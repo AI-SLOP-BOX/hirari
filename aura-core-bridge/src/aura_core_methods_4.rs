@@ -1146,7 +1146,7 @@ impl AuraCore {
             let native_track_id = *native_track_ids
                 .get(&region.track_id)
                 .ok_or_else(|| anyhow::anyhow!("region references an unknown track"))
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             if !engine.add_region(native_track_id, &region.path, region.start as f64) {
                 return Err(rollback_error(anyhow::anyhow!(
                     "native engine failed to import region {}",
@@ -1156,7 +1156,7 @@ impl AuraCore {
             let layout = engine.get_project_layout_json();
             let native_regions: Vec<NativeLayoutTrack> = serde_json::from_str(&layout)
                 .context("native engine returned malformed project layout")
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             let native_region = native_regions
                 .into_iter()
                 .filter(|track| track.id == native_track_id)
@@ -1173,7 +1173,7 @@ impl AuraCore {
                         region.id
                     )
                 })
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             used_native_region_ids.insert(native_region.id);
             let trim_ok = if region.base_length > 0 {
                 let start_norm = (region
@@ -1231,11 +1231,11 @@ impl AuraCore {
             let native_source_id = *native_track_ids
                 .get(&route.source_id)
                 .ok_or_else(|| anyhow::anyhow!("sidechain source references an unknown track"))
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             let native_destination_id = *native_track_ids
                 .get(&route.destination_id)
                 .ok_or_else(|| anyhow::anyhow!("sidechain destination references an unknown track"))
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             if !engine.set_sidechain_link(
                 native_source_id,
                 native_destination_id,
@@ -1253,11 +1253,11 @@ impl AuraCore {
             let native_source_id = *native_track_ids
                 .get(&route.source_id)
                 .ok_or_else(|| anyhow::anyhow!("feedback source references an unknown track"))
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             let native_destination_id = *native_track_ids
                 .get(&route.destination_id)
                 .ok_or_else(|| anyhow::anyhow!("feedback destination references an unknown track"))
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             if !engine.set_feedback_route(native_source_id, native_destination_id, route.gain, true)
             {
                 return Err(rollback_error(anyhow::anyhow!(
@@ -1270,13 +1270,13 @@ impl AuraCore {
             let native_source_id = *native_track_ids
                 .get(&route.source_id)
                 .ok_or_else(|| anyhow::anyhow!("audio route source references an unknown track"))
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             let native_destination_id = *native_track_ids
                 .get(&route.destination_id)
                 .ok_or_else(|| {
                     anyhow::anyhow!("audio route destination references an unknown track")
                 })
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             if !engine.set_route_gain(native_source_id, native_destination_id, route.gain, true) {
                 return Err(rollback_error(anyhow::anyhow!(
                     "native engine rejected persisted audio route"
@@ -1292,7 +1292,7 @@ impl AuraCore {
             let native_track_id = *native_track_ids
                 .get(&artifact.track_id)
                 .ok_or_else(|| anyhow::anyhow!("freeze artifact references an unknown track"))
-                .map_err(|error| rollback_error(error))?;
+                .map_err(rollback_error)?;
             let cache_path = std::path::Path::new(&artifact.path);
             let resolved_cache_path = if cache_path.is_absolute() {
                 cache_path.to_path_buf()
