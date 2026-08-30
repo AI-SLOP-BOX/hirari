@@ -38,7 +38,7 @@ fn callback_soak_has_no_nonfinite_output_or_deadline_misses() {
             .chain(right.iter())
             .all(|sample| sample.is_finite()));
         blocks += 1;
-        if blocks % 256 == 0 {
+        if blocks.is_multiple_of(256) {
             assert!(core.set_volume(track, 0.75));
             assert!(core.set_pan(track, -0.1));
         }
