@@ -92,7 +92,7 @@ pub fn capabilities() -> serde_json::Value {
         "modes": ["dry_run", "apply"],
         "permissions": ["read_only", "project_write", "system_write"],
         "privileged_permissions": [{"name": "unrestricted", "requires": "explicit_cli_flag_and_trusted_client", "audit_required": true}],
-        "operations": ["project.init", "project.inspect", "project.search", "control.inspect", "analyze_dynamics", "analyze_mix", "analyze_silence", "apply_dynamics_suggestion", "generate_chord", "describe_drum_lane", "inspect_chord_track", "add_chord_event", "place_generated_chord", "remove_chord_events_range", "clear_chord_track", "suggest_next_chords", "generate_arpeggio", "place_arpeggio", "preview_vocal_pitch_correction", "extension.catalog", "extension.validate", "extension.invoke", "extension.set_enabled", "project.load", "add_track", "add_aux_track", "duplicate_track", "remove_track", "add_plugin", "remove_plugin", "move_plugin", "insert_named_plugin", "insert_plugin_path", "set_plugin_parameter", "set_plugin_bypass", "set_plugin_favorite", "plugin_search", "freeze_track", "freeze_track_to_project_end", "unfreeze_track", "track_freeze_status", "set_macro_value", "add_macro_mapping", "remove_macro_mapping", "add_midi_learn_mapping", "remove_midi_learn_mapping", "humanize_midi", "apply_midi_swing", "quantize_midi", "apply_midi_logical_rule", "open_utau_import", "open_utau_notes", "open_utau_import_midi", "add_audio_region", "replace_region_audio", "set_volume", "set_master_gain", "set_track_delay", "set_track_delay_automation", "set_track_stack", "delete_track_stack", "set_track_stack_gain", "set_track_stack_collapsed", "add_vca_group", "assign_track_to_vca", "set_vca_group_gain", "upsert_marker", "delete_marker", "set_pan", "set_mute", "set_solo", "set_track_armed", "set_phase_invert", "set_automation", "set_route", "set_route_gain", "set_feedback_route", "set_sidechain_link", "set_midi_note", "clear_midi_notes", "remove_midi_notes_range", "transpose_midi_notes_range", "move_midi_notes_range", "move_region", "split_region", "duplicate_region", "remove_region", "set_region_warp", "set_region_gain", "set_region_pitch", "set_track_name", "set_time_signature", "select_recording_take", "register_comp_take", "select_comp_take", "remove_comp_take", "set_comp_segments", "split_region_with_crossfade", "transport_play", "transport_pause", "transport_stop", "set_playhead", "set_loop", "set_cycle_range", "set_metronome", "set_tempo", "record_arm", "record_start", "record_stop", "record_commit", "save_project", "bounce_project", "bounce_stems", "render_target_catalog", "undo", "redo", "project_inspect", "plugin_catalog", "history.status", "history.log", "history.diff", "history.commit", "history.branch", "history.checkout", "history.tag", "history.revert", "history.cherry_pick"],
+        "operations": ["project.init", "project.inspect", "project.search", "control.inspect", "analyze_dynamics", "analyze_mix", "analyze_silence", "apply_dynamics_suggestion", "generate_chord", "describe_drum_lane", "inspect_chord_track", "add_chord_event", "place_generated_chord", "remove_chord_events_range", "clear_chord_track", "suggest_next_chords", "generate_arpeggio", "place_arpeggio", "preview_vocal_pitch_correction", "extension.catalog", "extension.validate", "extension.invoke", "extension.set_enabled", "project.load", "add_track", "add_aux_track", "duplicate_track", "remove_track", "add_plugin", "remove_plugin", "move_plugin", "insert_named_plugin", "insert_plugin_path", "set_plugin_parameter", "set_plugin_bypass", "set_plugin_favorite", "plugin_search", "freeze_track", "freeze_track_to_project_end", "unfreeze_track", "track_freeze_status", "set_macro_value", "add_macro_mapping", "remove_macro_mapping", "add_midi_learn_mapping", "remove_midi_learn_mapping", "humanize_midi", "apply_midi_swing", "quantize_midi", "apply_midi_logical_rule", "open_utau_import", "open_utau_notes", "open_utau_import_midi", "add_audio_region", "replace_region_audio", "set_volume", "set_master_gain", "set_track_delay", "set_track_delay_automation", "set_track_stack", "delete_track_stack", "set_track_stack_gain", "set_track_stack_collapsed", "add_vca_group", "assign_track_to_vca", "set_vca_group_gain", "upsert_marker", "delete_marker", "set_pan", "set_mute", "set_solo", "set_track_armed", "set_phase_invert", "set_automation", "set_route", "set_route_gain", "set_feedback_route", "set_sidechain_link", "set_midi_note", "clear_midi_notes", "remove_midi_notes_range", "transpose_midi_notes_range", "move_midi_notes_range", "move_region", "split_region", "duplicate_region", "remove_region", "set_region_warp", "warp_region_audio_note_segment", "remove_region_audio_note_segment", "set_region_gain", "set_region_pitch", "set_track_name", "set_time_signature", "select_recording_take", "register_comp_take", "select_comp_take", "remove_comp_take", "set_comp_segments", "split_region_with_crossfade", "transport_play", "transport_pause", "transport_stop", "set_playhead", "set_loop", "set_cycle_range", "set_metronome", "set_tempo", "record_arm", "record_start", "record_stop", "record_commit", "save_project", "bounce_project", "bounce_stems", "render_target_catalog", "undo", "redo", "project_inspect", "plugin_catalog", "history.status", "history.log", "history.diff", "history.commit", "history.branch", "history.checkout", "history.tag", "history.revert", "history.cherry_pick"],
         "mix_assistant_operations": ["analyze_dynamics", "apply_gain_staging", "analyze_mix"],
         "standard_effect_operations": ["set_eq"],
         "dynamics_effect_operations": ["add_plugin", "Aura/Limiter", "Aura/Compressor", "Aura/Gate", "Aura/Saturation", "Aura/Transient", "Aura/DeEsser", "Aura/Delay", "Aura/Reverb", "Aura/DynamicEQ", "Aura/MidSide", "Aura/Width"],
@@ -899,6 +899,18 @@ pub enum CommandAction {
         track_id: u32,
         region_id: u32,
     },
+    WarpRegionAudioNoteSegment {
+        track_id: u32,
+        region_id: u32,
+        segment_start_seconds: f64,
+        new_start_seconds: f64,
+        new_end_seconds: f64,
+    },
+    RemoveRegionAudioNoteSegment {
+        track_id: u32,
+        region_id: u32,
+        segment_start_seconds: f64,
+    },
     SetTrackName {
         track_id: u32,
         name: String,
@@ -1149,6 +1161,12 @@ pub fn diff(command: &ValidatedCommand) -> Vec<CommandDiff> {
                 CommandAction::ClearRegionAudioNoteSegments { track_id, region_id } => {
                     format!("clear pitch segments on region {region_id} on track {track_id}")
                 }
+                CommandAction::WarpRegionAudioNoteSegment { track_id, region_id, segment_start_seconds, new_start_seconds, new_end_seconds } => {
+                    format!("warp pitch segment {segment_start_seconds} on region {region_id} track {track_id} to {new_start_seconds}..{new_end_seconds}")
+                }
+                CommandAction::RemoveRegionAudioNoteSegment { track_id, region_id, segment_start_seconds } => {
+                    format!("remove pitch segment {segment_start_seconds} on region {region_id} track {track_id}")
+                }
                 CommandAction::SetTrackName { track_id, name } => {
                     format!("rename track {track_id}: {name}")
                 }
@@ -1305,6 +1323,8 @@ pub fn mutation_class(action: &CommandAction) -> MutationClass {
         | CommandAction::SetRegionPitch { .. }
         | CommandAction::SetRegionAudioNoteSegment { .. }
         | CommandAction::ClearRegionAudioNoteSegments { .. }
+        | CommandAction::WarpRegionAudioNoteSegment { .. }
+        | CommandAction::RemoveRegionAudioNoteSegment { .. }
         | CommandAction::SetTrackName { .. }
         | CommandAction::ApplyDynamicsSuggestion { .. } => MutationClass::Reversible,
         CommandAction::RecordArm { .. }
@@ -1397,7 +1417,7 @@ pub fn validate(document: CommandDocument) -> Result<ValidatedCommand, String> {
                 || pitches.len() > 128
                 || velocities.len() != pitches.len()
                 || pitches.iter().any(|pitch| *pitch > 127)
-                || velocities.iter().any(|velocity| *velocity == 0)
+                || velocities.contains(&0)
                 || *pattern > 3
                 || *octaves == 0
                 || *octaves > 4
@@ -1424,7 +1444,7 @@ pub fn validate(document: CommandDocument) -> Result<ValidatedCommand, String> {
                 || pitches.len() > 128
                 || velocities.len() != pitches.len()
                 || pitches.iter().any(|pitch| *pitch > 127)
-                || velocities.iter().any(|velocity| *velocity == 0)
+                || velocities.contains(&0)
                 || *pattern > 3
                 || *octaves == 0
                 || *octaves > 4
@@ -1841,6 +1861,27 @@ pub fn validate(document: CommandDocument) -> Result<ValidatedCommand, String> {
                 || formant_offset_cents.abs() > 2400.0 =>
             {
                 return Err("audio note segment timing or offsets are invalid".into());
+            }
+            CommandAction::WarpRegionAudioNoteSegment {
+                segment_start_seconds,
+                new_start_seconds,
+                new_end_seconds,
+                ..
+            } if !segment_start_seconds.is_finite()
+                || *segment_start_seconds < 0.0
+                || !new_start_seconds.is_finite()
+                || *new_start_seconds < 0.0
+                || !new_end_seconds.is_finite()
+                || *new_end_seconds <= *new_start_seconds
+                || *new_end_seconds - *new_start_seconds > 24.0 * 60.0 =>
+            {
+                return Err("audio note segment warp timing is invalid".into());
+            }
+            CommandAction::RemoveRegionAudioNoteSegment {
+                segment_start_seconds,
+                ..
+            } if !segment_start_seconds.is_finite() || *segment_start_seconds < 0.0 => {
+                return Err("audio note segment start must be finite and non-negative".into());
             }
             CommandAction::SetTempo { bpm }
                 if !bpm.is_finite() || !(20.0..=400.0).contains(bpm) =>

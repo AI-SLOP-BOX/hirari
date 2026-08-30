@@ -151,9 +151,11 @@ fn float_wav_samples_are_finite(bytes: &[u8]) -> bool {
     }
     let Some(payload) = payload else { return false };
     !is_float
-        || payload.chunks_exact(4).all(|sample| {
-            f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]).is_finite()
-        })
+        || payload
+            .chunks_exact(std::mem::size_of::<f32>())
+            .all(|sample| {
+                f32::from_le_bytes(sample.try_into().expect("f32-sized chunk")).is_finite()
+            })
 }
 
 fn is_wav_output_path(path: &str) -> bool {

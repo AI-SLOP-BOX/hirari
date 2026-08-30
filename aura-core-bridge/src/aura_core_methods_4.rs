@@ -3,31 +3,61 @@ use crate::project_contracts::{RenderTargetContract, RenderTargetKind};
 impl AuraCore {
     /// Returns per-track and master plugin latency for MixConsole display.
     pub fn plugin_latency_snapshot_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else { return "{\"ok\":false,\"code\":\"engine_unavailable\"}".to_owned(); };
-        let tracks: serde_json::Value = serde_json::from_str(&engine.get_project_layout_json()).unwrap_or(serde_json::Value::Array(Vec::new()));
+        let Some(engine) = self.engine.as_ref() else {
+            return "{\"ok\":false,\"code\":\"engine_unavailable\"}".to_owned();
+        };
+        let tracks: serde_json::Value = serde_json::from_str(&engine.get_project_layout_json())
+            .unwrap_or(serde_json::Value::Array(Vec::new()));
         let mut entries = Vec::new();
-        if let Some(items) = tracks.as_array() { for item in items { if let Some(id) = item.get("id").and_then(|v| v.as_u64()).and_then(|v| u32::try_from(v).ok()) { entries.push(serde_json::json!({"track_id":id,"latency_ms":engine.get_track_latency_ms(id)})); } } }
-        serde_json::json!({"ok":true,"master_latency_ms":engine.get_latency_ms(),"tracks":entries}).to_string()
+        if let Some(items) = tracks.as_array() {
+            for item in items {
+                if let Some(id) = item
+                    .get("id")
+                    .and_then(|v| v.as_u64())
+                    .and_then(|v| u32::try_from(v).ok())
+                {
+                    entries.push(serde_json::json!({"track_id":id,"latency_ms":engine.get_track_latency_ms(id)}));
+                }
+            }
+        }
+        serde_json::json!({"ok":true,"master_latency_ms":engine.get_latency_ms(),"tracks":entries})
+            .to_string()
     }
 
     /// Exports the canonical MIDI note model as a portable MusicXML score.
     /// Sample positions are quantized to divisions while preserving lyrics.
     pub fn export_musicxml(&self, path: &str) -> anyhow::Result<usize> {
         use std::fs;
-        if path.trim().is_empty() { return Err(anyhow::anyhow!("MusicXML path is required")); }
-        let notes = self.scheduled_midi_notes.lock().map_err(|_| anyhow::anyhow!("MIDI note lock poisoned"))?.clone();
-        let rate = self.engine.as_ref().map(|e| e.get_sample_rate()).unwrap_or(48_000.0).max(1.0);
+        if path.trim().is_empty() {
+            return Err(anyhow::anyhow!("MusicXML path is required"));
+        }
+        let notes = self
+            .scheduled_midi_notes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("MIDI note lock poisoned"))?
+            .clone();
+        let rate = self
+            .engine
+            .as_ref()
+            .map(|e| e.get_sample_rate())
+            .unwrap_or(48_000.0)
+            .max(1.0);
         let divisions = 480u64;
         let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<score-partwise version=\"3.1\"><work><work-title>Aura Score</work-title></work><part-list><score-part id=\"P1\"><part-name>Aura</part-name></score-part></part-list><part id=\"P1\">");
-        let mut sorted = notes; sorted.sort_by_key(|n| n.start_sample);
+        let mut sorted = notes;
+        sorted.sort_by_key(|n| n.start_sample);
         let mut measure = 1u64;
         for note in &sorted {
             let start = ((note.start_sample as f64 / rate) * 2.0 * divisions as f64).round() as u64;
-            let duration = (((note.length_samples as f64 / rate) * 2.0 * divisions as f64).round() as u64).max(1);
+            let duration = (((note.length_samples as f64 / rate) * 2.0 * divisions as f64).round()
+                as u64)
+                .max(1);
             xml.push_str(&format!("<measure number=\"{}\"><note><pitch><step>{}</step><octave>{}</octave></pitch><duration>{}</duration><voice>1</voice><type>quarter</type><velocity>{}</velocity>{}</note></measure>", measure, ["C","C","D","D","E","F","F","G","G","A","A","B"][(note.pitch % 12) as usize], note.pitch / 12, duration, note.velocity, if note.lyric.is_empty() { String::new() } else { format!("<lyric><text>{}</text></lyric>", note.lyric.replace('&', "&amp;").replace('<', "&lt;")) }));
             measure = (start / (divisions * 8)).saturating_add(1);
         }
-        xml.push_str("</part></score-partwise>\n"); fs::write(path, xml)?; Ok(sorted.len())
+        xml.push_str("</part></score-partwise>\n");
+        fs::write(path, xml)?;
+        Ok(sorted.len())
     }
 
     /// Collects the current project file and every referenced media asset into
@@ -42,7 +72,9 @@ impl AuraCore {
             return Err(anyhow::anyhow!("project and archive paths are required"));
         }
         let project = Path::new(project_path);
-        if !project.is_file() { return Err(anyhow::anyhow!("project file does not exist")); }
+        if !project.is_file() {
+            return Err(anyhow::anyhow!("project file does not exist"));
+        }
         let root = Path::new(archive_dir);
         fs::create_dir_all(root)?;
         let assets = root.join("Assets");
@@ -55,28 +87,67 @@ impl AuraCore {
             for track in tracks {
                 if let Some(regions) = track.get("regions").and_then(|v| v.as_array()) {
                     for region in regions {
-                        let Some(source) = region.get("path").and_then(|v| v.as_str()).filter(|p| !p.is_empty()) else { continue; };
-                        let source_path = Path::new(source);
-                        let Some(file_name) = source_path.file_name().and_then(|n| n.to_str()) else { continue; };
-                        let mut target = assets.join(file_name);
-                        if let Some(existing) = seen.get(source) { target = existing.clone(); }
+                        let Some(source) = region
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .filter(|p| !p.is_empty())
                         else {
+                            continue;
+                        };
+                        let source_path = Path::new(source);
+                        let Some(file_name) = source_path.file_name().and_then(|n| n.to_str())
+                        else {
+                            continue;
+                        };
+                        let mut target = assets.join(file_name);
+                        if let Some(existing) = seen.get(source) {
+                            target = existing.clone();
+                        } else {
                             let mut suffix = 1u32;
                             while target.exists() {
-                                let stem = source_path.file_stem().and_then(|n| n.to_str()).unwrap_or("asset");
-                                let ext = source_path.extension().and_then(|n| n.to_str()).unwrap_or("");
-                                target = assets.join(if ext.is_empty() { format!("{stem}-{suffix}") } else { format!("{stem}-{suffix}.{ext}") });
+                                let stem = source_path
+                                    .file_stem()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("asset");
+                                let ext = source_path
+                                    .extension()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("");
+                                target = assets.join(if ext.is_empty() {
+                                    format!("{stem}-{suffix}")
+                                } else {
+                                    format!("{stem}-{suffix}.{ext}")
+                                });
                                 suffix += 1;
                             }
-                            if source_path.is_file() { fs::copy(source_path, &target)?; seen.insert(source.to_owned(), target.clone()); }
+                            if source_path.is_file() {
+                                fs::copy(source_path, &target)?;
+                                seen.insert(source.to_owned(), target.clone());
+                            }
                         }
-                        let status = if target.is_file() { "collected" } else { "missing" };
-                        manifest.push_str(&format!("{}\t{}\t{}\n", source, target.strip_prefix(root).unwrap_or(&target).display(), status));
+                        let status = if target.is_file() {
+                            "collected"
+                        } else {
+                            "missing"
+                        };
+                        manifest.push_str(&format!(
+                            "{}\t{}\t{}\n",
+                            source,
+                            target.strip_prefix(root).unwrap_or(&target).display(),
+                            status
+                        ));
                     }
                 }
             }
         }
-        fs::copy(project, root.join(project.file_name().unwrap_or_else(|| std::ffi::OsStr::new("project.aura"))))?;
+        fs::copy(
+            project,
+            root.join(
+                project
+                    .file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("project.aura")),
+            ),
+        )?;
         fs::write(root.join("archive-manifest.tsv"), manifest)?;
         Ok(seen.len())
     }
@@ -111,7 +182,9 @@ impl AuraCore {
             return false;
         };
         if bytes.len() >= 40 && bytes[0..4] == *b"RIFF" && bytes[24..28] == *b"WAVE" {
-            let Ok((_, _, samples)) = crate::export::read_wave64_float32(std::path::Path::new(path)) else {
+            let Ok((_, _, samples)) =
+                crate::export::read_wave64_float32(std::path::Path::new(path))
+            else {
                 return false;
             };
             return !require_audio || samples.iter().any(|sample| *sample != 0.0);
@@ -122,12 +195,22 @@ impl AuraCore {
         if !float_wav_samples_are_finite(&bytes) {
             return false;
         }
-        !require_audio || bytes.get(12..).is_some_and(|payload| payload.iter().any(|byte| *byte != 0))
+        !require_audio
+            || bytes
+                .get(12..)
+                .is_some_and(|payload| payload.iter().any(|byte| *byte != 0))
     }
 
-    pub fn validate_render_output_diagnostic_json(&self, path: &str, require_audio: bool) -> String {
+    pub fn validate_render_output_diagnostic_json(
+        &self,
+        path: &str,
+        require_audio: bool,
+    ) -> String {
         let result = if !is_wav_output_path(path) {
-            crate::bridge_error::BridgeError::new("invalid_render_path", "render output must be a WAV path")
+            crate::bridge_error::BridgeError::new(
+                "invalid_render_path",
+                "render output must be a WAV path",
+            )
         } else {
             let bytes = match std::fs::read(path) {
                 Ok(bytes) => bytes,
@@ -136,17 +219,24 @@ impl AuraCore {
                         "code": "render_output_unreadable",
                         "message": error.to_string(),
                         "retryable": true,
-                    }).to_string();
+                    })
+                    .to_string();
                 }
             };
-            let valid = if bytes.len() >= 40 && bytes[0..4] == *b"RIFF" && bytes[24..28] == *b"WAVE" {
+            let valid = if bytes.len() >= 40 && bytes[0..4] == *b"RIFF" && bytes[24..28] == *b"WAVE"
+            {
                 crate::export::read_wave64_float32(std::path::Path::new(path))
-                    .map(|(_, _, samples)| !require_audio || samples.iter().any(|sample| *sample != 0.0))
+                    .map(|(_, _, samples)| {
+                        !require_audio || samples.iter().any(|sample| *sample != 0.0)
+                    })
                     .unwrap_or(false)
             } else {
                 valid_pcm_or_float_wav(&bytes)
                     && float_wav_samples_are_finite(&bytes)
-                    && (!require_audio || bytes.get(12..).is_some_and(|payload| payload.iter().any(|byte| *byte != 0)))
+                    && (!require_audio
+                        || bytes
+                            .get(12..)
+                            .is_some_and(|payload| payload.iter().any(|byte| *byte != 0)))
             };
             if valid {
                 return serde_json::json!({
@@ -154,9 +244,13 @@ impl AuraCore {
                     "operation": "validate_render_output",
                     "path": path,
                     "require_audio": require_audio,
-                }).to_string();
+                })
+                .to_string();
             }
-            crate::bridge_error::BridgeError::new("invalid_render_output", "WAV output failed structural or sample validation")
+            crate::bridge_error::BridgeError::new(
+                "invalid_render_output",
+                "WAV output failed structural or sample validation",
+            )
         };
         serde_json::to_string(&result)
             .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
@@ -196,7 +290,11 @@ impl AuraCore {
         }
         self.engine.as_ref().map_or_else(
             || "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned(),
-            |engine| engine.bounce_project_diagnostic_json(path, format).to_string(),
+            |engine| {
+                engine
+                    .bounce_project_diagnostic_json(path, format)
+                    .to_string()
+            },
         )
     }
 
@@ -207,10 +305,13 @@ impl AuraCore {
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
-        let layout: serde_json::Value = match serde_json::from_str(engine.get_project_layout_json().as_str()) {
-            Ok(value) => value,
-            Err(_) => return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}".to_owned(),
-        };
+        let layout: serde_json::Value =
+            match serde_json::from_str(engine.get_project_layout_json().as_str()) {
+                Ok(value) => value,
+                Err(_) => {
+                    return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}".to_owned()
+                }
+            };
         let Some(tracks) = layout.as_array() else {
             return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}".to_owned();
         };
@@ -222,7 +323,10 @@ impl AuraCore {
             if source_id == 0 || source_id > u32::MAX as u64 {
                 return "{\"code\":\"invalid_track_id\",\"retryable\":false}".to_owned();
             }
-            let name = track.get("name").and_then(serde_json::Value::as_str).unwrap_or("Track");
+            let name = track
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Track");
             let kind = match track.get("type").and_then(serde_json::Value::as_str) {
                 Some("Bus") if name.starts_with("Aux ") => "Aux",
                 Some("Bus") => "Bus",
@@ -254,7 +358,8 @@ impl AuraCore {
             "ok": true,
             "operation": "render_target_catalog",
             "targets": targets,
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// Render one WAV per project track by selecting each track through a
@@ -282,10 +387,13 @@ impl AuraCore {
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
-        let layout: serde_json::Value = match serde_json::from_str(engine.get_project_layout_json().as_str()) {
-            Ok(layout) => layout,
-            Err(_) => return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}".to_owned(),
-        };
+        let layout: serde_json::Value =
+            match serde_json::from_str(engine.get_project_layout_json().as_str()) {
+                Ok(layout) => layout,
+                Err(_) => {
+                    return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}".to_owned()
+                }
+            };
         let Some(tracks) = layout.as_array() else {
             return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}".to_owned();
         };
@@ -293,7 +401,8 @@ impl AuraCore {
             return "{\"code\":\"no_tracks_for_stem_export\",\"retryable\":false}".to_owned();
         }
 
-        let requested: std::collections::HashSet<u32> = requested_track_ids.iter().copied().collect();
+        let requested: std::collections::HashSet<u32> =
+            requested_track_ids.iter().copied().collect();
         if requested.len() != requested_track_ids.len() || requested.iter().any(|id| *id == 0) {
             return "{\"code\":\"invalid_stem_track_selection\",\"retryable\":false}".to_owned();
         }
@@ -302,7 +411,12 @@ impl AuraCore {
         } else {
             tracks
                 .iter()
-                .filter(|track| track.get("id").and_then(serde_json::Value::as_u64).is_some_and(|id| requested.contains(&(id as u32))))
+                .filter(|track| {
+                    track
+                        .get("id")
+                        .and_then(serde_json::Value::as_u64)
+                        .is_some_and(|id| requested.contains(&(id as u32)))
+                })
                 .collect()
         };
         if !requested.is_empty() && selected_tracks.len() != requested.len() {
@@ -310,20 +424,39 @@ impl AuraCore {
                 "code": "stem_track_not_found",
                 "retryable": false,
                 "requested_track_ids": requested_track_ids,
-            }).to_string();
+            })
+            .to_string();
         }
 
         let mut track_state = Vec::with_capacity(selected_tracks.len());
         let mut names = std::collections::HashSet::with_capacity(tracks.len());
         for track in selected_tracks {
-            let Some(track_id) = track.get("id").and_then(serde_json::Value::as_u64).map(|id| id as u32) else {
+            let Some(track_id) = track
+                .get("id")
+                .and_then(serde_json::Value::as_u64)
+                .map(|id| id as u32)
+            else {
                 return "{\"code\":\"invalid_track_id\",\"retryable\":false}".to_owned();
             };
-            let raw_name = track.get("name").and_then(serde_json::Value::as_str).unwrap_or("track");
-            let base: String = raw_name.chars().map(|character| {
-                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') { character } else { '_' }
-            }).collect();
-            let base = if base.is_empty() { format!("track-{track_id}") } else { base };
+            let raw_name = track
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("track");
+            let base: String = raw_name
+                .chars()
+                .map(|character| {
+                    if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                        character
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let base = if base.is_empty() {
+                format!("track-{track_id}")
+            } else {
+                base
+            };
             let mut name = base.clone();
             let mut suffix = 2usize;
             while !names.insert(name.clone()) {
@@ -373,7 +506,8 @@ impl AuraCore {
                 "message": message,
                 "retryable": true,
                 "restored_render_target": true,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": true,
@@ -384,7 +518,8 @@ impl AuraCore {
             "include_inserts": include_inserts,
             "outputs": outputs,
             "restored_render_target": true,
-        }).to_string()
+        })
+        .to_string()
     }
 
     // --- RUST-POWERED PERSISTENCE (Point 3) ---
@@ -423,12 +558,13 @@ impl AuraCore {
             engine.get_sample_rate(),
             layout.as_str(),
         )?;
-        document.audio_routes = serde_json::from_str(engine.get_routing_snapshot_json().as_str())
-            .map_err(|_| anyhow::anyhow!("native routing snapshot is malformed"))?;
+        document.audio_routes =
+            serde_json::from_str(engine.get_routing_snapshot_json().as_str())
+                .map_err(|_| anyhow::anyhow!("native routing snapshot is malformed"))?;
         document.cycle_start_sample = engine.cycle_start();
         document.cycle_end_sample = engine.cycle_end();
-        document.cycle_enabled = engine.is_loop_enabled()
-            && document.cycle_end_sample > document.cycle_start_sample;
+        document.cycle_enabled =
+            engine.is_loop_enabled() && document.cycle_end_sample > document.cycle_start_sample;
         document.metronome_enabled = engine.is_metronome_enabled();
         document.master_gain = engine.get_master_gain();
         document.metadata.key_root = engine.tonal_root();
@@ -518,9 +654,13 @@ impl AuraCore {
             .filter(|track_id| project_track_ids.contains(track_id))
             .collect();
         for group in &mut document.vca_groups {
-            group.track_ids.retain(|track_id| project_track_ids.contains(track_id));
+            group
+                .track_ids
+                .retain(|track_id| project_track_ids.contains(track_id));
         }
-        document.vca_groups.retain(|group| !group.track_ids.is_empty());
+        document
+            .vca_groups
+            .retain(|group| !group.track_ids.is_empty());
         document.aux_track_ids = serde_json::from_str(&self.aux_track_ids_json())
             .map_err(|_| anyhow::anyhow!("Aux track metadata is malformed"))?;
         document.macro_mappings = self
@@ -579,26 +719,32 @@ impl AuraCore {
             })
             .collect();
         let tempo_values = self.get_tempo_events();
-        if tempo_values.len() % 3 != 0 {
+        if !tempo_values.len().is_multiple_of(3) {
             return Err(anyhow::anyhow!("native tempo map returned malformed data"));
         }
         document.tempo_events = tempo_values
             .chunks_exact(3)
             .map(|event| crate::project_contracts::TempoEventContract {
-                beat: event[0], bpm: event[1], ramp: event[2] != 0.0,
+                beat: event[0],
+                bpm: event[1],
+                ramp: event[2] != 0.0,
             })
             .collect();
         let signature_values = self.get_time_signature_events();
-        if signature_values.len() % 3 != 0 {
-            return Err(anyhow::anyhow!("native time signature map returned malformed data"));
+        if !signature_values.len().is_multiple_of(3) {
+            return Err(anyhow::anyhow!(
+                "native time signature map returned malformed data"
+            ));
         }
         document.time_signature_events = signature_values
             .chunks_exact(3)
-            .map(|event| crate::project_contracts::TimeSignatureEventContract {
-                beat: event[0],
-                numerator: event[1] as u8,
-                denominator: event[2] as u8,
-            })
+            .map(
+                |event| crate::project_contracts::TimeSignatureEventContract {
+                    beat: event[0],
+                    numerator: event[1] as u8,
+                    denominator: event[2] as u8,
+                },
+            )
             .collect();
         if self.project_generation() != save_generation {
             return Err(anyhow::anyhow!(
@@ -758,9 +904,9 @@ impl AuraCore {
         let rollback_error = |error: anyhow::Error| -> anyhow::Error {
             match rollback() {
                 Ok(()) => error,
-                Err(restore_error) => anyhow::anyhow!(
-                    "{error}; native rollback failed: {restore_error}"
-                ),
+                Err(restore_error) => {
+                    anyhow::anyhow!("{error}; native rollback failed: {restore_error}")
+                }
             }
         };
 
@@ -773,7 +919,9 @@ impl AuraCore {
         engine.remove_track(0);
         engine.apply_config(document.metadata.bpm, sample_rate, block_size);
         if !engine.set_tonal_scale(document.metadata.key_root, document.metadata.scale_type) {
-            return Err(rollback_error(anyhow::anyhow!("project contains an unsupported tonal scale")));
+            return Err(rollback_error(anyhow::anyhow!(
+                "project contains an unsupported tonal scale"
+            )));
         }
         engine.clear_tempo_events(document.metadata.bpm as f64);
         engine.clear_time_signature_events();
@@ -793,15 +941,15 @@ impl AuraCore {
         }
 
         let mut native_track_ids = std::collections::HashMap::with_capacity(document.tracks.len());
-        let mut used_native_track_ids = std::collections::HashSet::with_capacity(document.tracks.len());
+        let mut used_native_track_ids =
+            std::collections::HashSet::with_capacity(document.tracks.len());
         for track in &document.tracks {
-            let native_id =
-                match ProjectDocument::native_track_type_code(&track.track_type) {
-                    Ok(track_type) => engine.add_track(track_type),
-                    Err(error) => {
-                        return Err(rollback_error(error));
-                    }
-                };
+            let native_id = match ProjectDocument::native_track_type_code(&track.track_type) {
+                Ok(track_type) => engine.add_track(track_type),
+                Err(error) => {
+                    return Err(rollback_error(error));
+                }
+            };
             if native_id == 0 {
                 return Err(rollback_error(anyhow::anyhow!(
                     "native engine failed to create track {}",
@@ -851,7 +999,11 @@ impl AuraCore {
                             track.id, admission
                         )));
                     }
-                    if track.plugin_bypasses.get(plugin_index).copied().unwrap_or(false)
+                    if track
+                        .plugin_bypasses
+                        .get(plugin_index)
+                        .copied()
+                        .unwrap_or(false)
                         && !engine.set_plugin_bypass(native_id, plugin_index as u32, true)
                     {
                         return Err(rollback_error(anyhow::anyhow!(
@@ -909,7 +1061,11 @@ impl AuraCore {
                             )));
                         }
                     }
-                    if track.plugin_bypasses.get(plugin_index).copied().unwrap_or(false)
+                    if track
+                        .plugin_bypasses
+                        .get(plugin_index)
+                        .copied()
+                        .unwrap_or(false)
                         && !engine.set_plugin_bypass(native_id, plugin_index as u32, true)
                     {
                         return Err(rollback_error(anyhow::anyhow!(
@@ -944,25 +1100,27 @@ impl AuraCore {
                 (1u32, &track.pan_automation),
             ] {
                 if !points.is_empty() {
-                    let packed = points.iter().flat_map(|point| [
-                        point.time,
-                        f64::from(point.value),
-                        f64::from(point.curve),
-                    ]).collect();
+                    let packed = points
+                        .iter()
+                        .flat_map(|point| {
+                            [point.time, f64::from(point.value), f64::from(point.curve)]
+                        })
+                        .collect();
                     if !engine.set_automation_data(native_id, parameter_id, packed) {
                         return Err(rollback_error(anyhow::anyhow!(
                             "native engine failed to restore automation {} for track {}",
-                            parameter_id, track.id
+                            parameter_id,
+                            track.id
                         )));
                     }
                 }
             }
             if !track.track_delay_automation.is_empty() {
-                let packed = track.track_delay_automation.iter().flat_map(|point| [
-                    point.time,
-                    f64::from(point.value),
-                    f64::from(point.curve),
-                ]).collect();
+                let packed = track
+                    .track_delay_automation
+                    .iter()
+                    .flat_map(|point| [point.time, f64::from(point.value), f64::from(point.curve)])
+                    .collect();
                 if !engine.set_track_delay_automation(native_id, packed) {
                     return Err(rollback_error(anyhow::anyhow!(
                         "native engine failed to restore track delay automation for track {}",
@@ -975,7 +1133,9 @@ impl AuraCore {
         let aux_ids_json = serde_json::to_string(&document.aux_track_ids)
             .map_err(|_| rollback_error(anyhow::anyhow!("Aux track metadata is malformed")))?;
         if !self.restore_aux_track_ids_json(&aux_ids_json) {
-            return Err(rollback_error(anyhow::anyhow!("loaded project contains invalid Aux metadata")));
+            return Err(rollback_error(anyhow::anyhow!(
+                "loaded project contains invalid Aux metadata"
+            )));
         }
 
         // Region IDs are allocated by the native engine. Since the project was
@@ -986,9 +1146,7 @@ impl AuraCore {
             let native_track_id = *native_track_ids
                 .get(&region.track_id)
                 .ok_or_else(|| anyhow::anyhow!("region references an unknown track"))
-                .map_err(|error| {
-                    rollback_error(error)
-                })?;
+                .map_err(|error| rollback_error(error))?;
             if !engine.add_region(native_track_id, &region.path, region.start as f64) {
                 return Err(rollback_error(anyhow::anyhow!(
                     "native engine failed to import region {}",
@@ -998,9 +1156,7 @@ impl AuraCore {
             let layout = engine.get_project_layout_json();
             let native_regions: Vec<NativeLayoutTrack> = serde_json::from_str(&layout)
                 .context("native engine returned malformed project layout")
-                .map_err(|error| {
-                    rollback_error(error)
-                })?;
+                .map_err(|error| rollback_error(error))?;
             let native_region = native_regions
                 .into_iter()
                 .filter(|track| track.id == native_track_id)
@@ -1017,13 +1173,14 @@ impl AuraCore {
                         region.id
                     )
                 })
-                .map_err(|error| {
-                    rollback_error(error)
-                })?;
+                .map_err(|error| rollback_error(error))?;
             used_native_region_ids.insert(native_region.id);
             let trim_ok = if region.base_length > 0 {
-                let start_norm = (region.source_offset.saturating_sub(region.base_source_offset)
-                    as f64 / region.base_length as f64) as f32;
+                let start_norm = (region
+                    .source_offset
+                    .saturating_sub(region.base_source_offset)
+                    as f64
+                    / region.base_length as f64) as f32;
                 let end_norm = (region
                     .source_offset
                     .saturating_sub(region.base_source_offset)
@@ -1043,13 +1200,21 @@ impl AuraCore {
                 )
                 || !trim_ok
                 || !engine.set_region_reverse(native_track_id, native_region.id, region.reverse)
-                || !engine.set_region_warp_ratio(native_track_id, native_region.id, region.warp_ratio)
+                || !engine.set_region_warp_ratio(
+                    native_track_id,
+                    native_region.id,
+                    region.warp_ratio,
+                )
                 || !engine.set_region_pitch_semitones(
                     native_track_id,
                     native_region.id,
                     region.pitch_semitones,
                 )
-                || !engine.set_region_loop_count(native_track_id, native_region.id, region.loop_count)
+                || !engine.set_region_loop_count(
+                    native_track_id,
+                    native_region.id,
+                    region.loop_count,
+                )
             {
                 return Err(rollback_error(anyhow::anyhow!(
                     "native engine failed to restore region envelope {}",
@@ -1093,12 +1258,8 @@ impl AuraCore {
                 .get(&route.destination_id)
                 .ok_or_else(|| anyhow::anyhow!("feedback destination references an unknown track"))
                 .map_err(|error| rollback_error(error))?;
-            if !engine.set_feedback_route(
-                native_source_id,
-                native_destination_id,
-                route.gain,
-                true,
-            ) {
+            if !engine.set_feedback_route(native_source_id, native_destination_id, route.gain, true)
+            {
                 return Err(rollback_error(anyhow::anyhow!(
                     "native engine rejected persisted feedback route"
                 )));
@@ -1112,14 +1273,11 @@ impl AuraCore {
                 .map_err(|error| rollback_error(error))?;
             let native_destination_id = *native_track_ids
                 .get(&route.destination_id)
-                .ok_or_else(|| anyhow::anyhow!("audio route destination references an unknown track"))
+                .ok_or_else(|| {
+                    anyhow::anyhow!("audio route destination references an unknown track")
+                })
                 .map_err(|error| rollback_error(error))?;
-            if !engine.set_route_gain(
-                native_source_id,
-                native_destination_id,
-                route.gain,
-                true,
-            ) {
+            if !engine.set_route_gain(native_source_id, native_destination_id, route.gain, true) {
                 return Err(rollback_error(anyhow::anyhow!(
                     "native engine rejected persisted audio route"
                 )));
@@ -1160,11 +1318,8 @@ impl AuraCore {
             )));
         }
         if document.cycle_enabled {
-            if !engine.set_cycle_range(
-                document.cycle_start_sample,
-                document.cycle_end_sample,
-                true,
-            ) {
+            if !engine.set_cycle_range(document.cycle_start_sample, document.cycle_end_sample, true)
+            {
                 return Err(rollback_error(anyhow::anyhow!(
                     "loaded project contains an invalid cycle range"
                 )));
@@ -1248,27 +1403,35 @@ impl AuraCore {
         *self
             .chord_track
             .lock()
-            .map_err(|_| anyhow::anyhow!("chord track lock poisoned"))? = document.chord_track.clone();
+            .map_err(|_| anyhow::anyhow!("chord track lock poisoned"))? =
+            document.chord_track.clone();
         *self
             .midi_events
             .lock()
-            .map_err(|_| anyhow::anyhow!("MIDI event lock poisoned"))? = document.midi_events.clone();
+            .map_err(|_| anyhow::anyhow!("MIDI event lock poisoned"))? =
+            document.midi_events.clone();
         *self
             .openutau_vocals
             .lock()
             .map_err(|_| anyhow::anyhow!("OpenUtau metadata lock poisoned"))? =
             document.openutau_vocals.clone();
-        let track_stacks_json = serde_json::to_string(&document.track_stacks)
-            .map_err(|error| anyhow::anyhow!("track stack snapshot serialization failed: {error}"))?;
+        let track_stacks_json = serde_json::to_string(&document.track_stacks).map_err(|error| {
+            anyhow::anyhow!("track stack snapshot serialization failed: {error}")
+        })?;
         if !self.restore_track_stacks_json(&track_stacks_json) {
             return Err(rollback_error(anyhow::anyhow!(
                 "loaded project contains invalid track stack state"
             )));
         }
-        let markers_json = serde_json::to_string(&document.markers)
-            .map_err(|error| rollback_error(anyhow::anyhow!("marker snapshot serialization failed: {error}")))?;
+        let markers_json = serde_json::to_string(&document.markers).map_err(|error| {
+            rollback_error(anyhow::anyhow!(
+                "marker snapshot serialization failed: {error}"
+            ))
+        })?;
         if !self.restore_markers_json(&markers_json) {
-            return Err(rollback_error(anyhow::anyhow!("loaded project contains invalid arrangement markers")));
+            return Err(rollback_error(anyhow::anyhow!(
+                "loaded project contains invalid arrangement markers"
+            )));
         }
         *self
             .macro_mappings
@@ -1293,8 +1456,12 @@ impl AuraCore {
         if let Ok(mut history) = self.midi_lyric_history.lock() {
             history.clear();
         }
-        if let Ok(mut history) = self.chord_history.lock() { history.clear(); }
-        if let Ok(mut redo) = self.chord_redo_history.lock() { redo.clear(); }
+        if let Ok(mut history) = self.chord_history.lock() {
+            history.clear();
+        }
+        if let Ok(mut redo) = self.chord_redo_history.lock() {
+            redo.clear();
+        }
         let _ = std::fs::remove_file(&rollback_path);
         Ok(())
     }
@@ -1326,10 +1493,7 @@ impl AuraCore {
                 } else {
                     "project_hydration_failed"
                 };
-                let retryable = matches!(
-                    code,
-                    "plugin_state_timeout" | "project_asset_missing"
-                );
+                let retryable = matches!(code, "plugin_state_timeout" | "project_asset_missing");
                 let bridge_error = crate::bridge_error::BridgeError::new(code, message)
                     .retryable(retryable)
                     .object(format!("project:{path}"))
@@ -1361,14 +1525,26 @@ impl AuraCore {
             .map_or(0.0, |e| e.get_track_correlation(tid))
     }
     pub fn get_project_layout_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else { return String::new(); };
+        let Some(engine) = self.engine.as_ref() else {
+            return String::new();
+        };
         let raw = engine.get_project_layout_json();
-        let Ok(mut layout) = serde_json::from_str::<serde_json::Value>(&raw) else { return raw; };
-        let Ok(aux_ids) = serde_json::from_str::<Vec<u32>>(&self.aux_track_ids_json()) else { return raw; };
-        let Some(tracks) = layout.as_array_mut() else { return raw; };
+        let Ok(mut layout) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return raw;
+        };
+        let Ok(aux_ids) = serde_json::from_str::<Vec<u32>>(&self.aux_track_ids_json()) else {
+            return raw;
+        };
+        let Some(tracks) = layout.as_array_mut() else {
+            return raw;
+        };
         for track in tracks {
-            let Some(id) = track.get("id").and_then(serde_json::Value::as_u64) else { continue; };
-            if aux_ids.contains(&(id as u32)) && track.get("type").and_then(serde_json::Value::as_str) == Some("Bus") {
+            let Some(id) = track.get("id").and_then(serde_json::Value::as_u64) else {
+                continue;
+            };
+            if aux_ids.contains(&(id as u32))
+                && track.get("type").and_then(serde_json::Value::as_str) == Some("Bus")
+            {
                 track["type"] = serde_json::Value::String("Aux".to_owned());
             }
         }
@@ -1386,15 +1562,29 @@ impl AuraCore {
         self.take_mix_snapshot_with_plugins_json(name, states_json, "[]")
     }
 
-    pub fn take_mix_snapshot_with_plugins_json(&self, name: &str, states_json: &str, plugins_json: &str) -> String {
+    pub fn take_mix_snapshot_with_plugins_json(
+        &self,
+        name: &str,
+        states_json: &str,
+        plugins_json: &str,
+    ) -> String {
         self.take_mix_snapshot_with_plugins_and_routing_json(name, states_json, plugins_json, "[]")
     }
 
-    pub fn take_mix_snapshot_with_plugins_and_routing_json(&self, name: &str, states_json: &str, plugins_json: &str, routing_json: &str) -> String {
-        let Ok(states) = serde_json::from_str::<std::collections::HashMap<u32, f32>>(states_json) else {
+    pub fn take_mix_snapshot_with_plugins_and_routing_json(
+        &self,
+        name: &str,
+        states_json: &str,
+        plugins_json: &str,
+        routing_json: &str,
+    ) -> String {
+        let Ok(states) = serde_json::from_str::<std::collections::HashMap<u32, f32>>(states_json)
+        else {
             return "{\"ok\":false,\"code\":\"invalid_snapshot_state\"}".into();
         };
-        let Ok(plugins) = serde_json::from_str::<Vec<crate::snapshots::PluginSnapshotState>>(plugins_json) else {
+        let Ok(plugins) =
+            serde_json::from_str::<Vec<crate::snapshots::PluginSnapshotState>>(plugins_json)
+        else {
             return "{\"ok\":false,\"code\":\"invalid_snapshot_plugins\"}".into();
         };
         let Ok(routing) = serde_json::from_str::<serde_json::Value>(routing_json) else {
@@ -1404,8 +1594,17 @@ impl AuraCore {
             return "{\"ok\":false,\"code\":\"snapshot_lock_failed\"}".into();
         };
         let before = snapshots.snapshots.len();
-        snapshots.take_snapshot_with_plugins_and_routing(name, states, plugins, routing.to_string());
-        let accepted = snapshots.snapshots.len() >= before && snapshots.snapshots.iter().any(|snapshot| snapshot.name == name);
+        snapshots.take_snapshot_with_plugins_and_routing(
+            name,
+            states,
+            plugins,
+            routing.to_string(),
+        );
+        let accepted = snapshots.snapshots.len() >= before
+            && snapshots
+                .snapshots
+                .iter()
+                .any(|snapshot| snapshot.name == name);
         serde_json::json!({"ok": accepted, "operation": "take_mix_snapshot", "name": name, "count": snapshots.snapshots.len()}).to_string()
     }
 
@@ -1426,7 +1625,8 @@ impl AuraCore {
         let Some(snapshot) = snapshots.snapshots.get(index) else {
             return "{\"ok\":false,\"code\":\"snapshot_not_found\"}".into();
         };
-        let routing = serde_json::from_str::<serde_json::Value>(&snapshot.routing_state).unwrap_or_else(|_| serde_json::json!([]));
+        let routing = serde_json::from_str::<serde_json::Value>(&snapshot.routing_state)
+            .unwrap_or_else(|_| serde_json::json!([]));
         serde_json::json!({"ok": true, "operation": "recall_mix_snapshot", "index": index, "name": snapshot.name, "states": snapshot.parameter_states, "plugin_states": snapshot.plugin_states, "routing": routing}).to_string()
     }
 
@@ -1441,7 +1641,11 @@ impl AuraCore {
             let Some(snapshot) = snapshots.snapshots.get(index) else {
                 return "{\"ok\":false,\"code\":\"snapshot_not_found\"}".into();
             };
-            (snapshot.parameter_states.clone(), snapshot.plugin_states.clone(), snapshot.routing_state.clone())
+            (
+                snapshot.parameter_states.clone(),
+                snapshot.plugin_states.clone(),
+                snapshot.routing_state.clone(),
+            )
         };
         let Some(engine) = self.engine.as_ref() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\"}".into();
@@ -1451,17 +1655,21 @@ impl AuraCore {
             let track_id = parameter_id / 2;
             let slot = parameter_id % 4;
             let accepted = if slot == 0 {
-                value.is_finite() && (0.0..=2.0).contains(&value)
+                value.is_finite()
+                    && (0.0..=2.0).contains(&value)
                     && engine.set_track_volume(track_id, value)
             } else if slot == 1 {
-                value.is_finite() && (-1.0..=1.0).contains(&value)
+                value.is_finite()
+                    && (-1.0..=1.0).contains(&value)
                     && engine.set_track_pan(track_id, value)
             } else if slot == 2 {
                 (value == 0.0 || value == 1.0) && engine.set_track_mute(track_id, value > 0.5)
             } else {
                 (value == 0.0 || value == 1.0) && engine.set_track_solo(track_id, value > 0.5)
             };
-            if accepted { applied += 1; }
+            if accepted {
+                applied += 1;
+            }
         }
         for plugin in plugin_states {
             if !engine.set_plugin_bypass(plugin.track_id, plugin.plugin_index, plugin.bypassed) {
@@ -1469,18 +1677,31 @@ impl AuraCore {
             }
             applied += 1;
             for (parameter_id, value) in plugin.parameters.into_iter().enumerate() {
-                if value.is_finite() && engine.set_plugin_parameter_without_undo(
-                    plugin.track_id, plugin.plugin_index, parameter_id as u32, value,
-                ) {
+                if value.is_finite()
+                    && engine.set_plugin_parameter_without_undo(
+                        plugin.track_id,
+                        plugin.plugin_index,
+                        parameter_id as u32,
+                        value,
+                    )
+                {
                     applied += 1;
                 }
             }
         }
-        if let Ok(routes) = serde_json::from_str::<Vec<crate::project_contracts::AudioRouteContract>>(&routing_state) {
+        if let Ok(routes) = serde_json::from_str::<Vec<crate::project_contracts::AudioRouteContract>>(
+            &routing_state,
+        ) {
             for route in routes {
-                if route.source_id != route.destination_id && route.gain.is_finite()
+                if route.source_id != route.destination_id
+                    && route.gain.is_finite()
                     && (0.0..=2.0).contains(&route.gain)
-                    && engine.set_route_gain(route.source_id, route.destination_id, route.gain, true)
+                    && engine.set_route_gain(
+                        route.source_id,
+                        route.destination_id,
+                        route.gain,
+                        true,
+                    )
                 {
                     applied += 1;
                 }

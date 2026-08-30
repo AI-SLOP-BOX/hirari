@@ -231,15 +231,14 @@ impl RecordingSession {
 
         self.auto_stop_requested = false;
         self.pending_punch_out_sample = Some(punch_out_sample);
-        let result = if current_sample < punch_in_sample {
+        if current_sample < punch_in_sample {
             self.start_with_count_in(
                 punch_in_sample,
                 punch_in_sample.saturating_sub(current_sample),
             )
         } else {
             self.start(current_sample)
-        };
-        result
+        }
     }
 
     pub fn append_interleaved(&mut self, input: &[f32]) -> Result<(), RecordingSessionError> {
@@ -252,7 +251,8 @@ impl RecordingSession {
             if available_frames == 0 {
                 return Ok(());
             }
-            let discarded_frames = available_frames.min(self.count_in_remaining_frames.min(usize::MAX as u64) as usize);
+            let discarded_frames = available_frames
+                .min(self.count_in_remaining_frames.min(usize::MAX as u64) as usize);
             self.count_in_remaining_frames -= discarded_frames as u64;
             if self.count_in_remaining_frames > 0 {
                 return Ok(());
@@ -463,10 +463,17 @@ impl RecordingSession {
                 }
             }
             && match self.lifecycle {
-                RecordingLifecycle::Recording => self.state == RecordingSessionState::Recording && self.active_writer.is_some(),
+                RecordingLifecycle::Recording => {
+                    self.state == RecordingSessionState::Recording && self.active_writer.is_some()
+                }
                 RecordingLifecycle::Finalizing => self.active_writer.is_some(),
-                RecordingLifecycle::Idle | RecordingLifecycle::Armed => self.state != RecordingSessionState::Recording,
-                RecordingLifecycle::Stopped | RecordingLifecycle::Committed | RecordingLifecycle::Recovered | RecordingLifecycle::Failed => self.state != RecordingSessionState::Recording,
+                RecordingLifecycle::Idle | RecordingLifecycle::Armed => {
+                    self.state != RecordingSessionState::Recording
+                }
+                RecordingLifecycle::Stopped
+                | RecordingLifecycle::Committed
+                | RecordingLifecycle::Recovered
+                | RecordingLifecycle::Failed => self.state != RecordingSessionState::Recording,
             }
     }
 }
