@@ -340,6 +340,22 @@ impl AuraCore {
         sent
     }
 
+    pub fn list_midi_devices_json(&self) -> String {
+        self.engine.as_ref().map(|engine| engine.list_midi_devices_json().to_string()).unwrap_or_else(|| "[]".to_owned())
+    }
+
+    pub fn start_midi_input(&self) -> bool {
+        self.engine.as_ref().is_some_and(|engine| engine.start_midi_input())
+    }
+
+    pub fn stop_midi_input(&self) {
+        if let Some(engine) = self.engine.as_ref() { engine.stop_midi_input(); }
+    }
+
+    pub fn poll_midi_input_json(&self) -> String {
+        self.engine.as_ref().map(|engine| engine.poll_midi_input_json().to_string()).unwrap_or_else(|| "[]".to_owned())
+    }
+
     /// Invoke a project-local extension through the same bounded process
     /// runner used by the command API.  Keeping this small adapter here lets
     /// the native UI command palette share the CLI security boundary.
@@ -2420,6 +2436,7 @@ impl AuraCore {
                 {"id":"midi_logical_editor","status":"implemented","apis":["execute_midi_logical_editor"]},
                 {"id":"direct_routing","status":"implemented","apis":["fanoutStereo","fanoutPlanar"]},
                 {"id":"control_room","status":"implemented","apis":["control_room_monitor_snapshot_json","set_control_room_dim"]},
+                {"id":"audio_device_io","status":"implemented","apis":["list_audio_devices_json","select_audio_device","apply_audio_config"]},
                 {"id":"mix_snapshots","status":"implemented","apis":["save_snapshot","restore_snapshot"]},
                 {"id":"plugin_sandbox_catalog","status":"implemented","apis":["installed_plugin_catalog_json"]},
                 {"id":"vst3_sandbox_worker","status":"implemented","apis":["add_sandboxed_plugin","process_sandboxed_plugin_block","process_sandboxed_plugin_midi_block"]},
