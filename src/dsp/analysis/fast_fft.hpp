@@ -21,21 +21,27 @@ public:
             m_rev[i] = bitReverse(i, m_log2n);
         }
         
-        // Pre-compute Twiddle Factors (Unit Circle)
-        m_twiddles.resize(n / 2);
+        // Pre-compute Twiddle Factors (Split-Complex)
+        m_twiddleR.resize(n / 2);
+        m_twiddleI.resize(n / 2);
         for (size_t i = 0; i < n / 2; ++i) {
             double angle = -2.0 * M_PI * i / n;
-            m_twiddles[i] = { static_cast<float>(std::cos(angle)), static_cast<float>(std::sin(angle)) };
+            m_twiddleR[i] = static_cast<float>(std::cos(angle));
+            m_twiddleI[i] = static_cast<float>(std::sin(angle));
         }
     }
 
     /**
-     * @brief In-place FFT (Iterative)
+     * @brief In-place FFT (Iterative, Split-Complex)
+     * INDUSTRIAL: Using separate Real/Imaginary arrays for optimal cache-locality and SIMD-readiness.
      */
-    void forward(std::complex<float>* data) {
+    void forward(float* real, float* imag) {
         // 1. Bit-reversal permutation
         for (size_t i = 0; i < m_size; ++i) {
-            if (i < m_rev[i]) std::swap(data[i], data[m_rev[i]]);
+            if (i < m_rev[i]) {
+                std::swap(real[i], real[m_rev[i]]);
+                std::swap(imag[i], imag[m_rev[i]]);
+            }
         }
 
         // 2. Cooley-Tukey Iterative Stages
@@ -44,22 +50,33 @@ public:
             size_t m2 = m >> 1;
             for (size_t k = 0; k < m_size; k += m) {
                 for (size_t j = 0; j < m2; ++j) {
-                    // Twiddle lookup with stride
-                    std::complex<float> t = m_twiddles[j * (m_size / m)] * data[k + j + m2];
-                    std::complex<float> u = data[k + j];
-                    data[k + j] = u + t;
-                    data[k + j + m2] = u - t;
+                    size_t t_idx = j * (m_size / m);
+                    float wr = m_twiddleR[t_idx];
+                    float wi = m_twiddleI[t_idx];
+                    
+                    size_t i1 = k + j;
+                    size_t i2 = k + j + m2;
+                    
+                    float tr = wr * real[i2] - wi * imag[i2];
+                    float ti = wr * imag[i2] + wi * real[i2];
+                    
+                    real[i2] = real[i1] - tr;
+                    imag[i2] = imag[i1] - ti;
+                    real[i1] += tr;
+                    imag[i1] += ti;
                 }
             }
         }
     }
 
-    void inverse(std::complex<float>* data) {
-        // Conjugate -> FFT -> Conjugate -> Scale
-        for (size_t i = 0; i < m_size; ++i) data[i] = std::conj(data[i]);
-        forward(data);
+    void inverse(float* real, float* imag) {
+        // Conjugate (imag = -imag) -> FFT -> Conjugate -> Scale
+        for (size_t i = 0; i < m_size; ++i) imag[i] = -imag[i];
+        forward(real, imag);
+        float scale = 1.0f / static_cast<float>(m_size);
         for (size_t i = 0; i < m_size; ++i) {
-            data[i] = std::conj(data[i]) / static_cast<float>(m_size);
+            real[i] *= scale;
+            imag[i] *= -scale;
         }
     }
 
@@ -75,7 +92,8 @@ private:
 
     size_t m_size, m_log2n;
     std::vector<size_t> m_rev;
-    std::vector<std::complex<float>> m_twiddles;
+    std::vector<float> m_twiddleR;
+    std::vector<float> m_twiddleI;
 };
 
 } // namespace Aura::DSP::Analysis

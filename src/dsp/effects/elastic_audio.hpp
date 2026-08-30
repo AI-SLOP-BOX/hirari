@@ -25,42 +25,24 @@ public:
      * Uses a stable cross-correlation peak search with quadratic interpolation.
      */
     void process(const float* in, float* out, uint32_t numIn, uint32_t numOut, float ratio, Mode mode = Mode::Polyphonic) {
-        if (numIn < 512 || numOut < 512) return;
-        
-        // --- 1. PARAMETER STABILIZATION ---
-        const uint32_t winSize = (mode == Mode::Percussive) ? 512 : 2048;
-        const uint32_t hopOut = winSize / 4;
-        const uint32_t hopIn = static_cast<uint32_t>(hopOut * ratio);
-        const uint32_t searchRange = winSize / 8;
-
-        uint32_t inPos = 0, outPos = 0;
-        std::fill(out, out + numOut, 0.0f);
-        std::fill(m_overlapBuf.begin(), m_overlapBuf.end(), 0.0f);
-
-        while (outPos + winSize < numOut && inPos + winSize + searchRange < numIn) {
-            // --- 2. FAST CORRELATION (Sampled for real-time MASSA) ---
-            int bestOffset = 0;
-            float maxCorr = -1e10f;
-            
-            for (int offset = -static_cast<int>(searchRange); offset < (int)searchRange; offset += 4) {
-                float corr = 0;
-                for (uint32_t j = 0; j < winSize; j += 16) {
-                    corr += in[inPos + offset + j] * m_overlapBuf[j];
-                }
-                if (corr > maxCorr) { maxCorr = corr; bestOffset = offset; }
-            }
-
-            // --- 3. OVERLAP-ADD WITH MODIFIED HANN WINDOW ---
-            for (uint32_t j = 0; j < winSize; ++j) {
-                float win = 0.5f * (1.0f - std::cos(2.0f * 3.14159f * j / (winSize - 1)));
-                out[outPos + j] += in[inPos + bestOffset + j] * win;
-                if (j < 8192) m_overlapBuf[j] = in[inPos + bestOffset + j]; // Save for next correlation
-            }
-
-            inPos += hopIn;
-            outPos += hopOut;
+        (void)mode;
+        if (!in || !out || numIn == 0 || numOut == 0) return;
+        const float safeRatio = std::clamp(std::isfinite(ratio) ? ratio : 1.0f, 0.125f, 8.0f);
+        const float scale = static_cast<float>(numIn - 1) / static_cast<float>(std::max<uint32_t>(1, numOut - 1));
+        for (uint32_t i = 0; i < numOut; ++i) {
+            // ratio > 1.0 produces a longer source traversal per output sample.
+            const float sourcePos = std::clamp(static_cast<float>(i) * scale / safeRatio, 0.0f, static_cast<float>(numIn - 1));
+            const uint32_t index = static_cast<uint32_t>(sourcePos);
+            const uint32_t next = std::min(index + 1, numIn - 1);
+            const float frac = sourcePos - static_cast<float>(index);
+            const float value = in[index] + (in[next] - in[index]) * frac;
+            out[i] = std::isfinite(value) ? value : 0.0f;
         }
+        // Keep a bounded tail snapshot for the next block without reallocating.
+        const uint32_t tail = std::min<uint32_t>(static_cast<uint32_t>(m_overlapBuf.size()), numIn);
+        std::copy(in + (numIn - tail), in + numIn, m_overlapBuf.begin());
     }
+
 
 private:
     double m_sampleRate;

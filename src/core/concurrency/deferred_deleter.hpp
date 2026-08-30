@@ -3,6 +3,8 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include "lock_free.hpp"
 
 namespace Aura::Core::Concurrency {
@@ -31,6 +33,7 @@ public:
     void push(std::shared_ptr<T> ptr) {
         if (!ptr) return;
         m_trashQueue.push(std::static_pointer_cast<void>(std::move(ptr)));
+        m_wait.notify_one();
     }
 
     void performCleanup() {
@@ -48,19 +51,28 @@ public:
         m_worker = std::thread([this]() {
             while (!m_stop) {
                 while (auto item = m_trashQueue.pop()) { /* Destroyed here */ }
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+                std::unique_lock<std::mutex> lock(m_waitMutex);
+                m_wait.wait_for(lock, std::chrono::seconds(1), [this] {
+                    return m_stop.load(std::memory_order_acquire);
+                });
             }
         });
     }
 
 private:
     DeferredDeleter() = default;
-    ~DeferredDeleter() { m_stop = true; if (m_worker.joinable()) m_worker.join(); }
+    ~DeferredDeleter() {
+        m_stop.store(true, std::memory_order_release);
+        m_wait.notify_all();
+        if (m_worker.joinable()) m_worker.join();
+    }
 
     // Increased to 8192 capacity: Professional-grade safety margin
     MPMCQueue<std::shared_ptr<void>, 8192> m_trashQueue;
     std::thread m_worker;
     std::atomic<bool> m_stop{false};
+    std::condition_variable m_wait;
+    std::mutex m_waitMutex;
 };
 
 } // namespace Aura::Core::Concurrency

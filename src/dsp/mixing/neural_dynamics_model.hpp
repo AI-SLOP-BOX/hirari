@@ -28,15 +28,23 @@ public:
      * Captures the 'Warmth' and 'Saturation' that pure math formulas miss.
      */
     float process(float x, const Weights& w) {
-        // 1. RECURRENT UPDATE (Simplified GRU Inference)
-        // (Conceptual - in production, this uses SIMD-optimized matrix multiplication)
+        if (!std::isfinite(x)) x = 0.0f;
+        // 1. RECURRENT UPDATE (bounded, allocation-free GRU-style inference)
+        // Missing or invalid weights are treated as an inactive unit instead
+        // of indexing past a malformed preset supplied by a plugin/project.
         for (size_t i = 0; i < m_state.size(); ++i) {
-            float gate = sigmoid(x * w.inputWeights[i] + m_state[i] * w.recurrentWeights[i]);
-            m_state[i] = (1.0f - gate) * m_state[i] + gate * std::tanh(x + m_state[i]);
+            const float inputWeight = i < w.inputWeights.size() && std::isfinite(w.inputWeights[i])
+                ? w.inputWeights[i] : 0.0f;
+            const float recurrentWeight = i < w.recurrentWeights.size() && std::isfinite(w.recurrentWeights[i])
+                ? w.recurrentWeights[i] : 0.0f;
+            const float bias = i < w.bias.size() && std::isfinite(w.bias[i]) ? w.bias[i] : 0.0f;
+            const float gate = sigmoid(x * inputWeight + m_state[i] * recurrentWeight + bias);
+            m_state[i] = (1.0f - gate) * m_state[i] + gate * std::tanh(x + m_state[i] + bias);
         }
 
         // 2. OUTPUT NON-LINEAR COMBINATION
-        return std::tanh(m_state[0] + x);
+        const float output = std::tanh(m_state[0] + x);
+        return std::isfinite(output) ? output : 0.0f;
     }
 
 private:

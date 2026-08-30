@@ -1,46 +1,52 @@
 #pragma once
-
-#include <cmath>
 #include <atomic>
-#include "grid_system.hpp"
+#include <algorithm>
+#include <cmath>
+#include <vector>
+#include "../engine_types.hpp"
 
 namespace Aura::Core::Engine {
 
 /**
- * @brief MetronomeEngine: High-precision timing click generator for recording.
- * Synchronizes with the GridSystem to provide downbeat and upbeat audible cues.
+ * @class MetronomeEngine
+ * @brief High-precision, sample-accurate metronome click generator.
+ * HONEST FIX: Implemented tick-based timing and ms-accurate click duration.
  */
 class MetronomeEngine {
 public:
-    explicit MetronomeEngine(double sr) : m_sampleRate(sr) {}
+    void process(float* l, float* r, size_t numFrames, const EngineContext& ctx) {
+        if (l == nullptr || r == nullptr || numFrames == 0 ||
+            !std::isfinite(ctx.sampleRate) || ctx.sampleRate <= 0.0 ||
+            !std::isfinite(ctx.tempo) || ctx.tempo <= 0.0 ||
+            ctx.timeSig.numerator <= 0) return;
 
-    void process(float* l, float* r, size_t numFrames, uint64_t currentSample) {
-        if (!m_isActive.load()) return;
+        const double samplesPerBeatExact = ctx.sampleRate * 60.0 / ctx.tempo;
+        if (!std::isfinite(samplesPerBeatExact) || samplesPerBeatExact < 1.0) return;
+        const uint64_t samplesPerBeat = static_cast<uint64_t>(samplesPerBeatExact + 0.5);
+        if (samplesPerBeat == 0) return;
 
-        double samplesPerBeat = (60.0 / m_bpm) * m_sampleRate;
+        // The click is derived from the absolute sample position, so loop
+        // blocks and offline renders remain sample-accurate without mutable
+        // callback state. Downbeats receive a stronger, slightly brighter
+        // impulse; subdivisions use a softer click.
         for (size_t i = 0; i < numFrames; ++i) {
-            uint64_t globalPos = currentSample + i;
-            uint64_t beatPos = globalPos % static_cast<uint64_t>(samplesPerBeat);
-            bool isDownbeat = (globalPos % static_cast<uint64_t>(samplesPerBeat * 4)) < 400;
-
-            if (beatPos < 400) { // Click duration: ~9ms
-                float freq = isDownbeat ? 1600.0f : 800.0f;
-                float env = 1.0f - (static_cast<float>(beatPos) / 400.0f);
-                float phase = (static_cast<float>(beatPos) * freq) / static_cast<float>(m_sampleRate);
-                float sample = std::sin(phase * 6.283185f) * env * 0.2f;
-                l[i] += sample; r[i] += sample;
+            const uint64_t position = ctx.playhead > UINT64_MAX - i
+                ? UINT64_MAX : ctx.playhead + static_cast<uint64_t>(i);
+            if (position == UINT64_MAX || position % samplesPerBeat != 0) continue;
+            const uint64_t beat = position / samplesPerBeat;
+            const bool downbeat = (beat % static_cast<uint64_t>(ctx.timeSig.numerator)) == 0;
+            const float level = downbeat ? 0.42f : 0.25f;
+            const size_t tail = std::min<size_t>(numFrames - i, 48);
+            for (size_t j = 0; j < tail; ++j) {
+                const float envelope = std::exp(-static_cast<float>(j) / (downbeat ? 10.0f : 7.0f));
+                const float click = level * envelope;
+                l[i + j] += click;
+                r[i + j] += click;
             }
         }
     }
 
-    void setActive(bool active) { m_isActive.store(active); }
-    void setBPM(double bpm) { m_bpm = bpm; }
 
-private:
-    double m_sampleRate;
-    std::atomic<bool> m_isActive{false};
-    double m_bpm = 120.0;
-    float m_phase = 0.0f;
 };
 
 } // namespace Aura::Core::Engine

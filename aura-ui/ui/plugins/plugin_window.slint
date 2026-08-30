@@ -1,0 +1,162 @@
+import { Slider, Button, LineEdit } from "std-widgets.slint";
+import { Style } from "../style.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { PluginActions } from "../actions/plugin_actions.slint";
+
+export component Z_PluginWnd {
+    in property <string> name;
+    in property <[float]> gr_history: [0.1, 0.4, 0.8, 0.5, 0.2, 0.0, 0.0, 0.1];
+    in property <bool> active: true;
+    in property <int> track-id: -1;
+    in property <int> plugin-index: 0;
+    in property <[string]> parameter-names: [];
+    in property <[float]> parameter-values: [];
+    in property <float> track-latency-ms: 0.0;
+    in property <float> pdc-compensation-ms: 0.0;
+    in property <string> pdc-status: "UNAVAILABLE";
+    in-out property <int> sidechain-source-id: -1;
+    in property <string> sidechain-source-name: "";
+    in-out property <bool> sidechain-enabled: false;
+    in property <bool> sidechain-result: false;
+    in-out property <int> sidechain-tap-point: 0;
+    in-out property <string> preset-path: "";
+    callback close();
+    callback param_changed(int, float);
+
+    Rectangle {
+        width: 640px; height: 480px; background: Style.surface; border_radius: 2px; border_width: 2px; border_color: Style.brand;
+        VerticalLayout {
+            padding: 16px; spacing: 14px;
+            // Header
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle { width: 12px; height: 12px; border_radius: 6px; background: root.active ? Style.ok : #333; }
+                    Text { text: name + " | DSP"; font-size: 11px; font-weight: 700; color: Style.text-primary; horizontal-stretch: 1; }
+                Z_IconButton { icon: "×"; clicked => { close(); } }
+            }
+            
+            HorizontalLayout {
+                spacing: 20px;
+                // Left: GR Meter & Controls
+                VerticalLayout {
+                    width: 140px; spacing: 12px;
+                    Text { text: "Gain Reduction"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                    Rectangle {
+                        height: 180px; background: Style.surface-0; border_width: 1px; border_color: Style.border;
+                        HorizontalLayout {
+                            spacing: 1px; padding: 1px;
+                            for gr in gr_history : Rectangle {
+                                width: 100%; height: gr * parent.height; background: Style.record;
+                                y: 0; 
+                            }
+                        }
+                        // Scale
+                        for s in [0, -3, -6, -12, -20] : Text { text: s + ""; font-size: Style.font-xxs; color: #333; y: (-s/20.0) * parent.height; x: 2px; }
+                    }
+                    VerticalLayout {
+                        spacing: 8px;
+                        for p_idx in 4 : Rectangle {
+                            height: parameter-names.length > 0 && p_idx >= parameter-names.length ? 0px : 24px;
+                            opacity: parameter-names.length > 0 && p_idx >= parameter-names.length ? 0.0 : 1.0;
+                            background: Style.surface;
+                            HorizontalLayout {
+                                padding: 4px;
+                                Text { text: parameter-names.length > p_idx ? parameter-names[p_idx] : "PARAM " + p_idx; font-size: 8px; color: #666; vertical-alignment: center; horizontal-stretch: 1; }
+                                Slider {
+                                    value: parameter-values.length > p_idx ? parameter-values[p_idx] * 100.0 : 50.0;
+                                    width: 80px;
+                                    changed(v) => { param_changed(p_idx, v); }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Right: Transfer Curve & Visualizer
+                VerticalLayout {
+                    spacing: 12px;
+                    Text { text: "TRANSFER FUNCTION / ANALYZER"; font-size: 8px; color: #6E6E73; font-weight: 900; }
+                    Rectangle {
+                        background: Style.surface; border_width: 1.5px; border_color: Style.border;
+                        height: 240px; clip: true;
+                        // Grid
+                        for i in 8 : Rectangle { x: i * parent.width/8; width: 0.5px; height: 100%; background: Style.border; opacity: 0.3; }
+                        for j in 8 : Rectangle { y: j * parent.height/8; height: 0.5px; width: 100%; background: Style.border; opacity: 0.3; }
+                        // Knee Curve (Simulation)
+                        Path {
+                            stroke: Style.brand; 
+                            stroke-width: 2px;
+                            viewbox-width: 100;
+                            viewbox-height: 100;
+                            width: 100%; height: 100%;
+                            MoveTo { x: 0; y: 100; }
+                            LineTo { x: 40; y: 60; }
+                            QuadraticTo { control-x: 60; control-y: 40; x: 100; y: 40; }
+                        }
+                        // Dynamic Signal Points
+                        Rectangle {
+                            x: parent.width * 0.4 - 4px; y: parent.height * 0.6 - 4px; width: 8px; height: 8px; border_radius: 4px;
+                            background: Style.ok; opacity: 0.8;
+                        }
+                    }
+                }
+            }
+            
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: "Preset"; font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
+                Button { text: "Browse"; clicked => { PluginActions.browse_preset(false); } }
+                LineEdit {
+                    text: root.preset-path;
+                    placeholder-text: "Choose a preset file…";
+                    horizontal-stretch: 1;
+                    edited => { root.preset-path = self.text; }
+                }
+                Button {
+                    text: "Save As";
+                    clicked => { PluginActions.browse_preset(true); }
+                }
+                Button {
+                    text: "Save";
+                    clicked => { PluginActions.save_preset(root.track-id, root.plugin-index, root.preset-path); }
+                }
+                Button {
+                    text: "Load";
+                    clicked => { PluginActions.load_preset(root.track-id, root.plugin-index, root.preset-path); }
+                }
+                Button {
+                    text: "▲";
+                    enabled: root.plugin-index > 0;
+                    clicked => { PluginActions.move_plugin(root.plugin-index, -1); }
+                }
+                Button {
+                    text: "▼";
+                    clicked => { PluginActions.move_plugin(root.plugin-index, 1); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "Sidechain"; font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
+                Text { text: root.sidechain-source-id >= 0 ? (root.sidechain-source-name != "" ? root.sidechain-source-name : "Track " + root.sidechain-source-id) : "Choose a source in Routing"; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center; horizontal-stretch: 1; }
+                Button { text: root.sidechain-tap-point == 0 ? "✓ Pre" : "Pre"; clicked => { PluginActions.set_sidechain_tap_point(root.sidechain-source-id, root.track-id, root.plugin-index, 0); } }
+                Button { text: root.sidechain-tap-point == 1 ? "✓ Post" : "Post"; clicked => { PluginActions.set_sidechain_tap_point(root.sidechain-source-id, root.track-id, root.plugin-index, 1); } }
+                Button { text: root.sidechain-tap-point == 2 ? "✓ Input" : "Input"; clicked => { PluginActions.set_sidechain_tap_point(root.sidechain-source-id, root.track-id, root.plugin-index, 2); } }
+                Button {
+                    text: root.sidechain-result ? "Disconnect" : "Connect";
+                    enabled: root.sidechain-source-id >= 0 && root.track-id >= 0;
+                    clicked => {
+                        PluginActions.set_sidechain(root.sidechain-source-id, root.track-id, root.plugin-index, root.sidechain-tap-point, !root.sidechain-result);
+                    }
+                }
+            }
+            if (root.pdc-status != "READY") : Text { text: root.pdc-status == "UNAVAILABLE" ? "PDC unavailable" : (root.pdc-status == "NO_PLUGIN" ? "No PDC plugin" : (root.pdc-status == "ERROR" ? "PDC error" : "PDC calculating")); font-size: Style.font-xxs; color: Style.text-tertiary; }
+            HorizontalLayout {
+                padding-top: 10px; spacing: 8px;
+                Text { text: root.pdc-status == "READY" ? "PDC " + Math.round(root.pdc-compensation-ms * 100.0) / 100.0 + " ms" : "PDC " + root.pdc-status; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "Host parameters"; font-size: Style.font-xxs; color: Style.text-muted; }
+            }
+        }
+    }
+}

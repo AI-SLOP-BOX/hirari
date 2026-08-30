@@ -29,27 +29,30 @@ public:
      * @brief PROCESS: Snaps MIDI Note-Ons to the active scale.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed || m_scale == Scale::Chromatic) return;
-
-        auto events = midi.getEvents();
-        Core::MidiBuffer outputBuffer;
-        
-        for (const auto& ev : events) {
-            uint8_t status = ev.data[0] & 0xF0;
-            uint8_t note = ev.data[1];
-            uint8_t vel = ev.data[2];
-
-            if (status == 0x90) { // Note On
-                uint8_t snapped = getNearestNote(note);
-                uint8_t data[3] = {0x90, snapped, vel};
-                outputBuffer.addEvent(ev.sampleOffset, data, 3);
+        (void)buffer; (void)context;
+        m_outputBuffer.clear();
+        for (const auto& event : midi) {
+            if (event.size < 2 || event.data[0] < 0x80) {
+                m_outputBuffer.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
+                continue;
+            }
+            const uint8_t status = event.data[0] & 0xF0;
+            if (status == 0x80 || (status == 0x90 && event.size >= 3 && event.data[2] == 0)) {
+                const uint8_t mapped = getNearestNote(event.data[1]);
+                uint8_t data[3] = {event.data[0], mapped, static_cast<uint8_t>(event.size >= 3 ? event.data[2] : 0)};
+                m_outputBuffer.addEvent(event.sampleOffset, data, 3, event.articulationId);
+            } else if (status == 0x90) {
+                uint8_t data[3] = {event.data[0], getNearestNote(event.data[1]), event.data[2]};
+                m_outputBuffer.addEvent(event.sampleOffset, data, 3, event.articulationId);
             } else {
-                // Pass through note offs (we must track note-off mapping for consistency)
-                outputBuffer.addEvent(ev.sampleOffset, ev.data, ev.size);
+                m_outputBuffer.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
             }
         }
-        midi = std::move(outputBuffer);
+        midi.clear();
+        for (const auto& event : m_outputBuffer) midi.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
+        midi.sort();
     }
+
 
     void reset() noexcept override {}
 
@@ -59,21 +62,16 @@ public:
 
 private:
     uint8_t getNearestNote(uint8_t n) {
-        int noteInOctave = n % 12;
-        int octave = n / 12;
-
-        // Search for nearest active note in scale
-        int minDist = 12;
-        int nearest = noteInOctave;
-        
-        for (int active : m_activeNotes) {
-            int dist = std::abs(active - noteInOctave);
-            if (dist < minDist) {
-                minDist = dist;
-                nearest = active;
+        int best = n;
+        int minDist = 128;
+        for (int octave = std::max(0, static_cast<int>(n / 12) - 1); octave <= std::min(10, static_cast<int>(n / 12) + 1); ++octave) {
+            for (int active : m_activeNotes) {
+                const int candidate = octave * 12 + active;
+                const int dist = std::abs(candidate - static_cast<int>(n));
+                if (candidate >= 0 && candidate <= 127 && dist < minDist) { minDist = dist; best = candidate; }
             }
         }
-        return static_cast<uint8_t>(octave * 12 + nearest);
+        return static_cast<uint8_t>(best);
     }
 
     void updateActiveNotes() {
@@ -89,6 +87,7 @@ private:
     int m_root;
     Scale m_scale;
     std::vector<int> m_activeNotes;
+    Core::MidiBuffer m_outputBuffer;
 };
 
 } // namespace Aura::DSP::Effects

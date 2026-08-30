@@ -1,5 +1,0 @@
-[Engine] Logic Pro 11 Ultimate Session Ready.
-[UI] Bootstrapping UI...
-[UI] Kernel Created.
-[Metal] Failed to load default library.
-[macOS] GUI Host launched with HiDPI Scale: 2

@@ -1,0 +1,26 @@
+import { Style } from "../style.slint";
+import { SpatialActions } from "../actions/spatial_actions.slint";
+
+export component Z_ImmersivePanner {
+    in property <int> trk_id: 0;
+    in-out property <float> px: 0.5;
+    in-out property <float> py: 0.5;
+    in-out property <float> pz: 0.2;
+    in property <color> trk_col: Style.brand;
+    Rectangle {
+        width: 140px; height: 140px; background: Style.surface; border_radius: 2px; border_width: 1.5px; border_color: Style.border;
+        for i in 3 : Rectangle { width: 100%; height: 1px; y: parent.height * (i + 1) / 4; background: Style.surface; opacity: 0.5; }
+        for j in 3 : Rectangle { height: 100%; width: 1px; x: parent.width * (j + 1) / 4; background: Style.surface; opacity: 0.5; }
+        Rectangle {
+            x: px * (parent.width - 20px); y: (1.0 - py) * (parent.height - 20px);
+            width: (14.0 + pz * 16.0) * 1px; height: (14.0 + pz * 16.0) * 1px;
+            background: trk_col; border_radius: self.width/2; border_width: 2px; border_color: #fff;
+            Rectangle { width: 100%; height: 100%; border_radius: self.width/2; background: trk_col.with-alpha(0.25); opacity: pz; }
+        }
+        TouchArea {
+            moved => { if (self.pressed) { px = (self.mouse_x / parent.width).clamp(0, 1); py = (1.0 - self.mouse_y / parent.height).clamp(0, 1); SpatialActions.pan_3d_moved(trk_id, px, py, pz); } }
+            scroll-event(e) => { pz = (pz + e.delta-y / 1500.0 / 1px).clamp(0.0, 1.0); SpatialActions.pan_3d_moved(trk_id, px, py, pz); return accept; }
+        }
+        Text { text: "ELV: " + Math.floor(pz*100) + "%"; font-size: Style.font-xxs; color: Style.brand; x: 6px; y: 6px; font-weight: 900; }
+    }
+}

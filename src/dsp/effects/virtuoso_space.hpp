@@ -25,7 +25,7 @@ public:
         setupFDN();
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+    void prepareToPlay(double sr, uint32_t /*blockSize*/) noexcept override {
         m_sampleRate = sr;
         setupFDN();
     }
@@ -34,54 +34,46 @@ public:
      * @brief PROCESS: High-density spectral diffusion.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        uint32_t numSamples = buffer.getNumSamples();
-        float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
-
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float in = (l[s] + r[s]) * 0.5f;
-
-            // 1. INPUT DIFFUSION
-            float fdnIn = in;
-            
-            // 2. READ DELAY LINES (Prime-spaced)
-            std::array<float, kNumLines> y;
-            for (int i = 0; i < kNumLines; ++i) {
-                y[i] = m_delayLines[i][m_readIndices[i]];
-                // Apply subtle Low-pass damping (High frequency absorption)
-                m_filterState[i] = y[i] * (1.0f - m_damping) + m_filterState[i] * m_damping;
-                y[i] = m_filterState[i];
-            }
-
-            // 3. HOUSEHOLDER TRANSFORMATION (O(N) Matrix multiplication)
-            // Essential for recursive diffusion without energy loss.
+        (void)midi; (void)context;
+        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
+        float* left = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : left;
+        if (!left || !right) return;
+        const float decay = std::clamp(std::isfinite(m_decay) ? m_decay : 0.85f, 0.0f, 0.999f);
+        const float damping = std::clamp(std::isfinite(m_damping) ? m_damping : 0.2f, 0.0f, 0.99f);
+        const float mix = std::clamp(std::isfinite(m_mix) ? m_mix : 0.25f, 0.0f, 1.0f);
+        for (uint32_t s = 0; s < buffer.getNumSamples(); ++s) {
+            const float dryL = std::isfinite(left[s]) ? left[s] : 0.0f;
+            const float dryR = std::isfinite(right[s]) ? right[s] : 0.0f;
+            const float input = 0.5f * (dryL + dryR);
             float sum = 0.0f;
-            for (int i = 0; i < kNumLines; ++i) sum += y[i];
-            float factor = (2.0f / kNumLines) * sum;
-
             for (int i = 0; i < kNumLines; ++i) {
-                float fdnOut = y[i] - factor;
-                // --- HONEST FIX: DENORMAL KILLER ---
-                // Prevents inaudible feedback loops from spiking CPU usage when 
-                // the reverb tail reaches near-zero levels.
-                float feedback = ::Aura::DSP::Math::DenormalNumberKiller::kill(fdnIn + fdnOut * m_decay);
-                m_delayLines[i][m_writeIndices[i]] = feedback;
- 
-                // Index Update
-                m_writeIndices[i] = (m_writeIndices[i] + 1) % m_delayLength[i];
-                m_readIndices[i] = (m_readIndices[i] + 1) % m_delayLength[i];
+                auto& line = m_delayLines[i];
+                if (line.empty()) continue;
+                const int read = m_readIndices[i] % static_cast<int>(line.size());
+                const float value = std::isfinite(line[read]) ? line[read] : 0.0f;
+                m_lineRead[i] = value;
+                sum += value;
             }
-
-            // 4. MIX OUTPUT
-            float reverbOut = 0.0f;
+            const float mean = sum / static_cast<float>(kNumLines);
+            float wetL = 0.0f, wetR = 0.0f;
             for (int i = 0; i < kNumLines; ++i) {
-                reverbOut += y[i] * (i % 2 == 0 ? 1.0f : -1.0f); // Alternating phase for stereo spread
+                auto& line = m_delayLines[i];
+                if (line.empty()) continue;
+                const float diffuse = m_lineRead[i] - 2.0f * mean;
+                m_filterState[i] += (diffuse - m_filterState[i]) * (1.0f - damping);
+                const float injected = input + decay * m_filterState[i];
+                line[m_writeIndices[i]] = std::isfinite(injected) ? injected : 0.0f;
+                m_writeIndices[i] = (m_writeIndices[i] + 1) % static_cast<int>(line.size());
+                m_readIndices[i] = (m_readIndices[i] + 1) % static_cast<int>(line.size());
+                if ((i & 1) == 0) wetL += m_lineRead[i]; else wetR += m_lineRead[i];
             }
-
-            l[s] = l[s] * (1.0f - m_mix) + reverbOut * m_mix;
-            r[s] = r[s] * (1.0f - m_mix) + reverbOut * m_mix * -1.0f; // Pseudo-stereo
+            const float scale = 1.0f / 8.0f;
+            left[s] = dryL * (1.0f - mix) + wetL * scale * mix;
+            right[s] = dryR * (1.0f - mix) + wetR * scale * mix;
         }
     }
+
 
     void reset() noexcept override {
         for (auto& line : m_delayLines) line.assign(line.size(), 0.0f);
@@ -108,6 +100,7 @@ private:
     std::array<int, kNumLines> m_writeIndices;
     std::array<int, kNumLines> m_readIndices;
     std::array<float, kNumLines> m_filterState;
+    std::array<float, kNumLines> m_lineRead{};
 
     float m_decay = 0.85f;    // Reverb Time (RT60)
     float m_mix = 0.25f;      // Dry/Wet

@@ -27,10 +27,14 @@ public:
         m_carBuffer.assign(kFFTSize, 0.0f);
         m_outBuffer.assign(kFFTSize, 0.0f);
         m_env.assign(kFFTSize / 2, 0.0f);
+        m_fftMod.assign(kFFTSize, {});
+        m_fftCar.assign(kFFTSize, {});
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+        (void)bs;
+        m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0;
+        reset();
     }
 
     /**
@@ -40,12 +44,14 @@ public:
         if (m_bypassed) return;
 
         // 1. Fetch External Sidechain (e.g., Vocal or Kick)
-        auto sidechainBus = context.sidechainBus;
-        if (!sidechainBus) return;
+        auto sidechainBus = context.sidechainBuffer;
+        if (!sidechainBus || sidechainBus->getNumChannels() < 2 ||
+            buffer.getNumChannels() < 2 || buffer.getNumSamples() == 0) return;
 
         uint32_t numSamples = buffer.getNumSamples();
-        const float* scL = sidechainBus->getBufferL();
-        const float* scR = sidechainBus->getBufferR();
+        const float* scL = sidechainBus->getReadPointer(0);
+        const float* scR = sidechainBus->getReadPointer(1);
+        if (!scL || !scR) return;
 
         for (uint32_t s = 0; s < numSamples; ++s) {
             float midCar = (buffer.getReadPointer(0)[s] + buffer.getReadPointer(1)[s]) * 0.5f;
@@ -67,27 +73,28 @@ public:
     }
 
     void analyzeAndDuck() {
-        std::vector<std::complex<float>> fftMod(kFFTSize), fftCar(kFFTSize);
+        // Workspaces are allocated once in the constructor, never on the
+        // audio callback path.
         for (size_t i = 0; i < kFFTSize; ++i) {
             float win = 0.5f * (1.0f - std::cos(2*M_PI*i / (kFFTSize-1)));
-            fftMod[i] = std::complex<float>(m_modBuffer[i] * win, 0.0f);
-            fftCar[i] = std::complex<float>(m_carBuffer[i], 0.0f);
+            m_fftMod[i] = std::complex<float>(m_modBuffer[i] * win, 0.0f);
+            m_fftCar[i] = std::complex<float>(m_carBuffer[i], 0.0f);
         }
 
-        Utils::FFTUtils::fft(fftMod);
-        Utils::FFTUtils::fft(fftCar);
+        Utils::FFTUtils::fft(m_fftMod);
+        Utils::FFTUtils::fft(m_fftCar);
 
         // 3. Subtract spectral energy (Calculation-based Smart Eq)
         for (size_t i = 0; i < kFFTSize / 2; ++i) {
-            float modMag = std::abs(fftMod[i]);
+            float modMag = std::abs(m_fftMod[i]);
             float duckAmount = std::clamp(1.0f - (modMag * m_amount), 0.1f, 1.0f);
             
-            fftCar[i] *= duckAmount;
-            if (i > 0) fftCar[kFFTSize - i] *= duckAmount;
+            m_fftCar[i] *= duckAmount;
+            if (i > 0) m_fftCar[kFFTSize - i] *= duckAmount;
         }
 
-        Utils::FFTUtils::ifft(fftCar);
-        for (size_t i = 0; i < kFFTSize; ++i) m_outBuffer[i] = fftCar[i].real();
+        Utils::FFTUtils::ifft(m_fftCar);
+        for (size_t i = 0; i < kFFTSize; ++i) m_outBuffer[i] = m_fftCar[i].real();
     }
 
     void reset() noexcept override {
@@ -95,11 +102,12 @@ public:
     }
 
     // Parameters
-    void setAmount(float a) { m_amount = a; }
+    void setAmount(float a) { m_amount = std::isfinite(a) ? std::clamp(a, 0.0f, 1.0f) : 0.5f; }
 
 private:
     double m_sampleRate = 44100.0;
     std::vector<float> m_modBuffer, m_carBuffer, m_outBuffer, m_env;
+    std::vector<std::complex<float>> m_fftMod, m_fftCar;
     uint32_t m_writeIdx;
     float m_amount = 0.5f;
 };

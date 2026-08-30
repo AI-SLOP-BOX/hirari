@@ -1,0 +1,115 @@
+import { Style } from "../style.slint";
+import { Z_Knob } from "../primitives/knob.slint";
+
+export component Z_AuraSynth {
+    callback parameter-changed(int, float);
+    callback engine-changed(int);
+    in property <color> accent-col: Style.brand;
+    in property <float> ui_timer: 0.0;
+    
+    in-out property <int> active_engine: 1; // 0: Neural Synth, 1: Surge XT, 2: Alchemy
+    in-out property <int> active_skin: 0; // 0: Classic Dark, 1: Royal Blue, 2: Chroma Glow, 3: Retro Analog
+    property <color> current_accent: active_skin == 0 ? Style.brand : active_skin == 1 ? Style.ok : active_skin == 2 ? Style.brand : Style.solo;
+    
+    Rectangle {
+        width: 100%; height: 360px; background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        VerticalLayout {
+            padding: 14px; spacing: 10px;
+            
+            // Engine and Skin Select Bar
+            HorizontalLayout {
+                spacing: 20px; alignment: start;
+                
+                // Engine selection
+                HorizontalLayout {
+                    spacing: 6px; alignment: center;
+                    Text { text: "Engine"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; vertical-alignment: center; }
+                    for name[idx] in ["SYNTH", "WAVETABLE", "SAMPLER"] : Rectangle {
+                        height: 18px; background: active_engine == idx ? Style.border : Style.surface; border_radius: 2px; border_width: 1px; border_color: active_engine == idx ? current_accent : Style.border;
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px;
+                            Text { text: name; font-size: Style.font-xxs; color: active_engine == idx ? Style.text-primary : Style.text-secondary; font-weight: 500; vertical-alignment: center; }
+                        }
+                        TouchArea { clicked => { active_engine = idx; root.engine-changed(idx); } }
+                    }
+                }
+                
+                // Skin selection (Visible only when Surge XT is active)
+                if (active_engine == 1) : HorizontalLayout {
+                    spacing: 6px; alignment: center;
+                    Text { text: "Skin"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; vertical-alignment: center; }
+                    for skin_name[idx] in ["CLASSIC DARK", "ROYAL BLUE", "CHROMA GLOW", "RETRO ANALOG"] : Rectangle {
+                        height: 18px; background: active_skin == idx ? Style.border : Style.surface; border_radius: 2px; border_width: 1px; border_color: active_skin == idx ? current_accent : Style.border;
+                        HorizontalLayout {
+                            padding-left: 8px; padding-right: 8px;
+                            Text { text: skin_name; font-size: Style.font-xxs; color: active_skin == idx ? Style.text-primary : Style.text-secondary; font-weight: 500; vertical-alignment: center; }
+                        }
+                        TouchArea { clicked => { active_skin = idx; } }
+                    }
+                }
+            }
+            
+            Rectangle { height: 1px; background: Style.border; }
+            
+            // Oscillator and Filter Controls
+            HorizontalLayout {
+                spacing: 30px;
+                // OSCILLATOR SECTION
+                VerticalLayout {
+                    width: 240px; spacing: 14px;
+                    Text { text: active_engine == 0 ? "Analog Oscillator" : active_engine == 1 ? "Wavetable Oscillator" : "Multi-sampler"; font-size: 10px; color: current_accent; font-weight: 700; }
+                    Rectangle {
+                        height: 100px; background: Style.surface-0; border_radius: 2px;
+                        // Oscillator preview. Parameter changes are forwarded
+                        // to the shared macro engine below.
+                        Path {
+                            width: 100%; height: 100%; stroke: current_accent; stroke_width: 2px;
+                            MoveTo { x: 0; y: 50; }
+                            LineTo { x: 24; y: 50.0 + 40.0 * Math.sin((1.5 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 48; y: 50.0 + 40.0 * Math.sin((3.0 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 72; y: 50.0 + 40.0 * Math.sin((4.5 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 96; y: 50.0 + 40.0 * Math.sin((6.0 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 120; y: 50.0 + 40.0 * Math.sin((7.5 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 144; y: 50.0 + 40.0 * Math.sin((9.0 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 168; y: 50.0 + 40.0 * Math.sin((10.5 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 192; y: 50.0 + 40.0 * Math.sin((12.0 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 216; y: 50.0 + 40.0 * Math.sin((13.5 + ui_timer / 100.0) * 1rad); }
+                            LineTo { x: 240; y: 50.0 + 40.0 * Math.sin((15.0 + ui_timer / 100.0) * 1rad); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Z_Knob { label: "MORPH"; value: 0.4; accent-col: current_accent; changed(v) => { root.parameter-changed(0, v); } }
+                        Z_Knob { label: "DETUNE"; value: 0.1; accent-col: current_accent; changed(v) => { root.parameter-changed(1, v); } }
+                        Z_Knob { label: "DRIVE"; value: 0.8; accent-col: Style.record; changed(v) => { root.parameter-changed(2, v); } }
+                    }
+                }
+                
+                Rectangle { width: 1px; background: Style.border; }
+                
+                // SPECTRAL FILTER SECTION
+                VerticalLayout {
+                    horizontal-stretch: 1; spacing: 14px;
+                    Text { text: active_engine == 0 ? "Spectral Filter" : active_engine == 1 ? "Ladder Filter" : "Resynthesis Filter"; font-size: 10px; color: Style.text-secondary; font-weight: 700; }
+                    Rectangle {
+                        height: 140px; background: Style.surface; border_radius: 1px; clip: true;
+                        // Spectral Curve
+                        Path {
+                            fill: current_accent.with-alpha(0.15); stroke: current_accent; stroke_width: 2px;
+                            MoveTo { x: 0; y: 140; }
+                            QuadraticTo { control-x: 150; control-y: 10; x: 300; y: 140; }
+                            Close { }
+                        }
+                        Text { text: active_engine == 1 ? "Cutoff: 2.8 kHz" : "Cutoff: 4.2 kHz"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 10px; y: 10px; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Z_Knob { label: "FREQ"; value: 0.6; accent-col: current_accent; changed(v) => { root.parameter-changed(3, v); } }
+                        Z_Knob { label: "RES"; value: 0.3; accent-col: current_accent; changed(v) => { root.parameter-changed(4, v); } }
+                        Z_Knob { label: "DRIVE"; value: 0.5; accent-col: Style.alert; changed(v) => { root.parameter-changed(5, v); } }
+                    }
+                }
+            }
+        }
+    }
+}

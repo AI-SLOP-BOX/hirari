@@ -16,11 +16,19 @@ public:
     LFO() : m_phase(0.0), m_phaseInc(0.0), m_sampleRate(44100.0) {}
 
     void setFrequency(float freq) {
-        m_phaseInc = freq / m_sampleRate;
+        if (!std::isfinite(freq) || !std::isfinite(m_sampleRate) || m_sampleRate <= 0.0f) {
+            m_phaseInc = 0.0;
+            return;
+        }
+        m_phaseInc = static_cast<double>(freq) / m_sampleRate;
     }
 
     void setSampleRate(float sr) {
-        m_sampleRate = sr;
+        if (std::isfinite(sr) && sr > 0.0f) {
+            const double frequency = m_phaseInc * m_sampleRate;
+            m_sampleRate = sr;
+            m_phaseInc = frequency / m_sampleRate;
+        }
     }
 
     /**
@@ -28,25 +36,25 @@ public:
      * HONEST FIX: Zero-aliasing modulation output.
      */
     float process(Waveform wave) {
-        m_phase += m_phaseInc;
-        if (m_phase >= 1.0) m_phase -= 1.0;
-
+        const double phase = m_phase - std::floor(m_phase);
+        double out = 0.0;
         switch (wave) {
-            case Waveform::Sine:
-                return std::sin(2.0 * M_PI * m_phase);
-            case Waveform::Triangle:
-                return 2.0f * std::abs(2.0f * (m_phase - std::floor(m_phase + 0.5f))) - 1.0f;
-            case Waveform::Saw:
-                return 2.0f * m_phase - 1.0f;
-            case Waveform::Square:
-                return m_phase < 0.5f ? 1.0f : -1.0f;
+        case Waveform::Sine:     out = std::sin(kTwoPi * phase); break;
+        case Waveform::Triangle: out = 1.0 - 4.0 * std::abs(phase - 0.5); break;
+        case Waveform::Saw:      out = 2.0 * phase - 1.0; break;
+        case Waveform::Square:   out = phase < 0.5 ? 1.0 : -1.0; break;
         }
-        return 0.0f;
+        if (!std::isfinite(m_phaseInc)) m_phaseInc = 0.0;
+        m_phase += m_phaseInc;
+        m_phase -= std::floor(m_phase);
+        return static_cast<float>(out);
     }
+
 
     float getPhase() const { return m_phase; }
 
 private:
+    static constexpr double kTwoPi = 6.28318530717958647692;
     double m_phase;
     double m_phaseInc;
     float m_sampleRate;

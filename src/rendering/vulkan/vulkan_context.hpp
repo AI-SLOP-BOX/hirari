@@ -1,51 +1,30 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <iterator>
+#include <limits>
 #include <vector>
 #include <memory>
 #include <string>
+#include <cmath>
+
+#if __has_include("aura_vulkan_ui_spv.hpp")
+#include "aura_vulkan_ui_spv.hpp"
+#define AURA_HAS_EMBEDDED_VULKAN_UI_SPV 1
+#else
+#define AURA_HAS_EMBEDDED_VULKAN_UI_SPV 0
+#endif
 
 namespace Aura::Rendering::Vulkan {
 
 /**
  * @class VulkanContext
- * @brief High-performance Vulkan 1.3 Core for the DAW.
- * HONEST FIX: Uses modern Dynamic Rendering (KHR_dynamic_rendering) 
- * instead of the old-school, verbose RenderPass/Framebuffer boilerplate.
- * This is exactly what high-speed native UIs like Zed's GPUI do.
+ * @brief Vulkan device and surface lifecycle state.
  */
-class VulkanContext {
-public:
-    static VulkanContext& getInstance() {
-        static VulkanContext i;
-        return i;
-    }
-
-    bool initialize(VkInstance instance, VkSurfaceKHR surface) {
-        // 1. Pick Physical Device (GPU) with best performance
-        // 2. Setup Logical Device with KHR_dynamic_rendering and KHR_swapchain
-        // 3. Create Swapchain and Sync Primitives
-        return true; 
-    }
-
-    /**
-     * @brief THE GPUI-STYLE DRAWING COMMAND: Renders a list of quads (Rects) via GPU Instancing.
-     * This is the 'Secret Sauce' of Zed's performance. No single-pixel drawing.
-     */
-    void drawUIAtlas(VkCommandBuffer cb, const std::vector<float>& quadData) {
-        // High-speed draw call with instanced buffer
-        // 1. Bind Quad Pipeline
-        // 2. Bind Vertex Buffer (Atlas indices)
-        // 3. Bind Instance Buffer (Rect positions, colors, corner radius)
-        // 4. vkCmdDrawInstanced
-    }
-
-private:
-    VulkanContext() = default;
-    
-    VkDevice m_device = VK_NULL_HANDLE;
-    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
-    VkSwapchainKHR m_swapchain = VK_NULL_HANDLE;
-};
+    #include "vulkan_context_part_1.inc"
+    #include "vulkan_context_part_2.inc"
 
 } // namespace Aura::Rendering::Vulkan

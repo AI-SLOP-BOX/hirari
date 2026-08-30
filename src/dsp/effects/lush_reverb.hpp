@@ -6,15 +6,16 @@
 #include <algorithm>
 #include "../iprocessor.hpp"
 #include "../math/denormal_killer.hpp"
+#include "../../core/audio_buffer.hpp"
 
-namespace Aura::Core::DSP::Effects {
+namespace Aura::DSP::Effects {
 
 /**
  * @brief LushReverb: High-end Algorithmic Feedback Delay Network (FDN).
  */
 class LushReverb : public IProcessor {
 public:
-    explicit LushReverb(double sampleRate) : m_sampleRate(sampleRate) {
+    explicit LushReverb(double sampleRate = 44100.0) : m_sampleRate(sampleRate > 1000.0 ? sampleRate : 44100.0) {
         setupDelays();
     }
 
@@ -27,47 +28,57 @@ public:
         }
     }
 
-    void process(float* l, float* r, uint32_t numSamples) override {
+    void process(float* l, float* r, uint32_t numSamples) {
+        if (!l || !r) return;
+        const float feedback = std::clamp(m_feedback, 0.0f, 0.995f);
+        const float damping = std::clamp(m_damping, 0.0f, 0.99f);
         for (uint32_t s = 0; s < numSamples; ++s) {
-            float monoIn = (l[s] + r[s]) * 0.5f;
-            
-            std::array<float, 8> outputs;
-            for (int i = 0; i < 8; ++i) {
-                outputs[i] = m_delayLines[i][m_writeIndices[i]];
+            const float inL = std::isfinite(l[s]) ? l[s] : 0.0f;
+            const float inR = std::isfinite(r[s]) ? r[s] : 0.0f;
+            const float input = 0.5f * (inL + inR);
+            float sum = 0.0f;
+            for (size_t i = 0; i < m_delayLines.size(); ++i) {
+                auto& line = m_delayLines[i];
+                const size_t read = (m_writeIndices[i] + 1) % line.size();
+                const float delayed = std::isfinite(line[read]) ? line[read] : 0.0f;
+                m_filterState[i] += (delayed - m_filterState[i]) * (1.0f - damping);
+                sum += m_filterState[i];
             }
-
-            // --- 8x8 HADAMARD MATRIX (ORTHOGONAL SCATTERING) ---
-            // HONEST FIX: High-performance DIFFUSION without energy loss.
-            std::array<float, 8> h;
-            h[0] = outputs[0] + outputs[1] + outputs[2] + outputs[3] + outputs[4] + outputs[5] + outputs[6] + outputs[7];
-            h[1] = outputs[0] - outputs[1] + outputs[2] - outputs[3] + outputs[4] - outputs[5] + outputs[6] - outputs[7];
-            h[2] = outputs[0] + outputs[1] - outputs[2] - outputs[3] + outputs[4] + outputs[5] - outputs[6] - outputs[7];
-            h[3] = outputs[0] - outputs[1] - outputs[2] + outputs[3] + outputs[4] - outputs[5] - outputs[6] + outputs[7];
-            h[4] = outputs[0] + outputs[1] + outputs[2] + outputs[3] - outputs[4] - outputs[5] - outputs[6] - outputs[7];
-            h[5] = outputs[0] - outputs[1] + outputs[2] - outputs[3] - outputs[4] + outputs[5] - outputs[6] + outputs[7];
-            h[6] = outputs[0] + outputs[1] - outputs[2] - outputs[3] - outputs[4] - outputs[5] + outputs[6] + outputs[7];
-            h[7] = outputs[0] - outputs[1] - outputs[2] + outputs[3] - outputs[4] + outputs[5] + outputs[6] - outputs[7];
-
-            float scale = 0.3535f; // 1 / sqrt(8)
-            for (int i = 0; i < 8; ++i) {
-                float feedback = h[i] * scale;
-                m_filterState[i] = (1.0f - m_damping) * feedback + m_damping * m_filterState[i];
-                m_delayLines[i][m_writeIndices[i]] = Math::DenormalNumberKiller::kill(monoIn + m_filterState[i] * m_feedback);
-                m_writeIndices[i] = (m_writeIndices[i] + 1) % m_delayLines[i].size();
+            const float mean = sum / 8.0f;
+            float wetL = 0.0f, wetR = 0.0f;
+            for (size_t i = 0; i < m_delayLines.size(); ++i) {
+                auto& line = m_delayLines[i];
+                const float diffuse = m_filterState[i] - 2.0f * mean;
+                line[m_writeIndices[i]] = std::isfinite(input + feedback * diffuse) ? input + feedback * diffuse : 0.0f;
+                m_writeIndices[i] = (m_writeIndices[i] + 1) % line.size();
+                if ((i & 1u) == 0) wetL += m_filterState[i]; else wetR += m_filterState[i];
             }
-
-            float wetOutput = (h[0] + h[2] + h[4] + h[6]) * 0.125f;
-            l[s] += wetOutput * 0.3f;
-            r[s] += wetOutput * 0.3f;
+            l[s] = inL * 0.75f + wetL * 0.03125f;
+            r[s] = inR * 0.75f + wetR * 0.03125f;
         }
     }
 
-    void setSampleRate(double sr) override {
-        m_sampleRate = sr;
+    void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)bs; setSampleRate(sr); reset(); }
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
+        (void)midi; (void)context;
+        if (buffer.getNumChannels() == 0) return;
+        float* l = buffer.getWritePointer(0);
+        float* r = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : l;
+        process(l, r, buffer.getNumSamples());
+    }
+    void reset() noexcept override {
+        for (auto& line : m_delayLines) std::fill(line.begin(), line.end(), 0.0f);
+        m_filterState.fill(0.0f);
+        m_writeIndices.fill(0);
+    }
+
+
+    void setSampleRate(double sr) {
+        m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0;
         setupDelays();
     }
 
-    uint32_t getLatency() const override { return 0; }
+    uint32_t getLatency() const { return 0; }
 
 private:
     double m_sampleRate;
@@ -78,4 +89,4 @@ private:
     float m_damping = 0.2f;
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Aura::DSP::Effects

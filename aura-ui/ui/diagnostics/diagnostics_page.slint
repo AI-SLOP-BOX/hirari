@@ -1,0 +1,74 @@
+import { Style } from "../style.slint";
+
+export component Z_DiagnosticsPage inherits Rectangle {
+    in property <string> engine-state: "ENGINE IDLE";
+    in property <float> cpu-load: 0.0;
+    in property <int> dropped-blocks: 0;
+    in property <int> mailbox-overruns: 0;
+    in property <int> watchdog-trips: 0;
+    in property <int> sandbox-failures: 0;
+    in property <string> pdc-status: "UNAVAILABLE";
+    in property <bool> range-overflow: false;
+
+    background: Style.surface;
+    border-width: 1px;
+    border-color: Style.border;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        Text { text: "DIAGNOSTIC PANEL"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: "実機レビュー用の音声・プラグイン健全性"; font-size: 10px; color: Style.text-dim; }
+        Rectangle { height: 1px; background: Style.border; }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                horizontal-stretch: 1; height: 92px;
+                background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout { padding: 10px;
+                    Text { text: "ENGINE"; font-size: 9px; color: Style.text-dim; }
+                    // Idle is a valid stopped state, not an engine fault. Keep
+                    // the panel useful during device/configuration review by
+                    // reserving red for an actual unhealthy state.
+                    Text { text: root.engine-state; font-size: 14px; color: (root.engine-state == "ENGINE HEALTHY" || root.engine-state == "ENGINE IDLE") ? Style.ok : Style.record; font-weight: 700; }
+                    Text { text: "CPU " + Math.round(root.cpu-load) + "%"; font-size: 10px; color: root.cpu-load > 90 ? Style.record : Style.text-secondary; }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1; height: 92px;
+                background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout { padding: 10px;
+                    Text { text: "AUDIO"; font-size: 9px; color: Style.text-dim; }
+                    Text { text: "DROPS " + root.dropped-blocks; font-size: 14px; color: root.dropped-blocks > 0 ? Style.record : Style.ok; font-weight: 700; }
+                    Text { text: "MAILBOX " + root.mailbox-overruns; font-size: 10px; color: root.mailbox-overruns > 0 ? Style.record : Style.text-secondary; }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                horizontal-stretch: 1; height: 92px;
+                background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout { padding: 10px;
+                    Text { text: "PLUGIN RECOVERY"; font-size: 9px; color: Style.text-dim; }
+                    Text { text: "FAILURES " + root.sandbox-failures; font-size: 14px; color: root.sandbox-failures > 0 ? Style.record : Style.ok; font-weight: 700; }
+                    Text { text: "WATCHDOG " + root.watchdog-trips; font-size: 10px; color: root.watchdog-trips > 0 ? Style.record : Style.text-secondary; }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1; height: 92px;
+                background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout { padding: 10px;
+                    Text { text: "SYNC"; font-size: 9px; color: Style.text-dim; }
+                    Text { text: root.pdc-status; font-size: 14px; color: root.pdc-status == "OK" ? Style.ok : Style.text-secondary; font-weight: 700; }
+                    Text { text: root.range-overflow ? "POSITION OVERFLOW" : "POSITION RANGE OK"; font-size: 10px; color: root.range-overflow ? Style.record : Style.text-secondary; }
+                }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+        Text { text: "判定基準: dropout 0 · callback overrun 0 · worker残留 0 · project corruption 0"; font-size: 9px; color: Style.text-muted; }
+    }
+}

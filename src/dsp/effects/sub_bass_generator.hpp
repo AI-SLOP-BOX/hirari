@@ -1,6 +1,5 @@
 #pragma once
 
-#include <vector>
 #include <cmath>
 #include <algorithm>
 #include "../iprocessor.hpp"
@@ -21,72 +20,90 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
-        m_envAttack = std::exp(-1.0f / (0.005f * sr)); // 5ms
-        m_envRelease = std::exp(-1.0f / (0.1f * sr));  // 100ms
-        m_lpfCoeff = std::exp(-1.0f / (0.001f * sr));  // 1kHz LPF for tracking
+        (void)bs;
+        m_sampleRate = std::isfinite(sr) ? std::clamp(sr, 1000.0, 384000.0) : 44100.0;
+        m_envAttack = std::exp(static_cast<float>(-1.0 / (0.005 * m_sampleRate)));
+        m_envRelease = std::exp(static_cast<float>(-1.0 / (0.1 * m_sampleRate)));
+        m_lpfCoeff = std::exp(static_cast<float>(-1.0 / (0.001 * m_sampleRate)));
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (isBypassed()) return;
+        (void)midi;
+        (void)context;
+        if (m_bypassed || buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
 
-        uint32_t numSamples = buffer.getNumSamples();
+        const uint32_t channels = buffer.getNumChannels();
+        const uint32_t samples = buffer.getNumSamples();
         float* left = buffer.getWritePointer(0);
-        float* right = buffer.getWritePointer(1);
+        float* right = channels > 1 ? buffer.getWritePointer(1) : nullptr;
+        const float mix = std::clamp(std::isfinite(m_mix) ? m_mix : 0.0f, 0.0f, 1.0f);
+        const float sr = static_cast<float>(m_sampleRate);
 
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float mid = (left[s] + right[s]) * 0.5f;
+        for (uint32_t s = 0; s < samples; ++s) {
+            const float inL = std::isfinite(left[s]) ? left[s] : 0.0f;
+            const float inR = right ? (std::isfinite(right[s]) ? right[s] : 0.0f) : inL;
+            const float mid = 0.5f * (inL + inR);
 
-            // 1. INPUT PRE-FILTER (LPF + DC Block for stable tracking)
+            // Low-pass and DC rejection make zero-crossing tracking deterministic.
             m_lpfState += (1.0f - m_lpfCoeff) * (mid - m_lpfState);
-            m_dcBlockState = m_lpfState - m_lastLpf + 0.995f * m_dcBlockState;
+            const float dc = m_lpfState - m_lastLpf + 0.995f * m_dcBlockState;
             m_lastLpf = m_lpfState;
+            m_dcBlockState = std::isfinite(dc) ? dc : 0.0f;
 
-            // 2. ENVELOPE FOLLOWER
-            float absIn = std::abs(mid);
-            if (absIn > m_env) m_env = m_envAttack * m_env + (1.0f - m_envAttack) * absIn;
-            else m_env = m_envRelease * m_env;
+            const float magnitude = std::abs(mid);
+            if (magnitude > m_env) {
+                m_env = m_envAttack * m_env + (1.0f - m_envAttack) * magnitude;
+            } else {
+                m_env *= m_envRelease;
+            }
+            m_env = std::clamp(std::isfinite(m_env) ? m_env : 0.0f, 0.0f, 4.0f);
 
-            // 3. PITCH TRACKING (Zero-Crossing with Hysteresis)
-            bool triggered = false;
-            if (m_dcBlockState > 0.02f && !m_isPositive) { m_isPositive = true; triggered = true; }
-            else if (m_dcBlockState < -0.02f && m_isPositive) { m_isPositive = false; }
-
-            if (triggered) {
-                float period = static_cast<float>(m_zcCount);
+            bool crossing = false;
+            if (m_dcBlockState > 0.02f && !m_isPositive) {
+                m_isPositive = true;
+                crossing = true;
+            } else if (m_dcBlockState < -0.02f) {
+                m_isPositive = false;
+            }
+            if (crossing) {
+                const float period = static_cast<float>(m_zcCount);
                 if (period > 10.0f) {
-                    float target = (static_cast<float>(m_sampleRate) / period) * 0.5f;
-                    m_targetFreq = std::clamp(target, 20.0f, 90.0f);
+                    // Positive-going crossings are one period apart; generate one octave down.
+                    m_targetFreq = std::clamp((sr / period) * 0.5f, 20.0f, std::min(90.0f, sr * 0.24f));
                 }
                 m_zcCount = 0;
             }
-            m_zcCount = std::min(m_zcCount + 1u, 10000u);
+            m_zcCount = std::min<uint32_t>(m_zcCount + 1u, 10000u);
 
-            // 4. GENERATOR (Sub-Harmonic Sine)
+            const float maxFreq = std::min(90.0f, sr * 0.24f);
+            m_targetFreq = std::clamp(std::isfinite(m_targetFreq) ? m_targetFreq : 50.0f, 20.0f, maxFreq);
             m_currFreq += (m_targetFreq - m_currFreq) * 0.05f;
-            m_phase += (m_currFreq / static_cast<float>(m_sampleRate));
-            if (m_phase >= 1.0f) m_phase -= 1.0f;
+            m_currFreq = std::clamp(std::isfinite(m_currFreq) ? m_currFreq : 50.0f, 20.0f, maxFreq);
+            m_phase += static_cast<double>(m_currFreq) / m_sampleRate;
+            m_phase -= std::floor(m_phase);
 
-            float sub = std::sin(6.28318530718 * m_phase) * m_env * m_mix;
-
-            // 5. SUM
-            left[s] += sub;
-            right[s] += sub;
+            constexpr double kPi = 3.14159265358979323846;
+            const float sub = static_cast<float>(std::sin(2.0 * kPi * m_phase)) * m_env * mix;
+            left[s] = std::isfinite(inL + sub) ? inL + sub : inL;
+            if (right) right[s] = std::isfinite(inR + sub) ? inR + sub : inR;
         }
     }
 
+
     void reset() noexcept override {
-        m_env = 0.0f; m_phase = 0.0; m_lpfState = 0.0f; m_dcBlockState = 0.0f;
+        m_env = 0.0f; m_phase = 0.0; m_lpfState = 0.0f; m_lastLpf = 0.0f; m_dcBlockState = 0.0f;
         m_zcCount = 0; m_targetFreq = 50.0f; m_currFreq = 50.0f;
     }
 
-    void setParameter(uint32_t id, float value) noexcept override { if (id == 0) m_mix = value; }
+    void setParameter(uint32_t id, float value) noexcept override {
+        if (id == 0) m_mix = std::clamp(std::isfinite(value) ? value : 0.0f, 0.0f, 1.0f);
+    }
     float getParameter(uint32_t id) const noexcept override { return (id == 0) ? m_mix : 0.0f; }
 
 private:
     double m_sampleRate = 44100.0;
-    float m_env = 0.0f, m_envAttack, m_envRelease;
-    float m_lpfState = 0.0f, m_lastLpf = 0.0f, m_dcBlockState = 0.0f, m_lpfCoeff;
+    float m_env = 0.0f, m_envAttack = 0.995f, m_envRelease = 0.9998f;
+    float m_lpfState = 0.0f, m_lastLpf = 0.0f, m_dcBlockState = 0.0f, m_lpfCoeff = 0.9775f;
     float m_mix = 0.5f, m_targetFreq = 50.0f, m_currFreq = 50.0f;
     double m_phase = 0.0;
     uint32_t m_zcCount = 0;

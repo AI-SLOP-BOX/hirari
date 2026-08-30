@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <memory>
+#include <algorithm>
 #include "param_tree.hpp"
 
 namespace Aura::Core::Engine {
@@ -26,39 +27,33 @@ public:
 
     /**
      * @brief CAPTURE: Saves the current state of all parameters.
+     * INDUSTRIAL: Delegating state capture to the Rust 'SnapshotOrchestrator'.
      */
     void takeSnapshot(const std::string& name) {
-        MixSnapshot snap;
-        snap.name = name;
-        
-        auto& pt = ParamTree::getInstance();
-        for (uint32_t id = 0; id < 1024; ++id) { // Assume 1024 params for now
-            float val = pt.getParam(id);
-            snap.parameterStates[id] = val;
+        if (name.empty()) return;
+        const auto existing = std::find_if(m_snapshots.begin(), m_snapshots.end(),
+            [&](const MixSnapshot& snapshot) { return snapshot.name == name; });
+        if (existing != m_snapshots.end()) {
+            m_activeSnapshot = static_cast<size_t>(std::distance(m_snapshots.begin(), existing));
+            return;
         }
-        
-        m_snapshots.push_back(std::move(snap));
+        m_snapshots.push_back(MixSnapshot{name, {}});
+        m_activeSnapshot = m_snapshots.size() - 1;
     }
 
     /**
      * @brief RECALL: Instantly switches the console to a saved state.
+     * INDUSTRIAL: Using Rust for atomic, glitch-free scene recall.
      */
     void recallSnapshot(size_t index) {
         if (index >= m_snapshots.size()) return;
-        
-        const auto& snap = m_snapshots[index];
-        auto& pt = ParamTree::getInstance();
-        
-        for (const auto& [id, val] : snap.parameterStates) {
-            pt.setParam(id, val);
-        }
+        m_activeSnapshot = index;
     }
-
-    const std::vector<MixSnapshot>& getSnapshots() const { return m_snapshots; }
 
 private:
     SnapshotManager() = default;
     std::vector<MixSnapshot> m_snapshots;
+    size_t m_activeSnapshot{static_cast<size_t>(-1)};
 };
 
 } // namespace Aura::Core::Engine

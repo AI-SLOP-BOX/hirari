@@ -4,25 +4,27 @@
 #include <complex>
 #include <cmath>
 #include <algorithm>
+#include <span>
 
 namespace Aura::DSP::Analysis {
 
 /**
- * @brief FFTEngine: The mathematical 'Truth' of the DAW.
- * Implements Cooley-Tukey Radix-2 algorithm for spectral processing.
- * Essential for Reverb, Pitch Shift, and Spectral Repair.
+ * @class FFTEngine
+ * @brief Professional Cooley-Tukey Radix-2 FFT Engine (Sovereign Cinema Pro).
+ * Optimized for RT-safety by using spans/pointers to avoid heap transitions.
  */
 class FFTEngine {
 public:
     FFTEngine(uint32_t n) : m_n(n), m_log2n(static_cast<uint32_t>(std::log2(n))) {
         prepareBitReversal();
         prepareTwiddles();
+        m_complexScratch.resize(n);
     }
 
     /**
      * @brief FORWARD FFT: Time-domain -> Frequency-domain.
      */
-    void forward(const std::vector<float>& realIn, std::vector<std::complex<float>>& complexOut) {
+    void forward(std::span<const float> realIn, std::span<std::complex<float>> complexOut) {
         for (uint32_t i = 0; i < m_n; ++i) complexOut[i] = { realIn[m_bitRev[i]], 0.0f };
         compute(complexOut, false);
     }
@@ -30,14 +32,17 @@ public:
     /**
      * @brief INVERSE FFT: Frequency-domain -> Time-domain.
      */
-    void inverse(const std::vector<std::complex<float>>& complexIn, std::vector<float>& realOut) {
-        std::vector<std::complex<float>> temp = complexIn;
-        compute(temp, true);
-        for (uint32_t i = 0; i < m_n; ++i) realOut[i] = temp[i].real() / m_n;
+    void inverse(std::span<const std::complex<float>> complexIn, std::span<float> realOut) {
+        // We reuse complexOut as a temporary if provided, 
+        // but for absolute sovereignty we use a local complex scratch in spectral editor.
+        // For FFT core, we need a mutable complex buffer.
+        m_complexScratch.assign(complexIn.begin(), complexIn.end());
+        compute(m_complexScratch, true);
+        for (uint32_t i = 0; i < m_n; ++i) realOut[i] = m_complexScratch[i].real() / (float)m_n;
     }
 
 private:
-    void compute(std::vector<std::complex<float>>& data, bool inverse) {
+    void compute(std::span<std::complex<float>> data, bool inverse) {
         for (uint32_t s = 1; s <= m_log2n; ++s) {
             uint32_t m = 1 << s;
             uint32_t m2 = m >> 1;
@@ -76,6 +81,7 @@ private:
     uint32_t m_n, m_log2n;
     std::vector<uint32_t> m_bitRev;
     std::vector<std::complex<float>> m_twiddles;
+    std::vector<std::complex<float>> m_complexScratch; // RT-safe reuse
 };
 
 } // namespace Aura::DSP::Analysis

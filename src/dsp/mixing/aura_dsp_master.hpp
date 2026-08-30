@@ -1,79 +1,18 @@
 #pragma once
 
-#include <vector>
-#include <memory>
-#include <cmath>
-#include <algorithm>
-#include "../core/audio_buffer.hpp"
-#include "iprocessor.hpp"
-#include "math/denormal_killer.hpp"
+// Compatibility entry point kept for older integrations.
+//
+// This header used to contain a second, incomplete MasterSuite implementation
+// whose EQ, convolution and neural stages were silent no-ops.  Keeping two
+// classes with the same public role made it possible for callers to bypass the
+// real mastering path accidentally.  The product implementation is now
+// single-sourced through master_suite.hpp.
+#include "master_suite.hpp"
 
 namespace Aura::DSP::Mixing {
 
-/**
- * @brief TruePeakLimiter: Mastering Safeguard.
- */
-class TruePeakLimiter {
-public:
-    void process(Core::AudioBuffer& buffer) {
-        for (uint32_t ch = 0; ch < buffer.getNumChannels(); ++ch) {
-            float* data = buffer.getWritePointer(ch);
-            for (uint32_t s = 0; s < buffer.getNumSamples(); ++s) {
-                data[s] = std::clamp(data[s], -1.0f, 1.0f);
-            }
-        }
-    }
-};
-
-/**
- * @brief AtmosProcessor: Unified Immersive Handling (7.1.4).
- */
-class AtmosProcessor {
-public:
-    void processEQ(Core::AudioBuffer& buffer) { /* 12-channel Parametric EQ logic */ }
-    void processComp(Core::AudioBuffer& buffer) { /* 12-channel Linked Compression logic */ }
-};
-
-/**
- * @brief MasterSuite: The Final Polish.
- * Consolidates Limiting, EQ, and Immersive Monitoring.
- */
-class MasterSuite {
-public:
-    MasterSuite(double sr = 44100.0) : m_sampleRate(sr) {}
-    
-    void process(Core::AudioBuffer& buffer) {
-        // 1. IMMERSIVE EQUALIZATION
-        m_atmos.processEQ(buffer);
-        
-        // 2. TRUE PEAK LIMITING
-        m_limiter.process(buffer);
-    }
-
-private:
-    double m_sampleRate;
-    AtmosProcessor m_atmos;
-    TruePeakLimiter m_limiter;
-};
+// Source compatibility for integrations that used the old header.  This alias
+// deliberately resolves to the real IProcessor-backed implementation.
+using AuraMasterSuite = MasterSuite;
 
 } // namespace Aura::DSP::Mixing
-
-namespace Aura::DSP::Effects {
-
-/**
- * @brief ConvolutionReverb: IR-based Spatialization.
- */
-class ConvolutionReverb {
-public:
-    void process(Core::AudioBuffer& buffer) { /* FFT Multiplication logic */ }
-};
-
-/**
- * @brief NeuralModeler: Analog Flavor.
- */
-class NeuralModeler {
-public:
-    void process(Core::AudioBuffer& buffer) { /* RNN/GRU Inference logic */ }
-};
-
-} // namespace Aura::DSP::Effects

@@ -4,6 +4,8 @@
 #include <memory>
 #include <cmath>
 #include <algorithm>
+#include <limits>
+#include "../../graphics/graphics_kernel.hpp"
 // #include <vulkan/vulkan.h> または <Metal/Metal.h> を透過する抽象化レイヤ
 
 namespace Aura::Graphics::UI {
@@ -35,6 +37,10 @@ public:
      */
     void buildMipmapsForGPU(const float* audioData, size_t numSamples) {
         m_mipmaps.clear();
+        if (!audioData || numSamples == 0) {
+            m_vramDirty = false;
+            return;
+        }
         const std::vector<uint32_t> lodLevels = { 1, 4, 16, 64, 256, 1024, 4096, 16384 };
 
         for (uint32_t spp : lodLevels) {
@@ -66,12 +72,12 @@ public:
      * @brief 描画スレッド（DisplayLinkやGUIスレッド）から毎フレーム呼ばれるカーネル
      */
     void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float x, float y, float w, float h, float zoomLevel, float scrollPos, float playheadPos) {
-        if (m_mipmaps.empty()) return;
+        if (m_mipmaps.empty() || !std::isfinite(zoomLevel) || zoomLevel <= 0.0f ||
+            !std::isfinite(scrollPos) || !std::isfinite(playheadPos) || w <= 0.0f || h <= 0.0f) return;
 
         // --- 1. SMART LOD SELECTION ---
         // HONEST FIX: Choose the LOD level that best matches current zoom (pixels/sample)
         size_t lodIdx = 0;
-        float pixelsPerSample = zoomLevel; // samples per pixel inverse
         for (size_t i = 0; i < m_mipmaps.size(); ++i) {
             if (m_mipmaps[i].samplesPerPixel >= 1.0f / zoomLevel) {
                 lodIdx = i;
@@ -83,7 +89,8 @@ public:
         // --- 2. FAST BLOCK RENDERING ---
         float centerY = y + h * 0.5f;
         float samplesPerPixel = 1.0f / zoomLevel;
-        float mipmapFactor = (float)activeLod.samplesPerPixel;
+        std::vector<::Aura::Graphics::Vertex> waveform;
+        waveform.reserve(static_cast<size_t>(std::ceil(w)) * 2);
 
         for (float sx = 0; sx < w; sx += 1.0f) {
             size_t sampleOffset = static_cast<size_t>((scrollPos + sx) * samplesPerPixel);
@@ -98,9 +105,10 @@ public:
             float y1 = centerY - (maxVal * h * 0.45f);
             float y2 = centerY - (minVal * h * 0.45f);
             
-            // Logic Pro 11 Neon Blue: 0xFF58C1FF
-            kernel.drawLine(x + sx, y1, x + sx, y2, 1.0f, 0xFF58C1FF);
+            waveform.push_back({x + sx, y1, 0xFF58C1FF});
+            waveform.push_back({x + sx, y2, 0xFF58C1FF});
         }
+        if (!waveform.empty()) kernel.drawVertexPath(waveform.data(), waveform.size(), 1.0f);
 
         // --- 3. PLAYHEAD ---
         float px = x + (playheadPos - scrollPos) * zoomLevel;

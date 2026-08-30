@@ -26,16 +26,32 @@ public:
         desc.componentFlagsMask = 0;
 
         AudioComponent comp = AudioComponentFindNext(NULL, &desc);
-        if (!comp) return false;
+        if (!comp) {
+            std::cerr << "AURA | DRIVER | ERROR: Could not find Default Output Component." << std::endl;
+            return false;
+        }
 
-        AudioComponentInstanceNew(comp, &m_audioUnit);
-        AudioUnitInitialize(m_audioUnit);
+        OSStatus err = AudioComponentInstanceNew(comp, &m_audioUnit);
+        if (err != noErr) {
+            std::cerr << "AURA | DRIVER | ERROR: AudioComponentInstanceNew failed (" << err << ")" << std::endl;
+            return false;
+        }
+
+        err = AudioUnitInitialize(m_audioUnit);
+        if (err != noErr) {
+            std::cerr << "AURA | DRIVER | ERROR: AudioUnitInitialize failed (" << err << ")" << std::endl;
+            return false;
+        }
 
         // --- SET RENDER CALLBACK ---
         AURenderCallbackStruct input;
         input.inputProc = RenderCallback;
         input.inputProcRefCon = this;
-        AudioUnitSetProperty(m_audioUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &input, sizeof(input));
+        err = AudioUnitSetProperty(m_audioUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &input, sizeof(input));
+        if (err != noErr) {
+            std::cerr << "AURA | DRIVER | ERROR: Could not set render callback (" << err << ")" << std::endl;
+            return false;
+        }
 
         // --- Stream Format (Float32, Stereo) ---
         AudioStreamBasicDescription format;
@@ -47,10 +63,19 @@ public:
         format.mBytesPerFrame = 4;
         format.mChannelsPerFrame = 2;
         format.mBitsPerChannel = 32;
-        AudioUnitSetProperty(m_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof(format));
+        err = AudioUnitSetProperty(m_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof(format));
+        if (err != noErr) {
+            std::cerr << "AURA | DRIVER | ERROR: Could not set stream format (" << err << ")" << std::endl;
+            return false;
+        }
 
-        AudioOutputUnitStart(m_audioUnit);
-        std::cout << "[Driver] Core Audio Started: " << sr << "Hz / " << bs << " samples." << std::endl;
+        err = AudioOutputUnitStart(m_audioUnit);
+        if (err != noErr) {
+            std::cerr << "AURA | DRIVER | ERROR: AudioOutputUnitStart failed (" << err << ")" << std::endl;
+            return false;
+        }
+
+        std::cout << "AURA | DRIVER | SUCCESS: Core Audio Started (" << sr << "Hz / " << bs << " samples)" << std::endl;
         return true;
     }
 

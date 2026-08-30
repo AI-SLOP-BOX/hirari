@@ -1,41 +1,69 @@
 #pragma once
-
 #include <atomic>
 #include <cmath>
+#include <algorithm>
 
 namespace Aura::Core {
 
 /**
- * @brief ParameterSmoother: Prevents zipper noise by smoothing value changes.
- * Uses a simple 1st-order IIR filter for transparent parameter transitions.
+ * @class ParameterSmoother
+ * @brief High-precision parameter smoothing engine (anti-zipper filter).
+ * Implements a one-pole low-pass filter to smooth parameters.
  */
 class ParameterSmoother {
 public:
-    explicit ParameterSmoother(float initialValue = 0.0f, float smoothingMs = 20.0f, float sampleRate = 44100.0f)
-        : m_current(initialValue), m_target(initialValue) {
-        setSmoothingTime(smoothingMs, sampleRate);
+    explicit ParameterSmoother(float initialValue = 0.0f) {
+        m_target.store(initialValue);
+        m_current.store(initialValue);
+        m_a.store(0.01f);
     }
 
-    void setTarget(float value) { m_target = value; }
+    void setTarget(float value) { m_target.store(value, std::memory_order_relaxed); }
+    
+    void reset(float value) {
+        m_target.store(value, std::memory_order_relaxed);
+        m_current.store(value, std::memory_order_relaxed);
+    }
+
     void setSmoothingTime(float ms, float sr) {
-        double timeConstantSamples = (ms * 0.001) * sr;
-        m_coeff = static_cast<float>(1.0 - std::exp(-1.0 / timeConstantSamples));
+        if (ms <= 0.0f || sr <= 0.0f) {
+            m_a.store(1.0f, std::memory_order_relaxed);
+            return;
+        }
+        float tau = ms / 1000.0f;
+        float coef = 1.0f - std::exp(-1.0f / (sr * tau));
+        m_a.store(coef, std::memory_order_relaxed);
     }
 
-    /**
-     * @brief NEXT VALUE: High-precision 1st-order IIR smoothing.
-     * HONEST FIX: Removed the unstable 'Adaptive Alpha' that caused unmusical jumps.
-     * Standard exponential curve for natural transition.
-     */
+    void process(float* buffer, uint32_t len) {
+        float current = m_current.load(std::memory_order_relaxed);
+        float target = m_target.load(std::memory_order_relaxed);
+        float a = m_a.load(std::memory_order_relaxed);
+        
+        for (uint32_t i = 0; i < len; ++i) {
+            current = current + a * (target - current);
+            buffer[i] = current;
+        }
+        m_current.store(current, std::memory_order_relaxed);
+    }
+
     float getNextValue() {
-        m_current = m_current + (m_target - m_current) * m_coeff;
-        if (std::abs(m_target - m_current) < 1e-7f) m_current = m_target;
-        return m_current;
+        float current = m_current.load(std::memory_order_relaxed);
+        float target = m_target.load(std::memory_order_relaxed);
+        float a = m_a.load(std::memory_order_relaxed);
+        current = current + a * (target - current);
+        m_current.store(current, std::memory_order_relaxed);
+        return current;
+    }
+
+    float getCurrentValue() const {
+        return m_current.load(std::memory_order_relaxed);
     }
 
 private:
-    float m_target = 0.0f, m_current = 0.0f;
-    float m_coeff = 0.01f;
+    std::atomic<float> m_target;
+    std::atomic<float> m_current;
+    std::atomic<float> m_a;
 };
 
 } // namespace Aura::Core

@@ -1,0 +1,55 @@
+import { Style } from "../style.slint";
+import { Z_Track } from "../model/track_model.slint";
+
+export component Z_StageView {
+    callback pan-3d-moved(int, float, float, float);
+    in property <[Z_Track]> tracks;
+    Rectangle {
+        background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        VerticalLayout {
+            padding: 24px; spacing: 14px;
+            HorizontalLayout {
+                Text { text: "Spatial Stage"; font-size: 11px; color: Style.brand; font-weight: 700; horizontal-stretch: 1; }
+                Text { text: "OBJECTS: " + tracks.length; font-size: 8px; color: #6E6E73; vertical-alignment: center; }
+            }
+            area := Rectangle {
+                horizontal-stretch: 1; vertical-stretch: 1; background: #000; border_radius: 4px; border_width: 1px; border_color: Style.border;
+                clip: true;
+                // Floor Grid (Industrial)
+                for i in 12 : Rectangle { width: 100%; height: 0.5px; y: i * (parent.height / 11.0); background: Style.surface; }
+                for i in 12 : Rectangle { width: 0.5px; height: 100%; x: i * (parent.width / 11.0); background: Style.surface; }
+                
+                // Spatial Objects (Dynamic)
+                for trk[idx] in tracks : Rectangle {
+                    x: (trk.pan3d_x + 1.0) / 2.0 * (area.width - 24px);
+                    y: (trk.pan3d_y + 1.0) / 2.0 * (area.height - 24px);
+                    width: 24px; height: 24px; background: trk.color; border_radius: 12px; border_width: 2px; border_color: #fff;
+                    z: 100;
+                    
+                    Text { text: trk.name; font-size: Style.font-xxs; color: #fff; y: 26px; horizontal-alignment: center; font-weight: 900; }
+                    
+                    // Distance Halo (Z-axis representation)
+                    Rectangle { 
+                        width: 48px + trk.pan3d_z * 20px; height: self.width; border_radius: self.width / 2; 
+                        border_width: 1px; border_color: trk.color; opacity: 0.2; x: - (self.width - 24px) / 2; y: - (self.height - 24px) / 2; 
+                    }
+                    
+                    TouchArea {
+                        moved => {
+                            if (self.pressed) {
+                                pan-3d-moved(trk.id, 
+                                    (self.mouse_x / 1px + parent.x / 1px) / (area.width / 1px) * 2.0 - 1.0, 
+                                    (self.mouse_y / 1px + parent.y / 1px) / (area.height / 1px) * 2.0 - 1.0, 
+                                    trk.pan3d_z);
+                            }
+                        }
+                    }
+                }
+                
+                // Primary Center (Listener)
+                Rectangle { x: area.width / 2.0 - 6px; y: area.height / 2.0 - 6px; width: 12px; height: 12px; border_radius: 6px; background: Style.record; opacity: 0.8; }
+            }
+            Text { text: "TOPOLOGY: SPHERICAL-HRTF | ENGINE: AURASPACE v4"; font-size: Style.font-xxs; color: #333; horizontal-alignment: center; }
+        }
+    }
+}

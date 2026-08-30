@@ -1,0 +1,22 @@
+import { Style } from "../style.slint";
+
+export component Z_SphereTelemetry {
+    in property <[{x: float, y: float, z: float, level: float}]> panner_objects;
+    Rectangle {
+        width: 100%; height: 320px; background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        Text { text: "Spatial Object Telemetry"; font-size: 9px; color: Style.brand; font-weight: 700; horizontal-alignment: center; y: 10px; }
+        // Experimental 3D projection view
+        Rectangle {
+            width: 200px; height: 200px; border_radius: 100px; border_width: 1px; border_color: Style.border; x: (parent.width - 200px)/2; y: 60px;
+            for obj in panner_objects : Rectangle {
+                width: 8px; height: 8px; border_radius: 4px; background: Style.brand;
+                x: 100px + obj.x * 90px - 4px; y: 100px + obj.y * 90px - 4px;
+                opacity: 0.6 + obj.level * 0.4;
+                Rectangle { 
+                    width: 16px; height: 16px; border_radius: 8px; border_width: 0.5px; border_color: Style.brand; 
+                    x: -4px; y: -4px; opacity: obj.z * 0.8;
+                }
+            }
+        }
+    }
+}

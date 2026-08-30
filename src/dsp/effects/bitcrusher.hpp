@@ -24,33 +24,25 @@ public:
     /**
      * @brief PROCESS: Quantizes and downsamples the signal.
      */
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        float levels = std::pow(2.0f, m_bits);
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            m_sampleCounter += 1.0f;
-
-            if (m_sampleCounter >= m_downsample) {
-                m_sampleCounter -= m_downsample;
-                
-                for (uint32_t c = 0; c < 2; ++c) {
-                    float in = buffer.getReadPointer(c)[s];
-                    
-                    // 1. Quantization (Bit Reduction)
-                    float quantized = std::round(in * levels) / levels;
-                    
-                    if (c == 0) m_holdSampleL = quantized;
-                    else m_holdSampleR = quantized;
-                }
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer&, const ProcessContext&) noexcept override {
+        if (m_bypassed || buffer.getNumSamples() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        const float levels = std::ldexp(1.0f, static_cast<int>(std::clamp(m_bits, 1.0f, 24.0f)) - 1);
+        const uint32_t hold = std::max<uint32_t>(1, static_cast<uint32_t>(std::ceil(m_downsample)));
+        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+            if (m_sampleCounter <= 0.0f) {
+                m_holdSampleL = std::round(buffer.getReadPointer(0)[i] * levels) / levels;
+                m_holdSampleR = channels > 1 ? std::round(buffer.getReadPointer(1)[i] * levels) / levels : m_holdSampleL;
+                m_sampleCounter = static_cast<float>(hold);
             }
-
-            buffer.getWritePointer(0)[s] = m_holdSampleL;
-            buffer.getWritePointer(1)[s] = m_holdSampleR;
+            --m_sampleCounter;
+            const float dryL = buffer.getReadPointer(0)[i];
+            const float dryR = channels > 1 ? buffer.getReadPointer(1)[i] : dryL;
+            buffer.getWritePointer(0)[i] = dryL * (1.0f - m_mix) + m_holdSampleL * m_mix;
+            if (channels > 1) buffer.getWritePointer(1)[i] = dryR * (1.0f - m_mix) + m_holdSampleR * m_mix;
         }
     }
+
 
     void reset() noexcept override {
         m_holdSampleL = 0.0f;

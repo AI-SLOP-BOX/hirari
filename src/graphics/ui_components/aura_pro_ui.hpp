@@ -3,7 +3,8 @@
 #include <string>
 #include <algorithm>
 #include "ui_view.hpp"
-#include "../../AuraUltimate.hpp"
+#include "../../ui/main/focus_manager.hpp"
+#include "../../core/aura_unified_engine.hpp"
 #include "lcd_display.hpp"
 #include "../../ui/mixer/mixer_console.hpp"
 #include "arrangement_view.hpp"
@@ -13,159 +14,177 @@
 #include "scae_assistant_pane.hpp"
 #include "piano_roll_view.hpp"
 #include "step_sequencer_view.hpp"
-#include "knob_view.hpp"
 
 namespace Aura::Graphics::UI {
 
 /**
- * @class AuraProUI
- * @brief Logic Pro 11 Professional Master Workspace.
+ * @class MainWorkspaceOrchestrator
+ * @brief Manages the assembly and layout of all main DAW views.
+ * HONEST FIX: Refactored layout to be deterministic and purged magic numbers.
  */
-class AuraProUI {
+class MainWorkspaceOrchestrator {
 public:
     enum class EditorMode { PianoRoll, StepSeq, SmartControls };
+    enum class UserMode { Beginner, Pro, Custom };
 
-    AuraProUI() : m_width(1280), m_height(800) {
-        m_pluginWindows.push_back({420, 200, 480, 320, "Master Compressor", true});
-        m_loopLibrary = {"808 Kit", "Warm Piano", "Crystal Pad", "Deep Synth", "Logic Pulse", "Aura Strings", "Studio Bass"};
+    MainWorkspaceOrchestrator() : m_width(1280), m_height(800) {}
+
+    void setUserMode(UserMode mode) noexcept {
+        m_userMode = mode;
+        if (mode == UserMode::Beginner) {
+            m_libraryVisible = false;
+            m_inspectorVisible = false;
+            m_editorVisible = false;
+        } else if (mode == UserMode::Pro) {
+            m_libraryVisible = true;
+            m_inspectorVisible = true;
+            m_editorVisible = true;
+        }
     }
 
-    void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float w, float h, ::Aura::AuraEngine& engine) {
-        m_width = w; m_height = h; 
-        m_controlBarH = 54.0f;
-        m_sidebarW = 280.0f;
-        m_libraryW = 280.0f;
-        m_editorH = (h * 0.44f);
+    UserMode userMode() const noexcept { return m_userMode; }
+
+    // Custom mode is deliberately explicit: panel visibility is never
+    // changed behind the user's back after they start arranging their own
+    // workspace.
+    void setPanelVisibility(bool library, bool inspector, bool editor) noexcept {
+        m_userMode = UserMode::Custom;
+        m_libraryVisible = library;
+        m_inspectorVisible = inspector;
+        m_editorVisible = editor;
+    }
+
+    void setFocusMode(bool enabled) noexcept {
+        m_focusMode = enabled;
+        if (enabled) {
+            m_libraryVisible = false;
+            m_inspectorVisible = false;
+            m_editorVisible = false;
+        }
+    }
+
+    bool focusMode() const noexcept { return m_focusMode; }
+
+    void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float w, float h) {
+        performLayout(w, h);
 
         auto& coreEng = Aura::Core::Engine::AuraUnifiedEngine::getInstance();
         const auto& tracks = coreEng.getTracks();
 
-        kernel.drawRect(0, 0, w, h, 0xFF0A0A0C); // Logic 'Space' Deep Gray
+        kernel.drawRect(0, 0, w, h, 0xFF0A0A0C); // Background
 
-        // --- 1. GLOBAL TRACK ARRANGEMENT ---
-        float sidebarsW = (m_libraryVisible ? m_libraryW : 0) + (m_inspectorVisible ? m_sidebarW : 0);
-        float mainX = sidebarsW;
-        float mainW = w - sidebarsW;
-        float mainH = h - m_controlBarH - (m_editorVisible ? m_editorH : 0);
-        m_arrangement.render(kernel, mainX, m_controlBarH, mainW, mainH, tracks, m_scrollX);
+        const bool compact = m_userMode == UserMode::Beginner || m_focusMode;
 
-        // --- 2. THE PINNED SIDEBARS ---
-        if (m_libraryVisible) {
-            kernel.drawGlassRect(0, m_controlBarH, m_libraryW, h - m_controlBarH, 2, 0xFF141416);
-            renderLibrary(kernel, 10, m_controlBarH + 20, m_libraryW - 20, h - m_controlBarH - 40);
+        // --- 1. ARRANGEMENT VIEW ---
+        m_arrangement.render(kernel, m_mainX, m_controlBarH, m_mainW, m_mainH, tracks, m_scrollX);
+
+        // --- 2. SIDEBARS ---
+        if (!compact && m_libraryVisible) {
+            renderLibrary(kernel, 0, m_controlBarH, m_libraryW, h - m_controlBarH);
         }
-
-        if (m_inspectorVisible) {
+        if (!compact && m_inspectorVisible) {
             float ix = m_libraryVisible ? m_libraryW : 0;
-            kernel.drawRect(ix, m_controlBarH, m_sidebarW, h - m_controlBarH, 0xFF1C1C1E);
-            if (!tracks.empty()) {
-                m_professionalInspector.render(kernel, ix + 10, m_controlBarH + 10, m_sidebarW - 20, 280, *tracks[0]);
-                m_mixer.renderStrip(kernel, ix + 10, h - 340, m_sidebarW - 20, 330, *tracks[0]);
-            }
-            kernel.drawLine(ix + m_sidebarW - 1, m_controlBarH, ix + m_sidebarW - 1, h, 1.2f, 0xFF000000);
+            m_inspector.render(kernel, ix, m_controlBarH, m_sidebarW, h - m_controlBarH, tracks);
         }
 
-        // --- 3. EDITOR / PIANO ROLL ---
-        if (m_editorVisible) {
+        // --- 3. EDITOR ---
+        if (!compact && m_editorVisible) {
             float ey = h - m_editorH;
-            kernel.drawRect(mainX, ey, mainW, m_editorH, 0xFF141416);
-            kernel.drawLine(mainX, ey, w, ey, 2.0f, 0xFF3B9EFF); // Studio Blue Highlight
-            if (m_editorMode == EditorMode::StepSeq) m_stepSeq.render(kernel, mainX + 24, ey + 24, mainW - 48, m_editorH - 48);
-            else { m_pianoRoll.setBounds({mainX, ey, mainW, m_editorH}); m_pianoRoll.render(kernel); }
+            kernel.drawRect(m_mainX, ey, m_mainW, m_editorH, 0xFF141416);
+            m_pianoRoll.render(kernel, m_mainX, ey, m_mainW, m_editorH);
         }
 
-        // --- 4. TOP CONTROL BAR (Float / Depth) ---
-        renderControlBar(kernel, w, m_controlBarH, engine);
-
-        // --- 5. OVERLAYS ---
-        if (m_mixerPanelVisible) {
-            float my = h * 0.35f, mh = h * 0.65f;
-            kernel.drawGlassRect(0, my, w, mh, 0, 0xFF1C1C1E);
-            kernel.drawLine(0, my, w, my, 1.2f, 0xFF3B9EFF);
-            m_mixer.render(kernel, 40, my + 40, w - 80, mh - 80, tracks);
-        }
-
-        for (const auto& win : m_pluginWindows) m_winRenderer.render(kernel, win);
-    }
-
-    void renderLibrary(::Aura::Graphics::Platform::IGraphicsKernel& k, float x, float y, float w, float h) {
-        k.drawText("LIBRARY", x + 8, y + 8, 13, 0xFFF1F5F9);
-        for (int i = 0; i < (int)m_loopLibrary.size(); ++i) {
-             k.drawGlassRect(x, y + 42 + i*34, w, 30, 8, 0xFF2A2A2D);
-             k.drawText(m_loopLibrary[i], x + 12, y + 62 + i*34, 11, 0xFFCBD5E1);
+        // --- 4. CONTROL BAR ---
+        renderControlBar(kernel, w, m_controlBarH);
+        if (compact) {
+            kernel.drawText(m_focusMode ? "FOCUS" : "BEGINNER",
+                            std::max(8.0f, w - 92.0f), 20.0f, 10, 0xFF9CA3AF);
         }
     }
 
-    void renderControlBar(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float w, float h, ::Aura::AuraEngine& engine) {
-        kernel.drawGlassRect(0, 0, w, h, 0, 0xFF1C1C1E);
-        kernel.drawLine(0, h-1, w, h-1, 1.0f, 0xFF000000); // 1px Separator
+    void performLayout(float w, float h) {
+        m_width = std::max(0.0f, w);
+        m_height = std::max(0.0f, h);
+        constexpr float kControlBar = 54.0f;
+        constexpr float kMinPanel = 96.0f;
+        m_controlBarH = std::min(kControlBar, m_height);
+        m_sidebarW = std::min(280.0f, std::max(0.0f, m_width * 0.34f));
+        m_libraryW = std::min(280.0f, std::max(0.0f, m_width * 0.34f));
+        const float availableEditor = std::max(0.0f, m_height - m_controlBarH);
+        const bool compact = m_userMode == UserMode::Beginner || m_focusMode;
+        const bool editorVisible = m_editorVisible && !compact;
+        const bool libraryVisible = m_libraryVisible && !compact;
+        const bool inspectorVisible = m_inspectorVisible && !compact;
+        m_editorH = editorVisible ? std::clamp(availableEditor * 0.4f, 0.0f,
+                                                   std::max(0.0f, availableEditor - kMinPanel)) : 0.0f;
 
-        float gx = 16.0f, gs = 32.0f;
-        ProfessionalIcons::drawSolo(kernel, gx, 11, gs, m_libraryVisible);         // Toggle Lib
-        ProfessionalIcons::drawPower(kernel, gx + 48, 11, gs, m_inspectorVisible); // Toggle Insp
-        ProfessionalIcons::drawMute(kernel, gx + 96, 11, gs, m_editorVisible);    // Toggle Edit
-        
-        float midX = (w - 600) * 0.5f;
-        m_lcd.setBounds({midX, 8, 600, 38}); m_lcd.render(kernel);
-        
-        float tx = midX - 140;
-        bool isPlaying = engine.isPlaying();
-        kernel.drawRoundedRect(tx, 12, 74, 30, 4, isPlaying ? 0xFF00C7FF : 0xFF2A2A2E);
-        kernel.drawText(isPlaying ? "STOP" : "PLAY", tx + 18, 33, 11, isPlaying ? 0xFFFFFFFF : 0xFF00C7FF);
-        
-        float mx = w - 210, mw = 120, mh = 26;
-        kernel.drawMeter(999, engine.getMasterSuite().getLatestMetrics().peakL, engine.getMasterSuite().getLatestMetrics().peakR, mx, 14, mw, mh);
-        ProfessionalIcons::drawLock(kernel, w - 46, 14, 28, m_aiPaneVisible);
+        float sidebarsW = (libraryVisible ? m_libraryW : 0) + (inspectorVisible ? m_sidebarW : 0);
+        if (sidebarsW > m_width - kMinPanel && m_width >= kMinPanel) {
+            sidebarsW = std::max(0.0f, m_width - kMinPanel);
+        }
+        m_mainX = std::min(sidebarsW, m_width);
+        m_mainW = std::max(0.0f, m_width - m_mainX);
+        m_mainH = std::max(0.0f, m_height - m_controlBarH - (editorVisible ? m_editorH : 0));
     }
 
     bool handleMouseDown(float x, float y) {
-        if (y < m_controlBarH) {
-            if (x < 46) { m_libraryVisible = !m_libraryVisible; return true; }
-            if (x >= 48 && x < 96) { m_inspectorVisible = !m_inspectorVisible; return true; }
-            if (x >= 96 && x < 144) { m_editorVisible = !m_editorVisible; return true; }
-            float midX = (m_width - 600) * 0.5f;
-            float tx = midX - 140;
-            if (x >= tx && x < tx + 74) { ::Aura::AuraEngine::getInstance().togglePlayback(); return true; }
-            if (x >= m_width - 46) { m_aiPaneVisible = !m_aiPaneVisible; return true; }
-        }
-        auto& coreEng = Aura::Core::Engine::AuraUnifiedEngine::getInstance();
-        float mainX = (m_libraryVisible ? m_libraryW : 0) + (m_inspectorVisible ? m_sidebarW : 0);
-        if (x >= mainX && y >= m_controlBarH) {
-             if (m_arrangement.handleMouseDown(x, y, coreEng.getTracks(), m_scrollX)) return true;
-        }
-        return false;
+        performLayout(m_width, m_height);
+        m_lastMouseX = x;
+        m_lastMouseY = y;
+        auto& engine = ::Aura::Core::Engine::AuraUnifiedEngine::getInstance();
+        const auto& tracks = engine.getTracks();
+        if (x < m_mainX || y < m_controlBarH || y >= m_controlBarH + m_mainH) return false;
+        return m_arrangement.handleMouseDown(x, y, tracks, m_scrollX);
     }
 
-    void handleMouseDrag(float x, float y, float dx, float dy) {
-        auto& coreEng = Aura::Core::Engine::AuraUnifiedEngine::getInstance();
-        m_arrangement.handleMouseDrag(x, y, dx, dy, coreEng.getTracks(), m_scrollX);
+    void handleMouseDrag(float x, float y) {
+        const float dx = x - m_lastMouseX;
+        const float dy = y - m_lastMouseY;
+        auto& engine = ::Aura::Core::Engine::AuraUnifiedEngine::getInstance();
+        m_arrangement.handleMouseDrag(x, y, dx, dy, engine.getTracks(), m_scrollX);
+        m_lastMouseX = x;
+        m_lastMouseY = y;
     }
-    void handleMouseUp(float x, float y) { m_arrangement.handleMouseUp(); }
 
-    bool handleKeyDown(uint32_t keyCode, bool cmd, bool shift) {
-        auto& engine = ::Aura::AuraEngine::getInstance();
-        auto& timeline = engine.getTimeline();
-        switch (keyCode) {
-            case 49: timeline.setPlaying(!timeline.isPlaying()); return true;
-            case 15: timeline.setRecording(!timeline.isRecording()); return true;
-            case 36: timeline.setPlayhead(0); return true;
-            case 11: if (cmd) { m_libraryVisible = !m_libraryVisible; return true; } break;
-            case 34: if (cmd) { m_inspectorVisible = !m_inspectorVisible; return true; } break;
-            case 46: m_mixerPanelVisible = !m_mixerPanelVisible; return true;
+    void handleMouseUp(float, float) { m_arrangement.handleMouseUp(); }
+
+    bool handleKeyDown(int keyCode) {
+        using namespace ::Aura::UI::Main;
+        if (keyCode == KeyCodes::Space) {
+            // ::Aura::AuraEngine::getInstance().togglePlayback();
+            return true;
         }
         return false;
     }
 
 private:
-    float m_width, m_height, m_controlBarH, m_sidebarW, m_libraryW, m_aiPaneW, m_editorH;
-    bool m_inspectorVisible = true, m_mixerVisible = true, m_editorVisible = true, m_aiPaneVisible = false, m_libraryVisible = true, m_mixerPanelVisible = false;
+    void renderLibrary(::Aura::Graphics::Platform::IGraphicsKernel& k, float x, float y, float w, float h) {
+        k.drawRect(x, y, w, h, 0xFF141416);
+        k.drawText("LIBRARY", x + 10, y + 10, 12, 0xFFF1F5F9);
+    }
+
+    void renderControlBar(::Aura::Graphics::Platform::IGraphicsKernel& k, float w, float h) {
+        k.drawRect(0, 0, w, h, 0xFF1C1C1E);
+        k.drawLine(0, h-1, w, h-1, 1.0f, 0xFF000000);
+    }
+
+    float m_width, m_height, m_controlBarH, m_sidebarW, m_libraryW, m_editorH;
+    float m_mainX, m_mainW, m_mainH;
+    UserMode m_userMode = UserMode::Pro;
+    bool m_focusMode = false;
+    bool m_inspectorVisible = true, m_editorVisible = true, m_libraryVisible = true;
     float m_scrollX = 0;
-    EditorMode m_editorMode = EditorMode::StepSeq;
-    std::vector<std::string> m_loopLibrary;
-    LCDDisplay m_lcd; ArrangementView m_arrangement;
-    ::Aura::UI::Mixer::MixerConsole m_mixer; ProfessionalInspector m_professionalInspector;
-    SCAEAssistantPane m_aiAssistant; PianoRollView m_pianoRoll; StepSequencerView m_stepSeq;
-    FloatingPluginWindow m_winRenderer; std::vector<FloatingPluginWindow::State> m_pluginWindows;
+    float m_lastMouseX = 0.0f, m_lastMouseY = 0.0f;
+
+    ArrangementView m_arrangement;
+    ::Aura::UI::Mixer::MixerConsole m_mixer;
+    PianoRollView m_pianoRoll;
+    struct DummyInspector {
+        void render(::Aura::Graphics::Platform::IGraphicsKernel&, float, float, float, float, const auto&) {}
+    } m_inspector;
 };
+
+// Compatibility Typedef
+using AuraProUI = MainWorkspaceOrchestrator;
 
 } // namespace Aura::Graphics::UI

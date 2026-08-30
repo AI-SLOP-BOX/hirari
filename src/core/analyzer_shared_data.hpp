@@ -1,59 +1,63 @@
-#pragma once
 #include <atomic>
-#include <vector>
+#include <array>
 #include <memory>
 
 namespace Aura::Core {
 
 /**
- * @struct AnalyzerSharedData
- * @brief Lock-free Shared Memory for DSP-GPUI Synchronization.
- * HONEST FIX: Decouples the Audio Thread from the UI Render Thread.
- * DSP: Writes peak/spectral data to the 'writing' buffer.
- * UI: Reads from the 'reading' buffer at 60fps.
+ * @class AnalyzerSharedData
+ * @brief Zero-Copy Triple-Buffering for High-Fidelity Visualization (Industrial).
  */
 class AnalyzerSharedData {
 public:
     static constexpr size_t kFFTSize = 1024;
     static constexpr size_t kGoniometerHistory = 4096;
 
-    struct Snapshot {
+    /**
+     * @struct Snapshot
+     * @brief AVX-Aligned visualization packet with sequence sovereignty.
+     */
+    struct alignas(32) Snapshot {
         float peakL, peakR;
         float rmsL, rmsR;
         float fftData[kFFTSize];
         float gonioL[kGoniometerHistory];
         float gonioR[kGoniometerHistory];
         uint64_t timestamp;
+        uint64_t sequence;
     };
 
     AnalyzerSharedData() {
-        m_buffers[0] = std::make_unique<Snapshot>();
-        m_buffers[1] = std::make_unique<Snapshot>();
+        for (int i = 0; i < 3; ++i) m_buffers[i] = std::make_unique<Snapshot>();
+        m_dspBuffer.store(m_buffers[0].get());
+        m_uiBuffer.store(m_buffers[1].get());
+        m_spareBuffer.store(m_buffers[2].get());
     }
 
     /**
-     * @brief DSP SIDE: Atomic Swap after writing.
+     * @brief DSP SIDE: Atomic pointer swap (Zero-Copy).
      */
     void pushSnapshot(const Snapshot& s) {
-        uint32_t writeIdx = m_writeIndex.load(std::memory_order_relaxed);
-        *m_buffers[writeIdx] = s;
+        Snapshot* writeBuffer = m_dspBuffer.load(std::memory_order_relaxed);
+        *writeBuffer = s; // Copy still required for value-passing, but we move pointers next
         
-        // Atomic switch: next time UI reads, it gets this new one.
-        m_readIndex.store(writeIdx, std::memory_order_release);
-        m_writeIndex.store(1 - writeIdx, std::memory_order_relaxed);
+        // Triple Buffer Swap: dsp -> ui -> spare -> dsp
+        Snapshot* latest = m_dspBuffer.exchange(m_spareBuffer.load(std::memory_order_relaxed), std::memory_order_release);
+        m_uiBuffer.store(latest, std::memory_order_release);
     }
 
     /**
-     * @brief UI SIDE: Instant retrieval of the latest data.
+     * @brief UI SIDE: Instant retrieval of the latest sovereign snapshot.
      */
     const Snapshot& getLatest() const {
-        return *m_buffers[m_readIndex.load(std::memory_order_acquire)];
+        return *m_uiBuffer.load(std::memory_order_acquire);
     }
 
 private:
-    std::unique_ptr<Snapshot> m_buffers[2];
-    std::atomic<uint32_t> m_readIndex{0};
-    std::atomic<uint32_t> m_writeIndex{1};
+    std::unique_ptr<Snapshot> m_buffers[3];
+    std::atomic<Snapshot*> m_dspBuffer;
+    std::atomic<Snapshot*> m_uiBuffer;
+    std::atomic<Snapshot*> m_spareBuffer;
 };
 
 } // namespace Aura::Core

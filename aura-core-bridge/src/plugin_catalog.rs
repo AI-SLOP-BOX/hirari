@@ -57,10 +57,15 @@ pub fn plugin_cache_identity(
     state_schema_version: u32,
     gui_state_schema_version: u32,
 ) -> Option<String> {
-    if plugin_id.trim().is_empty() || plugin_version.trim().is_empty()
-        || binary_hash.len() != 64 || !binary_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-        || state_schema_version == 0 || gui_state_schema_version == 0
-        || plugin_id.contains('\0') || plugin_version.contains('\0') {
+    if plugin_id.trim().is_empty()
+        || plugin_version.trim().is_empty()
+        || binary_hash.len() != 64
+        || !binary_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || state_schema_version == 0
+        || gui_state_schema_version == 0
+        || plugin_id.contains('\0')
+        || plugin_version.contains('\0')
+    {
         return None;
     }
     Some(format!(
@@ -74,15 +79,21 @@ pub fn instrument_profiles() -> Vec<InstrumentProfile> {
             id: "vital".into(),
             aliases: vec!["Vital".into(), "Vital Synth".into()],
             formats: vec!["clap".into(), "vst3".into(), "au".into()],
-            midi_input: true, midi_channels: 16, parameter_automation: true,
-            state_save_restore: true, sidechain_input: true,
+            midi_input: true,
+            midi_channels: 16,
+            parameter_automation: true,
+            state_save_restore: true,
+            sidechain_input: true,
         },
         InstrumentProfile {
             id: "surge_xt".into(),
             aliases: vec!["Surge XT".into(), "Surge".into()],
             formats: vec!["clap".into(), "vst3".into(), "au".into()],
-            midi_input: true, midi_channels: 16, parameter_automation: true,
-            state_save_restore: true, sidechain_input: true,
+            midi_input: true,
+            midi_channels: 16,
+            parameter_automation: true,
+            state_save_restore: true,
+            sidechain_input: true,
         },
     ]
 }
@@ -149,7 +160,10 @@ fn persist_quarantine(set: &HashSet<String>) -> std::io::Result<()> {
     let temporary = path.with_extension(format!("tmp-{}-{nonce}", std::process::id()));
     let mut values: Vec<&String> = set.iter().collect();
     values.sort();
-    let contents = values.into_iter().map(|value| format!("{value}\n")).collect::<String>();
+    let contents = values
+        .into_iter()
+        .map(|value| format!("{value}\n"))
+        .collect::<String>();
     {
         let mut file = std::fs::File::create(&temporary)?;
         use std::io::Write;
@@ -190,11 +204,16 @@ fn favorite_set() -> &'static Mutex<HashSet<String>> {
 
 fn persist_favorites(set: &HashSet<String>) -> std::io::Result<()> {
     let path = favorites_file();
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
     let mut values: Vec<&String> = set.iter().collect();
     values.sort();
-    let contents = values.into_iter().map(|value| format!("{value}\n")).collect::<String>();
+    let contents = values
+        .into_iter()
+        .map(|value| format!("{value}\n"))
+        .collect::<String>();
     {
         use std::io::Write;
         let mut file = std::fs::File::create(&temporary)?;
@@ -214,10 +233,19 @@ fn persist_favorites(set: &HashSet<String>) -> std::io::Result<()> {
 /// identity without unexpectedly removing the user's browser favorite.
 pub fn set_favorite(id: &str, favorite: bool) -> std::io::Result<bool> {
     if id.trim().is_empty() || id.len() > 256 || id.contains('\0') {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid plugin id"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid plugin id",
+        ));
     }
-    let mut set = favorite_set().lock().map_err(|_| std::io::Error::other("favorite state unavailable"))?;
-    let changed = if favorite { set.insert(id.to_owned()) } else { set.remove(id) };
+    let mut set = favorite_set()
+        .lock()
+        .map_err(|_| std::io::Error::other("favorite state unavailable"))?;
+    let changed = if favorite {
+        set.insert(id.to_owned())
+    } else {
+        set.remove(id)
+    };
     if changed {
         if let Err(error) = persist_favorites(&set) {
             // Do not leave the process with a state that was never committed
@@ -234,7 +262,10 @@ pub fn set_favorite(id: &str, favorite: bool) -> std::io::Result<bool> {
 }
 
 pub fn is_quarantined_hash(binary_hash: &str) -> bool {
-    quarantine_set().lock().map(|set| set.contains(binary_hash)).unwrap_or(false)
+    quarantine_set()
+        .lock()
+        .map(|set| set.contains(binary_hash))
+        .unwrap_or(false)
 }
 
 /// Check quarantine by concrete plugin path without trusting the display
@@ -253,13 +284,17 @@ pub fn quarantine_plugin(plugin: &InstalledPlugin) -> Result<(), String> {
     if plugin.binary_hash.len() != 64 {
         return Err("plugin has no valid binary identity".into());
     }
-    let mut set = quarantine_set().lock().map_err(|_| "quarantine lock poisoned")?;
+    let mut set = quarantine_set()
+        .lock()
+        .map_err(|_| "quarantine lock poisoned")?;
     set.insert(plugin.binary_hash.clone());
     persist_quarantine(&set).map_err(|error| error.to_string())
 }
 
 pub fn clear_plugin_quarantine(plugin: &InstalledPlugin) -> Result<bool, String> {
-    let mut set = quarantine_set().lock().map_err(|_| "quarantine lock poisoned")?;
+    let mut set = quarantine_set()
+        .lock()
+        .map_err(|_| "quarantine lock poisoned")?;
     let removed = set.remove(&plugin.binary_hash);
     if removed {
         persist_quarantine(&set).map_err(|error| error.to_string())?;
@@ -325,7 +360,9 @@ fn canonical(path: PathBuf) -> Option<PathBuf> {
 }
 
 fn collect_candidates(root: &std::path::Path, candidates: &mut Vec<PathBuf>) {
-    let Ok(metadata) = std::fs::symlink_metadata(root) else { return };
+    let Ok(metadata) = std::fs::symlink_metadata(root) else {
+        return;
+    };
     if !metadata.is_dir() {
         if format_for(root).is_some() {
             candidates.push(root.to_path_buf());
@@ -340,7 +377,9 @@ fn collect_candidates(root: &std::path::Path, candidates: &mut Vec<PathBuf>) {
         candidates.push(root.to_path_buf());
         return;
     }
-    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
     for entry in entries.flatten() {
         collect_candidates(&entry.path(), candidates);
     }
@@ -362,10 +401,19 @@ fn binary_identity(path: &std::path::Path) -> (String, u64, u64) {
             hasher.update(&contents);
         }
         if let Ok(modified) = std::fs::metadata(&file).and_then(|meta| meta.modified()) {
-            newest = newest.max(modified.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs());
+            newest = newest.max(
+                modified
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            );
         }
     }
-    let hash = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect();
+    let hash = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     (hash, bytes_total, newest)
 }
 
@@ -381,15 +429,29 @@ pub fn binary_hash_for_path(path: &str) -> Option<String> {
     (bytes > 0).then_some(hash)
 }
 
-fn collect_files(root: &std::path::Path, path: &std::path::Path, files: &mut Vec<(String, PathBuf)>) {
-    let Ok(metadata) = std::fs::symlink_metadata(path) else { return };
+fn collect_files(
+    root: &std::path::Path,
+    path: &std::path::Path,
+    files: &mut Vec<(String, PathBuf)>,
+) {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return;
+    };
     if metadata.is_file() {
-        let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().into_owned();
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
         files.push((relative, path.to_path_buf()));
         return;
     }
-    if !metadata.is_dir() { return; }
-    let Ok(entries) = std::fs::read_dir(path) else { return };
+    if !metadata.is_dir() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
     for entry in entries.flatten() {
         collect_files(root, &entry.path(), files);
     }
@@ -520,14 +582,16 @@ pub fn scan() -> Vec<InstalledPlugin> {
                 },
                 capability: if quarantined {
                     "quarantined".to_owned()
-                } else { match format {
-                    "clap" if capabilities.clap => "sandbox-ready".to_owned(),
-                    "vst3" if capabilities.vst3 => "vst3-sandbox-ready".to_owned(),
-                    "vst3" => "vst3-sdk-required".to_owned(),
-                    "au" if capabilities.au => "au-sandbox-ready".to_owned(),
-                    "au" => "au-worker-unavailable".to_owned(),
-                    _ => "worker-unavailable".to_owned(),
-                }},
+                } else {
+                    match format {
+                        "clap" if capabilities.clap => "sandbox-ready".to_owned(),
+                        "vst3" if capabilities.vst3 => "vst3-sandbox-ready".to_owned(),
+                        "vst3" => "vst3-sdk-required".to_owned(),
+                        "au" if capabilities.au => "au-sandbox-ready".to_owned(),
+                        "au" => "au-worker-unavailable".to_owned(),
+                        _ => "worker-unavailable".to_owned(),
+                    }
+                },
                 binary_hash,
                 binary_bytes,
                 modified_unix_seconds,
@@ -557,85 +621,175 @@ pub fn resolve(alias: &str) -> Option<InstalledPlugin> {
     let (name_alias, requested_format) = alias
         .split_once('@')
         .or_else(|| alias.split_once(':'))
-        .map_or((alias, None), |(name, format)| (name, Some(format.to_ascii_lowercase())));
+        .map_or((alias, None), |(name, format)| {
+            (name, Some(format.to_ascii_lowercase()))
+        });
     let requested = normalized(name_alias);
     let mut plugins = vec![
         InstalledPlugin {
-            id: "aura.internal.limiter".into(), name: "Aura Limiter".into(), format: "internal".into(),
-            path: "Aura/Limiter".into(), installed: true, sandboxed: false,
-            capability: "native realtime dynamics".into(), binary_hash: "builtin".into(),
-            binary_bytes: 0, modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["dynamics".into(), "internal".into()], favorite: false,
+            id: "aura.internal.limiter".into(),
+            name: "Aura Limiter".into(),
+            format: "internal".into(),
+            path: "Aura/Limiter".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime dynamics".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["dynamics".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.compressor".into(), name: "Aura Compressor".into(), format: "internal".into(),
-            path: "Aura/Compressor".into(), installed: true, sandboxed: false,
-            capability: "native realtime dynamics · assistant-ready".into(), binary_hash: "builtin".into(),
-            binary_bytes: 0, modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["dynamics".into(), "internal".into()], favorite: false,
+            id: "aura.internal.compressor".into(),
+            name: "Aura Compressor".into(),
+            format: "internal".into(),
+            path: "Aura/Compressor".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime dynamics · assistant-ready".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["dynamics".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.gate".into(), name: "Aura Gate".into(), format: "internal".into(),
-            path: "Aura/Gate".into(), installed: true, sandboxed: false,
-            capability: "native realtime noise gate".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["dynamics".into(), "gate".into(), "internal".into()], favorite: false,
+            id: "aura.internal.gate".into(),
+            name: "Aura Gate".into(),
+            format: "internal".into(),
+            path: "Aura/Gate".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime noise gate".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["dynamics".into(), "gate".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.saturation".into(), name: "Aura Saturation".into(), format: "internal".into(),
-            path: "Aura/Saturation".into(), installed: true, sandboxed: false,
-            capability: "native realtime tube saturation".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["color".into(), "saturation".into(), "internal".into()], favorite: false,
+            id: "aura.internal.saturation".into(),
+            name: "Aura Saturation".into(),
+            format: "internal".into(),
+            path: "Aura/Saturation".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime tube saturation".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["color".into(), "saturation".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.transient".into(), name: "Aura Transient Shaper".into(), format: "internal".into(),
-            path: "Aura/Transient".into(), installed: true, sandboxed: false,
-            capability: "native realtime transient shaping".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["dynamics".into(), "transient".into(), "internal".into()], favorite: false,
+            id: "aura.internal.transient".into(),
+            name: "Aura Transient Shaper".into(),
+            format: "internal".into(),
+            path: "Aura/Transient".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime transient shaping".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["dynamics".into(), "transient".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.deesser".into(), name: "Aura De-Esser".into(), format: "internal".into(),
-            path: "Aura/DeEsser".into(), installed: true, sandboxed: false,
-            capability: "native realtime sibilance reduction".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["dynamics".into(), "de-esser".into(), "internal".into()], favorite: false,
+            id: "aura.internal.deesser".into(),
+            name: "Aura De-Esser".into(),
+            format: "internal".into(),
+            path: "Aura/DeEsser".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime sibilance reduction".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["dynamics".into(), "de-esser".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.delay".into(), name: "Aura Delay".into(), format: "internal".into(),
-            path: "Aura/Delay".into(), installed: true, sandboxed: false,
-            capability: "native realtime tempo-synced delay".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["delay".into(), "time-based".into(), "internal".into()], favorite: false,
+            id: "aura.internal.delay".into(),
+            name: "Aura Delay".into(),
+            format: "internal".into(),
+            path: "Aura/Delay".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime tempo-synced delay".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["delay".into(), "time-based".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.reverb".into(), name: "Aura Reverb".into(), format: "internal".into(),
-            path: "Aura/Reverb".into(), installed: true, sandboxed: false,
-            capability: "native realtime algorithmic reverb".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["reverb".into(), "time-based".into(), "internal".into()], favorite: false,
+            id: "aura.internal.reverb".into(),
+            name: "Aura Reverb".into(),
+            format: "internal".into(),
+            path: "Aura/Reverb".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime algorithmic reverb".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["reverb".into(), "time-based".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.dynamiceq".into(), name: "Aura Dynamic EQ".into(), format: "internal".into(),
-            path: "Aura/DynamicEQ".into(), installed: true, sandboxed: false,
-            capability: "native realtime dynamic equalization".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["eq".into(), "dynamic".into(), "internal".into()], favorite: false,
+            id: "aura.internal.dynamiceq".into(),
+            name: "Aura Dynamic EQ".into(),
+            format: "internal".into(),
+            path: "Aura/DynamicEQ".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime dynamic equalization".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["eq".into(), "dynamic".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.midside".into(), name: "Aura Mid/Side".into(), format: "internal".into(),
-            path: "Aura/MidSide".into(), installed: true, sandboxed: false,
-            capability: "native realtime mid-side processing".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["mid-side".into(), "stereo".into(), "internal".into()], favorite: false,
+            id: "aura.internal.midside".into(),
+            name: "Aura Mid/Side".into(),
+            format: "internal".into(),
+            path: "Aura/MidSide".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime mid-side processing".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["mid-side".into(), "stereo".into(), "internal".into()],
+            favorite: false,
         },
         InstalledPlugin {
-            id: "aura.internal.width".into(), name: "Aura Stereo Width".into(), format: "internal".into(),
-            path: "Aura/Width".into(), installed: true, sandboxed: false,
-            capability: "native realtime stereo width".into(), binary_hash: "builtin".into(), binary_bytes: 0,
-            modified_unix_seconds: 0, quarantined: false,
-            tags: vec!["stereo".into(), "width".into(), "internal".into()], favorite: false,
+            id: "aura.internal.width".into(),
+            name: "Aura Stereo Width".into(),
+            format: "internal".into(),
+            path: "Aura/Width".into(),
+            installed: true,
+            sandboxed: false,
+            capability: "native realtime stereo width".into(),
+            binary_hash: "builtin".into(),
+            binary_bytes: 0,
+            modified_unix_seconds: 0,
+            quarantined: false,
+            tags: vec!["stereo".into(), "width".into(), "internal".into()],
+            favorite: false,
         },
     ];
     plugins.extend(scan());
@@ -644,7 +798,10 @@ pub fn resolve(alias: &str) -> Option<InstalledPlugin> {
     // when the same plugin is installed in several formats.  Name-based
     // lookup is intentionally deterministic instead of depending on the
     // BTreeMap/hash suffix ordering used by discovery.
-    if let Some(plugin) = plugins.iter().find(|plugin| plugin.id == alias || normalized(&plugin.id) == normalized(alias)) {
+    if let Some(plugin) = plugins
+        .iter()
+        .find(|plugin| plugin.id == alias || normalized(&plugin.id) == normalized(alias))
+    {
         return Some(plugin.clone());
     }
     const FORMAT_PRIORITY: [&str; 3] = ["clap", "vst3", "au"];
@@ -672,16 +829,22 @@ pub fn is_admitted_path(path: &str) -> bool {
         return false;
     };
     scan().into_iter().any(|plugin| {
-        plugin.installed && plugin.sandboxed && !plugin.quarantined
-            && std::fs::canonicalize(&plugin.path)
-                .is_ok_and(|candidate| candidate == requested)
+        plugin.installed
+            && plugin.sandboxed
+            && !plugin.quarantined
+            && std::fs::canonicalize(&plugin.path).is_ok_and(|candidate| candidate == requested)
     })
 }
 
 pub const DEFAULT_PLUGIN_COLLECTION_ID: &str = "default";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PluginBlockReason { Unsupported32Bit, ScanCrash, LoadFailure(String), InvalidBinary }
+pub enum PluginBlockReason {
+    Unsupported32Bit,
+    ScanCrash,
+    LoadFailure(String),
+    InvalidBinary,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PluginInspection {
@@ -702,73 +865,150 @@ pub struct PluginInspection {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PluginManagerRegistry { pub plugins: Vec<PluginInspection> }
+pub struct PluginManagerRegistry {
+    pub plugins: Vec<PluginInspection>,
+}
 
 impl PluginManagerRegistry {
     /// Commit one isolated scan result. A failed or unsupported binary remains
     /// visible on the blocklist instead of disappearing from diagnostics.
     pub fn record_scan(&mut self, mut plugin: PluginInspection, scan_succeeded: bool) -> bool {
-        plugin.id = plugin.id.trim().to_owned(); plugin.name = plugin.name.trim().to_owned();
-        if plugin.bitness == 32 { plugin.block_reason = Some(PluginBlockReason::Unsupported32Bit); }
-        else if !scan_succeeded && plugin.block_reason.is_none() { plugin.block_reason = Some(PluginBlockReason::ScanCrash); }
-        else if scan_succeeded { plugin.block_reason = None; }
-        if !plugin.validate() { return false; }
-        if let Some(existing) = self.plugins.iter_mut().find(|item| item.id == plugin.id) { *existing = plugin; }
-        else if self.plugins.len() < 65_536 { self.plugins.push(plugin); }
-        else { return false; }
-        self.plugins.sort_by_key(|item| item.id.clone()); true
+        plugin.id = plugin.id.trim().to_owned();
+        plugin.name = plugin.name.trim().to_owned();
+        if plugin.bitness == 32 {
+            plugin.block_reason = Some(PluginBlockReason::Unsupported32Bit);
+        } else if !scan_succeeded && plugin.block_reason.is_none() {
+            plugin.block_reason = Some(PluginBlockReason::ScanCrash);
+        } else if scan_succeeded {
+            plugin.block_reason = None;
+        }
+        if !plugin.validate() {
+            return false;
+        }
+        if let Some(existing) = self.plugins.iter_mut().find(|item| item.id == plugin.id) {
+            *existing = plugin;
+        } else if self.plugins.len() < 65_536 {
+            self.plugins.push(plugin);
+        } else {
+            return false;
+        }
+        self.plugins.sort_by_key(|item| item.id.clone());
+        true
     }
 
     pub fn set_hidden(&mut self, id: &str, hidden: bool) -> bool {
-        let Some(plugin) = self.plugins.iter_mut().find(|plugin| plugin.id == id) else { return false; };
-        plugin.hidden = hidden; true
+        let Some(plugin) = self.plugins.iter_mut().find(|plugin| plugin.id == id) else {
+            return false;
+        };
+        plugin.hidden = hidden;
+        true
     }
 
     /// Reactivation is accepted only after an isolated rescan succeeds.
     /// Cubase-compatible 32-bit entries can never be reactivated.
     pub fn reactivate(&mut self, id: &str, rescan_succeeded: bool) -> bool {
-        let Some(plugin) = self.plugins.iter_mut().find(|plugin| plugin.id == id) else { return false; };
-        if plugin.bitness != 64 || !rescan_succeeded { return false; }
-        plugin.block_reason = None; true
+        let Some(plugin) = self.plugins.iter_mut().find(|plugin| plugin.id == id) else {
+            return false;
+        };
+        if plugin.bitness != 64 || !rescan_succeeded {
+            return false;
+        }
+        plugin.block_reason = None;
+        true
     }
 
-    pub fn available(&self, used_in_project: Option<&BTreeSet<String>>, require_f64: bool) -> Vec<&PluginInspection> {
-        let mut result = self.plugins.iter().filter(|plugin| !plugin.hidden && plugin.block_reason.is_none()
-            && (!require_f64 || plugin.supports_f64)
-            && used_in_project.is_none_or(|ids| ids.contains(&plugin.id))).collect::<Vec<_>>();
-        result.sort_by_key(|plugin| (plugin.vendor.to_ascii_lowercase(), plugin.name.to_ascii_lowercase())); result
+    pub fn available(
+        &self,
+        used_in_project: Option<&BTreeSet<String>>,
+        require_f64: bool,
+    ) -> Vec<&PluginInspection> {
+        let mut result = self
+            .plugins
+            .iter()
+            .filter(|plugin| {
+                !plugin.hidden
+                    && plugin.block_reason.is_none()
+                    && (!require_f64 || plugin.supports_f64)
+                    && used_in_project.is_none_or(|ids| ids.contains(&plugin.id))
+            })
+            .collect::<Vec<_>>();
+        result.sort_by_key(|plugin| {
+            (
+                plugin.vendor.to_ascii_lowercase(),
+                plugin.name.to_ascii_lowercase(),
+            )
+        });
+        result
     }
 
     pub fn blocklist(&self) -> Vec<&PluginInspection> {
-        let mut result = self.plugins.iter().filter(|plugin| plugin.block_reason.is_some()).collect::<Vec<_>>();
-        result.sort_by_key(|plugin| plugin.name.to_ascii_lowercase()); result
+        let mut result = self
+            .plugins
+            .iter()
+            .filter(|plugin| plugin.block_reason.is_some())
+            .collect::<Vec<_>>();
+        result.sort_by_key(|plugin| plugin.name.to_ascii_lowercase());
+        result
     }
 
     pub fn diagnostic_report(&self, system: &str) -> Result<String, String> {
-        if !self.validate() || system.trim().is_empty() || system.len() > 1024 || system.contains('\0') { return Err("invalid plug-in report data".into()); }
-        let mut report = format!("Aura Plug-in Report\nSystem: {}\nPlug-ins: {}\n", system.trim(), self.plugins.len());
+        if !self.validate()
+            || system.trim().is_empty()
+            || system.len() > 1024
+            || system.contains('\0')
+        {
+            return Err("invalid plug-in report data".into());
+        }
+        let mut report = format!(
+            "Aura Plug-in Report\nSystem: {}\nPlug-ins: {}\n",
+            system.trim(),
+            self.plugins.len()
+        );
         for plugin in &self.plugins {
-            report.push_str(&format!("{} | {} | {} | {}-bit | latency={} | sidechains={} | hidden={} | status={:?}\n",
-                plugin.name, plugin.vendor, plugin.format, plugin.bitness, plugin.latency_samples,
-                plugin.sidechain_inputs, plugin.hidden, plugin.block_reason));
+            report.push_str(&format!(
+                "{} | {} | {} | {}-bit | latency={} | sidechains={} | hidden={} | status={:?}\n",
+                plugin.name,
+                plugin.vendor,
+                plugin.format,
+                plugin.bitness,
+                plugin.latency_samples,
+                plugin.sidechain_inputs,
+                plugin.hidden,
+                plugin.block_reason
+            ));
         }
         Ok(report)
     }
 
     pub fn validate(&self) -> bool {
-        self.plugins.len() <= 65_536 && self.plugins.iter().all(PluginInspection::validate)
+        self.plugins.len() <= 65_536
+            && self.plugins.iter().all(PluginInspection::validate)
             && self.plugins.windows(2).all(|pair| pair[0].id < pair[1].id)
     }
 }
 
 impl PluginInspection {
     fn validate(&self) -> bool {
-        let text = |value: &str, max: usize| !value.trim().is_empty() && value.len() <= max && !value.contains('\0');
-        text(&self.id, 256) && text(&self.name, 256) && text(&self.vendor, 256) && text(&self.category, 128)
-            && text(&self.format, 32) && text(&self.version, 128) && text(&self.path, 4096)
-            && matches!(self.bitness, 32 | 64) && self.block_reason.as_ref().is_none_or(|reason| match reason {
-                PluginBlockReason::LoadFailure(message) => text(message, 1024), _ => true,
-            }) && (self.bitness != 32 || self.block_reason == Some(PluginBlockReason::Unsupported32Bit))
+        let text = |value: &str, max: usize| {
+            !value.trim().is_empty() && value.len() <= max && !value.contains('\0')
+        };
+        text(&self.id, 256)
+            && text(&self.name, 256)
+            && text(&self.vendor, 256)
+            && text(&self.category, 128)
+            && text(&self.format, 32)
+            && text(&self.version, 128)
+            && text(&self.path, 4096)
+            && matches!(self.bitness, 32 | 64)
+            && self
+                .block_reason
+                .as_ref()
+                .is_none_or(|reason| match reason {
+                    PluginBlockReason::LoadFailure(message) => text(message, 1024),
+                    _ => true,
+                })
+            && (self.bitness != 32
+                || self.block_reason == Some(PluginBlockReason::Unsupported32Bit))
     }
 }
 
@@ -800,13 +1040,29 @@ impl PluginCollectionManager {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let available_plugin_ids: BTreeSet<_> = available_ids.into_iter().map(Into::into)
-            .filter(|id| valid_collection_token(id)).collect();
-        let entries = available_plugin_ids.iter().map(|plugin_id| PluginCollectionEntry {
-            plugin_id: plugin_id.clone(), folder: Vec::new() }).collect();
-        Self { collections: vec![PluginCollection { id: DEFAULT_PLUGIN_COLLECTION_ID.into(),
-            name: "Default".into(), entries, immutable: true }], active_id: DEFAULT_PLUGIN_COLLECTION_ID.into(),
-            available_plugin_ids, next_id: 1 }
+        let available_plugin_ids: BTreeSet<_> = available_ids
+            .into_iter()
+            .map(Into::into)
+            .filter(|id| valid_collection_token(id))
+            .collect();
+        let entries = available_plugin_ids
+            .iter()
+            .map(|plugin_id| PluginCollectionEntry {
+                plugin_id: plugin_id.clone(),
+                folder: Vec::new(),
+            })
+            .collect();
+        Self {
+            collections: vec![PluginCollection {
+                id: DEFAULT_PLUGIN_COLLECTION_ID.into(),
+                name: "Default".into(),
+                entries,
+                immutable: true,
+            }],
+            active_id: DEFAULT_PLUGIN_COLLECTION_ID.into(),
+            available_plugin_ids,
+            next_id: 1,
+        }
     }
 
     /// A full rescan recreates Default while preserving unavailable references
@@ -816,11 +1072,24 @@ impl PluginCollectionManager {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.available_plugin_ids = available_ids.into_iter().map(Into::into)
-            .filter(|id| valid_collection_token(id)).collect();
-        if let Some(default) = self.collections.iter_mut().find(|collection| collection.id == DEFAULT_PLUGIN_COLLECTION_ID) {
-            default.entries = self.available_plugin_ids.iter().map(|plugin_id| PluginCollectionEntry {
-                plugin_id: plugin_id.clone(), folder: Vec::new() }).collect();
+        self.available_plugin_ids = available_ids
+            .into_iter()
+            .map(Into::into)
+            .filter(|id| valid_collection_token(id))
+            .collect();
+        if let Some(default) = self
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == DEFAULT_PLUGIN_COLLECTION_ID)
+        {
+            default.entries = self
+                .available_plugin_ids
+                .iter()
+                .map(|plugin_id| PluginCollectionEntry {
+                    plugin_id: plugin_id.clone(),
+                    folder: Vec::new(),
+                })
+                .collect();
             default.name = "Default".into();
             default.immutable = true;
         }
@@ -828,97 +1097,235 @@ impl PluginCollectionManager {
 
     pub fn create(&mut self, name: &str, include_all: bool) -> Option<String> {
         let name = name.trim();
-        if !valid_collection_name(name) || self.collections.len() >= 256
-            || self.collections.iter().any(|collection| collection.name.eq_ignore_ascii_case(name)) { return None; }
+        if !valid_collection_name(name)
+            || self.collections.len() >= 256
+            || self
+                .collections
+                .iter()
+                .any(|collection| collection.name.eq_ignore_ascii_case(name))
+        {
+            return None;
+        }
         let id = format!("user-{}", self.next_id);
         self.next_id = self.next_id.checked_add(1)?;
-        let entries = include_all.then(|| self.available_plugin_ids.iter().map(|plugin_id| PluginCollectionEntry {
-            plugin_id: plugin_id.clone(), folder: Vec::new() }).collect()).unwrap_or_default();
-        self.collections.push(PluginCollection { id: id.clone(), name: name.into(), entries, immutable: false });
+        let entries = if include_all {
+            self.available_plugin_ids
+                .iter()
+                .map(|plugin_id| PluginCollectionEntry {
+                    plugin_id: plugin_id.clone(),
+                    folder: Vec::new(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.collections.push(PluginCollection {
+            id: id.clone(),
+            name: name.into(),
+            entries,
+            immutable: false,
+        });
         Some(id)
     }
 
     pub fn copy_collection(&mut self, source_id: &str, name: &str) -> Option<String> {
-        let entries = self.collections.iter().find(|collection| collection.id == source_id)?.entries.clone();
+        let entries = self
+            .collections
+            .iter()
+            .find(|collection| collection.id == source_id)?
+            .entries
+            .clone();
         let id = self.create(name, false)?;
-        self.collections.iter_mut().find(|collection| collection.id == id)?.entries = entries;
+        self.collections
+            .iter_mut()
+            .find(|collection| collection.id == id)?
+            .entries = entries;
         Some(id)
     }
 
     pub fn activate(&mut self, id: &str) -> bool {
-        if !self.collections.iter().any(|collection| collection.id == id) { return false; }
+        if !self
+            .collections
+            .iter()
+            .any(|collection| collection.id == id)
+        {
+            return false;
+        }
         self.active_id = id.into();
         true
     }
 
     pub fn rename(&mut self, id: &str, name: &str) -> bool {
         let name = name.trim();
-        if !valid_collection_name(name) || self.collections.iter().any(|collection| collection.id != id
-            && collection.name.eq_ignore_ascii_case(name)) { return false; }
-        let Some(collection) = self.collections.iter_mut().find(|collection| collection.id == id && !collection.immutable) else { return false; };
+        if !valid_collection_name(name)
+            || self
+                .collections
+                .iter()
+                .any(|collection| collection.id != id && collection.name.eq_ignore_ascii_case(name))
+        {
+            return false;
+        }
+        let Some(collection) = self
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == id && !collection.immutable)
+        else {
+            return false;
+        };
         collection.name = name.into();
         true
     }
 
     pub fn delete(&mut self, id: &str) -> bool {
-        let Some(index) = self.collections.iter().position(|collection| collection.id == id && !collection.immutable) else { return false; };
+        let Some(index) = self
+            .collections
+            .iter()
+            .position(|collection| collection.id == id && !collection.immutable)
+        else {
+            return false;
+        };
         self.collections.remove(index);
-        if self.active_id == id { self.active_id = DEFAULT_PLUGIN_COLLECTION_ID.into(); }
+        if self.active_id == id {
+            self.active_id = DEFAULT_PLUGIN_COLLECTION_ID.into();
+        }
         true
     }
 
     pub fn add_plugin(&mut self, collection_id: &str, plugin_id: &str, folder: &[String]) -> bool {
-        if !self.available_plugin_ids.contains(plugin_id) || !valid_folder(folder) { return false; }
-        let Some(collection) = self.collections.iter_mut().find(|collection| collection.id == collection_id && !collection.immutable) else { return false; };
-        if collection.entries.len() >= 65_536 || collection.entries.iter().any(|entry| entry.plugin_id == plugin_id) { return false; }
-        collection.entries.push(PluginCollectionEntry { plugin_id: plugin_id.into(), folder: folder.to_vec() });
+        if !self.available_plugin_ids.contains(plugin_id) || !valid_folder(folder) {
+            return false;
+        }
+        let Some(collection) = self
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == collection_id && !collection.immutable)
+        else {
+            return false;
+        };
+        if collection.entries.len() >= 65_536
+            || collection
+                .entries
+                .iter()
+                .any(|entry| entry.plugin_id == plugin_id)
+        {
+            return false;
+        }
+        collection.entries.push(PluginCollectionEntry {
+            plugin_id: plugin_id.into(),
+            folder: folder.to_vec(),
+        });
         true
     }
 
     pub fn remove_plugin(&mut self, collection_id: &str, plugin_id: &str) -> bool {
-        let Some(collection) = self.collections.iter_mut().find(|collection| collection.id == collection_id && !collection.immutable) else { return false; };
+        let Some(collection) = self
+            .collections
+            .iter_mut()
+            .find(|collection| collection.id == collection_id && !collection.immutable)
+        else {
+            return false;
+        };
         let before = collection.entries.len();
-        collection.entries.retain(|entry| entry.plugin_id != plugin_id);
+        collection
+            .entries
+            .retain(|entry| entry.plugin_id != plugin_id);
         before != collection.entries.len()
     }
 
     pub fn remove_unavailable_from_user_collections(&mut self) -> usize {
         let mut removed = 0;
-        for collection in self.collections.iter_mut().filter(|collection| !collection.immutable) {
+        for collection in self
+            .collections
+            .iter_mut()
+            .filter(|collection| !collection.immutable)
+        {
             let before = collection.entries.len();
-            collection.entries.retain(|entry| self.available_plugin_ids.contains(&entry.plugin_id));
+            collection
+                .entries
+                .retain(|entry| self.available_plugin_ids.contains(&entry.plugin_id));
             removed += before - collection.entries.len();
         }
         removed
     }
 
     pub fn active_entries(&self, include_unavailable: bool) -> Vec<&PluginCollectionEntry> {
-        let Some(collection) = self.collections.iter().find(|collection| collection.id == self.active_id) else { return Vec::new(); };
-        collection.entries.iter().filter(|entry| include_unavailable || self.available_plugin_ids.contains(&entry.plugin_id)).collect()
+        let Some(collection) = self
+            .collections
+            .iter()
+            .find(|collection| collection.id == self.active_id)
+        else {
+            return Vec::new();
+        };
+        collection
+            .entries
+            .iter()
+            .filter(|entry| {
+                include_unavailable || self.available_plugin_ids.contains(&entry.plugin_id)
+            })
+            .collect()
     }
 
     pub fn validate(&self) -> bool {
-        self.next_id > 0 && self.collections.len() <= 256
-            && self.collections.iter().any(|collection| collection.id == self.active_id)
-            && self.collections.iter().filter(|collection| collection.id == DEFAULT_PLUGIN_COLLECTION_ID
-                && collection.immutable && collection.name == "Default").count() == 1
-            && self.collections.iter().enumerate().all(|(index, collection)| {
-                valid_collection_token(&collection.id) && valid_collection_name(&collection.name)
-                    && collection.entries.len() <= 65_536
-                    && self.collections[..index].iter().all(|previous| previous.id != collection.id
-                        && !previous.name.eq_ignore_ascii_case(&collection.name))
-                    && collection.entries.iter().enumerate().all(|(entry_index, entry)| {
-                        valid_collection_token(&entry.plugin_id) && valid_folder(&entry.folder)
-                            && collection.entries[..entry_index].iter().all(|previous| previous.plugin_id != entry.plugin_id)
-                    })
-            })
-            && self.collections.iter().find(|collection| collection.id == DEFAULT_PLUGIN_COLLECTION_ID)
-                .is_some_and(|default| default.entries.iter().map(|entry| &entry.plugin_id).eq(self.available_plugin_ids.iter()))
+        self.next_id > 0
+            && self.collections.len() <= 256
+            && self
+                .collections
+                .iter()
+                .any(|collection| collection.id == self.active_id)
+            && self
+                .collections
+                .iter()
+                .filter(|collection| {
+                    collection.id == DEFAULT_PLUGIN_COLLECTION_ID
+                        && collection.immutable
+                        && collection.name == "Default"
+                })
+                .count()
+                == 1
+            && self
+                .collections
+                .iter()
+                .enumerate()
+                .all(|(index, collection)| {
+                    valid_collection_token(&collection.id)
+                        && valid_collection_name(&collection.name)
+                        && collection.entries.len() <= 65_536
+                        && self.collections[..index].iter().all(|previous| {
+                            previous.id != collection.id
+                                && !previous.name.eq_ignore_ascii_case(&collection.name)
+                        })
+                        && collection
+                            .entries
+                            .iter()
+                            .enumerate()
+                            .all(|(entry_index, entry)| {
+                                valid_collection_token(&entry.plugin_id)
+                                    && valid_folder(&entry.folder)
+                                    && collection.entries[..entry_index]
+                                        .iter()
+                                        .all(|previous| previous.plugin_id != entry.plugin_id)
+                            })
+                })
+            && self
+                .collections
+                .iter()
+                .find(|collection| collection.id == DEFAULT_PLUGIN_COLLECTION_ID)
+                .is_some_and(|default| {
+                    default
+                        .entries
+                        .iter()
+                        .map(|entry| &entry.plugin_id)
+                        .eq(self.available_plugin_ids.iter())
+                })
     }
 }
 
 fn valid_collection_token(value: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= 256 && !value.contains('\0') && !value.contains('/') && !value.contains('\\')
+    !value.trim().is_empty()
+        && value.len() <= 256
+        && !value.contains('\0')
+        && !value.contains('/')
+        && !value.contains('\\')
 }
 
 fn valid_collection_name(value: &str) -> bool {
@@ -926,12 +1333,18 @@ fn valid_collection_name(value: &str) -> bool {
 }
 
 fn valid_folder(folder: &[String]) -> bool {
-    folder.len() <= 16 && folder.iter().all(|part| valid_collection_name(part) && part != "." && part != "..")
+    folder.len() <= 16
+        && folder
+            .iter()
+            .all(|part| valid_collection_name(part) && part != "." && part != "..")
 }
 
 pub fn json() -> String {
     let capabilities = worker_capabilities();
-    let favorites = favorite_set().lock().map(|set| set.clone()).unwrap_or_default();
+    let favorites = favorite_set()
+        .lock()
+        .map(|set| set.clone())
+        .unwrap_or_default();
     let mut plugins = vec![
         InstalledPlugin {
             id: "aura.internal.limiter".into(),
@@ -981,7 +1394,9 @@ pub fn json() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{binary_identity, content_fingerprint, instrument_profiles, normalized, recommended_plugins};
+    use super::{
+        binary_identity, content_fingerprint, instrument_profiles, normalized, recommended_plugins,
+    };
 
     #[test]
     fn aliases_ignore_spaces_and_punctuation() {
@@ -1022,7 +1437,8 @@ mod tests {
 
     #[test]
     fn binary_identity_changes_when_plugin_contents_change() {
-        let root = std::env::temp_dir().join(format!("aura-plugin-identity-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("aura-plugin-identity-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("Contents/MacOS")).unwrap();
         let binary = root.join("Contents/MacOS/plugin");
@@ -1045,13 +1461,25 @@ mod collection_tests {
     fn default_collection_is_immutable_and_rebuilt_on_rescan() {
         let mut manager = PluginCollectionManager::new(["plug.b", "plug.a"]);
         assert!(manager.validate());
-        assert_eq!(manager.active_entries(false).iter().map(|entry| entry.plugin_id.as_str()).collect::<Vec<_>>(),
-            vec!["plug.a", "plug.b"]);
+        assert_eq!(
+            manager
+                .active_entries(false)
+                .iter()
+                .map(|entry| entry.plugin_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["plug.a", "plug.b"]
+        );
         assert!(!manager.rename(DEFAULT_PLUGIN_COLLECTION_ID, "Other"));
         assert!(!manager.delete(DEFAULT_PLUGIN_COLLECTION_ID));
         manager.rescan(["plug.c", "plug.a"]);
-        assert_eq!(manager.active_entries(false).iter().map(|entry| entry.plugin_id.as_str()).collect::<Vec<_>>(),
-            vec!["plug.a", "plug.c"]);
+        assert_eq!(
+            manager
+                .active_entries(false)
+                .iter()
+                .map(|entry| entry.plugin_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["plug.a", "plug.c"]
+        );
         assert!(manager.validate());
     }
 
@@ -1091,10 +1519,22 @@ mod manager_registry_tests {
     use super::*;
 
     fn plugin(id: &str, bitness: u8) -> PluginInspection {
-        PluginInspection { id: id.into(), name: id.into(), vendor: "Vendor".into(), category: "Fx".into(),
-            format: "VST3".into(), version: "1.0".into(), path: format!("/plugins/{id}.vst3"), bitness,
-            supports_f64: true, asio_guard: true, sidechain_inputs: 1, latency_samples: 64,
-            hidden: false, block_reason: None }
+        PluginInspection {
+            id: id.into(),
+            name: id.into(),
+            vendor: "Vendor".into(),
+            category: "Fx".into(),
+            format: "VST3".into(),
+            version: "1.0".into(),
+            path: format!("/plugins/{id}.vst3"),
+            bitness,
+            supports_f64: true,
+            asio_guard: true,
+            sidechain_inputs: 1,
+            latency_samples: 64,
+            hidden: false,
+            block_reason: None,
+        }
     }
 
     #[test]
@@ -1112,7 +1552,10 @@ mod manager_registry_tests {
     fn unsupported_32_bit_plugin_cannot_be_reactivated() {
         let mut registry = PluginManagerRegistry::default();
         assert!(registry.record_scan(plugin("legacy", 32), true));
-        assert_eq!(registry.plugins[0].block_reason, Some(PluginBlockReason::Unsupported32Bit));
+        assert_eq!(
+            registry.plugins[0].block_reason,
+            Some(PluginBlockReason::Unsupported32Bit)
+        );
         assert!(!registry.reactivate("legacy", true));
     }
 

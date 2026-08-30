@@ -1,0 +1,5 @@
+// Step-sequencer edits are converted into normal MIDI notes by the UI/Core
+// bridge, so they share project persistence, undo, and rendering.
+export global StepActions {
+    callback step_toggled(int, int, int, bool);
+}

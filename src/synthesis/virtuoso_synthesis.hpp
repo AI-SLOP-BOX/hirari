@@ -4,7 +4,6 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
-#include <cstdlib>
 #include "../core/audio_processor_graph.hpp"
 
 namespace Aura::Synthesis {
@@ -31,6 +30,16 @@ struct SyntheticVoice {
     // Envelope (ADSR) state
     float envelope = 0.0f;
     float envRelease = 0.9999f; // Linear decay for KS
+    uint32_t rngState = 0x9E3779B9u;
+
+    float nextNoise() {
+        uint32_t x = rngState;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        rngState = x;
+        return (static_cast<float>(x) / 4294967295.0f) * 2.0f - 1.0f;
+    }
     
     void trigger(float f, float v, uint32_t n, double sr) {
         freq = std::max(f, 20.0f); // ゼロ除算・超低音によるバッファオーバーフロー防止
@@ -49,8 +58,8 @@ struct SyntheticVoice {
 
         // Excitation (White Noise Burst / プラック音の生成)
         for (size_t i = 0; i < std::min(activeLen, static_cast<size_t>(128)); ++i) {
-            delayL[i] = (std::rand() / (float)RAND_MAX * 2.0f - 1.0f) * v;
-            delayR[i] = (std::rand() / (float)RAND_MAX * 2.0f - 1.0f) * v;
+            delayL[i] = nextNoise() * v;
+            delayR[i] = nextNoise() * v;
         }
         readPosL = readPosR = 0;
     }

@@ -37,6 +37,12 @@ public:
     virtual std::string getDriverName() const = 0;
     virtual double getSampleRate() const = 0;
     virtual uint32_t getBufferSize() const = 0;
+    virtual bool isSilentFallback() const { return false; }
+    virtual bool isRunning() const { return false; }
+    virtual const std::string& lastError() const {
+        static const std::string empty;
+        return empty;
+    }
 };
 
 } // namespace Aura::IO::Drivers

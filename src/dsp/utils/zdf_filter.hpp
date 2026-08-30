@@ -16,9 +16,15 @@ class ZDFFilter {
 public:
     enum class Type { LowPass, HighPass, BandPass, Notch };
 
-    ZDFFilter() : m_s1(0), m_s2(0), m_sampleRate(44100.0) {}
+    ZDFFilter() : m_sampleRate(44100.0), m_s1(0), m_s2(0) {}
 
-    void setSampleRate(double sr) { m_sampleRate = sr; }
+    void setSampleRate(double sr) {
+        if (std::isfinite(sr) && sr > 1000.0) {
+            m_sampleRate = sr;
+            reset();
+            update(m_cutoff, m_resonance, m_type);
+        }
+    }
 
     /**
      * @brief UPDATE: Calculates TPT coefficients (g, R).
@@ -29,16 +35,29 @@ public:
     }
 
     void update(float cutoff, float resonance, Type type = Type::LowPass) {
-        float g = std::tan(3.14159f * cutoff / (float)m_sampleRate);
-        float r = 1.0f - resonance;
+        const float sr = static_cast<float>(m_sampleRate);
+        const float safeCutoff = std::clamp(std::isfinite(cutoff) ? cutoff : 1000.0f,
+                                            5.0f, sr * 0.49f);
+        const float safeResonance = std::clamp(std::isfinite(resonance) ? resonance : 0.0f,
+                                               0.0f, 0.99f);
+        float g = std::tan(3.14159265358979323846f * safeCutoff / sr);
+        float r = 1.0f - safeResonance;
         m_g = g;
         m_k = 2.0f * r;
         m_type = type;
+        m_cutoff = safeCutoff;
+        m_resonance = safeResonance;
         
         // Predistortion factor for frequency accuracy near Nyquist
         m_a1 = 1.0f / (1.0f + m_g * (m_g + m_k));
         m_a2 = m_g * m_a1;
         m_a3 = m_g * m_a2;
+        if (!std::isfinite(m_a1) || !std::isfinite(m_a2) || !std::isfinite(m_a3)) {
+            m_g = 0.0f;
+            m_a1 = 1.0f;
+            m_a2 = 0.0f;
+            m_a3 = 0.0f;
+        }
     }
 
     /**
@@ -67,7 +86,8 @@ public:
 private:
     double m_sampleRate;
     float m_s1, m_s2; // State variables
-    float m_g, m_k, m_a1, m_a2, m_a3; // Coefficients
+    float m_g = 0.0f, m_k = 2.0f, m_a1 = 1.0f, m_a2 = 0.0f, m_a3 = 0.0f; // Coefficients
+    float m_cutoff = 1000.0f, m_resonance = 0.0f;
     Type m_type = Type::LowPass;
 };
 

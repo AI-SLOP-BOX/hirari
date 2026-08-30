@@ -1,0 +1,40 @@
+import { ScrollView } from "std-widgets.slint";
+import { Style } from "../style.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { Z_MixerStrip } from "./mixer_strip.slint";
+import { Z_Track } from "../model/track_model.slint";
+
+export component Z_FullMixer {
+    in property <[Z_Track]> tracks;
+    in property <[float]> pks;
+    in property <[float]> pks_h;
+    in property <int> meter_mode;
+    callback close();
+    VerticalLayout {
+        padding: 12px; spacing: 16px;
+        Rectangle {
+            height: 32px; background: Style.surface; border_radius: 2px;
+            HorizontalLayout {
+                padding: 6px; spacing: 12px;
+                Text { text: "Mixer"; font-size: 11px; color: Style.brand; font-weight: 950; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Z_IconButton { icon: "✕"; clicked => { close(); } }
+            }
+        }
+        ScrollView {
+            horizontal-stretch: 1; vertical-stretch: 1;
+            HorizontalLayout {
+                spacing: 2px; padding: 4px;
+                for trk[idx] in tracks : Z_MixerStrip {
+                    name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan;
+                    peak: pks[Math.mod(idx, pks.length)]; pk_h: pks_h[Math.mod(idx, pks_h.length)]; tid: trk.id;
+                    is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert;
+                    fx: trk.fx; compact: false; send_lvl: trk.send_lvl;
+                    filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
+                    meter_mode: meter_mode; group_id: trk.group_id;
+                    saturate_active: trk.saturate_active; correlation: trk.correlation;
+                }
+            }
+        }
+    }
+}

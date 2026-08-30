@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <cmath>
 
 namespace Aura::DSP::Effects {
 
@@ -19,13 +20,15 @@ public:
     }
 
     float process(float in) {
-        float bufferOut = m_delayBuffer[m_idx];
-        float out = -m_feedback * in + bufferOut;
-        m_delayBuffer[m_idx] = in + m_feedback * bufferOut;
-
-        m_idx = (m_idx + 1) & m_mask;
-        return out;
+        if (m_delayBuffer.empty()) return in;
+        const float safeIn = std::isfinite(in) ? in : 0.0f;
+        const float delayed = m_delayBuffer[m_idx];
+        const float output = delayed - m_feedback * safeIn;
+        m_delayBuffer[m_idx] = safeIn + m_feedback * delayed;
+        m_idx = (m_idx + 1u) & m_mask;
+        return std::isfinite(output) ? output : 0.0f;
     }
+
 
 private:
     std::vector<float> m_delayBuffer;

@@ -64,6 +64,18 @@ public:
      */
     virtual void drawNative(float x, float y, float w, float h, float p1, float p2, float p3, uint32_t c1, uint32_t c2, float type) = 0;
 
+    /**
+     * @struct RenderingTelemetry
+     * @brief Professional performance monitoring for the graphics engine.
+     */
+    struct RenderingTelemetry {
+        float fps;
+        uint32_t drawCallCount;
+        uint32_t vertexCount;
+        float gpuLoad; // If supported by backend
+    };
+
+    virtual RenderingTelemetry getTelemetry() const = 0;
     virtual std::string getBackendName() const = 0;
 };
 

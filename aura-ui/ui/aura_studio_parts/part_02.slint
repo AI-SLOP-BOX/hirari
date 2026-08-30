@@ -1,0 +1,485 @@
+                            Text { text: v; font-size: 9px; color: root.snap_val == v ? Style.brand : (area_sn.has_hover ? #fff : #888); x: 10px; vertical-alignment: center; }
+                            area_sn := TouchArea { clicked => { root.snap_val = v; snap_open = false; TransportActions.set_snap(v); } }
+                        }
+                    }
+                }
+            }
+                Rectangle {
+                    height: 28px;
+                    background: #26282B;
+                    Text { text: "ARRANGEMENT"; x: 8px; color: Style.text-dim; font-size: 10px; vertical-alignment: center; }
+                }
+
+                // Timeline Top Header (Scrollable AREA)
+                Rectangle {
+                    // The stacked global lanes are taller than the old 50px
+                    // Lane spacer. Keeping this container at the real lane
+                    // height prevents tempo, markers, and the ruler from
+                    // painting over the first track row.
+                    height: production_mode ? (show_markers ? 96px : 74px) : (show_markers ? 244px : 222px);
+                    vertical-stretch: 0;
+                    clip: true;
+                    background: Style.surface;
+                    if (production_mode) : Rectangle {
+                        height: 24px; background: Style.surface;
+                        HorizontalLayout {
+                            padding-left: 10px; padding-right: 10px; spacing: 16px;
+                            Text { text: "BPM"; font-size: Style.font-xxs; color: Style.text-dim; vertical-alignment: center; }
+                            Text { text: Math.floor(Style.bpm * 100) / 100 + " BPM"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; font-weight: 700; vertical-alignment: center; }
+                            Text { text: "4/4"; font-size: Style.font-xxs; color: Style.text-dim; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                    if (!production_mode) : ScrollView {
+                        // Keep the scroll viewport inside the lane stack.
+                        // Without an explicit height Slint can use the
+                        // unbounded content height and push the arrangement
+                        // rows below the window.
+                        width: 100%;
+                        height: production_mode ? (show_markers ? 96px : 74px) : (show_markers ? 244px : 222px);
+                        viewport-height: production_mode ? (show_markers ? 96px : 74px) : (show_markers ? 244px : 222px);
+                        vertical-stretch: 0;
+                        viewport-width: project_len * Style.grid-step * root.z_lvl;
+                        viewport-x <=> main_scroll_x;
+                        VerticalLayout {
+                            // --- GLOBAL TRACKS (TEMPO / MARKER / VIDEO) ---
+                            if (!production_mode) : Z_GlobalTempoEditorView {
+                                set-tempo-event(beat, bpm, ramp) => { TransportActions.set_tempo_event(beat, bpm, ramp); }
+                                remove-tempo-event(beat) => { TransportActions.remove_tempo_event(beat); }
+                                move-tempo-event(from, to) => { TransportActions.move_tempo_event(from, to); }
+                                bpm: Style.bpm;
+                                event_beat: root.ph;
+                                tempo_event_beats: root.tempo_event_beats;
+                                tempo_event_bpms: root.tempo_event_bpms;
+                            }
+                            Rectangle { height: 1px; background: Style.border; }
+                            // Video thumbnails are an editor view, not part of the
+                            // everyday arrange surface. Keeping them in Advanced
+                            // mode prevents a large empty lane from splitting the
+                            // ruler and the tracks.
+                            if (!production_mode) : Rectangle {
+                                height: 42px; background: #000; border_width: 1px; border_color: Style.border;
+                                HorizontalLayout {
+                                    padding: 2px; spacing: 2px;
+                                    for i in 12 : Rectangle {
+                                        width: 72px; height: 100%; background: Style.surface; border_radius: 1px;
+                                        Text { text: "FRM " + (i * 240); font-size: Style.font-xxs; color: #333; x: 4px; y: 4px; }
+                                        Rectangle { x: 4px; y: 12px; width: 64px; height: 24px; background: Style.brand; opacity: 0.1; }
+                                    }
+                                }
+                                Text { text: "VIDEO"; font-size: Style.font-xxs; color: #6E6E73; x: 8px; y: 2px; font-weight: 950; }
+                            }
+
+                            Rectangle { height: 1px; background: Style.border; }
+                            Z_GlobalMarkersView { markers: root.markers; z_lvl: root.z_lvl; ph: root.ph; }
+                            
+                            // The expanded song-structure navigator is useful
+                            // during arrangement editing, but too noisy for the
+                            // default mixer/arrange view.
+                            if (!production_mode) : Rectangle {
+                                height: 38px; background: Style.surface; border_width: 1px; border_color: #000; clip: true;
+                                HorizontalLayout {
+                                    padding: 4px; spacing: 8px; alignment: center;
+                                    for m in markers : Rectangle {
+                                        height: 30px; width: (m.beat * 1.5).clamp(40.0, 120.0) * 1px;
+                                        background: m.color.with-alpha(0.15);
+                                        border_width: 1px; border_color: m.color;
+                                        Text { text: m.label; font-size: Style.font-xxs; color: m.color; vertical-alignment: center; horizontal-alignment: center; font-weight: 950; }
+                                        Rectangle { width: 100%; height: 100%; background: @linear-gradient(45deg, transparent 0%, #fff.with-alpha(0.1) 100%); }
+                                    }
+                                    Rectangle { y: parent.height - 1.5px; height: 1.5px; width: 100%; background: #000; }
+                                }
+                            }
+                                    
+                                    // Primary Ruler (Digital Industrial Style)
+                                    Rectangle {
+                                        height: 30px; background: Style.surface;
+                                        Rectangle { y: parent.height - 1px; height: 1px; background: Style.border; }
+                                        Rectangle { x: loop_st * Style.grid-step * root.z_lvl; width: (loop_ed - loop_st) * Style.grid-step * root.z_lvl; height: 100%; background: Style.cycle; opacity: loop_active ? 0.28 : 0.08; }
+                                        for i in 128 : Rectangle { 
+                                            x: i * Style.grid-step * root.z_lvl; width: 1px; height: 100%; opacity: Math.mod(i,16)==0 ? 1.0 : (Math.mod(i,4)==0 ? 0.7 : 0.35); background: (Math.mod(i,16)==0)?Style.grid-bar:(Math.mod(i,4)==0 ? Style.grid-beat : Style.grid-subbeat);
+                                            if (Math.mod(i,4)==0) : Text { text: tm_beats ? ("" + (i/4 + 1)) : Math.floor(i/(Style.bpm/60.0*4.0)) + ":" + Math.floor(Math.mod(i/(Style.bpm/60.0), 1.0)*60.0); font-size: 8px; color: (Math.mod(i,16)==0)?#888:#6E6E73; y: 12px; x: 4px; font-weight: 900; }
+                                        }
+                                        TouchArea { 
+                                            clicked => { TransportActions.scrub(self.mouse_x / 1px / (Style.grid-step / 1px * root.z_lvl)); }
+                                            moved => { if (self.pressed) { TransportActions.scrub(self.mouse_x / 1px / (Style.grid-step / 1px * root.z_lvl)); } } 
+                                        }
+                                        
+                                        // Punch Markers (Industrial Red Brackets)
+                                        if (punch_enabled) : Rectangle {
+                                            x: punch_in * Style.grid-step * root.z_lvl; width: (punch_out - punch_in) * Style.grid-step * root.z_lvl; height: 100%;
+                                            background: Style.record.with-alpha(0.05);
+                                            Rectangle { x: 0; width: 2px; height: 100%; background: Style.record; }
+                                            Rectangle { x: parent.width - 2px; width: 2px; height: 100%; background: Style.record; }
+                                            Text { text: "PUNCH"; font-size: Style.font-xxs; color: Style.record; x: 8px; y: 2px; font-weight: 500; opacity: 0.45; }
+                                        }
+
+                                        // Playhead (High Visibility)
+                                        Rectangle {
+                                            x: root.ph * Style.grid-step * root.z_lvl - 3px; width: 7px; height: 100%; background: Style.shadow-bottom; opacity: 0.35;
+                                        }
+                                        Rectangle { 
+                                            x: root.ph * Style.grid-step * root.z_lvl - 1px; width: 3px; height: 100%; background: Style.playhead; 
+                                            // Head
+                                            Path { y: 0; width: 14px; height: 10px; x: -6px; fill: Style.playhead; MoveTo { x: 0; y: 0; } LineTo { x: 14; y: 0; } LineTo { x: 7; y: 10; } Close { } }
+                                        }
+
+                                        // Loop Handles (Industrial Brackets)
+                                        Rectangle {
+                                            x: loop_st * Style.grid-step * root.z_lvl; width: 10px; height: 16px;
+                                            Rectangle { width: 2px; height: 100%; background: Style.brand; x: 0; }
+                                            Rectangle { width: 6px; height: 2px; background: Style.brand; y: 0; }
+                                            TouchArea { moved => { if (self.pressed) { loop_st = (self.mouse_x + parent.x - 5px) / (Style.grid-step / 1px * root.z_lvl * 1px); } } } 
+                                        }
+                                        Rectangle {
+                                            x: loop_ed * Style.grid-step * root.z_lvl - 10px; width: 10px; height: 16px;
+                                            Rectangle { width: 2px; height: 100%; background: Style.brand; x: 8px; }
+                                            Rectangle { width: 6px; height: 2px; background: Style.brand; y: 0; x: 4px; }
+                                            TouchArea { moved => { if (self.pressed) { loop_ed = (self.mouse_x + parent.x - 5px) / (Style.grid-step / 1px * root.z_lvl * 1px); } } }
+                                        }
+                                    }
+
+                                    // Marker Track
+                                    if (show_markers) : Rectangle {
+                                        height: 22px; background: Style.surface; border_width: 1px; border_color: Style.border;
+                                        for m[idx] in markers : m_lane := Rectangle { 
+                                            x: m.beat * Style.grid-step * root.z_lvl; width: 1px; height: 100%; background: m.color.with-alpha(0.6);
+                                            Rectangle { 
+                                                x: 0; width: 60px; height: 16px; background: m.color.with-alpha(0.12); border_radius: 1px;
+                                                Text { text: m.label; font-size: 8px; font-weight: 900; color: m.color; x: 4px; vertical-alignment: center; } 
+                                                TouchArea { 
+                                                    mouse-cursor: ew-resize;
+                                                    moved => { if (self.pressed) { TimelineActions.marker_moved(idx, (self.mouse_x / 1px + parent.x / 1px + m_lane.x / 1px) / (Style.grid-step / 1px * root.z_lvl)); } }
+                                                    clicked => { TransportActions.scrub(m.beat); } 
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // --- INDUSTRIAL TEMPO & SIGNATURE LANE ---
+                                    Rectangle {
+                                        height: 18px; background: Style.surface;
+                                        Rectangle { y: 0; height: 1px; background: Style.border; }
+                                        HorizontalLayout { 
+                                            padding-left: 10px; spacing: 14px;
+                                            Text { text: "GLOBAL TEMPO: " + Math.floor(Style.bpm * 100)/100 + " BPM"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; vertical-alignment: center; }
+                                            Text { text: "METER: 4/4"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; vertical-alignment: center; }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Text { text: "SYNC: INTERNAL INT"; font-size: Style.font-xxs; color: Style.border; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                HorizontalLayout {
+                    // The arrangement body must consume the remaining
+                    // window height. Without vertical stretch the two
+                    // ScrollViews collapse to zero after the ruler, leaving
+                    // a convincing but unusable black canvas.
+                    vertical-stretch: 1;
+                    height: 100%;
+                    // Fixed Track Headers Area
+                    VerticalLayout {
+                        width: Style.header-w;
+                        vertical-stretch: 1;
+                        ScrollView {
+                            height: 520px;
+                            vertical-stretch: 0;
+                            viewport-height: 520px;
+                            viewport-y <=> track_scroll_y;
+                            VerticalLayout {
+                                for am_trk_h[idx] in root.tracks : Rectangle {
+                                    // Visibility check: If parent is folded, hide this track
+                            // parent_id is a 1-based model reference. Guard both
+                            // ends before indexing: deleted/reordered parents must
+                            // hide safely instead of taking down the view.
+                            property <bool> parent_exists: am_trk_h.parent_id > 0 && am_trk_h.parent_id <= root.tracks.length;
+                            property <bool> is_hidden: parent_exists && root.tracks[am_trk_h.parent_id - 1].folded;
+                                    // Keep header rows pixel-aligned with the
+                                    // corresponding arrangement rows below.
+                                    height: is_hidden ? 0px : (am_trk_h.expanded ? (am_trk_h.show_automation ? 240px : (am_trk_h.clips.length > 2 ? 180px : 140px)) : 52px); 
+                                    clip: true;
+                                    background: root.sel_idx == idx ? Style.selection : (am_trk_h.is_folder ? Style.surface : (Math.mod(idx, 2) == 0 ? Style.panel : Style.base));
+                                    
+                                    Rectangle { x: 0; width: 4px; height: 100%; background: am_trk_h.color; opacity: 0.82; }
+                                    if (am_trk_h.is_folder) : Rectangle { x: 0; width: 100%; height: 100%; background: am_trk_h.color; opacity: 0.05; }
+
+                                    HorizontalLayout {
+                                        padding: 8px; spacing: 10px;
+                                        padding-left: (am_trk_h.parent_id != 0) ? 24px : 10px;
+                                        
+                                        Z_IconButton { compact: true;
+                                            icon: am_trk_h.is_folder ? (am_trk_h.folded ? "▣" : "▤") : (am_trk_h.expanded ? "▼" : "▶"); 
+                                            clicked => { if (am_trk_h.is_folder) { ProjectActions.toggle_folder(am_trk_h.id); } else { ProjectActions.toggle_expand(am_trk_h.id); } } 
+                                        }
+
+                                        Rectangle {
+                                            width: 24px; height: 24px; border-radius: 4px;
+                                            background: am_trk_h.color.with-alpha(0.22); border-width: 1px; border-color: am_trk_h.color;
+                                            Text { text: am_trk_h.icon; width: 100%; height: 100%; font-size: 12px; color: am_trk_h.color; horizontal-alignment: center; vertical-alignment: center; }
+                                        }
+                                        
+                                        // VCA / Group Tag
+                                        if (am_trk_h.group_id > 0) : Rectangle {
+                                            width: 14px; height: 14px; background: #000; border_radius: 2px; border_width: 1px; border_color: Style.brand;
+                                            Text { text: "" + am_trk_h.group_id; font-size: Style.font-xxs; color: Style.brand; horizontal-alignment: center; vertical-alignment: center; font-weight: 950; }
+                                        }
+
+                                        VerticalLayout { 
+                                            alignment: center; horizontal-stretch: 1;
+                                            Text { text: "\{idx < 9 ? "0" : ""}\{idx + 1} | \{am_trk_h.name}"; font-size: 11px; font-weight: 600; color: am_trk_h.mute ? Style.text-secondary : Style.text-primary; overflow: elide; }
+                                            if (am_trk_h.frozen) : Text { text: "FROZEN" + (am_trk_h.frozen_sample_rate > 0 ? " " + am_trk_h.frozen_sample_rate + "Hz" : ""); font-size: 8px; color: Style.brand; font-weight: 800; }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text { text: am_trk_h.input; width: 34px; font-size: Style.font-xxs; color: Style.brand; font-weight: 900; overflow: elide; }
+                                                Text { text: "LAT: " + (idx * 0.2) + "ms"; width: 42px; font-size: Style.font-xxs; color: Style.text-muted; overflow: elide; }
+                                                Rectangle {
+                                                    width: 48px; height: 4px; background: Style.border; border_radius: 2px;
+                                                    Rectangle { width: am_trk_h.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border_radius: 2px; }
+                                                    TouchArea { mouse-cursor: ew-resize; moved => { if (self.pressed) { MixerActions.fader_changed(am_trk_h.id, (self.mouse_x / parent.width).clamp(0, 1)); } } }
+                                                }
+                                                Z_Knob { compact: true; show-value: true; value: am_trk_h.pan; bipolar: true; display-value: am_trk_h.pan == 0.5 ? "C" : (am_trk_h.pan < 0.5 ? "L" + Math.round((0.5 - am_trk_h.pan) * 128.0) : "R" + Math.round((am_trk_h.pan - 0.5) * 127.0)); accent-col: Style.ok; changed(v) => { MixerActions.pan_changed(am_trk_h.id, v); } }
+                                            }
+                                        }
+                                        
+                                        if (!am_trk_h.is_folder) : HorizontalLayout {
+                                            spacing: 4px;
+                                            Z_IconButton { icon: "O"; compact: true; active: !am_trk_h.mute; active-col: Style.ok; clicked => { CommandActions.palette_exec("TOGGLE TRACK ACTIVE " + am_trk_h.id); } }
+                                            Z_IconButton { icon: "I"; compact: true; active: am_trk_h.monitor; active-col: Style.brand; clicked => { MixerActions.toggle_monitor(am_trk_h.id); } }
+                                            Z_IconButton { icon: "M"; compact: true; active: am_trk_h.mute; active-col: Style.brand; clicked => { MixerActions.toggle_mute(am_trk_h.id); } }
+                                            Z_IconButton { icon: "S"; compact: true; active: am_trk_h.solo; active-col: Style.solo; clicked => { MixerActions.toggle_solo(am_trk_h.id); } }
+                                            Z_IconButton { icon: "R"; compact: true; active: am_trk_h.armed; active-col: Style.record; clicked => { ProjectActions.toggle_arm(am_trk_h.id); } }
+                                            Z_IconButton { icon: "A"; compact: true; active: am_trk_h.show_automation; clicked => { AutomationActions.toggle_automation(am_trk_h.id); } }
+                                            Z_IconButton { icon: "AG"; compact: true; active-col: Style.ok; clicked => { EditorActions.apply_gain_staging(am_trk_h.id, -6.0); } }
+                                            // Track freeze is deliberately exposed as two explicit actions:
+                                            // freezing is a render-affecting operation and should never be
+                                            // toggled accidentally by a single ambiguous button.
+                                            Z_IconButton { icon: "FZ"; compact: true; active-col: Style.brand; clicked => { CommandActions.palette_exec("FREEZE TRACK " + am_trk_h.id); } }
+                                            Z_IconButton { icon: "UF"; compact: true; active-col: Style.record; clicked => { CommandActions.palette_exec("UNFREEZE TRACK " + am_trk_h.id); } }
+                                        }
+                                    }
+
+                                    // Macro Exposure
+                                    if (am_trk_h.expanded && !am_trk_h.is_folder) : VerticalLayout {
+                                        y: 56px; padding: 12px; spacing: 10px;
+                                        Rectangle { height: 1px; background: Style.border; }
+                                        Text { text: "Track Controls"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                                        HorizontalLayout {
+                                            spacing: 16px; alignment: start;
+                                            for m_idx in 4 : Z_Knob {
+                                                label: "PRM " + (m_idx + 1);
+                                                value: root.track_macros[m_idx];
+                                                accent-col: Style.brand;
+                                                changed(v) => { PluginActions.macro_changed(m_idx, v); }
+                                            }
+                                        }
+                                    }
+                                }    Rectangle { height: 1px; background: Style.border; width: 220px; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Main Scrollable Area (Clips)
+                    ScrollView {
+                        horizontal-stretch: 1;
+                        height: 520px;
+                        vertical-stretch: 0;
+                        viewport-height: 520px;
+                        viewport-width: project_len * Style.grid-step * root.z_lvl;
+                        viewport-x <=> main_scroll_x;
+                        viewport-y <=> track_scroll_y;
+                        
+                        VerticalLayout {
+                                for am_trk[idx] in root.tracks : Rectangle {
+                                    property <bool> parent_exists: am_trk.parent_id > 0 && am_trk.parent_id <= root.tracks.length;
+                                    property <bool> is_hidden: parent_exists && root.tracks[am_trk.parent_id - 1].folded;
+                                height: is_hidden ? 0px : (am_trk.expanded ? (am_trk.show_automation ? 240px : (am_trk.clips.length > 2 ? 180px : 140px)) : 52px); 
+                                clip: true;
+                                background: root.sel_idx == idx ? #1E1E1E : Style.panel;
+                                Rectangle { width: 100%; height: 100%; background: #000; opacity: am_trk.mute ? 0.4 : 0; }
+
+                                Rectangle { 
+                                    width: project_len * Style.grid-step * root.z_lvl;
+                                    background: Style.base; 
+                                    TouchArea { 
+                                        clicked => { TransportActions.scrub(self.mouse_x / 1px / (Style.grid-step / 1px * root.z_lvl)); }
+                                        moved => { 
+                                            if (self.pressed) { 
+                                                if (active_tool == 0) {
+                                                    if (!is_selecting) { is_selecting = true; sel_st_x = self.pressed_x / 1px; sel_st_y = self.pressed_y / 1px; }
+                                                    sel_cur_x = self.mouse_x / 1px; sel_cur_y = self.mouse_y / 1px;
+                                                } else {
+                                                    TransportActions.scrub(self.mouse_x / 1px / (Style.grid-step / 1px * root.z_lvl));
+                                                }
+                                            }
+                                        }
+                                        pointer-event(e) => { 
+                                            if (e.kind == PointerEventKind.up && is_selecting) { 
+                                                is_selecting = false; 
+                                                TimelineActions.area_select(
+                                                    am_trk.id,
+                                                    Math.min(sel_st_x, sel_cur_x) / (Style.grid-step / 1px * root.z_lvl), 
+                                                    Math.min(sel_st_y, sel_cur_y),
+                                                    Math.max(sel_st_x, sel_cur_x) / (Style.grid-step / 1px * root.z_lvl),
+                                                    Math.max(sel_st_y, sel_cur_y)
+                                                );
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Visual Lasso Rectangle
+                                    if (is_selecting) : Rectangle {
+                                        x: Math.min(sel_st_x, sel_cur_x) * 1px; y: Math.min(sel_st_y, sel_cur_y) * 1px;
+                                        width: Math.abs(sel_st_x - sel_cur_x) * 1px; height: Math.abs(sel_st_y - sel_cur_y) * 1px;
+                                        background: Style.brand.with-alpha(0.2); border_width: 1px; border_color: Style.brand;
+                                    }
+                                    for am_c in am_trk.clips : Rectangle {
+                                        x: (am_c.start_beat + (am_trk.delay_ms / 1000.0) * (Style.bpm / 60.0)) * Style.grid-step * root.z_lvl; 
+                                        width: am_c.length_beats * Style.grid-step * root.z_lvl; 
+                                        height: 38px * v_z_lvl; y: 3px + (am_c.layer * 42px * v_z_lvl); 
+                                        background: am_c.color.with-alpha(sel_cid == am_c.id || am_c.selected ? 0.58 : (am_trk.mute ? 0.08 : 0.22)); 
+                                        border_width: 1px; 
+                                        border_color: am_c.missing ? Style.record : (sel_cid == am_c.id || am_c.selected ? Style.text-primary : Style.region-border); 
+                                        border_radius: 3px; opacity: 1.0; clip: true;
+
+                                        // Selection is an inset state, not a heavy
+                                        // outer frame. Mute remains visible without
+                                        // making the region look deleted.
+                                        if (sel_cid == am_c.id || am_c.selected) : Rectangle {
+                                            x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px;
+                                            border_width: 1px; border_color: Style.selection; border_radius: 2px;
+                                        }
+                                        if (am_trk.mute) : Rectangle {
+                                            width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.42);
+                                            Text { text: "MUTED"; x: 6px; y: 15px; font-size: Style.font-xxs; color: Style.text-tertiary; font-family: Style.numeric-font; }
+                                        }
+
+                                        // --- INDUSTRIAL WAVEFORM RENDERING ---
+                                        HorizontalLayout {
+                                            spacing: 1px; padding: 1px; alignment: center;
+                                            for p in am_c.points : Rectangle {
+                                                width: 1.5px; height: Math.abs(p) * parent.height * 0.95; 
+                                                background: am_c.color; opacity: 0.7; border_radius: 0.5px;
+                                                y: (parent.height - self.height) / 2.0;
+                                            }
+                                        }
+
+                                        // Logic-style region header: name stays readable above the waveform.
+                                        Rectangle {
+                                            z: 10; x: 0; y: 0; width: 100%; height: 12px;
+                                            background: @linear-gradient(180deg, am_c.color.with-alpha(0.82) 0%, am_c.color.with-alpha(0.58) 100%);
+                                            Text { text: am_c.name; x: 5px; width: parent.width - 10px; font-size: Style.font-xxs; color: #FFFFFF; vertical-alignment: center; overflow: elide; }
+                                        }
+
+                                        if (root.loop_active && root.loop_st <= am_c.start_beat + am_c.length_beats && root.loop_ed >= am_c.start_beat) : Text {
+                                            text: "↻"; x: parent.width - 16px; y: 1px; width: 12px; height: 12px;
+                                            font-size: 10px; color: Style.cycle; horizontal-alignment: center; vertical-alignment: center;
+                                        }
+
+                                        // --- CLIP GAIN LINE & HANDLE ---
+                                        Rectangle {
+                                            y: (1.2 - am_c.gain.clamp(0, 1.2)) / 1.2 * parent.height;
+                                            width: 100%; height: 1.5px; background: #fff.with-alpha(0.4);
+                                            Rectangle {
+                                                x: parent.width / 2.0 - 4px; y: -3px; width: 8px; height: 8px; background: #fff; border_radius: 1px;
+                                                TouchArea { moved => { if (self.pressed) { EditorActions.clip_gain_changed(am_c.id, (am_c.gain - (self.mouse_y / 1px - self.pressed_y / 1px) / 20.0).clamp(0, 1.2)); } } }
+                                            }
+                                        }
+
+                                        // --- PRECISION FADES (CURVED) ---
+                                        Path { 
+                                            width: am_c.fade_in * parent.width; height: 100%; stroke: #fff; stroke_width: 1.5px; opacity: 0.6; 
+                                            MoveTo { x: 0; y: parent.height / 1px; } 
+                                            QuadraticTo { control-x: am_c.fade_in * parent.width / (2.0 * 1px); control-y: 0; x: am_c.fade_in * parent.width / 1px; y: 0; }
+                                        }
+                                        Rectangle {
+                                            x: 0px; y: 12px; width: am_c.fade_in * parent.width; height: parent.height - 12px;
+                                            background: #FFFFFF.with-alpha(0.08);
+                                        }
+                                        Path { 
+                                            x: (1.0 - am_c.fade_out) * parent.width; width: am_c.fade_out * parent.width; height: 100%; stroke: #fff; stroke_width: 1.5px; opacity: 0.6; 
+                                            MoveTo { x: 0; y: 0; } 
+                                            QuadraticTo { control-x: am_c.fade_out * parent.width / (2.0 * 1px); control-y: 0; x: am_c.fade_out * parent.width / 1px; y: parent.height / 1px; }
+                                        }
+                                        Rectangle {
+                                            x: (1.0 - am_c.fade_out) * parent.width; y: 12px;
+                                            width: am_c.fade_out * parent.width; height: parent.height - 12px;
+                                            background: #FFFFFF.with-alpha(0.08);
+                                        }
+                                        
+                                        // Fade Brackets
+                                        Rectangle { x: am_c.fade_in * parent.width - 4px; width: 8px; height: 12px; background: #fff; border_radius: 1px; TouchArea { moved => { if (self.pressed) { EditorActions.fade_changed(am_c.id, (self.mouse_x - self.pressed_x) / (am_c.length_beats * Style.grid-step / 1px * root.z_lvl * 1px), 0); } } } }
+                                        Rectangle { x: (1.0 - am_c.fade_out) * parent.width - 4px; width: 8px; height: 12px; background: #fff; border_radius: 1px; TouchArea { moved => { if (self.pressed) { EditorActions.fade_changed(am_c.id, 0, -(self.mouse_x - self.pressed_x) / (am_c.length_beats * Style.grid-step / 1px * root.z_lvl * 1px)); } } } }
+                                        
+                                        // Keep the region title in one place. The header above owns
+                                        // the name; a second title at y=2 caused visible text overlap.
+                                        if (am_c.missing) : Text {
+                                            text: "MISSING"; font-size: Style.font-xxs; color: Style.record;
+                                            x: 6px; y: 14px; font-weight: 700; opacity: 0.95;
+                                        }
+
+                                        // Interaction Layer
+                                        TouchArea {
+                                            mouse-cursor: root.active_tool == 1 ? crosshair : pointer;
+                                            clicked => { 
+                                                if (root.active_tool == 1) { EditorActions.split_clip(am_c.id, (self.mouse_x / 1px / (Style.grid-step / 1px * root.z_lvl)) + am_c.start_beat); }
+                                                else { root.sel_idx = idx; root.sel_cid = am_c.id; fc.focus(); ProjectActions.select_track(am_trk.id); }
+                                            }
+                                            moved => {
+                                                if (self.pressed && root.active_tool == 0 && Math.abs(self.mouse_x - self.pressed_x) > 4px) { 
+                                                    EditorActions.clip_moved(am_c.id, (self.mouse_x - self.pressed_x) / (Style.grid-step / 1px * root.z_lvl * 1px));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    }
+                                    Rectangle { 
+                                        x: root.ph * Style.grid-step * root.z_lvl; width: 1.5px; height: 100%; background: Style.ok; z: 40; 
+                                        // Singularity Infinity Trail
+                                        for i in [1, 2, 3, 4, 5] : Rectangle {
+                                            x: -i * 8px * (1.0 / root.z_lvl); width: 2px; height: 100%; background: Style.ok; opacity: 0.2 / i;
+                                        }
+                                    }
+                                    
+                                    if (am_trk.show_automation) : VerticalLayout {
+                                        for lane[l_idx] in am_trk.auto_lanes : Rectangle {
+                                            height: 80px; width: 100%; background: lane.color.with-alpha(0.05);
+                                            Rectangle { y: parent.height - 1px; height: 1px; background: Style.border; }
+                                            Text { text: lane.name; x: 8px; y: 4px; font-size: Style.font-xxs; color: lane.color; font-weight: 900; opacity: 0.6; }
+                                            Text { text: "×"; x: parent.width - 22px; y: 2px; width: 18px; height: 18px; horizontal-alignment: center; font-size: Style.font-xs; color: lane.color; opacity: 0.65;
+                                                TouchArea { clicked => { AutomationActions.clear_automation_lane(am_trk.id, l_idx); } }
+                                            }
+                                            
+                                            // Points Rendering
+                                            // Industrial Automation Points
+                                            for pt[p_idx] in lane.points : Rectangle {
+                                                x: (pt.beat * Style.grid-step * root.z_lvl) - 5px; 
+                                                y: ((1.0 - pt.value) * (parent.height / 1px - 20.0) + 10.0) * 1px - 5px;
+                                                width: 20px; height: 20px; background: transparent; border_radius: 10px;
+                                                Rectangle { x: 5px; y: 5px; width: 10px; height: 10px; background: lane.color; border_radius: 2px; border_width: 1px; border_color: #fff; }
+                                                TouchArea { moved => { if (self.pressed) { 
+                                                    AutomationActions.automation_point_moved(am_trk.id, l_idx, p_idx, 
+                                                        (self.mouse_x / 1px + parent.x / 1px - 5.0) / (Style.grid-step / 1px * root.z_lvl), 
+                                                        (parent.height / 1px - (self.mouse_y / 1px + parent.y / 1px)) / (parent.height / 1px), pt.curve); 
+                                                 } } }
+                                            }
+                                            
+                                            // Dynamic Bezier Segments (High-Vis)
+                                            if (lane.points.length > 1) : Rectangle {
+                                                width: 100%; height: 100%;
+                                                for i in (lane.points.length - 1) : Path {
+                                                    width: 100%; height: 100%; stroke: lane.color; stroke_width: 2px; opacity: 0.8;
+                                                MoveTo { x: lane.points[i].beat * Style.grid-step * root.z_lvl / 1px; y: (1.0 - lane.points[i].value) * (parent.height / 1px - 20.0) + 10.0; }
+                                                QuadraticTo {
+                                                    control-x: (lane.points[i].beat + lane.points[i+1].beat) / 2.0 * Style.grid-step * root.z_lvl / 1px;
+                                                    control-y: ((1.0 - lane.points[i].value) * (parent.height / 1px - 20.0) + (1.0 - lane.points[i+1].value) * (parent.height / 1px - 20.0)) / 2.0 + 10.0 + (lane.points[i].curve * 30.0);
+                                                    x: lane.points[i+1].beat * Style.grid-step * root.z_lvl / 1px; y: (1.0 - lane.points[i+1].value) * (parent.height / 1px - 20.0) + 10.0;
+                                                }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                        if (bot_view == 6) : Z_StageViewCore { tracks: root.tracks; pan-3d-moved(id, x, y, z) => { SpatialActions.pan_3d_moved(id, x, y, z); } }

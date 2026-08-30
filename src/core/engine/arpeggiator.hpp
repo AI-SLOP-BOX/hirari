@@ -1,95 +1,138 @@
 #pragma once
-
 #include <vector>
 #include <algorithm>
-#include "../midi_dispatcher.hpp"
+#include <random>
+#include "../engine_types.hpp"
 
 namespace Aura::Core::Engine {
 
+struct MidiEvent { uint8_t status, data1, data2; };
+
 /**
- * @brief Arpeggiator: Professional rhythmic pattern generator.
- * Standard tool for Electronic and Pop production (Logic/Ableton).
+ * @class Arpeggiator
+ * @brief MIDI Rhythmic Pattern Generator.
+ * Implements a time-synced pattern generator supporting Up/Down/UpDown/Random modes.
  */
 class Arpeggiator {
 public:
     enum class Pattern { Up, Down, UpDown, Random };
 
-    Arpeggiator(double sr = 44100.0) : m_sampleRate(sr) {}
+    Arpeggiator() : m_rng(42) {} 
 
-    void setParameters(Pattern p, int octaves, float rateRel, float gate = 0.8f) {
+    void setParameters(Pattern p, int octaves, int stepTicks, float swing = 0.0f) {
         m_pattern = p;
-        m_octaves = octaves;
-        m_rateRel = rateRel; // e.g. 0.25 for 1/16 notes
-        m_gate = gate;
+        m_octaves = std::max(1, octaves);
+        m_stepTicks = std::max(1, stepTicks);
+        m_swing = swing;
     }
 
     /**
-     * @brief ACCURATE ARPEGGIATOR: Processes MIDI input to generate rhythmic events.
-     * HONEST FIX: Replaced conceptual comments with a real tick-quantized sequencer.
+     * @brief Processes incoming MIDI note event chord lists and generates sequential arpeggiated outputs.
      */
-    void process(const std::vector<MidiEvent>& in, std::vector<MidiEvent>& out, uint64_t now, float bpm) {
-        // 1. CAPTURE & SORT HELD NOTES
+    void process(const std::vector<MidiEvent>& in, std::vector<MidiEvent>& out, const EngineContext& ctx) {
+        // 1. Process all incoming MIDI events
         for (const auto& ev : in) {
             uint8_t type = ev.status & 0xF0;
-            if (type == 0x90 && ev.data2 > 0) {
-                 m_heldNotes.push_back(ev.data1);
-                 std::sort(m_heldNotes.begin(), m_heldNotes.end());
-            } else if (type == 0x80 || (type == 0x90 && ev.data2 == 0)) {
-                m_heldNotes.erase(std::remove(m_heldNotes.begin(), m_heldNotes.end(), ev.data1), m_heldNotes.end());
+            if (type == 0x90 && ev.data2 > 0) { // Note On
+                NoteInfo info = { ev.data1, ev.data2 };
+                auto it = std::find_if(m_heldNotes.begin(), m_heldNotes.end(), [&](const auto& n) {
+                    return n.note == info.note;
+                });
+                if (it == m_heldNotes.end()) {
+                    m_heldNotes.push_back(info);
+                }
+            } 
+            else if (type == 0x80 || (type == 0x90 && ev.data2 == 0)) { // Note Off
+                int note = ev.data1;
+                m_heldNotes.erase(std::remove_if(m_heldNotes.begin(), m_heldNotes.end(), [&](const auto& n) {
+                    return n.note == note;
+                }), m_heldNotes.end());
+                
+                // Pass through note off
+                out.push_back(ev);
+            }
+            else {
+                // Pass through other messages
+                out.push_back(ev);
             }
         }
 
-        if (m_heldNotes.empty()) { m_currentStep = 0; return; }
-
-        // 2. RHYTHMIC TICK CALCULATION
-        double samplesPerBeat = (60.0 / bpm) * m_sampleRate;
-        double samplesPerStep = samplesPerBeat * m_rateRel;
-        
-        uint64_t currentTick = now % static_cast<uint64_t>(samplesPerStep);
-        uint32_t stepIndex = static_cast<uint32_t>(now / samplesPerStep);
-
-        // 3. TRIGGER NEW NOTE ON STEP BOUNDARY
-        if (stepIndex != m_lastStepTriggered) {
-            m_lastStepTriggered = stepIndex;
-            
-            // Pattern Selection
-            int noteIndex = 0;
-            if (m_pattern == Pattern::Up) noteIndex = m_currentStep % m_heldNotes.size();
-            else if (m_pattern == Pattern::Down) noteIndex = (m_heldNotes.size() - 1) - (m_currentStep % m_heldNotes.size());
-            else if (m_pattern == Pattern::Random) noteIndex = rand() % m_heldNotes.size();
-            
-            int baseNote = m_heldNotes[noteIndex];
-            int octaveOffset = (m_currentStep / m_heldNotes.size()) % m_octaves;
-            int finalNote = std::clamp(baseNote + (octaveOffset * 12), 0, 127);
-
-            // Output Note On
-            out.push_back({0x90, (uint8_t)finalNote, 90}); 
-            
-            // Store for Note Off
-            m_activeNotes.push_back({finalNote, now + static_cast<uint64_t>(samplesPerStep * m_gate)});
-            m_currentStep++;
+        if (m_heldNotes.empty()) {
+            if (m_activeArpPitch != -1) {
+                out.push_back({ 0x80, static_cast<uint8_t>(m_activeArpPitch), 0 });
+                m_activeArpPitch = -1;
+            }
+            return;
         }
 
-        // 4. HANDLE NOTE OFFS (Gate logic)
-        auto it = m_activeNotes.begin();
-        while (it != m_activeNotes.end()) {
-            if (now >= it->killTime) {
-                out.push_back({0x80, (uint8_t)it->note, 0});
-                it = m_activeNotes.erase(it);
-            } else { ++it; }
+        // 2. Calculate tick position based on sample rate and tempo
+        double beatsPerSecond = ctx.tempo / 60.0;
+        double totalBeats = (static_cast<double>(ctx.playhead) / ctx.sampleRate) * beatsPerSecond;
+        uint64_t totalTicks = static_cast<uint64_t>(totalBeats * MusicalTime::kTicksPerBeat);
+
+        uint32_t step = static_cast<uint32_t>(totalTicks / m_stepTicks);
+
+        if (step != m_lastStepTriggered) {
+            // Turn off previous note
+            if (m_activeArpPitch != -1) {
+                out.push_back({ 0x80, static_cast<uint8_t>(m_activeArpPitch), 0 });
+                m_activeArpPitch = -1;
+            }
+
+            // Trigger new note
+            if (!m_heldNotes.empty()) {
+                std::sort(m_heldNotes.begin(), m_heldNotes.end(), [](const auto& a, const auto& b) {
+                    return a.note < b.note;
+                });
+
+                size_t numNotes = m_heldNotes.size();
+                size_t idx = 0;
+
+                switch (m_pattern) {
+                    case Pattern::Up:
+                        idx = step % numNotes;
+                        break;
+                    case Pattern::Down:
+                        idx = (numNotes - 1) - (step % numNotes);
+                        break;
+                    case Pattern::UpDown:
+                        if (numNotes > 1) {
+                            size_t cycle = step % (numNotes * 2 - 2);
+                            idx = (cycle < numNotes) ? cycle : (numNotes * 2 - 2) - cycle;
+                        } else {
+                            idx = 0;
+                        }
+                        break;
+                    case Pattern::Random:
+                        idx = std::uniform_int_distribution<size_t>(0, numNotes - 1)(m_rng);
+                        break;
+                }
+
+                int baseNote = m_heldNotes[idx].note;
+                int octaveOffset = (step / numNotes) % m_octaves;
+                int finalPitch = baseNote + octaveOffset * 12;
+                finalPitch = std::clamp(finalPitch, 0, 127);
+
+                out.push_back({ 0x90, static_cast<uint8_t>(finalPitch), m_heldNotes[idx].velocity });
+                m_activeArpPitch = finalPitch;
+            }
+
+            m_lastStepTriggered = step;
         }
     }
 
 private:
-    struct NoteToKill { int note; uint64_t killTime; };
-    std::vector<NoteToKill> m_activeNotes;
+    struct NoteInfo { int note; uint8_t velocity; };
+    std::vector<NoteInfo> m_heldNotes;
     uint32_t m_lastStepTriggered = 0xFFFFFFFF;
-    uint32_t m_currentStep = 0;
-    double m_sampleRate;
+    int m_activeArpPitch = -1;
+    
     Pattern m_pattern = Pattern::Up;
     int m_octaves = 1;
-    float m_rateRel = 0.25f, m_gate = 0.8f;
-    std::vector<int> m_heldNotes;
+    int m_stepTicks = 240; 
+    float m_swing = 0.0f;
+    
+    std::mt19937 m_rng;
 };
 
 } // namespace Aura::Core::Engine

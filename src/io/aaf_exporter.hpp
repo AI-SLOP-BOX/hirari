@@ -31,7 +31,7 @@ public:
      */
     void exportProject(const Core::Engine::TimelineSystem& timeline, const std::string& outPath) {
         // 1. COLLECT TRACK DATA
-        const auto& tracks = timeline.getTracks();
+        const auto tracks = timeline.getTracksSnapshot();
         for (const auto& t : tracks) {
             // Encode Track metadata, volume, pan, and mute states
             // Encode Clip/Region positions and fade parameters

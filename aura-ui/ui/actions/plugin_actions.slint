@@ -1,0 +1,24 @@
+// Plugin parameter contract. Additional plugin actions will move here as
+// their views are migrated away from the compatibility facade.
+export global PluginActions {
+    callback refresh_extensions();
+    callback install_extension();
+    callback run_extension(string, string, string);
+    callback toggle_extension(string, bool);
+    callback plugin_param_changed(int, int, int, float);
+    callback apply_dynamics_suggestion(int, int);
+    callback set_filter(int, string, float);
+    callback macro_changed(int, float);
+    callback set_synth_engine(int);
+    callback set_route(int, int, bool);
+    callback set_route_gain(int, int, float, bool);
+    callback save_preset(int, int, string);
+    callback load_preset(int, int, string);
+    callback move_plugin(int, int);
+    callback browse_preset(bool);
+    callback rescan_plugins();
+    callback catalog_query_changed(string);
+    callback insert_plugin(string);
+    callback set_sidechain(int, int, int, int, bool);
+    callback set_sidechain_tap_point(int, int, int, int);
+}

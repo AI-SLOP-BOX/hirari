@@ -24,14 +24,17 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+        (void)bs;
+        if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = sr;
+        setAttackMs(m_attackMs);
+        setReleaseMs(m_releaseMs);
         reset();
     }
 
     void setThreshold(float db) { m_threshold = db; }
-    void setRatio(int ratio) { m_ratioFlat = 1.0f - 1.0f / static_cast<float>(ratio); }
-    void setAttack(float ms) { m_attack = std::exp(-1.0f / (ms * 0.001f * m_sampleRate)); }
-    void setRelease(float ms) { m_release = std::exp(-1.0f / (ms * 0.001f * m_sampleRate)); }
+    void setRatio(int ratio) { m_ratioFlat = 1.0f - 1.0f / static_cast<float>(std::clamp(ratio, 1, 20)); }
+    void setAttack(float ms) { m_attackMs = std::clamp(std::isfinite(ms) ? ms : 1.0f, 0.1f, 200.0f); setAttackMs(m_attackMs); }
+    void setRelease(float ms) { m_releaseMs = std::clamp(std::isfinite(ms) ? ms : 100.0f, 1.0f, 2000.0f); setReleaseMs(m_releaseMs); }
 
     void setParameters(float input, float output, float threshold, float attackMs, float releaseMs, int ratio) {
         m_inputGain = std::pow(10.0f, input / 20.0f);
@@ -43,50 +46,32 @@ public:
     }
 
     void process(::Aura::Core::AudioBuffer& b, ::Aura::Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& context) noexcept override {
-        uint32_t samples = b.getNumSamples();
-        float* l = b.getWritePointer(0);
-        float* r = b.getWritePointer(1);
-
-        for (uint32_t s = 0; s < samples; ++s) {
-            float inL = l[s] * m_inputGain;
-            float inR = r[s] * m_inputGain;
-            
-            // 1. Stereo-Linked Sidechain Detection
-            float detL = inL, detR = inR;
-            m_scHPF.processBlockHP(&detL, 1);
-            m_scHPF.processBlockHP(&detR, 1);
-            float det = std::max(std::abs(detL), std::abs(detR));
-            
-            // 2. Fast Log Approximation: dB = 20 * log10(x)
-            float db = fastLog2(det + 1e-12f) * 6.02f; // log2 conversion
-            
-            // 3. Gain Reduction Logic
-            float gr = 0.0f;
-            if (db > m_threshold) {
-                gr = (db - m_threshold) * m_ratioFlat;
+        (void)midi; (void)context;
+        const uint32_t channels = b.getNumChannels();
+        const uint32_t samples = b.getNumSamples();
+        if (channels == 0 || samples == 0) return;
+        for (uint32_t i = 0; i < samples; ++i) {
+            float peak = 0.0f;
+            for (uint32_t c = 0; c < channels; ++c) {
+                const float* p = b.getReadPointer(c);
+                if (p && std::isfinite(p[i])) peak = std::max(peak, std::abs(p[i] * m_inputGain));
             }
-            
-            // 4. Fast Exp Approximation: gain = 10^(-gr/20)
-            float targetGain = fastPow2(-gr / 6.02f); 
-
-            // 5. Feedback Ballistics
-            float coeff = (targetGain < m_envelope) ? m_attack : m_release;
-            m_envelope = targetGain + coeff * (m_envelope - targetGain);
-
-            // 6. Output Stage + Harmonic Color (Blow-up prevention)
-            float outL = inL * m_envelope;
-            float outR = inR * m_envelope;
-            
-            // 【致命的欠陥の修正】過大入力時に x - x^3 の関数が破綻して -infinity に発散し、爆音ノイズが発生する不具合を修正。
-            // ３次関数の前に安全な範囲（[-1.5, 1.5]付近）にクランプすることでスピーカー破損を防ぎます。
-            outL = std::clamp(outL, -1.2f, 1.2f);
-            outR = std::clamp(outR, -1.2f, 1.2f);
-            
-            float sat = (1.0f - m_envelope) * 0.15f;
-            l[s] = (outL - (outL*outL*outL) * sat) * m_outputGain;
-            r[s] = (outR - (outR*outR*outR) * sat) * m_outputGain;
+            const float detector = std::max(peak, 1.0e-8f);
+            const float coeff = detector > m_envelope ? m_attack : m_release;
+            m_envelope += (detector - m_envelope) * (1.0f - coeff);
+            const float levelDb = 6.0205999f * fastLog2(std::max(m_envelope, 1.0e-8f));
+            const float over = std::max(0.0f, levelDb - m_threshold);
+            const float reductionDb = over * std::clamp(m_ratioFlat, 0.0f, 0.95f);
+            const float gain = std::clamp(fastPow2((-reductionDb + 0.0f) / 6.0205999f) * m_outputGain, 0.0f, 4.0f);
+            for (uint32_t c = 0; c < channels; ++c) {
+                float* p = b.getWritePointer(c);
+                if (!p) continue;
+                const float x = std::isfinite(p[i]) ? p[i] : 0.0f;
+                p[i] = std::isfinite(x * gain) ? x * gain : 0.0f;
+            }
         }
     }
+
 
     void reset() noexcept override { m_envelope = 1.0f; }
 
@@ -110,10 +95,14 @@ private:
         return v.f;
     }
 
+    void setAttackMs(float ms) noexcept { m_attack = std::exp(-1.0f / (std::max(0.1f, ms) * 0.001f * std::max(1000.0, m_sampleRate))); }
+    void setReleaseMs(float ms) noexcept { m_release = std::exp(-1.0f / (std::max(1.0f, ms) * 0.001f * std::max(1000.0, m_sampleRate))); }
+
     double m_sampleRate;
     float m_inputGain = 1.0f, m_outputGain = 1.0f;
     float m_threshold = -24.0f, m_ratioFlat = 0.75f;
     float m_attack = 0.99f, m_release = 0.999f;
+    float m_attackMs = 1.0f, m_releaseMs = 100.0f;
     float m_envelope = 1.0f;
     Mixing::StateVariableFilter m_scHPF;
 };

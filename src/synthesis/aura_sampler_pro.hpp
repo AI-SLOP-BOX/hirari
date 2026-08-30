@@ -5,6 +5,7 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <deque>
 #include "../dsp/mixing/state_variable_filter.hpp"
 #include "../core/engine/parameter_smoother.hpp"
 #include "../core/midi_dispatcher.hpp"
@@ -120,7 +121,19 @@ public:
         for (int i = 0; i < 32; ++i) m_voices.emplace_back(std::make_unique<SamplerVoice>(sr));
     }
 
-    void addZone(SamplerZone zone) { m_zones.push_back(std::move(zone)); }
+    void addZone(SamplerZone zone) {
+        m_zones.push_back(std::move(zone));
+        SamplerZone* added = &m_zones.back();
+        const int lo = std::clamp(added->minKey, 0, 127);
+        const int hi = std::clamp(added->maxKey, lo, 127);
+        for (int note = lo; note <= hi; ++note) {
+            auto& zones = m_noteToZoneLookup[note].zones;
+            zones.push_back(added);
+            std::stable_sort(zones.begin(), zones.end(), [](const SamplerZone* a, const SamplerZone* b) {
+                return a->minVel < b->minVel;
+            });
+        }
+    }
 
     /**
      * @brief ADVANCED MIDI DISPATCH: Handles Pitch Bend and CC for expressive play.
@@ -232,10 +245,15 @@ private:
     }
 
     void updateVoiceCC(int chan, int cc, int val) {
+        if (m_channelMap.count(chan)) {
+            m_channelMap[chan]->handleMpe(chan, cc, val);
+        }
     }
 
     double m_sampleRate;
-    std::vector<SamplerZone> m_zones;
+    // deque keeps zone addresses stable after addZone, which is required by
+    // the precomputed note lookup table.
+    std::deque<SamplerZone> m_zones;
     std::vector<std::unique_ptr<SamplerVoice>> m_voices;
     std::map<int, SamplerVoice*> m_channelMap;
 };

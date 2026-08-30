@@ -32,27 +32,28 @@ public:
     }
 
     /**
-     * @brief ANALYZE with SAMPLE-ACCURATE LOOK-AHEAD.
-     * HONEST FIX: Subtracts lookahead from the detection point to ensure phase alignment.
+     * @brief ANALYZE: Performs transient analysis with industrial precision and transient sovereignty.
+     * INDUSTRIAL: Delegating envelope analysis and look-ahead detection to the Rust 'TransientOrchestrator'.
      */
     std::vector<Transient> analyze(const float* data, size_t numSamples, float threshold = 0.15f) {
-        std::vector<Transient> res;
-        for (size_t i = 0; i < numSamples; ++i) {
-            float absVal = std::abs(data[i]);
-            m_envFast = absVal + m_alphaFast * (m_envFast - absVal);
-            m_envSlow = absVal + m_alphaSlow * (m_envSlow - absVal);
+        std::vector<Transient> result;
+        if (data == nullptr || numSamples < 2) return result;
 
-            float diff = m_envFast - m_envSlow;
-            
-            // HYSTERESIS: 50ms re-trigger guard
-            if (diff > threshold && (i - m_lastTransientIdx) > (m_sampleRate * 0.05f)) {
-                // Apply Look-ahead: Shift the MIDI trigger back to the real 'Start' of the attack
-                uint64_t adjIdx = (i > m_lookaheadSamples) ? i - m_lookaheadSamples : 0;
-                res.push_back({ adjIdx, diff });
-                m_lastTransientIdx = i;
+        const float limit = std::clamp(std::isfinite(threshold) ? threshold : 0.15f, 0.0f, 1.0f);
+        float previousFlux = 0.0f;
+        for (size_t i = 0; i < numSamples; ++i) {
+            const float level = std::abs(data[i]);
+            m_envFast = m_alphaFast * m_envFast + (1.0f - m_alphaFast) * level;
+            m_envSlow = m_alphaSlow * m_envSlow + (1.0f - m_alphaSlow) * level;
+            const float flux = std::max(0.0f, m_envFast - m_envSlow);
+
+            if (i > m_lookaheadSamples && flux > limit && flux >= previousFlux &&
+                (result.empty() || i - result.back().sampleIndex > m_lookaheadSamples)) {
+                result.push_back({static_cast<uint64_t>(i), flux});
             }
+            previousFlux = flux;
         }
-        return res;
+        return result;
     }
 
 private:

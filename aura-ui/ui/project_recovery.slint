@@ -1,0 +1,108 @@
+import { Button } from "std-widgets.slint";
+import { Style } from "style.slint";
+import { Z_IconButton } from "./primitives/icon_button.slint";
+import { ProjectActions } from "./actions/project_actions.slint";
+
+export component Z_ProjectRecovery inherits Rectangle {
+    in property <string> project-path: "";
+    in property <string> status: "";
+    in property <int> backup-count: 0;
+    in property <string> backup-summary: "";
+    in property <[int]> backup-generations: [];
+    property <int> pending-generation: -1;
+    property <bool> pending-as: false;
+    property <bool> pending-latest: false;
+    background: Style.surface-1;
+    border-width: 1px;
+    border-color: Style.line-subtle;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        Text { text: "Project Recovery"; color: Style.text-primary; font-size: 16px; font-weight: 700; }
+        Text {
+            text: root.project-path == "" ? "No saved project" : "Current project: " + root.project-path;
+            color: Style.text-secondary;
+            font-size: 11px;
+            overflow: elide;
+        }
+        Text { text: root.backup-count > 0 ? root.backup-count + " validated recovery backup(s) available" : "No validated recovery backup available"; color: root.backup-count > 0 ? Style.ok : Style.text-tertiary; font-size: 11px; }
+        Text {
+            text: root.backup-summary == "" ? "Backup details unavailable" : root.backup-summary;
+            color: Style.text-tertiary;
+            font-size: 10px;
+            wrap: word-wrap;
+            max-height: 72px;
+            overflow: elide;
+        }
+        Z_IconButton {
+            icon: "Recover Last Backup";
+            button-width: 164px;
+            active-col: Style.brand;
+            clicked => {
+                root.pending-latest = true;
+                root.pending-generation = -1;
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            for generation in root.backup-generations : Button {
+                text: "Restore .bak." + generation;
+                clicked => {
+                    root.pending-generation = generation;
+                    root.pending-as = false;
+                }
+            }
+            for generation in root.backup-generations : Button {
+                text: "Restore As .bak." + generation;
+                clicked => {
+                    root.pending-generation = generation;
+                    root.pending-as = true;
+                }
+            }
+        }
+        if root.pending-generation >= 0 || root.pending-latest : Rectangle {
+            background: Style.surface-2;
+            border-width: 1px;
+            border-color: Style.brand;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                Text {
+                    text: root.pending-latest
+                        ? "Restore the latest validated backup?"
+                        : root.pending-as
+                        ? "Restore .bak." + root.pending-generation + " as a new project?"
+                        : "Replace current project with .bak." + root.pending-generation + "?";
+                    color: Style.text-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    wrap: word-wrap;
+                }
+                Button {
+                    text: root.pending-latest ? "Restore Latest" : root.pending-as ? "Restore As" : "Restore";
+                    clicked => {
+                        if root.pending-latest {
+                            ProjectActions.recover_latest();
+                        } else if root.pending-as {
+                            ProjectActions.recover_generation_as(root.pending-generation);
+                        } else {
+                            ProjectActions.recover_generation(root.pending-generation);
+                        }
+                        root.pending-generation = -1;
+                        root.pending-latest = false;
+                    }
+                }
+                Button {
+                    text: "Cancel";
+                    clicked => {
+                        root.pending-generation = -1;
+                        root.pending-latest = false;
+                    }
+                }
+            }
+        }
+        Text { text: root.status; color: Style.text-secondary; font-size: 11px; overflow: elide; }
+        Rectangle { vertical-stretch: 1; }
+    }
+}

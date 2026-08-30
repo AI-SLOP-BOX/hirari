@@ -1,0 +1,31 @@
+import { Style } from "../style.slint";
+
+export component Z_Telemetry {
+    in property <float> cpu; in property <float> ram; in property <[float]> load_his;
+    Rectangle {
+        width: 160px; height: 38px; background: Style.surface; border_radius: 1px; border_width: 1px; border_color: Style.border;
+        VerticalLayout {
+            padding: 4px; spacing: 4px;
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: "DSP Load: " + Math.floor(cpu) + "%"; font-size: Style.font-xxs; color: cpu > 85 ? Style.record : Style.text-secondary; font-weight: 600; }
+                    Rectangle { width: 44px; height: 3px; background: Style.surface; Rectangle { width: (cpu/100.0) * parent.width; height: 100%; background: Style.brand; } }
+                }
+                VerticalLayout {
+                    spacing: 2px;
+                    Text { text: ram > 0 ? "RAM: " + Math.floor(ram) + "%" : "RAM: --"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+                    Rectangle { width: 44px; height: 3px; background: Style.surface; Rectangle { width: (ram/100.0) * parent.width; height: 100%; background: Style.ok; } }
+                }
+            }
+            HorizontalLayout {
+                spacing: 1px;
+                for l in load_his : VerticalLayout {
+                    alignment: center;
+                    Rectangle { width: 1.5px; height: l * 12px; background: Style.brand; opacity: 0.4; }
+                }
+            }
+        }
+    }
+}

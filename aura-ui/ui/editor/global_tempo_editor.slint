@@ -1,0 +1,188 @@
+import { Style } from "../style.slint";
+import { Z_Knob } from "../primitives/knob.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+
+export component Z_GlobalTempoEditor {
+    callback set-tempo-event(float, float, bool);
+    callback remove-tempo-event(float);
+    callback move-tempo-event(float, float);
+    in-out property <float> bpm: 120.0;
+    in-out property <float> target_bpm: 145.0;
+    in-out property <float> event_beat: 0.0;
+    in property <[float]> tempo_event_beats: [];
+    in property <[float]> tempo_event_bpms: [];
+    in-out property <int> time_sig: 0; // 0: 4/4, 1: 3/4, 2: 6/8, 3: 7/8
+    in-out property <int> ramp_mode: 1; // 0: Step, 1: Linear, 2: Bezier
+    
+    Rectangle {
+        width: 100%; height: 72px; background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        HorizontalLayout {
+            padding: 8px; spacing: 14px;
+            
+            // 1. Time Signature & Tap Controls
+            VerticalLayout {
+                width: 120px; spacing: 4px; alignment: center;
+                Text { text: "SIGNATURE & TAP"; font-size: 8px; color: #6E6E73; font-weight: 950; }
+                
+                HorizontalLayout {
+                    spacing: 4px;
+                    for name[idx] in ["4/4", "3/4", "6/8", "7/8"] : Rectangle {
+                        height: 16px; background: time_sig == idx ? Style.border : Style.surface; border_radius: 1px; border_width: 1px; border_color: time_sig == idx ? Style.brand : Style.border;
+                        HorizontalLayout {
+                            padding-left: 4px; padding-right: 4px;
+                            Text { text: name; font-size: Style.font-xxs; color: time_sig == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                        }
+                        TouchArea { clicked => { time_sig = idx; } }
+                    }
+                }
+                
+                // Tap Tempo simulation
+                Rectangle {
+                    height: 18px; background: Style.surface; border_radius: 1.5px; border_width: 1px; border_color: Style.brand;
+                    Text { text: "TAP TEMPO"; font-size: Style.font-xxs; color: Style.brand; font-weight: 900; horizontal-alignment: center; vertical-alignment: center; }
+                    TouchArea {
+                        clicked => {
+                            bpm = bpm + 2.5;
+                            if (bpm > 200.0) { bpm = 90.0; }
+                        }
+                    }
+                }
+            }
+            
+            Rectangle { width: 1px; background: Style.border; }
+
+            VerticalLayout {
+                width: 82px; spacing: 3px; alignment: center;
+                Text { text: "EVENT AT " + Math.floor(event_beat * 100.0) / 100.0; font-size: Style.font-xxs; color: #6E6E73; horizontal-alignment: center; }
+                Z_IconButton {
+                    icon: "APPLY";
+                    active: true;
+                    clicked => { set-tempo-event(event_beat, target_bpm, ramp_mode != 0); }
+                }
+                Z_IconButton {
+                    icon: "REMOVE";
+                    clicked => { remove-tempo-event(event_beat); }
+                }
+            }
+            Rectangle { width: 1px; background: Style.border; }
+
+            VerticalLayout {
+                width: 150px; spacing: 2px;
+                Text { text: "TEMPO MAP"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; }
+                Flickable {
+                    viewport-height: 42px;
+                    VerticalLayout {
+                        spacing: 1px;
+                        for beat[index] in tempo_event_beats : Rectangle {
+                            height: 18px;
+                            background: Math.abs(event_beat - beat) < 0.001 ? Style.border : Style.surface;
+                            border-width: 1px;
+                            border-color: Math.abs(event_beat - beat) < 0.001 ? Style.brand : Style.border;
+                            Text {
+                                text: Math.floor(beat * 100.0) / 100.0 + "  " + Math.floor(tempo_event_bpms[index] * 10.0) / 10.0 + " BPM";
+                                font-size: Style.font-xxs;
+                                color: Math.abs(event_beat - beat) < 0.001 ? #fff : #A1A1A6;
+                                horizontal-alignment: center; vertical-alignment: center;
+                            }
+                            TouchArea {
+                                clicked => {
+                                    event_beat = beat;
+                                    target_bpm = tempo_event_bpms[index];
+                                    bpm = tempo_event_bpms[index];
+                                }
+                                pointer-event(e) => {
+                                    if (beat > 0.0 && e.kind == PointerEventKind.move && self.pressed) {
+                                        event_beat = Math.max(0.01, beat + (self.mouse_x - self.pressed_x) / 10px);
+                                    }
+                                    if (beat > 0.0 && e.kind == PointerEventKind.up && Math.abs(event_beat - beat) >= 0.01) {
+                            move-tempo-event(beat, event_beat);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Style.border; }
+            
+            // 2. Interactive BPM Controls
+            HorizontalLayout {
+                width: 130px; spacing: 12px; alignment: center;
+                VerticalLayout {
+                    alignment: center; spacing: 2px;
+                    Z_Knob { value: (bpm - 60.0)/160.0; unit: " BPM"; display-value: Math.round(bpm * 10.0) / 10.0 + " BPM"; changed(v) => { bpm = 60.0 + v * 160.0; } }
+                    Text { text: "START: " + Math.floor(bpm * 10) / 10 + " BPM"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                }
+                VerticalLayout {
+                    alignment: center; spacing: 2px;
+                    Z_Knob { value: (target_bpm - 60.0)/160.0; unit: " BPM"; display-value: Math.round(target_bpm * 10.0) / 10.0 + " BPM"; accent-col: Style.alert; changed(v) => { target_bpm = 60.0 + v * 160.0; } }
+                    Text { text: "TARGET: " + Math.floor(target_bpm * 10) / 10 + " BPM"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                }
+            }
+            
+            Rectangle { width: 1px; background: Style.border; }
+            
+            // 3. Interactive Curve Canvas with Mode Select
+            VerticalLayout {
+                horizontal-stretch: 1; spacing: 4px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "TEMPO MAP TRAJECTORY"; font-size: 8px; color: #6E6E73; font-weight: 950; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    // Curve type selection tabs
+                    for type_name[idx] in ["STEP", "LINEAR", "BEZIER"] : Rectangle {
+                        height: 14px; background: ramp_mode == idx ? Style.border : Style.surface; border_radius: 1px; border_width: 1px; border_color: ramp_mode == idx ? Style.brand : Style.border;
+                        HorizontalLayout {
+                            padding-left: 4px; padding-right: 4px;
+                            Text { text: type_name; font-size: Style.font-xxs; color: ramp_mode == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                        }
+                        TouchArea { clicked => { ramp_mode = idx; } }
+                    }
+                }
+                
+                Rectangle {
+                    vertical-stretch: 1; background: #000; border_radius: 2px; border_width: 1px; border_color: Style.surface;
+                    clip: true;
+                    
+                    property <float> y1_val: 1.0 - (bpm - 60.0) / 160.0;
+                    property <float> y2_val: 1.0 - (target_bpm - 60.0) / 160.0;
+                    
+                    if (ramp_mode == 0) : Path {
+                        width: 100%; height: 100%; stroke: Style.brand; stroke_width: 2px;
+                        MoveTo { x: 0; y: (y1_val * parent.height) / 1px; }
+                        LineTo { x: (parent.width * 0.4) / 1px; y: (y1_val * parent.height) / 1px; }
+                        LineTo { x: (parent.width * 0.4) / 1px; y: (y2_val * parent.height) / 1px; }
+                        LineTo { x: parent.width / 1px; y: (y2_val * parent.height) / 1px; }
+                    }
+                    
+                    if (ramp_mode == 1) : Path {
+                        width: 100%; height: 100%; stroke: Style.brand; stroke_width: 2px;
+                        MoveTo { x: 0; y: (y1_val * parent.height) / 1px; }
+                        LineTo { x: (parent.width * 0.3) / 1px; y: (y1_val * parent.height) / 1px; }
+                        LineTo { x: (parent.width * 0.7) / 1px; y: (y2_val * parent.height) / 1px; }
+                        LineTo { x: parent.width / 1px; y: (y2_val * parent.height) / 1px; }
+                    }
+                    
+                    if (ramp_mode == 2) : Path {
+                        width: 100%; height: 100%; stroke: Style.brand; stroke_width: 2px;
+                        MoveTo { x: 0; y: (y1_val * parent.height) / 1px; }
+                        LineTo { x: (parent.width * 0.2) / 1px; y: (y1_val * parent.height) / 1px; }
+                        CubicTo {
+                            control-1-x: (parent.width * 0.4) / 1px;
+                            control-1-y: (y1_val * parent.height) / 1px;
+                            control-2-x: (parent.width * 0.6) / 1px;
+                            control-2-y: (y2_val * parent.height) / 1px;
+                            x: (parent.width * 0.8) / 1px;
+                            y: (y2_val * parent.height) / 1px;
+                        }
+                        LineTo { x: parent.width / 1px; y: (y2_val * parent.height) / 1px; }
+                    }
+                    
+                    Text { text: "START: " + Math.floor(bpm) + " BPM"; font-size: Style.font-xxs; color: #6E6E73; x: 10px; y: 4px; }
+                    Text { text: "TARGET: " + Math.floor(target_bpm) + " BPM"; font-size: Style.font-xxs; color: #6E6E73; x: parent.width - 70px; y: parent.height - 12px; }
+                }
+            }
+        }
+    }
+}
+

@@ -18,7 +18,7 @@ public:
         reset();
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+    void prepareToPlay(double sr, uint32_t /*blockSize*/) noexcept override {
         m_sampleRate = sr;
         m_formantFilterL.setSampleRate(sr);
         m_formantFilterR.setSampleRate(sr);
@@ -26,28 +26,47 @@ public:
 
     std::string getName() const override { return "Virtuoso Vocal"; }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        uint32_t numSamples = buffer.getNumSamples();
-        float pitchRatio = std::pow(2.0f, m_pitchShiftSemi / 12.0f);
-        
-        // --- 1. Pitch Shifting ---
-        m_shifterL.process(buffer.getWritePointer(0), numSamples, pitchRatio, m_sampleRate);
-        m_shifterR.process(buffer.getWritePointer(1), numSamples, pitchRatio, m_sampleRate);
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
+        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
 
-        // --- 2. Formant Shifting (Band-Pass Peak Shifting) ---
-        float formantFreq = 800.0f * std::pow(2.0f, m_formantShift / 12.0f);
-        m_formantFilterL.updateCoefficients(formantFreq, 1.5f);
-        m_formantFilterR.updateCoefficients(formantFreq, 1.5f);
+        const uint32_t numSamples = buffer.getNumSamples();
+        const bool isStereo = buffer.getNumChannels() >= 2;
+        float* left = buffer.getWritePointer(0);
+        float* right = isStereo ? buffer.getWritePointer(1) : nullptr;
 
-        float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
+        const float pitchRatio = std::pow(2.0f, std::clamp(m_pitchShiftSemi, -24.0f, 24.0f) / 12.0f);
+
+        // Formant shift modifies cutoff frequency
+        float formantCutoff = 3000.0f * std::pow(2.0f, std::clamp(m_formantShift, -12.0f, 12.0f) / 12.0f);
+        formantCutoff = std::clamp(formantCutoff, 200.0f, 18000.0f);
+        // ZDFFilter exposes stable SVF responses rather than a peaking EQ.
+        // Band-pass is the closest formant-emphasis response available in this
+        // processor and keeps the call aligned with the actual API.
+        m_formantFilterL.updateCoefficients(formantCutoff, 0.707f, Utils::ZDFFilter::Type::BandPass);
+        if (isStereo) m_formantFilterR.updateCoefficients(formantCutoff, 0.707f, Utils::ZDFFilter::Type::BandPass);
+
+        // PitchShifter is a block processor.  Calling it once per sample would
+        // reset its block assumptions and was the source of the build failure.
+        m_shifterL.process(left, numSamples, pitchRatio, static_cast<float>(m_sampleRate));
+        if (isStereo && right) {
+            m_shifterR.process(right, numSamples, pitchRatio, static_cast<float>(m_sampleRate));
+        }
+
         for (uint32_t s = 0; s < numSamples; ++s) {
-            float wetL = m_formantFilterL.process(l[s]);
-            float wetR = m_formantFilterR.process(r[s]);
-            l[s] = (l[s] * 0.4f + wetL * 0.6f); // Blend faked formant
-            r[s] = (r[s] * 0.4f + wetR * 0.6f);
+            float outL = std::isfinite(left[s]) ? left[s] : 0.0f;
+            outL = m_formantFilterL.process(outL);
+            if (std::abs(outL) < 1.0e-24f) outL = 0.0f;
+            left[s] = outL;
+
+            if (isStereo && right) {
+                float outR = std::isfinite(right[s]) ? right[s] : 0.0f;
+                outR = m_formantFilterR.process(outR);
+                if (std::abs(outR) < 1.0e-24f) outR = 0.0f;
+                right[s] = outR;
+            }
         }
     }
+
 
     void reset() noexcept override {
         m_shifterL.reset();
@@ -74,12 +93,12 @@ private:
 class DeEsser : public IProcessor {
 public:
     DeEsser() : m_threshold(0.2f) {}
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+    void prepareToPlay(double sr, uint32_t /*blockSize*/) noexcept override {
         m_filterL.setSampleRate(sr);
         m_filterR.setSampleRate(sr);
     }
     std::string getName() const override { return "DeEsser"; }
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
         m_filterL.updateCoefficients(6000.0f, 0.707f, Utils::ZDFFilter::Type::HighPass);
         m_filterR.updateCoefficients(6000.0f, 0.707f, Utils::ZDFFilter::Type::HighPass);
 

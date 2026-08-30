@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <string>
+#include <cmath>
 #include "../graphics_kernel.hpp"
 
 namespace Aura::Graphics::UI {
@@ -19,7 +20,8 @@ public:
         std::string target;
     };
 
-    void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float x, float y, float w, float h, const std::vector<ModState>& mods) {
+    void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float x, float y, float w, float h,
+                const std::vector<ModState>& mods, double animationTimeSeconds = 0.0) {
         if (mods.empty()) return;
 
         // --- 1. MODULAR GRID GLASS ---
@@ -41,7 +43,10 @@ public:
              kernel.drawBezierCurve(p0x, p0y, p0x + 45, p0y + 100, p1x - 45, p1y + 100, p1x, p1y, 0.8f, 0xFFFFFFFF); // Core
              
              // --- SIGNAL FLOW (Moving Spark) ---
-             float progress = std::fmod((float)i * 0.2f + (float)clock() / (float)CLOCKS_PER_SEC, 1.0f);
+             const float time = std::isfinite(animationTimeSeconds)
+                 ? static_cast<float>(animationTimeSeconds) : 0.0f;
+             float progress = std::fmod(static_cast<float>(i) * 0.2f + time, 1.0f);
+             if (progress < 0.0f) progress += 1.0f;
              float spX, spY; // Calculate cubic bezier point at t=progress
              kernel.calculateBezier(p0x, p0y, p0x + 45, p0y + 100, p1x - 45, p1y + 100, p1x, p1y, progress, spX, spY);
              kernel.drawCircle(spX, spY, 2.2f, mods[i].color);

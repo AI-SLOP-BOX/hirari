@@ -1,0 +1,152 @@
+import { Style } from "../style.slint";
+import { ScrollView } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { ZNote } from "../model/midi_model.slint";
+
+export component Z_PianoRoll {
+    callback project-changed();
+    callback quantize();
+    callback ramp-velocities();
+    callback insert-chord(int, float, int, float, int);
+    callback insert-progression(int, float, int, float, int);
+    callback delete-all();
+    callback add-note(int, float, float, int);
+    callback select-note(int, float);
+    callback move-note(int, float, float, int);
+    callback resize-note(int, float, float);
+    callback set-velocity(int, int, float);
+    callback set-lyric(int, float, string);
+    in property <int> trk_id;
+    in property <float> ui_timer;
+    in property <float> zoom_lvl: 1.0;
+    in property <[ZNote]> notes;
+    in-out property <[float]> cc1: [];
+    in-out property <[float]> cc11: [];
+    in-out property <[float]> cc64: [];
+    in property <float> ph;
+    in property <int> active_tool;
+    // Switches the keyboard lane into a General MIDI drum-lane view.
+    in-out property <bool> drum-mode: false;
+    in property <float> snap_division: 16.0;
+    in-out property <int> chord-root: 60;
+    in-out property <int> chord-quality: 0;
+    in-out property <float> chord-length: 4.0;
+    in-out property <int> chord-inversion: 0;
+    in-out property <int> progression-preset: 0;
+
+    Rectangle {
+        background: Style.surface;
+        VerticalLayout {
+            Rectangle {
+                height: 28px; background: Style.surface-1;
+                HorizontalLayout {
+                    padding-left: 10px; padding-right: 10px; spacing: 8px;
+                    Text { text: (drum-mode ? "Drum Editor" : "Piano Roll") + " · Track " + (trk_id + 1); font-size: Style.font-xxs; color: Style.text-secondary; horizontal-stretch: 1; vertical-alignment: center; }
+                    Z_IconButton { icon: drum-mode ? "PIANO" : "DRUM"; clicked => { drum-mode = !drum-mode; } }
+                    Z_IconButton { icon: "Q"; clicked => { quantize(); project-changed(); } }
+                    Z_IconButton { icon: "RAMP"; clicked => { ramp-velocities(); project-changed(); } }
+                    Z_IconButton { icon: "ROOT-"; clicked => { chord-root = (chord-root - 1).max(0); } }
+                    Z_IconButton { icon: "ROOT+"; clicked => { chord-root = (chord-root + 1).min(127); } }
+                    Z_IconButton { icon: chord-quality == 0 ? "MAJ" : (chord-quality == 1 ? "MIN" : (chord-quality == 2 ? "7TH" : "SUS")); clicked => { chord-quality = Math.mod(chord-quality + 1, 4); } }
+                    Z_IconButton { icon: "LEN"; clicked => { chord-length = chord-length == 1.0 ? 2.0 : (chord-length == 2.0 ? 4.0 : 1.0); } }
+                    Z_IconButton { icon: "INV" + chord-inversion; clicked => { chord-inversion = Math.mod(chord-inversion + 1, 3); } }
+                    Z_IconButton { icon: "CHORD"; clicked => { insert-chord(chord-root, ph, chord-quality, chord-length, chord-inversion); project-changed(); } }
+                    Z_IconButton { icon: "P" + (progression-preset + 1); clicked => { progression-preset = Math.mod(progression-preset + 1, 3); } }
+                    Z_IconButton { icon: "PROG"; clicked => { insert-progression(chord-root, ph, progression-preset, chord-length, chord-inversion); project-changed(); } }
+                    Z_IconButton { icon: "DEL"; clicked => { delete-all(); project-changed(); } }
+                }
+            }
+            HorizontalLayout {
+                Rectangle {
+                    width: 44px; height: 84 * 14px; clip: true;
+                    for key in 84 : Rectangle {
+                        y: key * 14px - grid.viewport-y; width: 44px; height: 14px;
+                        visible: self.y + self.height > 0px && self.y < parent.height;
+                        background: (Math.mod(key, 12) == 1 || Math.mod(key, 12) == 3 || Math.mod(key, 12) == 6 || Math.mod(key, 12) == 8 || Math.mod(key, 12) == 10) ? Style.surface-0 : Style.surface-3;
+                        border-width: 0.5px; border-color: Style.line-subtle;
+                        if (drum-mode) : Text {
+                            text: (83 - key == 36 ? "Kick" : (83 - key == 38 ? "Snare" : (83 - key == 42 ? "Closed HH" : (83 - key == 46 ? "Open HH" : (83 - key == 49 ? "Crash" : (83 - key == 51 ? "Ride" : ""))))));
+                            font-size: Style.font-xxs; color: Style.text-tertiary; x: 2px; vertical-alignment: center;
+                        }
+                        if (!drum-mode && Math.mod(key, 12) == 0) : Text { text: "C" + Math.floor((83 - key) / 12); font-size: Style.font-xxs; color: Style.text-tertiary; x: 2px; vertical-alignment: center; }
+                    }
+                }
+                grid := ScrollView {
+                    viewport-width: 128.0 * Style.grid-step * zoom_lvl;
+                    viewport-height: 84 * 14px;
+                    Rectangle {
+                        background: Style.surface;
+                        TouchArea { clicked => {
+                            let beat = self.mouse_x / (Style.grid-step / 1px * zoom_lvl * 1px);
+                            let snap = 4.0 / snap_division.max(1.0);
+                            add-note(83 - Math.floor(self.mouse_y / 14px), (beat / snap).round() * snap, 1.0, 100);
+                            project-changed();
+                        } }
+                        for bar in 128 : Rectangle {
+                            x: bar * Style.grid-step * zoom_lvl; width: 1px; height: 100%;
+                            visible: self.x + self.width > grid.viewport-x && self.x < grid.viewport-x + grid.width;
+                            background: Math.mod(bar, 4) == 0 ? Style.line-strong : Style.grid-subbeat;
+                        }
+                        for row in 84 : Rectangle {
+                            y: row * 14px; width: 100%; height: 1px;
+                            background: Math.mod(83 - row, 12) == 0 ? Style.line-strong : Style.grid-subbeat;
+                        }
+                        for note in notes : Rectangle {
+                            x: note.start_beat * Style.grid-step * zoom_lvl;
+                            y: (83 - note.pitch) * 14px + 1px;
+                            width: (note.length_beats * Style.grid-step * zoom_lvl).max(4px); height: 12px;
+                            background: note.selected ? Style.text-primary : Style.brand.with-alpha(0.45 + note.velocity / 127.0 * 0.55);
+                            border-width: note.selected ? 2px : 1px; border-color: note.selected ? Style.text-primary : Style.brand; border-radius: 1px;
+                            LineEdit {
+                                text: note.lyric;
+                                placeholder-text: "lyric";
+                                edited => { set-lyric(note.pitch, note.start_beat, self.text); }
+                                font-size: 9px;
+                                x: 2px;
+                                y: 0px;
+                            }
+                            TouchArea {
+                                clicked => { select-note(note.pitch, note.start_beat); }
+                                moved => {
+                                    if (self.pressed) {
+                                        move-note(note.pitch, note.start_beat,
+                                            (self.mouse_x - self.pressed_x) / (Style.grid-step / 1px * zoom_lvl * 1px),
+                                            Math.floor((self.pressed_y - self.mouse_y) / 14px));
+                                        project-changed();
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                x: parent.width - 5px; width: 5px; height: parent.height;
+                                background: note.selected ? Style.text-primary : Style.brand;
+                                TouchArea {
+                                    moved => {
+                                        if (self.pressed) {
+                                            resize-note(note.pitch, note.start_beat,
+                                                (((note.length_beats + (self.mouse_x - self.pressed_x) / (Style.grid-step / 1px * zoom_lvl * 1px))
+                                                    / (4.0 / snap_division.max(1.0))).round() * (4.0 / snap_division.max(1.0))).max(0.0625));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { x: ph * Style.grid-step * zoom_lvl; width: 1px; height: 100%; background: Style.ok; opacity: 0.6; }
+                    }
+                }
+            }
+            Rectangle {
+                height: 64px; background: Style.surface-1; border-width: 1px; border-color: Style.line-subtle;
+                Text { text: "Velocity"; x: 4px; y: 4px; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                Rectangle {
+                    x: 44px; clip: true; width: parent.width - 44px;
+                    for note_index[idx] in notes : Rectangle {
+                        x: note_index.start_beat * Style.grid-step * zoom_lvl - grid.viewport-x; width: 5px; height: 54px; y: 8px;
+                        VerticalLayout { alignment: end; Rectangle { height: note_index.velocity / 127.0 * 44px; width: 3px; background: note_index.selected ? Style.ok : Style.brand; } }
+                        TouchArea { moved => { if (self.pressed) { set-velocity(trk_id, idx, Math.floor(((54.0 - self.mouse_y / 1px) / 44.0) * 127.0)); } } }
+                    }
+                }
+            }
+        }
+    }
+}

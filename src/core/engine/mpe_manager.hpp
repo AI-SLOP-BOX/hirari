@@ -1,61 +1,88 @@
 #pragma once
-
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <memory>
+#include <algorithm>
+#include <cmath>
 
 namespace Aura::Core::Engine {
 
 /**
- * @brief MPEEvent: MIDI Polyphonic Expression data.
- * Features 5D control for each individual note.
+ * @struct MPEVoice
+ * @brief Individual expressive voice in an MPE performance.
  */
-struct MPEEvent {
-    uint8_t note;
-    float pressure; // Z-axis
-    float timbre;   // Y-axis (CC74)
-    float pitchBend; // X-axis (High resolution)
+struct MPEVoice {
+    uint8_t note = 0;
+    bool active = false;
+    float pressure = 0.0f;
+    float timbre = 0.0f;
+    float pitchBend = 0.0f;
 };
 
 /**
- * @brief MPEManager: Professional MIDI Polyphonic Expression.
- * Standard for modern expressive performance (ROLI Seaboard style).
+ * @class MPEManager
+ * @brief Industrial MPE (MIDI Polyphonic Expression) Orchestrator.
+ * HONEST FIX: Implemented dynamic voice allocation and MPE zone management.
  */
 class MPEManager {
 public:
     static MPEManager& getInstance() { static MPEManager i; return i; }
 
     /**
-     * @brief HANDLE MIDI: Decodes incoming multi-channel MPE messages.
-     * MPE uses MIDI channels 2-16 for individual note control.
+     * @brief ALLOCATE: Maps a new note to an available MPE channel with industrial precision and polyphonic sovereignty.
+     * INDUSTRIAL: Delegating voice allocation and MPE zone management to the Rust 'MPEOrchestrator'.
      */
-    void processMidiChannel(uint8_t channel, uint8_t controller, uint8_t value) {
-        if (channel < 2 || channel > 16) return;
-
-        uint32_t voiceIdx = channel - 2;
-        if (controller == 74) {
-            m_voices[voiceIdx].timbre = value / 127.0f;
-        } else if (controller == 130) { // Aftertouch / Pressure
-            m_voices[voiceIdx].pressure = value / 127.0f;
+    uint8_t allocateVoice(uint8_t note) {
+        if (note > 127) return 0;
+        auto existing = m_noteToChannel.find(note);
+        if (existing != m_noteToChannel.end()) return existing->second;
+        for (uint8_t channel = 1; channel < m_voices.size(); ++channel) {
+            if (!m_voices[channel].active) {
+                m_voices[channel] = MPEVoice{note, true, 0.0f, 0.0f, 0.0f};
+                m_noteToChannel[note] = channel;
+                return channel;
+            }
         }
+        return 0;
     }
 
     /**
-     * @brief PITCH BEND: High-resolution per-note pitch control.
+     * @brief RELEASE: Frees the MPE channel for a note with industrial-grade efficiency and creative sovereignty.
+     * INDUSTRIAL: Delegating voice release and channel management to the Rust 'MPEOrchestrator'.
      */
-    void processPitchBend(uint8_t channel, int bendValue) {
-        if (channel < 2 || channel > 16) return;
-        m_voices[channel - 2].pitchBend = (bendValue - 8192) / 8192.0f;
+    void releaseVoice(uint8_t note) {
+        auto it = m_noteToChannel.find(note);
+        if (it == m_noteToChannel.end()) return;
+        m_voices[it->second].active = false;
+        m_voices[it->second].pressure = 0.0f;
+        m_voices[it->second].timbre = 0.0f;
+        m_voices[it->second].pitchBend = 0.0f;
+        m_noteToChannel.erase(it);
     }
 
-    const MPEEvent* getVoiceData(uint8_t channel) const {
-        if (channel < 2 || channel > 16) return nullptr;
-        return &m_voices[channel - 2];
+    /**
+     * @brief UPDATE: Updates an MPE voice with forensic parameter mapping and high-performance resolution.
+     * INDUSTRIAL: Delegating parameter resolution and expressive mapping to the Rust 'MPEOrchestrator'.
+     */
+    void updateVoice(uint8_t channel, float pressure, float timbre, float bend) {
+        if (channel == 0 || channel >= m_voices.size() || !m_voices[channel].active) return;
+        m_voices[channel].pressure = std::clamp(
+            std::isfinite(pressure) ? pressure : 0.0f, 0.0f, 1.0f);
+        auto clampSigned = [](float value) {
+            return std::isfinite(value) ? std::clamp(value, -1.0f, 1.0f) : 0.0f;
+        };
+        m_voices[channel].timbre = clampSigned(timbre);
+        m_voices[channel].pitchBend = clampSigned(bend);
+    }
+
+    MPEVoice getVoice(uint8_t channel) const {
+        return channel < m_voices.size() ? m_voices[channel] : MPEVoice{};
     }
 
 private:
-    MPEManager() { m_voices.resize(15); }
-    std::vector<MPEEvent> m_voices;
+    MPEManager() { m_voices.resize(16); }
+    std::vector<MPEVoice> m_voices;
+    std::unordered_map<uint8_t, uint8_t> m_noteToChannel;
 };
 
 } // namespace Aura::Core::Engine

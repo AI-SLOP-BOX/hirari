@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#if defined(__arm64__) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 namespace Aura::Core {
 
@@ -27,7 +30,7 @@ public:
     void getValueString(char* buffer, size_t size) const {
         if (!buffer || size == 0) return;
         float val = m_target.load(std::memory_order_acquire);
-        
+
         switch (m_unit) {
             case Unit::Percentage:
                 snprintf(buffer, size, "%.1f%%", (val + 1.0f) * 50.0f);
@@ -53,11 +56,15 @@ public:
     }
 
     float getNormalizedValue() const {
-        float val = m_current;
+        float val = m_current.load(std::memory_order_relaxed);
         if (m_displayMode == DisplayMode::Unipolar) {
             return std::clamp((val + 1.0f) * 0.5f, 0.0f, 1.0f);
         }
         return val;
+    }
+
+    float getTarget() const noexcept {
+        return m_target.load(std::memory_order_acquire);
     }
 
     void setUnit(Unit unit) { m_unit = unit; }
@@ -69,22 +76,30 @@ public:
         }
 
         const float target = m_target.load(std::memory_order_relaxed);
+        float current = m_current.load(std::memory_order_relaxed);
         
-        if (std::abs(m_current - target) < 1e-7f) {
-            m_current = target;
-            return getNormalizedValue() + m_aiOffset.load(std::memory_order_relaxed);
+        if (std::abs(current - target) < 1e-7f) {
+            current = target;
+            m_current.store(current, std::memory_order_relaxed);
+            return std::clamp(getNormalizedValue() + m_aiOffset.load(std::memory_order_relaxed), 0.0f, 1.0f);
         }
         
         SmoothingType type = m_type.load(std::memory_order_relaxed);
         if (type == SmoothingType::Exponential) {
-            m_current = m_current + (target - m_current) * m_coeff;
+            current = current + (target - current) * m_coeff.load(std::memory_order_relaxed);
+            if (std::abs(current - target) < 1e-24f) {
+                current = target;
+            }
         } else if (type == SmoothingType::Linear) {
-            m_current += m_step;
-            if ((m_step > 0 && m_current > target) || (m_step < 0 && m_current < target)) m_current = target;
+            const float step = m_step.load(std::memory_order_relaxed);
+            current += step;
+            if ((step > 0 && current > target) || (step < 0 && current < target)) current = target;
         } else {
-            m_current = target;
+            current = target;
         }
         
+        m_current.store(current, std::memory_order_relaxed);
+
         // --- HONEST FIX: SAFETY CLAMPING ---
         // Prevents AI modulation from pushing parameters into unstable territory.
         float val = getNormalizedValue() + m_aiOffset.load(std::memory_order_relaxed);
@@ -93,66 +108,116 @@ public:
 
 
     /**
-     * @brief BLOCK OPTIMIZED: Loads atomics once per block.
+     * @brief BLOCK OPTIMIZED: Vectorizable block processing.
      */
     void getNextBlock(float* buffer, size_t numSamples) {
         if (m_dirty.load(std::memory_order_acquire)) {
             updateInternalState();
         }
 
-        float target = m_target.load(std::memory_order_relaxed);
-        SmoothingType type = m_type.load(std::memory_order_relaxed);
+        const float target = m_target.load(std::memory_order_relaxed);
+        const SmoothingType type = m_type.load(std::memory_order_relaxed);
         const float aiMod = m_aiOffset.load(std::memory_order_relaxed);
-        
-        for (size_t i = 0; i < numSamples; ++i) {
-            // Internal smoothing logic
-            if (std::abs(m_current - target) > 1e-7f) {
-                if (type == SmoothingType::Exponential) {
-                    m_current = m_current + (target - m_current) * m_coeff;
-                } else if (type == SmoothingType::Linear) {
-                    m_current += m_step;
-                    if ((m_step > 0 && m_current > target) || (m_step < 0 && m_current < target)) m_current = target;
-                } else {
-                    m_current = target;
-                }
-            } else {
-                m_current = target;
+        const float isUnipolar = (m_displayMode == DisplayMode::Unipolar) ? 0.5f : 1.0f;
+        const float unipolarOffset = (m_displayMode == DisplayMode::Unipolar) ? 1.0f : 0.0f;
+
+        // INDUSTRIAL VECTORIZATION
+        float current = m_current.load(std::memory_order_relaxed);
+        if (std::abs(current - target) < 1e-7f) {
+            current = target;
+            m_current.store(current, std::memory_order_relaxed);
+            float val = (current + unipolarOffset) * isUnipolar;
+            float finalVal = std::clamp(val + aiMod, 0.0f, 1.0f);
+
+            size_t i = 0;
+#if defined(__arm64__) || defined(__aarch64__)
+            float32x4_t vVal = vdupq_n_f32(finalVal);
+            for (; i + 3 < numSamples; i += 4) vst1q_f32(buffer + i, vVal);
+#endif
+            for (; i < numSamples; ++i) buffer[i] = finalVal;
+        } else if (type == SmoothingType::Linear) {
+            // Linear smoothing is highly vectorizable
+            for (size_t i = 0; i < numSamples; ++i) {
+                const float step = m_step.load(std::memory_order_relaxed);
+                current += step;
+                if ((step > 0 && current > target) || (step < 0 && current < target)) current = target;
+                float norm = (current + unipolarOffset) * isUnipolar;
+                buffer[i] = std::clamp(norm + aiMod, 0.0f, 1.0f);
             }
-            
-            float val = m_current;
-            float norm = (m_displayMode == DisplayMode::Unipolar) ? std::clamp((val + 1.0f) * 0.5f, 0.0f, 1.0f) : val;
-            buffer[i] = std::clamp(norm + aiMod, 0.0f, 1.0f);
+            m_current.store(current, std::memory_order_relaxed);
+        } else {
+            // Exponential smoothing (Recursive, harder to SIMD but can be unrolled)
+            for (size_t i = 0; i < numSamples; ++i) {
+                current = current + (target - current) * m_coeff.load(std::memory_order_relaxed);
+                if (std::abs(current - target) < 1e-24f) {
+                    current = target;
+                }
+                float norm = (current + unipolarOffset) * isUnipolar;
+                buffer[i] = std::clamp(norm + aiMod, 0.0f, 1.0f);
+            }
+            if (std::abs(current - target) < 1e-7f) current = target;
+            m_current.store(current, std::memory_order_relaxed);
         }
     }
 
 
     void setTarget(float value) {
+        if (!std::isfinite(value)) return;
         m_target.store(value, std::memory_order_release);
         m_dirty.store(true, std::memory_order_release);
     }
 
     void setSampleRate(double sr) {
+        if (!std::isfinite(sr) || sr <= 0.0) return;
         m_sampleRate.store(sr, std::memory_order_relaxed);
-        m_dirty.store(true, std::memory_order_release);
+        recalculateCoefficients();
+    }
+
+    void setSmoothingTime(double ms) {
+        if (!std::isfinite(ms) || ms < 0.0) return;
+        m_smoothingTimeMs.store(ms, std::memory_order_relaxed);
+        recalculateCoefficients();
     }
 
     void setAIModulation(float offset) { m_aiOffset.store(offset, std::memory_order_release); }
 
-private:
-    void updateInternalState() {
-        if (m_shouldReset.exchange(false, std::memory_order_acq_rel)) {
-            m_current = m_resetValue.load(std::memory_order_acquire);
-        }
+    // Transport/reset boundary: discard a pending ramp without changing the
+    // user-facing target.  This is intentionally a control-side operation;
+    // the audio thread only observes the already coherent current value.
+    void resetToTarget() noexcept {
+        const float target = m_target.load(std::memory_order_acquire);
+        m_current.store(target, std::memory_order_release);
+        m_dirty.store(false, std::memory_order_release);
+    }
 
+private:
+    void recalculateCoefficients() {
+        double sr = m_sampleRate.load(std::memory_order_relaxed);
+        double ms = m_smoothingTimeMs.load(std::memory_order_relaxed);
+        if (sr > 0) {
+            double samples = (ms * 0.001) * sr;
+            m_coeff.store(static_cast<float>(1.0 - std::exp(-1.0 / std::max(1.0, samples))),
+                          std::memory_order_release);
+            updateStep();
+        }
+    }
+
+    void updateStep() {
         double sr = m_sampleRate.load(std::memory_order_relaxed);
         double ms = m_smoothingTimeMs.load(std::memory_order_relaxed);
         float target = m_target.load(std::memory_order_relaxed);
+        float current = m_current.load(std::memory_order_relaxed);
+        double samples = (ms * 0.001) * sr;
+        const float step = (std::isfinite(samples) && samples > 0.0)
+            ? (target - current) / std::max(1.0f, static_cast<float>(samples)) : 0.0f;
+        m_step.store(std::isfinite(step) ? step : 0.0f, std::memory_order_release);
+    }
 
-        if (sr > 0) {
-            double samples = (ms * 0.001) * sr;
-            m_coeff = static_cast<float>(1.0 - std::exp(-1.0 / std::max(1.0, samples)));
-            m_step = (target - m_current) / std::max(1.0f, static_cast<float>(samples));
+    void updateInternalState() {
+        if (m_shouldReset.exchange(false, std::memory_order_acq_rel)) {
+            m_current.store(m_resetValue.load(std::memory_order_acquire), std::memory_order_relaxed);
         }
+        recalculateCoefficients(); // Also calls updateStep()
         m_dirty.store(false, std::memory_order_release);
     }
 
@@ -162,9 +227,9 @@ private:
     std::atomic<bool> m_shouldReset{false};
     std::atomic<bool> m_dirty{true};
 
-    float m_current; 
-    float m_coeff = 0.01f;
-    float m_step = 0.0f;
+    std::atomic<float> m_current;
+    std::atomic<float> m_coeff{0.01f};
+    std::atomic<float> m_step{0.0f};
     DisplayMode m_displayMode = DisplayMode::Unipolar;
     Unit m_unit = Unit::Percentage;
     std::atomic<SmoothingType> m_type{SmoothingType::Exponential};
@@ -173,4 +238,3 @@ private:
 };
 
 } // namespace Aura::Core
-

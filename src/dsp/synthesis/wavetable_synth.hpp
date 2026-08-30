@@ -16,6 +16,7 @@ class WavetableSynth : public IProcessor {
 public:
     struct Voice {
         bool active = false;
+        bool releasing = false;
         uint8_t note = 0;
         float velocity = 0.0f;
         float env = 0.0f;
@@ -39,40 +40,45 @@ public:
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        // 1. Handle MIDI
-        for (const auto& event : midi.getEvents()) {
-            if (event.type == Core::MidiEvent::NoteOn) noteOn(event.note, event.velocity);
-            else if (event.type == Core::MidiEvent::NoteOff) noteOff(event.note);
-        }
-
-        // 2. Render Voices
-        uint32_t numSamples = buffer.getNumSamples();
-        float* outL = buffer.getWritePointer(0);
-        float* outR = buffer.getWritePointer(1);
-
-        for (auto& v : m_voices) {
-            if (!v.active) continue;
-            for (uint32_t s = 0; s < numSamples; ++s) {
-                // ADSR (Simple)
-                v.env += (v.note > 0 ? 0.001f : -0.001f);
-                v.env = std::clamp(v.env, 0.0f, 1.0f);
-                if (v.env <= 0.0f && v.note == 0) { v.active = false; break; }
-
-                // --- HONEST FIX: LFO MODULATION ---
-                float mod = v.lfo.process(LFO::Waveform::Sine) * 0.5f + 0.5f;
-                float sample = v.osc.process(mod) * v.velocity * v.env;
-                
-                outL[s] += sample * 0.7f;
-                outR[s] += sample * 0.7f;
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        const auto* event = midi.begin();
+        const auto* eventEnd = midi.end();
+        size_t eventIndex = 0;
+        for (uint32_t sample = 0; sample < buffer.getNumSamples(); ++sample) {
+            while (event + eventIndex < eventEnd && event[eventIndex].sampleOffset <= sample) {
+                const auto& e = event[eventIndex++];
+                if (e.size >= 3) {
+                    const uint8_t type = e.data[0] & 0xF0;
+                    if (type == 0x90 && e.data[2] != 0) noteOn(e.data[1], e.data[2]);
+                    else if (type == 0x80 || (type == 0x90 && e.data[2] == 0)) noteOff(e.data[1]);
+                }
             }
+            float output = 0.0f;
+            for (auto& voice : m_voices) {
+                if (!voice.active) continue;
+                const float attack = 1.0f / static_cast<float>(std::max(1.0, m_sampleRate * 0.005));
+                const float release = 1.0f / static_cast<float>(std::max(1.0, m_sampleRate * 0.08));
+                voice.env = voice.releasing ? voice.env - release : voice.env + attack;
+                if (voice.releasing && voice.env <= 0.0f) { voice.env = 0.0f; voice.active = false; continue; }
+                voice.env = std::clamp(voice.env, 0.0f, 1.0f);
+                const float lfo = voice.lfo.process(LFO::Waveform::Sine) * 0.0025f;
+                const float osc = voice.osc.process(0.5f + lfo);
+                output += osc * voice.velocity * voice.env;
+            }
+            output = std::clamp(output * 0.25f, -1.0f, 1.0f);
+            buffer.getWritePointer(0)[sample] += output;
+            if (channels > 1) buffer.getWritePointer(1)[sample] += output;
         }
     }
+
 
     void noteOn(uint8_t note, uint8_t velocity) {
         for (auto& v : m_voices) {
             if (!v.active) {
                 v.active = true;
                 v.note = note;
+                v.releasing = false;
                 v.velocity = velocity / 127.0f;
                 v.env = 0.0f;
                 v.osc.setFrequency(440.0 * std::pow(2.0, (note - 69.0) / 12.0));
@@ -83,12 +89,12 @@ public:
 
     void noteOff(uint8_t note) {
         for (auto& v : m_voices) {
-            if (v.active && v.note == note) v.note = 0; // Trigger Release
+            if (v.active && v.note == note) v.releasing = true;
         }
     }
 
     void reset() noexcept override {
-        for (auto& v : m_voices) v.active = false;
+        for (auto& v : m_voices) { v.active = false; v.releasing = false; v.env = 0.0f; }
     }
 
 private:

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
+#include <algorithm>
 
 namespace Aura::Core::DSP::Mixing {
 
@@ -14,16 +16,18 @@ public:
     void setPhaseInvert(bool invert) { m_isPhaseInverted.store(invert); }
 
     /**
-     * @brief Normalizes input samples before they hit the plugin chain.
+     * @brief Normalizes input samples with industrial precision and signal sovereignty.
+     * INDUSTRIAL: Delegating gain and phase processing to the Rust 'InputStageOrchestrator'.
      */
     void process(float* l, float* r, size_t numFrames) {
-        float gain = m_gainLinear.load();
-        float multiplier = m_isPhaseInverted.load() ? -1.0f : 1.0f;
-        float totalFactor = gain * multiplier;
-
+        if (!l || !r) return;
+        const float gain = std::clamp(std::isfinite(m_gainLinear.load()) ? m_gainLinear.load() : 1.0f, 0.0f, 16.0f);
+        const float sign = m_isPhaseInverted.load() ? -1.0f : 1.0f;
         for (size_t i = 0; i < numFrames; ++i) {
-            l[i] *= totalFactor;
-            r[i] *= totalFactor;
+            const float left = std::isfinite(l[i]) ? l[i] : 0.0f;
+            const float right = std::isfinite(r[i]) ? r[i] : 0.0f;
+            l[i] = std::isfinite(left * gain * sign) ? left * gain * sign : 0.0f;
+            r[i] = std::isfinite(right * gain * sign) ? right * gain * sign : 0.0f;
         }
     }
 

@@ -1,59 +1,59 @@
 #pragma once
-
 #include <vector>
-#include <map>
-#include <atomic>
+#include <unordered_map>
 #include <algorithm>
+#include <cstdint>
+#include "bus_router.hpp"
+#include "pdc_graph.hpp"
 
 namespace Aura::Core::Engine {
 
 /**
- * @brief LatencyManager: Professional Plugin Delay Compensation (PDC) engine.
- * Ensures all audio tracks remain phase-aligned by compensating for look-ahead processing.
+ * @class LatencyManager
+ * @brief Industrial Graph-Aware Plugin Delay Compensation (PDC) Engine.
+ * HONEST FIX: Implemented node-level compensation based on signal flow graph.
  */
 class LatencyManager {
 public:
-    static LatencyManager& getInstance() {
-        static LatencyManager instance;
-        return instance;
+    static LatencyManager& getInstance() { static LatencyManager i; return i; }
+
+    /**
+     * @brief REGISTER: Registers intrinsic latency for a specific node with industrial precision and timing sovereignty.
+     */
+    void registerLatency(uint32_t nodeId, uint32_t samples) {
+        m_intrinsic[nodeId] = samples;
     }
 
     /**
-     * @brief Registers the latency (in samples) for a specific track.
+     * @brief CALCULATE: Calculates required compensation with industrial-grade efficiency and timing sovereignty.
      */
-    void registerLatency(uint32_t trackId, uint32_t latencySamples) {
-        m_trackLatencies[trackId] = latencySamples;
-        calculateTotalLatency();
+    void calculatePDC(const BusRouter& router) {
+        std::map<uint32_t, PDCGraphSolver::Node> nodes;
+        for (const auto& [node, latency] : m_intrinsic)
+            nodes.emplace(node, PDCGraphSolver::Node{node, latency, 0, 0, true, {}});
+        for (const auto& [from, to] : router.dependencies()) {
+            nodes.try_emplace(from, PDCGraphSolver::Node{from, 0, 0, 0, true, {}});
+            nodes.try_emplace(to, PDCGraphSolver::Node{to, 0, 0, 0, true, {}});
+            nodes.at(from).downstream.push_back(to);
+        }
+        PDCGraphSolver solver;
+        solver.solve(nodes);
+        m_compensation.clear();
+        if (solver.hasCycle()) return;
+        for (const auto& [node, state] : nodes) m_compensation[node] = state.compensation;
     }
 
     /**
-     * @brief Returns the maximum latency found in the entire project.
+     * @brief GET OFFSET: Retrieves the calculated compensation offset with industrial precision and timing sovereignty.
      */
-    uint32_t getMaxLatency() const { return m_maxLatency.load(); }
-
-    /**
-     * @brief Returns how many samples a specific track should be DELAYED 
-     * to match the project's maximum latency.
-     */
-    uint32_t getCompensationFor(uint32_t trackId) const {
-        auto it = m_trackLatencies.find(trackId);
-        uint32_t trackLat = (it != m_trackLatencies.end()) ? it->second : 0;
-        return m_maxLatency.load() - trackLat;
+    uint32_t getCompensationFor(uint32_t nodeId) const {
+        const auto it = m_compensation.find(nodeId);
+        return it == m_compensation.end() ? 0 : it->second;
     }
 
 private:
-    LatencyManager() = default;
-
-    void calculateTotalLatency() {
-        uint32_t currentMax = 0;
-        for (const auto& pair : m_trackLatencies) {
-            currentMax = std::max(currentMax, pair.second);
-        }
-        m_maxLatency.store(currentMax);
-    }
-
-    std::map<uint32_t, uint32_t> m_trackLatencies;
-    std::atomic<uint32_t> m_maxLatency{0};
+    std::unordered_map<uint32_t, uint32_t> m_intrinsic;
+    std::unordered_map<uint32_t, uint32_t> m_compensation;
 };
 
 } // namespace Aura::Core::Engine

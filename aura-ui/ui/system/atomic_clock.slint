@@ -1,0 +1,22 @@
+import { Style } from "../style.slint";
+
+export component Z_AtomicClock {
+    in property <string> time_str: "09:14:22:04";
+    Rectangle {
+        width: 100%; height: 280px; background: Style.surface; border_width: 1.5px; border_color: Style.brand;
+        VerticalLayout {
+            padding: 24px; spacing: 20px;
+            Text { text: "System Timebase"; font-size: 10px; color: Style.brand; font-weight: 700; }
+            Rectangle {
+                height: 80px; background: Style.lcd-bg; border_radius: 4px; border_width: 1px; border_color: Style.border;
+                Text { text: time_str; font-size: 42px; color: Style.brand; font-family: Style.numeric-font; font-weight: 900; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                VerticalLayout { spacing: 4px; Text { text: "Sync Source"; font-size: Style.font-xxs; color: Style.text-tertiary; } Text { text: "PTP / Internal"; font-size: 9px; color: Style.ok; font-weight: 700; } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Text { text: "Drift < 0.0001 ms | Stable"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+        }
+    }
+}

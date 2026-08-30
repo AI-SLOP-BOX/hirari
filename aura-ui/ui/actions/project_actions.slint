@@ -1,0 +1,20 @@
+// Project and track topology contract.
+export global ProjectActions {
+    callback add_track(string);
+    callback delete_track(int);
+    callback select_track(int);
+    callback load_project(string);
+    callback save_project(string);
+    callback load_video();
+    callback undo();
+    callback redo();
+    callback toggle_arm(int);
+    callback genesis_reset();
+    callback toggle_expand(int);
+    callback toggle_folder(int);
+    callback duplicate_track(int);
+    callback rename_track(int, string);
+    callback recover_latest();
+    callback recover_generation(int);
+    callback recover_generation_as(int);
+}

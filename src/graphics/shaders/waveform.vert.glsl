@@ -24,6 +24,8 @@ void main() {
     float x = float(vid) / (pc.viewRange.y - pc.viewRange.x);
     float y = (vid % 2 == 0) ? peakPairs[pairIdx * 2] : peakPairs[pairIdx * 2 + 1];
     
+    // NDC Transformation: Map [0, 1] range to OpenGL/Vulkan [-1, 1] screen space.
+    // Factor 2.0 scales width to full viewport; -1.0 centers it.
     gl_Position = vec4(x * 2.0 - 1.0, y, 0.0, 1.0);
     outColor = pc.drawColor;
 }

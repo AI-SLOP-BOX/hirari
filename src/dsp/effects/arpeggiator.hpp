@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include "../iprocessor.hpp"
@@ -18,58 +19,70 @@ public:
 
     Arpeggiator(double sr = 44100.0) : m_sampleRate(sr) { reset(); }
 
-    void prepareToPlay(double sr, uint32_t bs) override { m_sampleRate = sr; }
-
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-        
-        // 1. DYNAMICALLY CAPTURE HELD NOTES
-        Core::MidiBuffer::Iterator it{midi};
-        uint8_t data[3]; uint32_t size; uint32_t offset;
-        while (it.getNextEvent(offset, data, size)) {
-            uint8_t status = data[0] & 0xF0;
-            if (status == 0x90 && data[2] > 0) {
-                if (std::find(m_heldNotes.begin(), m_heldNotes.end(), data[1]) == m_heldNotes.end())
-                    m_heldNotes.push_back(data[1]);
-            } else if (status == 0x80 || (status == 0x90 && data[2] == 0)) {
-                auto nit = std::find(m_heldNotes.begin(), m_heldNotes.end(), data[1]);
-                if (nit != m_heldNotes.end()) m_heldNotes.erase(nit);
-            }
-        }
-        
-        if (m_heldNotes.empty()) {
-            killActiveNote(midi, 0);
-            return;
-        }
-        std::sort(m_heldNotes.begin(), m_heldNotes.end());
-
-        // 2. PATTERN SYNC (1/16th Note resolution)
-        double samplesPer16th = (60.0 / context.bpm) * context.sampleRate / 4.0;
-        uint64_t currentSample = context.playhead;
-        uint32_t numSamples = buffer.getNumSamples();
-
-        // Check if a trigger point exists within this buffer
-        uint64_t nextTriggerSample = (static_cast<uint64_t>(currentSample / samplesPer16th) + 1) * samplesPer16th;
-        
-        if (nextTriggerSample >= currentSample && nextTriggerSample < (currentSample + numSamples)) {
-            uint32_t triggerOffset = static_cast<uint32_t>(nextTriggerSample - currentSample);
-            
-            // --- PROFESSIONAL KILL PREVIOUS ---
-            killActiveNote(midi, triggerOffset);
-
-            // Trigger New Note
-            m_stepCounter = (m_stepCounter + 1) % m_heldNotes.size();
-            m_activeNote = m_heldNotes[m_stepCounter];
-            
-            uint8_t noteOn[3] = {0x90, m_activeNote, 100};
-            midi.addEvent(triggerOffset, noteOn, 3);
-        }
+    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+        (void)bs;
+        if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = sr;
+        reset();
     }
 
-    void reset() override {
-        m_heldNotes.clear();
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
+        (void)buffer;
+        const double bpm = std::clamp(std::isfinite(context.bpm) ? context.bpm : 120.0, 20.0, 300.0);
+        const uint64_t stepSamples = std::max<uint64_t>(1, static_cast<uint64_t>(context.sampleRate * 60.0 / bpm / 4.0));
+        Core::MidiBuffer output;
+        for (const auto& event : midi) {
+            if (event.size < 2 || event.data[0] < 0x80) {
+                output.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
+                continue;
+            }
+            const uint8_t status = event.data[0] & 0xF0;
+            const uint8_t channel = static_cast<uint8_t>((event.data[0] & 0x0F) + 1);
+            const uint8_t note = event.data[1];
+            if (status == 0x90 && event.size >= 3 && event.data[2] != 0) {
+                if (std::find(m_heldNotes.begin(), m_heldNotes.begin() + m_heldCount, note) == m_heldNotes.begin() + m_heldCount && m_heldCount < m_heldNotes.size()) {
+                    m_heldNotes[m_heldCount++] = note;
+                }
+            } else if (status == 0x80 || (status == 0x90 && event.size >= 3 && event.data[2] == 0)) {
+                auto it = std::find(m_heldNotes.begin(), m_heldNotes.begin() + m_heldCount, note);
+                if (it != m_heldNotes.begin() + m_heldCount) {
+                    *it = m_heldNotes[--m_heldCount];
+                }
+                killActiveNote(output, event.sampleOffset);
+            } else {
+                output.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
+            }
+        }
+        const uint64_t blockStart = context.blockStart;
+        const uint64_t blockEnd = blockStart + buffer.getNumSamples();
+        if (m_heldCount > 0 && stepSamples > 0) {
+            const uint64_t first = ((blockStart + stepSamples - 1) / stepSamples) * stepSamples;
+            for (uint64_t absolute = first; absolute < blockEnd; absolute += stepSamples) {
+                killActiveNote(output, absolute - blockStart);
+                const size_t index = selectIndex(m_stepCounter++, m_heldCount);
+                m_activeNote = m_heldNotes[index];
+                output.addNoteOn(1, m_activeNote, 100, absolute - blockStart);
+            }
+        }
+        midi.clear();
+        for (const auto& event : output) midi.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
+        midi.sort();
+    }
+
+
+    void reset() noexcept override {
+        m_heldCount = 0;
         m_activeNote = 0xFF;
         m_stepCounter = 0;
+    }
+
+    size_t selectIndex(uint32_t step, size_t count) const noexcept {
+        if (count == 0) return 0;
+        switch (m_mode) {
+            case Mode::Down: return count - 1 - (step % count);
+            case Mode::Range: return (step / count) % 2 == 0 ? step % count : count - 1 - (step % count);
+            case Mode::Random: return (static_cast<uint32_t>(step * 1664525u + 1013904223u) >> 16) % count;
+            case Mode::Up: default: return step % count;
+        }
     }
 
 private:
@@ -82,7 +95,8 @@ private:
     }
 
     double m_sampleRate;
-    std::vector<uint8_t> m_heldNotes;
+    std::array<uint8_t, 128> m_heldNotes{};
+    size_t m_heldCount = 0;
     uint8_t m_activeNote = 0xFF; // Sentinal for 'None'
     uint32_t m_stepCounter = 0;
     Mode m_mode = Mode::Up;

@@ -47,37 +47,29 @@ public:
 
     float getNext() {
         switch (m_state) {
+            case ADSR_IDLE: case ADSR_OFF: return 0.0f;
             case ADSR_ATTACK:
-                m_currentLevel += m_attackStep;
-                if (m_currentLevel >= 1.0f) {
-                    m_currentLevel = 1.0f;
-                    m_state = ADSR_DECAY;
-                }
+                m_currentLevel = std::min(1.0f, m_currentLevel + m_attackStep);
+                if (m_currentLevel >= 1.0f) m_state = ADSR_DECAY;
                 break;
             case ADSR_DECAY:
-                m_currentLevel -= m_decayStep;
-                if (m_currentLevel <= m_sustain) {
-                    m_currentLevel = m_sustain;
-                    m_state = ADSR_SUSTAIN;
-                }
+                m_currentLevel = std::max(m_sustain, m_currentLevel - m_decayStep);
+                if (m_currentLevel <= m_sustain) m_state = ADSR_SUSTAIN;
                 break;
             case ADSR_SUSTAIN:
                 m_currentLevel = m_sustain;
                 break;
             case ADSR_RELEASE:
-                // --- HONEST FIX: EXPONENTIAL RELEASE ---
                 m_currentLevel *= m_releaseCoeff;
-                if (m_currentLevel <= 0.0005f) {
+                if (m_currentLevel <= 1.0e-5f) {
                     m_currentLevel = 0.0f;
-                    m_state = ADSR_OFF;
+                    m_state = ADSR_IDLE;
                 }
                 break;
-            default:
-                m_currentLevel = 0.0f;
-                break;
         }
-        return m_currentLevel;
+        return std::isfinite(m_currentLevel) ? std::clamp(m_currentLevel, 0.0f, 1.0f) : 0.0f;
     }
+
 
 private:
     void updateCoeffs() {
@@ -95,4 +87,3 @@ private:
 };
 
 } // namespace Aura::Core::DSP::Synthesis
-

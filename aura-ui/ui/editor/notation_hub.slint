@@ -1,0 +1,59 @@
+import { Style } from "../style.slint";
+import { ZNote } from "../model/midi_model.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export component Z_NotationHub {
+    in property <[ZNote]> notes;
+    Rectangle {
+        background: Style.surface-1;
+        border-width: 1.5px;
+        border-color: Style.border;
+        VerticalLayout {
+            padding: 24px;
+            spacing: 20px;
+            Text {
+                text: "Notation";
+                font-size: 11px;
+                color: Style.brand;
+                font-weight: 700;
+            }
+            ScrollView {
+                VerticalLayout {
+                    spacing: 40px;
+                    for staff in 3 : VerticalLayout {
+                        spacing: 2px;
+                        for i in 5 : Rectangle {
+                            width: 100%;
+                            height: 1.5px;
+                            background: Style.line-subtle;
+                        }
+                        HorizontalLayout {
+                            padding-left: 100px;
+                            spacing: 40px;
+                            for note in 6 : Rectangle {
+                                width: 12px;
+                                height: 10px;
+                                background: Style.brand;
+                                border-radius: 6px;
+                                y: (Math.sin((note * 1.5 + staff) * 1rad) * 20.0) * 1px;
+                                Rectangle {
+                                    x: 5px;
+                                    y: -10px;
+                                    width: 1.5px;
+                                    height: 30px;
+                                    background: Style.text-tertiary;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Text {
+                text: "Notation editor";
+                font-size: Style.font-xxs;
+                color: Style.text-tertiary;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}

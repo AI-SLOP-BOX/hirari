@@ -7,6 +7,10 @@
 #include <memory>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
 
 namespace Aura::IO {
 
@@ -20,7 +24,14 @@ namespace Aura::IO {
 class WavetableParser {
 public:
     struct AlignedDeleter {
-        void operator()(float* p) const { if (p) free(p); }
+        void operator()(float* p) const {
+            if (!p) return;
+#if defined(_WIN32)
+            _aligned_free(p);
+#else
+            std::free(p);
+#endif
+        }
     };
 
     struct WavetableData {
@@ -55,6 +66,7 @@ public:
         // Point 4: Strict Power of 2 (128 to 4096 per Surge spec)
         if (!isPowerOfTwo(data->waveSize) || data->waveSize < 128 || data->waveSize > 4096) return nullptr;
 
+        if (data->waveCount == 0) return nullptr;
         uint64_t totalSamples = (uint64_t)data->waveSize * data->waveCount;
         uint64_t dataSizeInBytes = totalSamples * sizeof(float); 
         
@@ -62,11 +74,18 @@ public:
         if (fileSize < 12 + dataSizeInBytes) return nullptr;
 
         // --- HONEST FIX: POSIX ALIGNMENT FOR SIMD ---
+        const size_t allocationSize = (dataSizeInBytes + 15u) & ~size_t(15u);
         float* rawPtr = nullptr;
-        if (posix_memalign(reinterpret_cast<void**>(&rawPtr), 16, dataSizeInBytes) != 0) return nullptr;
+#if defined(_WIN32)
+        rawPtr = static_cast<float*>(_aligned_malloc(allocationSize, 16));
+#else
+        rawPtr = static_cast<float*>(std::aligned_alloc(16, allocationSize));
+#endif
+        if (!rawPtr) return nullptr;
         data->samples.reset(rawPtr);
 
-        file.read(reinterpret_cast<char*>(data->samples.get()), dataSizeInBytes);
+        file.read(reinterpret_cast<char*>(data->samples.get()), static_cast<std::streamsize>(dataSizeInBytes));
+        if (!file) return nullptr;
 
         // Point 3: Flag 0x0008 (Headroom recovery)
         if (data->flags & 0x0008) {

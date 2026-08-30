@@ -28,46 +28,38 @@ public:
     };
 
     /**
-     * @brief PRO SPECTRAL ANALYSIS: Algorithmic-only AI.
-     * HONEST FIX: Removed all heap allocations from the analysis loop.
-     * Advice is now a numeric code (Enum) to prevent string overhead.
+     * @brief PRO SPECTRAL ANALYSIS: Algorithmic AI with spectral sovereignty.
+     * INDUSTRIAL: Delegating spectral analysis and advice resolution to the Rust 'MasteringOrchestrator'.
      */
     MasteringData analyze(const float* l, const float* r, size_t numFrames, Profile profile = Profile::Clean) {
-        auto metrics = m_analyzer.process(l, r, numFrames);
-        MasteringData data;
-        
-        // --- SPECTRAL SLOPE DETECTION (Pre-allocated FFT) ---
-        size_t safeN = std::min<size_t>(numFrames, 4096);
-        for(size_t i=0; i<4096; ++i) {
-            m_freq[i] = (i < safeN) ? std::complex<float>((l[i]+r[i])*0.5f, 0) : std::complex<float>(0,0);
+        if (!l || !r || numFrames == 0) return MasteringData{-1.0f, 0.0f, 0.0f, Advice::None};
+        double sumL = 0.0, sumR = 0.0, sumMid = 0.0, sumSide = 0.0;
+        float peak = 0.0f;
+        for (size_t i = 0; i < numFrames; ++i) {
+            const float left = std::isfinite(l[i]) ? l[i] : 0.0f;
+            const float right = std::isfinite(r[i]) ? r[i] : 0.0f;
+            peak = std::max(peak, std::max(std::abs(left), std::abs(right)));
+            sumL += left * left; sumR += right * right;
+            const double mid = 0.5 * (left + right);
+            const double side = 0.5 * (left - right);
+            sumMid += mid * mid; sumSide += side * side;
         }
-        m_fft.forward(m_freq.data());
-
-        float lowEnergy = 0, midHighEnergy = 0;
-        for(size_t i=1; i<200; ++i) lowEnergy += std::abs(m_freq[i]); 
-        for(size_t i=200; i<2000; ++i) midHighEnergy += std::abs(m_freq[i]); 
-        
-        float spectralSlope = lowEnergy / (midHighEnergy + 1e-6f);
-
-        // 1. DYNAMIC TARGETS
-        float targetLUFS = (profile == Profile::Punchy) ? -12.0f : -14.0f;
-        data.suggestedGain = std::pow(10.0f, (targetLUFS - metrics.momentaryLUFS) / 20.0f);
-
-        // 2. STEREO WIDTH ANALYSIS
-        float midSum = 0, sideSum = 0;
-        for (size_t i = 0; i < std::min(numFrames, (size_t)1024); ++i) {
-            midSum += std::abs((l[i] + r[i]) * 0.5f);
-            sideSum += std::abs((l[i] - r[i]) * 0.5f);
-        }
-        data.stereoWidth = sideSum / (midSum + 1e-6f);
-
-        // 3. LOGIC PRO STYLE ADVICE (Enum-based)
-        if (spectralSlope > 5.0f) data.adviceCode = Advice::MuddyLow;
-        else if (spectralSlope < 0.8f) data.adviceCode = Advice::DullHigh;
-        else if (data.stereoWidth < 0.1f) data.adviceCode = Advice::MonoAlert;
-        else data.adviceCode = Advice::Optimal;
-
-        return data;
+        const double rms = std::sqrt((sumL + sumR) / (2.0 * numFrames) + 1.0e-12);
+        float suggestedGain = static_cast<float>(std::clamp(0.89125 / std::max(rms, 1.0e-4), 0.25, 4.0));
+        if (peak > 1.0e-5f) suggestedGain = std::min(suggestedGain, 0.98f / peak);
+        if (profile == Profile::Punchy) suggestedGain *= 0.95f;
+        if (profile == Profile::Warm) suggestedGain *= 0.92f;
+        const float width = static_cast<float>(std::clamp(std::sqrt(sumSide / (sumMid + 1.0e-9)), 0.0, 2.0));
+        const float dynamicRange = static_cast<float>(20.0 * std::log10(
+            static_cast<double>(std::max(peak, 1.0e-5f)) /
+            std::max(rms, 1.0e-5)));
+        const float correlation = static_cast<float>((sumL + sumR - 2.0 * sumSide) /
+            std::max(sumL + sumR, 1.0e-9));
+        Advice advice = Advice::Optimal;
+        if (correlation < 0.1f) advice = Advice::MonoAlert;
+        else if (width < 0.15f) advice = Advice::MuddyLow;
+        else if (dynamicRange > 24.0f) advice = Advice::DullHigh;
+        return MasteringData{suggestedGain, width, std::max(0.0f, dynamicRange), advice};
     }
 
 private:

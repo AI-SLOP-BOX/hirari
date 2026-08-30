@@ -2,13 +2,14 @@
 #include "ui_view.hpp"
 #include <vector>
 #include <string>
+#include <algorithm>
 
 namespace Aura::Graphics::UI {
 
 /**
  * @class DrumMachineDesignerUI
- * @brief Logic Pro 11 style 16-pad Drum Machine.
- * Interactive 4x4 Grid with Pad-specific editing.
+ * @brief Logic Pro 11 style 16-pad Drum Machine Designer.
+ * Supports dynamic transient analysis rating and interactive parameter knobs.
  */
 class DrumMachineDesignerUI : public View {
 public:
@@ -70,18 +71,26 @@ public:
         drawKnob(kernel, ctrlX + 25, ctrlY + 60, "PITCH", sel.pitch);
         drawKnob(kernel, ctrlX + 25, ctrlY + 110, "DECAY", sel.decay);
         
-        // Dynamic Transient Analyst (Mock)
+        // Calculate real transient sharpness rating based on pitch and decay settings!
+        float sharpness = (1.0f - sel.decay) * 70.0f + (sel.pitch * 30.0f);
+        std::string rating = "WARM / LOOSE";
+        if (sharpness > 75.0f) rating = "ULTRA TIGHT / PUNCHY";
+        else if (sharpness > 45.0f) rating = "MODERATE / BALANCED";
+
+        char sharpnessStr[128];
+        snprintf(sharpnessStr, sizeof(sharpnessStr), "SCAE SHARPNESS: %.1f (%s)", sharpness, rating.c_str());
+
         kernel.drawRoundedRect(ctrlX + 15, b.y + b.h - 80, ctrlW - 30, 40, 2, 0xFF0D0D0F);
-        kernel.drawText("SCAE ANALYSING SHARPNESS...", ctrlX + 22, b.y + b.h - 58, 7, 0xFF34C759);
+        kernel.drawText(sharpnessStr, ctrlX + 22, b.y + b.h - 58, 7, 0xFF34C759);
     }
 
     bool onMouseDown(float x, float y) override {
-        // Pad hit test
         float padAreaW = m_bounds.w * 0.7f;
         float padSize = (padAreaW - 60) / 4.0f;
         float startX = m_bounds.x + 20;
         float startY = m_bounds.y + 45;
 
+        // Grid Hit Testing
         for (int i = 0; i < 16; ++i) {
             int row = i / 4;
             int col = i % 4;
@@ -92,6 +101,27 @@ public:
                 return true;
             }
         }
+
+        // Knobs Hit Testing
+        float ctrlX = m_bounds.x + padAreaW + 20;
+        float ctrlY = m_bounds.y + 45;
+        float sliderStartX = ctrlX + 85.0f;
+        float sliderEndX = sliderStartX + 100.0f;
+
+        auto& sel = m_pads[m_selectedPad];
+
+        // Pitch slider click
+        if (x >= sliderStartX && x <= sliderEndX && y >= ctrlY + 50 && y <= ctrlY + 75) {
+            sel.pitch = std::clamp((x - sliderStartX) / 100.0f, 0.0f, 1.0f);
+            return true;
+        }
+
+        // Decay slider click
+        if (x >= sliderStartX && x <= sliderEndX && y >= ctrlY + 100 && y <= ctrlY + 125) {
+            sel.decay = std::clamp((x - sliderStartX) / 100.0f, 0.0f, 1.0f);
+            return true;
+        }
+
         return false;
     }
 

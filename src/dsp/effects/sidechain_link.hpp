@@ -20,13 +20,25 @@ public:
      * @brief Updates the sidechain level from a source track.
      */
     void updateFromSource(const Core::AudioBuffer& buffer) {
-        float rms = 0.0f;
-        const float* l = buffer.getWritePointer(0);
-        for (uint32_t s = 0; s < buffer.getNumSamples(); ++s) {
-            rms += l[s] * l[s];
+        const uint32_t channels = buffer.getNumChannels();
+        const uint32_t samples = buffer.getNumSamples();
+        if (channels == 0 || samples == 0) { m_level.store(0.0f, std::memory_order_relaxed); return; }
+        double sum = 0.0;
+        for (uint32_t c = 0; c < channels; ++c) {
+            const float* p = buffer.getReadPointer(c);
+            if (!p) continue;
+            for (uint32_t i = 0; i < samples; ++i) {
+                const float x = std::isfinite(p[i]) ? p[i] : 0.0f;
+                sum += static_cast<double>(x) * x;
+            }
         }
-        m_level.store(std::sqrt(rms / buffer.getNumSamples()));
+        const float rms = static_cast<float>(std::sqrt(sum / static_cast<double>(channels * samples)));
+        const float previous = m_level.load(std::memory_order_relaxed);
+        const float target = std::isfinite(rms) ? rms : 0.0f;
+        const float smoothed = previous + (target - previous) * 0.25f;
+        m_level.store(std::clamp(smoothed, 0.0f, 4.0f), std::memory_order_relaxed);
     }
+
 
     float getLevel() const { return m_level.load(); }
 

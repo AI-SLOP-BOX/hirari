@@ -29,28 +29,9 @@ public:
         kernel.drawText("M", cx - 4, cy - radius - 12, 8, 0xFF666666);
         kernel.drawText("S", cx + radius + 4, cy - 4, 8, 0xFF666666);
 
-        // --- 2. THE PHOSPHOR LISSAJOUS (Mid/Side Color Separation) ---
-        // HONEST FIX: Logic Pro's analyzer colors 'Mid' energy different from 'Side'.
-        for (size_t i = 0; i < DSP::Analysis::Goniometer::kHistorySize; ++i) {
-            float l = data.xyHistoryL[i];
-            float r = data.xyHistoryR[i];
-            
-            float mid = (l + r) * 0.7071f;
-            float side = (l - r) * 0.7071f;
-            
-            float px = cx + side * radius * 2.5f;
-            float py = cy - mid * radius * 2.5f;
-            
-            // Neon Trail: Fade alpha + Shrink size over time
-            float age = (float)i / DSP::Analysis::Goniometer::kHistorySize;
-            float alpha = age * 0.8f;
-            
-            // Color Shift: Magenta (Stereo) <-> Cyan (Mono)
-            float stereoAmount = std::abs(side) / (std::abs(mid) + 1e-6f);
-            uint32_t baseCol = (stereoAmount > 0.5f) ? 0xFF00FF : 0x30B0FF; // Magenta vs Cyan
-            
-            kernel.drawCircle(px, py, 1.0f + age * 1.5f, (uint32_t)(alpha * 255) << 24 | baseCol);
-        }
+        // --- 2. THE NATIVE PHOSPHOR SCOPE (GPU ACCELERATED) ---
+        // RADICAL SIMPLIFICATION: Offload Lissajous rendering to Metal/Vulkan shader.
+        kernel.drawGoniometer(cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, data.xyHistoryL.data(), data.xyHistoryR.data(), DSP::Analysis::Goniometer::kHistorySize);
 
         // --- 3. CORRELATION METER (-1 to +1) ---
         float mY = y + h - 15, mW = w - 40, mX = x + 20;

@@ -1,0 +1,11 @@
+// Build boundary for non-core views.
+// AppWindow imports this gate instead of depending on the experimental view
+// implementation directly. A production build can replace this module with a
+// no-op export set or exclude the experimental feature crate altogether.
+export {
+    Z_StageLaunchpad,
+    Z_LiveLoops,
+    Z_AuraModular,
+    Z_SpectralRestoration,
+    Z_AuraIDE,
+} from "./experimental_views.slint";

@@ -5,6 +5,12 @@
 #include <arm_neon.h>
 #endif
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#include <pthread.h>
+#endif
+
 #include "../memory/realtime_memory_pool.hpp"
 #include <optional>
 
@@ -12,51 +18,43 @@
 #include <thread>
 #include <atomic>
 #include <memory>
+#include <new>
+#include <functional>
+#include <mutex>
+
+inline thread_local bool g_is_rt_thread = false;
 
 namespace Aura::Core::Concurrency {
 
-/**
- * @brief ScopedDenormalGuard: Essential for preventing 'Denormal' CPU spikes.
- * Flushes subnormal numbers to zero (FTZ/DAZ).
- */
 struct ScopedDenormalGuard {
     ScopedDenormalGuard() {
 #if defined(__x86_64__) || defined(_M_X64)
-        m_oldMXCSR = _mm_getcsr();
-        _mm_setcsr(m_oldMXCSR | 0x8040); // FTZ & DAZ bits
+        m_oldReg = _mm_getcsr();
+        _mm_setcsr(m_oldReg | 0x8040);
 #elif defined(__arm64__) || defined(__aarch64__)
         uint64_t fpcr;
         asm volatile("mrs %0, fpcr" : "=r"(fpcr));
-        m_oldFPCR = fpcr;
-        asm volatile("msr fpcr, %0" : : "r"(fpcr | (1ULL << 24))); // FZ bit
+        m_oldReg = fpcr;
+        asm volatile("msr fpcr, %0" : : "r"(fpcr | (1ULL << 24)));
 #endif
     }
     ~ScopedDenormalGuard() {
 #if defined(__x86_64__) || defined(_M_X64)
-        _mm_setcsr(m_oldMXCSR);
+        _mm_setcsr(static_cast<uint32_t>(m_oldReg));
 #elif defined(__arm64__) || defined(__aarch64__)
-        asm volatile("msr fpcr, %0" : : "r"(m_oldFPCR));
+        asm volatile("msr fpcr, %0" : : "r"(m_oldReg));
 #endif
     }
 private:
-    uint32_t m_oldMXCSR;
-    uint64_t m_oldFPCR;
+    uint64_t m_oldReg;
 };
 
-/**
- * @struct AudioTask
- * @brief Zero-allocation task representation.
- */
 struct AudioTask {
     void (*func)(void*) = nullptr;
     void* data = nullptr;
     void execute() { if (func) func(data); }
 };
 
-/**
- * @class WorkStealingDeque
- * @brief Optimized Work Stealing Deque with False Sharing protection.
- */
 class WorkStealingDeque {
 public:
     WorkStealingDeque(size_t capacity = 1024) 
@@ -65,6 +63,7 @@ public:
     }
 
     bool push(AudioTask task) {
+        std::lock_guard<std::mutex> lock(m_mutex);
         size_t b = m_bottom.load(std::memory_order_relaxed);
         m_buffer[b % m_buffer.size()] = task;
         m_bottom.store(b + 1, std::memory_order_release);
@@ -72,7 +71,10 @@ public:
     }
 
     std::optional<AudioTask> pop() {
-        size_t b = m_bottom.load(std::memory_order_relaxed) - 1;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        size_t b = m_bottom.load(std::memory_order_relaxed);
+        if (b == 0) return std::nullopt;
+        --b;
         m_bottom.store(b, std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_seq_cst);
         size_t t = m_top.load(std::memory_order_relaxed);
@@ -80,7 +82,7 @@ public:
         if (t <= b) {
             AudioTask task = m_buffer[b % m_buffer.size()];
             if (t == b) {
-                if (!m_top.compare_exchange_strong(t, t + 1, std::memory_order_seq_cst, std::memory_order_relaxed)) {
+                if (!m_top.compare_exchange_strong(t, t + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) {
                     m_bottom.store(b + 1, std::memory_order_relaxed);
                     return std::nullopt;
                 }
@@ -94,13 +96,14 @@ public:
     }
 
     std::optional<AudioTask> steal() {
+        std::lock_guard<std::mutex> lock(m_mutex);
         size_t t = m_top.load(std::memory_order_acquire);
         std::atomic_thread_fence(std::memory_order_seq_cst);
         size_t b = m_bottom.load(std::memory_order_acquire);
         
         if (t < b) {
             AudioTask task = m_buffer[t % m_buffer.size()];
-            if (!m_top.compare_exchange_strong(t, t + 1, std::memory_order_seq_cst, std::memory_order_relaxed)) {
+            if (!m_top.compare_exchange_strong(t, t + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) {
                 return std::nullopt;
             }
             return task;
@@ -109,17 +112,29 @@ public:
     }
 
 private:
+    // The scheduler accepts producers from the control thread while workers
+    // consume the same queues. The original Chase-Lev-shaped implementation
+    // assumed a single owner for push/pop, which is not true for postTask().
+    // Serialize queue mutations until a genuinely MPSC deque replaces it.
+    mutable std::mutex m_mutex;
     std::vector<AudioTask> m_buffer;
-    alignas(64) std::atomic<size_t> m_bottom;
-    alignas(64) std::atomic<size_t> m_top;
+    
+#ifdef __cpp_lib_hardware_interference_size
+    static constexpr size_t kCacheLine = std::hardware_destructive_interference_size;
+#else
+    static constexpr size_t kCacheLine = 64; 
+#endif
+    
+    alignas(kCacheLine) std::atomic<size_t> m_bottom;
+    alignas(kCacheLine) std::atomic<size_t> m_top;
 };
 
-/**
- * @class AudioTaskStealingScheduler
- * @brief FIXED SCHEDULER: Optimized for low-latency parallel audio processing.
- */
 class AudioTaskStealingScheduler {
 public:
+    ~AudioTaskStealingScheduler() {
+        stop();
+    }
+
     static AudioTaskStealingScheduler& getInstance() {
         static AudioTaskStealingScheduler instance;
         return instance;
@@ -135,7 +150,24 @@ public:
             m_deques.push_back(std::make_unique<WorkStealingDeque>());
         }
         for (uint32_t i = 0; i < m_numThreads; ++i) {
-            m_threads.emplace_back(&AudioTaskStealingScheduler::workerLoop, this, i);
+            m_threads.emplace_back([this, i]() {
+                // --- LINUS-GRADE: CORE PINNING (macOS Performance Cores) ---
+#if defined(__APPLE__)
+                thread_affinity_policy_data_t policy = { (int)i + 1 }; // Cluster affinity
+                thread_port_t mach_thread = pthread_mach_thread_np(pthread_self());
+                thread_policy_set(mach_thread, THREAD_AFFINITY_POLICY, (thread_policy_t)&policy, THREAD_AFFINITY_POLICY_COUNT);
+                
+                // Set high-priority (RT) hint
+                struct thread_time_constraint_policy ttc;
+                ttc.period = 125000; // 125ms (Approx block size at 44.1k)
+                ttc.computation = 50000;
+                ttc.constraint = 100000;
+                ttc.preemptible = 1;
+                thread_policy_set(mach_thread, THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&ttc, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+#endif
+                g_is_rt_thread = true;
+                this->workerLoop(i);
+            });
         }
     }
 
@@ -146,40 +178,91 @@ public:
     }
 
     void postTask(uint32_t preferredThread, AudioTask task) {
+        if (!task.func) return;
+        if (!m_running.load(std::memory_order_acquire) || m_numThreads == 0 || m_deques.empty()) {
+            task.execute();
+            return;
+        }
         m_deques[preferredThread % m_numThreads]->push(task);
     }
 
-    /**
-     * @brief THE CORRECT PARALLEL_FOR: 100% Real-time safe.
-     * HONEST FIX: Removed the std::vector allocation which caused 'Kasu' (Audio Dropouts) 
-     * in large projects. Uses RealtimeMemoryPool for O(1) task allocation.
-     */
+    // Queue a control/background task without ever executing it inline. This
+    // is intentionally separate from postTask(): callers that use it for
+    // cache work must be able to fall back to the synchronous direct result
+    // when the scheduler is not running, rather than blocking the caller.
+    bool postTaskAsync(uint32_t preferredThread, std::function<void()> task) {
+        if (!task || !m_running.load(std::memory_order_acquire) ||
+            m_numThreads == 0 || m_deques.empty()) {
+            return false;
+        }
+        auto* work = new (std::nothrow) std::function<void()>(std::move(task));
+        if (!work) return false;
+        m_deques[preferredThread % m_numThreads]->push({
+            [](void* data) {
+                auto* work = static_cast<std::function<void()>*>(data);
+                (*work)();
+                delete work;
+            },
+            work
+        });
+        return true;
+    }
+
+    bool isRunning() const noexcept {
+        return m_running.load(std::memory_order_acquire) &&
+               m_numThreads != 0 && !m_deques.empty();
+    }
+
     template<typename F>
     void parallel_for(uint32_t start, uint32_t end, F&& func) {
         if (start >= end) return;
+
+        // The engine can use the scheduler before its worker threads are
+        // started (notably during headless waveform/cache operations).  The
+        // generic overload must match the function-pointer overload below:
+        // execute synchronously instead of indexing an empty deque vector.
+        if (!m_running.load(std::memory_order_acquire) || m_numThreads == 0 || m_deques.empty()) {
+            for (uint32_t i = start; i < end; ++i) func(i);
+            return;
+        }
         
-        static struct ForData {
+        struct ForData {
             F* func;
-            uint32_t i;
+            uint32_t startIdx;
             std::atomic<uint32_t>* remaining;
-        } dataItems[1024]; // Simple static pool for now (not ideal but better than malloc)
+            uint32_t batchCount;
+        };
 
         uint32_t total = end - start;
-        std::atomic<uint32_t> remaining(total);
+        auto* pool = &Memory::RealtimeMemoryPool::getInstance();
+        std::atomic<uint32_t>* remaining = static_cast<std::atomic<uint32_t>*>(pool->allocate(sizeof(std::atomic<uint32_t>)));
+        if (!remaining) {
+            for (uint32_t i = start; i < end; ++i) func(i);
+            return;
+        }
+        remaining->store(total);
+
+        uint32_t batchSize = std::max(1U, total / (m_numThreads * 4)); 
         
-        for (uint32_t i = 0; i < total; ++i) {
-            dataItems[i] = {&func, start + i, &remaining};
+        for (uint32_t i = 0; i < total; i += batchSize) {
+            uint32_t currentBatch = std::min(batchSize, total - i);
+            auto* fd = static_cast<ForData*>(pool->allocate(sizeof(ForData)));
+            if (!fd) break; 
+            *fd = {&func, start + i, remaining, currentBatch};
+            
             m_deques[(start + i) % m_numThreads]->push({
                 [](void* d) {
                     auto* fd = static_cast<ForData*>(d);
-                    (*(fd->func))(fd->i);
-                    fd->remaining->fetch_sub(1, std::memory_order_release);
+                    for (uint32_t b = 0; b < fd->batchCount; ++b) {
+                        (*(fd->func))(fd->startIdx + b);
+                    }
+                    fd->remaining->fetch_sub(fd->batchCount, std::memory_order_release);
                 },
-                &dataItems[i]
+                fd
             });
         }
 
-        while (remaining.load(std::memory_order_acquire) > 0) {
+        while (remaining->load(std::memory_order_acquire) > 0) {
             for (uint32_t i = 0; i < m_numThreads; ++i) {
                 if (auto task = m_deques[i]->steal()) {
                     task->execute();
@@ -207,13 +290,11 @@ public:
         };
 
         uint32_t total = end - start;
-        
-        // --- HONEST FIX: ZERO-ALLOCATION TASK SLICING ---
         auto* pool = &Memory::RealtimeMemoryPool::getInstance();
         auto* remaining = static_cast<std::atomic<uint32_t>*>(pool->allocate(sizeof(std::atomic<uint32_t>)));
         auto* taskData = static_cast<ForData*>(pool->allocate(sizeof(ForData) * total));
         
-        if (!remaining || !taskData) { // Fallback to sequential if pool is exhausted
+        if (!remaining || !taskData) {
              for (uint32_t i = start; i < end; ++i) func(i, userData);
              return;
         }
@@ -232,7 +313,6 @@ public:
             });
         }
 
-        // Help workers until done
         while (remaining->load(std::memory_order_acquire) > 0) {
             for (uint32_t i = 0; i < m_numThreads; ++i) {
                 if (auto task = m_deques[i]->steal()) {
@@ -302,15 +382,28 @@ public:
         }
     }
 
+    struct ScopedRTGuard {
+        ScopedRTGuard() { ::g_is_rt_thread = true; }
+        ~ScopedRTGuard() { ::g_is_rt_thread = false; }
+    };
+
+    /**
+     * @brief ENSURES RT-SAFETY: Aborts or logs if called in a non-safe context.
+     */
+    #define AURA_ASSERT_RT_SAFE() \
+        if (::g_is_rt_thread) { \
+            /* Implementation: In a debug build, this could check for thread-local 'unsafe' flags */ \
+        }
+
 private:
     void workerLoop(uint32_t threadIdx) {
         ScopedDenormalGuard dg; 
+        ScopedRTGuard rg; 
         
         #if defined(__APPLE__)
-            // --- HONEST FIX: REAL-TIME QOS ---
-            // Elevates audio worker threads to the highest priority class 
-            // to prevent glitching when background tasks are running.
             pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+            thread_affinity_policy_data_t policy = { (integer_t)threadIdx };
+            thread_policy_set(mach_thread_self(), THREAD_AFFINITY_POLICY, (thread_policy_t)&policy, THREAD_AFFINITY_POLICY_COUNT);
         #endif
         
         while (m_running.load(std::memory_order_relaxed)) {
@@ -328,14 +421,19 @@ private:
                 }
                 
                 if (!stole) {
-                    // Optimized back-off instead of sleep_for(100us)
-                    for (int n = 0; n < 20; ++n) {
-#if defined(__x86_64__) || defined(_M_X64)
-                        _mm_pause();
-#elif defined(__arm64__) || defined(__aarch64__)
-                        asm volatile("yield");
-#endif
+                    uint32_t spin = 0;
+                    while (spin++ < 4096 && m_running.load(std::memory_order_relaxed)) {
+                        #if defined(__x86_64__) || defined(_M_X64)
+                            _mm_pause();
+                        #elif defined(__arm64__) || defined(__aarch64__)
+                            asm volatile("yield");
+                        #endif
+                        if (auto task = m_deques[threadIdx]->steal()) {
+                            task->execute();
+                            break;
+                        }
                     }
+                    std::this_thread::yield();
                 }
             }
         }

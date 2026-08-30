@@ -1,0 +1,43 @@
+// Shared UI contracts. Keep these independent from visual components so that
+// views can be split without creating imports back into AppWindow.
+
+export struct Z_Marker { id: int, beat: float, label: string, color: color }
+
+export struct Z_ChatMessage { sender: string, content: string, is_ai: bool }
+
+export struct Z_Bus {
+    id: int, name: string, color: color, volume: float, pan: float,
+    peak: float, mute: bool, solo: bool
+}
+
+export struct Z_Sample_Entry {
+    name: string, path: string, bpm: float, key: string, fav: bool,
+    sr: int, size: string, fmt: string, wave: [float]
+}
+
+// A concrete installed plugin entry.  The path is retained for the control
+// plane, while the UI shows only the readable name/format/capability.
+export struct Z_Plugin_Entry {
+    id: string,
+    name: string,
+    format: string,
+    path: string,
+    capability: string,
+    binary_hash: string,
+    binary_bytes: int,
+    installed: bool,
+    sandboxed: bool,
+    favorite: bool,
+    visible: bool
+}
+
+export struct Z_Extension_Entry {
+    extension_id: string,
+    command_id: string,
+    title: string,
+    kind: string,
+    execution: string,
+    permissions: string,
+    enabled: bool,
+    visible: bool
+}

@@ -18,42 +18,56 @@ namespace Aura::DSP::Synthesis {
  */
 class AuraWavetableSynth : public IProcessor {
 public:
-    AuraWavetableSynth(double sr) : m_sampleRate(sr), m_osc() {
-        m_osc.setSampleRate(sr);
+    AuraWavetableSynth(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0), m_osc() {
+        m_osc.setSampleRate(m_sampleRate);
     }
 
-    void process(AudioBuffer& buffer, MidiBuffer& midi, const ProcessContext& ctx) override {
-        float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
-        size_t n = buffer.getNumSamples();
+    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+        (void)bs;
+        if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = sr;
+        m_osc.setSampleRate(m_sampleRate);
+        reset();
+    }
 
-        for (size_t i = 0; i < n; ++i) {
-            // --- 1. OSCILLATOR & MORPH ---
-            float raw = m_osc.process(m_morphPos.load());
-
-            // --- 2. FILTER SECTION (F1 -> WS -> F2) ---
-            // F1: Low-pass with Feedback
-            float f1In = raw + (m_lastF2Out * m_feedback.load());
-            float f1Out = applyFilter(f1In, m_f1Z1, m_cutoff1.load(), m_res1.load());
-
-            // WS: WaveShaper (Saturation)
-            float wsOut = std::tanh(f1Out * m_drive.load());
-
-            // F2: Secondary Filter (Multi-mode)
-            float f2Out = applyFilter(wsOut, m_f2Z1, m_cutoff2.load(), m_res2.load());
-            m_lastF2Out = f2Out; 
-
-            // --- 3. AMP ENVELOPE (AEG) ---
-            float env = m_aeg.getNext();
-            float finalSample = f2Out * env * m_velocity;
-
-            // --- 4. MASTER HPF (Logic Pro Style) ---
-            float hpfOut = applyHPF(finalSample, m_hpfZ1, 20.0f); // 20Hz safety cut
-
-            l[i] += hpfOut;
-            r[i] += hpfOut;
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& ctx) noexcept override {
+        (void)ctx;
+        for (const auto& event : midi) {
+            if (event.size < 2 || event.data[0] < 0x80) continue;
+            const uint8_t status = event.data[0] & 0xF0;
+            if (status == 0x90 && event.size >= 3 && event.data[2] != 0) {
+                const float frequency = 440.0f * std::pow(2.0f, (static_cast<float>(event.data[1]) - 69.0f) / 12.0f);
+                noteOn(frequency, static_cast<float>(event.data[2]) / 127.0f);
+            } else if (status == 0x80 || (status == 0x90 && event.size >= 3 && event.data[2] == 0)) {
+                m_aeg.release();
+                m_feg.release();
+            }
+        }
+        if (buffer.getNumChannels() == 0) return;
+        float* left = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : left;
+        if (!left || !right) return;
+        const float morph = std::clamp(m_morphPos.load(std::memory_order_relaxed), 0.0f, 1.0f);
+        const float cutoff1 = std::clamp(m_cutoff1.load(std::memory_order_relaxed), 20.0f, static_cast<float>(m_sampleRate * 0.45));
+        const float cutoff2 = std::clamp(m_cutoff2.load(std::memory_order_relaxed), 20.0f, static_cast<float>(m_sampleRate * 0.45));
+        const float resonance1 = std::clamp(m_res1.load(std::memory_order_relaxed), 0.0f, 0.95f);
+        const float resonance2 = std::clamp(m_res2.load(std::memory_order_relaxed), 0.0f, 0.95f);
+        const float feedback = std::clamp(m_feedback.load(std::memory_order_relaxed), 0.0f, 0.8f);
+        const float drive = std::clamp(m_drive.load(std::memory_order_relaxed), 0.1f, 8.0f);
+        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+            const float env = std::clamp(m_aeg.getNext(), 0.0f, 1.0f);
+            const float filterEnv = std::clamp(m_feg.getNext(), 0.0f, 1.0f);
+            const float osc = m_osc.process(morph) * m_velocity * env;
+            const float f1 = applyFilter(osc + feedback * m_lastF2Out, m_f1Z1, cutoff1 * (0.5f + filterEnv), resonance1);
+            const float f2 = applyFilter(f1, m_f2Z1, cutoff2 * (0.5f + filterEnv), resonance2);
+            m_lastF2Out = f2;
+            const float out = std::tanh((f2 + 0.2f * f1) * drive) * 0.65f;
+            left[i] = std::isfinite(out) ? out : 0.0f;
+            right[i] = left[i];
         }
     }
+
+    void reset() noexcept override { m_aeg.reset(); m_feg.reset(); m_f1Z1 = m_f2Z1 = m_hpfZ1 = m_lastIn = m_lastF2Out = 0.0f; }
+
 
     void noteOn(float freq, float vel) {
         m_osc.setFrequency(freq);
@@ -83,6 +97,7 @@ private:
         float getNext() { level += (target - level) * 0.001f; return level; }
         void trigger() { target = 1.0f; }
         void release() { target = 0.0f; }
+        void reset() { level = 0.0f; target = 0.0f; }
     };
 
     double m_sampleRate;

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <vector>
-#include <string>
 #include "transient_detector.hpp"
 
 namespace Aura::DSP::Analysis {
@@ -19,36 +21,59 @@ public:
         uint8_t midiNote;
     };
 
-    /**
-     * @brief DRUM DETECTION: Converts transient peaks into MIDI triggers.
-     */
     static std::vector<TriggerEvent> convertToMidi(const float* buffer, size_t size, double sr, uint8_t targetNote = 36) {
-        TransientDetector detector(sr);
-        auto peaks = detector.detect(buffer, size, 0.4f); // Mid-sensitivity
-        
-        std::vector<TriggerEvent> triggers;
-        for (auto p : peaks) {
-            float peakVal = std::abs(buffer[p]);
-            float vel = std::clamp(peakVal * 127.0f, 1.0f, 127.0f);
-            triggers.push_back({p, vel, targetNote});
+        std::vector<TriggerEvent> result;
+        if (buffer == nullptr || size < 2 || !std::isfinite(sr) || sr <= 0.0) {
+            return result;
         }
-        
-        return triggers;
+
+        const uint8_t note = std::min<uint8_t>(targetNote, 127);
+        const Aura::Core::DSP::Analysis::TransientDetector detector(sr);
+        const auto transients = detector.analyze(buffer, size, 0.15f);
+        result.reserve(transients.size());
+
+        for (const auto& transient : transients) {
+            if (!std::isfinite(transient.strength) || transient.strength <= 0.0f) {
+                continue;
+            }
+
+            // Flux is unbounded, while MIDI velocity is 7-bit.  Compress the
+            // detector strength into a useful musical range and keep silence
+            // from producing Note On velocity zero.
+            const float velocity = std::clamp(
+                1.0f + 126.0f * (1.0f - std::exp(-transient.strength * 8.0f)),
+                1.0f,
+                127.0f);
+            result.push_back({transient.sampleIndex, velocity, note});
+        }
+        return result;
     }
 
-    /**
-     * @brief Generates a raw MIDI byte stream from the detected triggers.
-     */
     static std::vector<uint8_t> generateMidiStream(const std::vector<TriggerEvent>& triggers) {
+        // This is a deterministic sample-timestamped event stream, not a
+        // Standard MIDI File. Each packet is:
+        // [sample position: uint64 LE][Note On: 0x90,note,velocity]
+        // [Note Off: 0x80,note,0]. Keeping the timestamp preserves the
+        // sample-accurate trigger position for the engine-side scheduler.
+        constexpr size_t kPacketSize = sizeof(uint64_t) + 6;
         std::vector<uint8_t> stream;
-        for (const auto& t : triggers) {
-            // Note ON (Status 0x90, Note, Velocity)
-            stream.push_back(0x90);
-            stream.push_back(t.midiNote);
-            stream.push_back(static_cast<uint8_t>(t.velocity));
+        stream.reserve(triggers.size() * kPacketSize);
+
+        for (const auto& trigger : triggers) {
+            const uint8_t note = std::min<uint8_t>(trigger.midiNote, 127);
+            const auto velocity = static_cast<uint8_t>(std::clamp(
+                std::isfinite(trigger.velocity) ? trigger.velocity : 1.0f,
+                1.0f,
+                127.0f));
+
+            for (unsigned shift = 0; shift < sizeof(uint64_t); ++shift) {
+                stream.push_back(static_cast<uint8_t>((trigger.samplePosition >> (shift * 8)) & 0xffu));
+            }
+            stream.insert(stream.end(), {0x90u, note, velocity, 0x80u, note, 0x00u});
         }
         return stream;
     }
 };
+
 
 } // namespace Aura::DSP::Analysis

@@ -18,42 +18,49 @@ public:
     TubeSaturation() : m_drive(0.0f), m_bias(0.0f), m_dryWet(1.0f) {}
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        // No special prep needed for stateless waveshaping
+        (void)bs;
+        (void)sr;
+        reset();
     }
 
     /**
      * @brief PROCESS: Applies the non-linear transfer function.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        float drive = std::pow(10.0f, m_drive / 20.0f);
-        
-        for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-            float* p = buffer.getWritePointer(c);
-            for (uint32_t s = 0; s < numSamples; ++s) {
-                float in = p[s] * drive + m_bias;
-                
-                // 1. Asymmetrical Soft Clipping (Tube Characteristic)
-                // f(x) = x / (1 + |x|) or similar sigmoid
-                float saturated = (in > 0) ? (in / (1.0f + in)) : (in / (1.0f - in));
-                
-                // 2. DC Offset Compensation (Simplified)
-                saturated -= m_bias * 0.5f;
-
-                // 3. Dry/Wet Mix
-                p[s] = (p[s] * (1.0f - m_dryWet)) + (saturated * m_dryWet);
+        (void)midi;
+        (void)context;
+        const uint32_t n = buffer.getNumSamples();
+        float* left = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+        if (!left) return;
+        const float drive = std::clamp(std::isfinite(m_drive) ? m_drive : 0.0f, -24.0f, 36.0f);
+        const float bias = std::clamp(std::isfinite(m_bias) ? m_bias : 0.0f, -1.0f, 1.0f);
+        const float mix = std::clamp(std::isfinite(m_dryWet) ? m_dryWet : 1.0f, 0.0f, 1.0f);
+        const float gain = std::pow(10.0f, drive / 20.0f);
+        const auto shape = [bias](float input) noexcept {
+            const float x = std::clamp(input + bias * 0.15f, -8.0f, 8.0f);
+            const float wet = std::tanh(x) + 0.08f * std::tanh(x * 2.0f) * (1.0f + bias);
+            return std::clamp(wet * 0.88f - bias * 0.04f, -1.0f, 1.0f);
+        };
+        for (uint32_t i = 0; i < n; ++i) {
+            const float dryL = std::isfinite(left[i]) ? left[i] : 0.0f;
+            const float wetL = shape(dryL * gain);
+            left[i] = dryL + mix * (wetL - dryL);
+            if (right) {
+                const float dryR = std::isfinite(right[i]) ? right[i] : 0.0f;
+                const float wetR = shape(dryR * gain);
+                right[i] = dryR + mix * (wetR - dryR);
             }
         }
     }
 
+
     void reset() noexcept override {}
 
     // Parameters
-    void setDrive(float db) { m_drive = db; }
-    void setBias(float b) { m_bias = b; }
-    void setDryWet(float mix) { m_dryWet = mix; }
+    void setDrive(float db) { if (std::isfinite(db)) m_drive = std::clamp(db, -24.0f, 36.0f); }
+    void setBias(float b) { if (std::isfinite(b)) m_bias = std::clamp(b, -1.0f, 1.0f); }
+    void setDryWet(float mix) { if (std::isfinite(mix)) m_dryWet = std::clamp(mix, 0.0f, 1.0f); }
 
 private:
     float m_drive;   // Gain in dB

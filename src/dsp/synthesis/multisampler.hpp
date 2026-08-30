@@ -3,10 +3,12 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <array>
 #include <filesystem>
 #include <regex>
-#include "../dsp/synthesis/sampler_engine.hpp"
-#include "persistence/wav_reader.hpp"
+#include "sampler_engine.hpp"
+#include "../../io/persistence/wav_reader.hpp"
+#include "../../core/io/sample_pool.hpp"
 
 namespace Aura::DSP::Synthesis {
 
@@ -45,13 +47,36 @@ public:
 
     void noteOn(uint8_t note, uint8_t velocity) {
         if (!m_isLoaded) return;
-        
+
+        // Select one velocity layer first, then rotate only among zones that
+        // describe that exact layer.  Rotating across layers would make the
+        // same MIDI velocity change timbre from hit to hit.
+        const Zone* selectedLayer = nullptr;
         for (const auto& zone : m_zones) {
-            if (note >= zone.lowNote && note <= zone.highNote && 
+            if (note >= zone.lowNote && note <= zone.highNote &&
                 velocity >= zone.lowVel && velocity <= zone.highVel) {
-                m_engine.noteOn(note, velocity, zone.sampleData, zone.rootNote); 
-                return;
+                selectedLayer = &zone;
+                break;
             }
+        }
+        if (!selectedLayer) return;
+
+        std::array<const Zone*, 256> roundRobin{};
+        size_t roundRobinCount = 0;
+        for (const auto& zone : m_zones) {
+            if (note >= zone.lowNote && note <= zone.highNote &&
+                velocity >= zone.lowVel && velocity <= zone.highVel &&
+                zone.lowVel == selectedLayer->lowVel &&
+                zone.highVel == selectedLayer->highVel) {
+                if (roundRobinCount < roundRobin.size()) {
+                    roundRobin[roundRobinCount++] = &zone;
+                }
+            }
+        }
+        if (roundRobinCount != 0) {
+            const uint32_t ordinal = m_roundRobinCounters[note]++;
+            const Zone& zone = *roundRobin[ordinal % roundRobinCount];
+            m_engine.noteOn(note, velocity, zone.sampleData.get(), zone.rootNote);
         }
     }
 
@@ -86,11 +111,14 @@ private:
         static const std::map<std::string, int> map = {
             {"C",0},{"C#",1},{"Db",1},{"D",2},{"D#",3},{"Eb",3},{"E",4},{"F",5},{"F#",6},{"Gb",6},{"G",7},{"G#",8},{"Ab",8},{"A",9},{"A#",10},{"Bb",10},{"B",11}
         };
-        return static_cast<uint8_t>((octave + 1) * 12 + map.at(name));
+        auto it = map.find(name);
+        int offset = (it != map.end()) ? it->second : 0;
+        return static_cast<uint8_t>((octave + 1) * 12 + offset);
     }
 
     SamplerEngine m_engine;
     std::vector<Zone> m_zones;
+    std::array<uint32_t, 128> m_roundRobinCounters{};
     bool m_isLoaded = false;
 };
 

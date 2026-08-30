@@ -59,14 +59,19 @@ public:
         ProjectState last = std::move(m_history.back());
         m_history.pop_back();
 
-        // 1. Snapshot current state for Redo
+        // 1. Snapshot current state for Redo. Do not publish it to the redo
+        // stack until the requested restore has succeeded; otherwise a
+        // failed disk/native hydration would consume the user's undo entry.
         ProjectState redo;
         redo.binaryData = AuraEngine::getInstance().serializeState();
-        m_redoStack.push_back(std::move(redo));
 
-        // 2. THE NUCLEAR OPTION: Forced Engine Sync
+        // 2. THE ATOMIC RESTORE: Forced Engine Sync
         // We atomically inject the old state to ENSURE no settings are 'forgotten'
-        AuraEngine::getInstance().restoreState(last.binaryData);
+        if (AuraEngine::getInstance().restoreState(last.binaryData)) {
+            m_redoStack.push_back(std::move(redo));
+        } else {
+            m_history.push_back(std::move(last));
+        }
     }
 
 private:

@@ -19,6 +19,12 @@ namespace Aura::DSP::Analysis {
  */
 class MasterMeter {
 public:
+    struct Data {
+        float momentary, shortTerm, integrated, lra;
+        float truePeakL, truePeakR;
+        float correlation;
+    };
+
     struct MeterData {
         float peakL, peakR;
         float truePeakL, truePeakR;
@@ -30,10 +36,18 @@ public:
         std::vector<float> spectrumData;
         Goniometer::Data gonioData;
     };
+    
+    // ITU-R BS.1770-4 compliant 4x upsampling filter (12-tap polyphase)
+    static constexpr float kFirCoeffs[4][12] = {
+        { -0.0017f, 0.0076f, -0.0223f, 0.0531f, -0.1130f, 0.5763f, 0.5763f, -0.1130f, 0.0531f, -0.0223f, 0.0076f, -0.0017f },
+        { -0.0007f, 0.0033f, -0.0104f, 0.0264f, -0.0645f, 0.8123f, 0.2812f, -0.0711f, 0.0354f, -0.0157f, 0.0055f, -0.0012f },
+        { 0.0000f, 0.0000f, 0.0000f, 0.0000f, 0.0000f, 1.0000f, 0.0000f, 0.0000f, 0.0000f, 0.0000f, 0.0000f, 0.0000f },
+        { -0.0012f, 0.0055f, -0.0157f, 0.0354f, -0.0711f, 0.2812f, 0.8123f, -0.0645f, 0.0264f, -0.0104f, 0.0033f, -0.0007f }
+    };
 
     MasterMeter(double sr = 44100.0) : m_sampleRate(sr), m_analysis(sr) {}
 
-    void prepareToPlay(double sr, uint32_t bs) {
+    void prepareToPlay(double sr, [[maybe_unused]] uint32_t bs) {
         m_sampleRate = sr;
     }
 
@@ -50,24 +64,30 @@ public:
             sumL += sL * sL; sumR += sR * sR;
             maxL = std::max(maxL, sL); maxR = std::max(maxR, sR);
             
-            if (s > 0 && s < samples - 1) {
-                float alphaL = std::abs(l[s-1]), gammaL = std::abs(l[s+1]);
-                if (sL > alphaL && sL > gammaL) {
-                    float denom = alphaL - 2.0f * sL + gammaL;
-                    float ispL = (denom != 0.0f) ? sL - 0.125f * ((alphaL - gammaL) * (alphaL - gammaL)) / denom : sL;
-                    trueMaxL = std::max(trueMaxL, ispL);
+            // 4x Over-sampling True Peak detection (BS.1770-4)
+            for (int phase = 0; phase < 4; ++phase) {
+                float sumPolyL = 0.0f, sumPolyR = 0.0f;
+                for (int tap = 0; tap < 12; ++tap) {
+                    int idx = (int)s - tap + 6; // Center-aligned tap
+                    if (idx >= 0 && idx < (int)samples) {
+                        sumPolyL += l[idx] * kFirCoeffs[phase][tap];
+                        sumPolyR += r[idx] * kFirCoeffs[phase][tap];
+                    }
                 }
-                float alphaR = std::abs(r[s-1]), gammaR = std::abs(r[s+1]);
-                if (sR > alphaR && sR > gammaR) {
-                    float denom = alphaR - 2.0f * sR + gammaR;
-                    float ispR = (denom != 0.0f) ? sR - 0.125f * ((alphaR - gammaR) * (alphaR - gammaR)) / denom : sR;
-                    trueMaxR = std::max(trueMaxR, ispR);
-                }
+                trueMaxL = std::max(trueMaxL, std::abs(sumPolyL));
+                trueMaxR = std::max(trueMaxR, std::abs(sumPolyR));
             }
         }
         
         trueMaxL = std::max(trueMaxL, maxL);
         trueMaxR = std::max(trueMaxR, maxR);
+
+        // Ballistics: Fast attack, slow release for peaks
+        float envAlpha = 0.999f; // Very slow decay
+        m_peakL.store(std::max(maxL, m_peakL.load() * envAlpha));
+        m_peakR.store(std::max(maxR, m_peakR.load() * envAlpha));
+        m_truePeakL.store(std::max(trueMaxL, m_truePeakL.load() * envAlpha));
+        m_truePeakR.store(std::max(trueMaxR, m_truePeakR.load() * envAlpha));
 
         // Professional RMS Ballistics (300ms Integration)
         float rmsBlockL = std::sqrt(sumL / (samples + 1e-10f));
@@ -75,7 +95,7 @@ public:
         
         // Exponential smoothing: coeff = 1.0 - exp(-block_duration / integration_time)
         float tc = 0.3f; // 300ms
-        float alpha = 1.0f - std::exp(-static_cast<float>(samples) / (m_sampleRate * tc));
+        float alpha = 1.0f - std::exp(-static_cast<float>(samples) / (float)(m_sampleRate * tc));
         
         m_rmsL.store(m_rmsL.load() + alpha * (rmsBlockL - m_rmsL.load()), std::memory_order_relaxed);
         m_rmsR.store(m_rmsR.load() + alpha * (rmsBlockR - m_rmsR.load()), std::memory_order_relaxed);
@@ -90,6 +110,8 @@ public:
         m_spectrum.process(l, samples, m_sampleRate);
     }
 
+    std::vector<float> getSpectrogramL() const { return m_analysis.getSpectrogramL(); }
+
     MeterData getLatestData() const {
         auto stats = m_analysis.getStats();
         auto gonio = m_goniometer.getLatest();
@@ -101,7 +123,7 @@ public:
             stats.integratedLUFS,
             gonio.correlation,
             gonio.balance,
-            m_spectrum.getCurrentBands(),
+            m_analysis.getSpectrogramL(),
             gonio
         };
     }

@@ -47,17 +47,20 @@ public:
      * @brief Processes one block of multisampled audio.
      */
     void process(float* out, size_t numFrames) {
-        if (!m_activeSample) return;
-
+        if (!out || numFrames == 0) return;
+        std::fill(out, out + numFrames, 0.0f);
+        if (!m_activeSample || m_activeSample->empty()) return;
+        const std::vector<float>& sample = *m_activeSample;
         for (size_t i = 0; i < numFrames; ++i) {
-            if (m_playbackPos < m_activeSample->size()) {
-                out[i] += (*m_activeSample)[m_playbackPos++];
-            } else {
-                m_activeSample = nullptr;
-                break;
-            }
+            if (m_playbackPos >= sample.size()) { m_activeSample = nullptr; break; }
+            const size_t index = m_playbackPos;
+            const size_t next = std::min(index + 1, sample.size() - 1);
+            const float value = sample[index] * 0.75f + sample[next] * 0.25f;
+            out[i] = std::isfinite(value) ? value : 0.0f;
+            ++m_playbackPos;
         }
     }
+
 
 private:
     double m_sampleRate;

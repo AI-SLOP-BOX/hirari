@@ -1,5 +1,10 @@
 #pragma once
 #include "fast_fft.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 #include <complex>
 
@@ -10,9 +15,10 @@ public:
     static constexpr uint32_t kFFTSize = 1024;
     static constexpr uint8_t kNumBands = 64;
 
-    SpectrumAnalyzer(double sr = 44100.0) : m_sampleRate(sr), m_fft(kFFTSize) {
+    SpectrumAnalyzer([[maybe_unused]] double sr = 44100.0) : m_fft(kFFTSize) {
         m_win.resize(kFFTSize);
-        m_complexBuffer.resize(kFFTSize);
+        m_realBuffer.resize(kFFTSize);
+        m_imagBuffer.resize(kFFTSize);
         for (uint32_t i = 0; i < kFFTSize; ++i) {
              m_win[i] = 0.5f * (1.0f - std::cos(2.0f * M_PI * i / (kFFTSize - 1)));
         }
@@ -20,21 +26,24 @@ public:
     }
 
     void process(const float* data, size_t size, double sr) {
-        if (size < kFFTSize) return;
+        if (!data || size < kFFTSize || !std::isfinite(sr) || sr <= 0.0) return;
 
         // 1. WINDOWED PREP
         for (size_t i = 0; i < kFFTSize; ++i) {
-            m_complexBuffer[i] = { data[i] * m_win[i], 0.0f };
+            m_realBuffer[i] = data[i] * m_win[i];
+            m_imagBuffer[i] = 0.0f;
         }
         
-        m_fft.forward(m_complexBuffer.data());
+        m_fft.forward(m_realBuffer.data(), m_imagBuffer.data());
 
         // 2. LOG BAND MAPPING
         std::array<float, kNumBands> newBands;
         newBands.fill(0.0f);
         
         for (uint32_t b = 0; b < kFFTSize / 2; ++b) {
-            float mag = std::abs(m_complexBuffer[b]) / kFFTSize; 
+            float r = m_realBuffer[b];
+            float im = m_imagBuffer[b];
+            float mag = std::sqrt(r * r + im * im) / kFFTSize; 
             float freq = (float)b * (float)sr / (float)kFFTSize;
             
             if (freq > 20.0f) {
@@ -61,11 +70,10 @@ public:
     }
 
 private:
-    double m_sampleRate;
-    size_t m_fftSize = kFFTSize;
     FastFFT m_fft;
     std::vector<float> m_win;
-    std::vector<std::complex<float>> m_complexBuffer;
+    std::vector<float> m_realBuffer;
+    std::vector<float> m_imagBuffer;
     std::array<std::atomic<float>, kNumBands> m_bands;
 };
 

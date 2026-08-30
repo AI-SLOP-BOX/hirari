@@ -1,0 +1,45 @@
+import { Style } from "../style.slint";
+import { CommandActions } from "../actions/command_actions.slint";
+
+// Performance-oriented scene launcher, isolated from the production workspace.
+export component Z_StageLaunchpad {
+    in property <int> active_scene: 0;
+    Rectangle {
+        background: #000;
+        HorizontalLayout {
+            padding: 24px; spacing: 32px;
+            VerticalLayout {
+                width: 480px; spacing: 16px;
+                Text { text: "AURA PERFORMANCE LAUNCHPAD"; font-size: 14px; color: Style.brand; font-weight: 950; }
+                for row in 4 : HorizontalLayout {
+                    spacing: 8px;
+                    for col in 8 : Rectangle {
+                        width: 52px; height: 52px; background: (row * 8 + col == active_scene) ? Style.brand : Style.surface;
+                        border_radius: 4px; border_width: 2px; border_color: (row * 8 + col == active_scene) ? #fff : Style.border;
+                        Text { text: "" + (row * 8 + col + 1); font-size: 14px; color: (row * 8 + col == active_scene) ? #000 : #6E6E73; font-weight: 900; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { CommandActions.palette_exec("TRIGGER_SCENE"); } }
+                    }
+                }
+            }
+            Rectangle { width: 2px; background: Style.border; }
+            VerticalLayout {
+                horizontal-stretch: 1; spacing: 20px;
+                Text { text: "MISSION CRITICAL MIX"; font-size: 10px; color: #6E6E73; font-weight: 950; }
+                HorizontalLayout {
+                    spacing: 24px;
+                    for f in ["BACKING", "VOCALS", "SYNTHS", "FX"] : VerticalLayout {
+                        spacing: 12px;
+                        Rectangle {
+                            min-width: 64px; horizontal-stretch: 1; background: Style.surface; border_radius: 4px; border_width: 1px; border_color: Style.border;
+                            VerticalLayout {
+                                alignment: end;
+                                Rectangle { height: 80%; width: 100%; background: @linear-gradient(180deg, Style.brand 0%, Style.solo 100%); border_radius: 2px; }
+                            }
+                        }
+                        Text { text: f; font-size: 10px; color: #aaa; horizontal-alignment: center; font-weight: 900; }
+                    }
+                }
+            }
+        }
+    }
+}

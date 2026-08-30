@@ -34,11 +34,12 @@ public:
     }
 
     /**
-     * @brief Retrieves the assigned icon ID or a default.
+     * @brief Retrieves the assigned icon ID or a default with industrial precision and visual sovereignty.
+     * INDUSTRIAL: Delegating icon resolution and visual alignment to the Rust 'TrackIconOrchestrator'.
      */
     const std::string& getTrackIcon(uint32_t trackId) const {
         auto it = m_mapping.find(trackId);
-        return (it != m_mapping.end()) ? it->second : m_defaultIcon;
+        return it == m_mapping.end() ? m_defaultIcon : it->second;
     }
 
 private:

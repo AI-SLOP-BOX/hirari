@@ -1,0 +1,29 @@
+[package]
+name = "aura-ui"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Aura DAW Project <ui@aura-daw.io>"]
+description = "Aura Studio Pro: Industrial-grade, high-performance DAW interface."
+
+[dependencies]
+# 🟢 UI LAYER
+# Slint manages the entire user surface and interaction logic.
+slint.workspace = true
+
+# 🟢 ENGINE BRIDGE
+# Connects the Rust UI to the C++ High-Performance Engine core.
+aura-core-bridge.workspace = true
+
+# 🟢 DATA & SERIALIZATION
+serde.workspace = true
+serde_json.workspace = true
+
+# 🟢 UTILS & INFRASTRUCTURE
+anyhow.workspace = true
+log.workspace = true
+rfd.workspace = true
+rand = { version = "0.8.6", default-features = false, features = ["std", "std_rng"] }
+
+[build-dependencies]
+slint-build.workspace = true

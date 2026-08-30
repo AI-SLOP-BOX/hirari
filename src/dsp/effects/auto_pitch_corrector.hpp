@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <algorithm>
@@ -18,28 +19,34 @@ namespace Aura::Core::DSP::Effects {
 class AutoPitchCorrector : public ::Aura::DSP::IProcessor {
 public:
     AutoPitchCorrector(double sr, size_t fftSize = 1024) 
-        : m_sampleRate(sr), m_fftSize(fftSize), m_fft(fftSize) {
-        m_complexBufL.resize(fftSize);
-        m_complexBufR.resize(fftSize);
-        m_shiftedL.resize(fftSize);
-        m_shiftedR.resize(fftSize);
-        m_lastPhaseL.resize(fftSize / 2 + 1, 0.0f);
-        m_lastPhaseR.resize(fftSize / 2 + 1, 0.0f);
-        m_accumPhaseL.resize(fftSize / 2 + 1, 0.0f);
-        m_accumPhaseR.resize(fftSize / 2 + 1, 0.0f);
+        : m_sampleRate(std::isfinite(sr) && sr > 0.0 ? sr : 44100.0),
+          m_fftSize(std::clamp<size_t>(fftSize, 64, 16384)),
+          m_fft(m_fftSize) {
+        m_complexBufL.resize(m_fftSize);
+        m_complexBufR.resize(m_fftSize);
+        m_shiftedL.resize(m_fftSize);
+        m_shiftedR.resize(m_fftSize);
+        m_lastPhaseL.resize(m_fftSize / 2 + 1, 0.0f);
+        m_lastPhaseR.resize(m_fftSize / 2 + 1, 0.0f);
+        m_accumPhaseL.resize(m_fftSize / 2 + 1, 0.0f);
+        m_accumPhaseR.resize(m_fftSize / 2 + 1, 0.0f);
         m_lpcCoeffs.resize(13, 0.0f);
+        m_realBuf.resize(m_fftSize, 0.0f);
+        m_imagBuf.resize(m_fftSize, 0.0f);
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+        if (std::isfinite(sr) && sr > 0.0) m_sampleRate = sr;
         reset();
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& context) noexcept override {
         if (m_bypassed) return;
         
+        if (buffer.getNumChannels() < 2) return;
         float* l = buffer.getWritePointer(0);
         float* r = buffer.getWritePointer(1);
+        if (!l || !r) return;
         size_t n = buffer.getNumSamples();
         
         processInternal(l, r, n, m_response, m_scaleMask);
@@ -63,7 +70,7 @@ public:
 
     void setParameter(uint32_t id, float value) noexcept override {
         switch(id) {
-            case 0: m_response = std::clamp(value, 0.0f, 1.0f); break;
+            case 0: m_response = std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.5f; break;
             case 1: m_scaleMask = static_cast<uint32_t>(value); break;
         }
     }
@@ -103,30 +110,32 @@ private:
     }
 
     float detectPitch(const float* data, size_t n) {
+        if (!data || n < 64 || !std::isfinite(m_sampleRate)) return 0.0f;
         // PROFESSIONAL YIN ALGORITHM
         const size_t tauMax = std::min<size_t>(n / 2, 800);
         const size_t winSize = n / 2;
         
-        static thread_local std::vector<float> diff(800);
-        diff.assign(tauMax, 0.0f);
+        static thread_local std::array<float, 800> diff;
+        std::fill(diff.begin(), diff.begin() + std::min<size_t>(tauMax, 800), 0.0f);
 
-        for (size_t tau = 1; tau < tauMax; ++tau) {
+        for (size_t tau = 1; tau < std::min<size_t>(tauMax, diff.size()); ++tau) {
             for (size_t i = 0; i < winSize; ++i) {
                 float d = data[i] - data[i + tau];
-                diff[tau] += d * d;
+                if (std::isfinite(d)) diff[tau] += d * d;
             }
         }
 
         float runningSum = 0.0f;
         diff[0] = 1.0f;
-        for (size_t tau = 1; tau < tauMax; ++tau) {
+        const size_t safeTauMax = std::min<size_t>(tauMax, diff.size());
+        for (size_t tau = 1; tau < safeTauMax; ++tau) {
             runningSum += diff[tau];
             diff[tau] *= (static_cast<float>(tau) / (runningSum + 1e-6f));
         }
 
         const float threshold = 0.15f;
         int bestTau = -1;
-        for (size_t tau = 20; tau < tauMax; ++tau) {
+        for (size_t tau = 20; tau < safeTauMax; ++tau) {
             if (diff[tau] < threshold) {
                 while (tau + 1 < tauMax && diff[tau+1] < diff[tau]) tau++;
                 bestTau = (int)tau;
@@ -134,10 +143,15 @@ private:
             }
         }
 
-        if (bestTau <= 0) return 0.0f;
+        if (bestTau <= 0 || static_cast<size_t>(bestTau) + 1 >= tauMax) return 0.0f;
         
         float yL = diff[bestTau - 1], yC = diff[bestTau], yR = diff[bestTau + 1];
         float peakShift = (yR - yL) / (2.0f * (2.0f * yC - yR - yL) + 1e-6f);
+        if (std::isfinite(peakShift)) {
+            peakShift = std::clamp(peakShift, -0.5f, 0.5f);
+        } else {
+            peakShift = 0.0f;
+        }
         
         return static_cast<float>(m_sampleRate) / (static_cast<float>(bestTau) + peakShift);
     }
@@ -167,11 +181,19 @@ private:
         auto processChannel = [&](float* data, std::vector<std::complex<float>>& spec, 
                                  std::vector<std::complex<float>>& outSpec,
                                  std::vector<float>& lastPh, std::vector<float>& accumPh) {
+            if (!data || !std::isfinite(ratio) || ratio <= 0.0f) return;
             for (size_t i = 0; i < m_fftSize; ++i) {
-                float win = 0.5f * (1.0f - std::cos(2.0f * M_PI * i / (m_fftSize - 1)));
+                float win = 0.5f * (1.0f - std::cos(2.0f * M_PI * i /
+                                                        static_cast<float>(m_fftSize - 1)));
                 spec[i] = { (i < n) ? data[i] * win : 0.0f, 0.0f };
             }
-            m_fft.forward(spec.data());
+            for (size_t i = 0; i < m_fftSize; ++i) {
+                m_realBuf[i] = spec[i].real();
+                m_imagBuf[i] = spec[i].imag();
+            }
+            m_fft.forward(m_realBuf.data(), m_imagBuf.data());
+            for (size_t i = 0; i < m_fftSize; ++i)
+                spec[i] = {m_realBuf[i], m_imagBuf[i]};
 
             std::fill(outSpec.begin(), outSpec.end(), std::complex<float>(0,0));
             float hopSize = static_cast<float>(n);
@@ -198,9 +220,15 @@ private:
                     outSpec[targetIdx] += std::polar(mag * correction, accumPh[targetIdx]);
                 }
             }
-            m_fft.inverse(outSpec.data());
+            for (size_t i = 0; i < m_fftSize; ++i) {
+                m_realBuf[i] = outSpec[i].real();
+                m_imagBuf[i] = outSpec[i].imag();
+            }
+            m_fft.inverse(m_realBuf.data(), m_imagBuf.data());
             float norm = 1.0f / (m_fftSize * 0.5f); 
-            for (size_t i = 0; i < n; ++i) data[i] = outSpec[i].real() * norm;
+            const size_t limit = std::min(n, m_fftSize);
+            for (size_t i = 0; i < limit; ++i) data[i] = m_realBuf[i] * norm;
+            for (size_t i = limit; i < n; ++i) data[i] = 0.0f;
         };
 
         processChannel(l, m_complexBufL, m_shiftedL, m_lastPhaseL, m_accumPhaseL);
@@ -240,11 +268,12 @@ private:
 
     double m_sampleRate;
     size_t m_fftSize;
-    Analysis::FastFFT m_fft;
+    ::Aura::DSP::Analysis::FastFFT m_fft;
     std::vector<std::complex<float>> m_complexBufL, m_complexBufR;
     std::vector<std::complex<float>> m_shiftedL, m_shiftedR;
     std::vector<float> m_lastPhaseL, m_lastPhaseR, m_accumPhaseL, m_accumPhaseR;
     std::vector<float> m_lpcCoeffs;
+    std::vector<float> m_realBuf, m_imagBuf;
     float m_currentCorrection = 0.0f;
     float m_response = 0.5f;
     uint32_t m_scaleMask = 0xFFF;
@@ -253,4 +282,3 @@ private:
 };
 
 } // namespace Aura::Core::DSP::Effects
-

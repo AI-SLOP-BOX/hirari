@@ -6,6 +6,10 @@
 #include <fstream>
 #include <string>
 #include <condition_variable>
+#include <mutex>
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
 
 namespace Aura::IO {
 
@@ -29,6 +33,9 @@ public:
         m_streamThread = std::thread(&StreamingBuffer::streamTask, this);
     }
 
+    StreamingBuffer(const StreamingBuffer&) = delete;
+    StreamingBuffer& operator=(const StreamingBuffer&) = delete;
+
     ~StreamingBuffer() {
         m_stop.store(true, std::memory_order_release);
         m_cv.notify_one();
@@ -39,7 +46,9 @@ public:
      * @brief 完全ロックフリーによる、オーディオスレッド向けの最速読み出しアルゴリズム。
      * ここには std::mutex 等のスレッドロックやシステムコールは「一切」含まれていません。絶対のO(1)保証。
      */
-    void getSamples(float* dest, size_t numSamples) {
+    bool getSamples(float* dest, size_t numSamples) {
+        if (dest == nullptr) return false;
+        if (numSamples == 0) return true;
         size_t readPos = m_readIndex.load(std::memory_order_acquire);
         size_t writePos = m_writeIndex.load(std::memory_order_acquire);
         
@@ -50,6 +59,7 @@ public:
         size_t samplesToRead = std::min(numSamples, available);
         if (samplesToRead < numSamples) {
             std::fill(dest + samplesToRead, dest + numSamples, 0.0f);
+            m_underrunCount.fetch_add(1, std::memory_order_relaxed);
         }
 
         // リングバッファからの高速読み出し（ラップアラウンドの分割考慮）
@@ -63,20 +73,71 @@ public:
         // オーディオスレッド側から直接「読み終えた位置」を更新する
         m_readIndex.store((readPos + samplesToRead) % kChunkSize, std::memory_order_release);
         
-        // バッファが半分以下に減ったら、ディスクI/Oスレッドを「叩き起こす」
-        if (available < kChunkSize / 2) {
-            m_cv.notify_one();
+        // The audio thread must not enter an OS wake-up path.  The producer
+        // continuously observes the atomic read/write indices and resumes
+        // filling as soon as space is available; the condition variable is
+        // reserved for producer-side end-of-stream/ shutdown waits.
+        return samplesToRead == numSamples;
+    }
+
+    bool sourceReady() const noexcept {
+        return m_sourceReady.load(std::memory_order_acquire);
+    }
+
+    bool sourceFailed() const noexcept {
+        return m_sourceFailed.load(std::memory_order_acquire);
+    }
+
+    std::string sourceError() const {
+        std::lock_guard<std::mutex> lock(m_errorMutex);
+        return m_sourceError;
+    }
+
+    uint64_t underrunCount() const noexcept {
+        return m_underrunCount.load(std::memory_order_acquire);
+    }
+
+    size_t availableSamples() const noexcept {
+        const size_t readPos = m_readIndex.load(std::memory_order_acquire);
+        const size_t writePos = m_writeIndex.load(std::memory_order_acquire);
+        return writePos >= readPos ? writePos - readPos
+                                   : kChunkSize - readPos + writePos;
+    }
+
+    bool isLooping() const noexcept {
+        return m_looping.load(std::memory_order_acquire);
+    }
+
+    void setLooping(bool enabled) noexcept {
+        m_looping.store(enabled, std::memory_order_release);
+        if (enabled) {
+            m_sourceExhausted.store(false, std::memory_order_release);
+            m_sourceFailed.store(false, std::memory_order_release);
         }
+        m_cv.notify_one();
+    }
+
+    bool exhausted() const noexcept {
+        return m_sourceExhausted.load(std::memory_order_acquire);
     }
 
 private:
     void streamTask() {
         // バックグラウンド・ディスク読み込みスレッド（OSの優先度低・オーディオの邪魔をしない）
         std::ifstream file(m_path, std::ios::binary);
-        // WAVヘッダ（44バイト想定）のスキップ処理（簡略化モック）
-        file.seekg(44, std::ios::beg);
+        if (!file.is_open()) {
+            {
+                std::lock_guard<std::mutex> lock(m_errorMutex);
+                m_sourceError = "unable to open streaming source: " + m_path;
+            }
+            m_sourceFailed.store(true, std::memory_order_release);
+            std::unique_lock<std::mutex> lk(m_waitMutex);
+            m_cv.wait(lk, [this] { return m_stop.load(std::memory_order_acquire); });
+            return;
+        }
+        m_sourceReady.store(true, std::memory_order_release);
 
-        std::vector<float> tempBuf(kChunkSize / 4);
+        std::vector<float> tempBuf(kChunkSize / 4, 0.0f);
 
         while (!m_stop.load(std::memory_order_acquire)) {
             size_t readPos = m_readIndex.load(std::memory_order_acquire);
@@ -91,11 +152,26 @@ private:
                 file.read(reinterpret_cast<char*>(tempBuf.data()), tempBuf.size() * sizeof(float));
                 size_t bytesRead = file.gcount();
                 size_t samplesRead = bytesRead / sizeof(float);
+                samplesRead = std::min(samplesRead, tempBuf.size());
 
                 if (samplesRead == 0) {
-                    // ループ再生・またはEOFの処理（最初に戻る）
+                    if (!m_looping.load(std::memory_order_acquire)) {
+                        m_sourceExhausted.store(true, std::memory_order_release);
+                        std::unique_lock<std::mutex> lk(m_waitMutex);
+                        m_cv.wait(lk, [this] {
+                            return m_stop.load(std::memory_order_acquire) ||
+                                   m_looping.load(std::memory_order_acquire);
+                        });
+                        continue;
+                    }
+                    // Loop mode: restart only after a complete EOF.
                     file.clear();
-                    file.seekg(44, std::ios::beg);
+                    file.seekg(0, std::ios::beg);
+                    m_sourceExhausted.store(false, std::memory_order_release);
+                    std::unique_lock<std::mutex> lk(m_waitMutex);
+                    m_cv.wait_for(lk, std::chrono::milliseconds(1), [this] {
+                        return m_stop.load(std::memory_order_acquire);
+                    });
                     continue;
                 }
 
@@ -103,7 +179,6 @@ private:
                 size_t firstPart = std::min(samplesRead, kChunkSize - writePos);
                 std::copy(tempBuf.begin(), tempBuf.begin() + firstPart, m_ringBuffer.begin() + writePos);
                 if (firstPart < samplesRead) {
-                    size_t secondPart = samplesRead - firstPart;
                     std::copy(tempBuf.begin() + firstPart, tempBuf.begin() + samplesRead, m_ringBuffer.begin());
                 }
 
@@ -111,7 +186,7 @@ private:
             } else {
                 // バッファが一杯（満杯）なら、無駄なCPUループをせずに深く休眠する（CPU負荷ゼロ）
                 std::unique_lock<std::mutex> lk(m_waitMutex);
-                m_cv.wait_for(lk, std::chrono::milliseconds(10)); // 最大10msかオーディオスレッドからの通知で起きる
+                m_cv.wait_for(lk, std::chrono::milliseconds(10));
             }
         }
     }
@@ -119,6 +194,13 @@ private:
     std::string m_path;
     std::thread m_streamThread;
     std::atomic<bool> m_stop;
+    std::atomic<bool> m_sourceReady{false};
+    std::atomic<bool> m_sourceFailed{false};
+    std::atomic<bool> m_sourceExhausted{false};
+    std::atomic<bool> m_looping{true};
+    std::atomic<uint64_t> m_underrunCount{0};
+    std::string m_sourceError;
+    mutable std::mutex m_errorMutex;
 
     // 完全ロックフリー・リングバッファ構造とアトミックインデックス
     std::vector<float> m_ringBuffer;

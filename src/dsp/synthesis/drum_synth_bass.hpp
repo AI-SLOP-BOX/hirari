@@ -22,62 +22,34 @@ public:
     }
 
     void render(float* l, float* r, size_t numFrames) {
+        if (!l || !r || numFrames == 0) return;
         if (m_shouldTrigger.exchange(false, std::memory_order_acq_rel)) {
-            m_phase = 0.0; m_envPos = 0.0;
-            m_pStart = m_nextPitchStart.load(std::memory_order_relaxed);
-            m_pDecay = m_nextDecay.load(std::memory_order_relaxed);
-            m_pSat = m_nextSaturation.load(std::memory_order_relaxed);
-            m_isActive.store(true, std::memory_order_release);
+            m_pStart = std::clamp(m_nextPitchStart.load(std::memory_order_relaxed), 40.0f, 400.0f);
+            m_pDecay = std::clamp(m_nextDecay.load(std::memory_order_relaxed), 0.05f, 2.0f);
+            m_pSat = std::clamp(m_nextSaturation.load(std::memory_order_relaxed), 0.1f, 8.0f);
+            m_phase = 0.0; m_envPos = 0.0; m_pitchEnv = 1.0f; m_isActive.store(true, std::memory_order_release);
         }
-
-        if (!m_isActive.load(std::memory_order_acquire)) return;
-
-        const float invSr = 1.0f / static_cast<float>(m_sampleRate);
-        const float dRate = 1.0f / (m_pDecay + 0.001f);
-        
-        // --- HONEST FIX: LUT-BASED HIGH-PERFORMANCE OSCILLATOR ---
-        // Using a 4096-point pre-computed sine table for zero-CPU synthesis.
-        static constexpr size_t kLutSize = 4096;
-        static std::vector<float> sLut;
-        if (sLut.empty()) {
-            sLut.resize(kLutSize);
-            for (size_t i = 0; i < kLutSize; ++i) sLut[i] = std::sin(2.0f * M_PI * i / kLutSize);
-        }
-
+        if (!m_isActive.load(std::memory_order_acquire)) { std::fill(l, l + numFrames, 0.0f); std::fill(r, r + numFrames, 0.0f); return; }
         for (size_t i = 0; i < numFrames; ++i) {
-            float env = 1.0f - (static_cast<float>(m_envPos) * dRate);
-            if (env <= 0.0f) { m_isActive.store(false, std::memory_order_release); break; }
-
-            // Exponential Pitch Drop (Logic Pro Style)
-            float freqEnv = std::exp(-static_cast<float>(m_envPos) * 22.0f); 
-            float freq = 42.0f + m_pStart * freqEnv;
-
-            // --- ULTRA-FAST LUT LOOKUP WITH LINEAR INTERP ---
-            double phaseIdx = m_phase * (kLutSize / (2.0 * M_PI));
-            int i1 = (int)phaseIdx % kLutSize;
-            int i2 = (i1 + 1) % kLutSize;
-            float frac = static_cast<float>(phaseIdx - (int)phaseIdx);
-            float s = sLut[i1] * (1.0f - frac) + sLut[i2] * frac;
-
-            // --- ZERO-ALLOCATION ANALOG SATURATION (Rational Approximation) ---
-            // Faster than std::tanh, but with a more 'musical' curve.
-            float raw = s * env;
-            float x = std::clamp(raw * m_pSat, -3.0f, 3.0f);
-            float sat = x * (27.0f + x * x) / (27.0f + 9.0f * x * x);
-
-            l[i] += sat;
-            r[i] += sat;
-
-            m_phase += 2.0 * M_PI * freq * invSr;
+            const float env = std::exp(-static_cast<float>(m_envPos) / (m_pDecay * static_cast<float>(m_sampleRate)));
+            const float pitch = 45.0f + m_pStart * std::exp(-static_cast<float>(m_envPos) / (0.045f * static_cast<float>(m_sampleRate)));
+            m_phase += 2.0 * M_PI * pitch / m_sampleRate;
             if (m_phase > 2.0 * M_PI) m_phase -= 2.0 * M_PI;
-            m_envPos += invSr;
+            const float raw = static_cast<float>(std::sin(m_phase) * env);
+            const float shaped = std::tanh(raw * m_pSat) * 0.85f;
+            l[i] = std::isfinite(shaped) ? shaped : 0.0f;
+            r[i] = l[i];
+            m_envPos += 1.0;
         }
+        if (std::exp(-m_envPos / (m_pDecay * m_sampleRate)) < 1.0e-4) m_isActive.store(false, std::memory_order_release);
     }
+
 
 private:
     double m_sampleRate;
     double m_phase = 0.0, m_envPos = 0.0;
     float m_pStart = 150.f, m_pDecay = 0.5f, m_pSat = 1.2f;
+    float m_pitchEnv = 1.0f, m_pitchDropCoef = 1.0f;
 
     std::atomic<float> m_nextPitchStart{150.0f}, m_nextDecay{0.5f}, m_nextSaturation{1.2f};
     std::atomic<bool> m_shouldTrigger{false}, m_isActive{false};

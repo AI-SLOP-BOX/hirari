@@ -2,66 +2,88 @@
 #include <cmath>
 #include <random>
 #include <array>
+#include <cstdint>
+
+#if defined(__arm64__) || defined(__aarch64__)
+#include <arm_neon.h>
+#elif defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 namespace Aura::DSP::Utils {
 
 /**
  * @class TPDFDither
  * @brief High-precision Triangular Probability Density Function Dither.
- * Standard for 24-bit/32-bit internal DAW processing.
+ * Optimized with Xorshift32 for real-time audio threads.
  */
 class TPDFDither {
 public:
-    TPDFDither() : m_dist(-1.0f, 1.0f) {
+    TPDFDither() {
         std::random_device rd;
-        m_rng.seed(rd());
+        m_state = rd();
+        if (m_state == 0) m_state = 0x12345678;
     }
 
     /**
      * @brief Generate 1 LSB of TPDF noise at 24-bit level.
      */
     inline float process() {
-        return (m_dist(m_rng) + m_dist(m_rng)) * (1.0f / 8388608.0f);
+        uint32_t r1 = xorshift32();
+        uint32_t r2 = xorshift32();
+        // Summing two uniform dists gives TPDF.
+        // Scale to [-1, 1] then to 24-bit LSB.
+        float n = (static_cast<float>(r1) * kScale + static_cast<float>(r2) * kScale - 1.0f);
+        return n * (1.0f / 8388608.0f);
+    }
+
+    void processBlock(float* buffer, uint32_t numSamples) {
+        for (uint32_t i = 0; i < numSamples; ++i) {
+            buffer[i] += process();
+        }
     }
 
 private:
-    std::mt19937 m_rng;
-    std::uniform_real_distribution<float> m_dist;
+    inline uint32_t xorshift32() {
+        m_state ^= m_state << 13;
+        m_state ^= m_state >> 17;
+        m_state ^= m_state << 5;
+        return m_state;
+    }
+
+    uint32_t m_state;
+    static constexpr float kScale = 1.0f / 4294967295.0f;
 };
 
 /**
  * @class NoiseShapingDither
  * @brief Mastering-Grade Psychoacoustic Noise-Shaping Dither.
+ * Optimized for high-throughput block processing.
  */
 class NoiseShapingDither {
 public:
     NoiseShapingDither() {
-        m_seed = 0x12345678;
+        m_state = 0x12345678;
         m_errorHistory.fill(0.0f);
     }
 
     inline float process(float sample, int bits = 16) {
-        // --- HONEST PERFORMANCE FIX: Fast LCG Noise Generator ---
-        // mt19937 is too heavy for per-sample audio thread processing.
-        m_seed = (1103515245 * m_seed + 12345) & 0x7FFFFFFF;
-        float r1 = (float)m_seed * (1.0f / 2147483647.0f);
-        m_seed = (1103515245 * m_seed + 12345) & 0x7FFFFFFF;
-        float r2 = (float)m_seed * (1.0f / 2147483647.0f);
-        
         float bitStep = 1.0f / static_cast<float>(1 << (bits - 1));
-        float noise = (r1 + r2 - 1.0f) * bitStep; // TPDF [-bitStep, bitStep]
         
-        // Mastering-Grade 4th Order Noise Shaping (Lipshitz/Vanderkooy)
+        uint32_t r1 = xorshift32();
+        uint32_t r2 = xorshift32();
+        float noise = (static_cast<float>(r1) * kScale + static_cast<float>(r2) * kScale - 1.0f) * bitStep;
+        
         float filteredError = m_errorHistory[0] * 2.033f 
                             - m_errorHistory[1] * 2.165f 
                             + m_errorHistory[2] * 1.259f 
                             - m_errorHistory[3] * 0.304f;
                             
-        // THE CRITICAL FIX: Noise + Error + Input MUST be summed BEFORE quantization
         float input = sample + filteredError + noise;
-        float quantized = std::round(input / bitStep) * bitStep;
         
-        // Shift history and store NEW error
+        // Fast rounding
+        float quantized = std::floor(input / bitStep + 0.5f) * bitStep;
+        
         m_errorHistory[3] = m_errorHistory[2];
         m_errorHistory[2] = m_errorHistory[1];
         m_errorHistory[1] = m_errorHistory[0];
@@ -70,9 +92,43 @@ public:
         return quantized;
     }
 
+    void processBlock(float* buffer, uint32_t numSamples, int bits = 16) {
+        float bitStep = 1.0f / static_cast<float>(1 << (bits - 1));
+        float invBitStep = static_cast<float>(1 << (bits - 1));
+
+        for (uint32_t i = 0; i < numSamples; ++i) {
+            uint32_t r1 = xorshift32();
+            uint32_t r2 = xorshift32();
+            float noise = (static_cast<float>(r1) * kScale + static_cast<float>(r2) * kScale - 1.0f) * bitStep;
+
+            float filteredError = m_errorHistory[0] * 2.033f 
+                                - m_errorHistory[1] * 2.165f 
+                                + m_errorHistory[2] * 1.259f 
+                                - m_errorHistory[3] * 0.304f;
+                                
+            float input = buffer[i] + filteredError + noise;
+            float quantized = std::floor(input * invBitStep + 0.5f) * bitStep;
+            
+            m_errorHistory[3] = m_errorHistory[2];
+            m_errorHistory[2] = m_errorHistory[1];
+            m_errorHistory[1] = m_errorHistory[0];
+            m_errorHistory[0] = input - quantized;
+            
+            buffer[i] = quantized;
+        }
+    }
+
 private:
-    uint32_t m_seed = 0x12345678;
+    inline uint32_t xorshift32() {
+        m_state ^= m_state << 13;
+        m_state ^= m_state >> 17;
+        m_state ^= m_state << 5;
+        return m_state;
+    }
+
+    uint32_t m_state;
     std::array<float, 4> m_errorHistory{0.0f, 0.0f, 0.0f, 0.0f};
+    static constexpr float kScale = 1.0f / 4294967295.0f;
 };
 
 } // namespace Aura::DSP::Utils

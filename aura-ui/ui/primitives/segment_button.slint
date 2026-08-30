@@ -1,0 +1,19 @@
+import { Style } from "../style.slint";
+
+export component Z_SegmentButton {
+    in property <string> icon;
+    in property <bool> active: false;
+    in property <bool> enabled: true;
+    in property <bool> divider-before: true;
+    in property <color> active-col: Style.brand;
+    callback clicked();
+    Rectangle {
+        width: 30px; height: 24px;
+        background: !root.enabled ? Style.surface-1 : (area.pressed ? Style.surface-0 : (root.active ? Style.surface-3 : (area.has-hover ? Style.panel-h : Style.panel)));
+        border-width: 0px;
+        if (divider-before) : Rectangle { x: 0px; y: 4px; width: 1px; height: 16px; background: Style.border; }
+        if (root.active) : Rectangle { x: 2px; y: parent.height - 2px; width: parent.width - 4px; height: 2px; background: root.active-col; }
+        Text { text: root.icon; width: 100%; height: 100%; color: !root.enabled ? Style.text-muted : (root.active ? Style.text-primary : (area.has-hover ? Style.text : Style.text-dim)); font-family: Style.ui-font; font-size: Style.font-s; horizontal-alignment: center; vertical-alignment: center; }
+        area := TouchArea { mouse-cursor: root.enabled ? pointer : default; clicked => { if (root.enabled) { root.clicked(); } } }
+    }
+}

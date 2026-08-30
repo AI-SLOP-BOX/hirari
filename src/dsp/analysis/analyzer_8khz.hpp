@@ -25,9 +25,12 @@ public:
 
 private:
     std::atomic<float> m_highFreqEnergy{0.0f};
+    std::atomic<float> m_rms{0.0f};
+    std::atomic<float> m_peak{0.0f};
     double m_sampleRate = 44100.0;
-    float m_z1 = 0.0f, m_z2 = 0.0f; // Filter state
-    float m_b0, m_b1, m_b2, m_a1, m_a2; // Precomputed coeffs
+    float m_highPassState = 0.0f;
+    float m_lowPassState = 0.0f;
 };
+
 
 } // namespace Aura::DSP::Analysis

@@ -25,7 +25,7 @@ public:
 
     PitchShifter() { reset(); }
 
-    void process(float* buffer, uint32_t numSamples, float pitchRatio, float sampleRate) {
+    void process(float* buffer, uint32_t numSamples, float pitchRatio, float /*sampleRate*/) {
         if (std::abs(pitchRatio - 1.0f) < 0.001f) return;
 
         for (uint32_t s = 0; s < numSamples; ++s) {

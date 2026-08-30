@@ -1,8 +1,9 @@
 #pragma once
 
-#include <vector>
-#include <string>
 #include <algorithm>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace Aura::Core::DSP::Synthesis {
 
@@ -27,20 +28,29 @@ public:
         return instance;
     }
 
-    /**
-     * @brief Finds the correct sample path for a given MIDI note and velocity.
-     */
+    /** @brief Finds the first registered zone covering the MIDI note and velocity. */
     std::string resolveSample(uint8_t note, uint8_t velocity) const {
-        for (const auto& zone : m_zones) {
-            if (note >= zone.lowNote && note <= zone.highNote &&
-                velocity >= zone.lowVel && velocity <= zone.highVel) {
-                return zone.samplePath;
-            }
+        const auto zone = std::find_if(m_zones.begin(), m_zones.end(),
+            [note, velocity](const SamplerZone& candidate) {
+                return note >= candidate.lowNote && note <= candidate.highNote &&
+                       velocity >= candidate.lowVel && velocity <= candidate.highVel;
+            });
+        if (zone != m_zones.end()) {
+            return zone->samplePath;
         }
-        return ""; // Fallback
+        return "";
     }
 
-    void addZone(const SamplerZone& zone) { m_zones.push_back(zone); }
+    /** @brief Registers a zone when both note and velocity ranges are valid. */
+    void addZone(const SamplerZone& zone) {
+        if (zone.lowNote > zone.highNote || zone.lowVel > zone.highVel ||
+            zone.samplePath.empty()) {
+            return;
+        }
+        m_zones.push_back(zone);
+    }
+
+    std::size_t zoneCount() const noexcept { return m_zones.size(); }
 
 private:
     SamplerMappingEngine() = default;

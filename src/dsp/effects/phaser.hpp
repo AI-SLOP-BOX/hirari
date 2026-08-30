@@ -21,46 +21,55 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+        (void)bs;
+        m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0;
+        reset();
     }
 
     /**
      * @brief PROCESS: Modulates phase cancellaton points over time.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
+        (void)midi;
+        (void)context;
+        const uint32_t n = buffer.getNumSamples();
+        float* left = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+        if (!left || n == 0) return;
 
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            // 1. Stereo LFO
-            m_lfoPhase += (m_rate / m_sampleRate);
-            if (m_lfoPhase >= 1.0) m_lfoPhase -= 1.0;
+        const float mix = std::clamp(std::isfinite(m_mix) ? m_mix : 0.0f, 0.0f, 1.0f);
+        const float feedback = std::clamp(std::isfinite(m_feedback) ? m_feedback : 0.0f, -0.95f, 0.95f);
+        const float rate = std::clamp(std::isfinite(m_rate) ? m_rate : 0.5f, 0.01f, 20.0f);
+        const float phaseInc = rate / static_cast<float>(m_sampleRate);
 
-            float lfoL = 0.5f + 0.5f * std::sin(2.0f * M_PI * m_lfoPhase);
-            float lfoR = 0.5f + 0.5f * std::sin(2.0f * M_PI * m_lfoPhase + 0.5f * M_PI); // 90-deg offset
-
-            // 2. Filter Update & Filter Process
-            for (uint32_t c = 0; c < 2; ++c) {
-                float freq = std::lerp(500.0f, 4000.0f, (c == 0 ? lfoL : lfoR));
-                float g = (freq - m_sampleRate) / (freq + m_sampleRate); // Simplified all-pass coeff
-
-                float* p = buffer.getWritePointer(c);
-                float in = p[s] + m_feedback * m_lastOut[c];
-                
-                // 4-Stage All-pass cascade
-                float y = in;
-                for (int stage = 0; stage < 4; ++stage) {
-                    float out = g * y + m_filterState[c][stage];
-                    m_filterState[c][stage] = y - g * out;
-                    y = out;
-                }
-
-                m_lastOut[c] = y;
-                p[s] = (p[s] * (1.0f - m_mix)) + (y * m_mix);
+        for (uint32_t i = 0; i < n; ++i) {
+            const float dryL = std::isfinite(left[i]) ? left[i] : 0.0f;
+            const float dryR = right && std::isfinite(right[i]) ? right[i] : dryL;
+            const float lfoL = 0.5f + 0.5f * std::sin(2.0f * static_cast<float>(M_PI) * m_lfoPhase);
+            const float lfoR = 0.5f + 0.5f * std::sin(2.0f * static_cast<float>(M_PI) * (m_lfoPhase + 0.5f));
+            const float coeffL = 0.05f + 0.90f * lfoL;
+            const float coeffR = 0.05f + 0.90f * lfoR;
+            float wetL = dryL + m_lastOut[0] * feedback;
+            float wetR = dryR + m_lastOut[1] * feedback;
+            for (size_t stage = 0; stage < 4; ++stage) {
+                const float aL = std::clamp(coeffL * (0.85f + 0.04f * static_cast<float>(stage)), -0.98f, 0.98f);
+                const float aR = std::clamp(coeffR * (0.85f + 0.04f * static_cast<float>(stage)), -0.98f, 0.98f);
+                float outL = -aL * wetL + m_filterState[0][stage];
+                float outR = -aR * wetR + m_filterState[1][stage];
+                m_filterState[0][stage] = wetL + aL * outL;
+                m_filterState[1][stage] = wetR + aR * outR;
+                wetL = outL;
+                wetR = outR;
             }
+            m_lastOut[0] = std::isfinite(wetL) ? wetL : 0.0f;
+            m_lastOut[1] = std::isfinite(wetR) ? wetR : 0.0f;
+            left[i] = dryL + mix * (m_lastOut[0] - dryL);
+            if (right) right[i] = dryR + mix * (m_lastOut[1] - dryR);
+            m_lfoPhase += phaseInc;
+            if (m_lfoPhase >= 1.0f) m_lfoPhase -= std::floor(m_lfoPhase);
         }
     }
+
 
     void reset() noexcept override {
         for (auto& v : m_filterState) std::fill(v.begin(), v.end(), 0.0f);
@@ -68,9 +77,9 @@ public:
     }
 
     // Parameters
-    void setMix(float m) { m_mix = m; }
-    void setRate(float r) { m_rate = r; }
-    void setFeedback(float f) { m_feedback = f; }
+    void setMix(float m) { if (std::isfinite(m)) m_mix = std::clamp(m, 0.0f, 1.0f); }
+    void setRate(float r) { if (std::isfinite(r)) m_rate = std::clamp(r, 0.01f, 20.0f); }
+    void setFeedback(float f) { if (std::isfinite(f)) m_feedback = std::clamp(f, -0.95f, 0.95f); }
 
 private:
     double m_sampleRate = 44100.0;

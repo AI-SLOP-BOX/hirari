@@ -1,0 +1,23 @@
+import { Z_Fx } from "plugin_model.slint";
+import { Z_Clip } from "clip_model.slint";
+import { Z_AutomationLane } from "automation_model.slint";
+import { ZNote } from "midi_model.slint";
+
+export struct Z_Track {
+    id: int, name: string, type: string, color: color, expanded: bool,
+    volume: float, pan: float, solo: bool, mute: bool, armed: bool,
+    is_stereo: bool, phase_invert: bool, auto_rw: int,
+    fx: [Z_Fx], clips: [Z_Clip], auto_lanes: [Z_AutomationLane],
+    show_automation: bool, send_lvl: float, notes: string, width: float, delay_ms: float,
+    filter_lp: float, filter_hp: float, icon: string, pan_law: string, midi_ch: int,
+    group_id: int, input: string, output: string, monitor: bool,
+    piano_roll_notes: [ZNote],
+    is_folder: bool, parent_id: int, folded: bool,
+    panner_mode: int,
+    pan3d_x: float, pan3d_y: float, pan3d_z: float,
+    saturate_active: bool,
+    artic_map: string,
+    correlation: float,
+    frozen: bool,
+    frozen_sample_rate: int
+}

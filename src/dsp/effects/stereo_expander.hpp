@@ -17,33 +17,33 @@ class StereoExpander : public IProcessor {
 public:
     StereoExpander() : m_width(1.0f), m_midGain(1.0f) {}
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {}
+    void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)sr; (void)bs; }
 
     /**
      * @brief PROCESS: M/S Matrixing and Width expansion.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float l = buffer.getReadPointer(0)[s];
-            float r = buffer.getReadPointer(1)[s];
-
-            // 1. L/R to M/S Matrix
-            float mid = (l + r) * 0.5f;
-            float side = (l - r) * 0.5f;
-
-            // 2. Apply Width and Gains
-            mid *= m_midGain;
-            side *= m_width;
-
-            // 3. M/S to L/R Matrix (Inverse)
-            buffer.getWritePointer(0)[s] = mid + side;
-            buffer.getWritePointer(1)[s] = mid - side;
+        (void)midi;
+        (void)context;
+        const uint32_t n = buffer.getNumSamples();
+        float* left = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+        if (!left || !right) return;
+        const float midGain = std::isfinite(m_midGain) ? m_midGain : 1.0f;
+        const float width = std::isfinite(m_width) ? m_width : 1.0f;
+        const float mix = getMix();
+        for (uint32_t i = 0; i < n; ++i) {
+            const float dryL = left[i];
+            const float dryR = right[i];
+            const float mid = 0.5f * (dryL + dryR) * midGain;
+            const float side = 0.5f * (dryL - dryR) * width;
+            const float wetL = mid + side;
+            const float wetR = mid - side;
+            left[i] = dryL + mix * (wetL - dryL);
+            right[i] = dryR + mix * (wetR - dryR);
         }
     }
+
 
     void reset() noexcept override {}
 

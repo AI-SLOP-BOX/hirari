@@ -3,34 +3,37 @@
 #include <unordered_map>
 #include <memory>
 #include <queue>
+#include <algorithm>
+#include <atomic>
+#include <functional>
+#include <limits>
+#include <map>
+
+#include "pdc_graph.hpp"
 
 namespace Aura::Core::Engine {
 
-// 仮想的なオーディオノード（トラック、バス、プラグイン等の処理単位）
+// AudioNode represents a track, bus, or plugin processing unit
 class AudioNode {
 public:
     uint32_t id;
-    uint32_t processingLatency = 0; // そのノードが持つ純粋な遅延（LinerPhase EQ等）
-    uint32_t cumulativeDelay = 0;   // DAWが追加すべき「待ち（ディレイ）」サンプル数
-    std::vector<uint32_t> outgoingEdges; // 次に接続されるノード（ルーティング）
-    uint32_t inDegree = 0; // 入ってくる接続数（トポロジカルソート用）
+    uint32_t processingLatency = 0; // Pure latency of this node
+    uint32_t cumulativeDelay = 0;   // Audio latency compensation offset
+    std::vector<uint32_t> outgoingEdges; // Routing targets
+    uint32_t inDegree = 0; // Inputs count for topological sorting
+    std::atomic<int> dynamicInputsReady{0}; // Atomic dependency counter for lock-free scheduler
 };
 
 /**
  * @class RoutingGraphPDC
- * @brief 【超絶肉付け・王道DAW必須機能】完全な遅延補正（PDC）とDAGルーティング
- * 以前のコードでは、適当な配列でトラックを処理していましたが、それだと
- * 「トラックA（キック）の音を、トラックB（ベース）のサイドチェインに送る」際に
- * トラックBが先に処理されてしまうと音が鳴らなくなります。
- * 
- * ZrythmやArdour等が行っている、有向非巡回グラフ（DAG）を用いたグラフ理論により、
- * 1. トポロジカルソート（依存関係に基づく正しい処理順序の決定）
- * 2. PDC（プラグイン・ディレイ・補正：重いエフェクトが挿さっていないトラックに
- *    ワザと遅延バッファを挟み、マスター出力時点で全トラックの位相をミリ秒単位で完璧に揃える数学的補正）
- * を行う、DAWミキサーの「真の心臓部」です。
+ * @brief DAG Routing & PipeWire/JACK-style Lock-Free Stage Scheduling Engine.
  */
 class RoutingGraphPDC {
 public:
+    struct ProcessStage {
+        std::vector<uint32_t> nodeIds;
+    };
+
     void addNode(uint32_t nodeId, uint32_t latency) {
         auto node = std::make_shared<AudioNode>();
         node->id = nodeId;
@@ -40,75 +43,124 @@ public:
 
     void connect(uint32_t sourceId, uint32_t destId) {
         if (m_nodes.count(sourceId) && m_nodes.count(destId)) {
-            m_nodes[sourceId]->outgoingEdges.push_back(destId);
-            m_nodes[destId]->inDegree++;
+            auto& edges = m_nodes[sourceId]->outgoingEdges;
+            if (std::find(edges.begin(), edges.end(), destId) == edges.end()) {
+                edges.push_back(destId);
+                m_nodes[destId]->inDegree++;
+            }
         }
     }
 
     /**
-     * @brief グラフ理論（Kahnのアルゴリズム）を用いて正しい処理順と遅延を計算
+     * @brief Computes topological ordering, latency compensation, and PipeWire-style stages.
      */
     bool compileGraph() {
         m_executionOrder.clear();
-        std::queue<uint32_t> noIncoming;
-        
-        // 1. トポロジカルソート（依存関係順に前処理）
+        m_stages.clear();
+
         std::unordered_map<uint32_t, uint32_t> inDegrees;
+        std::unordered_map<uint32_t, uint32_t> nodeDepths;
+        std::queue<uint32_t> zeroInDegreeQueue;
+
         for (const auto& pair : m_nodes) {
             inDegrees[pair.first] = pair.second->inDegree;
-            if (pair.second->inDegree == 0) noIncoming.push(pair.first);
+            nodeDepths[pair.first] = 0;
+            if (pair.second->inDegree == 0) {
+                zeroInDegreeQueue.push(pair.first);
+            }
         }
 
-        while (!noIncoming.empty()) {
-            uint32_t curr = noIncoming.front();
-            noIncoming.pop();
+        // 1. Kahn's Topological Sort with Stage Level Calculations
+        while (!zeroInDegreeQueue.empty()) {
+            uint32_t curr = zeroInDegreeQueue.front();
+            zeroInDegreeQueue.pop();
             m_executionOrder.push_back(curr);
-            for (uint32_t neighbor : m_nodes[curr]->outgoingEdges) {
-                if (--inDegrees[neighbor] == 0) noIncoming.push(neighbor);
+
+            uint32_t currDepth = nodeDepths[curr];
+            const auto& edges = m_nodes[curr]->outgoingEdges;
+            for (uint32_t dest : edges) {
+                nodeDepths[dest] = std::max(nodeDepths[dest], currDepth + 1);
+                inDegrees[dest]--;
+                if (inDegrees[dest] == 0) {
+                    zeroInDegreeQueue.push(dest);
+                }
             }
         }
 
-        if (m_executionOrder.size() != m_nodes.size()) return false;
-
-        // 2. PDC（遅延補正）の計算
-        // 全ノードの待ち時間をリセット
-        for (auto& pair : m_nodes) pair.second->cumulativeDelay = 0;
-
-        // クリティカルパス（最大遅延）を後ろから伝播
-        std::unordered_map<uint32_t, uint32_t> pathDelays;
-        for (auto it = m_executionOrder.rbegin(); it != m_executionOrder.rend(); ++it) {
-            uint32_t curr = *it;
-            uint32_t maxChildPath = 0;
-            for (uint32_t neighbor : m_nodes[curr]->outgoingEdges) {
-                maxChildPath = std::max(maxChildPath, pathDelays[neighbor]);
-            }
-            pathDelays[curr] = m_nodes[curr]->processingLatency + maxChildPath;
+        // Cycle check
+        if (m_executionOrder.size() != m_nodes.size()) {
+            return false;
         }
 
-        // 各ノードに必要な「待ち時間（空のディレイ）」を決定
-        for (auto& pair : m_nodes) {
-            uint32_t curr = pair.first;
-            uint32_t maxChildPath = 0;
-            for (uint32_t neighbor : m_nodes[curr]->outgoingEdges) {
-                maxChildPath = std::max(maxChildPath, pathDelays[neighbor]);
-            }
-            
-            for (uint32_t neighbor : m_nodes[curr]->outgoingEdges) {
-                // 子ノードごとに、最大パスとの差分を待ち時間として設定
-                uint32_t diff = maxChildPath - pathDelays[neighbor];
-                m_nodes[neighbor]->cumulativeDelay += diff;
-            }
+        // 2. Compile PipeWire-style Stages
+        uint32_t maxDepth = 0;
+        for (const auto& pair : nodeDepths) {
+            maxDepth = std::max(maxDepth, pair.second);
+        }
+
+        m_stages.resize(maxDepth + 1);
+        for (const auto& pair : nodeDepths) {
+            m_stages[pair.second].nodeIds.push_back(pair.first);
+        }
+        for (auto& stage : m_stages) {
+            std::sort(stage.nodeIds.begin(), stage.nodeIds.end());
+        }
+
+        // 3. Use the shared solver for the production PDC calculation.  Keeping
+        // this at the graph boundary prevents the UI-facing PDC implementation
+        // and the realtime routing graph from drifting apart.
+        std::map<uint32_t, PDCGraphSolver::Node> solverNodes;
+        for (const auto& [id, node] : m_nodes) {
+            solverNodes.emplace(id, PDCGraphSolver::Node{
+                id,
+                node->processingLatency,
+                0,
+                0,
+                true,
+                node->outgoingEdges,
+            });
+        }
+
+        PDCGraphSolver solver;
+        solver.solve(solverNodes);
+        if (solver.hasCycle()) return false;
+
+        // 4. Publish the compensation offsets calculated by the shared solver.
+        for (const auto& [id, node] : m_nodes) {
+            node->cumulativeDelay = solverNodes.at(id).compensation;
         }
 
         return true;
     }
 
+    /**
+   * @brief Deterministic bounded stage scheduler for the audio graph.
+   * Nodes within a stage have no mutual dependencies; the fallback executes them
+   * in stable ID order so the audio callback never creates worker threads.
+     */
+    void executeStages(const std::function<void(uint32_t)>& processFunc) {
+        for (const auto& stage : m_stages) {
+            if (stage.nodeIds.empty()) continue;
+
+            if (stage.nodeIds.size() == 1) {
+                // Optimize single-node stage by executing synchronously on calling thread
+                processFunc(stage.nodeIds[0]);
+            } else {
+                for (uint32_t nodeId : stage.nodeIds) {
+                    processFunc(nodeId);
+                }
+            }
+        }
+    }
+
     const std::vector<uint32_t>& getExecutionOrder() const { return m_executionOrder; }
+    const std::vector<ProcessStage>& getStages() const { return m_stages; }
     uint32_t getDelayForNode(uint32_t id) const { return m_nodes.at(id)->cumulativeDelay; }
 
 private:
     std::unordered_map<uint32_t, std::shared_ptr<AudioNode>> m_nodes;
-    std::vector<uint32_t> m_executionOrder; 
+    std::vector<uint32_t> m_executionOrder;
+    std::vector<ProcessStage> m_stages;
 };
 
 } // namespace Aura::Core::Engine

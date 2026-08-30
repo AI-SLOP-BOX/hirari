@@ -23,48 +23,32 @@ public:
         reset();
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+    void prepareToPlay(double sr, [[maybe_unused]] uint32_t bs) noexcept override {
         m_sampleRate = sr;
     }
 
     /**
      * @brief PROCESS: Applies magnetic character and speed instability.
      */
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        float drive = std::pow(10.0f, m_drive / 20.0f);
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            // 1. Wow & Flutter (Slow/Fast time modulation)
-            m_lfoPhase += (0.5f / m_sampleRate); // Wow (0.5Hz)
-            m_flutterPhase += (5.0f / m_sampleRate); // Flutter (5.0Hz)
-            if (m_lfoPhase >= 1.0f) m_lfoPhase -= 1.0f;
-            if (m_flutterPhase >= 1.0f) m_flutterPhase -= 1.0f;
-
-            float mod = (m_flutter * 0.5f) * std::sin(2.0f * M_PI * m_lfoPhase) + 
-                        (m_flutter * 0.2f) * std::sin(2.0f * M_PI * m_flutterPhase);
-            
-            float delaySamps = (4.0f + mod * 400.0f); 
-
-            for (uint32_t c = 0; c < 2; ++c) {
-                float in = buffer.getReadPointer(c)[s] * drive;
-                
-                // 2. Magnetic Saturation (Hysteresis model approximation)
-                float saturated = (in > 0) ? (in / (1.0f + in)) : (in / (1.0f - in));
-                
-                // 3. Time instability
-                float fluttered = (c == 0) ? m_delayL.process(saturated, delaySamps) 
-                                           : m_delayR.process(saturated, delaySamps);
-
-                // 4. Add Tape Hiss (Natural noise)
-                float hiss = ((float)rand() / RAND_MAX - 0.5f) * m_noise;
-                
-                buffer.getWritePointer(c)[s] = fluttered + hiss;
-            }
+    void process(Core::AudioBuffer& buffer, [[maybe_unused]] Core::MidiBuffer& midi, [[maybe_unused]] const ProcessContext& context) noexcept override {
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        const float drive = std::clamp(std::pow(10.0f, m_drive / 20.0f), 1.0f, 20.0f);
+        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+            const float speed = 1.0f + m_flutter * 0.0025f * std::sin(m_flutterPhase);
+            const uint32_t delay = static_cast<uint32_t>(std::clamp(12.0f * speed, 1.0f, 64.0f));
+            const float l = m_delayL.process(buffer.getReadPointer(0)[i], delay);
+            const float r = channels > 1 ? m_delayR.process(buffer.getReadPointer(1)[i], delay + 3) : l;
+            const float hiss = m_noise * std::sin(m_lfoPhase * 17.0f + 0.37f);
+            buffer.getWritePointer(0)[i] = std::tanh(l * drive) / std::max(1.0f, drive) + hiss;
+            if (channels > 1) buffer.getWritePointer(1)[i] = std::tanh(r * drive) / std::max(1.0f, drive) - hiss;
+            m_lfoPhase += 0.37f / static_cast<float>(std::max(1.0, m_sampleRate));
+            m_flutterPhase += 0.8f / static_cast<float>(std::max(1.0, m_sampleRate));
+            if (m_lfoPhase > 6.2831853f) m_lfoPhase -= 6.2831853f;
+            if (m_flutterPhase > 6.2831853f) m_flutterPhase -= 6.2831853f;
         }
     }
+
 
     void reset() noexcept override {
         m_delayL.reset(); m_delayR.reset();

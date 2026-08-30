@@ -1,0 +1,28 @@
+import { Style } from "../style.slint";
+import { Z_Knob } from "../primitives/knob.slint";
+
+export component Z_SpectralRestoration {
+    in property <[float]> samples; in property <color> accent: Style.brand;
+    in property <float> ui_timer: 0.0;
+    Rectangle {
+        width: 100%; height: 340px; background: Style.surface; border_width: 1px; border_color: Style.border;
+        VerticalLayout {
+            padding: 16px; spacing: 12px;
+            HorizontalLayout { spacing: 12px; Text { text: "Spectral Repair 2.1"; font-size: 11px; color: accent; font-weight: 700; } Rectangle { horizontal-stretch: 1; } }
+            Rectangle {
+                background: #000; border_width: 1px; border_color: Style.border; horizontal-stretch: 1; vertical-stretch: 1;
+                for i in 32 : Rectangle {
+                    x: i * parent.width / 32; width: parent.width / 32; height: 100%;
+                    background: @linear-gradient(180deg, accent.with-alpha(Math.mod(i*0.1 + ui_timer/300.0, 1.0)) 0%, transparent 80%); opacity: 0.4;
+                }
+                Rectangle { x: 40px; y: 60px; width: 120px; height: 80px; border_width: 1px; border_color: Style.solo; background: Style.solo.with-alpha(0.05); }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Z_Knob { label: "Threshold"; value: 0.6; unit: " dB"; display-value: Math.round((-24.0 + self.value * 24.0) * 10.0) / 10.0 + " dB"; }
+                Z_Knob { label: "Reduction"; value: 0.8; accent-col: Style.alert; unit: " dB"; display-value: Math.round(self.value * 10.0) / 10.0 + " dB"; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+    }
+}

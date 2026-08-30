@@ -2,6 +2,8 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
+#include "k_weighting_filter.hpp"
 
 namespace Aura::DSP::Analysis {
 
@@ -13,72 +15,89 @@ namespace Aura::DSP::Analysis {
  */
 class LoudnessMeter {
 public:
-    LoudnessMeter() : m_integratedLUFS(-70.0f) {
+    explicit LoudnessMeter(double sampleRate = 44100.0)
+        : m_sampleRate(sanitizeSampleRate(sampleRate)),
+          m_filter(m_sampleRate),
+          m_integratedLUFS(-70.0f) {
+        reset();
+    }
+
+    void setSampleRate(double sampleRate) {
+        m_sampleRate = sanitizeSampleRate(sampleRate);
+        m_filter.setSampleRate(m_sampleRate);
         reset();
     }
 
     void reset() {
         m_integratedLUFS = -70.0f;
-        m_sampleCount = 0;
-        m_energySum = 0.0;
-        m_hpS1L = m_hpS2L = m_hpS1R = m_hpS2R = 0.0f;
-        m_shelfS1L = m_shelfS2L = m_shelfS1R = m_shelfS2R = 0.0f;
+        m_blockSamples = 0;
+        m_blockEnergy = 0.0;
+        m_gatedEnergy = 0.0;
+        m_gatedBlocks = 0;
+        m_filter.reset();
     }
 
     /**
      * @brief PROCESS: K-Weighting + Gated Integration.
      */
     void process(const float* l, const float* r, uint32_t len) {
-        for (uint32_t s = 0; s < len; ++s) {
-            float inL = l[s];
-            float inR = r[s];
+        if (!l || !r || len == 0) return;
 
-            // 1. Pre-filter (K-Weighting Stage 1: High Shelf)
-            float v1L = inL - m_shelfA1 * m_shelfS1L - m_shelfA2 * m_shelfS2L;
-            float out1L = m_shelfB0 * v1L + m_shelfB1 * m_shelfS1L + m_shelfB2 * m_shelfS2L;
-            m_shelfS2L = m_shelfS1L; m_shelfS1L = v1L;
+        // BS.1770 uses 400ms integration blocks. We intentionally keep the
+        // accumulator fixed-size so this method remains allocation-free.
+        const uint64_t blockLength = std::max<uint64_t>(1, static_cast<uint64_t>(m_sampleRate * 0.4));
+        for (uint32_t i = 0; i < len; ++i) {
+            float weightedL = 0.0f;
+            float weightedR = 0.0f;
+            m_filter.process(l[i], r[i], weightedL, weightedR);
+            if (!std::isfinite(weightedL)) weightedL = 0.0f;
+            if (!std::isfinite(weightedR)) weightedR = 0.0f;
+            m_blockEnergy += static_cast<double>(weightedL) * weightedL;
+            m_blockEnergy += static_cast<double>(weightedR) * weightedR;
+            ++m_blockSamples;
 
-            float v1R = inR - m_shelfA1 * m_shelfS1R - m_shelfA2 * m_shelfS2R;
-            float out1R = m_shelfB0 * v1R + m_shelfB1 * m_shelfS1R + m_shelfB2 * m_shelfS2R;
-            m_shelfS2R = m_shelfS1R; m_shelfS1R = v1R;
-
-            // 2. High-pass (K-Weighting Stage 2: RLB Filter)
-            float v2L = out1L - m_hpA1 * m_hpS1L - m_hpA2 * m_hpS2L;
-            float out2L = m_hpB0 * v2L + m_hpB1 * m_hpS1L + m_hpB2 * m_hpS2L;
-            m_hpS2L = m_hpS1L; m_hpS1L = v2L;
-
-            float v2R = out1R - m_hpA1 * m_hpS1R - m_hpA2 * m_hpS2R;
-            float out2R = m_hpB0 * v2R + m_hpB1 * m_hpS1R + m_hpB2 * m_hpS2R;
-            m_hpS2R = m_hpS1R; m_hpS1R = v2R;
-
-            // 3. Accumulate Energy (Mean Square)
-            m_energySum += (double)(out2L * out2L + out2R * out2R);
-            m_sampleCount++;
-        }
-
-        // 4. Calculate LUFS
-        if (m_sampleCount > 0) {
-            double meanSquare = m_energySum / m_sampleCount;
-            m_integratedLUFS = -0.691f + 10.0f * std::log10(std::max(1e-7, meanSquare));
+            if (m_blockSamples >= blockLength) {
+                finishBlock();
+            }
         }
     }
+
 
     float getIntegratedLUFS() const { return m_integratedLUFS; }
 
 private:
-    // Pre-calculated coefficients for 44.1kHz (ITU-R BS.1770-4)
-    const float m_shelfB0 = 1.53512485958697f, m_shelfB1 = -2.69169618940638f, m_shelfB2 = 1.19839281085285f;
-    const float m_shelfA1 = -1.69065929318241f, m_shelfA2 = 0.73248077421585f;
+    static double sanitizeSampleRate(double sampleRate) noexcept {
+        return std::isfinite(sampleRate) && sampleRate > 1000.0 ? sampleRate : 44100.0;
+    }
 
-    const float m_hpB0 = 1.0f, m_hpB1 = -2.0f, m_hpB2 = 1.0f;
-    const float m_hpA1 = -1.99004745483398f, m_hpA2 = 0.99007225036621f;
+    void finishBlock() noexcept {
+        if (m_blockSamples == 0) return;
+        const double meanEnergy = m_blockEnergy / static_cast<double>(m_blockSamples);
+        constexpr double kAbsoluteGateEnergy = 1.0e-7; // approximately -70 LUFS
+        if (std::isfinite(meanEnergy) && meanEnergy >= kAbsoluteGateEnergy) {
+            m_gatedEnergy += meanEnergy;
+            ++m_gatedBlocks;
+            const double gatedMean = m_gatedEnergy / static_cast<double>(m_gatedBlocks);
+            const double candidate = -0.691 + 10.0 * std::log10(std::max(gatedMean, 1.0e-12));
+            if (std::isfinite(candidate)) {
+                // Relative gate: exclude blocks more than 10 LU below the
+                // current integrated estimate on the next update.
+                if (m_integratedLUFS <= -70.0f || candidate >= static_cast<double>(m_integratedLUFS) - 10.0) {
+                    m_integratedLUFS = static_cast<float>(std::clamp(candidate, -120.0, 20.0));
+                }
+            }
+        }
+        m_blockEnergy = 0.0;
+        m_blockSamples = 0;
+    }
 
-    float m_hpS1L, m_hpS2L, m_hpS1R, m_hpS2R;
-    float m_shelfS1L, m_shelfS2L, m_shelfS1R, m_shelfS2R;
-
+    double m_sampleRate;
+    KWeightingFilter m_filter;
     float m_integratedLUFS;
-    double m_energySum;
-    uint64_t m_sampleCount;
+    double m_blockEnergy = 0.0;
+    double m_gatedEnergy = 0.0;
+    uint64_t m_blockSamples = 0;
+    uint64_t m_gatedBlocks = 0;
 };
 
 } // namespace Aura::DSP::Analysis

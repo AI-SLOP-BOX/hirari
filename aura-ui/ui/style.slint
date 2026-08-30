@@ -1,0 +1,57 @@
+// Canonical Aura UI design tokens. All UI files import this global.
+export global Style {
+    in-out property <length> grid-step: 48px;
+    in-out property <float> bpm: 120.0;
+    in-out property <float> snap: 16.0;
+    in-out property <length> header-w: 260px;
+    in-out property <length> inspector-w: 260px;
+
+    // Logic-inspired neutral layers and restrained functional accents.
+    in-out property <color> base: #131315;
+    in-out property <color> panel: #232326;
+    in-out property <color> panel-h: #2C2C30;
+    in-out property <color> surface: #1A1A1C;
+    in-out property <color> surface-0: #0D0E10;
+    in-out property <color> surface-1: #15171A;
+    in-out property <color> surface-2: #1D2024;
+    in-out property <color> surface-3: #25292E;
+    in-out property <color> border: #2D2D32;
+    in-out property <color> line-subtle: #292D33;
+    in-out property <color> line-strong: #3A414A;
+    in-out property <color> bezel-light: #38383C;
+    in-out property <color> shadow-bottom: #000000.with-alpha(0.42);
+    in-out property <color> highlight-top: #FFFFFF.with-alpha(0.08);
+    in-out property <color> brand: #3182CE;
+    in-out property <color> brand-glow: #0A84FF.with-alpha(0.12);
+    in-out property <color> selection: #0A84FF.with-alpha(0.28);
+    in-out property <color> ok: #30A46C;
+    in-out property <color> solo: #D39A3A;
+    in-out property <color> alert: #D94A4A;
+    in-out property <color> record: #D94A4A;
+    in-out property <color> lcd-bg: #0A0A0C;
+    in-out property <color> lcd-text: #63C7C5;
+    in-out property <color> cycle: #A2E048;
+    in-out property <color> grid-bar: #3A3A3C;
+    in-out property <color> grid-beat: #242426;
+    in-out property <color> grid-subbeat: #1F1F23;
+    in-out property <color> playhead: #30D158;
+    in-out property <color> region-border: #FFFFFF.with-alpha(0.20);
+
+    in-out property <color> text: #F2F2F7;
+    in-out property <color> text-dim: #8E8E93;
+    in-out property <color> text-muted: #636366;
+    in-out property <color> text-primary: #E8EDF2;
+    in-out property <color> text-secondary: #A2ABB5;
+    in-out property <color> text-tertiary: #69737E;
+    // Generic families are resolved by the platform font manager: this keeps
+    // Windows/Linux from silently requesting unavailable Apple-only fonts.
+    // macOS resolves these to its native sans/monospace system families.
+    in-out property <string> ui-font: "sans-serif";
+    in-out property <string> numeric-font: "monospace";
+
+    in-out property <length> font-xs: 11px;
+    in-out property <length> font-xxs: 10px;
+    in-out property <length> font-s: 12px;
+    in-out property <length> font-m: 13px;
+    in-out property <length> font-l: 16px;
+}

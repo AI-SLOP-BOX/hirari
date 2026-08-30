@@ -15,7 +15,7 @@ public:
      * @brief Fast approximation of exponential function.
      * Based on Schraudolph's algorithm (1998).
      */
-    static float fastExp(float x) {
+    static inline float fastExp(float x) {
         union { float f; int32_t i; } u;
         u.i = static_cast<int32_t>(12102203.0f * x + 1064866805.0f);
         return u.f;
@@ -24,14 +24,14 @@ public:
     /**
      * @brief Fast dB to Linear conversion.
      */
-    static float dbToLinear(float db) {
+    static inline float dbToLinear(float db) {
         return fastExp(db * 0.1151292546497022842f); // db * ln(10)/20
     }
 
     /**
      * @brief Fast Linear to dB conversion.
      */
-    static float linearToDb(float linear) {
+    static inline float linearToDb(float linear) {
         return 20.0f * std::log10(linear + 1e-10f); // FastLog could be added
     }
 };

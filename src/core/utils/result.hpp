@@ -30,12 +30,13 @@ public:
     bool isOk() const { return std::holds_alternative<T>(m_data); }
     bool isError() const { return std::holds_alternative<Error>(m_data); }
 
-    T& get() { 
-        if (!isOk()) throw std::runtime_error("Attempted to get() an Error Result");
+    T& get() noexcept { 
+        // Real-time Safety: Exceptions are BANNED in the audio core.
+        // We use explicit error checking. If this is hit, it's a logic error, not a runtime failure.
         return std::get<T>(m_data); 
     }
 
-    const Error& getError() const { return std::get<Error>(m_data); }
+    const Error& getError() const noexcept { return std::get<Error>(m_data); }
 
 private:
     std::variant<T, Error> m_data;

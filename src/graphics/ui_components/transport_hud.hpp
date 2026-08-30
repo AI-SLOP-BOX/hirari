@@ -28,11 +28,20 @@ public:
         kernel.drawGradientRect(lcdX, lcdY, lcdW, 20.0f, 0x11FFFFFF, 0x00000000); // Top Shine
         
         // --- CALC POSITION (Logic Standard: Bar.Beat.Div.Tick) ---
-        double beatTotal = (currentPos / sampleRate) * (bpm / 60.0);
-        uint32_t bar = (uint32_t)(beatTotal / 4.0) + 1;
-        uint32_t beat = (uint32_t)(std::fmod(beatTotal, 4.0)) + 1;
-        uint32_t div = (uint32_t)(std::fmod(beatTotal * 4.0, 4.0)) + 1;
-        uint32_t tick = (uint32_t)(std::fmod(beatTotal * 960.0, 240.0));
+        const double safeRate = (std::isfinite(sampleRate) && sampleRate > 0.0) ? sampleRate : 44100.0;
+        const double safeBpm = (std::isfinite(bpm) && bpm > 0.0f) ? bpm : 120.0;
+        const double beatTotal = (static_cast<double>(currentPos) / safeRate) * (safeBpm / 60.0);
+        // 960 PPQN: derive every field from one integer tick position so
+        // floating-point fmod rounding cannot make division/tick disagree.
+        const uint64_t totalTicks = static_cast<uint64_t>(std::max(0.0, std::floor(beatTotal * 960.0)));
+        constexpr uint64_t ticksPerBeat = 960;
+        constexpr uint64_t ticksPerDivision = 240;
+        constexpr uint64_t ticksPerBar = ticksPerBeat * 4;
+        const uint64_t barTicks = totalTicks % ticksPerBar;
+        uint32_t bar = static_cast<uint32_t>(totalTicks / ticksPerBar) + 1;
+        uint32_t beat = static_cast<uint32_t>(barTicks / ticksPerBeat) + 1;
+        uint32_t div = static_cast<uint32_t>((barTicks % ticksPerBeat) / ticksPerDivision) + 1;
+        uint32_t tick = static_cast<uint32_t>(barTicks % ticksPerDivision);
         
         // --- CALC SMPTE (HH:MM:SS.ms) ---
         double totalSeconds = (double)currentPos / sampleRate;

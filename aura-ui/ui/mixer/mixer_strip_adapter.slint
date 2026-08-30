@@ -1,0 +1,38 @@
+import { MixerActions } from "../actions/mixer_actions.slint";
+import { DiagnosticsActions } from "../actions/diagnostics_actions.slint";
+import { Z_Fx } from "../model/plugin_model.slint";
+import { Z_MixerStrip as Z_MixerStripCore } from "./mixer_strip.slint";
+
+// Compatibility adapter for legacy call sites. New views should use the
+// isolated strip directly; keeping this boundary prevents action wiring from
+// leaking back into the visual mixer implementation.
+export component Z_MixerStrip {
+    in property <string> name; in property <color> color; in property <float> volume; in property <float> pan;
+    in property <float> peak; in property <float> pk_h; in property <int> tid;
+    in property <bool> is_mute; in property <bool> is_solo; in property <bool> is_phase; in property <[Z_Fx]> fx;
+    in property <bool> compact: false; in property <float> send_lvl: 0.0;
+    in property <float> filter_lp: 1.0; in property <float> filter_hp: 0.0; in property <int> track_idx: 0;
+    in property <bool> is_master: false; in property <int> meter_mode;
+    in property <int> group_id: 0; in property <int> panner_mode: 0; in property <bool> ai_enabled: true;
+    in property <float> low_b: 0.0; in property <float> low_c: 0.0; in property <float> high_b: 0.0; in property <float> high_c: 0.0;
+    in property <bool> saturate_active: false; in property <float> correlation: 0.0;
+    in property <float> delay_ms: 0.0;
+    Z_MixerStripCore {
+        name: root.name; color: root.color; volume: root.volume; pan: root.pan; peak: root.peak; pk_h: root.pk_h; tid: root.tid;
+        is_mute: root.is_mute; is_solo: root.is_solo; is_phase: root.is_phase; fx: root.fx; compact: root.compact;
+        send_lvl: root.send_lvl; filter_lp: root.filter_lp; filter_hp: root.filter_hp; track_idx: root.track_idx;
+        is_master: root.is_master; meter_mode: root.meter_mode; group_id: root.group_id; panner_mode: root.panner_mode;
+        ai_enabled: root.ai_enabled; low_b: root.low_b; low_c: root.low_c; high_b: root.high_b; high_c: root.high_c;
+        saturate_active: root.saturate_active; correlation: root.correlation;
+        delay_ms: root.delay_ms;
+        eq-changed(a, b, c, d, e) => { MixerActions.eq_changed(a, b, c, d, e); }
+        fx-toggled(a, b) => { MixerActions.toggle_fx(a, b); }
+        phase-toggled(a) => { MixerActions.toggle_phase(a); }
+        solo-toggled(a) => { MixerActions.toggle_solo(a); }
+        mute-toggled(a) => { MixerActions.toggle_mute(a); }
+        cloner-toggled(a) => { DiagnosticsActions.toggle_cloner(a); }
+        peaks-reset => { MixerActions.reset_peaks(); }
+        fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
+        delay-changed(a, b) => { MixerActions.delay_changed(a, b); }
+    }
+}

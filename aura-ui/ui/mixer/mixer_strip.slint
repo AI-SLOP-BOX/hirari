@@ -1,0 +1,205 @@
+import { Style } from "../style.slint";
+import { Z_Meter } from "../primitives/meter.slint";
+import { Z_Knob } from "../primitives/knob.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { Z_Fx } from "../model/plugin_model.slint";
+
+export component Z_MixerStrip {
+    in property <string> name; in property <color> color; in property <float> volume; in property <float> pan; in property <float> peak; in property <float> pk_h; in property <int> tid;
+    in property <bool> is_mute; in property <bool> is_solo; in property <bool> is_phase; in property <[Z_Fx]> fx;
+    in property <bool> compact: false; in property <float> send_lvl: 0.0;
+    in property <float> filter_lp: 1.0; in property <float> filter_hp: 0.0; in property <int> track_idx: 0;
+    in property <bool> is_master: false;
+    in property <int> meter_mode; in property <int> group_id: 0; in property <int> panner_mode: 0; in property <bool> ai_enabled: true;
+    in property <float> low_b: 0.0; in property <float> low_c: 0.0; in property <float> high_b: 0.0; in property <float> high_c: 0.0;
+    in property <bool> saturate_active: false;
+    in property <float> correlation: 0.0;
+    in property <float> delay_ms: 0.0;
+    callback eq-changed(int, float, float, float, float);
+    callback fx-toggled(int, int);
+    callback phase-toggled(int);
+    callback solo-toggled(int);
+    callback mute-toggled(int);
+    callback cloner-toggled(int);
+    callback peaks-reset();
+    callback fader-changed(int, float);
+    callback delay-changed(int, float);
+    Rectangle {
+        min-height: 480px; 
+        background: Style.surface-1; border_radius: 2px; border_width: 1px; border_color: Style.border;
+        animate background { duration: 250ms; }
+        
+        // --- DYNAMIC AUDIO GLOW (INDUSTRIAL WOW) ---
+        Rectangle { 
+            width: 100%; height: 100%; border_radius: 2px;
+            background: color.with-alpha(peak.clamp(0,1.2) * 0.12);
+            opacity: peak.clamp(0,1.0);
+            animate background { duration: 150ms; }
+        }
+
+        VerticalLayout {
+            padding: 4px; spacing: 4px;
+        // I/O Header
+        Rectangle {
+            height: 16px; background: Style.surface-0; border_radius: 2px;
+            Text { text: is_master ? "MASTER OUT" : "IN 1/2"; font-size: Style.font-xxs; color: Style.text-secondary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        
+        // --- PASSIVE ANALOG EQ (PULTEC MODEL) ---
+        if (!compact) : Rectangle {
+            height: 64px; background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border;
+            VerticalLayout {
+                padding: 4px; spacing: 4px;
+                HorizontalLayout {
+                    spacing: 4px; alignment: center;
+                    VerticalLayout {
+                        Z_Knob { value: low_b; compact: true; accent-col: Style.ok; display-value: Math.round(low_b * 100.0) + "%"; changed(v) => { root.eq-changed(tid, v, low_c, high_b, high_c); } }
+                        Text { text: "LB"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                    }
+                    VerticalLayout {
+                        Z_Knob { value: low_c; compact: true; accent-col: Style.alert; display-value: Math.round(low_c * 100.0) + "%"; changed(v) => { root.eq-changed(tid, low_b, v, high_b, high_c); } }
+                        Text { text: "LC"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                    }
+                    VerticalLayout {
+                        Z_Knob { value: high_b; compact: true; accent-col: Style.brand; display-value: Math.round(high_b * 100.0) + "%"; changed(v) => { root.eq-changed(tid, low_b, low_c, v, high_c); } }
+                        Text { text: "HB"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                    }
+                    VerticalLayout {
+                        Z_Knob { value: high_c; compact: true; accent-col: Style.text-secondary; display-value: Math.round(high_c * 100.0) + "%"; changed(v) => { root.eq-changed(tid, low_b, low_c, high_b, v); } }
+                        Text { text: "HC"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                    }
+                }
+                // Interactive Response Path
+                Path {
+                    stroke: Style.brand; stroke-width: 1.5px; opacity: 0.6;
+                    MoveTo { x: 0; y: 16; }
+                    QuadraticTo { control-x: 20; control-y: 16 - (low_b - low_c) * 12; x: 40; y: 16; }
+                    QuadraticTo { control-x: 60; control-y: 16 - (high_b - high_c) * 12; x: 80; y: 16; }
+                }
+            }
+        }
+
+        // --- TRACK IDENTITY ---
+        VerticalLayout {
+            spacing: 2px; padding: 4px;
+            Text { text: name; font-size: 11px; font-weight: 700; color: Style.text-primary; horizontal-alignment: center; overflow: elide; }
+            Rectangle { height: 2px; background: color; border_radius: 1px; }
+        }
+
+        // --- AUDIO FX SLOTS ---
+        if (!compact) : VerticalLayout {
+            spacing: 2px;
+            for slot in 10 : Rectangle {
+                height: 18px; background: slot < fx.length ? Style.surface-2 : Style.surface-0; border-radius: 2px;
+                border-width: 1px; border-color: slot < fx.length ? Style.brand.with-alpha(0.45) : Style.border;
+                if (slot < fx.length) : HorizontalLayout {
+                    padding-left: 3px; padding-right: 3px; spacing: 3px;
+                    Z_IconButton { icon: "●"; compact: true; active: fx[slot].active; active-col: Style.ok; clicked => { root.fx-toggled(tid, slot); } }
+                    Text { text: fx[slot].name; font-size: Style.font-xxs; color: Style.text; horizontal-alignment: center; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: "▾"; font-size: Style.font-xxs; color: Style.text-muted; vertical-alignment: center; }
+                }
+                if (slot >= fx.length) : Text { text: "Audio FX"; font-size: Style.font-xxs; color: Style.text-muted; x: 6px; vertical-alignment: center; }
+            }
+        }
+
+        // --- CONSOLE FADER & METER (INDUSTRIAL) ---
+        HorizontalLayout {
+            spacing: 6px; alignment: center; padding-left: 4px; padding-right: 4px;
+            
+            // Channel Controls (SSL Vertical Style)
+            if (!compact) : VerticalLayout {
+                spacing: 6px; alignment: center;
+                Z_IconButton { icon: "Ø"; active: is_phase; clicked => { root.phase-toggled(tid); } }
+                Z_IconButton { icon: "S"; active: is_solo; active-col: Style.solo; clicked => { root.solo-toggled(tid); } }
+                Z_IconButton { icon: "M"; active: is_mute; active-col: Style.brand; clicked => { root.mute-toggled(tid); } }
+                Z_IconButton { icon: "≈"; active: saturate_active; active-col: Style.record; clicked => { root.cloner-toggled(tid); } }
+                Rectangle { height: 1px; background: Style.border; width: 100%; }
+                Z_Knob {
+                    value: pan; bipolar: true; compact: true; show-value: true; accent-col: Style.ok;
+                    display-value: pan == 0.5 ? "C" : (pan < 0.5 ? "L" + Math.round((0.5 - pan) * 128.0) : "R" + Math.round((pan - 0.5) * 127.0));
+                }
+                Z_Knob {
+                    value: (delay_ms / 200.0).clamp(0.0, 1.0); compact: true; show-value: true; accent-col: Style.brand;
+                    label: "DLY"; display-value: Math.round(delay_ms) + " ms";
+                    changed(v) => { root.delay-changed(tid, v * 200.0); }
+                }
+            }
+
+            // High-Resolution Fader Lane
+            VerticalLayout {
+                spacing: 4px;
+                // Peak Numeric Readout (Pro Parity)
+                Rectangle {
+                    height: 14px; background: Style.lcd-bg; border_radius: 1px;
+                    Text { text: (peak > 1.0 ? "+" : "") + Math.floor((peak - 1.0) * 100.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: peak > 1.0 ? Style.record : Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; font-weight: 700; }
+                }
+                Rectangle {
+                    height: compact ? 160px : 220px; background: Style.surface-0; width: compact ? 26px : 32px; border_radius: 3px; border_width: 1px; border_color: Style.border;
+                    clip: true;
+                    Rectangle { width: 2px; height: parent.height * 0.90; background: Style.surface-2; x: (parent.width - self.width) / 2; y: parent.height * 0.05; }
+                    
+                    // --- INDUSTRIAL PHASE CORRELATION BAR ---
+                    if (!compact) : Rectangle {
+                        height: 6px; width: 24px; x: (parent.width - self.width) / 2; y: 18px; background: Style.lcd-bg; border_radius: 1px;
+                        Rectangle {
+                            width: 10px; height: 100%; x: 7px + (correlation * 7px); 
+                            background: correlation < 0 ? Style.alert : Style.ok; border_radius: 1px;
+                            animate x { duration: 100ms; }
+                        }
+                    }
+
+                    // Scale Markings
+                    for s in [0, -6, -12, -18, -24, -36, -48, -60] : Rectangle {
+                        y: (1.2 - (s == -60 ? 0.001 : Math.pow(10.0, s/20.0)))/1.2 * parent.height;
+                        width: 4px; height: 1px; background: Style.border; x: 0;
+                        if (!compact) : Text { text: s + ""; font-size: Style.font-xxs; color: Style.text-tertiary; x: 6px; y: -3px; font-weight: 500; }
+                    }
+
+                    // Multichannel Metering (ATMOS Support)
+                    if (panner_mode == 2) : HorizontalLayout {
+                        spacing: 1px; padding: 2px;
+                        for i in 6 : Z_Meter { val: peak * (1.0 - i * 0.1); width: 4px; mode: 0; reset-peaks => { root.peaks-reset(); } }
+                    }
+                    if (panner_mode != 2) : Z_Meter { val: peak; peak_h: pk_h; width: 100%; mode: meter_mode; reset-peaks => { root.peaks-reset(); } }
+                    
+                    // Industrial Fader Handle (Premium Metallic)
+                    Rectangle { 
+                        y: (1.2 - volume.clamp(0,1.2))/1.2 * parent.height - 12px; width: 100%; height: 24px; z: 50;
+                        background: @linear-gradient(180deg, Style.surface-3 0%, Style.surface-2 100%); 
+                        border_width: 1px; border_color: handle.has-hover ? Style.brand : Style.text-dim; border_radius: 2px;
+                        
+                        // Center Color Indicator
+                        Rectangle { width: 100%; height: 2px; background: color; y: 11px; }
+                        
+                        // Tactical Grips
+                        for i in 3 : Rectangle { 
+                            width: 70%; height: 1px; background: Style.line-subtle; 
+                            y: 6px + i * 3px; x: (parent.width - self.width)/2; 
+                        }
+                        for i in 3 : Rectangle { 
+                            width: 70%; height: 1px; background: Style.line-strong; 
+                            y: 20px + i * 3px; x: (parent.width - self.width)/2; 
+                        }
+                        
+                        handle := TouchArea { moved => { if (self.pressed) { root.fader-changed(tid, (volume + (self.pressed_y - self.mouse_y)/parent.height * 1.2).clamp(0, 1.2)); } } }
+                    }
+                }
+            }
+            
+            // RMS / Gain Reduction Track
+            if (!compact) : VerticalLayout {
+                spacing: 2px;
+                Z_Meter { val: peak * 0.7; width: 4px; height: 100%; mode: 1; reset-peaks => { root.peaks-reset(); } }
+                Text { text: "GR"; font-size: Style.font-xxs; color: Style.record; horizontal-alignment: center; font-weight: 600; }
+                Rectangle { height: (peak * 0.3) * 60px; width: 4px; background: Style.record; opacity: 0.6; }
+            }
+        }
+
+        // --- TRACK STRIP FOOTER ---
+        Rectangle {
+            height: 18px; background: Style.surface-0; border_radius: 2px;
+            Text { text: is_master ? "Master" : (track_idx + 1) + ""; font-size: 9px; color: Style.text-tertiary; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+}
+}

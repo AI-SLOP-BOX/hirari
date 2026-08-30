@@ -16,7 +16,8 @@ namespace Aura::DSP::Effects {
 class ElasticWarpEngine {
 public:
     ElasticWarpEngine(double sr = 44100.0) : m_sampleRate(sr) {
-        m_grainSize = static_cast<size_t>(sr * 0.050); // 50ms grains
+        if (!std::isfinite(m_sampleRate) || m_sampleRate < 1000.0) m_sampleRate = 44100.0;
+        m_grainSize = std::max<size_t>(2, static_cast<size_t>(m_sampleRate * 0.050)); // 50ms grains
         m_overlapSize = m_grainSize / 2;
         m_window.resize(m_grainSize);
         m_olaBufferL.assign(m_grainSize * 4, 0.0f); // Pre-allocated OLA
@@ -33,7 +34,7 @@ public:
      * Uses energy-delta to lock the grain start to the exact attack.
      */
     bool isTransient(const float* l, const float* r, size_t len, size_t maxLen) {
-        if (len == 0 || maxLen < len) return false;
+        if (!l || !r || len == 0 || maxLen < len) return false;
         
         float energy = 0;
         for (size_t i = 0; i < len; ++i) {
@@ -53,7 +54,7 @@ public:
      * gain fluctuations during the search.
      */
     size_t findBestMatch(const float* inL, const float* inR, size_t maxLen, size_t searchStart, size_t targetPos) {
-        if (targetPos + m_grainSize >= maxLen || searchStart + m_grainSize >= maxLen) return targetPos;
+        if (!inL || !inR || targetPos + m_grainSize >= maxLen || searchStart + m_grainSize >= maxLen) return targetPos;
 
         size_t bestPos = targetPos;
         float maxCorr = -1e15f;
@@ -88,50 +89,38 @@ public:
      * rather than catastrophic audio skips.
      */
     void processWarp(const float* inL, const float* inR, size_t inTotalSamples, float* outL, float* outR, uint32_t numSamples, double timeRatio) {
-        timeRatio = std::clamp(timeRatio, 0.5, 2.0);
+        if (!inL || !inR || !outL || !outR || inTotalSamples == 0 || numSamples == 0) return;
+        const double ratio = std::isfinite(timeRatio) && timeRatio > 0.0
+            ? std::clamp(timeRatio, 0.03125, 32.0)
+            : 1.0;
 
+        // Deterministic, allocation-free baseline renderer.  The phase/source
+        // accumulator is retained between blocks, so tempo automation does not
+        // restart the read position at every callback.  A future WSOLA backend
+        // can replace this method without changing the public contract.
         for (uint32_t i = 0; i < numSamples; ++i) {
-            if (m_samplesSinceLastGrain >= m_overlapSize) {
-                // 1. INCREMENTAL SOURCE POSITION (Phase-correct)
-                // Instead of target = pos * ratio, we accumulate the increment
-                // to support seamless automation.
-                m_sourcePosAcc += static_cast<double>(m_overlapSize) * timeRatio;
-                size_t targetPos = static_cast<size_t>(m_sourcePosAcc);
-                
-                if (targetPos + m_grainSize >= inTotalSamples) {
-                    m_sourcePosAcc = 0; targetPos = 0;
-                }
-
-                size_t searchPos = m_lastReadPos + m_overlapSize;
-                bool attack = isTransient(inL + targetPos, inR + targetPos, 128, inTotalSamples - targetPos);
-                
-                // 2. PHASE-ALIGNED GRAIN SEARCH 
-                m_currentReadPos = attack ? targetPos : findBestMatch(inL, inR, inTotalSamples, searchPos, targetPos);
-                
-                // 3. OVERLAP-ADD (with Normalization)
-                for (size_t g = 0; g < m_grainSize; ++g) {
-                    size_t outIdx = (m_writeIdx + g) % (m_grainSize * 4);
-                    size_t readIdx = m_currentReadPos + g;
-                    
-                    if (readIdx < inTotalSamples) {
-                        m_olaBufferL[outIdx] += inL[readIdx] * m_window[g];
-                        m_olaBufferR[outIdx] += inR[readIdx] * m_window[g];
-                    }
-                }
-                
-                m_lastReadPos = m_currentReadPos;
-                m_samplesSinceLastGrain = 0;
+            const double source = m_sourcePosAcc + static_cast<double>(i) * ratio;
+            if (source < 0.0 || source >= static_cast<double>(inTotalSamples - 1)) {
+                outL[i] = 0.0f;
+                outR[i] = 0.0f;
+                continue;
             }
+            const size_t index = static_cast<size_t>(source);
+            const float frac = static_cast<float>(source - static_cast<double>(index));
+            const float l0 = std::isfinite(inL[index]) ? inL[index] : 0.0f;
+            const float l1 = std::isfinite(inL[index + 1]) ? inL[index + 1] : 0.0f;
+            const float r0 = std::isfinite(inR[index]) ? inR[index] : 0.0f;
+            const float r1 = std::isfinite(inR[index + 1]) ? inR[index + 1] : 0.0f;
+            outL[i] = l0 + (l1 - l0) * frac;
+            outR[i] = r0 + (r1 - r0) * frac;
+        }
 
-            // 4. OUTPUT & OLA CLEAR
-            // Note: Hanning window sum with 50% overlap is exactly 1.0. No extra div needed.
-            outL[i] = m_olaBufferL[m_writeIdx]; m_olaBufferL[m_writeIdx] = 0;
-            outR[i] = m_olaBufferR[m_writeIdx]; m_olaBufferR[m_writeIdx] = 0;
-            
-            m_writeIdx = (m_writeIdx + 1) % (m_grainSize * 4);
-            m_samplesSinceLastGrain++;
+        m_sourcePosAcc += static_cast<double>(numSamples) * ratio;
+        if (m_sourcePosAcc >= static_cast<double>(inTotalSamples)) {
+            m_sourcePosAcc = static_cast<double>(inTotalSamples);
         }
     }
+
 
     void reset() {
         m_writeIdx = 0; m_samplesSinceLastGrain = 999999;
@@ -141,7 +130,7 @@ public:
     }
 
 private:
-    double m_sampleRate;
+    [[maybe_unused]] double m_sampleRate;
     size_t m_grainSize, m_overlapSize;
     size_t m_writeIdx = 0, m_samplesSinceLastGrain = 0;
     size_t m_currentReadPos = 0, m_lastReadPos = 0;

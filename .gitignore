@@ -11,13 +11,14 @@ Makefile
 *.o
 *.o.d
 *.a
-bin/
-obj/
+/bin/
+/obj/
 
 # Rust (Cargo)
 target/
 **/*.rs.bk
-Cargo.lock
+# Aura ships applications, so Cargo.lock is intentionally versioned to keep
+# developer, CI, and release dependency resolution reproducible.
 
 # OS-specific
 .DS_Store
@@ -37,9 +38,41 @@ Temporary Items
 # Project artifacts
 AuraIcon.iconset/
 AuraUltimate.app/
+dist/
+packaging/
+build-tools/
+target/
+/.openutau-review/
+/.codex-runs/
+/.tmp/
 *.log
+*.tmp
+*.journal
+*_build_output.txt
+/app_output*.txt
+/build_log*.txt
+/aura-core-bridge/build*.txt
+/aura-ui/*build*.txt
+/aura-ui/*errors*.txt
+
+# Local applications, plugins, voicebanks and rendered audio
+*.app/
+*.clap
+*.vst3/
+*.component/
+*.wav
+*.aiff
+*.flac
+*.ust
+*.ustx
 
 # Personal/Config
 .env
 config.json
 *.local
+.slint-tmp/
+
+# Local audit outputs; release archives should be copied to an external
+# artifact store rather than committed into the source tree.
+artifacts/
+release-metadata/

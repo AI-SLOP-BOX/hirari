@@ -29,36 +29,24 @@ public:
      * @brief PROCESS: Dynamically reshapes the signal's attack and tail.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float inL = buffer.getReadPointer(0)[s];
-            float inR = buffer.getReadPointer(1)[s];
-            float level = std::max(std::abs(inL), std::abs(inR));
-
-            // 1. Dual Envelope Followers
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        const float attackGain = std::clamp(1.0f + m_attack, 0.0f, 2.0f);
+        const float sustainGain = std::clamp(1.0f + m_sustain, 0.0f, 2.0f);
+        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+            const float l = buffer.getReadPointer(0)[i];
+            const float r = channels > 1 ? buffer.getReadPointer(1)[i] : l;
+            const float level = std::max(std::abs(l), std::abs(r));
             m_attackEnv = m_attackAlpha * m_attackEnv + (1.0f - m_attackAlpha) * level;
             m_sustainEnv = m_sustainAlpha * m_sustainEnv + (1.0f - m_sustainAlpha) * level;
-
-            // 2. Transients are the difference between Fast and Slow envelopes
-            float ratio = (m_attackEnv + 1e-6f) / (m_sustainEnv + 1e-6f);
-            float gain = 1.0f;
-
-            // Attack Modification
-            if (m_attack > 0.0f) gain += (ratio - 1.0f) * m_attack;
-            else gain += (ratio - 1.0f) * m_attack;
-
-            // Sustain Modification (Simplified)
-            gain += (m_sustainEnv - level) * m_sustain;
-
-            m_currentGain = 0.95f * m_currentGain + 0.05f * gain;
-
-            buffer.getWritePointer(0)[s] *= m_currentGain;
-            buffer.getWritePointer(1)[s] *= m_currentGain;
+            const float transient = std::clamp(m_attackEnv - m_sustainEnv, -1.0f, 1.0f);
+            const float body = std::clamp(m_sustainEnv, 0.0f, 1.0f);
+            const float gain = std::clamp(1.0f + transient * (attackGain - 1.0f) + body * (sustainGain - 1.0f), 0.0f, 3.0f);
+            buffer.getWritePointer(0)[i] = l * gain;
+            if (channels > 1) buffer.getWritePointer(1)[i] = r * gain;
         }
     }
+
 
     void reset() noexcept override {
         m_attackEnv = 0.0f;

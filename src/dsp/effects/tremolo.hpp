@@ -27,27 +27,28 @@ public:
      * @brief PROCESS: Rhythmic volume and pan modulation.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        double samplesPerBeat = (60.0 / context.bpm) * context.sampleRate;
-        double lfoInc = 1.0 / (samplesPerBeat * m_noteValue);
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            m_lfoPhase += lfoInc;
-            if (m_lfoPhase >= 1.0) m_lfoPhase -= 1.0;
-
-            // Sine LFO for smooth pulsing
-            float lfoL = 0.5f + 0.5f * std::sin(2.0f * M_PI * m_lfoPhase);
-            float lfoR = 0.5f + 0.5f * std::sin(2.0f * M_PI * m_lfoPhase + M_PI * m_stereoWidth);
-
-            float modL = 1.0f - (m_depth * lfoL);
-            float modR = 1.0f - (m_depth * lfoR);
-
-            buffer.getWritePointer(0)[s] *= modL;
-            buffer.getWritePointer(1)[s] *= modR;
+        (void)midi;
+        const uint32_t n = buffer.getNumSamples();
+        float* left = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+        if (!left || n == 0) return;
+        const double sr = m_sampleRate > 1000.0 ? m_sampleRate : 44100.0;
+        const double bpm = std::isfinite(context.bpm) && context.bpm > 1.0 ? context.bpm : 120.0;
+        const double hz = bpm / (60.0 * std::max(0.0625, static_cast<double>(m_noteValue)));
+        const double inc = hz / sr;
+        for (uint32_t i = 0; i < n; ++i) {
+            const float lfo = static_cast<float>(0.5 + 0.5 * std::sin(2.0 * M_PI * m_lfoPhase));
+            const float amplitude = 1.0f - m_depth * (1.0f - lfo);
+            const float pan = m_stereoWidth * std::sin(2.0 * M_PI * m_lfoPhase);
+            const float gainL = amplitude * (1.0f - 0.25f * pan);
+            const float gainR = amplitude * (1.0f + 0.25f * pan);
+            left[i] *= gainL;
+            if (right) right[i] *= gainR;
+            m_lfoPhase += inc;
+            if (m_lfoPhase >= 1.0) m_lfoPhase -= std::floor(m_lfoPhase);
         }
     }
+
 
     void reset() noexcept override {
         m_lfoPhase = 0.0;

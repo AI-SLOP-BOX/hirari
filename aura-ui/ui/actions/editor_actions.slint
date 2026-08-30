@@ -1,0 +1,21 @@
+// Non-destructive audio-region editing contract.
+export global EditorActions {
+    callback select_all_clips();
+    callback clear_clip_selection();
+    callback copy_selected_clips();
+    callback paste_clips(float);
+    callback split_clip(int, float);
+    callback split_clip_with_crossfade(int, float, float);
+    callback split_clip_at_silence(int, float, int);
+    callback clip_moved(int, float);
+    callback clip_gain_changed(int, float);
+    callback apply_gain_staging(int, float);
+    callback fade_changed(int, float, float);
+    callback reverse_clip(int, bool);
+    callback trim_clip(int, float, float);
+    callback warp_clip(int, float);
+    callback pitch_clip(int, float);
+    callback loop_clip(int, int);
+    callback duplicate_clip(int);
+    callback remove_clip(int);
+}

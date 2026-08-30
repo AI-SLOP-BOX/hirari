@@ -1,0 +1,21 @@
+import { Style } from "../style.slint";
+import { ProjectActions } from "../actions/project_actions.slint";
+
+export component Z_VideoMonitor inherits Rectangle {
+    in property <image> frame;
+    background: #000; border_width: 2px; border_color: Style.border; border_radius: 2px;
+    Image { source: root.frame; width: 100%; height: 100%; }
+    Rectangle {
+        x: 8px; y: 8px; width: 92px; height: 22px;
+        background: Style.panel.with-alpha(0.92); border_width: 1px; border_color: Style.border; border_radius: 3px;
+        Text { text: "Load Video"; width: 100%; height: 100%; color: Style.text; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; }
+        TouchArea { clicked => { ProjectActions.load_video(); } }
+    }
+    VerticalLayout {
+        alignment: end;
+        Rectangle {
+            height: 24px; background: #000.with-alpha(0.8);
+            Text { text: "VIDEO SLAVE: SYNCED [24 FPS]"; font-size: 8px; color: Style.brand; x: 8px; vertical-alignment: center; }
+        }
+    }
+}

@@ -3,48 +3,80 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <atomic>
 #include "../iprocessor.hpp"
+#include "../../core/parameter_smoother.hpp"
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 namespace Aura::DSP::Effects {
 
 /**
  * @class VintagePassiveEQ
- * @brief Professional Passive-style Equalizer modeling (Pultec EQP-1A logic).
- * HONEST FIX: Implements the 'Pultec Trick' (simultaneous low boost/cut) 
- * which creates a unique resonant shelf, adding weight without muddiness.
- * Uses high-order shelving filters with vintage-style curves.
+ * @brief Passive-style Equalizer modeling (Pultec EQP-1A logic) with RT-safety and smoothing.
  */
 class VintagePassiveEQ : public IProcessor {
 public:
     VintagePassiveEQ() {
+        m_lowBoost.store(2.0f, std::memory_order_relaxed);
+        m_lowAtten.store(1.0f, std::memory_order_relaxed);
+        m_highBoost.store(3.0f, std::memory_order_relaxed);
         reset();
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
         m_sampleRate = sr;
-        updateCoefficients();
+        m_smoothLowBoost.setSampleRate(sr);
+        m_smoothLowAtten.setSampleRate(sr);
+        m_smoothHighBoost.setSampleRate(sr);
+        
+        m_smoothLowBoost.setTarget(m_lowBoost.load(std::memory_order_relaxed));
+        m_smoothLowAtten.setTarget(m_lowAtten.load(std::memory_order_relaxed));
+        m_smoothHighBoost.setTarget(m_highBoost.load(std::memory_order_relaxed));
+
+        updateCoefficients(
+            m_lowBoost.load(std::memory_order_relaxed),
+            m_lowAtten.load(std::memory_order_relaxed),
+            m_highBoost.load(std::memory_order_relaxed)
+        );
     }
 
     /**
-     * @brief PROCESS: Applies the unique passive EQ curves.
+     * @brief Applies passive EQ curves channel-by-channel with parameter smoothing.
      */
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
+        uint32_t channels = buffer.getNumChannels();
+        uint32_t samples = buffer.getNumSamples();
         
-        for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
+        // 1. Get smoothed parameters for this block
+        m_smoothLowBoost.setTarget(m_lowBoost.load(std::memory_order_relaxed));
+        m_smoothLowAtten.setTarget(m_lowAtten.load(std::memory_order_relaxed));
+        m_smoothHighBoost.setTarget(m_highBoost.load(std::memory_order_relaxed));
+
+        float smoothLB = m_smoothLowBoost.getNextValue();
+        float smoothLA = m_smoothLowAtten.getNextValue();
+        float smoothHB = m_smoothHighBoost.getNextValue();
+
+        // 2. Update coefficients on the audio thread safely
+        updateCoefficients(smoothLB, smoothLA, smoothHB);
+
+        // 3. Process signal
+        for (uint32_t c = 0; c < channels && c < 2; ++c) {
             float* p = buffer.getWritePointer(c);
-            for (uint32_t s = 0; s < numSamples; ++s) {
-                float in = p[s];
+            for (uint32_t i = 0; i < samples; ++i) {
+                float val = p[i];
+                val = m_lowFilter[c].process(val);
+                val = m_highFilter[c].process(val);
                 
-                // 1. Low Shelf (Boost + Attenuate)
-                float low = m_lowFilter[c].process(in);
-                
-                // 2. High Peak
-                float high = m_highFilter[c].process(low);
-                
-                p[s] = high;
+                // Safety guard against NaN/inf explosions
+                if (std::isnan(val) || std::isinf(val)) {
+                    val = 0.0f;
+                    m_lowFilter[c].reset();
+                    m_highFilter[c].reset();
+                }
+                p[i] = val;
             }
         }
     }
@@ -54,10 +86,10 @@ public:
         for (auto& f : m_highFilter) f.reset();
     }
 
-    // Parameters
-    void setLowBoost(float b) { m_lowBoost = b; updateCoefficients(); }
-    void setLowAtten(float a) { m_lowAtten = a; updateCoefficients(); }
-    void setHighBoost(float b) { m_highBoost = b; updateCoefficients(); }
+    // Parameters (UI thread writes to atomic variables without blocking)
+    void setLowBoost(float b) { m_lowBoost.store(b, std::memory_order_relaxed); }
+    void setLowAtten(float a) { m_lowAtten.store(a, std::memory_order_relaxed); }
+    void setHighBoost(float b) { m_highBoost.store(b, std::memory_order_relaxed); }
 
 private:
     struct FilterState {
@@ -72,15 +104,65 @@ private:
         void reset() { x1=x2=y1=y2=0; }
     };
 
-    void updateCoefficients() {
-        // Mock Pulsating Passive Curves (Biquad adaptation)
-        // Simplified shelving logic here (Actual Pultec uses R-L-C transfer)
+    void updateCoefficients(float lowBoost, float lowAtten, float highBoost) {
+        // Low shelf boost/cut at 60 Hz
+        float lowFreq = 60.0f;
+        float lowGainDb = (lowBoost * 3.0f) - (lowAtten * 2.5f); // Pultec Trick
+        float lowA = std::pow(10.0f, lowGainDb / 40.0f);
+        float w0_low = static_cast<float>(2.0 * M_PI * lowFreq / m_sampleRate);
+        float cos_w0_low = std::cos(w0_low);
+        float sin_w0_low = std::sin(w0_low);
+        float beta_low = std::sqrt(lowA) * 2.0f; 
+        
+        float b0_low = lowA * ((lowA + 1.0f) - (lowA - 1.0f) * cos_w0_low + beta_low * sin_w0_low);
+        float b1_low = 2.0f * lowA * ((lowA - 1.0f) - (lowA + 1.0f) * cos_w0_low);
+        float b2_low = lowA * ((lowA + 1.0f) - (lowA - 1.0f) * cos_w0_low - beta_low * sin_w0_low);
+        float a0_low = (lowA + 1.0f) + (lowA - 1.0f) * cos_w0_low + beta_low * sin_w0_low;
+        float a1_low = -2.0f * ((lowA - 1.0f) + (lowA + 1.0f) * cos_w0_low);
+        float a2_low = (lowA + 1.0f) + (lowA - 1.0f) * cos_w0_low - beta_low * sin_w0_low;
+
+        for (int c = 0; c < 2; ++c) {
+            m_lowFilter[c].b0 = b0_low / a0_low;
+            m_lowFilter[c].b1 = b1_low / a0_low;
+            m_lowFilter[c].b2 = b2_low / a0_low;
+            m_lowFilter[c].a1 = a1_low / a0_low;
+            m_lowFilter[c].a2 = a2_low / a0_low;
+        }
+
+        // High shelf boost at 8 kHz
+        float highFreq = 8000.0f;
+        float highGainDb = highBoost * 3.5f;
+        float highA = std::pow(10.0f, highGainDb / 40.0f);
+        float w0_high = static_cast<float>(2.0 * M_PI * highFreq / m_sampleRate);
+        float cos_w0_high = std::cos(w0_high);
+        float sin_w0_high = std::sin(w0_high);
+        float beta_high = std::sqrt(highA) * 2.0f;
+
+        float b0_high = highA * ((highA + 1.0f) + (highA - 1.0f) * cos_w0_high + beta_high * sin_w0_high);
+        float b1_high = -2.0f * highA * ((highA - 1.0f) + (highA + 1.0f) * cos_w0_high);
+        float b2_high = highA * ((highA + 1.0f) + (highA - 1.0f) * cos_w0_high - beta_high * sin_w0_high);
+        float a0_high = (highA + 1.0f) - (highA - 1.0f) * cos_w0_high + beta_high * sin_w0_high;
+        float a1_high = 2.0f * ((highA - 1.0f) - (highA + 1.0f) * cos_w0_high);
+        float a2_high = (highA + 1.0f) - (highA - 1.0f) * cos_w0_high - beta_high * sin_w0_high;
+
+        for (int c = 0; c < 2; ++c) {
+            m_highFilter[c].b0 = b0_high / a0_high;
+            m_highFilter[c].b1 = b1_high / a0_high;
+            m_highFilter[c].b2 = b2_high / a0_high;
+            m_highFilter[c].a1 = a1_high / a0_high;
+            m_highFilter[c].a2 = a2_high / a0_high;
+        }
     }
 
     double m_sampleRate = 44100.0;
-    float m_lowBoost = 2.0f;
-    float m_lowAtten = 1.0f;
-    float m_highBoost = 3.0f;
+    std::atomic<float> m_lowBoost;
+    std::atomic<float> m_lowAtten;
+    std::atomic<float> m_highBoost;
+
+    // Thread-safe parameter smoothers
+    Core::ParameterSmoother m_smoothLowBoost;
+    Core::ParameterSmoother m_smoothLowAtten;
+    Core::ParameterSmoother m_smoothHighBoost;
 
     FilterState m_lowFilter[2];
     FilterState m_highFilter[2];

@@ -3,55 +3,95 @@
 #include <cmath>
 #include <algorithm>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 namespace Aura::Synthesis {
 
 /**
+ * @class SurgeWavetable
+ * @brief Contiguous precalculated 3D wavetable memory manager.
+ * Builds the Sine -> Triangle -> Sawtooth -> Square morphed frames once on startup.
+ */
+class SurgeWavetable {
+public:
+    static constexpr int kNumFrames = 64;
+    static constexpr int kTableLength = 2048;
+
+    static const float* getTable() {
+        static SurgeWavetable instance;
+        return instance.m_data.data();
+    }
+
+private:
+    std::vector<float> m_data;
+
+    SurgeWavetable() {
+        m_data.resize(kNumFrames * kTableLength);
+        for (int frame = 0; frame < kNumFrames; ++frame) {
+            float morphFrac = static_cast<float>(frame) / static_cast<float>(kNumFrames - 1);
+            for (int sample = 0; sample < kTableLength; ++sample) {
+                float sampleFrac = static_cast<float>(sample) / static_cast<float>(kTableLength);
+                
+                float sineVal = std::sin(2.0f * M_PI * sampleFrac);
+                float triVal = 1.0f - 4.0f * std::abs(std::round(sampleFrac - 0.25f) - (sampleFrac - 0.25f));
+                float sawVal = 2.0f * (sampleFrac - std::floor(sampleFrac + 0.5f));
+                float sqVal = (sampleFrac < 0.5f) ? 1.0f : -1.0f;
+                
+                float outVal = 0.0f;
+                if (morphFrac < 0.333f) {
+                    float blend = morphFrac / 0.333f;
+                    outVal = sineVal + blend * (triVal - sineVal);
+                } else if (morphFrac < 0.666f) {
+                    float blend = (morphFrac - 0.333f) / 0.333f;
+                    outVal = triVal + blend * (sawVal - triVal);
+                } else {
+                    float blend = (morphFrac - 0.666f) / 0.334f;
+                    outVal = sawVal + blend * (sqVal - sawVal);
+                }
+                m_data[frame * kTableLength + sample] = outVal;
+            }
+        }
+    }
+};
+
+/**
  * @class SurgeWavetableOscillator
- * @brief 【究極の肉付け・新規音源群】Surge XTインスパイア『3Dモーフィング・ウェーブテーブル』
- * SerumやSurge XTなどの世界最強オープンソースシンセの心臓とも言える最重要エンジンです。
- * ただの波形のループ再生ではなく、数十枚の異なる波形（テーブル）をシームレスに行き来（モーフ）させます。
- * 高級なCubic / Catmull-Rom 補間による凄まじく滑らかなエイリアスノイズ除去を施し、
- * 非常にクリアで鋭い「最先端のEDM・ベースミュージックサウンド」を生成する強力なモジュールです。
+ * @brief 3D Morphing Wavetable Synthesizer Oscillator.
+ * Reads precalculated contiguous frames using 4-point Catmull-Rom spline interpolation.
+ * Instantiation is 100% lock-free, RT-safe, and cache-friendly.
  */
 class SurgeWavetableOscillator {
 public:
-    SurgeWavetableOscillator(double sr = 44100.0) : m_sampleRate(sr), m_phase(0.0) {
-        // [仮想的なウェーブテーブルのロード処理]
-        // 実際には1周期（例：2048サンプル）の波形が64枚（Z軸）重なった3D配列を持ちます。
+    SurgeWavetableOscillator(double sr = 44100.0) 
+        : m_sampleRate(sr)
+        , m_phase(0.0)
+        , m_wavetableData(SurgeWavetable::getTable()) {
     }
 
-    // 周波数の設定（Hz）
     void setFrequency(double freq) {
         m_phaseIncrement = freq / m_sampleRate;
     }
 
-    // テーブルの「深さ」（Wave Position: 0.0〜1.0）を設定
-    // ここをLFOやエンベロープで動かすと「グワウッ」という唸るようなフィルター的モーフ音になります
     void setMorphPosition(float pos) {
         m_morphPos = std::clamp(pos, 0.0f, 1.0f);
     }
 
-    // フル解像度のCubic補間で波形を出力（エイリアス対策済みのMIPマップから取得想定）
     float process() {
-        // Surge XTにおけるウェーブテーブル走査のアルゴリズム
         float numTables = static_cast<float>(m_numFrames - 1);
         float tableZ = m_morphPos * numTables;
         int tableA = static_cast<int>(tableZ);
         int tableB = std::min(tableA + 1, m_numFrames - 1);
-        float blendFrac = tableZ - static_cast<float>(tableA); // 2枚の波形間のクロスフェード割合
+        float blendFrac = tableZ - static_cast<float>(tableA);
 
         float posInSamples = static_cast<float>(m_phase * m_tableLength);
 
-        // --- テーブルAからの高品質読み出し（超補間技術） ---
         float valA = getInterpolatedSample(tableA, posInSamples);
-        
-        // --- テーブルBからの高品質読み出し（超補間技術） ---
         float valB = getInterpolatedSample(tableB, posInSamples);
 
-        // --- 3Dモーフィング（2層レイヤーの滑らかなブレンドによる波形変化） ---
         float out = valA + blendFrac * (valB - valA);
 
-        // フェーズ（位相）の前進
         m_phase += m_phaseIncrement;
         if (m_phase >= 1.0) m_phase -= 1.0;
 
@@ -62,35 +102,25 @@ private:
     double m_sampleRate;
     double m_phase;
     double m_phaseIncrement = 0.0;
-    float m_morphPos = 0.0f; // Wavetable Position
+    float m_morphPos = 0.0f;
     
-    // 【ダミーデータ】本来はファイルパス(.wav等)から読み込んだミップマップ波形を使います
-    int m_numFrames = 64; // 64枚の波形が重なっている
-    int m_tableLength = 2048; // 1周期の解像度
+    static constexpr int m_numFrames = SurgeWavetable::kNumFrames;
+    static constexpr int m_tableLength = SurgeWavetable::kTableLength;
+    const float* m_wavetableData;
 
-    /**
-     * @brief 高品位な4点（Catmull-Rom スプライン）補間による波形の再構築。
-     * Surge XTのOSSコード群に見られる、高音域の「チリチリ音（デジタル特有の量子化ノイズ）」
-     * を極限まで減らす数学的処理です。直線（Linear）補間ではこの透明感あるベース音は作れません。
-     */
     float getInterpolatedSample(int tableIdx, float pos) {
-        // ※本来は m_wavetableData[tableIdx][pos] への安全なアクセスを行います
         int p1 = static_cast<int>(pos);
         float frac = pos - p1;
 
-        // 4つの数個のサンプルポイント（リングバッファラップアラウンド処理して繋ぐ）
         int p0 = (p1 - 1 + m_tableLength) % m_tableLength;
         int p2 = (p1 + 1) % m_tableLength;
         int p3 = (p1 + 2) % m_tableLength;
 
-        // 【シミュレーション】ここには波形データへのポインタアクセスが入りますが、
-        // 動作確認のため仮のモック波形（サイン波に高次倍音を足したもの）を生成して流し込みます。
-        float s0 = std::sin(2.0f * M_PI * p0 / m_tableLength);
-        float s1 = std::sin(2.0f * M_PI * p1 / m_tableLength);
-        float s2 = std::sin(2.0f * M_PI * p2 / m_tableLength);
-        float s3 = std::sin(2.0f * M_PI * p3 / m_tableLength);
+        float s0 = m_wavetableData[tableIdx * m_tableLength + p0];
+        float s1 = m_wavetableData[tableIdx * m_tableLength + p1];
+        float s2 = m_wavetableData[tableIdx * m_tableLength + p2];
+        float s3 = m_wavetableData[tableIdx * m_tableLength + p3];
 
-        // Catmull-Rom スプライン補間アルゴリズム (Surge水準のハイデフ解像度補間)
         float a0 = -0.5f * s0 + 1.5f * s1 - 1.5f * s2 + 0.5f * s3;
         float a1 = s0 - 2.5f * s1 + 2.0f * s2 - 0.5f * s3;
         float a2 = -0.5f * s0 + 0.5f * s2;

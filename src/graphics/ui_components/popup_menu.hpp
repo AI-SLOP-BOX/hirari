@@ -46,7 +46,7 @@ public:
                 curY += 4;
             } else {
                 // Hover effect (simulated)
-                bool hover = (i == m_hoverIdx);
+                bool hover = m_hoverIdx >= 0 && i == static_cast<size_t>(m_hoverIdx);
                 if (hover) {
                     kernel.drawRoundedRect(b.x + 4, curY, b.w - 8, 22, 4.0f, 0xFF3B82F6);
                 }
@@ -57,6 +57,11 @@ public:
     }
 
     bool onMouseDown(float x, float y) override {
+        if (!m_visible) return false;
+        if (!m_bounds.contains(x, y)) {
+            m_visible = false;
+            return true;
+        }
         float curY = m_bounds.y + 5;
         for (size_t i = 0; i < m_items.size(); ++i) {
             auto& item = m_items[i];
@@ -64,14 +69,14 @@ public:
                 curY += 4;
             } else {
                 if (x >= m_bounds.x && x <= m_bounds.x + m_bounds.w && y >= curY && y < curY + 24) {
-                    if (item.callback) item.callback();
                     m_visible = false;
+                    if (item.callback) item.callback();
                     return true;
                 }
                 curY += 24;
             }
         }
-        m_visible = false; // Close on click outside
+        m_visible = false; // Clicked menu padding, not an item.
         return true;
     }
 

@@ -1,0 +1,32 @@
+import { ScrollView } from "std-widgets.slint";
+import { Style } from "../style.slint";
+
+export component Z_CloudBridge {
+    in property <[{name: string, date: string, author: string, hash: string}]> history;
+    Rectangle {
+        width: 100%; height: 360px; background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        VerticalLayout {
+            padding: 16px; spacing: 12px;
+            Text { text: "Cloud Sync"; font-size: 10px; color: Style.brand; font-weight: 700; }
+            ScrollView {
+                VerticalLayout {
+                    spacing: 4px;
+                    for commit in history : Rectangle {
+                        height: 36px; background: Style.surface; border_radius: 1px;
+                        HorizontalLayout {
+                            padding: 8px; spacing: 12px;
+                            Text { text: "Cloud"; font-size: Style.font-xxs; vertical-alignment: center; }
+                            VerticalLayout {
+                                alignment: center;
+                                Text { text: commit.name; font-size: 9px; color: #fff; font-weight: 800; }
+                                Text { text: commit.author + " | " + commit.date; font-size: Style.font-xxs; color: #6E6E73; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: commit.hash; font-size: Style.font-xxs; color: #333; vertical-alignment: center; font-family: Style.numeric-font; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

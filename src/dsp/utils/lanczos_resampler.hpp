@@ -15,8 +15,6 @@ namespace Aura::DSP::Utils {
  */
 class LanczosResampler {
 public:
-    static constexpr int kKernelSize = 32;
-    static constexpr int kHQKernelSize = 128; // ULTIMATE MASTERING GRADE
     static constexpr double kPi = 3.14159265358979323846;
 
     static float sinc(double x) {
@@ -31,26 +29,55 @@ public:
         return sinc(x) * sinc(x / a);
     }
 
-    /**
-     * @brief Perfectly interpolated sample using 32 or 128 taps.
-     */
-    static float interpolate(const float* data, uint64_t len, double pos, bool hq = false) {
-        int64_t center = static_cast<int64_t>(std::floor(pos));
-        int kernel = hq ? kHQKernelSize : kKernelSize;
-        double a = hq ? 8.0 : 3.0; // Window size
-        
-        float result = 0.0f;
-        float weightSum = 0.0f;
+    static constexpr int kTaps = 8;
+    static constexpr int kPhases = 64;
+    static constexpr int kMaxKernelSize = kTaps * kPhases;
 
-        for (int i = -kernel / 2; i <= kernel / 2; ++i) {
-            int64_t idx = center + i;
-            if (idx >= 0 && idx < (int64_t)len) {
-                float weight = lanczos(pos - idx, a);
-                result += data[idx] * weight;
-                weightSum += weight;
+    /**
+     * @brief Professional Polyphase FIR Implementation.
+     * Pre-computed Sinc LUT for high-fidelity resampling.
+     * No sin/cos calls in the audio thread.
+     */
+    class PolyphaseKernel {
+    public:
+        static PolyphaseKernel& getInstance() { static PolyphaseKernel instance; return instance; }
+
+        float get(int phase, int tap) const { return m_lut[phase * kTaps + tap]; }
+
+    private:
+        PolyphaseKernel() {
+            for (int p = 0; p < kPhases; ++p) {
+                double phase = (double)p / kPhases;
+                for (int t = 0; t < kTaps; ++t) {
+                    double x = (t - (kTaps/2 - 1)) - phase;
+                    m_lut[p * kTaps + t] = lanczos(x, kTaps/2.0);
+                }
             }
         }
-        return (weightSum > 0) ? (result / weightSum) : 0.0f;
+        float m_lut[kMaxKernelSize];
+    };
+
+    /**
+     * @brief High-performance Polyphase Interpolation.
+     * O(1) table lookup + O(8) SIMD-auto-vectorizable convolution.
+     */
+    static float interpolate(const float* data, uint64_t len, double pos) {
+        int64_t iPos = static_cast<int64_t>(std::floor(pos));
+        double frac = pos - iPos;
+        int phase = static_cast<int>(frac * (kPhases - 1));
+        
+        const auto& kernel = PolyphaseKernel::getInstance();
+        float result = 0.0f;
+        
+        // INDUSTRIAL: Static tap convolution (Unrolled & Vectorized)
+        #pragma unroll
+        for (int t = 0; t < kTaps; ++t) {
+            int64_t idx = iPos + t - (kTaps/2 - 1);
+            if (idx >= 0 && idx < (int64_t)len) {
+                result += data[idx] * kernel.get(phase, t);
+            }
+        }
+        return result;
     }
 };
 

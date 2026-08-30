@@ -1,0 +1,22 @@
+import { Style } from "../style.slint";
+import { Z_Knob } from "../primitives/knob.slint";
+
+export component Z_SmartControls {
+    in property <string> track_name;
+    in property <[float]> values;
+    callback changed(int, float);
+    Rectangle {
+        background: Style.surface; border-width: 1px; border-color: Style.border; border-radius: 3px;
+        VerticalLayout {
+            padding: 10px; spacing: 8px;
+            HorizontalLayout { Text { text: "Smart Controls"; font-size: Style.font-m; color: Style.text; font-weight: 600; } Rectangle { horizontal-stretch: 1; } Text { text: track_name; font-size: Style.font-s; color: Style.text-dim; vertical-alignment: center; } }
+            HorizontalLayout {
+                spacing: 8px; alignment: center;
+                for label[idx] in ["Tone", "Drive", "Mix", "Space", "Attack", "Release", "Width", "Output"] : Z_Knob {
+                    compact: false; label: label; value: values[idx].clamp(0, 1); accent-col: Style.brand;
+                    changed(v) => { root.changed(idx, v); }
+                }
+            }
+        }
+    }
+}

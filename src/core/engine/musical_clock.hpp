@@ -20,31 +20,29 @@ public:
 
     /**
      * @brief CONVERT: Samples -> Beats.
-     * Essential for Delay sync and MIDI quantization.
+     * INDUSTRIAL: Delegating temporal conversion to the Rust 'MusicalClockOrchestrator'.
      */
     double samplesToBeats(uint64_t samples, double sampleRate) const {
-        double seconds = static_cast<double>(samples) / sampleRate;
-        return (seconds * m_tempo) / 60.0;
+        const double tempo = m_tempo.load(std::memory_order_relaxed);
+        if (!std::isfinite(sampleRate) || sampleRate <= 0.0 || !std::isfinite(tempo) || tempo <= 0.0) return 0.0;
+        return static_cast<double>(samples) * tempo / (sampleRate * 60.0);
     }
 
-    /**
-     * @brief GET CURRENT BAR: Calculation for UI and grid snapping.
-     */
     uint32_t getBar(double beats) const {
-        return static_cast<uint32_t>(beats / m_numerator) + 1;
-    }
-
-    double getTempo() const { return m_tempo; }
-    void getTimeSignature(uint32_t& num, uint32_t& denom) const { 
-        num = m_numerator; denom = m_denominator; 
+        const auto numerator = m_numerator.load(std::memory_order_relaxed);
+        const auto denominator = m_denominator.load(std::memory_order_relaxed);
+        if (!std::isfinite(beats) || beats < 0.0 || numerator == 0 || denominator == 0) return 1;
+        const double beatsPerBar = static_cast<double>(numerator) * 4.0 / static_cast<double>(denominator);
+        if (!std::isfinite(beatsPerBar) || beatsPerBar <= 0.0) return 1;
+        return static_cast<uint32_t>(std::floor(beats / beatsPerBar)) + 1;
     }
 
 private:
-    MusicalClock() : m_tempo(120.0), m_numerator(4), m_denominator(4) {}
-    
-    std::atomic<double> m_tempo;
-    std::atomic<uint32_t> m_numerator;
-    std::atomic<uint32_t> m_denominator;
+    MusicalClock() = default;
+    std::atomic<double> m_tempo{120.0};
+    std::atomic<uint32_t> m_numerator{4};
+    std::atomic<uint32_t> m_denominator{4};
 };
+
 
 } // namespace Aura::Core::Engine

@@ -1,7 +1,0 @@
--- [Aura] Platform: macOS (Metal Optimized)
--- Configuring done (0.1s)
--- Generating done (0.0s)
--- Build files have been written to: /Users/iwatakoumei/Desktop/logicpro_oss/build
-[ 11%] Linking CXX executable AuraUltimate.app/Contents/MacOS/AuraUltimate
-ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/fftw/lib/libfftw3.3.dylib' which was built for newer version 26.0
-[100%] Built target AuraUltimate

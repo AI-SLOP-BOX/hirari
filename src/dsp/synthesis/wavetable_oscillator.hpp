@@ -4,6 +4,8 @@
 #include <cmath>
 #include <algorithm>
 #include <atomic>
+#include <memory>
+#include <cstdlib>
 
 namespace Aura::DSP::Synthesis {
 
@@ -25,7 +27,7 @@ public:
     };
 
 
-    WavetableOscillator() : m_phase(0.0), m_phaseInc(0.0), m_sampleRate(44100.0) {
+    WavetableOscillator() : m_phase(0.0), m_phaseInc(0.0), m_frequency(0.0), m_sampleRate(44100.0) {
         // --- HONEST FIX: MIP-MAP Generation ---
         // Pre-allocate tables for all octaves to stay Aliasing-Free.
         for (int m = 0; m < kNumMipMaps; ++m) {
@@ -42,8 +44,17 @@ public:
     }
 
 
-    void setFrequency(double freq) { m_phaseInc = freq / m_sampleRate; }
-    void setSampleRate(double sr) { m_sampleRate = sr; }
+    void setFrequency(double freq) {
+        m_frequency = std::isfinite(freq) ? freq : 0.0;
+        const double nyquist = std::max(1.0, m_sampleRate * 0.49);
+        m_frequency = std::clamp(m_frequency, -nyquist, nyquist);
+        m_phaseInc = m_frequency / m_sampleRate;
+    }
+    void setSampleRate(double sr) {
+        if (!std::isfinite(sr) || sr <= 0.0) return;
+        m_sampleRate = sr;
+        setFrequency(m_frequency);
+    }
 
     /**
      * @brief RENDER: Morphing with Cubic Hermite Spline Interpolation.
@@ -51,37 +62,42 @@ public:
      * 4-point interpolation significantly reduces high-frequency artifacts.
      */
     float process(float morphPos) {
-        m_phase += m_phaseInc;
-        if (m_phase >= 1.0) m_phase -= 1.0;
+        if (!std::isfinite(m_phase) || !std::isfinite(m_phaseInc) ||
+            !std::isfinite(m_sampleRate) || m_sampleRate <= 0.0) {
+            m_phase = 0.0;
+            return 0.0f;
+        }
 
-        // --- HONEST FIX: Dynamic Mip-Map Selection ---
-        // Blend between octa-tables based on current frequency.
-        float freq = m_phaseInc * m_sampleRate;
-        float mipIdx = std::log2(freq / 20.0f);
-        int m1 = std::clamp((int)mipIdx, 0, kNumMipMaps - 1);
-        int m2 = std::clamp(m1 + 1, 0, kNumMipMaps - 1);
-        float mMix = std::clamp(mipIdx - m1, 0.0f, 1.0f);
-
-        double readIdx = m_phase * kTableSize;
-        int i1 = static_cast<int>(readIdx);
-        int i0 = (i1 - 1 + kTableSize) % kTableSize;
-        int i2 = (i1 + 1) % kTableSize;
-        int i3 = (i1 + 2) % kTableSize;
-        float frac = static_cast<float>(readIdx - i1);
-
-        auto interpolate = [&](const std::unique_ptr<float[], AlignedDeleter>& table) {
-            float y0 = table[i0], y1 = table[i1], y2 = table[i2], y3 = table[i3];
-            float a = (3.0f * (y1 - y2) - y0 + y3) * 0.5f;
-            float b = 2.0f * y2 + y0 - 2.5f * y1 - 0.5f * y3;
-            float c = (y2 - y0) * 0.5f;
-            return ((a * frac + b) * frac + c) * frac + y1;
+        const float morph = std::clamp(std::isfinite(morphPos) ? morphPos : 0.0f, 0.0f, 1.0f);
+        const double absFrequency = std::abs(m_frequency);
+        const int mip = std::clamp(static_cast<int>(std::floor(
+            std::log2(std::max(20.0, absFrequency) / 20.0))), 0, kNumMipMaps - 1);
+        const double tablePosition = m_phase * static_cast<double>(kTableSize);
+        const int base = static_cast<int>(std::floor(tablePosition));
+        const float frac = static_cast<float>(tablePosition - std::floor(tablePosition));
+        const auto sample = [base, frac](const std::unique_ptr<float[], AlignedDeleter>& table) {
+            const auto at = [](int index) {
+                index %= static_cast<int>(kTableSize);
+                return index < 0 ? index + static_cast<int>(kTableSize) : index;
+            };
+            const float p0 = table[at(base - 1)];
+            const float p1 = table[at(base)];
+            const float p2 = table[at(base + 1)];
+            const float p3 = table[at(base + 2)];
+            // Catmull-Rom interpolation; all table reads are wrapped.
+            const float a = -0.5f * p0 + 1.5f * p1 - 1.5f * p2 + 0.5f * p3;
+            const float b = p0 - 2.5f * p1 + 2.0f * p2 - 0.5f * p3;
+            const float c = -0.5f * p0 + 0.5f * p2;
+            return ((a * frac + b) * frac + c) * frac + p1;
         };
-
-        float valA = std::lerp(interpolate(m_sineTables[m1]), interpolate(m_sineTables[m2]), mMix);
-        float valB = std::lerp(interpolate(m_sawTables[m1]), interpolate(m_sawTables[m2]), mMix);
-
-        return std::lerp(valA, valB, std::clamp(morphPos, 0.0f, 1.0f));
+        const float sine = sample(m_sineTables[mip]);
+        const float saw = sample(m_sawTables[mip]);
+        const float output = sine + (saw - sine) * morph;
+        m_phase += m_phaseInc;
+        m_phase -= std::floor(m_phase);
+        return std::isfinite(output) ? output : 0.0f;
     }
+
 
 
 private:
@@ -101,6 +117,7 @@ private:
 
     double m_phase;
     double m_phaseInc;
+    double m_frequency;
     double m_sampleRate;
     std::unique_ptr<float[], AlignedDeleter> m_sineTables[kNumMipMaps];
     std::unique_ptr<float[], AlignedDeleter> m_sawTables[kNumMipMaps];

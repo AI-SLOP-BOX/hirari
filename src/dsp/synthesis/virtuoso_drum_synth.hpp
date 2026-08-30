@@ -22,9 +22,9 @@ public:
         reset();
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override { m_sampleRate = sr; }
+    void prepareToPlay(double sr, uint32_t /*blockSize*/) noexcept override { m_sampleRate = sr; }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& /*context*/) noexcept override {
         // --- 1. MIDI Parse (PDC Aware) ---
         Core::MidiBuffer::Iterator it{midi};
         uint8_t data[3]; uint32_t size; uint32_t offset;

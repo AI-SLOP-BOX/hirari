@@ -2,9 +2,10 @@
 #include <vector>
 #include <memory>
 #include <algorithm>
-#include "audio_buffer.hpp"
-#include "midi_buffer.hpp"
-#include "../dsp/iprocessor.hpp"
+#include <array>
+#include "../audio_buffer.hpp"
+#include "../midi_buffer.hpp"
+#include "../../dsp/iprocessor.hpp"
 
 namespace Aura::Core::Engine {
 
@@ -24,32 +25,47 @@ public:
      * @brief SUB-BLOCK PROCESS: The heart of Jitter-free playback.
      */
     void process(AudioBuffer& audio, MidiBuffer& midi) {
-        uint32_t numSamples = audio.getNumSamples();
-        uint32_t currentSample = 0;
-        
-        MidiBuffer::Iterator it{midi};
-        uint8_t data[3]; uint32_t size; uint32_t timestamp;
+        if (audio.getNumChannels() < 2 || audio.getNumSamples() == 0 || m_processors.empty()) return;
+        const uint32_t total = audio.getNumSamples();
+        std::array<uint32_t, MidiBuffer::kMaxEventsPerBlock + 2> boundaries{};
+        size_t boundaryCount = 0;
+        boundaries[boundaryCount++] = 0;
+        const MidiEvent* events = midi.getEvents();
+        for (size_t index = 0; index < midi.size() && boundaryCount < boundaries.size() - 1; ++index) {
+            const uint64_t offset = events[index].sampleOffset;
+            if (offset > 0 && offset < total) boundaries[boundaryCount++] = static_cast<uint32_t>(offset);
+        }
+        boundaries[boundaryCount++] = total;
+        std::sort(boundaries.begin(), boundaries.begin() + boundaryCount);
+        boundaryCount = static_cast<size_t>(std::unique(
+            boundaries.begin(), boundaries.begin() + boundaryCount) - boundaries.begin());
 
-        // --- SUB-BLOCK LOOP ---
-        while (currentSample < numSamples) {
-            uint32_t nextEventSample = numSamples;
-            
-            // Look ahead for the next MIDI event in this block
-            if (it.getNextEvent(currentSample, data, size, &timestamp)) {
-                nextEventSample = timestamp;
-            }
-
-            uint32_t subBlockSize = nextEventSample - currentSample;
-            if (subBlockSize > 0) {
-                // RENDER AUDIO UP TO THE EVENT POINT
-                for (auto& p : m_processors) {
-                    // Logic to process a fragment of the buffer O(1)
-                    // p->processSubBlock(audio, currentSample, subBlockSize);
+        for (size_t segment = 0; segment + 1 < boundaryCount; ++segment) {
+            const uint32_t start = boundaries[segment];
+            const uint32_t end = boundaries[segment + 1];
+            if (end <= start) continue;
+            float* channels[2] = {
+                audio.getWritePointer(0, start), audio.getWritePointer(1, start)
+            };
+            if (!channels[0] || !channels[1]) continue;
+            AudioBuffer view;
+            view.wrapChannels(channels, 2, end - start);
+            MidiBuffer segmentMidi;
+            for (size_t index = 0; index < midi.size(); ++index) {
+                const auto& event = events[index];
+                if (event.sampleOffset >= start && event.sampleOffset < end) {
+                    MidiEvent shifted = event;
+                    shifted.sampleOffset -= start;
+                    segmentMidi.tryAddEvent(shifted);
                 }
             }
-
-            // [Handle MIDI event at currentSample + subBlockSize]
-            currentSample = nextEventSample;
+            DSP::ProcessContext context{};
+            context.blockSize = end - start;
+            context.blockStart = start;
+            context.blockEnd = end;
+            for (const auto& processor : m_processors) {
+                if (processor) processor->process(view, segmentMidi, context);
+            }
         }
     }
 

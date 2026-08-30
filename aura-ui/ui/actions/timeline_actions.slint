@@ -1,0 +1,7 @@
+// Timeline selection and marker interaction contract.
+export global TimelineActions {
+    callback area_select(int, float, float, float, float);
+    callback marker_moved(int, float);
+    callback scrub_to_marker(int);
+    callback add_marker(float);
+}

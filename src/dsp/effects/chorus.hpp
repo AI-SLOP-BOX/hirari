@@ -29,31 +29,24 @@ public:
      * @brief PROCESS: Modulates delay taps to create pitch-fluctuating width.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            // 1. Slow LFO (Chorus drift)
-            m_lfoPhase += (m_rate / m_sampleRate);
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        const float rate = std::clamp(m_rate, 0.1f, 5.0f);
+        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+            const float inL = buffer.getReadPointer(0)[i];
+            const float inR = channels > 1 ? buffer.getReadPointer(1)[i] : inL;
+            const float phase = static_cast<float>(m_lfoPhase * 6.283185307);
+            const uint32_t modL = static_cast<uint32_t>(std::clamp(28.0f + 12.0f * std::sin(phase), 1.0f, 80.0f));
+            const uint32_t modR = static_cast<uint32_t>(std::clamp(40.0f + 12.0f * std::sin(phase + 1.5707963f), 1.0f, 80.0f));
+            const float delayedL = m_delayL.process(inL, modL);
+            const float delayedR = m_delayR.process(inR, modR);
+            buffer.getWritePointer(0)[i] = inL * (1.0f - m_mix) + delayedL * m_mix;
+            if (channels > 1) buffer.getWritePointer(1)[i] = inR * (1.0f - m_mix) + delayedR * m_mix;
+            m_lfoPhase += rate / std::max(1.0, m_sampleRate);
             if (m_lfoPhase >= 1.0) m_lfoPhase -= 1.0;
-
-            float lfoL = 0.5f + 0.5f * std::sin(2.0f * M_PI * m_lfoPhase);
-            float lfoR = 0.5f + 0.5f * std::sin(2.0f * M_PI * m_lfoPhase + 0.5f * M_PI);
-
-            // 2. Modulate Delay Taps (10ms to 30ms offset)
-            float delaySampsL = (0.01f + 0.02f * lfoL) * m_sampleRate;
-            float delaySampsR = (0.01f + 0.02f * lfoR) * m_sampleRate;
-
-            for (uint32_t c = 0; c < 2; ++c) {
-                float in = buffer.getReadPointer(c)[s];
-                float out = (c == 0) ? m_delayL.process(in, delaySampsL) 
-                                     : m_delayR.process(in, delaySampsR);
-
-                buffer.getWritePointer(c)[s] = (in * (1.0f - m_mix)) + (out * m_mix);
-            }
         }
     }
+
 
     void reset() noexcept override {
         m_delayL.reset();

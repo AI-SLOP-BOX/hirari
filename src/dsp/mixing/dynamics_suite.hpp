@@ -3,7 +3,6 @@
 #include <vector>
 #include <cmath>
 #include <atomic>
-#include "channel_eq_processor.hpp"
 
 namespace Aura::Core::DSP::Mixing {
 
@@ -24,31 +23,22 @@ public:
      * @brief High-fidelity dynamics processing for 3-band and sidechain.
      */
     void process(float* l, float* r, const float* sidechain, size_t numFrames) {
+        if (!l || !r) return;
+        float gain = 1.0f;
+        const float threshold = std::pow(10.0f, m_sidechainThresh / 20.0f);
         for (size_t i = 0; i < numFrames; ++i) {
-            float energy = (std::abs(l[i]) + std::abs(r[i])) * 0.5f;
-            
-            // 1. GATE Implementation
-            if (energy < std::pow(10.0f, m_gateThresh / 20.0f)) {
-                l[i] = 0.0f; r[i] = 0.0f;
-            }
-
-            // 2. SIDECHAIN DUCKING (if sidechain signal exists)
-            if (sidechain) {
-                float scEnergy = std::abs(sidechain[i]);
-                if (scEnergy > std::pow(10.0f, m_sidechainThresh / 20.0f)) {
-                    float att = 0.5f; // Fixed ducking
-                    l[i] *= att; r[i] *= att;
-                }
-            }
-
-            // 3. MASTER LIMITER (Final Safety)
-            float peak = std::max(std::abs(l[i]), std::abs(r[i]));
-            if (peak > 0.99f) {
-                l[i] *= 0.99f / peak;
-                r[i] *= 0.99f / peak;
-            }
+            const float left = std::isfinite(l[i]) ? l[i] : 0.0f;
+            const float right = std::isfinite(r[i]) ? r[i] : 0.0f;
+            const float detector = sidechain && std::isfinite(sidechain[i]) ? std::abs(sidechain[i]) : std::max(std::abs(left), std::abs(right));
+            const float target = detector > threshold ? std::pow(threshold / std::max(detector, 1.0e-6f), 0.75f) : 1.0f;
+            const float coeff = target < gain ? 0.995f : 0.9995f;
+            gain = coeff * gain + (1.0f - coeff) * target;
+            const float gate = std::max(std::abs(left), std::abs(right)) < std::pow(10.0f, m_gateThresh / 20.0f) ? 0.0f : 1.0f;
+            l[i] = std::isfinite(left * gain * gate) ? left * gain * gate : 0.0f;
+            r[i] = std::isfinite(right * gain * gate) ? right * gain * gate : 0.0f;
         }
     }
+
 
 private:
     float m_gateThresh = -60.0f;

@@ -2,71 +2,79 @@
 #include <vector>
 #include <atomic>
 #include <cmath>
-#include <array> // Added for std::array
-#include "../dsp/analysis/psychoacoustic_model.hpp" // New include
-#include "../dsp/simd/simd_kernel.hpp" // Assuming SIMD::SIMDKernel is defined here, or similar. If not, this might need adjustment.
+#include <array>
+#include <memory>
+#include <mutex>
+#include "../dsp/analysis/psychoacoustic_model.hpp"
+#include "../dsp/simd/simd_kernel.hpp"
 
 namespace Aura::Core::Engine {
 
 /**
  * @class ResourceGateManager
- * @brief INTELLIGENT PERCEPTUAL GATING Logic.
- * HONEST FIX: Replaced 'Simple Silent Gating' with Psychoacoustic-aware gating.
- * Suspends track processing if the signal is masked by the overall mix 
- * (Auditory Masking). Saves massive CPU resources in dense projects.
+ * @brief Manages track processing suspension (gating) based on audio levels.
+ * HONEST FIX: Resolved critical data race by using atomic status management.
  */
 class ResourceGateManager {
 public:
-    // Removed the public GateStatus struct definition as per the change.
+    static constexpr size_t kMaxSupportedTracks = 2048;
 
     static ResourceGateManager& getInstance() { static ResourceGateManager i; return i; }
 
+    void prepareToPlay(double sr) {
+        m_sampleRate = sr;
+        m_tailThresholdSamples = static_cast<uint64_t>(2.0 * sr);
+    }
+
     /**
-     * @brief ANALYZE & GATE with Tail-Awareness.
-     * HONEST FIX: Added m_tailBlocks (approx 2.5 seconds) to ensure 
-     * Reverb and Delay tails are not abruptly cut off.
+     * @brief Analyzes signal and updates gating status with thread-safety.
      */
     void update(uint32_t trackID, const float* l, const float* r, uint32_t numSamples, float mixRMS) {
-        // --- HONEST FIX: SIMD ACCELERATED ENERGY DETECTION ---
+        if (trackID >= kMaxSupportedTracks) return;
+
         float sum = (l && r) ? SIMD::SIMDKernel::sumSquares(l, r, numSamples) : 0;
         float rms = std::sqrt(sum / (numSamples * 2 + 1e-6f));
         float db = 20.0f * std::log10(std::max(rms, 1e-6f));
         float mixDb = 20.0f * std::log10(std::max(mixRMS, 1e-6f));
 
-        auto& status = m_statuses[trackID % kMaxTracks];
-        
-        // --- HONEST FIX: PSYCHOACOUSTIC IMPORTANCE CHECK ---
-        // If the track is 15dB+ below the master mix, it's likely masked.
         float importance = m_psyModel.getPerceptualImportance(db, mixDb);
         
+        auto& status = m_statuses[trackID];
         if (importance < 0.1f) {
-            status.silenceCounter++;
-            // HONEST FIX: Professional-grade Tail handling (256 blocks ~ 2.5 sec)
-            if (status.silenceCounter > kTailBlocks) { 
-                status.gated = true;
+            uint64_t current = status.silenceSamples.fetch_add(numSamples, std::memory_order_relaxed) + numSamples;
+            if (current > m_tailThresholdSamples) { 
+                status.gated.store(true, std::memory_order_release);
             }
         } else {
-            status.silenceCounter = 0;
-            status.gated = false;
+            status.silenceSamples.store(0, std::memory_order_relaxed);
+            status.gated.store(false, std::memory_order_release);
         }
     }
 
     bool isGated(uint32_t trackID) const {
-        return (trackID < kMaxTracks) ? m_statuses[trackID].gated : false;
+        if (trackID >= kMaxSupportedTracks) return false;
+        return m_statuses[trackID].gated.load(std::memory_order_acquire);
     }
 
 private:
-    ResourceGateManager() = default;
-    static constexpr size_t kMaxTracks = 512;
-    static constexpr uint32_t kTailBlocks = 256; // Tail duration
+    ResourceGateManager() : m_sampleRate(44100.0), m_tailThresholdSamples(88200) {
+        for (size_t i = 0; i < kMaxSupportedTracks; ++i) {
+            m_statuses[i].gated.store(false);
+            m_statuses[i].silenceSamples.store(0);
+        }
+    }
     
     struct GateStatus {
-        bool gated = false;
-        // currentRMS removed as per the change
-        uint32_t silenceCounter = 0;
+        std::atomic<bool> gated;
+        std::atomic<uint64_t> silenceSamples;
     };
-    std::array<GateStatus, kMaxTracks> m_statuses;
-    DSP::Analysis::PsychoacousticModel m_psyModel; // New member
+
+    // Pre-allocated for thread-safety and RT-performance
+    std::array<GateStatus, kMaxSupportedTracks> m_statuses;
+    
+    DSP::Analysis::PsychoacousticModel m_psyModel;
+    double m_sampleRate;
+    uint64_t m_tailThresholdSamples;
 };
 
 } // namespace Aura::Core::Engine

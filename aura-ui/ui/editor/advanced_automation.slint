@@ -1,0 +1,104 @@
+import { Style } from "../style.slint";
+
+export component Z_AdvancedAutomation {
+    in property <[float]> points;
+    in-out property <int> active_target: 0; // 0: Volume, 1: Pan, 2: Cutoff, 3: Reverb
+    in-out property <float> p0_y: 0.2;
+    in-out property <float> p1_y: 0.5;
+    in-out property <float> p2_y: 0.4;
+    in-out property <float> p3_y: 0.8;
+    in-out property <float> p4_y: 0.6;
+
+    Rectangle {
+        width: 100%; height: 160px; background: Style.surface; border_radius: 2px; border_width: 1.5px; border_color: Style.border;
+        VerticalLayout {
+            padding: 8px; spacing: 8px;
+            
+            // Selector bar for automation targets (Ardour / Zrythm Style)
+            HorizontalLayout {
+                spacing: 6px; alignment: start;
+                Text { text: "TARGET:"; font-size: 8px; color: #A1A1A6; font-weight: 950; vertical-alignment: center; }
+                for name[idx] in ["VOLUME", "PAN", "CUTOFF", "REVERB"] : Rectangle {
+                    height: 18px; background: active_target == idx ? Style.border : Style.surface; border_radius: 1px; border_width: 1px; border_color: active_target == idx ? Style.brand : Style.border;
+                    HorizontalLayout {
+                        padding-left: 6px; padding-right: 6px;
+                        Text { text: name; font-size: Style.font-xxs; color: active_target == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                    }
+                    TouchArea { clicked => { active_target = idx; } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                // Target Value display
+                Text {
+                    text: active_target == 0 ? ("VAL: " + Math.floor((p2_y * 12.0 - 12.0) * 10) / 10 + " dB") :
+                          active_target == 1 ? ("VAL: L" + Math.floor((1.0 - p2_y) * 100) + " / R" + Math.floor(p2_y * 100)) :
+                          active_target == 2 ? ("VAL: " + Math.floor(p2_y * 20.0 * 10) / 10 + " kHz") :
+                          ("VAL: " + Math.floor(p2_y * 100) + "%");
+                    font-size: 8px; color: Style.brand; font-weight: 900; vertical-alignment: center;
+                }
+            }
+            
+            // Interactive Envelope Canvas
+            Rectangle {
+                vertical-stretch: 1; background: #000; border_radius: 1px; border_width: 1px; border_color: Style.surface;
+                clip: true;
+                
+                // Draw background envelope grid lines
+                for grid_y in 4 : Rectangle {
+                    y: grid_y * (parent.height / 4); width: 100%; height: 1px; background: Style.surface;
+                }
+                for grid_x in 8 : Rectangle {
+                    x: grid_x * (parent.width / 8); width: 1px; height: 100%; background: Style.surface;
+                }
+                
+                // Path connecting the 5 nodes
+                Path {
+                    width: 100%; height: 100%; stroke: Style.brand; stroke_width: 2px;
+                    MoveTo { x: 0; y: ((1.0 - p0_y) * parent.height) / 1px; }
+                    LineTo { x: (0.1 * parent.width) / 1px; y: ((1.0 - p0_y) * parent.height) / 1px; }
+                    LineTo { x: (0.3 * parent.width) / 1px; y: ((1.0 - p1_y) * parent.height) / 1px; }
+                    LineTo { x: (0.5 * parent.width) / 1px; y: ((1.0 - p2_y) * parent.height) / 1px; }
+                    LineTo { x: (0.7 * parent.width) / 1px; y: ((1.0 - p3_y) * parent.height) / 1px; }
+                    LineTo { x: (0.9 * parent.width) / 1px; y: ((1.0 - p4_y) * parent.height) / 1px; }
+                    LineTo { x: parent.width / 1px; y: ((1.0 - p4_y) * parent.height) / 1px; }
+                }
+                
+                // Interactive Node Handles (P0 to P4)
+                // Node 0
+                Rectangle {
+                    width: 12px; height: 12px; background: #fff; border_radius: 6px; border_width: 2px; border_color: Style.brand;
+                    x: 0.1 * parent.width - 6px;
+                    y: (1.0 - p0_y) * parent.height - 6px;
+                    TouchArea { moved => { if (self.pressed) { p0_y = (1.0 - self.mouse_y / parent.height).clamp(0.0, 1.0); } } }
+                }
+                // Node 1
+                Rectangle {
+                    width: 12px; height: 12px; background: #fff; border_radius: 6px; border_width: 2px; border_color: Style.brand;
+                    x: 0.3 * parent.width - 6px;
+                    y: (1.0 - p1_y) * parent.height - 6px;
+                    TouchArea { moved => { if (self.pressed) { p1_y = (1.0 - self.mouse_y / parent.height).clamp(0.0, 1.0); } } }
+                }
+                // Node 2
+                Rectangle {
+                    width: 12px; height: 12px; background: #fff; border_radius: 6px; border_width: 2px; border_color: Style.brand;
+                    x: 0.5 * parent.width - 6px;
+                    y: (1.0 - p2_y) * parent.height - 6px;
+                    TouchArea { moved => { if (self.pressed) { p2_y = (1.0 - self.mouse_y / parent.height).clamp(0.0, 1.0); } } }
+                }
+                // Node 3
+                Rectangle {
+                    width: 12px; height: 12px; background: #fff; border_radius: 6px; border_width: 2px; border_color: Style.brand;
+                    x: 0.7 * parent.width - 6px;
+                    y: (1.0 - p3_y) * parent.height - 6px;
+                    TouchArea { moved => { if (self.pressed) { p3_y = (1.0 - self.mouse_y / parent.height).clamp(0.0, 1.0); } } }
+                }
+                // Node 4
+                Rectangle {
+                    width: 12px; height: 12px; background: #fff; border_radius: 6px; border_width: 2px; border_color: Style.brand;
+                    x: 0.9 * parent.width - 6px;
+                    y: (1.0 - p4_y) * parent.height - 6px;
+                    TouchArea { moved => { if (self.pressed) { p4_y = (1.0 - self.mouse_y / parent.height).clamp(0.0, 1.0); } } }
+                }
+            }
+        }
+    }
+}

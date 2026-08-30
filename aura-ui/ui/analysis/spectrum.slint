@@ -1,0 +1,190 @@
+import { Style } from "../style.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { Z_Marker } from "../model/models.slint";
+
+export component Z_Spectrum {
+    in property <[float]> fft; 
+    in property <[float]> heatmap_data;
+    in property <[float]> partials_data;
+    in property <float> motion_energy: 0.0;
+    in property <image> video_frame;
+    in property <color> spec_col: Style.brand;
+    in property <[float]> suggested_eq: [0.2, 0.4, 0.6, 0.5, 0.3, 0.1]; // AI Target Curve
+    
+    Rectangle {
+        background: Style.surface-1; border_width: 1.5px; border_color: Style.border; clip: true;
+        
+        // --- SIDECHAIN MASKING LAYER ---
+        HorizontalLayout {
+            spacing: 1px; padding: 1px;
+            for ov in heatmap_data : Rectangle {
+                VerticalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 100%; height: ov.clamp(0,1) * parent.height;
+                        background: Style.solo; opacity: 0.25;
+                    }
+                }
+            }
+        }
+
+        // --- AI SUGGESTED CURVE (TRUTH LAYER) ---
+        if (suggested_eq.length > 0) : Path {
+            width: 100%; height: 100%;
+            stroke: Style.brand.with-alpha(0.4);
+            stroke-width: 2px;
+            commands: "M 0 " + (1.0 - suggested_eq[0]) * 100% + " L 20 " + (1.0 - suggested_eq[1]) * 100% + " L 40 " + (1.0 - suggested_eq[2]) * 100% + " L 60 " + (1.0 - suggested_eq[3]) * 100% + " L 80 " + (1.0 - suggested_eq[4]) * 100% + " L 100 " + (1.0 - suggested_eq[5]) * 100%;
+        }
+
+        // --- PRIMARY SPECTRUM ---
+        HorizontalLayout {
+            spacing: 1px; padding: 1px;
+            for val in fft : Rectangle {
+                VerticalLayout {
+                    alignment: end;
+                    Rectangle {
+                        width: 100%; height: val.clamp(0,1) * parent.height;
+            background: val > 0.85 ? Style.record : Style.brand;
+                        opacity: 0.8;
+                        // HOLOGRAPHIC GLOW
+                        Rectangle { width: 100%; height: 100%; background: parent.background.with-alpha(0.2); opacity: (val - 0.2).clamp(0, 1); }
+                    }
+                }
+                // --- PEAK TRACE ---
+                Rectangle {
+                    width: 100%; height: 1px; background: Style.text-primary.with-alpha(0.3);
+                    y: (1.0 - (val * 1.1).clamp(0,1)) * parent.height;
+                }
+            }
+        }
+        // Grid lines
+        for i in 4 : Rectangle {
+            y: (i / 4.0) * parent.height; height: 0.5px; width: parent.width; background: Style.border; opacity: 0.5;
+        }
+        
+        // --- INDUSTRIAL MULTIBAND CORRELATION FLOOR ---
+        Rectangle {
+            y: parent.height - 8px; height: 6px; width: parent.width; background: Style.surface-0.with-alpha(0.8);
+            HorizontalLayout {
+                spacing: 2px; padding: 1px;
+                for v in partials_data : Rectangle {
+                    width: 100%; height: 100%; 
+                    background: v > 0 ? Style.ok : Style.record;
+                    opacity: 0.3 + v.abs() * 0.7;
+                    border_radius: 0.5px;
+                }
+            }
+        }
+    }
+}
+
+export component Z_HolographicSpec {
+    in property <[float]> fft;
+    Rectangle {
+        width: 100%; height: 120px; background: Style.surface-0; border_radius: 2px; clip: true;
+        // Depth Layers
+        for i in 4 : Rectangle {
+            opacity: 0.15 + i * 0.1;
+            HorizontalLayout {
+                padding: 2px; spacing: 2px; alignment: center;
+                for val in fft : VerticalLayout {
+                    alignment: end;
+                    Rectangle { 
+                        width: 4px; height: (val * (1.0 - i * 0.2)).clamp(0,1) * (parent.height - (i * 10px)); 
+                        background: i == 3 ? Style.brand : (i == 0 ? Style.text-tertiary : Style.brand.with-alpha(0.3));
+                        x: i * 4px; // Tilt effect
+                    }
+                }
+            }
+        }
+        Text { text: "Depth"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 4px; y: 4px; font-weight: 500; opacity: 0.7; }
+    }
+}
+
+export component Z_DNAMap {
+    in property <[float]> genome;
+    Rectangle {
+        HorizontalLayout {
+            padding: 4px; spacing: 2px; alignment: center;
+            for val[idx] in genome : VerticalLayout {
+                spacing: 2px; alignment: center;
+                Rectangle { width: 4px; height: 12px; background: val > 0.5 ? Style.brand : Style.solo; border_radius: 2px; opacity: val; }
+                Rectangle { width: 1px; height: 10px; background: Style.border; }
+                Rectangle { width: 4px; height: 12px; background: val > 0.3 ? Style.ok : Style.alert; border_radius: 2px; opacity: 1.0 - val; }
+            }
+        }
+        Text { text: "Analysis"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 4px; y: 4px; font-weight: 500; opacity: 0.7; }
+    }
+}
+
+export component Z_NeuralVoice {
+    in property <[float]> voice_data;
+    Rectangle {
+        clip: true; background: Style.surface; border_radius: 10px; border_width: 1px; border_color: Style.border;
+        HorizontalLayout {
+            padding: 4px; spacing: 1px; alignment: center;
+            for val[idx] in voice_data : Rectangle {
+                width: 2px; height: (val.abs() * 16.0 + 2.0) * 1px; 
+                background: Style.brand; border_radius: 1px;
+                opacity: 0.2 + (val.abs() * 0.8);
+            }
+        }
+        Text { text: "Voice"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 6px; y: 2px; font-weight: 500; opacity: 0.65; }
+    }
+}
+
+export component Z_SentinelDashboard {
+    in property <[float]> cpu_his;
+    in property <float> cpu_cur;
+    in property <float> latency;
+    in property <int> buffer_size;
+    Rectangle {
+        height: 180px; background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border;
+        VerticalLayout {
+            padding: 12px; spacing: 10px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "System Health"; font-size: Style.font-xxs; color: Style.brand; font-weight: 700; horizontal-stretch: 1; }
+                Rectangle { width: 10px; height: 10px; border_radius: 5px; background: root.cpu_cur > 0.8 ? Style.alert : Style.ok; }
+            }
+            Rectangle {
+                height: 60px; background: Style.surface-0; border_radius: 1px; clip: true;
+                HorizontalLayout {
+                    spacing: 2px; padding: 4px; alignment: end;
+                    for val in cpu_his : Rectangle {
+                        width: 12px; height: 100%;
+                        VerticalLayout { alignment: end; Rectangle { width: 100%; height: val * parent.height; background: Style.brand; opacity: 0.6; border_radius: 1px; } }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 20px;
+                VerticalLayout { spacing: 2px; Text { text: "Latency"; font-size: Style.font-xxs; color: Style.text-tertiary; } Text { text: Math.round(root.latency * 10.0)/10.0 + " ms"; font-size: 14px; color: Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
+                VerticalLayout { spacing: 2px; Text { text: "Buffer"; font-size: Style.font-xxs; color: Style.text-tertiary; } Text { text: root.buffer_size > 0 ? root.buffer_size + " spls" : "-- spls"; font-size: 14px; color: Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
+                VerticalLayout { spacing: 2px; Text { text: "Core Load"; font-size: Style.font-xxs; color: Style.text-tertiary; } Text { text: Math.round(root.cpu_cur * 100) + "%"; font-size: 14px; color: root.cpu_cur > 0.8 ? Style.alert : Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
+            }
+        }
+    }
+}
+
+export component Z_MarkerList {
+    in property <[Z_Marker]> markers;
+    callback scrub-to-marker(int);
+    VerticalLayout {
+        padding: 4px; spacing: 4px;
+        Text { text: "Project Markers"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+        for m[idx] in markers : Rectangle {
+            height: 38px; background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border;
+            HorizontalLayout {
+                padding: 6px; spacing: 10px;
+                Rectangle { width: 4px; height: 100%; background: m.color; border_radius: 1px; }
+                VerticalLayout {
+                    alignment: center; horizontal-stretch: 1;
+                    Text { text: m.label; font-size: 10px; color: Style.text-primary; font-weight: 600; }
+                    Text { text: "Beat: " + m.beat; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                }
+                Z_IconButton { icon: "▶"; clicked => { root.scrub-to-marker(idx); } }
+            }
+        }
+    }
+}

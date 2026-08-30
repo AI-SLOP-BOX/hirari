@@ -1,0 +1,34 @@
+import { Style } from "../style.slint";
+
+export component Z_AuraIDE {
+    Rectangle {
+        width: 100%; height: 500px; background: Style.surface; border_width: 1px; border_color: Style.border;
+        VerticalLayout {
+            padding: 12px; spacing: 12px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "AURA-IDE: REAL-TIME COMPONENT COMPILER"; font-size: 10px; color: Style.solo; font-weight: 950; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            // Experimental code editor view
+            Rectangle {
+                background: #020202; border_width: 1.5px; border_color: Style.border; vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 8px; spacing: 4px;
+                    Text { text: "#pragma aura.atom.v1"; font-size: 9px; color: #6E6E73; font-family: Style.numeric-font; }
+                    Text { text: "kernel SovereignLimiter {"; font-size: 9px; color: Style.brand; font-family: Style.numeric-font; }
+                    Text { text: "    input signal in[2];"; font-size: 9px; color: #aaa; font-family: Style.numeric-font; }
+                    Text { text: "    param threshold: -0.1dB;"; font-size: 9px; color: Style.solo; font-family: Style.numeric-font; }
+                    Text { text: "    "; font-size: 9px; color: #aaa; font-family: Style.numeric-font; }
+                    Text { text: "    void main() {"; font-size: 9px; color: Style.brand; font-family: Style.numeric-font; }
+                    Text { text: "        if (abs(in[0]) > threshold) {"; font-size: 9px; color: #fff; font-family: Style.numeric-font; }
+                    Text { text: "            nuclear_clamp(in[0], threshold);"; font-size: 9px; color: Style.ok; font-family: Style.numeric-font; }
+                    Text { text: "        }"; font-size: 9px; color: #fff; font-family: Style.numeric-font; }
+                    Text { text: "    }"; font-size: 9px; color: Style.brand; font-family: Style.numeric-font; }
+                    Text { text: "}"; font-size: 9px; color: Style.brand; font-family: Style.numeric-font; }
+                }
+            }
+            Text { text: "SYSTEM STATUS: READY FOR INJECTION"; font-size: Style.font-xxs; color: #6E6E73; }
+        }
+    }
+}

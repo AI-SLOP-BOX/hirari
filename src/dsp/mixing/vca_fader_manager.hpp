@@ -28,46 +28,27 @@ public:
      * Uses Atomic bitmasks and smoothing multipliers to avoid clicks.
      */
     void syncVCAs() {
-        auto& pm = Core::Engine::ParamTree::getInstance();
-        
-        std::array<float, kMaxGroups> groupGains;
-        uint32_t activeMuteMask = 0;
-        uint32_t activeSoloMask = 0;
-
-        for (uint32_t g = 0; g < kMaxGroups; ++g) {
-            auto& group = m_groups[g];
-            if (group.active.load(std::memory_order_acquire)) {
-                auto* master = pm.getParam(group.masterId);
-                // Linear gain assumed from ParamTree, or conversion happens once here
-                groupGains[g] = master ? master->getCurrentValue() : 1.0f;
-                if (group.muted.load(std::memory_order_relaxed)) activeMuteMask |= (1 << g);
-                if (group.soloed.load(std::memory_order_relaxed)) activeSoloMask |= (1 << g);
-            } else {
-                groupGains[g] = 1.0f; 
+        m_vcaMuteBitmap.reset();
+        m_vcaSoloBitmap.reset();
+        for (uint32_t track = 0; track < kMaxTracks; ++track) {
+            float target = 1.0f;
+            bool muted = false;
+            bool soloed = false;
+            for (const auto& group : m_groups) {
+                if (!group.active.load(std::memory_order_acquire) || !group.slaveBitmap.test(track)) continue;
+                target *= std::clamp(group.gain.load(std::memory_order_relaxed), 0.0f, 4.0f);
+                muted = muted || group.muted.load(std::memory_order_relaxed);
+                soloed = soloed || group.soloed.load(std::memory_order_relaxed);
             }
-        }
-
-        for (uint32_t t = 0; t < kMaxTracks; ++t) {
-            float totalGain = 1.0f;
-            bool isMutedByVca = false;
-            bool isSoloedByVca = false;
-
-            for (uint32_t g = 0; g < kMaxGroups; ++g) {
-                if (m_groups[g].active.load(std::memory_order_relaxed) && m_groups[g].slaveBitmap[t]) {
-                    totalGain *= groupGains[g];
-                    if (activeMuteMask & (1 << g)) isMutedByVca = true;
-                    if (activeSoloMask & (1 << g)) isSoloedByVca = true;
-                }
-            }
-            
-            // Store previous for smoothing, then new current
-            m_prevGains[t].store(m_currentGains[t].load(std::memory_order_relaxed), std::memory_order_relaxed);
-            m_currentGains[t].store(totalGain, std::memory_order_relaxed);
-            
-            m_vcaMuteBitmap.set(t, isMutedByVca);
-            m_vcaSoloBitmap.set(t, isSoloedByVca);
+            const float current = m_currentGains[track].load(std::memory_order_relaxed);
+            const float smooth = current + (target - current) * 0.25f;
+            m_prevGains[track].store(current, std::memory_order_relaxed);
+            m_currentGains[track].store(std::isfinite(smooth) ? smooth : 1.0f, std::memory_order_relaxed);
+            if (muted) m_vcaMuteBitmap.set(track);
+            if (soloed) m_vcaSoloBitmap.set(track);
         }
     }
+
 
     struct VCAGainState { float prev; float current; };
     VCAGainState getVCAGainState(uint32_t tId) const { 
@@ -80,6 +61,7 @@ public:
 
     void setGroupMute(uint32_t gIdx, bool m) { if (gIdx < kMaxGroups) m_groups[gIdx].muted.store(m); }
     void setGroupSolo(uint32_t gIdx, bool s) { if (gIdx < kMaxGroups) m_groups[gIdx].soloed.store(s); }
+    void setGroupGain(uint32_t gIdx, float v) { if (gIdx < kMaxGroups) m_groups[gIdx].gain.store(v); }
     void addGroup(uint32_t masterId, const std::bitset<kMaxTracks>& slaves) {
         for (auto& g : m_groups) {
             if (!g.active.load()) {
@@ -103,6 +85,7 @@ private:
     struct AtomicGroup {
         std::atomic<bool> active{false};
         std::atomic<bool> muted{false}, soloed{false};
+        std::atomic<float> gain{1.0f};
         uint32_t masterId = 0;
         std::bitset<kMaxTracks> slaveBitmap;
     };

@@ -1,9 +1,0 @@
-[ 11%] Building OBJCXX object CMakeFiles/AuraUltimate.dir/src/ui/platform/macos_window.mm.o
-[ 22%] Building OBJCXX object CMakeFiles/AuraUltimate.dir/src/graphics/platform/metal_kernel.mm.o
-/Users/iwatakoumei/Desktop/logicpro_oss/src/graphics/platform/metal_kernel.mm:148:14: warning: instance method '-replaceRegion:mipLevel:withBytes:bytesPerRow:' not found (return type defaults to 'id') [-Wobjc-method-access]
-  148 |         [tex replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger)s.width, (NSUInteger)s.height) mipLevel:0 withBytes:[rep bitmapData] bytesPerRow:[rep bytesPerRow]];
-      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-1 warning generated.
-[ 33%] Linking CXX executable AuraUltimate.app/Contents/MacOS/AuraUltimate
-ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/fftw/lib/libfftw3.3.dylib' which was built for newer version 26.0
-[100%] Built target AuraUltimate

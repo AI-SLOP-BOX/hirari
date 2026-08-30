@@ -6,6 +6,8 @@
 #include <condition_variable>
 #include <functional>
 #include <future>
+#include <type_traits>
+#include <algorithm>
 
 namespace Aura::Core::Concurrency {
 
@@ -18,13 +20,18 @@ namespace Aura::Core::Concurrency {
 class ThreadPool {
 public:
     static ThreadPool& getInstance() {
-        static ThreadPool instance(std::thread::hardware_concurrency());
+        const auto detected = std::thread::hardware_concurrency();
+        // The standard permits hardware_concurrency() to return 0 when the
+        // platform cannot report a value.  A zero-sized pool would accept
+        // work forever without a worker to execute it.
+        static ThreadPool instance(detected == 0 ? 1u : detected);
         return instance;
     }
 
     template<class F, class... Args>
-    auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
-        using return_type = typename std::result_of<F(Args...)>::type;
+    auto enqueue(F&& f, Args&&... args)
+        -> std::future<std::invoke_result_t<F, Args...>> {
+        using return_type = std::invoke_result_t<F, Args...>;
 
         auto task = std::make_shared<std::packaged_task<return_type()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
@@ -51,6 +58,7 @@ public:
 
 private:
     explicit ThreadPool(size_t threads) : m_stop(false) {
+        threads = std::max<size_t>(1u, threads);
         for (size_t i = 0; i < threads; ++i) {
             m_workers.emplace_back([this] {
                 for (;;) {

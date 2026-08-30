@@ -8,6 +8,7 @@
 #include "track_header_renderer.hpp"
 #include "../../core/engine/track.hpp"
 #include "../../ui/main/view_transformer.hpp"
+#include "../../rendering/waveform_overview.hpp"
 
 namespace Aura::Graphics::UI {
 
@@ -59,8 +60,18 @@ public:
                 if (m_selectedRegionId == meta.id) kernel.drawNeonRect(rx - 1, currentTrackY + 3, rw + 2, trackH - 22, 5, 4, 0xFFFFFFFF);
                 
                 auto wave = region->getWaveOverview();
-                if (wave && wave->getNumPeaks() > 0) {
-                     kernel.drawWaveformPath(wave->getMinData(), wave->getMaxData(), wave->getNumPeaks(), rx, currentTrackY + trackH/2, rw, trackH*0.4f, 0xAABBBBCB);
+                if (wave) {
+                    ::Aura::Rendering::WaveformOverview::LOD lod;
+                    const uint32_t targetPixels = static_cast<uint32_t>(
+                        std::max(1.0f, std::min(rw, 4096.0f)));
+                    if (wave->copyBestLOD(targetPixels, lod) &&
+                        !lod.minData.empty() &&
+                        lod.minData.size() == lod.maxData.size()) {
+                        kernel.drawWaveformPath(lod.minData.data(), lod.maxData.data(),
+                                                lod.minData.size(), rx,
+                                                currentTrackY + trackH / 2.0f,
+                                                rw, trackH * 0.4f, 0xAABBBBCB);
+                    }
                 }
                 kernel.drawText(meta.name, rx + 10, currentTrackY + 20, 10, 0xFFFFFFFF);
             }
@@ -98,6 +109,7 @@ public:
                             m_selectedRegionId = region->getMeta().id;
                             m_draggedRegion = region.get();
                             m_dragStartSamples = region->getMeta().samplePosition;
+                            m_currentDragSamples = m_dragStartSamples;
                             m_clickX = x; return true;
                         }
                     }
@@ -110,10 +122,15 @@ public:
     }
 
     void handleMouseDrag(float x, float y, float dx, float dy, const std::vector<std::shared_ptr<Core::Engine::Track>>& tracks, float scrollX) {
+        (void)x; (void)y; (void)dy; (void)tracks; (void)scrollX;
         if (!m_draggedRegion) return;
         auto& vt = ::Aura::UI::Main::ViewTransformer::getInstance();
-        int64_t diffSamples = vt.pixelsToSamples(x - m_clickX);
-        m_draggedRegion->setSamplePosition(std::max(0LL, (int64_t)m_dragStartSamples + diffSamples));
+        // dx is the event delta since the previous callback. Applying the
+        // absolute x-click distance on every event compounds the movement.
+        int64_t diffSamples = vt.pixelsToSamples(dx);
+        m_currentDragSamples = static_cast<uint64_t>(std::max<int64_t>(
+            0, static_cast<int64_t>(m_currentDragSamples) + diffSamples));
+        m_draggedRegion->setSamplePosition(m_currentDragSamples);
     }
 
     void handleMouseUp() { m_draggedRegion = nullptr; }
@@ -122,7 +139,7 @@ private:
     TrackHeaderRenderer m_headerRenderer;
     uint32_t m_selectedTrackId = 0xFFFFFFFF, m_selectedRegionId = 0xFFFFFFFF;
     ::Aura::Core::AudioRegion* m_draggedRegion = nullptr;
-    uint64_t m_dragStartSamples = 0; float m_clickX = 0;
+    uint64_t m_dragStartSamples = 0, m_currentDragSamples = 0; float m_clickX = 0;
     float m_x, m_y, m_w, m_h;
 };
 

@@ -29,36 +29,49 @@ public:
     /**
      * @brief PROCESS: Dynamically ducks high frequencies when sibilance is detected.
      */
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
+        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
 
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float inL = buffer.getReadPointer(0)[s];
-            float inR = buffer.getReadPointer(1)[s];
-            float mid = (inL + inR) * 0.5f;
+        const uint32_t numSamples = buffer.getNumSamples();
+        const bool isStereo = buffer.getNumChannels() >= 2;
+        float* left = buffer.getWritePointer(0);
+        float* right = isStereo ? buffer.getWritePointer(1) : nullptr;
 
-            // 1. Detect Sibilance (Bandpass Filter 6kHz)
-            float sibilance = m_scFilter.process(mid);
-            float peak = std::abs(sibilance);
+        const float thresh = std::clamp(m_threshold, 0.001f, 1.0f);
+        const float intensity = std::clamp(m_intensity, 0.0f, 2.0f);
 
-            // 2. Ballistics (Fast Attack, Moderate Release)
-            if (peak > m_env) m_env = 0.9f * m_env + 0.1f * peak;
-            else m_env *= 0.999f;
+        for (uint32_t i = 0; i < numSamples; ++i) {
+            float inL = std::isfinite(left[i]) ? left[i] : 0.0f;
+            float inR = (isStereo && std::isfinite(right[i])) ? right[i] : inL;
 
-            // 3. Reduction
-            float targetGain = 1.0f;
-            if (m_env > m_threshold) {
-                targetGain = 1.0f - (m_env - m_threshold) * m_intensity;
+            // Detect sibilance energy in 6kHz bandpass region
+            float scInput = 0.5f * (inL + inR);
+            float scSignal = m_scFilter.process(scInput);
+            float scLevel = std::abs(scSignal);
+
+            // Envelope follower: fast attack (~1ms), smooth release (~40ms)
+            if (scLevel > m_env) {
+                m_env = 0.9f * m_env + 0.1f * scLevel;
+            } else {
+                m_env = 0.999f * m_env + 0.001f * scLevel;
             }
-            m_currentGain = 0.95f * m_currentGain + 0.05f * targetGain;
 
-            // 4. Selective Reduction (or Broadband)
-            buffer.getWritePointer(0)[s] *= m_currentGain;
-            buffer.getWritePointer(1)[s] *= m_currentGain;
+            if (std::abs(m_env) < 1.0e-24f) m_env = 0.0f;
+
+            // Calculate dynamic ducking gain
+            float excess = std::max(0.0f, m_env - thresh);
+            float targetGain = 1.0f / (1.0f + intensity * excess * 12.0f);
+
+            // Smooth gain transition
+            m_currentGain += (targetGain - m_currentGain) * 0.08f;
+
+            left[i] = inL * m_currentGain;
+            if (isStereo && right) {
+                right[i] = inR * m_currentGain;
+            }
         }
     }
+
 
     void reset() noexcept override {
         m_env = 0.0f;

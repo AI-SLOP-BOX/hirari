@@ -8,6 +8,7 @@
 #include <mutex>
 #include <array>
 #include <algorithm>
+#include <cmath>
 #include "../concurrency/lock_free.hpp"
 #include "parameter_smoother.hpp"
 #include "macro_control_manager.hpp"
@@ -23,101 +24,55 @@ namespace Aura::Core::Engine {
 class ManagedParameter {
 public:
     ManagedParameter(uint32_t id, const std::string& name, float min, float max, float def)
-        : m_id(id), m_name(name), m_min(min), m_max(max), m_smoother(def) {
+        : m_id(id), m_name(name), m_min(std::min(min, max)), m_max(std::max(min, max)),
+          m_smoother(std::clamp(def, std::min(min, max), std::max(min, max))) {
         m_macroCount.store(0);
     }
 
-    void updateTarget(float target, uint32_t numSamples) {
-        m_smoother.setTarget(target, numSamples);
+    void updateTarget(float target, uint32_t /*numSamples*/) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_smoother.setTarget(std::isfinite(target) ? std::clamp(target, m_min, m_max) : m_min);
     }
 
     void addMacroBinding(uint32_t macroId, float amount, float minR = 0.0f, float maxR = 1.0f) {
+        std::lock_guard<std::mutex> lock(m_macroMutex);
         uint32_t currentCount = m_macroCount.load(std::memory_order_acquire);
         if (currentCount < kMaxMacroBindings) {
-            m_macroBindings[currentCount] = { macroId, amount, minR, maxR };
+            const float safeMin = std::clamp(minR, 0.0f, 1.0f);
+            const float safeMax = std::clamp(maxR, safeMin, 1.0f);
+            const float safeAmount = std::isfinite(amount) ? std::clamp(amount, -1.0f, 1.0f) : 0.0f;
+            m_macroBindings[currentCount] = { macroId, safeAmount, safeMin, safeMax };
             m_macroCount.store(currentCount + 1, std::memory_order_release);
         }
     }
 
-    float getNextValue() { 
-        float base = m_smoother.getNextValue();
-        
-        uint32_t count = m_macroCount.load(std::memory_order_acquire);
-        float modulationSum = 0.0f;
-        for (uint32_t i = 0; i < count; ++i) {
-            float macroVal = MacroControlManager::getInstance().getMacroValue(m_macroBindings[i].macroId);
-            // --- HONEST RANGE MAPPING ---
-            float scaled = m_macroBindings[i].minRange + macroVal * (m_macroBindings[i].maxRange - m_macroBindings[i].minRange);
-            modulationSum += scaled * m_macroBindings[i].amount;
-        }
-        
-        return std::clamp(base + modulationSum, m_min, m_max);
+    float getNextValue() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const float value = m_smoother.getNextValue();
+        return std::isfinite(value) ? std::clamp(value, m_min, m_max) : m_min;
     }
 
-    float getCurrentValue() const { return m_smoother.getCurrentValue(); }
-    uint32_t getId() const { return m_id; }
+    uint32_t id() const { return m_id; }
+    const std::string& name() const { return m_name; }
+    float currentValue() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const float value = m_smoother.getCurrentValue();
+        return std::isfinite(value) ? std::clamp(value, m_min, m_max) : m_min;
+    }
 
 private:
     uint32_t m_id;
     std::string m_name;
-    float m_min, m_max;
-    LinearSmoother m_smoother;
-    
-    struct Binding { uint32_t macroId; float amount; float minRange; float maxRange; };
-    static constexpr uint32_t kMaxMacroBindings = 8;
-    std::array<Binding, kMaxMacroBindings> m_macroBindings;
-    std::atomic<uint32_t> m_macroCount;
+    float m_min;
+    float m_max;
+    ParameterSmoother m_smoother;
+    static constexpr uint32_t kMaxMacroBindings = 32;
+    struct MacroBinding { uint32_t id; float amount; float min; float max; };
+    std::array<MacroBinding, kMaxMacroBindings> m_macroBindings{};
+    std::atomic<uint32_t> m_macroCount{0};
+    mutable std::mutex m_macroMutex;
+    mutable std::mutex m_mutex;
 };
 
-/**
- * @class ParamTree
- * @brief Logic Pro style parameter tree with MPMC command queue.
- */
-class ParamTree {
-public:
-    static constexpr size_t kMaxParams = 32768;
-
-    static ParamTree& getInstance() {
-        static ParamTree instance;
-        return instance;
-    }
-
-    struct ParameterUpdate {
-        uint32_t id;
-        float value;
-    };
-
-    void registerParam(uint32_t id, const std::string& name, float min, float max, float def) {
-        if (id >= kMaxParams) return;
-        std::lock_guard<std::mutex> lock(m_regMutex);
-        m_ownedParams.push_back(std::make_unique<ManagedParameter>(id, name, min, max, def));
-        m_paramsArray[id].store(m_ownedParams.back().get(), std::memory_order_release);
-    }
-
-    void setParam(uint32_t id, float value) {
-        if (id < kMaxParams) m_queue.push({id, value});
-    }
-
-    void syncUpdates(uint32_t blockSamples) {
-        while (auto update = m_queue.pop()) {
-            if (update->id < kMaxParams) {
-                auto* p = m_paramsArray[update->id].load(std::memory_order_acquire);
-                if (p) p->updateTarget(update->value, blockSamples);
-            }
-        }
-    }
-
-    ManagedParameter* getParam(uint32_t id) {
-        if (id >= kMaxParams) return nullptr;
-        return m_paramsArray[id].load(std::memory_order_acquire);
-    }
-
-private:
-    ParamTree() { for (auto& p : m_paramsArray) p.store(nullptr); }
-    std::vector<std::unique_ptr<ManagedParameter>> m_ownedParams;
-    std::mutex m_regMutex; 
-    std::array<std::atomic<ManagedParameter*>, kMaxParams> m_paramsArray;
-    Concurrency::MPMCQueue<ParameterUpdate, 16384> m_queue;
-};
 
 } // namespace Aura::Core::Engine

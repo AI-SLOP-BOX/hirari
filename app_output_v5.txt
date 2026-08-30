@@ -1,4 +1,0 @@
-[Engine] Logic Pro 11 Ultimate Session Ready.
-[UI] Bootstrapping UI...
-[UI] Kernel Created.
-[macOS] GUI Host launched with HiDPI Scale: 2

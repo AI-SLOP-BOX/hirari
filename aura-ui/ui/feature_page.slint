@@ -1,0 +1,78 @@
+import { Slider } from "std-widgets.slint";
+import { Style } from "./style.slint";
+
+// Shared shell for secondary DAW feature pages. The page owns presentation;
+// the AppWindow only supplies labels, values, and the change callback.
+export component Z_LogicFeaturePage inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <[string]> controls;
+    in property <[float]> values;
+    callback changed(int, float);
+    background: Style.surface;
+    border-width: 1px;
+    border-color: Style.border;
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        Text { text: root.title; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: root.subtitle; font-size: 10px; color: Style.text-dim; }
+        Rectangle { height: 1px; background: Style.border; }
+        HorizontalLayout {
+            spacing: 8px;
+            for label[idx] in root.controls : Rectangle {
+                horizontal-stretch: 1;
+                height: 112px;
+                background: Style.panel;
+                border-width: 1px;
+                border-color: Style.border;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 7px;
+                    Text { text: label; font-size: 9px; color: Style.text; overflow: elide; }
+                    Text { text: Math.floor(root.values[idx] * 100.0) + "%"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
+                    Slider {
+                        vertical-stretch: 1;
+                        value: root.values[idx];
+                        changed(v) => { root.changed(idx, v); }
+                    }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            Text { text: "Changes are applied at block boundaries."; font-size: 9px; color: Style.text-muted; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "READY"; font-size: 9px; color: Style.ok; font-family: Style.numeric-font; }
+        }
+    }
+}
+
+export component Z_StepCell inherits Rectangle {
+    in property <color> accent: Style.border;
+    in-out property <bool> active: false;
+    callback clicked(bool);
+    horizontal-stretch: 1;
+    height: 22px;
+    background: root.active ? root.accent : Style.panel;
+    border-width: 1px;
+    border-color: root.accent;
+    animate background { duration: 80ms; }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.active = !root.active; root.clicked(root.active); }
+    }
+}
+
+export component Z_QuickHelp inherits Rectangle {
+    in property <string> context: "Select a control to see help";
+    width: 280px; height: 116px;
+    background: Style.panel; border-width: 1px; border-color: Style.border; border-radius: 4px;
+    VerticalLayout {
+        padding: 12px; spacing: 7px;
+        Text { text: "Quick Help"; font-size: 11px; font-weight: 700; color: Style.text; }
+        Text { text: root.context; font-size: 10px; color: Style.text-dim; wrap: word-wrap; }
+        Text { text: "Space: Play/Stop   C: Cycle   I: Inspector   ⌘D: Duplicate Clip"; font-size: 9px; color: Style.brand; font-family: Style.numeric-font; }
+    }
+}

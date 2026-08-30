@@ -29,7 +29,7 @@ struct StringHash {
 /**
  * @brief User-defined literal for easy hash creation: "my_track"_id
  */
-constexpr uint32_t operator"" _id(const char* str, size_t size) {
+constexpr uint32_t operator""_id(const char* str, size_t size) {
     return StringHash::get(std::string_view(str, size));
 }
 

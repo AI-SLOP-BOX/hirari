@@ -1,0 +1,8 @@
+// Production keeps these views behind the AppWindow production_mode gate.
+// This facade is the only import surface for experimental screens so the
+// application shell does not depend on each research view individually.
+export { Z_StageLaunchpad } from "./stage_launchpad.slint";
+export { Z_LiveLoops } from "./live_loops.slint";
+export { Z_AuraModular } from "./aura_modular.slint";
+export { Z_SpectralRestoration } from "./spectral_restoration.slint";
+export { Z_AuraIDE } from "./aura_ide.slint";

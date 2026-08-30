@@ -33,7 +33,17 @@ public:
      * HONEST FIX: No more real-time transcendentals.
      */
     float getThresholdAtFreq(float freq) {
-        int idx = std::clamp((int)(std::log(freq/20.0f) / std::log(1.1f)), 0, 127);
+        if (m_athTable.empty()) return -60.0f;
+        if (!std::isfinite(freq) || freq <= 20.0f) return m_athTable.front();
+
+        const float maxFreq = 20.0f * std::pow(1.1f, 127.0f);
+        if (!std::isfinite(maxFreq) || freq >= maxFreq) return m_athTable.back();
+
+        // The explicit range checks keep this float-to-int conversion safe.
+        const float tablePosition = std::log(freq / 20.0f) / std::log(1.1f);
+        if (!std::isfinite(tablePosition)) return m_athTable.front();
+        const int idx = std::clamp(static_cast<int>(tablePosition), 0,
+                                   static_cast<int>(m_athTable.size() - 1));
         return m_athTable[idx];
     }
 
@@ -42,8 +52,14 @@ public:
      * HONEST FIX: Replaced binary on/off with smooth 0..1 to prevent pop-noise.
      */
     float getPerceptualImportance(float signalDB, float backgroundDB) {
+        if (!std::isfinite(signalDB) || !std::isfinite(backgroundDB)) return 0.05f;
+
+        // Keep pathological but finite dB values from overflowing arithmetic.
+        signalDB = std::clamp(signalDB, -1.0e6f, 1.0e6f);
+        backgroundDB = std::clamp(backgroundDB, -1.0e6f, 1.0e6f);
         float maskingThreshold = backgroundDB - 15.0f; // Simplified masking delta
         float delta = signalDB - maskingThreshold;
+        if (!std::isfinite(delta)) return delta > 0.0f ? 1.0f : 0.05f;
         
         // Linear fade: 0 to 1 scaling over a 12dB window
         // This prevents the 'switching noise' (Pop) when the analyzer toggles.

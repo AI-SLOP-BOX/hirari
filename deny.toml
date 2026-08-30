@@ -1,0 +1,36 @@
+[advisories]
+yanked = "deny"
+ignore = [
+    # Maintenance advisories without a vulnerability or safe compatible
+    # replacement. cargo-audit still reports these in CI; vulnerabilities are
+    # never ignored.
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0141",
+    "RUSTSEC-2026-0192",
+    "RUSTSEC-2026-0206",
+]
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "GPL-3.0-only",
+    "ISC",
+    "MIT",
+    "NCSA",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

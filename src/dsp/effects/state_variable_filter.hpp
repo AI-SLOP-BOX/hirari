@@ -28,7 +28,9 @@ public:
      * @brief SET PARAMS: SVF Logic for Analog Modeling.
      */
     void setParams(float freq, float gainDb, float Q) {
-        float g = std::tan(M_PI * freq / m_sampleRate);
+        freq = std::clamp(freq, 5.0f, static_cast<float>(m_sampleRate * 0.45));
+        Q = std::clamp(Q, 0.05f, 20.0f);
+        float g = std::tan(static_cast<float>(M_PI) * freq / static_cast<float>(m_sampleRate));
         float k = 1.0f / Q;
         float a = std::pow(10.0f, gainDb / 40.0f); // Half-gain for shelf sum logic
         
@@ -42,32 +44,31 @@ public:
      * @brief BLOCK PROCESS: High-performance buffer sum.
      */
     void process(Core::AudioBuffer& buffer) {
-        uint32_t numSamples = buffer.getNumSamples();
-        uint32_t numChannels = buffer.getNumChannels();
-
-        for (uint32_t c = 0; c < numChannels; ++c) {
-            float* samples = buffer.getWritePointer(c);
-            float& s1 = m_s1[c];
-            float& s2 = m_s2[c];
-            
-            for (uint32_t i = 0; i < numSamples; ++i) {
-                float x = samples[i];
-                float v3 = x - s2;
-                float v1 = m_a1 * s1 + m_a2 * v3;
-                float v2 = s2 + m_a2 * s1 + m_a3 * v3;
-                
-                s1 = 2.0f * v1 - s1;
-                s2 = 2.0f * v2 - s2;
-                
-                // Pultec-style Parallel Summation for Shelves
-                if (m_type == LowShelf) samples[i] = x + m_gain * v2;
-                else if (m_type == HighShelf) samples[i] = x + m_gain * (x - m_k * v1 - v2);
-                else if (m_type == LowPass) samples[i] = v2;
-                else if (m_type == HighPass) samples[i] = x - m_k * v1 - v2;
-                else samples[i] = v1; // Bandpass fallback
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        for (uint32_t c = 0; c < channels; ++c) {
+            float* data = buffer.getWritePointer(c);
+            for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+                const float input = std::isfinite(data[i]) ? data[i] : 0.0f;
+                const float v3 = input - m_s2[c];
+                const float v1 = m_a1 * m_s1[c] + m_a2 * v3;
+                const float v2 = m_s2[c] + m_a2 * m_s1[c] + m_a3 * v3;
+                m_s1[c] = 2.0f * v1 - m_s1[c];
+                m_s2[c] = 2.0f * v2 - m_s2[c];
+                float output = 0.0f;
+                switch (m_type) {
+                    case LowPass: output = v2; break;
+                    case HighPass: output = input - m_k * v1 - v2; break;
+                    case BandPass: output = v1; break;
+                    case Notch: output = input - m_k * v1; break;
+                    case Bell: output = input + (m_gain - 1.0f) * v1; break;
+                    case LowShelf: output = input + (m_gain - 1.0f) * v2; break;
+                    case HighShelf: output = input + (m_gain - 1.0f) * (input - v2); break;
+                }
+                data[i] = std::isfinite(output) ? output : 0.0f;
             }
         }
     }
+
 
     void reset() {
         m_s1.fill(0.0f);

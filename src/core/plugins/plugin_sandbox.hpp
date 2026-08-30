@@ -1,98 +1,74 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
-#include <mutex>
-#include <csignal>
-#include <csetjmp>
-#include <iostream>
+#include <utility>
 #include "../../dsp/iprocessor.hpp"
 #include "../../core/audio_buffer.hpp"
+#include "../../core/log_buffer.hpp"
 
 namespace Aura::Core::Plugins {
 
 /**
  * @class PluginSandboxHost
- * @brief Zero-Latency Crash-Resiliant Plugin Wrapper.
- * HONEST FIX: Replaces a useless try-catch with a REAL signal-protected 
- * jump system (SIGSEGV/SIGFPE/SIGILL). This prevents unstable 3rd-party 
- * VST/AU plugins from taking down the entire DAW process.
+ * @brief Exception-safe bypass wrapper for an in-process plugin.
+ *
+ * This class is deliberately not a process sandbox. Recovering SIGSEGV or
+ * SIGILL with siglongjmp is undefined for C++ objects and can leave the audio
+ * graph, allocator, and locks corrupted. Real crash isolation must be provided
+ * by a child process/IPC host; this wrapper only contains C++ exceptions and
+ * bypasses after a failure.
  */
 class PluginSandboxHost : public DSP::IProcessor {
 public:
-    PluginSandboxHost(std::shared_ptr<DSP::IProcessor> inner) : m_inner(inner) {}
+    explicit PluginSandboxHost(std::shared_ptr<DSP::IProcessor> inner)
+        : m_inner(std::move(inner)) {}
 
-    void prepareToPlay(double sr, uint32_t bs) override {
-        if (!m_hasCrashed) m_inner->prepareToPlay(sr, bs);
+    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+        if (m_hasCrashed.load(std::memory_order_acquire) || !m_inner) return;
+        try {
+            m_inner->prepareToPlay(sr, bs);
+        } catch (...) {
+            markFailed("PLUGIN_EXCEPTION_CAUGHT");
+        }
     }
 
-    /**
-     * @brief PROTECTED PROCESS: Real Signal-level Sandbox.
-     * Uses setjmp/longjmp to survive Segmentation Faults (SIGSEGV).
-     */
-    void process(Core::AudioBuffer& b, Core::MidiBuffer& m, const DSP::ProcessContext& context) noexcept override {
-        if (m_hasCrashed) {
-            b.clear(); // Plugin is dead, keep silence
+    void process(Core::AudioBuffer& b, Core::MidiBuffer& m,
+                 const DSP::ProcessContext& context) noexcept override {
+        if (m_hasCrashed.load(std::memory_order_acquire) || !m_inner) {
+            b.clear();
             return;
         }
 
-        // --- THE CRITICAL SURVIVAL ZONE ---
-        // Save the current thread state before invoking the plugin.
-        // POSIX: sigsetjmp/siglongjmp are better for signal masks.
-        if (sigsetjmp(m_jumpEnv, 1) == 0) {
-            setupSignalHandlers();
-            
-            // Invoke the potentially unstable plugin
+        try {
             m_inner->process(b, m, context);
-            
-            restoreSignalHandlers();
-        } else {
-            // WE JUST SURVIVED A CRASH!
-            m_hasCrashed = true;
+        } catch (...) {
+            markFailed("PLUGIN_EXCEPTION_CAUGHT");
             b.clear();
-            std::cerr << "[CRITICAL] PLUGIN CRASHED: Segmentation Fault suppressed. Session saved." << std::endl;
         }
     }
 
-    void reset() noexcept override { 
-        if (!m_hasCrashed) m_inner->reset(); 
+    void reset() noexcept override {
+        if (m_hasCrashed.load(std::memory_order_acquire) || !m_inner) return;
+        try {
+            m_inner->reset();
+        } catch (...) {
+            markFailed("PLUGIN_EXCEPTION_CAUGHT");
+        }
     }
-    
-    bool hasCrashed() const { return m_hasCrashed; }
+
+    bool hasCrashed() const noexcept {
+        return m_hasCrashed.load(std::memory_order_acquire);
+    }
 
 private:
-    static void signalHandler(int sig) {
-        // Jumping back to the pre-process state. 
-        // Note: Global/Thread-local m_jumpEnv is required for static handler.
-        siglongjmp(t_currentJumpEnv, 1);
-    }
-
-    void setupSignalHandlers() {
-        t_currentJumpEnv = &m_jumpEnv;
-        m_oldSegv = std::signal(SIGSEGV, signalHandler);
-        m_oldFpe = std::signal(SIGFPE, signalHandler);
-        m_oldIll = std::signal(SIGILL, signalHandler);
-    }
-
-    void restoreSignalHandlers() {
-        std::signal(SIGSEGV, m_oldSegv);
-        std::signal(SIGFPE, m_oldFpe);
-        std::signal(SIGILL, m_oldIll);
+    void markFailed(const char* message) noexcept {
+        m_hasCrashed.store(true, std::memory_order_release);
+        ::Aura::Core::Diagnostics::LogBuffer::post(0, 0, message);
     }
 
     std::shared_ptr<DSP::IProcessor> m_inner;
-    sigjmp_buf m_jumpEnv;
-    bool m_hasCrashed = false;
-
-    // Signal backups
-    void (*m_oldSegv)(int);
-    void (*m_oldFpe)(int);
-    void (*m_oldIll)(int);
-
-    // Thread-local pointer to support concurrent plugin processing
-    static thread_local sigjmp_buf* t_currentJumpEnv;
+    std::atomic<bool> m_hasCrashed{false};
 };
-
-// Definition of thread local storage
-inline thread_local sigjmp_buf* PluginSandboxHost::t_currentJumpEnv = nullptr;
 
 } // namespace Aura::Core::Plugins

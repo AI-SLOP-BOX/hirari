@@ -26,9 +26,9 @@ public:
         }
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override { m_sampleRate = sr; }
+    void prepareToPlay(double sr, uint32_t /*blockSize*/) noexcept override { m_sampleRate = sr; }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& /*context*/) noexcept override {
         // 1. MIDI Trigger
         for (const auto& ev : midi) {
             if ((ev.data[0] & 0xF0) == 0x90 && ev.data[2] > 0) triggerNote(ev.data[1], ev.data[2] / 127.0f);

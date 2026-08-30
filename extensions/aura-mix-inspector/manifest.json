@@ -1,0 +1,20 @@
+{
+  "id": "aura-mix-inspector",
+  "name": "Aura Mix Inspector",
+  "version": "0.1.0",
+  "description": "Read-only mix health summary for the current Aura project.",
+  "capabilities": ["project.inspect", "audio.diagnostics"],
+  "permissions": ["project_read"],
+  "commands": [
+    {
+      "id": "inspect_mix",
+      "title": "Inspect mix health",
+      "kind": "read_only"
+    },
+    {
+      "id": "explain_loudness",
+      "title": "Explain loudness and headroom",
+      "kind": "read_only"
+    }
+  ]
+}

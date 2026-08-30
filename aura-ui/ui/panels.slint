@@ -1,0 +1,31 @@
+import { Style } from "style.slint";
+import { Z_IconButton } from "./primitives/icon_button.slint";
+
+// Compact, factual status panel shared by the transport and inspector.
+export component Z_AudioEngineStatus {
+    in property <bool> ready;
+    in property <float> time;
+    Rectangle {
+        height: 64px; background: Style.surface; border-radius: 2px;
+        border-width: 1px; border-color: root.ready ? Style.brand : Style.border;
+        HorizontalLayout {
+            padding: 12px; spacing: 15px;
+            Rectangle {
+                width: 40px; height: 40px; border-radius: 20px;
+                background: root.ready ? Style.brand.with-alpha(0.1) : Style.surface;
+                Rectangle {
+                    width: 6px; height: 6px; border-radius: 3px;
+                    x: 17px; y: 17px; background: Style.brand;
+                    opacity: root.ready ? 1.0 : 0.35;
+                }
+            }
+            VerticalLayout {
+                spacing: 4px; alignment: center;
+                Text { text: "AUDIO ENGINE: " + (root.ready ? "READY" : "STANDBY"); font-size: 11px; color: Style.text; font-weight: 600; }
+                Text { text: root.ready ? "Output active" : "Initializing output"; font-size: 10px; color: Style.text-dim; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Z_IconButton { icon: "STATUS"; active: ready; active-col: Style.brand; }
+        }
+    }
+}

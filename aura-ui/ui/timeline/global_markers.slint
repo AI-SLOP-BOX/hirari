@@ -1,0 +1,20 @@
+import { Style } from "../style.slint";
+import { Z_Marker } from "../model/models.slint";
+import { TimelineActions } from "../actions/timeline_actions.slint";
+
+export component Z_GlobalMarkers {
+    in property <[Z_Marker]> markers;
+    in property <float> z_lvl;
+    in property <float> ph;
+    Rectangle {
+        height: 20px; background: Style.surface;
+        for m in markers : Rectangle {
+            x: m.beat * Style.grid-step * z_lvl; width: 60px; height: 100%; background: m.color.with-alpha(0.1);
+            Rectangle { width: 2px; height: 100%; background: m.color; x: 0; }
+            Text { text: m.label; font-size: Style.font-xxs; color: m.color; x: 4px; vertical-alignment: center; font-weight: 900; }
+        }
+        // Extra Playhead Line for Marker Area
+        Rectangle { x: ph * Style.grid-step * z_lvl; width: 1.5px; height: 100%; background: Style.ok; opacity: 0.4; }
+        TouchArea { clicked => { TimelineActions.add_marker(self.mouse_x / 1px / (Style.grid-step * z_lvl / 1px)); } }
+    }
+}

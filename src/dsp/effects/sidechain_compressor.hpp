@@ -24,42 +24,51 @@ public:
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer&, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
-        
-        // 1. SIDECHAIN DETECTOR
-        // This compressor is dedicated to sidechain ducking.
-        const float* scL = (context.sidechainBuffer) ? context.sidechainBuffer->getReadPointer(0) : l;
-        const float* scR = (context.sidechainBuffer) ? context.sidechainBuffer->getReadPointer(1) : r;
-
-        float alphaA = std::exp(-1.0f / (m_sampleRate * m_attack * 0.001f));
-        float alphaR = std::exp(-1.0f / (m_sampleRate * m_release * 0.001f));
-
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float inLevel = std::max(std::abs(scL[s]), std::abs(scR[s]));
-            
-            // Peak Detection
-            float alpha = (inLevel > m_env) ? alphaA : alphaR;
-            m_env = alpha * m_env + (1.0f - alpha) * inLevel;
-
-            // Gain Reduction Logic
-            float reduction = 1.0f;
-            if (m_env > m_threshold) {
-                float dbOver = 20.0f * std::log10(m_env / m_threshold);
-                float dbReduced = dbOver * (1.0f / m_ratio - 1.0f);
-                reduction = std::pow(10.0f, dbReduced / 20.0f);
+        const uint32_t samples = buffer.getNumSamples();
+        if (samples == 0 || buffer.getNumChannels() == 0) return;
+        const float* scL = nullptr;
+        const float* scR = nullptr;
+        if (context.sidechainBuffer &&
+            context.sidechainBuffer->getNumSamples() >= samples &&
+            context.sidechainBuffer->getNumChannels() > 0) {
+            scL = context.sidechainBuffer->getReadPointer(0);
+            scR = context.sidechainBuffer->getNumChannels() > 1
+                ? context.sidechainBuffer->getReadPointer(1) : scL;
+        }
+        const float* mainL = buffer.getReadPointer(0);
+        const float* mainR = buffer.getNumChannels() > 1 ? buffer.getReadPointer(1) : mainL;
+        float* outL = buffer.getWritePointer(0);
+        float* outR = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : outL;
+        const double sr = (std::isfinite(context.sampleRate) && context.sampleRate > 1.0)
+            ? context.sampleRate : m_sampleRate;
+        const float attackCoeff = 1.0f - std::exp(-1.0f /
+            static_cast<float>(std::max(1.0, m_attack) * 0.001 * sr));
+        const float releaseCoeff = 1.0f - std::exp(-1.0f /
+            static_cast<float>(std::max(1.0, m_release) * 0.001 * sr));
+        const float threshold = std::clamp(std::isfinite(m_threshold) ? m_threshold : 0.2f,
+                                           1.0e-5f, 1.0f);
+        const float ratio = std::max(1.0f, std::isfinite(m_ratio) ? m_ratio : 1.0f);
+        for (uint32_t i = 0; i < samples; ++i) {
+            const float detectorL = scL ? scL[i] : mainL[i];
+            const float detectorR = scR ? scR[i] : mainR[i];
+            const float detector = std::max(std::abs(detectorL), std::abs(detectorR));
+            const float targetEnv = std::isfinite(detector) ? detector : 0.0f;
+            const float envCoeff = targetEnv > m_env ? attackCoeff : releaseCoeff;
+            m_env += (targetEnv - m_env) * envCoeff;
+            float desiredGain = 1.0f;
+            if (m_env > threshold) {
+                const float compressed = threshold + (m_env - threshold) / ratio;
+                desiredGain = std::clamp(compressed / std::max(m_env, 1.0e-6f), 0.0f, 1.0f);
             }
-
-            // Smoothing for gain (Avoid Zipper noise)
-            m_currentGain = 0.95f * m_currentGain + 0.05f * reduction;
-
-            l[s] *= m_currentGain;
-            r[s] *= m_currentGain;
+            const float gainCoeff = desiredGain < m_currentGain ? attackCoeff : releaseCoeff;
+            m_currentGain += (desiredGain - m_currentGain) * gainCoeff;
+            outL[i] = std::isfinite(mainL[i] * m_currentGain) ? mainL[i] * m_currentGain : 0.0f;
+            if (outR != outL) {
+                outR[i] = std::isfinite(mainR[i] * m_currentGain) ? mainR[i] * m_currentGain : 0.0f;
+            }
         }
     }
+
 
     void reset() noexcept override {
         m_env = 0.0f;

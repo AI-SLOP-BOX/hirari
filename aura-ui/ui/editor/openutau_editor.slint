@@ -1,0 +1,76 @@
+import { Button, LineEdit, Slider } from "std-widgets.slint";
+import { Style } from "../style.slint";
+
+export component Z_OpenUtauEditor inherits Rectangle {
+    callback open-score();
+    callback launch-editor();
+    callback render-score();
+    callback import-render();
+    callback apply-tuning();
+    in-out property <string> score-path: "";
+    in-out property <string> render-path: "";
+    in property <string> status: "OPENUTAU READY";
+    in-out property <float> scoop: 0.35;
+    in-out property <float> vibrato: 0.45;
+    in-out property <float> dynamics: 0.60;
+    in-out property <float> consonants: 0.50;
+    in property <[string]> notes: [];
+    background: Style.surface;
+    border-width: 1px;
+    border-color: Style.border;
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        Text { text: "OpenUtau Vocal Editor"; color: Style.brand; font-size: 18px; font-weight: 700; }
+        Text { text: "歌詞・音高・ノート編集はOpenUtau、タイムラインと音声はAuraで管理"; color: Style.text-secondary; font-size: 11px; }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "スコアを開く"; clicked => { open-score(); } }
+            Button { text: "OpenUtauで編集"; clicked => { launch-editor(); } }
+            Button { text: "レンダー"; clicked => { render-score(); } }
+            Button { text: "Auraへ取り込む"; clicked => { import-render(); } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "USTX/UST"; color: Style.text-tertiary; vertical-alignment: center; }
+            LineEdit { text <=> score-path; horizontal-stretch: 1; placeholder-text: "OpenUtau score"; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "Render"; color: Style.text-tertiary; vertical-alignment: center; }
+            LineEdit { text <=> render-path; horizontal-stretch: 1; placeholder-text: "Rendered WAV/AIFF"; }
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        Text { text: "Aura調教"; color: Style.text-primary; font-size: 13px; font-weight: 600; }
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout { horizontal-stretch: 1; Text { text: "しゃくり"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> scoop; } }
+            VerticalLayout { horizontal-stretch: 1; Text { text: "ビブラート"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> vibrato; } }
+            VerticalLayout { horizontal-stretch: 1; Text { text: "強弱"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> dynamics; } }
+            VerticalLayout { horizontal-stretch: 1; Text { text: "子音"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> consonants; } }
+            Button { text: "調教をUSTXへ反映"; clicked => { apply-tuning(); } }
+        }
+        Text { text: "ノートエディタ · tick / length / MIDI pitch"; color: Style.text-primary; font-size: 13px; font-weight: 600; }
+        Rectangle {
+            height: 240px;
+            background: Style.surface-0;
+            border-width: 1px;
+            border-color: Style.border;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 5px;
+                if (notes.length > 0) : VerticalLayout {
+                    for row in notes : Text { text: row; color: Style.text-secondary; font-size: 11px; font-family: Style.numeric-font; }
+                }
+                if (notes.length == 0) : Text {
+                    text: "UST/USTXを開くと実際のノートが表示されます";
+                    color: Style.text-tertiary; font-size: 12px;
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: "※ tick範囲・音程・歌詞を確認してからOpenUtauで詳細調教。Aura側の表示は実ファイルを再読込します"; color: Style.text-tertiary; font-size: 10px; }
+            }
+        }
+        Text { text: status; color: Style.ok; font-size: 11px; }
+        Rectangle { vertical-stretch: 1; }
+    }
+}

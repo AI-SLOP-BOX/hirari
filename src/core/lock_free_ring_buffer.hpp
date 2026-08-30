@@ -42,6 +42,15 @@ public:
         return true;
     }
 
+    // Control-thread lifecycle operation. Call only after the consumer has
+    // stopped; resetting indices while push/pop are active would violate the
+    // SPSC ownership contract. This is used to prevent frames left behind by
+    // a failed recording session from entering the next session.
+    void reset() noexcept {
+        m_readIdx.store(0, std::memory_order_relaxed);
+        m_writeIdx.store(0, std::memory_order_relaxed);
+    }
+
 private:
     std::unique_ptr<T[]> m_buffer;
     alignas(64) std::atomic<size_t> m_writeIdx;

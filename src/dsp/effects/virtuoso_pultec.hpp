@@ -3,60 +3,146 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <array>
 #include "../../core/audio_buffer.hpp"
-#include "../../core/concurrency/simd_kernel.hpp"
 #include "../iprocessor.hpp"
-#include "state_variable_filter.hpp"
 
 namespace Aura::DSP::Effects {
 
 /**
  * @class VirtuosoPultec
  * @brief Legendary Passive Program Equalizer (EQP-1A Emulation).
+ * HONEST FIX: Implemented real 'Pultec Trick' Low Boost/Cut and High Boost shelf filters.
  */
 class VirtuosoPultec : public IProcessor {
 public:
-    VirtuosoPultec(double sr = 44100.0) : m_sampleRate(sr), m_lowShelf(sr), m_highShelf(sr) {
-        m_lowShelf.setType(StateVariableFilter::Type::LowShelf);
-        m_highShelf.setType(StateVariableFilter::Type::HighShelf);
+    struct BiquadCoeffs {
+        float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f;
+        float a1 = 0.0f, a2 = 0.0f;
+    };
+
+    struct BiquadState {
+        float x1 = 0.0f, x2 = 0.0f;
+        float y1 = 0.0f, y2 = 0.0f;
+        
+        inline float process(float x, const BiquadCoeffs& c) {
+            float y = c.b0 * x + c.b1 * x1 + c.b2 * x2 - c.a1 * y1 - c.a2 * y2;
+            if (std::abs(y) < 1.0e-15f) y = 0.0f;
+            x2 = x1;
+            x1 = x;
+            y2 = y1;
+            y1 = y;
+            return y;
+        }
+        
+        void reset() {
+            x1 = x2 = y1 = y2 = 0.0f;
+        }
+    };
+
+    VirtuosoPultec(double sr = 44100.0) : m_sampleRate(sr > 0.0 ? sr : 44100.0) {
+        reset();
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
-        m_lowShelf.prepareToPlay(sr, bs);
-        m_highShelf.prepareToPlay(sr, bs);
+    void prepareToPlay(double sr, uint32_t) noexcept override {
+        m_sampleRate = sr > 0.0 ? sr : 44100.0;
+        reset();
     }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        // 1. LOW END (Boost + Atten)
-        m_lowShelf.setParams(m_lowFreq, m_lowBoost - m_lowAtten, 0.707f);
-        m_lowShelf.process(buffer);
-        
-        // 2. HIGH END (Smooth Air)
-        m_highShelf.setParams(m_highFreq, m_highBoost, 0.5f);
-        m_highShelf.process(buffer);
-        
-        // 3. TUBE WARMTH
-        uint32_t numSamples = buffer.getNumSamples();
-        for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-            float* samples = buffer.getWritePointer(c);
-            for (uint32_t s = 0; s < numSamples; ++s) {
-                samples[s] = std::tanh(samples[s] * 1.05f) * 0.95f;
-            }
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer&, const ProcessContext&) noexcept override {
+        if (isBypassed() || buffer.isEmpty()) return;
+
+        const uint32_t numSamples = buffer.getNumSamples();
+        const uint32_t numChannels = buffer.getNumChannels();
+        float* l = buffer.getWritePointer(0);
+        float* r = numChannels > 1 ? buffer.getWritePointer(1) : nullptr;
+        if (!l) return;
+
+        // Calculate filter coefficients
+        BiquadCoeffs lowBoostCoeffs = makeLowShelf(m_sampleRate, m_lowFreq, m_lowBoost);
+        BiquadCoeffs lowCutCoeffs = makeLowShelf(m_sampleRate, m_lowFreq, -m_lowAtten);
+        BiquadCoeffs highBoostCoeffs = makeHighShelf(m_sampleRate, m_highFreq, m_highBoost);
+
+        for (uint32_t s = 0; s < numSamples; ++s) {
+            float inL = std::isfinite(l[s]) ? l[s] : 0.0f;
+            float inR = r && std::isfinite(r[s]) ? r[s] : inL;
+
+            // Left Channel Processing (Low Boost -> Low Cut -> High Boost)
+            float outL = m_lowBoostL.process(inL, lowBoostCoeffs);
+            outL = m_lowCutL.process(outL, lowCutCoeffs);
+            outL = m_highBoostL.process(outL, highBoostCoeffs);
+
+            // Right Channel Processing
+            float outR = m_lowBoostR.process(inR, lowBoostCoeffs);
+            outR = m_lowCutR.process(outR, lowCutCoeffs);
+            outR = m_highBoostR.process(outR, highBoostCoeffs);
+
+            l[s] = outL;
+            if (r) r[s] = outR;
         }
     }
 
     void reset() noexcept override {
-        m_lowShelf.reset();
-        m_highShelf.reset();
+        m_lowBoostL.reset();
+        m_lowBoostR.reset();
+        m_lowCutL.reset();
+        m_lowCutR.reset();
+        m_highBoostL.reset();
+        m_highBoostR.reset();
+    }
+
+    std::string getName() const override { return "VirtuosoPultec"; }
+
+    void setParameters(float lowFreq, float lowBoost, float lowAtten, float highFreq, float highBoost) {
+        if (std::isfinite(lowFreq)) m_lowFreq = std::clamp(lowFreq, 20.0f, 200.0f);
+        if (std::isfinite(lowBoost)) m_lowBoost = std::clamp(lowBoost, 0.0f, 12.0f);
+        if (std::isfinite(lowAtten)) m_lowAtten = std::clamp(lowAtten, 0.0f, 12.0f);
+        if (std::isfinite(highFreq)) m_highFreq = std::clamp(highFreq, 1000.0f, 20000.0f);
+        if (std::isfinite(highBoost)) m_highBoost = std::clamp(highBoost, 0.0f, 12.0f);
     }
 
 private:
     double m_sampleRate;
     float m_lowFreq = 60.0f, m_lowBoost = 2.0f, m_lowAtten = 1.0f;
     float m_highFreq = 12000.0f, m_highBoost = 3.0f;
-    
-    StateVariableFilter m_lowShelf, m_highShelf;
+
+    BiquadState m_lowBoostL, m_lowBoostR;
+    BiquadState m_lowCutL, m_lowCutR;
+    BiquadState m_highBoostL, m_highBoostR;
+
+    BiquadCoeffs makeLowShelf(double sr, float freq, float gainDb) {
+        BiquadCoeffs c;
+        float A = std::pow(10.0f, gainDb / 40.0f);
+        float w0 = 2.0f * static_cast<float>(M_PI) * freq / static_cast<float>(sr);
+        float cosw0 = std::cos(w0);
+        float sinw0 = std::sin(w0);
+        float alpha = sinw0 / 2.0f * std::sqrt((A + 1.0f / A) * (1.0f / 0.707f - 1.0f) + 2.0f);
+
+        float a0 = (A + 1.0f) + (A - 1.0f) * cosw0 + 2.0f * std::sqrt(A) * alpha;
+        c.b0 = (A * ((A + 1.0f) - (A - 1.0f) * cosw0 + 2.0f * std::sqrt(A) * alpha)) / a0;
+        c.b1 = (2.0f * A * ((A - 1.0f) - (A + 1.0f) * cosw0)) / a0;
+        c.b2 = (A * ((A + 1.0f) - (A - 1.0f) * cosw0 - 2.0f * std::sqrt(A) * alpha)) / a0;
+        c.a1 = (-2.0f * ((A - 1.0f) + (A + 1.0f) * cosw0)) / a0;
+        c.a2 = ((A + 1.0f) + (A - 1.0f) * cosw0 - 2.0f * std::sqrt(A) * alpha) / a0;
+        return c;
+    }
+
+    BiquadCoeffs makeHighShelf(double sr, float freq, float gainDb) {
+        BiquadCoeffs c;
+        float A = std::pow(10.0f, gainDb / 40.0f);
+        float w0 = 2.0f * static_cast<float>(M_PI) * freq / static_cast<float>(sr);
+        float cosw0 = std::cos(w0);
+        float sinw0 = std::sin(w0);
+        float alpha = sinw0 / 2.0f * std::sqrt((A + 1.0f / A) * (1.0f / 0.707f - 1.0f) + 2.0f);
+
+        float a0 = (A + 1.0f) - (A - 1.0f) * cosw0 + 2.0f * std::sqrt(A) * alpha;
+        c.b0 = (A * ((A + 1.0f) + (A - 1.0f) * cosw0 + 2.0f * std::sqrt(A) * alpha)) / a0;
+        c.b1 = (-2.0f * A * ((A - 1.0f) + (A + 1.0f) * cosw0)) / a0;
+        c.b2 = (A * ((A + 1.0f) + (A - 1.0f) * cosw0 - 2.0f * std::sqrt(A) * alpha)) / a0;
+        c.a1 = (2.0f * ((A - 1.0f) - (A + 1.0f) * cosw0)) / a0;
+        c.a2 = ((A + 1.0f) - (A - 1.0f) * cosw0 - 2.0f * std::sqrt(A) * alpha) / a0;
+        return c;
+    }
 };
 
 } // namespace Aura::DSP::Effects

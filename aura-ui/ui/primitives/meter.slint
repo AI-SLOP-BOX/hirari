@@ -1,0 +1,45 @@
+import { Style } from "../style.slint";
+
+export component Z_Meter {
+    callback reset-peaks();
+    in property <float> time;
+    in-out property <float> beat: Math.mod(root.time / (60000.0 / Style.bpm) * 4.0, 1.0);
+    in property <float> val;
+    in property <float> peak_h;
+    in property <float> rms: 0.0;
+    in property <int> mode;
+
+    Rectangle {
+        width: 18px; height: 100%; background: Style.surface-0; border_radius: 1px; clip: true;
+        for i in [0.0, 0.25, 0.5, 0.75, 1.0] : Rectangle {
+            y: (1.0 - i) * parent.height; height: 1px; width: parent.width;
+            background: i > (mode == 2 ? 0.7 : 0.9) ? Style.line-strong : Style.line-subtle;
+            if (i > 0) : Text {
+                text: mode == 2 ? (i == 1.0 ? "+20" : (i == 0.75 ? "+10" : (i == 0.5 ? "0" : "-10"))) : (i == 1.0 ? "0" : (i == 0.75 ? "-6" : (i == 0.5 ? "-12" : "-24")));
+                font-size: Style.font-xxs; color: Style.text-muted; x: -8px;
+            }
+        }
+        Rectangle {
+            property <float> display-val: mode == 1 ? rms : val;
+            VerticalLayout {
+                spacing: 1px; padding: 1px;
+                for i in 24 : Rectangle {
+                    property <float> thresh: (24.0 - i) / 24.0;
+                    vertical-stretch: 1;
+                    background: display-val >= thresh ? (thresh > 0.9 ? Style.record : (thresh > 0.75 ? Style.solo : (thresh > 0.25 ? Style.ok : Style.brand))) : Style.border;
+                    opacity: display-val >= thresh ? 1.0 : 0.3;
+                }
+            }
+        }
+        Rectangle {
+            x: 10px; y: (1.0 - (mode == 0 ? rms : val).clamp(0,1)) * parent.height;
+            width: 2px; height: (mode == 0 ? rms : val).clamp(0,1) * parent.height;
+            background: mode == 2 ? Style.text-primary : Style.brand.with-alpha(0.6);
+        }
+        if (peak_h > 0.01) : Rectangle {
+            x: 1px; y: (1.0 - peak_h.clamp(0,1)) * parent.height; width: 7px; height: 1.5px;
+            background: peak_h > 0.98 ? Style.text-primary : Style.text-secondary;
+        }
+        TouchArea { clicked => { root.reset-peaks(); } }
+    }
+}

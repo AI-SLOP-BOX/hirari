@@ -1,0 +1,85 @@
+import { Style } from "../style.slint";
+import { Button, Slider } from "std-widgets.slint";
+import { CommandActions } from "../actions/command_actions.slint";
+import { StepActions } from "../actions/step_actions.slint";
+import { StackActions } from "../actions/stack_actions.slint";
+import { Z_StepCell } from "../feature_page.slint";
+
+export component Z_WorkflowPage inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> status: "READY";
+    width: 100%;
+    height: 300px;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 18px; spacing: 14px;
+        Text { text: root.title; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: root.subtitle; font-size: 10px; color: Style.text-dim; }
+        Rectangle { height: 1px; background: Style.border; }
+        HorizontalLayout {
+            spacing: 10px;
+            for label in ["Primary", "Secondary", "Monitor"] : Rectangle {
+                horizontal-stretch: 1; height: 86px; background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout {
+                    padding: 12px; spacing: 8px;
+                    Text { text: label; font-size: 10px; font-weight: 600; color: Style.text; }
+                    Text { text: root.status; font-size: 9px; color: Style.ok; font-family: Style.numeric-font; }
+                    Rectangle { vertical-stretch: 1; }
+                    Rectangle { height: 3px; background: Style.border; Rectangle { width: 42%; height: 100%; background: Style.brand; } }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        Text { text: "Select a track or project item to begin editing."; font-size: 10px; color: Style.text-muted; }
+    }
+}
+
+export component Z_StepSequencerPage inherits Rectangle {
+    in property <int> selected-track-id: -1;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 18px; spacing: 10px;
+        Text { text: "Step Sequencer"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: "16-step pattern editor with per-step velocity and probability"; font-size: 10px; color: Style.text-dim; }
+        Rectangle { height: 1px; background: Style.border; }
+        for row[idx] in ["Kick", "Snare", "Closed Hat", "Open Hat", "Bass", "Percussion"] : HorizontalLayout {
+            height: 28px; spacing: 4px;
+            Text { text: row; width: 84px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            for step in 16 : Z_StepCell {
+                accent: Math.mod(step, 4) == 0 ? Style.brand : Style.border;
+                clicked(active) => {
+                    StepActions.step_toggled(root.selected-track-id, idx, step, active);
+                    CommandActions.palette_exec("STEP " + row + " " + step);
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        Text { text: "Click a step to trigger or edit its event."; font-size: 9px; color: Style.text-muted; }
+    }
+}
+
+export component Z_TrackStackPage inherits Rectangle {
+    in property <int> selected-track-id: -1;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 18px; spacing: 12px;
+        Text { text: "Track Stacks"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: "Group selected tracks into one reusable mix control surface"; font-size: 10px; color: Style.text-dim; }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "Create from selected"; enabled: root.selected-track-id >= 0; clicked => { StackActions.create_from_selected(root.selected-track-id); } }
+            Button { text: "Add selected"; enabled: root.selected-track-id >= 0; clicked => { StackActions.add_selected(root.selected-track-id); } }
+            Button { text: "Delete stack"; clicked => { StackActions.delete_stack(); } }
+            Button { text: "Collapse"; clicked => { StackActions.collapsed_changed(true); } }
+            Button { text: "Expand"; clicked => { StackActions.collapsed_changed(false); } }
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        HorizontalLayout {
+            Text { text: "Stack level"; width: 90px; color: Style.text; vertical-alignment: center; }
+            Slider { horizontal-stretch: 1; value: 1.0; changed(v) => { StackActions.gain_changed(v * 2.0); } }
+        }
+        Text { text: "Changes are persisted with the project and available to CLI transactions."; font-size: 9px; color: Style.text-muted; }
+        Rectangle { vertical-stretch: 1; }
+    }
+}

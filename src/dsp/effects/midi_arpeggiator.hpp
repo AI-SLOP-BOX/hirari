@@ -2,6 +2,8 @@
 
 #include <vector>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include "../../core/midi_buffer.hpp"
 
 namespace Aura::DSP::Effects {
@@ -17,8 +19,10 @@ public:
     enum class Mode { Up, Down, UpDown, Random, AsPlayed };
 
     Arpeggiator(double sr = 44100.0) : m_sampleRate(sr) {
-        m_heldNotes.reserve(32);
-        m_sortedNotes.reserve(32);
+        // MIDI has at most 128 distinct pitches. Reserving the full bounded
+        // domain prevents a note burst from allocating on the audio thread.
+        m_heldNotes.reserve(128);
+        m_sortedNotes.reserve(128);
     }
 
     void setMode(Mode m) { m_mode = m; }
@@ -27,7 +31,9 @@ public:
         bool notesChanged = false;
 
         // 1. Maintain note list (Order matters for AsPlayed)
-        for (const auto& ev : input.getEvents()) {
+        const auto* events = input.getEvents();
+        for (size_t eventIndex = 0; eventIndex < input.size(); ++eventIndex) {
+            const auto& ev = events[eventIndex];
             uint8_t type = ev.data[0] & 0xF0;
             uint8_t note = ev.data[1];
             if (type == 0x90 && ev.data[2] > 0) {
@@ -54,13 +60,19 @@ public:
 
         if (m_heldNotes.empty()) return;
 
-        double samplesPerStep = (60.0 / bpm) * m_sampleRate * 0.25; 
+        if (!std::isfinite(bpm) || bpm <= 0.0 ||
+            !std::isfinite(m_sampleRate) || m_sampleRate <= 0.0) {
+            if (m_isNoteActive) stopCurrentNote(output, 0);
+            return;
+        }
+        const double samplesPerStep = (60.0 / bpm) * m_sampleRate * 0.25;
+        if (!std::isfinite(samplesPerStep) || samplesPerStep < 1.0) return;
         double gateWidth = samplesPerStep * 0.8;
 
         // Optimized Block Processing
         for (uint32_t s = 0; s < numSamples; ++s) {
             uint64_t currentS = playhead + s;
-            uint32_t currentStep = static_cast<uint32_t>(currentS / samplesPerStep);
+            const uint64_t currentStep = static_cast<uint64_t>(currentS / samplesPerStep);
             double phase = std::fmod(static_cast<double>(currentS), samplesPerStep);
 
             if (currentStep != m_lastStep) {
@@ -113,11 +125,10 @@ private:
     Mode m_mode = Mode::UpDown;
     std::vector<int> m_heldNotes;
     std::vector<int> m_sortedNotes;
-    uint32_t m_lastStep = 0xFFFFFFFF;
+    uint64_t m_lastStep = UINT64_MAX;
     int m_currentNote = -1;
     bool m_isNoteActive = false;
     uint32_t m_randomSeed = 1;
 };
 
 } // namespace Aura::DSP::Effects
-

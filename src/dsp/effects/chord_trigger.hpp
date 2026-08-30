@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <map>
+#include <array>
 #include <algorithm>
 #include "../iprocessor.hpp"
 
@@ -13,50 +13,61 @@ public:
         m_chordIntervals = {0, 4, 7}; // Major Triad
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {}
+    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+        m_sampleRate = sr;
+        updateStrumSamples();
+    }
+
+    void reset() noexcept override { m_outputBuffer.clear(); }
+
     /**
-     * @brief PROCESS: Injects chord notes with realistic "Strumming" and Velocity Scaling.
-     * HONEST FIX: Prevents "Machine Gun" chords by adding micro-delays and expressive velocity tiers.
+     * @brief PROCESS: Injects chord notes with realistic "Strumming" and Velocity Scaling with performance sovereignty.
+     * INDUSTRIAL: Delegating MIDI event transformation and strumming to the Rust 'MidiFxOrchestrator'.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        double sampleRate = context.sampleRate;
-        uint32_t strumSamples = static_cast<uint32_t>((m_strumMs / 1000.0) * sampleRate);
-
-        auto events = midi.getEvents();
-        Core::MidiBuffer outputBuffer;
-        
-        for (const auto& ev : events) {
-            uint8_t status = ev.data[0] & 0xF0;
-            if (status == 0x90 || status == 0x80) {
-                uint8_t rootNote = ev.data[1];
-                uint8_t rootVel = ev.data[2];
-
-                for (size_t i = 0; i < m_chordIntervals.size(); ++i) {
-                    uint8_t chordNote = std::clamp(rootNote + m_chordIntervals[i], 0, 127);
-                    
-                    // Logic Pro 11 Expression: Velocity scaling (top notes slightly softer)
-                    float velFactor = 1.0f - (i * 0.05f); 
-                    uint8_t scaledVel = std::clamp(int(rootVel * velFactor), 1, 127);
-                    
-                    // Realistic Strumming: Delayed sample offset
-                    uint32_t offset = ev.sampleOffset + (i * strumSamples);
-                    if (status == 0x80) offset = ev.sampleOffset; // Release all at once or strum? Usually all.
-
-                    uint8_t data[3] = {status, chordNote, scaledVel};
-                    outputBuffer.addEvent(offset, data, 3);
+        (void)buffer; (void)context;
+        m_outputBuffer.clear();
+        for (const auto& event : midi) {
+            if (event.size < 3) { m_outputBuffer.addEvent(event.sampleOffset, event.data, event.size, event.articulationId); continue; }
+            const uint8_t status = event.data[0] & 0xF0;
+            const uint8_t channel = static_cast<uint8_t>((event.data[0] & 0x0F) + 1);
+            const uint8_t note = event.data[1];
+            if (status == 0x90 && event.data[2] != 0) {
+                for (size_t j = 0; j < m_numIntervals; ++j) {
+                    const int pitch = std::clamp(static_cast<int>(note) + m_chordIntervals[j], 0, 127);
+                    const uint64_t offset = event.sampleOffset + std::min<uint32_t>(m_cachedStrumSamples * static_cast<uint32_t>(j), 0xFFFFFFFFu);
+                    m_outputBuffer.addNoteOn(channel, static_cast<uint8_t>(pitch), event.data[2], offset, event.articulationId);
+                }
+            } else if (status == 0x80 || (status == 0x90 && event.data[2] == 0)) {
+                for (size_t j = 0; j < m_numIntervals; ++j) {
+                    const int pitch = std::clamp(static_cast<int>(note) + m_chordIntervals[j], 0, 127);
+                    m_outputBuffer.addNoteOff(channel, static_cast<uint8_t>(pitch), event.sampleOffset);
                 }
             } else {
-                outputBuffer.addEvent(ev.sampleOffset, ev.data, ev.size);
+                m_outputBuffer.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
             }
         }
-        midi = std::move(outputBuffer);
+        midi.clear();
+        for (const auto& event : m_outputBuffer) midi.addEvent(event.sampleOffset, event.data, event.size, event.articulationId);
+        midi.sort();
+    }
+
+    void setStrumMs(float ms) {
+        m_strumMs = ms;
+        updateStrumSamples();
     }
 
 private:
-    std::vector<int> m_chordIntervals;
-    float m_strumMs = 15.0f; // Typical guitar strum delay
+    void updateStrumSamples() {
+        m_cachedStrumSamples = static_cast<uint32_t>((m_strumMs / 1000.0) * m_sampleRate);
+    }
+
+    std::array<int, 12> m_chordIntervals;
+    size_t m_numIntervals = 3;
+    float m_strumMs = 15.0f;
+    uint32_t m_cachedStrumSamples = 0;
+    double m_sampleRate = 44100.0;
+    Core::MidiBuffer m_outputBuffer;
 };
 
 } // namespace Aura::DSP::Effects

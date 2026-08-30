@@ -1,0 +1,15 @@
+import { LineEdit } from "std-widgets.slint";
+import { Style } from "../style.slint";
+
+export component Z_Spotlight {
+    in property <bool> active: false;
+    Rectangle {
+        width: 320px; height: 38px; background: #000; border_radius: 6px; border_width: 2px; border_color: Style.brand; clip: true;
+        HorizontalLayout {
+            padding: 8px; spacing: 12px;
+            Text { text: "⌕"; font-size: 16px; vertical-alignment: center; }
+            LineEdit { placeholder-text: "Search tracks, clips or commands"; horizontal-stretch: 1; font-size: 13px; }
+            Text { text: "⌘ K"; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center; font-weight: 600; }
+        }
+    }
+}

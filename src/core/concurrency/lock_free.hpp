@@ -3,6 +3,7 @@
 #include <array>
 #include <optional>
 #include <cstddef>
+#include <utility>
 
 namespace Aura::Core::Concurrency {
 
@@ -12,6 +13,8 @@ namespace Aura::Core::Concurrency {
  */
 template <typename T, size_t Capacity = 4096>
 class MPMCQueue {
+    static_assert(Capacity >= 2 && (Capacity & (Capacity - 1)) == 0,
+                  "MPMCQueue capacity must be a power of two and at least 2");
     struct Slot {
         T data;
         std::atomic<size_t> sequence;
@@ -54,6 +57,13 @@ public:
         T data = std::move(slot->data); // HONEST FIX: Move to prevent ref-count sticking
         slot->sequence.store(pos + Capacity, std::memory_order_release);
         return data;
+    }
+
+    bool pop(T& out) {
+        auto value = pop();
+        if (!value) return false;
+        out = std::move(*value);
+        return true;
     }
 
 private:

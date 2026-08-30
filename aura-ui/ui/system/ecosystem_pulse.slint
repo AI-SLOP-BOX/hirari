@@ -1,0 +1,30 @@
+import { Style } from "../style.slint";
+
+export component Z_EcosystemPulse {
+    in property <float> global_health: 0.992;
+    Rectangle {
+        width: 100%; height: 340px; background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        VerticalLayout {
+            padding: 16px; spacing: 14px;
+            Text { text: "System Status"; font-size: 10px; color: Style.solo; font-weight: 700; }
+            HorizontalLayout {
+                spacing: 12px;
+                for i in 4 : Rectangle {
+                    width: 60px; height: 60px; background: Style.surface; border_radius: 2px;
+                    VerticalLayout {
+                        alignment: center;
+                        Text { text: i == 0 ? "Security" : (i == 1 ? "Network" : (i == 2 ? "DSP" : "Power")); font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                        Text { text: "OK"; font-size: 10px; color: Style.ok; horizontal-alignment: center; font-weight: 700; }
+                    }
+                }
+            }
+            // Health Bar
+            VerticalLayout {
+                spacing: 4px;
+                Text { text: "Overall stability: " + Math.floor(global_health * 1000) / 10 + "%"; font-size: Style.font-xxs; color: Style.text-secondary; }
+                Rectangle { height: 4px; background: Style.surface-0; Rectangle { width: global_health * parent.width; height: 100%; background: Style.brand; } }
+            }
+            Text { text: "Security enabled | Local"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+        }
+    }
+}

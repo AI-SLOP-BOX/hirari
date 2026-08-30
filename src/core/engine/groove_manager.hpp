@@ -1,68 +1,78 @@
 #pragma once
-
 #include <vector>
-#include <memory>
 #include <string>
-#include "transient_detector.hpp"
+#include <algorithm>
+#include "../engine_types.hpp"
 
 namespace Aura::Core::Engine {
 
-/**
- * @brief GrooveMap: A collection of micro-timing offsets extracted from a performance.
- * The 'DNA' of a rhythm.
- */
-struct GrooveMap {
-    std::string name;
-    std::vector<double> offsets; // Relative to perfect grid
+struct GroovePoint {
+    int32_t tickOffset;
+    float velocityMult = 1.0f;
+    uint64_t sourceTick;
+
+    bool operator<(const GroovePoint& other) const { return sourceTick < other.sourceTick; }
 };
 
 /**
- * @brief GrooveManager: Professional Logic Pro-style Groove Extraction.
- * Captures the 'Swing' of a drum loop and applies it to other tracks.
+ * @struct GrooveMap
+ * @brief High-precision rhythmic template.
+ */
+struct GrooveMap {
+    std::string name;
+    std::vector<GroovePoint> points;
+};
+
+/**
+ * @class GrooveManager
+ * @brief Groove Extraction and Application Engine.
+ * Replaced O(N*M) search with O(N log M) binary search.
  */
 class GrooveManager {
 public:
     static GrooveManager& getInstance() { static GrooveManager i; return i; }
 
     /**
-     * @brief EXTRACT: Analyzes a region to create a unique Groove Template.
+     * @brief Applies a groove template to MIDI tick positions and velocities.
      */
-    GrooveMap extractGroove(const float* data, uint64_t len, float bpm) {
-        DSP::Analysis::TransientDetector detector(44100.0);
-        double grid = (60.0 / bpm) * 44100.0 / 4.0; // 1/16th grid
-        
-        GrooveMap map;
-        map.name = "Extracted Groove";
+    void applyGroove(uint64_t* tickPositions, float* velocities, size_t count, const GrooveMap& map, float strength = 1.0f) {
+        if (count == 0 || map.points.empty()) return;
 
-        for (uint64_t i = 0; i < len; i += 512) {
-            if (detector.detect(data + i, 512)) {
-                double target = std::round(i / grid) * grid;
-                map.offsets.push_back(i - target);
-            }
-        }
-        return map;
-    }
+        // Assumes map.points is pre-sorted to satisfy RT-safety (no dynamic allocations or sorting in real-time)
+        for (size_t i = 0; i < count; ++i) {
+            uint64_t noteTick = tickPositions[i];
 
-    /**
-     * @brief APPLY: Adjusts MIDI timing to match the extracted Groove.
-     * HONEST FIX: Replaced empty placeholder with proportional Nudge logic.
-     * Aligns MIDI notes to the 'Human' feel extracted from the Groove Template.
-     */
-    void applyGroove(std::vector<MIDINote>& notes, const GrooveMap& map, float strength = 1.0f) {
-        if (map.offsets.empty()) return;
+            // Use binary search to find the nearest groove point
+            auto it = std::lower_bound(map.points.begin(), map.points.end(), noteTick, 
+                [](const GroovePoint& pt, uint64_t tick) {
+                    return pt.sourceTick < tick;
+                });
 
-        for (auto& n : notes) {
-            // Find nearest groove marker by time
-            double bestDist = 1e10;
-            double nearestOffset = 0;
-            
-            for (auto off : map.offsets) {
-                double dist = std::abs(n.startBeat - off);
-                if (dist < bestDist) { bestDist = dist; nearestOffset = off; }
+            GroovePoint nearest;
+            if (it == map.points.end()) {
+                nearest = map.points.back();
+            } else if (it == map.points.begin()) {
+                nearest = map.points.front();
+            } else {
+                auto prev = it - 1;
+                if ((it->sourceTick - noteTick) < (noteTick - prev->sourceTick)) {
+                    nearest = *it;
+                } else {
+                    nearest = *prev;
+                }
             }
 
-            // Nudge towards the groove
-            n.startBeat += (nearestOffset - n.startBeat) * strength;
+            // Apply groove shift to tick position
+            int64_t offset = static_cast<int64_t>(nearest.tickOffset * strength);
+            int64_t newTick = static_cast<int64_t>(noteTick) + offset;
+            tickPositions[i] = static_cast<uint64_t>(std::max(static_cast<int64_t>(0), newTick));
+
+            // Apply groove dynamics to velocity
+            if (velocities) {
+                float vel = velocities[i];
+                float targetVel = vel * nearest.velocityMult;
+                velocities[i] = std::clamp(vel + strength * (targetVel - vel), 0.0f, 127.0f);
+            }
         }
     }
 

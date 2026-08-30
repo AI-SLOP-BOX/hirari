@@ -1,0 +1,50 @@
+import { LineEdit } from "std-widgets.slint";
+import { Style } from "../style.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+
+// Export configuration is isolated from the main workspace so its layout can
+// evolve without increasing AppWindow's responsibility.
+export component Z_ExportDialog {
+    in property <bool> active: false;
+    callback close();
+    callback start_render(string, string, bool);
+    callback start_stems();
+    callback start_selected_stem();
+
+    Rectangle {
+        width: 520px; height: 440px; background: Style.surface; border_radius: 3px; border_width: 2px; border_color: Style.brand;
+        VerticalLayout {
+            padding: 24px; spacing: 20px;
+            Text { text: "Export"; font-size: 14px; color: Style.brand; font-weight: 700; horizontal-alignment: center; }
+            VerticalLayout {
+                spacing: 12px;
+                Text { text: "Output Format"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    for f in ["WAV (BWF)"] : Rectangle {
+                        height: 28px; background: Style.surface-0; border_radius: 1px; border_width: 1px; border_color: Style.border;
+                        Text { text: f; font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                // The native bounce uses the engine's current sample rate;
+                // do not advertise a hard-coded rate that can disagree with
+                // the actual WAV header after a device/config change.
+                Text { text: "WAV export: current engine rate · PCM16"; font-size: Style.font-xxs; color: Style.text-secondary; }
+            }
+            Rectangle { height: 1px; background: Style.border; }
+            VerticalLayout {
+                spacing: 12px;
+                Text { text: "Metadata"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                HorizontalLayout { spacing: 12px; LineEdit { placeholder-text: "Artist name"; horizontal-stretch: 1; } LineEdit { placeholder-text: "ISRC (optional)"; width: 140px; } }
+            }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 16px; alignment: end;
+                Z_IconButton { icon: "CANCEL"; clicked => { close(); } }
+                Z_IconButton { icon: "EXPORT STEMS"; clicked => { start_stems(); } }
+                Z_IconButton { icon: "EXPORT SELECTED"; clicked => { start_selected_stem(); } }
+                Z_IconButton { icon: "START RENDER"; active-col: Style.brand; clicked => { start_render("WAV", "current", true); } }
+            }
+        }
+    }
+}

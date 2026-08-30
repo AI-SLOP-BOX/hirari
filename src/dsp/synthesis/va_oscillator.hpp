@@ -18,12 +18,13 @@ public:
     enum class Waveform { Saw, Square, Triangle, Sine };
 
     PolyBLEPOscillator(double sampleRate = 44100.0) 
-        : m_sampleRate(sampleRate), m_phase(0.0), m_freq(440.0) {
+        : m_sampleRate((std::isfinite(sampleRate) && sampleRate > 0.0) ? sampleRate : 44100.0), m_phase(0.0), m_freq(440.0) {
         updateIncrement();
     }
 
     void setFrequency(double freq) {
-        m_freq = freq;
+        m_freq = std::isfinite(freq) ? freq : 0.0;
+        if (m_freq < 0.0) m_freq = 0.0;
         updateIncrement();
     }
 
@@ -33,36 +34,28 @@ public:
      * @brief RENDER: Generates the next sample of the chosen waveform.
      */
     float process() {
-        float out = 0.0f;
-        double p = m_phase;
-        double dt = m_increment;
-
+        const double dt = std::min(m_increment, 0.5);
+        double out = 0.0;
         switch (m_waveform) {
-            case Waveform::Sine:
-                out = std::sin(p * 2.0 * M_PI);
-                break;
-            case Waveform::Saw:
-                out = static_cast<float>(2.0 * p - 1.0);
-                out -= bleach(p, dt); // PolyBLEP Correction
-                break;
-            case Waveform::Square:
-                out = (p < 0.5) ? 1.0f : -1.0f;
-                out += bleach(p, dt);
-                out -= bleach(std::fmod(p + 0.5, 1.0), dt);
-                break;
-            case Waveform::Triangle:
-                // Triangle is integrated square wave (already mostly aliasing-free)
-                out = static_cast<float>(4.0 * std::abs(p - 0.5) - 1.0);
-                break;
+        case Waveform::Sine: out = std::sin(kTwoPi * m_phase); break;
+        case Waveform::Saw:
+            out = 2.0 * m_phase - 1.0 - bleach(m_phase, dt); break;
+        case Waveform::Square:
+            out = (m_phase < 0.5 ? 1.0 : -1.0) + bleach(m_phase, dt) - bleach(std::fmod(m_phase + 0.5, 1.0), dt); break;
+        case Waveform::Triangle: {
+            const double saw = 2.0 * m_phase - 1.0 - bleach(m_phase, dt);
+            out = 2.0 * std::abs(saw) - 1.0;
+            break;
         }
-
-        m_phase += dt;
-        if (m_phase >= 1.0) m_phase -= 1.0;
-
-        return out;
+        }
+        m_phase += m_increment;
+        m_phase -= std::floor(m_phase);
+        return static_cast<float>(out);
     }
 
+
 private:
+    static constexpr double kTwoPi = 6.28318530717958647692;
     /**
      * @brief The 'Magic' Correction term for PolyBLEP.
      */

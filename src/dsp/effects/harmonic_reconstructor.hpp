@@ -14,25 +14,34 @@ namespace Aura::DSP::Effects {
  */
 class HarmonicReconstructor : public IProcessor {
 public:
-    HarmonicReconstructor(double sr = 44100.0) : m_sampleRate(sr) {}
+    HarmonicReconstructor(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr > 1000.0 ? static_cast<float>(sr) : 44100.0f), m_cutoff(4500.0f) { updateCoefficients(); }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override { m_sampleRate = sr; }
+    void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)bs; if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = static_cast<float>(sr); updateCoefficients(); reset(); }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-        
-        float cutoff = 12000.0f; 
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-            float* p = buffer.getWritePointer(c);
-            for (uint32_t s = 0; s < numSamples; ++s) {
-                float in = p[s];
-                float high = std::tanh(in * 1.5f) - in;
-                p[s] += high * 0.1f;
+        (void)midi; (void)context;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 32);
+        for (uint32_t c = 0; c < channels; ++c) {
+            float* data = buffer.getWritePointer(c);
+            if (!data) continue;
+            float low = m_lastIn[c];
+            for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+                const float x = std::isfinite(data[i]) ? data[i] : 0.0f;
+                low = m_alpha * low + (1.0f - m_alpha) * x;
+                const float high = x - low;
+                const float air = high * high * std::copysign(1.0f, high);
+                const float y = x + 0.12f * air;
+                data[i] = std::isfinite(y) ? std::clamp(y, -4.0f, 4.0f) : 0.0f;
             }
+            m_lastIn[c] = low;
         }
     }
+
+    void reset() noexcept override {
+        std::fill(m_hpfState.begin(), m_hpfState.end(), 0.0f);
+        std::fill(m_lastIn.begin(), m_lastIn.end(), 0.0f);
+    }
+
 
 private:
     void updateCoefficients() {

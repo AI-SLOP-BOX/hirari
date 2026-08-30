@@ -1,5 +1,8 @@
 #pragma once
 #include <cmath>
+#include <algorithm>
+#include <atomic>
+#include <mutex>
 #include <vector>
 #include "../iprocessor.hpp"
 
@@ -20,7 +23,7 @@ public:
 
     enum Type { ShelfLow, Peak, ShelfHigh };
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
+    void prepareToPlay(double sr, uint32_t /*bs*/) noexcept override {
         m_sampleRate = sr;
         reset();
     }
@@ -49,29 +52,44 @@ public:
         m_coeffsReady.store(true, std::memory_order_release);
     }
 
-    void process(Core::AudioBuffer& b, Core::MidiBuffer&, const ProcessContext& context) noexcept override {
-        // 【大罪修正】オーディオスレッドでデータ競合（Data Race）を起こさず、かつCPU負荷スパイクを起こさない設計
-        if (m_coeffsReady.load(std::memory_order_acquire)) {
-            if (m_coeffMutex.try_lock()) {
-                std::copy(std::begin(m_targetLowBoost), std::end(m_targetLowBoost), m_lowBoostCoeffs);
-                std::copy(std::begin(m_targetLowAtten), std::end(m_targetLowAtten), m_lowAttenCoeffs);
-                std::copy(std::begin(m_targetHighBoost), std::end(m_targetHighBoost), m_highBoostCoeffs);
-                std::copy(std::begin(m_targetHighAtten), std::end(m_targetHighAtten), m_highAttenCoeffs);
-                m_coeffsReady.store(false, std::memory_order_release);
-                m_coeffMutex.unlock();
+    void process(Core::AudioBuffer& b, Core::MidiBuffer&, const ProcessContext& /*context*/) noexcept override {
+        // Only attempt to take the parameter lock at a block boundary.  The
+        // audio thread must never wait for a UI-thread parameter update.
+        if (m_coeffsReady.load(std::memory_order_acquire) && m_coeffMutex.try_lock()) {
+            std::copy(std::begin(m_targetLowBoost), std::end(m_targetLowBoost), m_lowBoostCoeffs);
+            std::copy(std::begin(m_targetLowAtten), std::end(m_targetLowAtten), m_lowAttenCoeffs);
+            std::copy(std::begin(m_targetHighBoost), std::end(m_targetHighBoost), m_highBoostCoeffs);
+            std::copy(std::begin(m_targetHighAtten), std::end(m_targetHighAtten), m_highAttenCoeffs);
+            m_coeffsReady.store(false, std::memory_order_release);
+            m_coeffMutex.unlock();
+        }
+
+        const uint32_t channels = std::min<uint32_t>(b.getNumChannels(), 2u);
+        const uint32_t samples = b.getNumSamples();
+        for (uint32_t channel = 0; channel < channels; ++channel) {
+            float* data = b.getWritePointer(channel);
+            float* state = channel == 0 ? m_stateL : m_stateR;
+            if (!data || !state) continue;
+
+            for (uint32_t i = 0; i < samples; ++i) {
+                const float input = data[i];
+                if (!std::isfinite(input)) {
+                    std::fill(state, state + 32, 0.0f);
+                    data[i] = 0.0f;
+                    continue;
+                }
+
+                const float output = processSample(input, state);
+                if (!std::isfinite(output)) {
+                    std::fill(state, state + 32, 0.0f);
+                    data[i] = 0.0f;
+                } else {
+                    data[i] = output;
+                }
             }
         }
-        
-        uint32_t numSamples = b.getNumSamples();
-        float* l = b.getWritePointer(0);
-        float* r = b.getWritePointer(1);
-
-        // Vectorized simulation loop
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            l[s] = processSample(l[s], m_stateL);
-            r[s] = processSample(r[s], m_stateR);
-        }
     }
+
 
     float processSample(float x, float* state) {
         float out = x;

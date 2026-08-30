@@ -1,0 +1,58 @@
+import { Style } from "../style.slint";
+
+export component Z_SpectralMaskingMap {
+    in property <[float]> heatmap;
+    Rectangle {
+        width: 160px; height: 120px; background: Style.surface-0; border_radius: 2px; border_width: 1px; border_color: Style.border;
+        Text { text: "Spectral Masking"; y: 4px; x: 6px; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+        VerticalLayout {
+            padding: 10px; spacing: 1px;
+            for row in 10 : HorizontalLayout {
+                spacing: 1px;
+                for col in 10 : Rectangle {
+                    background: Style.alert; opacity: heatmap[row * 10 + col] * 0.8;
+                    width: 10px; height: 10px; border_radius: 1px;
+                }
+            }
+        }
+        Text { text: "Low · Frequency · High"; y: 110px; horizontal-alignment: center; font-size: Style.font-xxs; color: Style.text-tertiary; }
+    }
+}
+
+export component Z_LargeVU {
+    in property <float> val; in property <string> label;
+    Rectangle {
+        width: 120px; height: 80px; background: Style.surface; border_radius: 2px; border_width: 1.5px; border_color: Style.border;
+        Text { text: label; font-size: 8px; color: #6E6E73; y: 4px; horizontal-alignment: center; font-weight: 900; }
+        Path {
+            width: 100px; height: 50px; stroke: #333; stroke_width: 6px; x: 10px; y: 20px;
+            MoveTo { x: 0; y: 50; }
+            QuadraticTo { control-x: 50; control-y: 0; x: 100; y: 50; }
+        }
+        Path {
+            width: 100px; height: 50px; stroke: val > 0.9 ? Style.record : Style.brand; stroke_width: 2px; x: 10px; y: 20px;
+            property <float> angle: (val - 0.5) * 1.5;
+            MoveTo { x: 50; y: 50; }
+            LineTo { x: 50 + 40 * Math.sin(angle * 1rad); y: 50 - 40 * Math.cos(angle * 1rad); }
+            animate stroke { duration: 50ms; }
+        }
+        Text { text: (Math.floor(val * 100) - 100) + " dB"; font-size: 9px; color: val > 0.9 ? Style.record : #888; y: 60px; horizontal-alignment: center; }
+    }
+}
+
+export component Z_PhaseMeter {
+    in property <float> correlation;
+    Rectangle {
+        width: 120px; height: 18px; background: Style.surface; border_radius: 1px; border_width: 1px; border_color: Style.border;
+        HorizontalLayout { padding-left: 2px; padding-right: 2px; for i in 11 : Rectangle { width: 1px; height: 4px; background: Style.line-subtle; y: parent.height - self.height; } }
+        HorizontalLayout {
+            padding-left: 6px; padding-right: 6px; spacing: 2px;
+            Text { text: "-1"; font-size: Style.font-xxs; color: #A1A1A6; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "Corr"; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center; font-weight: 600; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "+1"; font-size: Style.font-xxs; color: #A1A1A6; vertical-alignment: center; }
+        }
+        Rectangle { x: (correlation + 1.0) / 2.0 * (parent.width - 2px); width: 2.5px; height: 100%; background: correlation > 0 ? Style.ok : Style.record; border_radius: 1px; animate x { duration: 80ms; easing: ease-out; } }
+    }
+}

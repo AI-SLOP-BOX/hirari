@@ -1,0 +1,44 @@
+import { Style } from "../style.slint";
+import { Z_SampleEditor } from "./sample_editor.slint";
+
+// Keeps the editor view independent from the global action contract.
+export component Z_SampleEditorAdapter {
+    in-out property <[float]> samples;
+    in-out property <color> wave_col: Style.brand;
+    in property <int> clip-id: -1;
+    in property <bool> reversed: false;
+    in property <float> trim-start: 0.0;
+    in property <float> trim-end: 1.0;
+    in property <float> flex-ratio: 1.0;
+    in property <float> pitch-semitones: 0.0;
+    in property <int> loop-count: 1;
+    callback apply-gain(float);
+    callback apply-fades(float, float);
+    callback apply-reverse(bool);
+    callback apply-trim(float, float);
+    callback apply-warp(float);
+    callback apply-pitch(float);
+    callback apply-loop(int);
+    callback duplicate-clip();
+    callback remove-clip();
+
+    Z_SampleEditor {
+        samples: root.samples;
+        wave_col: root.wave_col;
+        is_reversed: root.reversed;
+        initial-trim-start: root.trim-start;
+        initial-trim-end: root.trim-end;
+        flex_ratio: root.flex-ratio;
+        pitch_semitones: root.pitch-semitones;
+        loop_count: root.loop-count;
+        apply-gain(value) => { root.apply-gain(value); }
+        apply-fades(fade-in, fade-out) => { root.apply-fades(fade-in, fade-out); }
+        apply-reverse(value) => { root.apply-reverse(value); }
+        apply-trim(start, end) => { root.apply-trim(start, end); }
+        apply-warp(ratio) => { root.apply-warp(ratio); }
+        apply-pitch(semitones) => { root.apply-pitch(semitones); }
+        apply-loop(count) => { root.apply-loop(count); }
+        duplicate-clip => { root.duplicate-clip(); }
+        remove-clip => { root.remove-clip(); }
+    }
+}

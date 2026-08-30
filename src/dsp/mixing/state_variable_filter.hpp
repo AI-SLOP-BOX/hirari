@@ -14,7 +14,7 @@ namespace Aura::DSP::Mixing {
  */
 class StateVariableFilter {
 public:
-    StateVariableFilter(double sr = 44100.0) : m_sampleRate(sr) {
+    StateVariableFilter(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0) {
         m_freqSmoother.reset(1000.0f);
         m_resSmoother.reset(0.707f);
         reset();
@@ -25,13 +25,18 @@ public:
         m_ic2 = 0.0f;
     }
 
+    void setSampleRate(double sr) noexcept {
+        if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = sr;
+    }
+
     void setParameters(float freq, float res, int mode = 0) {
-        m_freqSmoother.setTarget(freq, 128);
-        m_resSmoother.setTarget(res, 128);
+        m_freqSmoother.setTarget(freq);
+        m_resSmoother.setTarget(res);
         m_mode = mode;
     }
 
     void processBlockLP(float* data, uint32_t numSamples) {
+        if (!data) return;
         for (uint32_t s = 0; s < numSamples; ++s) {
             updateCoefficients();
             float x = data[s];
@@ -45,6 +50,7 @@ public:
     }
 
     void processBlockBP(float* data, uint32_t numSamples) {
+        if (!data) return;
         for (uint32_t s = 0; s < numSamples; ++s) {
             data[s] = processSampleBP(data[s]);
         }
@@ -62,15 +68,11 @@ public:
 
     inline float processSampleBP(float x) {
         updateCoefficients();
-        float v3 = x - m_ic2;
-        float v1 = m_a1 * (m_ic1 + m_g * (x - m_ic2)) / (1.0f + m_g * (m_g + m_k)); // Corrected for TPT
-        // Simple SVF re-implementation for HP
         float g = m_g;
         float k = m_k;
         float h = 1.0f / (1.0f + g * (g + k));
         float bp = h * (m_ic1 + g * (x - m_ic2));
         float lp = m_ic2 + g * bp;
-        float hp = x - k * bp - lp;
         m_ic1 = 2.0f * bp - m_ic1;
         m_ic2 = 2.0f * lp - m_ic2;
         return bp;
@@ -90,6 +92,7 @@ public:
     }
     
     void processBlockHP(float* data, uint32_t numSamples) {
+        if (!data) return;
         for (uint32_t s = 0; s < numSamples; ++s) {
             data[s] = processSampleHP(data[s]);
         }
@@ -103,15 +106,27 @@ private:
         
         // Only update if parameters changed significantly
         if (std::abs(f - m_lastFreq) > 0.001f || std::abs(r - m_lastRes) > 0.001f) {
-            float g = std::tan(static_cast<float>(M_PI) * f / static_cast<float>(m_sampleRate));
-            float k = 1.0f / (r + 1e-10f);
+            const float safeSr = static_cast<float>(std::max(1000.0, m_sampleRate));
+            const float safeFreq = std::clamp(std::isfinite(f) ? f : 1000.0f,
+                                              5.0f, safeSr * 0.49f);
+            const float safeRes = std::clamp(std::isfinite(r) ? r : 0.707f,
+                                             0.05f, 4.0f);
+            float g = std::tan(static_cast<float>(M_PI) * safeFreq / safeSr);
+            float k = 1.0f / safeRes;
             m_g = g;
             m_k = k;
             m_a1 = 1.0f / (1.0f + g * (g + k));
             m_a2 = g * m_a1;
             m_a3 = g * m_a2;
-            m_lastFreq = f;
-            m_lastRes = r;
+            if (!std::isfinite(m_a1) || !std::isfinite(m_a2) || !std::isfinite(m_a3)) {
+                m_a1 = 1.0f;
+                m_a2 = 0.0f;
+                m_a3 = 0.0f;
+                g = 0.0f;
+                k = 1.0f;
+            }
+            m_lastFreq = safeFreq;
+            m_lastRes = safeRes;
         }
     }
 

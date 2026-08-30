@@ -27,25 +27,37 @@ public:
         updateKernel();
     }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+    void prepareToPlay(double sr, [[maybe_unused]] uint32_t bs) noexcept override {
+        if (std::isfinite(sr) && sr >= 100.0 && sr <= 384000.0) m_sampleRate = sr;
     }
 
     /**
      * @brief PROCESS: Spectral-domain filtering.
      */
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
+    void process(Core::AudioBuffer& buffer, [[maybe_unused]] Core::MidiBuffer& midi, [[maybe_unused]] const ProcessContext& context) noexcept override {
         if (m_bypassed) return;
 
         uint32_t numSamples = buffer.getNumSamples();
-        if (numSamples > kFFTSize / 2) return; // Simplified OLA limit
+        if (numSamples == 0 || buffer.getNumChannels() == 0
+            || numSamples > kFFTSize / 2
+            || m_fftBuffer.size() != kFFTSize
+            || m_kernelComplex.size() != kFFTSize
+            || m_overlap.size() < 1) {
+            return; // Simplified OLA limit and invariant guard
+        }
 
-        for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
+        const uint32_t channels = std::min<uint32_t>(
+            buffer.getNumChannels(), static_cast<uint32_t>(m_overlap.size()));
+        for (uint32_t c = 0; c < channels; ++c) {
             float* p = buffer.getWritePointer(c);
+            if (!p || m_overlap[c].size() < kFFTSize) continue;
             
             // 1. Fill FFT Buffer (Zero-padded)
             std::fill(m_fftBuffer.begin(), m_fftBuffer.end(), 0.0f);
-            for (uint32_t s = 0; s < numSamples; ++s) m_fftBuffer[s] = p[s];
+            for (uint32_t s = 0; s < numSamples; ++s) {
+                const float sample = p[s];
+                m_fftBuffer[s] = std::isfinite(sample) ? std::clamp(sample, -4.0f, 4.0f) : 0.0f;
+            }
 
             // 2. FFT
             Utils::FFTUtils::fft(m_fftBuffer);
@@ -60,13 +72,14 @@ public:
 
             // 5. Overlap-Add
             for (uint32_t s = 0; s < numSamples; ++s) {
-                float out = m_fftBuffer[s].real() + m_overlap[c][s];
-                p[s] = out;
+                const float out = m_fftBuffer[s].real() + m_overlap[c][s];
+                p[s] = std::isfinite(out) ? std::clamp(out, -4.0f, 4.0f) : 0.0f;
             }
 
             // Store overlap for next block
             for (size_t i = 0; i < kFFTSize - numSamples; ++i) {
-                m_overlap[c][i] = m_fftBuffer[numSamples + i].real();
+                const float overlap = m_fftBuffer[numSamples + i].real();
+                m_overlap[c][i] = std::isfinite(overlap) ? overlap : 0.0f;
             }
         }
     }
@@ -76,11 +89,19 @@ public:
     }
 
     void setGain(float low, float mid, float high) {
-        m_gains = {low, mid, high};
+        m_gains = {
+            sanitizeGain(low),
+            sanitizeGain(mid),
+            sanitizeGain(high),
+        };
         updateKernel();
     }
 
 private:
+    static float sanitizeGain(float gain) noexcept {
+        return std::isfinite(gain) ? std::clamp(gain, 0.0f, 16.0f) : 1.0f;
+    }
+
     void updateKernel() {
         // Simple spectral mask generation (3 nodes)
         m_kernelComplex.assign(kFFTSize, 0.0f);
@@ -91,7 +112,7 @@ private:
             else if (freq < 0.3f) g = m_gains[1];
             else g = m_gains[2];
             
-            m_kernelComplex[i] = g;
+            m_kernelComplex[i] = sanitizeGain(g);
             if (i > 0 && i < kFFTSize / 2) {
                 m_kernelComplex[kFFTSize - i] = std::conj(m_kernelComplex[i]);
             }

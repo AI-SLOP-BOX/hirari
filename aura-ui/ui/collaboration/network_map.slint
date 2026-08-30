@@ -1,0 +1,21 @@
+import { Style } from "../style.slint";
+
+export component Z_NetworkMap {
+    in property <float> time;
+    Rectangle {
+        background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border; clip: true;
+        for i in 12 : Rectangle {
+            x: Math.mod(i * 47.0 + time * 0.05, 200.0) * 1px; 
+            y: Math.mod(i * 31.0, 120.0) * 1px;
+            width: 4px; height: 4px; background: Style.brand; border_radius: 2px;
+            opacity: 0.3 + 0.7 * Math.sin(root.time / 200.0 * 1rad + i * 0.5rad).abs();
+            // Pulse Ring
+            Rectangle { 
+                width: parent.width * 4; height: self.width; border_radius: self.width/2; 
+                border_width: 0.5px; border_color: Style.brand; opacity: 1.0 - Math.mod(root.time, 500.0) / 500.0;
+                animate width { duration: 1000ms; easing: ease-out; }
+            }
+        }
+        Text { text: "Collaboration"; font-size: Style.font-xxs; color: Style.brand; x: 4px; y: 4px; font-weight: 600; opacity: 0.8; }
+    }
+}

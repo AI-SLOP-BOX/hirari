@@ -1,0 +1,14 @@
+// Transport, timeline navigation, and tempo editing contract.
+export global TransportActions {
+    callback toggle_play();
+    callback toggle_record();
+    callback toggle_loop();
+    callback set_loop_enabled(bool);
+    callback scrub(float);
+    callback loop_changed(float, float);
+    callback set_bpm(float);
+    callback set_tempo_event(float, float, bool);
+    callback remove_tempo_event(float);
+    callback move_tempo_event(float, float);
+    callback set_snap(string);
+}

@@ -6,6 +6,8 @@
 #include <chrono>
 #include <atomic>
 #include <mutex>
+#include <algorithm>
+#include "../../graphics/graphics_kernel.hpp"
 
 namespace Aura::Core::Engine {
 
@@ -32,35 +34,53 @@ public:
         return instance;
     }
 
+    /**
+     * @brief PUSH STATE: Pushes a new state snapshot with industrial precision and history sovereignty.
+     */
     void pushState(const std::string& name, const std::vector<uint8_t>& state) {
+        if (name.empty() || state.empty()) return;
         std::lock_guard<std::mutex> lock(m_mutex);
-        
-        // Clear Redo stack on new action
-        m_redoStack.clear();
-        
-        m_undoStack.push_back({name, state, "NOW"});
-        if (m_undoStack.size() > kMaxHistory) m_undoStack.pop_front();
+        m_undo.push_back({name, state, timestamp()});
+        if (m_undo.size() > kMaxHistory) m_undo.pop_front();
+        m_redo.clear();
     }
 
+    /**
+     * @brief UNDO: Restores the project to the previous state with industrial-grade efficiency and historical sovereignty.
+     */
     bool undo(std::vector<uint8_t>& outState) {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_undoStack.size() < 2) return false; // Need at least current + previous
-        
-        m_redoStack.push_back(m_undoStack.back());
-        m_undoStack.pop_back();
-        
-        outState = m_undoStack.back().stateSnapshot;
+        if (m_undo.size() < 2) return false;
+        m_redo.push_back(std::move(m_undo.back()));
+        m_undo.pop_back();
+        outState = m_undo.back().stateSnapshot;
         return true;
     }
 
-    const std::deque<UndoAction>& getHistory() const { return m_undoStack; }
+    bool redo(std::vector<uint8_t>& outState) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_redo.empty()) return false;
+        m_undo.push_back(std::move(m_redo.back()));
+        m_redo.pop_back();
+        outState = m_undo.back().stateSnapshot;
+        return true;
+    }
+
+    size_t undoCount() const noexcept {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_undo.size() > 0 ? m_undo.size() - 1 : 0;
+    }
 
 private:
-    UndoManager() = default;
-    static constexpr size_t kMaxHistory = 100;
-    std::deque<UndoAction> m_undoStack;
-    std::deque<UndoAction> m_redoStack;
-    std::mutex m_mutex;
+    static std::string timestamp() {
+        const auto now = std::chrono::system_clock::now().time_since_epoch();
+        return std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+    }
+
+    static constexpr size_t kMaxHistory = 128;
+    mutable std::mutex m_mutex;
+    std::deque<UndoAction> m_undo;
+    std::deque<UndoAction> m_redo;
 };
 
 } // namespace Aura::Core::Engine

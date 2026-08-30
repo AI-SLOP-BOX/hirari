@@ -1,6 +1,9 @@
 #pragma once
 #include "ui_view.hpp"
 #include "../../scae/AuraAISuite.hpp"
+#include <atomic>
+#include <thread>
+#include <cstring>
 
 namespace Aura::Graphics::UI {
 
@@ -15,8 +18,18 @@ public:
         m_visible = false;
     }
 
+    ~StemSplitterUI() {
+        m_cancel.store(true, std::memory_order_release);
+        if (m_worker.joinable()) m_worker.join();
+    }
+
     void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel) override {
         if (!m_visible) return;
+        if (m_completed.load(std::memory_order_acquire) && m_worker.joinable()) {
+            // The worker has already published completion. Joining here is
+            // non-blocking in practice and permits a later split operation.
+            m_worker.join();
+        }
         auto b = m_bounds;
 
         // --- 1. GLASS OVERLAY ---
@@ -58,13 +71,21 @@ public:
         float btnW = 180, btnH = 36;
         float btnX = cx - btnW*0.5f, btnY = cy + 100;
         
-        if (m_isProcessing) {
+        if (m_completed.exchange(false, std::memory_order_acq_rel)) {
+            m_isProcessing.store(false, std::memory_order_release);
+            m_visible = false;
+        }
+        if (m_isProcessing.load(std::memory_order_acquire)) {
             kernel.drawRoundedRect(btnX, btnY, btnW, btnH, 6.0f, 0xFF1F2937);
             kernel.drawText("SPLITTING...", btnX + 55, btnY + 22, 10, 0xFFFFFFFF);
-            kernel.drawRect(btnX, btnY + btnH - 2, btnW * m_progress, 2, 0xFF30B0FF);
+            kernel.drawRect(btnX, btnY + btnH - 2,
+                            btnW * m_progress.load(std::memory_order_relaxed), 2, 0xFF30B0FF);
         } else {
             kernel.drawRoundedRect(btnX, btnY, btnW, btnH, 6.0f, 0xFF3B82F6);
-            kernel.drawText("SPLIT STEMS", btnX + 55, btnY + 22, 10, 0xFFFFFFFF);
+            kernel.drawText(m_error.load(std::memory_order_acquire)
+                                ? "UNAVAILABLE"
+                                : "SPLIT STEMS",
+                            btnX + 55, btnY + 22, 10, 0xFFFFFFFF);
         }
     }
 
@@ -103,24 +124,22 @@ public:
     }
 
     void startSeparation() {
-        m_isProcessing = true;
-        m_progress = 0.0f;
-        // Mock progress
-        std::thread([this]() {
-            for (int i = 0; i <= 100; ++i) {
-                m_progress = i / 100.0f;
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            }
-            m_isProcessing = false;
-            m_visible = false;
-            // logic to create new tracks here...
-        }).detach();
+        if (m_worker.joinable()) return;
+        // The actual separation pipeline requires a selected region/sample
+        // buffer and a destination track. This view currently has neither;
+        // never simulate progress or report completion without those inputs.
+        m_error.store(true, std::memory_order_release);
+        m_progress.store(0.0f, std::memory_order_relaxed);
     }
 
 private:
     uint8_t m_selectedMask = 0x0F; // All selected by default
-    bool m_isProcessing = false;
-    float m_progress = 0.0f;
+    std::atomic<bool> m_isProcessing{false};
+    std::atomic<float> m_progress{0.0f};
+    std::atomic<bool> m_completed{false};
+    std::atomic<bool> m_cancel{false};
+    std::atomic<bool> m_error{false};
+    std::thread m_worker;
 };
 
 } // namespace Aura::Graphics::UI

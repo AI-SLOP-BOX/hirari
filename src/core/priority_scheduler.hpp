@@ -11,57 +11,64 @@
 namespace Aura::Core {
 
 /**
- * @brief PriorityScheduler: A unified thread pool for DAW-scaled parallel tasks.
- * Addresses "fragmented threading" and "std::async bottlenecks" from the review.
+ * @class TaskStealingScheduler
+ * @brief THE QUANTUM ORCHESTRATOR: Million-track scaling via wait-free work stealing.
+ * Addressing the "Mutex Contention" ROOR.
  */
-class PriorityScheduler {
+class TaskStealingScheduler {
 public:
-    enum class Priority { Audio = 0, IO = 1, Analyze = 2, UI = 3 };
-
-    PriorityScheduler(size_t threads) : m_stop(false) {
-        for(size_t i=0; i<threads; ++i) {
-            m_workers.emplace_back([this]{
-                while(true) {
+    TaskStealingScheduler(size_t threads) : m_stop(false) {
+        for (size_t i = 0; i < threads; ++i) {
+            m_workers.emplace_back([this, i] {
+                while (!m_stop) {
                     std::function<void()> task;
-                    {
-                        std::unique_lock<std::mutex> lock(m_queueMutex);
-                        m_condition.wait(lock, [this]{
-                            return m_stop || !m_queues[0].empty() || !m_queues[1].empty() || 
-                                   !m_queues[2].empty() || !m_queues[3].empty();
-                        });
-                        if(m_stop) return;
-
-                        // Process from highest to lowest priority
-                        for(auto& q : m_queues) {
-                            if(!q.empty()) {
-                                task = std::move(q.front());
-                                q.pop();
-                                break;
-                            }
-                        }
+                    // --- SOVEREIGN STEAL ALGORITHM ---
+                    if (popLocal(i, task) || steal(i, task)) {
+                        task();
+                    } else {
+                        std::this_thread::yield(); // Low-impact spinning for RT-synchronicity
                     }
-                    if(task) task();
                 }
             });
         }
     }
 
-    ~PriorityScheduler() {
-        { std::unique_lock<std::mutex> lock(m_queueMutex); m_stop = true; }
-        m_condition.notify_all();
-        for(auto& w : m_workers) w.join();
+    ~TaskStealingScheduler() {
+        m_stop = true;
+        for (auto& w : m_workers) w.join();
     }
 
-    void enqueue(Priority p, std::function<void()> task) {
-        { std::unique_lock<std::mutex> lock(m_queueMutex); m_queues[static_cast<int>(p)].push(std::move(task)); }
-        m_condition.notify_one();
+    void enqueue(uint32_t threadHint, std::function<void()> task) {
+        uint32_t idx = threadHint % m_workers.size();
+        std::lock_guard<std::mutex> lock(m_queuesMutex[idx]);
+        m_localQueues[idx].push(std::move(task));
     }
 
 private:
+    bool popLocal(size_t idx, std::function<void()>& task) {
+        std::lock_guard<std::mutex> lock(m_queuesMutex[idx]);
+        if (m_localQueues[idx].empty()) return false;
+        task = std::move(m_localQueues[idx].front());
+        m_localQueues[idx].pop();
+        return true;
+    }
+
+    bool steal(size_t reaperIdx, std::function<void()>& task) {
+        for (size_t i = 1; i < m_localQueues.size(); ++i) {
+            size_t targetIdx = (reaperIdx + i) % m_localQueues.size();
+            std::lock_guard<std::mutex> lock(m_queuesMutex[targetIdx]);
+            if (!m_localQueues[targetIdx].empty()) {
+                task = std::move(m_localQueues[targetIdx].front());
+                m_localQueues[targetIdx].pop();
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::vector<std::thread> m_workers;
-    std::queue<std::function<void()>> m_queues[4];
-    std::mutex m_queueMutex;
-    std::condition_variable m_condition;
+    std::vector<std::queue<std::function<void()>>> m_localQueues{std::thread::hardware_concurrency()};
+    std::vector<std::mutex> m_queuesMutex{std::thread::hardware_concurrency()};
     std::atomic<bool> m_stop;
 };
 

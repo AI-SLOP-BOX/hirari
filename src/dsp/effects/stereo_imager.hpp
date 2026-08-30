@@ -26,31 +26,28 @@ public:
         m_targetSideGain = m_width;
     }
 
-    void process(float* l, float* r, uint32_t numSamples) override {
+    void process(float* l, float* r, uint32_t numSamples) {
+        if (!l || !r || numSamples == 0 || m_bypassed) return;
+        const float target = std::clamp(m_targetSideGain, 0.0f, 4.0f);
         for (uint32_t i = 0; i < numSamples; ++i) {
-            float inL = l[i];
-            float inR = r[i];
-
-            // 1. MID-SIDE ENCODING
-            float mid = (inL + inR) * 0.5f;
-            float side = (inL - inR) * 0.5f;
-
-            // 2. SPATIAL SCULPTING (Width Control)
-            // Note: Smooth gain change to prevent clicks
-            m_currentSideGain += (m_targetSideGain - m_currentSideGain) * 0.01f;
-            side *= m_currentSideGain;
-
-            // 3. MID-SIDE DECODING (Back to L/R)
-            // Compensation: Boost Mid slightly if Side is very wide to keep perceived power (optional)
-            float comp = 1.0f / std::max(1.0f, m_currentSideGain * 0.5f);
-            
-            l[i] = (mid + side) * comp;
-            r[i] = (mid - side) * comp;
+            m_currentSideGain += (target - m_currentSideGain) * 0.01f;
+            const float mid = 0.5f * (l[i] + r[i]);
+            const float side = 0.5f * (l[i] - r[i]) * m_currentSideGain;
+            const float wetL = mid + side;
+            const float wetR = mid - side;
+            l[i] = l[i] * (1.0f - m_mix) + wetL * m_mix;
+            r[i] = r[i] * (1.0f - m_mix) + wetR * m_mix;
         }
     }
 
-    void setSampleRate(double sr) override { m_sampleRate = sr; }
-    uint32_t getLatency() const override { return 0; }
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer&, const ProcessContext&) noexcept override {
+        if (buffer.getNumChannels() < 2) return;
+        process(buffer.getWritePointer(0), buffer.getWritePointer(1), buffer.getNumSamples());
+    }
+
+
+    void setSampleRate(double sr) { if (std::isfinite(sr) && sr > 0.0) m_sampleRate = sr; }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
 
 private:
     double m_sampleRate;

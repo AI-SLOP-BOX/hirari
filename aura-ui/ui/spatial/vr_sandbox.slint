@@ -1,0 +1,162 @@
+import { Style } from "../style.slint";
+import { Z_Knob } from "../primitives/knob.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+
+export component Z_VRSandbox {
+    in-out property <bool> headset_active: true;
+    in-out property <float> yaw: 0.2;
+    in-out property <float> pitch: 0.1;
+    in-out property <float> roll: 0.0;
+    in-out property <int> vr_mode: 1; // 0: Stereo, 1: Atmos Binaural, 2: 7th Order Ambisonic
+    
+    // Dynamic coordinates for a draggable object in VR Space
+    in-out property <float> obj_x: 0.5; // normalized 0.0 - 1.0
+    in-out property <float> obj_y: 0.3; // normalized 0.0 - 1.0
+
+    Rectangle {
+        width: 100%; height: 340px; background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        VerticalLayout {
+            padding: 12px; spacing: 10px;
+            
+            // Header
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: "VR Spatial Audio"; font-size: 10px; color: Style.brand; font-weight: 700; }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    height: 16px; background: headset_active ? Style.ok.with-alpha(0.15) : Style.border; border_radius: 2px;
+                    HorizontalLayout {
+                        padding-left: 6px; padding-right: 6px;
+                        Text { text: headset_active ? "LOCK: ACTIVE" : "LOCK: SEARCHING"; font-size: Style.font-xxs; color: headset_active ? Style.ok : #666; font-weight: 900; vertical-alignment: center; }
+                    }
+                }
+            }
+            
+            Rectangle { height: 1px; background: Style.border; }
+            
+            HorizontalLayout {
+                spacing: 20px;
+                
+                // LEFT: Interactive 2D Head/Object Map
+                VerticalLayout {
+                    width: 160px; spacing: 6px;
+                    Text { text: "TOP-DOWN SPATIAL MAP"; font-size: 8px; color: #6E6E73; font-weight: 900; horizontal-alignment: center; }
+                    
+                    Rectangle {
+                        width: 160px; height: 160px; background: #000; border_radius: 80px; border_width: 1px; border_color: Style.border;
+                        clip: true;
+                        
+                        // Grid circles
+                        for r in [40, 80, 120] : Rectangle {
+                            width: r * 1px; height: r * 1px;
+                            border_width: 1px; border_color: Style.surface; border_radius: (r / 2) * 1px;
+                            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                        }
+                        
+                        // Center listener head graphic
+                        Rectangle {
+                            width: 32px; height: 32px; background: Style.surface; border_radius: 16px; border_width: 1.5px; border_color: Style.brand;
+                            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                            // nose indicator pointing forward
+                            Path {
+                                stroke: Style.brand; stroke_width: 1.5px;
+                                MoveTo { x: 16; y: 0; }
+                                LineTo { x: 16; y: -6; }
+                            }
+                            Text { text: "User"; font-size: Style.font-xxs; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        
+                        // Draggable spatial object
+                        Rectangle {
+                            width: 18px; height: 18px; background: Style.alert; border_radius: 9px; border_width: 1px; border_color: #fff;
+                            x: obj_x * (parent.width - 18px);
+                            y: obj_y * (parent.height - 18px);
+                            
+                            Text { text: "S1"; font-size: 8px; color: #fff; font-weight: 950; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        
+                        TouchArea {
+                            moved => {
+                                if (self.pressed) {
+                                    obj_x = (self.mouse_x / parent.width).clamp(0.05, 0.95);
+                                    obj_y = (self.mouse_y / parent.height).clamp(0.05, 0.95);
+                                }
+                            }
+                        }
+                    }
+                    
+                    Text { 
+                        text: "SRC_1: X=" + Math.floor((obj_x - 0.5) * 200) + " | Y=" + Math.floor((0.5 - obj_y) * 200); 
+                        font-size: Style.font-xxs; color: #666; font-weight: 800; horizontal-alignment: center; 
+                    }
+                }
+                
+                // RIGHT: Telemetry Controls & Rotators
+                VerticalLayout {
+                    spacing: 12px; horizontal-stretch: 1;
+                    
+                    // Mode Selector Tabs
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for name[idx] in ["STEREO", "ATMOS BINAURAL", "AMBISONICS"] : Rectangle {
+                            height: 20px; background: vr_mode == idx ? Style.border : Style.surface; border_radius: 2px; border_width: 1px; border_color: vr_mode == idx ? Style.brand : Style.border;
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px;
+                                Text { text: name; font-size: Style.font-xxs; color: vr_mode == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                            }
+                            TouchArea { clicked => { vr_mode = idx; } }
+                        }
+                    }
+                    
+                    // Rotators Controls (Yaw, Pitch, Roll Knobs)
+                    HorizontalLayout {
+                        spacing: 16px; alignment: start;
+                        VerticalLayout {
+                            alignment: center; spacing: 4px;
+                            Z_Knob { value: yaw; changed(v) => { yaw = v; } }
+                            Text { text: "YAW: " + Math.floor(yaw * 360) + "°"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            alignment: center; spacing: 4px;
+                            Z_Knob { value: pitch; changed(v) => { pitch = v; } }
+                            Text { text: "PITCH: " + Math.floor(pitch * 360) + "°"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            alignment: center; spacing: 4px;
+                            Z_Knob { value: roll; changed(v) => { roll = v; } }
+                            Text { text: "ROLL: " + Math.floor(roll * 360) + "°"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                        }
+                    }
+                    
+                    // Telemetry Stats Box
+                    Rectangle {
+                        background: #000; border_radius: 2px; border_width: 1px; border_color: Style.border;
+                        VerticalLayout {
+                            padding: 8px; spacing: 4px;
+                            HorizontalLayout {
+                                Text { text: "HEADSETS READY:"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text { text: headset_active ? "AURA-VR v2" : "NONE"; font-size: Style.font-xxs; color: Style.brand; font-weight: 950; }
+                            }
+                            HorizontalLayout {
+                                Text { text: "Head Tracking"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text { text: "1.4 ms"; font-size: Style.font-xxs; color: Style.ok; font-weight: 700; }
+                            }
+                            HorizontalLayout {
+                                Text { text: "HRTF Filter"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text { text: "128 coef / ear"; font-size: Style.font-xxs; color: Style.text-secondary; font-weight: 500; }
+                            }
+                        }
+                    }
+                    
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Z_IconButton { icon: "◯ TOGGLE HEADSET"; active: headset_active; clicked => { headset_active = !headset_active; } }
+                    }
+                }
+            }
+        }
+    }
+}

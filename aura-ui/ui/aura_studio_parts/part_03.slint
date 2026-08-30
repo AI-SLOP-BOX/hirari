@@ -1,0 +1,598 @@
+                        if (bot_view == 7) : Z_FullMixer { 
+                            tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode;
+                            close => { mx_open = false; } 
+                        }
+                        if (bot_view == 8 && root.tracks.length > 0) : Z_NotationHubView { notes: root.tracks[selected_row].piano_roll_notes; }
+
+                if (root.tracks.length == 0) : Rectangle {
+                    height: 300px;
+                    vertical-stretch: 1;
+                    background: Style.surface;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 10px;
+                        Text { text: "No tracks in this project"; font-size: 14px; color: Style.text; horizontal-alignment: center; }
+                        Text { text: "Create a track or choose a starting template to begin."; font-size: 10px; color: Style.text-dim; horizontal-alignment: center; }
+                        Z_IconButton { width: 160px; icon: "Create Audio Track"; clicked => { ProjectActions.add_track("AUDIO"); } }
+                    }
+                }
+
+                // The compact session surface below owns the loaded-project editor.
+                // Keep the legacy bottom-panel tree out of the frame once a real
+                // template is loaded; otherwise both trees are instantiated and
+                // every animated analyzer redraws on top of the new editor.
+                if ((mx_open || pr_open) && root.tracks.length < 4) : Rectangle {
+                    height: 300px; background: Style.panel;
+                    Rectangle { y: 0; height: 2px; background: #000; width: 100%; }
+                    VerticalLayout {
+                        Rectangle {
+                            height: 32px; background: Style.surface;
+                            HorizontalLayout {
+                                padding-left: 10px; padding-right: 10px; spacing: 4px;
+                                ScrollView {
+                                    horizontal-stretch: 1;
+                                    viewport-height: 28px;
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        // Primary editor destinations stay visible;
+                                        // secondary tools open in the row below.
+                                        Z_IconButton { icon: "Mixer"; active: bot_view == ViewModes.mixer; clicked => { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; } }
+                                        Z_IconButton { icon: "Editor"; active: bot_view == ViewModes.piano_roll; clicked => { bot_view = ViewModes.piano_roll; mx_open = true; pr_open = true; } }
+                                        Z_IconButton { icon: "Browser"; active: bot_view == ViewModes.browser; clicked => { bot_view = ViewModes.browser; mx_open = true; pr_open = false; } }
+                                        if (production_mode) : Z_IconButton { icon: "Automation"; active: bot_view == ViewModes.automation; clicked => { bot_view = ViewModes.automation; mx_open = true; pr_open = false; } }
+                                        if (production_mode) : Z_IconButton { icon: "Project"; active: bot_view == ViewModes.project; clicked => { bot_view = ViewModes.project; mx_open = true; pr_open = false; } }
+                                        if (!production_mode) : Z_IconButton { icon: "Audio"; active: bot_view == ViewModes.audio_editor; clicked => { bot_view = ViewModes.audio_editor; mx_open = true; pr_open = false; } }
+                                        if (!production_mode) : Z_IconButton { icon: "Smart"; active: bot_view == ViewModes.smart_controls; clicked => { bot_view = ViewModes.smart_controls; mx_open = true; pr_open = false; } }
+                                        Z_IconButton { icon: "Diag"; active: bot_view == 19; clicked => { bot_view = 19; mx_open = true; pr_open = false; } }
+                                        if (!production_mode) : Z_IconButton { icon: more_views_open ? "Less" : "More"; compact: true; active: more_views_open; clicked => { more_views_open = !more_views_open; } }
+                                    }
+                                }
+                                if (!production_mode && more_views_open) : Rectangle {
+                                    height: 30px; background: Style.panel; border_width: 1px; border_color: Style.border;
+                                    ScrollView {
+                                        viewport-height: 28px;
+                                        HorizontalLayout {
+                                            padding-left: 10px; padding-right: 10px; spacing: 4px;
+                                            Z_IconButton { icon: "Score"; active: bot_view == 8; clicked => { bot_view = 8; mx_open = true; pr_open = false; } }
+                                            if (!production_mode) : Z_IconButton { icon: "Loops"; active: bot_view == 11; clicked => { bot_view = 11; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Drums"; active: bot_view == 12; clicked => { bot_view = 12; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Auto"; active: bot_view == 13; clicked => { bot_view = 13; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Project"; active: bot_view == 14; clicked => { bot_view = 14; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Setup"; active: bot_view == 15; clicked => { bot_view = 15; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "MIDI"; active: bot_view == 17; clicked => { bot_view = 17; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Vocal"; active: bot_view == ViewModes.openutau; clicked => { bot_view = ViewModes.openutau; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Export"; active: bot_view == 18; clicked => { bot_view = 18; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Diag"; active: bot_view == 19; clicked => { bot_view = 19; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Prefs"; active: bot_view == 20; clicked => { bot_view = 20; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Flex"; active: bot_view == 21; clicked => { bot_view = 21; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Comp"; active: bot_view == 22; clicked => { bot_view = 22; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Stacks"; active: bot_view == 23; clicked => { bot_view = 23; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Global"; active: bot_view == 24; clicked => { bot_view = 24; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Steps"; active: bot_view == 25; clicked => { bot_view = 25; mx_open = true; pr_open = false; } }
+                                            if (!production_mode) : Z_IconButton { icon: "Console"; active: bot_view == 9; clicked => { bot_view = 9; mx_open = true; pr_open = false; } }
+                                        }
+                                    }
+                                }
+                                Text { text: production_mode ? "BEGINNER" : "ADVANCED"; font-size: 8px; color: production_mode ? Style.text-secondary : Style.brand; vertical-alignment: center; }
+                                Z_IconButton { icon: production_mode ? "ADVANCED" : "BEGINNER"; compact: true; button-width: 76px; active: !production_mode; clicked => { production_mode = !production_mode; more_views_open = !production_mode; experience-mode-changed(production_mode); if (production_mode && (bot_view == 1 || bot_view == 11)) { bot_view = 0; } } }
+                                Text { text: focus_mode ? "FOCUS" : "FULL"; font-size: 8px; color: focus_mode ? Style.brand : Style.text-secondary; vertical-alignment: center; }
+                                Z_IconButton { icon: focus_mode ? "FULL VIEW" : "FOCUS"; compact: true; button-width: 68px; active: focus_mode; clicked => { focus_mode = !focus_mode; focus-mode-changed(focus_mode); if (focus_mode) { bot_view = 0; mx_open = false; pr_open = false; } } }
+                                Z_IconButton { icon: workspace_preset == "arrange" ? "ARRANGE" : (workspace_preset == "mix" ? "MIX" : (workspace_preset == "vocal" ? "VOCAL" : "SOUND")); compact: true; button-width: 76px; clicked => {
+                                    workspace_preset = workspace_preset == "arrange" ? "mix" : (workspace_preset == "mix" ? "vocal" : (workspace_preset == "vocal" ? "sound_design" : "arrange"));
+                                    if (workspace_preset == "arrange") { bot_view = 0; mx_open = false; pr_open = false; }
+                                    if (workspace_preset == "mix") { bot_view = 0; mx_open = true; pr_open = false; }
+                                    if (workspace_preset == "vocal") { bot_view = 8; mx_open = true; pr_open = false; }
+                                    if (workspace_preset == "sound_design") { bot_view = 3; mx_open = true; pr_open = false; }
+                                    workspace-preset-changed(workspace_preset);
+                                } }
+                                if (production_mode) : Z_IconButton { icon: "GUIDE"; compact: true; button-width: 52px; clicked => { beginner_guide_open = true; } }
+                                Z_IconButton { icon: "X"; compact: true; clicked => { mx_open = false; pr_open = false; } }
+                            }
+                        }
+                        
+                        if (bot_view == 9) : Rectangle {
+                            background: Style.surface;
+                            VerticalLayout {
+                                padding: 12px; spacing: 8px;
+                                Text { text: "Console"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; font-weight: 600; }
+                                ScrollView {
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        Text { text: "> aura.engine.initialize()"; font-size: 9px; color: Style.text-tertiary; font-family: Style.numeric-font; }
+                                        Text { text: "OK: Bridge active at 0x7fc192"; font-size: 9px; color: Style.ok; font-family: Style.numeric-font; }
+                                        Text { text: "> aura.plugins.scan()"; font-size: 9px; color: Style.text-tertiary; font-family: Style.numeric-font; }
+                                        Text { text: available_fx.length > 0 ? "Plugin scan: ready (" + available_fx.length + ")" : "Plugin scan: no plugins"; font-size: 9px; color: available_fx.length > 0 ? Style.ok : Style.text-secondary; font-family: Style.numeric-font; }
+                                        Text { text: "> _"; font-size: 9px; color: Style.text-primary; font-family: Style.numeric-font; }
+                                    }
+                                }
+                                Rectangle { height: 1px; background: Style.border; }
+                                HorizontalLayout {
+                                    Text { text: "Memory: — | Status: Ready"; font-size: Style.font-xxs; color: Style.text-tertiary; font-family: Style.numeric-font; }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
+                        }
+                        
+                        if (bot_view == 0) : HorizontalLayout {
+                            // Scrollable Track Statically Assigned Strips
+                            ScrollView {
+                                horizontal-stretch: 1;
+                                viewport-height: 280px;
+                                HorizontalLayout {
+                                    padding: 10px; spacing: 2px;
+                                    for trk[idx] in root.tracks : Z_MixerStrip {
+                                        property <float> safe_peak: pks.length > 0 ? pks[Math.mod(idx, pks.length)] : 0.0;
+                                        property <float> safe_hold: pks_h.length > 0 ? pks_h[Math.mod(idx, pks_h.length)] : 0.0;
+                                        name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan; 
+                                        peak: safe_peak; pk_h: safe_hold; tid: trk.id; 
+                                        is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; 
+                                        delay_ms: trk.delay_ms;
+                                        fx: trk.fx; compact: mx_compact; send_lvl: trk.send_lvl; 
+                                        filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
+                                        meter_mode: meter_mode; group_id: trk.group_id;
+
+                                    }
+                                    Rectangle { width: 4px; background: Style.surface-0; } // Divider
+                                    for v_trk[v_idx] in vca_tracks : Z_MixerStrip {
+                                        name: v_trk.name; color: v_trk.color; volume: v_trk.volume; pan: v_trk.pan; 
+                                        peak: v_trk.peak; pk_h: 0.0; tid: v_trk.id; 
+                                        is_mute: v_trk.mute; is_solo: v_trk.solo; is_phase: false; 
+                                        fx: []; compact: mx_compact; send_lvl: 0.0;
+                                        filter_lp: 1.0; filter_hp: 0.0; track_idx: v_idx;
+                                        meter_mode: meter_mode; group_id: 0;
+                                    }
+                                }
+                            }
+                            
+                            // --- INDUSTRIAL FIXED MASTER CONSOLE ---
+                            Rectangle { width: 1.5px; background: Style.surface-0; }
+                            if (!focus_mode) : Rectangle {
+                                width: 250px; background: Style.surface;
+                                Rectangle { x: 0; width: 1px; height: 100%; background: Style.border; }
+                                VerticalLayout {
+                                    padding: 8px; spacing: 10px;
+                                    HorizontalLayout { 
+                                        spacing: 4px; 
+                                        Text { text: "Master Monitoring"; font-size: 9px; font-weight: 600; color: Style.brand; horizontal-stretch: 1; vertical-alignment: center; } 
+                                        Z_IconButton { icon: "DIM"; active: is_dim; clicked => { is_dim = !is_dim; DiagnosticsActions.toggle_dim(); } }
+                                        Z_IconButton { icon: "EXP"; clicked => { export_open = true; } }
+                                    }
+
+                                    // Real-time DSP Feedback
+                                    Z_Telemetry { cpu: cpu_usage; ram: 0.0; load_his: load_his; }
+                                    
+                                    // The expensive multi-layer visualizer is an ADV-only view.
+                                    // Production mode keeps the meter and spectrum focused on mix work.
+                                    if (!production_mode) : Z_HolographicSpec { fft: fft_data; }
+                                    
+                                    // Spectral Auditing (Fixed)
+                                    Z_Spectrum { fft: fft_data; heatmap_data: heatmap_data; partials_data: partials_data; motion_energy: root.motion_energy; suggested_eq: suggested_eq; height: 90px; }
+                                    
+                                    // Phase & Correlation (Fixed)
+                                    Z_PhaseMeter { correlation: root.phase_correlation; }
+                                    
+                                    // Final Output Bus
+                                    HorizontalLayout {
+                                        spacing: 12px;
+                                        Z_MixerStrip { 
+                                            name: "MAIN"; color: Style.brand; volume: root.master_output_gain; pan: 0.5; 
+                                            peak: pks.length > tracks.length ? pks[tracks.length] : 0.0; pk_h: pks_h.length > tracks.length ? pks_h[tracks.length] : 0.0; tid: 999; 
+                                            is_mute: false; is_solo: false; is_phase: false; fx: []; compact: true; 
+                                            send_lvl: 0; filter_lp: 1.0; filter_hp: 0.0; track_idx: 99; is_master: true; meter_mode: meter_mode; 
+                                        }
+                                        VerticalLayout {
+                                            spacing: 6px; alignment: end; horizontal-stretch: 1;
+                                            Rectangle { height: 1px; background: Style.border; }
+                                            Text { text: root.lufs_integrated > -120.0 ? "LUFS: " + (Math.round(root.lufs_integrated * 10.0) / 10.0) : "LUFS: N/A"; font-size: 8px; color: root.lufs_integrated > -120.0 ? Style.ok : Style.text-secondary; font-weight: 600; }
+                                            Text { text: "Peak: " + (Math.floor(((pks.length > tracks.length ? pks[tracks.length] : 0.0) - 1.0) * 10.0)) + " dBFS"; font-size: 8px; color: Style.text-secondary; }
+                                            Rectangle { vertical-stretch: 1; }
+                                            Text { text: root.audio_sample_rate > 0.0 ? "Engine Ready | " + (Math.round(root.audio_sample_rate / 100.0) / 10.0) + " kHz" : "Audio Engine Offline"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (bot_view == 10 && root.tracks.length > 0) : Z_SmartControls {
+                            track_name: root.tracks[selected_row].name;
+                            values: root.track_macros;
+                            changed(idx, value) => { PluginActions.macro_changed(idx, value); }
+                        }
+
+                        if (bot_view == 11) : Z_WorkflowPage {
+                            title: "Live Session";
+                            subtitle: "Live performance workspace";
+                            status: root.tracks.length > 0 ? "TRACK READY" : "NO TRACK SELECTED";
+                        }
+
+                        if (bot_view == 12) : Z_WorkflowPage {
+                            title: "Drum Pads";
+                            subtitle: "Sample pads and pattern performance";
+                            status: root.tracks.length > 0 ? "TRACK READY" : "NO TRACK SELECTED";
+                        }
+
+                        if (bot_view == 13) : Z_WorkflowPage {
+                            title: "Automation";
+                            subtitle: "Track volume, pan and effect automation lanes";
+                            status: root.tracks.length > 0 ? "LANES READY" : "CREATE A TRACK";
+                        }
+
+                        if (bot_view == 14) : Z_ProjectRecovery {
+                            project-path: root.project-path;
+                            backup-count: root.recovery-backup-count;
+                            backup-summary: root.recovery-backup-summary;
+                            backup-generations: root.recovery-backup-generations;
+                            status: root.last_action;
+                        }
+
+                        if (bot_view == 15) : Z_WorkflowPage {
+                            title: "Setup";
+                            subtitle: "Audio device, MIDI and application preferences";
+                            status: root.audio_diagnostic;
+                        }
+
+                        if (bot_view == 16) : Z_LibraryPage {
+                            entries: root.sample_entries;
+                            preview(path) => { BrowserActions.browser_preview(path); }
+                        }
+
+                        if (bot_view == 17) : Z_WorkflowPage {
+                            title: "MIDI Learn";
+                            subtitle: "Map controllers to transport and track parameters";
+                            status: "WAITING FOR MIDI INPUT";
+                        }
+
+                        if (bot_view == 18) : Z_WorkflowPage {
+                            title: "Export";
+                            subtitle: "Bounce range, format and stem export settings";
+                            status: root.is_rendering ? root.render_state : "READY TO EXPORT";
+                        }
+
+                        if (bot_view == 19) : Z_DiagnosticsPage {
+                            engine-state: root.diagnostic_state;
+                            cpu-load: root.diagnostic_load;
+                            dropped-blocks: root.input_dropped_blocks;
+                            mailbox-overruns: root.diagnostic_overruns;
+                            watchdog-trips: root.diagnostic_watchdogs;
+                            sandbox-failures: root.diagnostic_sandbox_failures;
+                            pdc-status: root.diagnostic_pdc;
+                            range-overflow: root.diagnostic_range_overflow;
+                        }
+
+                        if (bot_view == 20) : Z_AudioSettings {
+                            ready: root.audio_device_ready;
+                            sample-rate: root.audio_sample_rate;
+                            buffer-size: root.buffer_size;
+                            dropped-blocks: root.input_dropped_blocks;
+                            diagnostic: root.audio_diagnostic;
+                            busy: root.is_ply || root.is_rec;
+                        }
+
+                        if (bot_view == 21) : Z_LogicFeaturePage {
+                            title: "Flex & Pitch";
+                            subtitle: "Transient-aware timing and pitch editing for the selected audio region";
+                            controls: ["Timing", "Pitch", "Formant", "Gain", "Transient", "Quantize"];
+                            values: [0.5, 0.5, 0.5, 0.5, 0.7, 0.0];
+                            changed(idx, value) => {
+                                if (root.sel_cid >= 0 && idx == 0) { EditorActions.warp_clip(root.sel_cid, 0.5 + value * 1.5); }
+                                else if (root.sel_cid >= 0 && idx == 1) { EditorActions.pitch_clip(root.sel_cid, (value - 0.5) * 48.0); }
+                                else if (root.sel_cid >= 0 && idx == 3) { EditorActions.clip_gain_changed(root.sel_cid, value * 2.0); }
+                                else { PluginActions.macro_changed(idx, value); }
+                                CommandActions.palette_exec("FLEX PARAM");
+                            }
+                        }
+
+                        if (bot_view == 22) : Z_LogicFeaturePage {
+                            title: "Take Comping";
+                            subtitle: "Quick-swipe comping across recorded takes with crossfaded boundaries";
+                            controls: ["Take 1", "Take 2", "Take 3", "Take 4", "Crossfade", "Preview"];
+                            values: [1.0, 0.7, 0.3, 0.0, 0.5, 0.0];
+                            changed(idx, value) => {
+                                if (idx >= 0 && idx < 4) { CompingActions.select_take(idx); }
+                                else if (idx == 4) { CompingActions.crossfade_changed(value); }
+                                else if (idx == 5 && value > 0.5) { CompingActions.preview(); }
+                                CommandActions.palette_exec("TAKE COMP");
+                            }
+                        }
+
+                        if (bot_view == 23) : Z_TrackStackPage {
+                            selected-track-id: tracks.length > 0 ? tracks[selected_row].id : -1;
+                        }
+
+                        if (bot_view == 24) : Z_LogicFeaturePage {
+                            title: "Global Tracks";
+                            subtitle: "Tempo, markers, arrangement sections and key signature lanes";
+                            controls: ["Tempo", "Markers", "Arrangement", "Key", "Signature", "Cycle"];
+                            values: [0.5, 0.7, 0.4, 0.0, 0.5, 0.25];
+                            changed(idx, value) => {
+                                if (idx == 0) { TransportActions.set_bpm(60.0 + value * 180.0); }
+                                else if (idx == 5) { TransportActions.set_loop_enabled(value > 0.5); }
+                                else { PluginActions.macro_changed(idx, value); }
+                                CommandActions.palette_exec("GLOBAL TRACKS");
+                            }
+                        }
+
+                        if (bot_view == 25) : Z_StepSequencerPage {
+                            selected-track-id: tracks.length > 0 ? tracks[selected_row].id : -1;
+                        }
+
+                        if (bot_view == ViewModes.openutau) : Z_OpenUtauEditor {
+                            score-path <=> root.openutau_score_path;
+                            render-path <=> root.openutau_render_path;
+                            status: root.openutau_status;
+                            scoop <=> root.openutau_scoop;
+                            vibrato <=> root.openutau_vibrato;
+                            dynamics <=> root.openutau_dynamics;
+                            consonants <=> root.openutau_consonants;
+                            notes: root.openutau_notes;
+                            open-score => { CommandActions.palette_exec("OPENUTAU EDIT"); }
+                            launch-editor => { CommandActions.palette_exec("OPENUTAU LAUNCH"); }
+                            render-score => { CommandActions.palette_exec("OPENUTAU RENDER"); }
+                            import-render => { CommandActions.palette_exec("OPENUTAU IMPORT RENDER"); }
+                            apply-tuning => { CommandActions.palette_exec("OPENUTAU APPLY TUNING"); }
+                        }
+
+                        if (bot_view == 1 && !production_mode && root.tracks.length > 0) : Z_SampleEditorAdapter { 
+                            samples: root.is_rec && root.recording_waveform.length > 0 ? root.recording_waveform : [0.2, 0.5, 0.3, 0.8, 0.9, 0.7, 0.4, 0.1, 0.3, 0.6, 0.8, 0.5, 0.2, 0.4, 0.7, 0.9, 0.8, 0.6, 0.3, 0.1, 0.4, 0.8, 0.6, 0.2];
+                            wave_col: root.tracks[selected_row].color;
+                            clip-id: root.sel_cid;
+                            reversed: root.selected_clip_reversed;
+                                trim-start: root.selected_clip_trim_start;
+                                trim-end: root.selected_clip_trim_end;
+                                flex-ratio: root.selected_clip_warp_ratio;
+                                pitch-semitones: root.selected_clip_pitch_semitones;
+                                loop-count: root.selected_clip_loop_count;
+                            apply-gain(value) => { if (root.sel_cid >= 0) { EditorActions.clip_gain_changed(root.sel_cid, value); } }
+                            apply-fades(fade-in, fade-out) => { if (root.sel_cid >= 0) { EditorActions.fade_changed(root.sel_cid, fade-in, fade-out); } }
+                            apply-reverse(value) => { if (root.sel_cid >= 0) { EditorActions.reverse_clip(root.sel_cid, value); } }
+                            apply-trim(start, end) => { if (root.sel_cid >= 0) { EditorActions.trim_clip(root.sel_cid, start, end); } }
+                            apply-warp(ratio) => { if (root.sel_cid >= 0) { EditorActions.warp_clip(root.sel_cid, ratio); } }
+                            apply-pitch(semitones) => { if (root.sel_cid >= 0) { EditorActions.pitch_clip(root.sel_cid, semitones); } }
+                            apply-loop(count) => { if (root.sel_cid >= 0) { EditorActions.loop_clip(root.sel_cid, count); } }
+                            duplicate-clip => { if (root.sel_cid >= 0) { EditorActions.duplicate_clip(root.sel_cid); } }
+                            remove-clip => { if (root.sel_cid >= 0) { EditorActions.remove_clip(root.sel_cid); } }
+                        }
+
+                        if (bot_view == 2 && root.tracks.length > 0) : Z_PianoRollView { 
+                            trk_id: root.selected_row; 
+                            ui_timer: ui_timer;
+                            zoom_lvl: root.z_lvl;
+                            ph: root.ph;
+                            notes: root.tracks[selected_row].piano_roll_notes;
+                            snap_division: root.snap_division;
+                            project-changed => { auto_save_status = "Unsaved changes"; }
+                            quantize => { MidiActions.quantize_notes(root.selected_row, 0.25); }
+                            ramp-velocities => { MidiActions.ramp_selected_velocities(root.selected_row); }
+                            insert-chord(root_note, beat, quality, length, inversion) => { MidiActions.insert_chord(root.selected_row, root_note, beat, quality, length, inversion); }
+                            insert-progression(root_note, beat, preset, length, inversion) => { MidiActions.insert_progression(root.selected_row, root_note, beat, preset, length, inversion); }
+                            delete-all => { MidiActions.piano_roll_delete(); }
+                            add-note(pitch, beat, length, velocity) => { MidiActions.add_note(root.selected_row, pitch, beat, length, velocity); }
+                            select-note(pitch, beat) => { MidiActions.select_note(root.selected_row, pitch, beat); }
+                            move-note(pitch, beat, delta, pitch_delta) => { MidiActions.move_note(root.selected_row, pitch, beat, delta, pitch_delta); }
+                            resize-note(pitch, beat, delta) => { MidiActions.resize_note(root.selected_row, pitch, beat, delta); }
+                            set-velocity(track_id, note_index, velocity) => { MidiActions.set_note_velocity(track_id, note_index, velocity); }
+                            set-lyric(pitch, beat, lyric) => { MidiActions.set_note_lyric(root.selected_row, pitch, beat, lyric); }
+                        }
+                        
+                        if (bot_view == 3) : Rectangle {
+                            background: Style.surface;
+                            HorizontalLayout {
+                                padding: 12px; spacing: 16px;
+                                ScrollView {
+                                    horizontal-stretch: 1;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                    for trk[idx] in root.tracks : Z_MixerStrip {
+                                        property <float> safe_peak: pks.length > 0 ? pks[Math.mod(idx, pks.length)] : 0.0;
+                                        property <float> safe_hold: pks_h.length > 0 ? pks_h[Math.mod(idx, pks_h.length)] : 0.0;
+                                        name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan; 
+                                        peak: safe_peak; pk_h: safe_hold; tid: trk.id; 
+                                            is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; 
+                                            delay_ms: trk.delay_ms;
+                                            fx: trk.fx; compact: false; send_lvl: trk.send_lvl; 
+                                            filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
+                                            meter_mode: meter_mode; group_id: trk.group_id;
+                                        }
+                                    }
+                                }
+                                
+                                Rectangle { width: 2px; background: Style.border; }
+                                
+                                // --- DIVINE MASTER CONSOLE (SSL PARITY) ---
+                                VerticalLayout {
+                                    width: 420px; spacing: 12px;
+                                    Text { text: "Master Bus"; font-size: 10px; color: Style.brand; font-weight: 700; horizontal-alignment: center; }
+                                    
+                                    Rectangle {
+                                        height: 120px; background: Style.surface-0; border_radius: 2px; border_width: 1px; border_color: Style.border;
+                                        HorizontalLayout {
+                                            padding: 8px; spacing: 12px;
+                                            VerticalLayout {
+                                                alignment: center; spacing: 4px;
+                                                Text { text: "LUFS"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                                Rectangle { height: 80px; width: 30px; background: Style.surface; Rectangle { y: (1.0 - 0.7) * parent.height; height: 0.7 * parent.height; width: 100%; background: Style.ok; } }
+                                                Text { text: Math.round(root.lufs_integrated * 10.0) / 10.0 + " LUFS"; font-size: Style.font-xxs; color: Style.ok; font-weight: 700; horizontal-alignment: center; }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center; spacing: 4px;
+                                                Text { text: "Peak L/R"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                                HorizontalLayout { spacing: 2px; for i in 2 : Rectangle { property <float> safe_peak: pks.length > i ? pks[i] : 0.0; height: 80px; width: 8px; background: Style.surface; Rectangle { y: (1.0 - safe_peak) * parent.height; height: safe_peak * parent.height; width: 100%; background: @linear-gradient(180deg, Style.record 0%, Style.solo 100%); } } }
+                                                Text { text: Math.round(root.master_true_peak_l * 10.0) / 10.0 + " / " + Math.round(root.master_true_peak_r * 10.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: Style.text-primary; horizontal-alignment: center; }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center; horizontal-stretch: 1;
+                                                Text { text: "Stereo Phase"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                                                Z_PhaseMeter { correlation: root.phase_correlation; }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // --- INDUSTRIAL SPECTRAL BUSS VISUALIZER ---
+                                    Rectangle {
+                                        height: 100px; background: Style.surface-0; border_radius: 2px; border_width: 1px; border_color: Style.border; clip: true;
+                                        HorizontalLayout {
+                                            padding: 4px; spacing: 1.5px; alignment: center;
+                                            for i in 64 : Rectangle {
+                                                property <float> safe_fft: fft_data.length > 0 ? fft_data[Math.mod(i, fft_data.length)] : 0.0;
+                                                width: 4px; height: (safe_fft * 0.95 + 0.05) * parent.height;
+                                                background: @linear-gradient(0deg, Style.brand 0%, Style.solo 100%);
+                                                opacity: 0.7 + 0.3 * (i / 64.0);
+                                                border_radius: 0.5px;
+                                                y: (parent.height - self.height) / 2.0;
+                                            }
+                                        }
+                                        Text { text: "Master Spectrum"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 6px; y: 4px; font-weight: 600; }
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Z_LargeVU { val: root.pks.length > tracks.length ? root.pks[tracks.length] : 0.0; label: "MASTER L/R"; }
+                                        Rectangle {
+                                            height: 125px; background: Style.surface; border_radius: 2px; border_width: 1.5px; border_color: Style.line-subtle; horizontal-stretch: 1;
+                                            VerticalLayout {
+                                                padding: 10px; spacing: 8px;
+                                                HorizontalLayout {
+                                                    Text { text: "Master Dynamics"; font-size: Style.font-xxs; color: Style.text-secondary; font-weight: 600; horizontal-stretch: 1; }
+                                                    Button {
+                                                        text: "ASSIST"; enabled: root.tracks.length > 0 && root.fx_active_id >= 0;
+                                                        clicked => { PluginActions.apply_dynamics_suggestion(root.tracks[root.selected_row].id, root.fx_active_id); }
+                                                    }
+                                                }
+                                                HorizontalLayout {
+                                                    spacing: 12px; alignment: center;
+                                                    Z_Knob { label: "THR"; value: root.plugin-parameter-values.length > 0 ? root.plugin-parameter-values[0] : 0.7; accent-col: Style.brand; changed(v) => { if (root.tracks.length > 0 && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 0, v); } } }
+                                                    Z_Knob { label: "RAT"; value: root.plugin-parameter-values.length > 1 ? root.plugin-parameter-values[1] : 0.4; accent-col: Style.record; changed(v) => { if (root.tracks.length > 0 && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 1, v); } } }
+                                                    Z_Knob { label: "ATT"; value: root.plugin-parameter-values.length > 2 ? root.plugin-parameter-values[2] : 0.2; accent-col: Style.solo; changed(v) => { if (root.tracks.length > 0 && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 2, v); } } }
+                                                    Z_Knob { label: "REL"; value: root.plugin-parameter-values.length > 3 ? root.plugin-parameter-values[3] : 0.6; accent-col: Style.ok; changed(v) => { if (root.tracks.length > 0 && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 3, v); } } }
+                                                }
+                                                Rectangle { height: 18px; background: Style.surface-0; border_radius: 1px; Text { text: "Gain Reduction: " + Math.round(root.master_gain_reduction * 10.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: Style.record; horizontal-alignment: center; vertical-alignment: center; font-weight: 600; } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (bot_view == 4) : Rectangle {
+                            background: Style.surface;
+                            VerticalLayout {
+                                padding: 20px; spacing: 12px;
+                                Text { text: "Audio Routing"; font-size: 14px; color: Style.brand; font-weight: 700; }
+                                HorizontalLayout {
+                                    spacing: 16px;
+                                    // Routing Grid (Hardened)
+                                    Rectangle {
+                                        horizontal-stretch: 1; background: Style.surface-0; border_width: 1px; border_color: Style.border;
+                                        VerticalLayout {
+                                            padding: 10px; spacing: 1px;
+                                            HorizontalLayout {
+                                                spacing: 1px;
+                                                Rectangle { width: 80px; height: 20px; } // Header corner
+                                                for b in 10 : Rectangle {
+                                                    width: 33px; height: 20px; background: Style.surface;
+                                                    Text {
+                                                        text: b < root.tracks.length ? root.tracks[b].name : "DEST " + (b + 1);
+                                                        font-size: Style.font-xxs; color: #6E6E73;
+                                                        vertical-alignment: center; horizontal-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                            for t_idx in 8 : HorizontalLayout {
+                                                spacing: 1px;
+                                                if t_idx < root.tracks.length : Button {
+                                                    width: 80px; height: 22px;
+                                                    text: root.tracks[t_idx].name;
+                                                    enabled: root.tracks[t_idx].id != root.tracks[root.selected_row].id;
+                                                    clicked => { root.sidechain-source-id = root.tracks[t_idx].id; root.sidechain-source-name = root.tracks[t_idx].name; }
+                                                }
+                                                if t_idx >= root.tracks.length : Rectangle {
+                                                    width: 80px; height: 22px; background: Style.surface;
+                                                    Text { text: "TRACK " + (t_idx+1); font-size: Style.font-xxs; color: #888; x: 8px; vertical-alignment: center; }
+                                                }
+                                                for b_idx in 10 : r := Rectangle { 
+                                                    // Start disconnected: a visual demo pattern must
+                                                    // never claim routes that are absent in the engine.
+                                                    property <bool> ptc: false;
+                                                    width: 33px; height: 22px; background: r.ptc ? Style.brand.with-alpha(0.2) : Style.surface;
+                                                    Rectangle { width: 6px; height: 6px; border_radius: 3px; background: r.ptc ? Style.brand : Style.border; x: 13.5px; y: 8px; }
+                                                    TouchArea { clicked => {
+                                                        if (t_idx < root.tracks.length && b_idx < root.tracks.length
+                                                            && root.tracks[t_idx].id != root.tracks[b_idx].id) {
+                                                            r.ptc = !r.ptc;
+                                                            root.route-source-id = root.tracks[t_idx].id;
+                                                            root.route-destination-id = root.tracks[b_idx].id;
+                                                            root.route-enabled = r.ptc;
+                                                            root.route-gain = 1.0;
+                                                            PluginActions.set_route(root.tracks[t_idx].id, root.tracks[b_idx].id, r.ptc);
+                                                        }
+                                                    } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Neural Brain Overlay
+                                    VerticalLayout {
+                                        width: 300px; spacing: 12px;
+                                        Rectangle {
+                                            height: 180px; background: #000; border_radius: 4px; border_width: 1px; border_color: Style.brand;
+                                            Z_AudioEngineStatus { ready: true; time: root.ui_timer; }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px; alignment: center;
+                                        }
+                                        Rectangle {
+                                            height: 86px; background: Style.surface-0;
+                                            VerticalLayout {
+                                                padding: 8px; spacing: 4px;
+                                                Text {
+                                                    text: root.route-source-id >= 0 && root.route-destination-id >= 0
+                                                        ? "ROUTE " + root.route-source-id + " → " + root.route-destination-id
+                                                        : "SELECT A ROUTE";
+                                                    font-size: 9px; color: Style.text-secondary;
+                                                }
+                                                HorizontalLayout {
+                                                    spacing: 6px;
+                                                    Slider {
+                                                        horizontal-stretch: 1;
+                                                        enabled: root.route-source-id >= 0 && root.route-destination-id >= 0;
+                                                        value: root.route-gain / 2.0;
+                                                        changed(v) => {
+                                                            root.route-gain = v * 2.0;
+                                                            PluginActions.set_route_gain(
+                                                                root.route-source-id,
+                                                                root.route-destination-id,
+                                                                root.route-gain,
+                                                                root.route-enabled
+                                                            );
+                                                        }
+                                                    }
+                                                    Text { text: Math.round(root.route-gain * 100.0) / 100.0 + "x"; width: 38px; color: Style.brand; vertical-alignment: center; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Text { text: "ROUTING ACTIVE | SAMPLE-ACCURATE PROCESSING"; font-size: Style.font-xxs; color: #333; horizontal-alignment: center; }
+                            }
+                        }
+
+                        if (bot_view == 5) : Z_AuraSynth { accent-col: Style.brand; ui_timer: root.ui_timer; parameter-changed(index, value) => { PluginActions.macro_changed(index, value); } engine-changed(index) => { PluginActions.set_synth_engine(index); } }
+                        if (bot_view == 6) : HorizontalLayout {
+                            Z_StageViewCore { tracks: root.tracks; pan-3d-moved(id, x, y, z) => { SpatialActions.pan_3d_moved(id, x, y, z); } }
+                            Z_WorkflowPage {
+                                title: "Scene Launchpad";
+                                subtitle: "Scene control is available from the transport actions";
+                                status: "PRODUCTION MODE";
+                            }
+                        }
+                        if (bot_view == 7) : Z_FullMixer { 
+                            tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode;
+                            close => { root.mx_open = false; } 
+                        }
+                        if (bot_view == 8 && root.tracks.length > 0) : Z_NotationHubView { notes: root.tracks[selected_row].piano_roll_notes; }
+                    }
+                }
+            
+            // --- OMNIPRESENT TIMELINE NAVIGATOR (FINAL OVERVIEW) ---
+            Rectangle {
+                height: 14px; background: Style.surface; border_width: 0.5px; border_color: Style.border;

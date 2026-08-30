@@ -30,28 +30,23 @@ public:
      * @brief PROCESS: Cross-feedback stereo delay loop.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        double samplesPerBeat = (60.0 / context.bpm) * context.sampleRate;
-        uint32_t delaySamps = static_cast<uint32_t>(samplesPerBeat * m_noteValue);
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float inL = buffer.getReadPointer(0)[s];
-            float inR = buffer.getReadPointer(1)[s];
-
-            // 1. Fetch Delayed Output (Ping-Pong Cross-Tap)
-            float outL = m_delayL.process(inR + m_feedbackL * m_lastOutR, delaySamps);
-            float outR = m_delayR.process(inL + m_feedbackR * m_lastOutL, delaySamps);
-
-            m_lastOutL = outL;
-            m_lastOutR = outR;
-
-            // 2. Mix
-            buffer.getWritePointer(0)[s] = (inL * (1.0f - m_mix)) + (outL * m_mix);
-            buffer.getWritePointer(1)[s] = (inR * (1.0f - m_mix)) + (outR * m_mix);
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        const double bpm = std::isfinite(context.bpm) && context.bpm > 1.0 ? context.bpm : 120.0;
+        const uint32_t delaySamples = static_cast<uint32_t>(std::clamp(
+            m_sampleRate * (60.0 / bpm) * std::max(0.0625f, m_noteValue * 4.0f), 1.0, 65535.0));
+        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+            const float inL = buffer.getReadPointer(0)[i];
+            const float inR = channels > 1 ? buffer.getReadPointer(1)[i] : inL;
+            const float delayedL = m_delayL.process(inL + m_lastOutR * m_feedbackR, delaySamples);
+            const float delayedR = m_delayR.process(inR + m_lastOutL * m_feedbackL, delaySamples);
+            m_lastOutL = delayedL;
+            m_lastOutR = delayedR;
+            buffer.getWritePointer(0)[i] = inL * (1.0f - m_mix) + delayedL * m_mix;
+            if (channels > 1) buffer.getWritePointer(1)[i] = inR * (1.0f - m_mix) + delayedR * m_mix;
         }
     }
+
 
     void reset() noexcept override {
         m_delayL.reset();
@@ -61,9 +56,9 @@ public:
     }
 
     // Parameters
-    void setNoteValue(float v) { m_noteValue = v; } // 0.25 (Quarter), 0.5 (Half), etc.
+    void setNoteValue(float v) { m_noteValue = std::clamp(v, 0.0625f, 4.0f); } // 0.25 (Quarter), 0.5 (Half), etc.
     void setFeedback(float f) { m_feedbackL = m_feedbackR = std::clamp(f, 0.0f, 0.99f); }
-    void setMix(float m) { m_mix = m; }
+    void setMix(float m) { m_mix = std::clamp(m, 0.0f, 1.0f); }
 
 private:
     double m_sampleRate = 44100.0;

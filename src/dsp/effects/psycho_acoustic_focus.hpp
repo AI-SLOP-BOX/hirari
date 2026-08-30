@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include "../../core/audio_buffer.hpp"
+#include "../../core/atomic_parameter.hpp"
 #include "../iprocessor.hpp"
 
 namespace Aura::DSP::Effects {
@@ -27,33 +28,31 @@ public:
      * @brief PROCESS: Generates musically-related even-order harmonics.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-        
-        uint32_t numSamples = buffer.getNumSamples();
-        float focusAmount = 0.5f; // TODO: Map to parameter
-        
-        for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-            float* p = buffer.getWritePointer(c);
-            for (uint32_t s = 0; s < numSamples; ++s) {
-                float in = p[s];
-                
-                // 1. Extract Presence (High-pass at 3.5kHz)
-                m_hpfState[c] = m_alpha * (m_hpfState[c] + in - m_lastIn[c]);
-                m_lastIn[c] = in;
-                float highMids = m_hpfState[c];
-                
-                // 2. Add 'Musical' Harmonics (Asymmetrical saturation for presence focus)
-                float harmonic = std::tanh(highMids * 2.0f) * focusAmount * 0.1f;
-                
-                // 3. Blend back (Psych-Additive logic)
-                p[s] += harmonic;
+        (void)midi; (void)context;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 32);
+        const float amount = std::clamp(m_focusAmount.getNextValue(), 0.0f, 1.0f);
+        for (uint32_t c = 0; c < channels; ++c) {
+            float* data = buffer.getWritePointer(c);
+            if (!data) continue;
+            float low = m_lastIn[c];
+            for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+                const float x = std::isfinite(data[i]) ? data[i] : 0.0f;
+                low = m_alpha * low + (1.0f - m_alpha) * x;
+                const float high = x - low;
+                const float harmonic = high * high * std::copysign(1.0f, high);
+                const float y = x + amount * 0.18f * harmonic;
+                data[i] = std::isfinite(y) ? std::clamp(y, -4.0f, 4.0f) : 0.0f;
             }
+            m_lastIn[c] = low;
         }
     }
+
 
     void reset() noexcept override {
         std::fill(m_hpfState.begin(), m_hpfState.end(), 0.0f);
     }
+
+    void setFocusAmount(float val) { m_focusAmount.setTarget(val); }
 
 private:
     void updateCoefficients() {
@@ -65,6 +64,7 @@ private:
         m_lastIn.assign(32, 0.0f);
     }
 
+    Core::AtomicParameter m_focusAmount{0.5f};
     double m_sampleRate;
     float m_alpha = 0.9f;
     std::vector<float> m_hpfState;

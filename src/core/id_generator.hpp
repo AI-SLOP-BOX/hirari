@@ -28,7 +28,13 @@ public:
     }
     static uint32_t peekNextAutomationID() { return getAutomationCounter().load(std::memory_order_relaxed); }
 
+    static uint32_t nextNoteID() {
+        return getNoteCounter().fetch_add(1, std::memory_order_relaxed);
+    }
+    static uint32_t peekNextNoteID() { return getNoteCounter().load(std::memory_order_relaxed); }
+
 private:
+    static std::atomic<uint32_t>& getNoteCounter() { static std::atomic<uint32_t> c{1000000}; return c; }
     static std::atomic<uint32_t>& getRegionCounter() { static std::atomic<uint32_t> c{10000}; return c; }
     static std::atomic<uint32_t>& getTrackCounter() { static std::atomic<uint32_t> c{1}; return c; }
     static std::atomic<uint32_t>& getAutomationCounter() { static std::atomic<uint32_t> c{5000}; return c; }

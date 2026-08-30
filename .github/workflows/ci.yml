@@ -1,0 +1,56 @@
+name: Reproducible build and tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: rustfmt
+      - name: Verify checkout contains buildable source directories
+        run: ./scripts/verify_repository_health.sh
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+      - name: Compile with the committed lockfile
+        run: cargo check --workspace --locked
+      - name: Run the serialized workspace suite
+        env:
+          RUST_TEST_THREADS: "1"
+          AURA_NATIVE_TEST_ISOLATION: "1"
+        run: cargo test --workspace --all-targets --locked -- --test-threads=1
+
+  macos-bundle:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+      - name: Install build tools
+        run: brew install cmake ffmpeg
+      - name: Build the application bundle
+        run: ./scripts/build_app.sh
+      - name: Verify headless readiness
+        run: AURA_HEADLESS=1 "packaging/Aura DAW.app/Contents/MacOS/Aura DAW"
+      - name: Verify bundle signature
+        run: codesign --verify --deep --strict "packaging/Aura DAW.app"
+      - name: Generate and verify release metadata
+        run: |
+          ./scripts/generate_release_metadata.sh release-metadata "packaging/Aura DAW.app"
+          ./scripts/verify_release_metadata.sh release-metadata
+      - name: Upload release metadata for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: aura-release-metadata
+          path: release-metadata/
+          if-no-files-found: error

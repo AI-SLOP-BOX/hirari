@@ -22,43 +22,28 @@ public:
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float inL = buffer.getReadPointer(0)[s];
-            float inR = buffer.getReadPointer(1)[s];
-            float mid = (inL + inR) * 0.5f;
-
-            // 1. Envelope Follower (Correct timing)
-            float absIn = std::abs(mid);
-            if (absIn > m_env) m_env += (absIn - m_env) * m_attack;
-            else m_env += (absIn - m_env) * m_release;
-
-            // 2. Sample-Accurate Modulated Cutoff
-            float depth = m_env * m_sens;
-            float targetCutoff = std::clamp(m_cutoffBase + depth, 0.02f, 0.98f);
-            
-            // Continuous g-coefficient smoothing (No more clicking)
-            float f = targetCutoff * 8000.0f; 
-            float targetG = std::tan(3.1415926535 * f / m_sampleRate);
-            m_g += (targetG - m_g) * 0.2f; // Smooth ramp
-            m_k = 2.0f - (m_res * 1.95f);
-
-            // 3. SVF Execution (Stereo)
-            for (uint32_t c = 0; c < 2; ++c) {
-                float in = buffer.getReadPointer(c)[s];
-                float hp = (in - m_k * m_s1[c] - m_s2[c]) / (1.0f + m_k * m_g + m_g * m_g);
-                float bp = m_g * hp + m_s1[c];
-                float lp = m_g * bp + m_s2[c];
-
-                m_s1[c] = m_g * hp + bp;
-                m_s2[c] = m_g * bp + lp;
-                buffer.getWritePointer(c)[s] = lp;
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
+            float input[2] = {buffer.getReadPointer(0)[i], channels > 1 ? buffer.getReadPointer(1)[i] : buffer.getReadPointer(0)[i]};
+            const float detector = 0.5f * (std::abs(input[0]) + std::abs(input[1]));
+            const float coeff = detector > m_env ? m_attack : m_release;
+            m_env += (detector - m_env) * coeff;
+            const float cutoffNorm = std::clamp(m_cutoffBase + m_env * m_sens * 0.7f, 0.01f, 0.49f);
+            const float f = 2.0f * std::sin(3.14159265f * cutoffNorm);
+            const float damp = std::clamp(2.0f * (1.0f - std::pow(m_res, 0.25f)), 0.05f, 2.0f);
+            for (uint32_t c = 0; c < channels; ++c) {
+                const float low = m_s1[c] + f * m_s2[c];
+                const float high = input[c] - low - damp * m_s2[c];
+                const float band = f * high + m_s2[c];
+                m_s1[c] = low;
+                m_s2[c] = band;
+                const float wet = low + band * 0.35f;
+                buffer.getWritePointer(c)[i] = input[c] * (1.0f - m_mix) + wet * m_mix;
             }
         }
     }
+
 
     void reset() noexcept override {
         m_env = 0.0f;

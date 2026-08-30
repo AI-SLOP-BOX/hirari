@@ -13,39 +13,42 @@ namespace Aura::DSP::Analysis {
  */
 class FlexTimeEngine {
 public:
-    explicit FlexTimeEngine(double sr) : m_sampleRate(sr) {}
+    explicit FlexTimeEngine(double sr) : m_sampleRate(sr) {
+        // Pre-calculate Hann window
+        m_window.resize(kGrainSize);
+        for (size_t i = 0; i < kGrainSize; ++i) {
+            m_window[i] = 0.5f * (1.0f - std::cos(2.0f * M_PI * i / (kGrainSize - 1)));
+        }
+    }
 
     /**
-     * @brief Stretches a source buffer by a specific factor.
-     * @param factor: 2.0 means twice the length (slow), 0.5 means half (fast).
+     * @brief Stretches a source buffer into a target buffer.
+     * HARDENED: Zero-allocation, pre-windowed OLA.
      */
-    std::vector<float> process(const std::vector<float>& source, float factor) {
-        if (std::abs(factor - 1.0f) < 0.01f) return source;
+    void process(const float* source, size_t sourceSize, float* output, size_t targetSize, float factor) {
+        if (std::abs(factor - 1.0f) < 0.01f) {
+            std::copy(source, source + std::min(sourceSize, targetSize), output);
+            return;
+        }
 
-        size_t targetSize = static_cast<size_t>(source.size() * factor);
-        std::vector<float> output(targetSize, 0.0f);
-
-        const size_t grainSize = 1024;
-        const size_t hopSize = 512;
         size_t readPos = 0;
         size_t writePos = 0;
 
-        while (readPos + grainSize < source.size() && writePos + grainSize < targetSize) {
-            // Apply a simple Hann window to overlap-add grains
-            for (size_t i = 0; i < grainSize; ++i) {
-                float window = 0.5f * (1.0f - std::cos(2.0f * 3.14159f * i / (grainSize - 1)));
-                output[writePos + i] += source[readPos + i] * window;
+        while (readPos + kGrainSize < sourceSize && writePos + kGrainSize < targetSize) {
+            for (size_t i = 0; i < kGrainSize; ++i) {
+                output[writePos + i] += source[readPos + i] * m_window[i];
             }
             
-            readPos += static_cast<size_t>(hopSize / factor);
-            writePos += hopSize;
+            readPos += static_cast<size_t>(kHopSize / factor);
+            writePos += kHopSize;
         }
-
-        return output;
     }
 
 private:
+    static constexpr size_t kGrainSize = 1024;
+    static constexpr size_t kHopSize = 512;
     double m_sampleRate;
+    std::vector<float> m_window;
 };
 
 } // namespace Aura::DSP::Analysis

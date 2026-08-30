@@ -36,53 +36,58 @@ public:
         m_crossoverR.setParameters(5500.0f, (float)sr);
     }
 
-    void process(AudioBuffer& buffer, const MidiBuffer& midi) override {
-        float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
-        uint32_t numSamples = buffer.getNumSamples();
-        uint32_t lookaheadSamples = static_cast<uint32_t>(0.002f * m_sampleRate);
+    void process(AudioBuffer& buffer, const MidiBuffer& /*midi*/) override {
+        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
 
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            float inL = l[s], inR = r[s];
-            
-            // 1. SPLIT-BAND CROSSOVER
-            float loL = 0, hiL = 0, loR = 0, hiR = 0;
-            m_crossoverL.process(inL, loL, hiL);
-            m_crossoverR.process(inR, loR, hiR);
-            
-            // 2. RELATIVE DETECTION (High vs. Broadband)
-            float broadbandEnv = (std::abs(inL) + std::abs(inR)) * 0.5f;
-            m_bbEnv += (broadbandEnv - m_bbEnv) * 0.01f;
+        const uint32_t numSamples = buffer.getNumSamples();
+        const bool isStereo = buffer.getNumChannels() >= 2;
+        float* left = buffer.getWritePointer(0);
+        float* right = isStereo ? buffer.getWritePointer(1) : nullptr;
 
-            float sibilanceL = inL, sibilanceR = inR;
-            m_sidechainBP.processBlockBP(&sibilanceL, 1);
-            m_sidechainBP.processBlockBP(&sibilanceR, 1);
-            float sibilanceEnv = (std::abs(sibilanceL) + std::abs(sibilanceR)) * 0.5f;
-            m_sibEnv += (sibilanceEnv - m_sibEnv) * 0.05f;
+        const uint32_t delayFrames = getLatencySamples();
 
-            // 3. ADAPTIVE COMPRESSION (Logic Pro 'Sibilance Only' Logic)
-            // Ratio of Sibilance to Broadband (Relative Threshold)
-            float sibRatio = m_sibEnv / (m_bbEnv + 1e-6f);
-            float targetGain = 1.0f;
-            
-            // Only compress if sibilance is 2x louder than average broadband (threshold = 2.0)
-            float threshold = 2.0f; 
-            if (sibRatio > threshold) {
-                float intensity = std::min(1.0f, (sibRatio - threshold) * 2.5f);
-                targetGain = 1.0f - (intensity * 0.4f); // Max 6dB reduction
+        for (uint32_t i = 0; i < numSamples; ++i) {
+            float inL = std::isfinite(left[i]) ? left[i] : 0.0f;
+            float inR = (isStereo && right && std::isfinite(right[i])) ? right[i] : inL;
+
+            // Split bands via Linkwitz-Riley
+            float lowL = 0.0f, hiL = 0.0f;
+            float lowR = 0.0f, hiR = 0.0f;
+            m_crossoverL.process(inL, lowL, hiL);
+            if (isStereo) m_crossoverR.process(inR, lowR, hiR);
+            else { lowR = lowL; hiR = hiL; }
+
+            // Bandpass sidechain detection
+            float bpL = m_sidechainBP.process(inL);
+            float bpR = isStereo ? m_sidechainBP.process(inR) : bpL;
+
+            float sibilanceLevel = std::max(std::abs(bpL), std::abs(bpR));
+            float broadbandLevel = std::max(std::abs(inL), std::abs(inR));
+
+            m_sibEnv = 0.9f * m_sibEnv + 0.1f * sibilanceLevel;
+            m_bbEnv = 0.99f * m_bbEnv + 0.01f * broadbandLevel;
+
+            if (std::abs(m_sibEnv) < 1.0e-24f) m_sibEnv = 0.0f;
+            if (std::abs(m_bbEnv) < 1.0e-24f) m_bbEnv = 0.0f;
+
+            // Relative ratio comparison
+            float ratio = (m_bbEnv > 0.0001f) ? (m_sibEnv / m_bbEnv) : 0.0f;
+            float targetGain = (ratio > 1.2f) ? (1.0f / (1.0f + (ratio - 1.2f) * 4.0f)) : 1.0f;
+            targetGain = std::clamp(targetGain, 0.15f, 1.0f);
+
+            m_gain += (targetGain - m_gain) * 0.05f;
+
+            // Delay compensation lookahead push/pop
+            m_lookaheadL.push(lowL + hiL * m_gain);
+            if (isStereo) m_lookaheadR.push(lowR + hiR * m_gain);
+
+            left[i] = m_lookaheadL.read(delayFrames);
+            if (isStereo && right) {
+                right[i] = m_lookaheadR.read(delayFrames);
             }
-            
-            float attack = 1.0f - std::exp(-1.0f / (0.002f * m_sampleRate)); 
-            float release = 1.0f - std::exp(-1.0f / (0.050f * m_sampleRate)); 
-            m_gain += (targetGain - m_gain) * ((targetGain < m_gain) ? attack : release);
-
-            // 4. LOOKAHEAD APPLICATION
-            l[s] = m_lookaheadL.process(loL, lookaheadSamples) + 
-                   (m_lookaheadL_Hi.process(hiL, lookaheadSamples) * m_gain);
-            r[s] = m_lookaheadR.process(loR, lookaheadSamples) + 
-                   (m_lookaheadR_Hi.process(hiR, lookaheadSamples) * m_gain);
         }
     }
+
 
     void reset() override { m_gain = 1.0f; m_sibEnv = 0.0f; m_bbEnv = 0.0f; m_lookaheadL.reset(); m_lookaheadR.reset(); }
     uint32_t getLatencySamples() const override { return static_cast<uint32_t>(0.002f * m_sampleRate); }
@@ -133,36 +138,57 @@ public:
     uint32_t getLatencySamples() const override { return static_cast<uint32_t>(0.002f * m_sampleRate); }
 
 private:
-    void processInternal(AudioBuffer& buffer, AudioBuffer& sidechain, const MidiBuffer& midi) {
-        float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
+    void processInternal(AudioBuffer& buffer, AudioBuffer& sidechain, const MidiBuffer& /*midi*/) {
+        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
+
+        const uint32_t numSamples = buffer.getNumSamples();
+        const bool isStereo = buffer.getNumChannels() >= 2;
+        const bool hasScStereo = sidechain.getNumChannels() >= 2;
+
+        float* left = buffer.getWritePointer(0);
+        float* right = isStereo ? buffer.getWritePointer(1) : nullptr;
         const float* scL = sidechain.getReadPointer(0);
-        const float* scR = sidechain.getReadPointer(1);
-        uint32_t numSamples = buffer.getNumSamples();
-        uint32_t lhSamples = static_cast<uint32_t>(0.002f * m_sampleRate);
+        const float* scR = hasScStereo ? sidechain.getReadPointer(1) : scL;
 
-        for (size_t i = 0; i < numSamples; ++i) {
-            float instEnv = (std::abs(scL[i]) + std::abs(scR[i])) * 0.5f;
-            
-            // Peak Detector with asymmetric time constants
-            if (instEnv > m_env) m_env += (instEnv - m_env) * 0.01f;
-            else m_env += (instEnv - m_env) * 0.0005f;
+        const uint32_t delayFrames = getLatencySamples();
+        constexpr float thresholdDb = -40.0f;
+        const float thresholdLinear = std::pow(10.0f, thresholdDb / 20.0f);
+        const uint32_t holdSamples = static_cast<uint32_t>(0.02f * m_sampleRate); // 20ms hold
 
-            if (m_env > 0.01f) {
+        for (uint32_t i = 0; i < numSamples; ++i) {
+            float inL = std::isfinite(left[i]) ? left[i] : 0.0f;
+            float inR = (isStereo && right && std::isfinite(right[i])) ? right[i] : inL;
+
+            float detectL = (scL && std::isfinite(scL[i])) ? scL[i] : inL;
+            float detectR = (scR && std::isfinite(scR[i])) ? scR[i] : inR;
+
+            float scLevel = std::max(std::abs(detectL), std::abs(detectR));
+            m_env = (scLevel > m_env) ? (0.8f * m_env + 0.2f * scLevel) : (0.998f * m_env + 0.002f * scLevel);
+            if (std::abs(m_env) < 1.0e-24f) m_env = 0.0f;
+
+            if (m_env > thresholdLinear) {
+                m_holdCounter = holdSamples;
                 m_isOpening = true;
-                m_holdCounter = static_cast<uint32_t>(m_sampleRate * 0.05); // 50ms Hold
-            } else if (m_env < 0.005f) {
-                if (m_holdCounter > 0) m_holdCounter--;
-                else m_isOpening = false;
+            } else if (m_holdCounter > 0) {
+                m_holdCounter--;
+            } else {
+                m_isOpening = false;
             }
 
-            m_gain += ((m_isOpening ? 1.0f : 0.0f) - m_gain) * (m_isOpening ? m_attack : m_release);
+            float targetGain = (m_isOpening || m_holdCounter > 0) ? 1.0f : 0.0f;
+            float coeff = (targetGain > m_gain) ? m_attack : m_release;
+            m_gain += (targetGain - m_gain) * coeff;
 
-            // Apply to delayed signal (Lookahead)
-            l[i] = m_lookaheadL.process(l[i], lhSamples) * m_gain;
-            r[i] = m_lookaheadR.process(r[i], lhSamples) * m_gain;
+            m_lookaheadL.push(inL);
+            if (isStereo) m_lookaheadR.push(inR);
+
+            left[i] = m_lookaheadL.read(delayFrames) * m_gain;
+            if (isStereo && right) {
+                right[i] = m_lookaheadR.read(delayFrames) * m_gain;
+            }
         }
     }
+
 
     double m_sampleRate;
     Effects::DelayLine m_lookaheadL, m_lookaheadR;

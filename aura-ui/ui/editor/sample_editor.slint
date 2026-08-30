@@ -1,0 +1,197 @@
+import { Style } from "../style.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+
+export component Z_SampleEditor {
+    callback apply-gain(float);
+    callback apply-fades(float, float);
+    callback apply-reverse(bool);
+    callback apply-trim(float, float);
+    callback apply-warp(float);
+    callback apply-pitch(float);
+    callback apply-loop(int);
+    callback duplicate-clip();
+    callback remove-clip();
+    in property <float> initial-trim-start: 0.0;
+    in property <float> initial-trim-end: 1.0;
+    in-out property <[float]> samples;
+    in-out property <color> wave_col: Style.brand;
+    
+    // Interactive states
+    in-out property <float> trim_start: initial-trim-start; // normalized 0.0 - 1.0
+    in-out property <float> trim_end: initial-trim-end;   // normalized 0.0 - 1.0
+    in-out property <float> scale_multiplier: 1.0; // modified by Normalize
+    in-out property <bool> is_reversed: false;
+    in-out property <bool> is_faded: false;
+    in-out property <bool> flex_mode: false;
+    in-out property <float> flex_ratio: 1.0;
+    in-out property <float> pitch_semitones: 0.0;
+    in-out property <int> loop_count: 1;
+    in-out property <float> editor_ph: 0.4; // simulated playhead position
+
+    Rectangle {
+        background: Style.surface; border_width: 1.5px; border_color: Style.border;
+        VerticalLayout {
+            padding: 12px; spacing: 10px;
+            
+            // Header controls
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: "Audio Editor"; font-size: 10px; color: Style.brand; font-weight: 950; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                
+                Z_IconButton { 
+                    icon: "NORMALIZE"; 
+                    active: scale_multiplier > 1.0;
+                    clicked => {
+                        scale_multiplier = scale_multiplier == 1.0 ? 1.4 : 1.0;
+                        root.apply-gain(scale_multiplier);
+                    }
+                }
+                Z_IconButton { 
+                    icon: "REVERSE"; 
+                    active: is_reversed;
+                    clicked => {
+                        is_reversed = !is_reversed;
+                        root.apply-reverse(is_reversed);
+                    }
+                }
+                Z_IconButton { 
+                    icon: "FADE IN/OUT"; 
+                    active: is_faded;
+                    clicked => {
+                        is_faded = !is_faded;
+                        root.apply-fades(is_faded ? 0.05 : -0.05, is_faded ? 0.05 : -0.05);
+                    }
+                }
+                Z_IconButton { icon: "FLEX"; active: flex_mode; clicked => { flex_mode = !flex_mode; flex_ratio = flex_mode ? 1.1 : 1.0; root.apply-warp(flex_ratio); } }
+                Z_IconButton { icon: "PITCH"; active: pitch_semitones != 0.0; clicked => { pitch_semitones = pitch_semitones == 0.0 ? 1.0 : 0.0; root.apply-pitch(pitch_semitones); } }
+                Z_IconButton { icon: "LOOP"; active: loop_count > 1; clicked => { loop_count = loop_count == 1 ? 2 : (loop_count == 2 ? 4 : 1); root.apply-loop(loop_count); } }
+                Z_IconButton { icon: "DUPLICATE"; clicked => { root.duplicate-clip(); } }
+                Z_IconButton { icon: "DELETE CLIP"; clicked => { root.remove-clip(); } }
+                Z_IconButton { 
+                    icon: "RESET TRIM"; 
+                    clicked => {
+                        trim_start = 0.0;
+                        trim_end = 1.0;
+                        root.apply-trim(trim_start, trim_end);
+                    }
+                }
+            }
+            Text { text: "Gain, fades, trim, reverse, Flex, pitch and loop count are saved with the project"; font-size: Style.font-xxs; color: Style.text-muted; }
+            
+            // Waveform Canvas
+            Rectangle {
+                background: #020202; border_width: 1px; border_color: Style.surface; height: 180px; clip: true;
+                
+                // Trim region selection background shading
+                Rectangle {
+                    x: trim_start * parent.width;
+                    width: (trim_end - trim_start) * parent.width;
+                    height: 100%;
+                    background: Style.brand.with-alpha(0.05);
+                }
+                
+                // Bipolar Waveform rendering
+                HorizontalLayout {
+                    spacing: 2px; padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px;
+                    for s[idx] in samples : VerticalLayout {
+                        alignment: center;
+                        
+                        // Calculate sample values taking into account reverse and fade effects
+                        property <int> mapped_idx: is_reversed ? (samples.length - 1 - idx) : idx;
+                        property <float> base_val: samples[mapped_idx];
+                        
+                        // Apply fade curve
+                        property <float> fade_factor: is_faded ? (
+                            idx < 5 ? (idx / 5.0) : 
+                            (idx > (samples.length - 6) ? ((samples.length - 1 - idx) / 5.0) : 1.0)
+                        ) : 1.0;
+                        
+                        property <float> final_h: (base_val * scale_multiplier * fade_factor).clamp(0.0, 1.0);
+                        
+                        // Check if outside trim boundaries
+                        property <float> norm_pos: idx / samples.length;
+                        property <bool> is_trimmed: (norm_pos < trim_start || norm_pos > trim_end);
+
+                        Rectangle {
+                            width: 3px; height: final_h * 140.0 * 1px; 
+                            background: is_trimmed ? #333 : wave_col; 
+                            border_radius: 1.5px; 
+                            opacity: is_trimmed ? 0.3 : 0.9;
+                            animate height { duration: 150ms; }
+                            animate background { duration: 150ms; }
+                        }
+                    }
+                }
+                
+                // Center line
+                Rectangle { height: 1px; background: Style.border; width: 100%; y: parent.height / 2; opacity: 0.3; }
+                
+                // Playhead
+                Rectangle {
+                    x: editor_ph * parent.width;
+                    width: 2px; height: 100%; background: Style.ok;
+                    animate x { duration: 100ms; }
+                }
+                if (flex_mode) : Rectangle {
+                    width: 100%; height: 100%;
+                    for t in [0.18, 0.37, 0.59, 0.78] : Rectangle {
+                        x: t * parent.width; y: 18px; width: 1px; height: parent.height - 36px; background: Style.cycle; opacity: 0.8;
+                        Rectangle { x: -3px; y: -4px; width: 7px; height: 7px; border-radius: 4px; background: Style.cycle; }
+                    }
+                    Text { text: "Flex Time / Pitch"; x: 8px; y: 8px; font-size: Style.font-xxs; color: Style.cycle; }
+                }
+                
+                // Draggable Trim Handles
+                // Start Bracket handle
+                Rectangle {
+                    x: trim_start * parent.width - 4px; width: 8px; height: 100%;
+                    background: transparent;
+                    Rectangle { width: 2px; height: 100%; background: Style.alert; x: 3px; }
+                    // Handle tab
+                    Rectangle { width: 8px; height: 20px; background: Style.alert; border_radius: 2px; y: 80px; }
+                    TouchArea {
+                        moved => {
+                            if (self.pressed) {
+                                trim_start = (trim_start + (self.mouse_x - self.pressed_x) / parent.width).clamp(0.0, trim_end - 0.1);
+                                root.apply-trim(trim_start, trim_end);
+                            }
+                        }
+                    }
+                }
+                // End Bracket handle
+                Rectangle {
+                    x: trim_end * parent.width - 4px; width: 8px; height: 100%;
+                    background: transparent;
+                    Rectangle { width: 2px; height: 100%; background: Style.alert; x: 3px; }
+                    // Handle tab
+                    Rectangle { width: 8px; height: 20px; background: Style.alert; border_radius: 2px; y: 80px; }
+                    TouchArea {
+                        moved => {
+                            if (self.pressed) {
+                                trim_end = (trim_end + (self.mouse_x - self.pressed_x) / parent.width).clamp(trim_start + 0.1, 1.0);
+                                root.apply-trim(trim_start, trim_end);
+                            }
+                        }
+                    }
+                }
+                
+                // Scrub Touch Area
+                TouchArea {
+                    clicked => {
+                        editor_ph = (self.mouse_x / parent.width).clamp(0.0, 1.0);
+                    }
+                }
+            }
+            
+            // Time Ruler labels
+            HorizontalLayout {
+                Text { text: "Start: " + Math.floor(trim_start * 165) + ".0 ms"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "Active: " + Math.floor((trim_end - trim_start) * 165) + ".0 ms"; font-size: Style.font-xxs; color: Style.brand; font-weight: 600; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "End: " + Math.floor(trim_end * 165) + ".0 ms"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+            }
+        }
+    }
+}

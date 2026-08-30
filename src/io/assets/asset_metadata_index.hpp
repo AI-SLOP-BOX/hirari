@@ -4,12 +4,14 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
+#include <sstream>
 
 namespace Aura::IO::Assets {
 
 /**
  * @brief AssetMetadata: Fast metadata for DAW assets (samples, presets).
- * Essential for LMMS-style sample browsers.
  */
 struct AssetMetadata {
     std::string name;
@@ -28,19 +30,12 @@ public:
         return instance;
     }
 
-#include <unordered_map>
-#include <unordered_set>
-#include <sstream>
-
     /**
-     * @brief InvertedIndex: High-performance O(1) search for production assets.
-     * HONEST FIX: Replaces linear search with a professional Inverted Index 
-     * where tags are mapped to sets of file paths for instant retrieval.
+     * @brief InvertedIndex: Search for production assets by tag.
      */
     void registerAsset(const std::string& path, const std::string& tags) {
         m_index[path] = {path, tags, 0.0, ""};
         
-        // Tokenize and index for O(1) search
         std::stringstream ss(tags);
         std::string token;
         while (std::getline(ss, token, ',')) {

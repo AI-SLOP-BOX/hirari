@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <random>
+#include <algorithm>
 #include "../../core/midi_buffer.hpp"
 
 namespace Aura::Core::Engine {
@@ -11,16 +12,27 @@ namespace Aura::Core::Engine {
 /**
  * @class StepSequencer
  * @brief Logic Pro Style High-Density Polyphonic Pattern Engine.
- * HONEST FIX: Added a Pending Trigger buffer to handle notes delayed by
- * Swing or Humanization that fall outside the current audio block.
- * This ensures absolute rhythmic precision without note loss.
+ * Manages Step Grid data and generates sample-accurate MIDI Note triggers.
  */
 class StepSequencer {
 public:
     static constexpr int kMaxSteps = 64;
     static constexpr int kMaxLanes = 16; 
 
-    StepSequencer() { reset(); initDefaults(); }
+    struct PendingTrigger {
+        bool active = false;
+        uint32_t lane = 0;
+        uint32_t step = 0;
+        uint64_t sampleOffset = 0;
+    };
+
+    struct PendingNoteOff {
+        bool active = false;
+        uint8_t pitch = 0;
+        uint64_t offSamplePos = 0; // Absolute sample position
+    };
+
+    StepSequencer() : m_rng(std::random_device{}()) { reset(); initDefaults(); }
 
     void reset() {
         for (int l = 0; l < kMaxLanes; ++l) {
@@ -32,140 +44,156 @@ public:
                 m_stepOffsets[l][s].store(0.0f, std::memory_order_relaxed);
             }
         }
-        m_numActiveNotes = 0;
+        m_numActiveNotes.store(0);
         for (auto& p : m_pendingPool) p.active = false;
+        for (auto& o : m_activeNoteOffs) o.active = false;
+    }
+
+    void initDefaults() {
+        m_active = true;
+        m_lanes[0][0].store(true);
+        m_lanes[0][4].store(true);
+        m_lanes[0][8].store(true);
+        m_lanes[0][12].store(true);
+        
+        m_lanes[1][4].store(true);
+        m_lanes[1][12].store(true);
+        
+        for (int s = 0; s < 16; s += 2) {
+            m_lanes[2][s].store(true);
+        }
     }
 
     void process(MidiBuffer& midi, uint64_t currentPos, uint32_t numSamples, double bpm, double sr) {
         if (!m_active) return;
+        
+        double stepDurationSamples = (60.0 / bpm / 4.0) * sr;
+        if (stepDurationSamples <= 0.0) return;
 
-        // 1. PROCESS PENDING TRIGGERS FROM LAST BLOCK
-        for (auto& p : m_pendingPool) {
-            if (!p.active) continue;
-            if (p.delaySamples < (float)numSamples) {
-                uint8_t onEv[3] = { 0x90, p.note, p.vel };
-                midi.addEvent((uint32_t)p.delaySamples, onEv, 3);
-                
-                uint64_t offS = currentPos + (uint32_t)p.delaySamples + static_cast<uint64_t>(p.lenSamples);
-                if (m_numActiveNotes < m_activeNotes.size()) {
-                    m_activeNotes[m_numActiveNotes++] = { p.note, offS };
+        // 1. Process active note-offs that fall in this block to prevent stuck notes
+        for (auto& noteOff : m_activeNoteOffs) {
+            if (noteOff.active) {
+                if (noteOff.offSamplePos >= currentPos && noteOff.offSamplePos < currentPos + numSamples) {
+                    uint64_t offOffset = noteOff.offSamplePos - currentPos;
+                    midi.addNoteOff(1, noteOff.pitch, offOffset);
+                    noteOff.active = false;
+                } else if (noteOff.offSamplePos < currentPos) {
+                    // Fallback to prevent hang if transport jumped
+                    midi.addNoteOff(1, noteOff.pitch, 0);
+                    noteOff.active = false;
                 }
-                p.active = false;
-            } else {
-                p.delaySamples -= (float)numSamples;
             }
         }
 
-        double samplesPerStep = (60.0 * sr) / (bpm * 4.0); // 16th notes
-        double phaseIncr = 1.0 / samplesPerStep;
+        // 2. Trigger new note-ons and register their note-offs
+        uint64_t startStep = static_cast<uint64_t>(std::floor(static_cast<double>(currentPos) / stepDurationSamples));
+        uint64_t endStep = static_cast<uint64_t>(std::floor(static_cast<double>(currentPos + numSamples) / stepDurationSamples));
 
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            double nextPhase = m_phase + phaseIncr;
-            
-            if (std::floor(nextPhase) > std::floor(m_phase)) {
-                uint32_t stepIdx = static_cast<uint32_t>(std::floor(nextPhase)) % kMaxSteps;
-                double swingOffset = (stepIdx % 2 != 0) ? (samplesPerStep * m_swingAmount * 0.5) : 0.0;
+        const uint8_t lanePitches[kMaxLanes] = { 36, 38, 42, 46, 39, 41, 43, 45, 47, 48, 49, 50, 51, 52, 53, 54 };
 
-                for (int l = 0; l < kMaxLanes; ++l) {
-                    if (m_lanes[l][stepIdx].load(std::memory_order_relaxed)) {
-                        int prob = m_stepProbability[l][stepIdx].load(std::memory_order_relaxed);
-                        if ((m_gen() % 100) >= prob) continue;
+        for (uint64_t s = startStep; s <= endStep; ++s) {
+            uint32_t stepIdx = static_cast<uint32_t>(s % kMaxSteps);
 
-                        float microOffset = m_stepOffsets[l][stepIdx].load(std::memory_order_relaxed);
-                        double jitter = (m_humanizeAmount > 0) ? ((m_dist(m_gen) * m_humanizeAmount) * 441.0) : 0;
-                        double totalOffset = swingOffset + (microOffset * samplesPerStep) + jitter;
+            // Calculate timing parameters: Swing & Offsets
+            double swingOffset = 0.0;
+            if (stepIdx % 2 == 1) { // Swing applied to offbeats
+                swingOffset = m_swingAmount * 0.5 * stepDurationSamples;
+            }
+
+            for (int l = 0; l < kMaxLanes; ++l) {
+                if (m_lanes[l][stepIdx].load(std::memory_order_relaxed)) {
+                    // Probability check
+                    uint32_t prob = m_stepProbability[l][stepIdx].load(std::memory_order_relaxed);
+                    if (prob < 100) {
+                        // Use persistent m_rng (seeded once) for true stochastic behaviour
+                        std::uniform_int_distribution<uint32_t> dist(0, 100);
+                        if (dist(m_rng) > prob) continue;
+                    }
+
+                    // Substeps & Offsets
+                    uint32_t substeps = std::max(1u, m_stepSubsteps[l][stepIdx].load(std::memory_order_relaxed));
+                    float offsetPct = m_stepOffsets[l][stepIdx].load(std::memory_order_relaxed);
+                    double userOffset = offsetPct * stepDurationSamples;
+                    double totalOffset = swingOffset + userOffset;
+
+                    double substepInterval = stepDurationSamples / substeps;
+
+                    for (uint32_t sub = 0; sub < substeps; ++sub) {
+                        double substepSamplePos = static_cast<double>(s * stepDurationSamples) + totalOffset + (sub * substepInterval);
                         
-                        uint8_t note = m_laneNotes[l].load(std::memory_order_relaxed);
-                        uint8_t vel = m_laneVelocities[l][stepIdx].load(std::memory_order_relaxed);
-                        
-                        // Calculated trigger sample (can exceed 'numSamples' due to swing)
-                        uint32_t triggerSample = s + (uint32_t)totalOffset;
+                        if (substepSamplePos >= currentPos && substepSamplePos < currentPos + numSamples) {
+                            uint64_t triggerOffset = static_cast<uint64_t>(substepSamplePos - currentPos);
+                            uint8_t pitch = lanePitches[l];
+                            uint8_t vel = m_laneVelocities[l][stepIdx].load(std::memory_order_relaxed);
+                            
+                            midi.addNoteOn(1, pitch, vel, triggerOffset);
 
-                        if (triggerSample < numSamples) {
-                            uint8_t onEv[3] = { 0x90, note, vel };
-                            midi.addEvent(triggerSample, onEv, 3);
-                            uint64_t offS = currentPos + triggerSample + static_cast<uint64_t>(samplesPerStep * 0.4);
-                            if (m_numActiveNotes < m_activeNotes.size()) {
-                                m_activeNotes[m_numActiveNotes++] = { note, offS };
-                            }
-                        } else {
-                            // PUSH TO PENDING POOL: Lock-Free
-                            for (auto& p : m_pendingPool) {
-                                if (!p.active) {
-                                    p = {note, vel, (float)(triggerSample - numSamples), (float)(samplesPerStep * 0.4), true};
+                            // Schedule Note Off (80% gate length or 1000 samples)
+                            uint64_t offSamplePos = static_cast<uint64_t>(substepSamplePos + std::min(stepDurationSamples * 0.8, 1000.0));
+
+                            // Find inactive slot in the activeNoteOffs pool
+                            bool registered = false;
+                            for (auto& noteOff : m_activeNoteOffs) {
+                                if (!noteOff.active) {
+                                    noteOff.active = true;
+                                    noteOff.pitch = pitch;
+                                    noteOff.offSamplePos = offSamplePos;
+                                    registered = true;
                                     break;
                                 }
+                            }
+                            // If pool is full, send note off immediately at the end of block to prevent stuck notes
+                            if (!registered) {
+                                midi.addNoteOff(1, pitch, numSamples - 1);
                             }
                         }
                     }
                 }
             }
-            m_phase = nextPhase;
         }
-
-        handleNoteOffs(midi, currentPos, numSamples);
     }
 
     void setSwing(float amount) { m_swingAmount = amount; }
-    void setHumanize(float amount) { m_humanizeAmount = amount; }
     void setActive(bool a) { m_active = a; }
-    void toggleStep(int lane, int step) { 
-        if (lane < kMaxLanes && step < kMaxSteps) {
-            bool current = m_lanes[lane][step].load();
-            m_lanes[lane][step].store(!current);
-        }
+
+    bool getStep(int lane, int step) const {
+        if (lane < 0 || lane >= kMaxLanes || step < 0 || step >= kMaxSteps) return false;
+        return m_lanes[lane][step].load(std::memory_order_relaxed);
+    }
+
+    void setStep(int lane, int step, bool active) {
+        if (lane < 0 || lane >= kMaxLanes || step < 0 || step >= kMaxSteps) return;
+        m_lanes[lane][step].store(active, std::memory_order_relaxed);
+    }
+
+    void setStepProbability(int lane, int step, uint32_t prob) {
+        if (lane < 0 || lane >= kMaxLanes || step < 0 || step >= kMaxSteps) return;
+        m_stepProbability[lane][step].store(std::min(100u, prob), std::memory_order_relaxed);
+    }
+
+    void setStepSubsteps(int lane, int step, uint32_t subs) {
+        if (lane < 0 || lane >= kMaxLanes || step < 0 || step >= kMaxSteps) return;
+        m_stepSubsteps[lane][step].store(std::max(1u, subs), std::memory_order_relaxed);
+    }
+
+    void setStepOffset(int lane, int step, float offset) {
+        if (lane < 0 || lane >= kMaxLanes || step < 0 || step >= kMaxSteps) return;
+        m_stepOffsets[lane][step].store(std::clamp(offset, -0.5f, 0.5f), std::memory_order_relaxed);
     }
 
 private:
-    void handleNoteOffs(MidiBuffer& midi, uint64_t currentPos, uint32_t numSamples) {
-        for (int i = 0; i < (int)m_numActiveNotes; ) {
-            auto& n = m_activeNotes[i];
-            if (n.offSample >= currentPos && n.offSample < currentPos + numSamples) {
-                uint8_t ev[3] = { 0x80, n.note, 0 };
-                midi.addEvent(static_cast<uint32_t>(n.offSample - currentPos), ev, 3);
-                m_activeNotes[i] = m_activeNotes[--m_numActiveNotes];
-            } else if (n.offSample < currentPos) {
-                 m_activeNotes[i] = m_activeNotes[--m_numActiveNotes];
-            } else {
-                ++i;
-            }
-        }
-    }
-
-    struct PendingTrigger { 
-        uint8_t note; uint8_t vel; 
-        float delaySamples; float lenSamples; 
-        bool active = false; 
-    };
-    
-    struct ActiveNote { uint8_t note; uint64_t offSample; };
-    
     bool m_active = false;
-    double m_phase = 0.0;
     float m_swingAmount = 0.0f;
-    float m_humanizeAmount = 0.05f;
-
-    std::mt19937 m_gen{0x1234};
-    std::uniform_real_distribution<float> m_dist{-1.0f, 1.0f};
-
-    // --- HONEST FIX: Fixed-capacity Real-time Safe Storage ---
-    static constexpr size_t kMaxPending = 512;
-    std::array<PendingTrigger, kMaxPending> m_pendingPool;
-    std::array<ActiveNote, kMaxLanes * 16> m_activeNotes;
-    size_t m_numActiveNotes = 0;
+    mutable std::mt19937 m_rng; // Seeded once — persistent for true stochastic behaviour
 
     std::array<std::array<std::atomic<bool>, kMaxSteps>, kMaxLanes> m_lanes;
-    std::array<std::array<std::atomic<uint8_t>, kMaxSteps>, kMaxLanes> m_laneVelocities;
-    std::array<std::array<std::atomic<uint8_t>, kMaxSteps>, kMaxLanes> m_stepProbability;
-    std::array<std::array<std::atomic<uint8_t>, kMaxSteps>, kMaxLanes> m_stepSubsteps;
+    std::array<std::array<std::atomic<uint32_t>, kMaxSteps>, kMaxLanes> m_laneVelocities;
+    std::array<std::array<std::atomic<uint32_t>, kMaxSteps>, kMaxLanes> m_stepProbability;
+    std::array<std::array<std::atomic<uint32_t>, kMaxSteps>, kMaxLanes> m_stepSubsteps;
     std::array<std::array<std::atomic<float>, kMaxSteps>, kMaxLanes> m_stepOffsets;
-    std::array<std::atomic<uint8_t>, kMaxLanes> m_laneNotes;
-
-
-    void initDefaults() {
-        uint8_t defNotes[] = {36, 38, 42, 46, 49, 39, 41, 43, 45, 47, 48, 50, 51, 52, 53, 54};
-        for(int i=0; i<kMaxLanes; ++i) m_laneNotes[i].store(defNotes[i], std::memory_order_relaxed);
-    }
+    std::atomic<uint32_t> m_numActiveNotes;
+    std::array<PendingTrigger, 256> m_pendingPool;
+    std::array<PendingNoteOff, 128> m_activeNoteOffs;
 };
 
 } // namespace Aura::Core::Engine

@@ -1,0 +1,7 @@
+// Take comping controls.  These callbacks are routed to the same Core
+// comping state used by recording, persistence, and offline rendering.
+export global CompingActions {
+    callback select_take(int);
+    callback crossfade_changed(float);
+    callback preview();
+}

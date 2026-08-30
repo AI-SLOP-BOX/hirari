@@ -1,0 +1,33 @@
+import { Style } from "../style.slint";
+
+export component Z_NeuralTrainer {
+    in property <float> loss: 0.042;
+    in property <int> epoch: 482;
+    Rectangle {
+        width: 100%; height: 400px; background: Style.surface; border_width: 2px; border_color: Style.brand;
+        VerticalLayout {
+            padding: 20px; spacing: 16px;
+            Text { text: "Assistant"; font-size: 11px; color: Style.brand; font-weight: 700; }
+            HorizontalLayout {
+                spacing: 20px;
+                // Training Graph
+                Rectangle {
+                    width: 200px; height: 120px; background: Style.surface-0; border_width: 1px; border_color: Style.border;
+                    Path {
+                         width: 100%; height: 100%; stroke: Style.brand; stroke_width: 2px;
+                         MoveTo { x: 0; y: 10; }
+                         CubicTo { control-1-x: 50; control-1-y: 10; control-2-x: 100; control-2-y: 100; x: 200; y: 110; }
+                    }
+                    Text { text: "Loss: " + loss; font-size: Style.font-xxs; color: Style.text-secondary; x: 10px; y: 10px; }
+                }
+                VerticalLayout {
+                    spacing: 8px; alignment: center;
+                    Text { text: "Epoch: " + epoch; font-size: 12px; color: Style.text-primary; font-weight: 700; }
+                    Text { text: "Dataset: LCL_STEMS_V4"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                }
+            }
+            Rectangle { height: 1px; background: Style.border; }
+            Text { text: "Model data: Protected"; font-size: Style.font-xxs; color: Style.ok; }
+        }
+    }
+}

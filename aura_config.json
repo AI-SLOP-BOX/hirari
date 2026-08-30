@@ -1,0 +1,8 @@
+{
+    "audio.buffer_size": 128,
+    "audio.sample_rate": 48000.0,
+    "audio.rt_priority": 99,
+    "spectral.fft_size": 4096,
+    "gui.refresh_rate": 60.0,
+    "internal.high_precision_pdc": true
+}

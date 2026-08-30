@@ -23,37 +23,42 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+        (void)bs;
+        m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0;
+        m_windowSize = std::clamp<uint32_t>(m_windowSize, 10u, static_cast<uint32_t>(m_buffer[0].size() - 1));
+        reset();
     }
 
     /**
      * @brief PROCESS: Plays back segments of audio in reverse order.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed) return;
-
-        uint32_t numSamples = buffer.getNumSamples();
-        
-        for (uint32_t s = 0; s < numSamples; ++s) {
-            for (uint32_t c = 0; c < 2; ++c) {
-                float in = buffer.getReadPointer(c)[s];
-                m_buffer[c][m_writeIdx] = in;
-
-                // 1. Calculate Reverse Position
-                // We play back from (Current Window End - Offset)
-                uint32_t windowStart = (m_writeIdx / m_windowSize) * m_windowSize;
-                uint32_t offsetInWindow = m_writeIdx % m_windowSize;
-                uint32_t readIdx = windowStart + (m_windowSize - 1 - offsetInWindow);
-
-                float reversed = m_buffer[c][readIdx % m_buffer[c].size()];
-
-                // 2. Linear Dry/Wet
-                buffer.getWritePointer(c)[s] = (in * (1.0f - m_mix)) + (reversed * m_mix);
-            }
-            
-            m_writeIdx = (m_writeIdx + 1) % m_buffer[0].size();
+        (void)midi;
+        (void)context;
+        const uint32_t n = buffer.getNumSamples();
+        float* left = buffer.getWritePointer(0);
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+        if (!left || n == 0 || m_buffer.empty()) return;
+        const uint32_t capacity = static_cast<uint32_t>(m_buffer[0].size());
+        const uint32_t window = std::clamp(m_windowSize, 10u, capacity - 1u);
+        const float mix = std::clamp(std::isfinite(m_mix) ? m_mix : 0.0f, 0.0f, 1.0f);
+        for (uint32_t i = 0; i < n; ++i) {
+            const uint32_t write = m_writeIdx;
+            const uint32_t reverseOffset = write % window;
+            const uint32_t windowStart = write - reverseOffset;
+            const uint32_t read = (windowStart + window - 1u - reverseOffset) % capacity;
+            const float wetL = m_buffer[0][read];
+            const float wetR = m_buffer[1][read];
+            const float dryL = std::isfinite(left[i]) ? left[i] : 0.0f;
+            const float dryR = right && std::isfinite(right[i]) ? right[i] : dryL;
+            m_buffer[0][write] = dryL;
+            m_buffer[1][write] = dryR;
+            left[i] = dryL + mix * (wetL - dryL);
+            if (right) right[i] = dryR + mix * (wetR - dryR);
+            m_writeIdx = (write + 1u) % capacity;
         }
     }
+
 
     void reset() noexcept override {
         for (auto& v : m_buffer) std::fill(v.begin(), v.end(), 0.0f);
@@ -61,8 +66,11 @@ public:
     }
 
     // Parameters
-    void setWindowTime(float ms) { m_windowSize = std::max(10, (int)(m_sampleRate * ms * 0.001f)); }
-    void setMix(float m) { m_mix = m; }
+    void setWindowTime(float ms) {
+        if (!std::isfinite(ms)) return;
+        m_windowSize = std::clamp<uint32_t>(static_cast<uint32_t>(std::max(10.0f, ms * static_cast<float>(m_sampleRate) * 0.001f)), 10u, static_cast<uint32_t>(m_buffer[0].size() - 1));
+    }
+    void setMix(float m) { if (std::isfinite(m)) m_mix = std::clamp(m, 0.0f, 1.0f); }
 
 private:
     double m_sampleRate = 44100.0;

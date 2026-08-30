@@ -1,0 +1,14 @@
+import { Style } from "../style.slint";
+
+export component Z_Shield {
+    in property <bool> active;
+    in property <float> time;
+    Rectangle {
+        width: 14px; height: 14px;
+        Image {
+            source: @image-url("../sanctuary_shield_converted.png"); width: 100%; height: 100%; 
+            colorize: root.active ? Style.ok : #333;
+            opacity: root.active ? (0.6 + 0.4 * Math.sin(root.time / 150.0 * 1rad).abs()) : 0.2;
+        }
+    }
+}
