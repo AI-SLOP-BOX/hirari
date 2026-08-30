@@ -28,7 +28,7 @@ fn project_layout_round_trips_through_public_core_api() {
 
     let before = core.get_project_layout_json();
     assert!(before.contains("Roundtrip Track"));
-    assert!(core.save_project(path_text));
+    assert!(core.save_project(&path_text));
     assert!(core.load_project(&path_text));
     let after = core.get_project_layout_json();
 
@@ -128,7 +128,7 @@ fn selected_recovery_generation_restores_the_requested_project_state() {
 
     let first_track = core.add_track(0);
     assert!(core.set_track_name(first_track, "Generation One"));
-    assert!(core.save_project(&path_text));
+    assert!(core.save_project(path_text));
 
     let second_track = core.add_track(0);
     assert!(core.set_track_name(second_track, "Generation Two"));
