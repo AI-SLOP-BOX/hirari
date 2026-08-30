@@ -122,8 +122,12 @@ pub struct MidiNoteContract {
     pub repeat_count: u16,
 }
 
-fn default_note_probability() -> u8 { 100 }
-fn default_note_repeat_count() -> u16 { 1 }
+fn default_note_probability() -> u8 {
+    100
+}
+fn default_note_repeat_count() -> u16 {
+    1
+}
 
 /// Persisted logical sidechain edge. Runtime audio buffers are intentionally
 /// not serialized; hydration recreates the owned buffer publication from the
@@ -137,7 +141,9 @@ pub struct SidechainRouteContract {
     pub tap_point: u32,
 }
 
-fn default_sidechain_tap_point() -> u32 { 2 }
+fn default_sidechain_tap_point() -> u32 {
+    2
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FeedbackRouteContract {
@@ -202,7 +208,8 @@ pub struct TimeSignatureEventContract {
 
 impl TimeSignatureEventContract {
     pub fn validate(&self) -> Result<()> {
-        if !self.beat.is_finite() || self.beat < 0.0
+        if !self.beat.is_finite()
+            || self.beat < 0.0
             || !(1..=32).contains(&self.numerator)
             || !matches!(self.denominator, 1 | 2 | 4 | 8 | 16 | 32)
         {
@@ -214,8 +221,11 @@ impl TimeSignatureEventContract {
 
 impl TempoEventContract {
     pub fn validate(&self) -> Result<()> {
-        if !self.beat.is_finite() || self.beat < 0.0
-            || !self.bpm.is_finite() || !(20.0..=300.0).contains(&self.bpm) {
+        if !self.beat.is_finite()
+            || self.beat < 0.0
+            || !self.bpm.is_finite()
+            || !(20.0..=300.0).contains(&self.bpm)
+        {
             bail!("invalid tempo event");
         }
         Ok(())
@@ -224,9 +234,14 @@ impl TempoEventContract {
 
 impl AutomationPointContract {
     pub fn validate(&self) -> Result<()> {
-        if !self.time.is_finite() || self.time < 0.0 || self.time.fract() != 0.0
-            || !self.value.is_finite() || !(0.0..=1.0).contains(&self.value)
-            || !self.curve.is_finite() || !(-1.0..=1.0).contains(&self.curve) {
+        if !self.time.is_finite()
+            || self.time < 0.0
+            || self.time.fract() != 0.0
+            || !self.value.is_finite()
+            || !(0.0..=1.0).contains(&self.value)
+            || !self.curve.is_finite()
+            || !(-1.0..=1.0).contains(&self.curve)
+        {
             bail!("invalid automation point");
         }
         Ok(())
@@ -366,9 +381,12 @@ pub struct VcaGroupContract {
 
 impl VcaGroupContract {
     pub fn validate(&self) -> Result<()> {
-        if self.id == 0 || !self.gain.is_finite() || !(0.0..=8.0).contains(&self.gain)
-            || self.track_ids.iter().any(|id| *id == 0)
-            || self.track_ids.windows(2).any(|ids| ids[0] == ids[1]) {
+        if self.id == 0
+            || !self.gain.is_finite()
+            || !(0.0..=8.0).contains(&self.gain)
+            || self.track_ids.contains(&0)
+            || self.track_ids.windows(2).any(|ids| ids[0] == ids[1])
+        {
             bail!("invalid VCA group");
         }
         Ok(())
@@ -386,9 +404,15 @@ pub struct MarkerContract {
 
 impl MarkerContract {
     pub fn validate(&self) -> Result<()> {
-        if self.id == 0 || self.label.trim().is_empty() || self.label.len() > 128
-            || self.label.contains('\0') || !self.beat.is_finite() || self.beat < 0.0
-            || self.color.len() > 32 || self.color.contains('\0') {
+        if self.id == 0
+            || self.label.trim().is_empty()
+            || self.label.len() > 128
+            || self.label.contains('\0')
+            || !self.beat.is_finite()
+            || self.beat < 0.0
+            || self.color.len() > 32
+            || self.color.contains('\0')
+        {
             bail!("invalid arrangement marker");
         }
         Ok(())
@@ -413,9 +437,16 @@ impl Default for OpenUtauTuningContract {
     }
 }
 
-fn default_tuning_value() -> f32 { 0.5 }
+fn default_tuning_value() -> f32 {
+    0.5
+}
 fn default_tuning() -> OpenUtauTuningContract {
-    OpenUtauTuningContract { scoop: 0.35, vibrato: 0.45, dynamics: 0.60, consonants: 0.50 }
+    OpenUtauTuningContract {
+        scoop: 0.35,
+        vibrato: 0.45,
+        dynamics: 0.60,
+        consonants: 0.50,
+    }
 }
 
 /// A recorded take available to the non-destructive comp editor.
@@ -429,8 +460,12 @@ pub struct CompTakeContract {
 
 impl CompTakeContract {
     pub fn validate(&self) -> Result<()> {
-        if self.id == 0 || self.name.trim().is_empty() || self.name.contains('\0')
-            || self.name.len() > 128 || self.end_sample <= self.start_sample {
+        if self.id == 0
+            || self.name.trim().is_empty()
+            || self.name.contains('\0')
+            || self.name.len() > 128
+            || self.end_sample <= self.start_sample
+        {
             bail!("invalid comp take metadata");
         }
         Ok(())
@@ -449,9 +484,11 @@ pub struct CompSegmentContract {
 
 impl CompSegmentContract {
     pub fn validate(&self) -> Result<()> {
-        if self.take_id == 0 || self.length_samples == 0
+        if self.take_id == 0
+            || self.length_samples == 0
             || self.crossfade_samples as u64 > self.length_samples
-            || self.start_sample.checked_add(self.length_samples).is_none() {
+            || self.start_sample.checked_add(self.length_samples).is_none()
+        {
             bail!("invalid comp segment bounds");
         }
         Ok(())
@@ -495,17 +532,32 @@ pub fn validate_contracts(
             || plugin.sidechain_channels > 256
             || (plugin.sidechain_channels > 0 && plugin.output_channels == 0)
         {
-            bail!("plugin instance {} has invalid bus layout", plugin.instance_id);
+            bail!(
+                "plugin instance {} has invalid bus layout",
+                plugin.instance_id
+            );
         }
         if !plugin.binary_hash.is_empty() && plugin.binary_hash.len() != 64 {
-            bail!("plugin instance {} has invalid binary hash", plugin.instance_id);
+            bail!(
+                "plugin instance {} has invalid binary hash",
+                plugin.instance_id
+            );
         }
-        if plugin.plugin_version.len() > 256 || plugin.architecture.len() > 32 ||
-            plugin.plugin_version.contains('\0') || plugin.architecture.contains('\0') {
-            bail!("plugin instance {} has invalid binary identity", plugin.instance_id);
+        if plugin.plugin_version.len() > 256
+            || plugin.architecture.len() > 32
+            || plugin.plugin_version.contains('\0')
+            || plugin.architecture.contains('\0')
+        {
+            bail!(
+                "plugin instance {} has invalid binary identity",
+                plugin.instance_id
+            );
         }
         if plugin.state_schema_version > 1 {
-            bail!("plugin instance {} has unsupported state schema", plugin.instance_id);
+            bail!(
+                "plugin instance {} has unsupported state schema",
+                plugin.instance_id
+            );
         }
         if plugin.state_blob.len() > 4 * 1024 * 1024 || plugin.gui_state.len() > 1024 * 1024 {
             bail!(
@@ -519,11 +571,15 @@ pub fn validate_contracts(
         if plugin.parameter_values.len() > 65_536
             || (!plugin.parameter_ids.is_empty()
                 && plugin.parameter_ids.len() != plugin.parameter_values.len())
-            || plugin.parameter_values.iter().any(|value| {
-                !value.is_finite() || !(0.0..=1.0).contains(value)
-            })
+            || plugin
+                .parameter_values
+                .iter()
+                .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
         {
-            bail!("plugin instance {} has invalid parameter state", plugin.instance_id);
+            bail!(
+                "plugin instance {} has invalid parameter state",
+                plugin.instance_id
+            );
         }
         let mut parameter_ids = HashSet::with_capacity(plugin.parameter_ids.len());
         if plugin.parameter_ids.iter().any(|parameter| {
@@ -532,7 +588,10 @@ pub fn validate_contracts(
                 || parameter.contains('\0')
                 || !parameter_ids.insert(parameter)
         }) {
-            bail!("plugin instance {} has duplicate or invalid parameter ids", plugin.instance_id);
+            bail!(
+                "plugin instance {} has duplicate or invalid parameter ids",
+                plugin.instance_id
+            );
         }
     }
 
@@ -545,7 +604,10 @@ pub fn validate_contracts(
             .iter()
             .find(|plugin| plugin.instance_id == mapping.target_instance_id)
         else {
-            bail!("macro mapping {} targets an unknown plugin", mapping.mapping_id);
+            bail!(
+                "macro mapping {} targets an unknown plugin",
+                mapping.mapping_id
+            );
         };
         if mapping.macro_index >= 128
             || mapping.target_parameter_id.trim().is_empty()
@@ -754,7 +816,10 @@ mod tests {
         };
         validate_contracts(&[plugin.clone()], &[], &[mapping.clone()], &[], &[]).unwrap();
         let json = serde_json::to_string(&mapping).unwrap();
-        assert_eq!(serde_json::from_str::<MacroMappingContract>(&json).unwrap(), mapping);
+        assert_eq!(
+            serde_json::from_str::<MacroMappingContract>(&json).unwrap(),
+            mapping
+        );
         let mut missing = mapping;
         missing.target_instance_id = "track:9:slot:0".into();
         assert!(validate_contracts(&[plugin], &[], &[missing], &[], &[]).is_err());

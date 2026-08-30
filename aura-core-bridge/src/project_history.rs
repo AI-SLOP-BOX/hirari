@@ -266,8 +266,9 @@ impl ProjectHistoryStore {
         let expected_project_id = read_to_string(self.root.join("PROJECT_ID"))?
             .trim()
             .to_owned();
-        let project = ProjectDocument::load(project_file_text)
-            .with_context(|| format!("failed to load working project {}", project_file.display()))?;
+        let project = ProjectDocument::load(project_file_text).with_context(|| {
+            format!("failed to load working project {}", project_file.display())
+        })?;
         let project_bytes = serde_json::to_vec(&project)?;
         let working_snapshot_hash = content_hash(&project_bytes);
         let identity_matches = project.project_id == expected_project_id;
@@ -336,7 +337,9 @@ impl ProjectHistoryStore {
         message: &str,
         render_file: impl AsRef<Path>,
     ) -> Result<ProjectCommit> {
-        if message.trim().is_empty() || message.len() > 512 { bail!("commit message must be 1..=512 characters"); }
+        if message.trim().is_empty() || message.len() > 512 {
+            bail!("commit message must be 1..=512 characters");
+        }
         let render_file = render_file.as_ref();
         let (bytes, hash, _, _, _) = fingerprint_asset_file(render_file)
             .with_context(|| format!("failed to fingerprint render {}", render_file.display()))?;
@@ -368,7 +371,12 @@ impl ProjectHistoryStore {
         self.commit_locked(&project, message, None)
     }
 
-    fn commit_locked(&self, project: &ProjectDocument, message: &str, render: Option<(String, u64)>) -> Result<ProjectCommit> {
+    fn commit_locked(
+        &self,
+        project: &ProjectDocument,
+        message: &str,
+        render: Option<(String, u64)>,
+    ) -> Result<ProjectCommit> {
         project.validate()?;
         self.ensure_project_identity(&project.project_id)?;
         let bytes = serde_json::to_vec(project)?;
@@ -408,7 +416,10 @@ impl ProjectHistoryStore {
             asset_manifest_hash,
             plugin_manifest_hash,
             platform,
-            render_artifact_hash: render.as_ref().map(|value| value.0.clone()).unwrap_or_default(),
+            render_artifact_hash: render
+                .as_ref()
+                .map(|value| value.0.clone())
+                .unwrap_or_default(),
             render_artifact_bytes: render.map(|value| value.1).unwrap_or_default(),
         };
         let material = commit_id_material(&commit);
@@ -483,17 +494,25 @@ impl ProjectHistoryStore {
         let target = self.load_commit(&commit_id)?;
         let previous = if project_file.exists() {
             Some(read(project_file).with_context(|| {
-                format!("failed to snapshot current project {}", project_file.display())
+                format!(
+                    "failed to snapshot current project {}",
+                    project_file.display()
+                )
             })?)
         } else {
             None
         };
 
         target.save_atomic(project_file_text).with_context(|| {
-            format!("failed to restore history commit into {}", project_file.display())
+            format!(
+                "failed to restore history commit into {}",
+                project_file.display()
+            )
         })?;
 
-        if let Err(head_error) = atomic_write(&self.root.join("HEAD"), format!("{branch}\n").as_bytes()) {
+        if let Err(head_error) =
+            atomic_write(&self.root.join("HEAD"), format!("{branch}\n").as_bytes())
+        {
             let rollback = match previous.as_deref() {
                 Some(bytes) => atomic_write(project_file, bytes),
                 None => remove_published_file(project_file),
@@ -527,13 +546,19 @@ impl ProjectHistoryStore {
         let target = self.load_commit(commit_id)?;
         let previous = if project_file.exists() {
             Some(read(project_file).with_context(|| {
-                format!("failed to snapshot current project {}", project_file.display())
+                format!(
+                    "failed to snapshot current project {}",
+                    project_file.display()
+                )
             })?)
         } else {
             None
         };
         target.save_atomic(project_file_text).with_context(|| {
-            format!("failed to restore history commit into {}", project_file.display())
+            format!(
+                "failed to restore history commit into {}",
+                project_file.display()
+            )
         })?;
         let message = format!("revert {commit_id}");
         match self.commit_locked(&target, &message, None) {
@@ -660,7 +685,7 @@ impl ProjectHistoryStore {
     pub fn log(&self, limit: usize) -> Result<Vec<ProjectCommit>> {
         let mut commits = Vec::new();
         let mut cursor = self.status()?.head;
-        for _ in 0..limit.max(1).min(512) {
+        for _ in 0..limit.clamp(1, 512) {
             let Some(id) = cursor else {
                 break;
             };
@@ -953,21 +978,25 @@ fn append_entity_changes(
             }
             (None, None) => continue,
         };
-            changes.push(SnapshotChange {
+        changes.push(SnapshotChange {
             section: section.to_owned(),
             before_hash,
             after_hash,
             entity_id: Some(id),
-                operation: operation.to_owned(),
-                fields: field_changes(before_item, after_item),
-            });
+            operation: operation.to_owned(),
+            fields: field_changes(before_item, after_item),
+        });
     }
 }
 
 fn entity_id(item: &serde_json::Value, key: &str) -> Option<String> {
     if key == "source_destination" {
         let object = item.as_object()?;
-        return Some(format!("{}:{}", object.get("source_id")?.as_u64()?, object.get("destination_id")?.as_u64()?));
+        return Some(format!(
+            "{}:{}",
+            object.get("source_id")?.as_u64()?,
+            object.get("destination_id")?.as_u64()?
+        ));
     }
     if key.is_empty() {
         let object = item.as_object()?;
@@ -1231,7 +1260,8 @@ mod tests {
 
     #[test]
     fn commit_file_reads_working_tree_inside_history_transaction() {
-        let root = std::env::temp_dir().join(format!("aura-history-commit-file-{}", unique_nonce()));
+        let root =
+            std::env::temp_dir().join(format!("aura-history-commit-file-{}", unique_nonce()));
         std::fs::create_dir_all(&root).unwrap();
         let project_file = root.join("Song.aura");
         let project = ProjectDocument::from_layout_json("Demo", 120.0, 48_000.0, "[]").unwrap();
@@ -1285,7 +1315,8 @@ mod tests {
         std::fs::write(&rendered, b"render-a").unwrap();
 
         let store = ProjectHistoryStore::open_project_directory(&root).unwrap();
-        let mut project = ProjectDocument::from_layout_json("Vocal", 120.0, 48_000.0, "[]").unwrap();
+        let mut project =
+            ProjectDocument::from_layout_json("Vocal", 120.0, 48_000.0, "[]").unwrap();
         project.openutau_vocals.push(OpenUtauVocalContract {
             source_path: source.to_string_lossy().into_owned(),
             rendered_audio_path: rendered.to_string_lossy().into_owned(),
@@ -1379,23 +1410,29 @@ mod tests {
         second.tracks[0].volume = 0.75;
         second.tracks[0].track_delay_samples = 2400;
         second.plugin_instances[0].bypassed = true;
-        second.freeze_artifacts.push(crate::project_contracts::FreezeArtifactContract {
-            track_id: 7,
-            project_generation: 2,
-            audio_generation: 3,
-            total_samples: 48_000,
-            sample_rate: 48_000,
-            path: "freeze/vocal.wav".to_owned(),
-            content_checksum: 1,
-        });
+        second
+            .freeze_artifacts
+            .push(crate::project_contracts::FreezeArtifactContract {
+                track_id: 7,
+                project_generation: 2,
+                audio_generation: 3,
+                total_samples: 48_000,
+                sample_rate: 48_000,
+                path: "freeze/vocal.wav".to_owned(),
+                content_checksum: 1,
+            });
         let second_commit = store.commit(&second, "vocal edit").unwrap();
         let diff = store
             .diff_commits(&first_commit.commit_id, &second_commit.commit_id)
             .unwrap();
 
         assert!(diff.changed_sections.contains(&"tracks".to_owned()));
-        assert!(diff.changed_sections.contains(&"plugin_instances".to_owned()));
-        assert!(diff.changed_sections.contains(&"freeze_artifacts".to_owned()));
+        assert!(diff
+            .changed_sections
+            .contains(&"plugin_instances".to_owned()));
+        assert!(diff
+            .changed_sections
+            .contains(&"freeze_artifacts".to_owned()));
         assert!(diff.changes.iter().any(|change| {
             change.section == "tracks"
                 && change.entity_id.as_deref() == Some("7")
@@ -1439,14 +1476,22 @@ mod tests {
         assert_ne!(first.commit_id, second.commit_id);
 
         store.checkout_and_restore(&project_file, "main").unwrap();
-        assert_eq!(ProjectDocument::load(project_file.to_str().unwrap()).unwrap(), changed);
+        assert_eq!(
+            ProjectDocument::load(project_file.to_str().unwrap()).unwrap(),
+            changed
+        );
 
-        store.create_branch("initial-state", Some(&first.commit_id)).unwrap();
+        store
+            .create_branch("initial-state", Some(&first.commit_id))
+            .unwrap();
         let status = store
             .checkout_and_restore(&project_file, "initial-state")
             .unwrap();
         assert_eq!(status.branch, "initial-state");
-        assert_eq!(ProjectDocument::load(project_file.to_str().unwrap()).unwrap(), initial);
+        assert_eq!(
+            ProjectDocument::load(project_file.to_str().unwrap()).unwrap(),
+            initial
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1462,8 +1507,11 @@ mod tests {
         let store = ProjectHistoryStore::open_project_file(&project_file).unwrap();
         store.commit(&project, "initial").unwrap();
 
-        let replacement = ProjectDocument::from_layout_json("Replacement", 120.0, 48_000.0, "[]").unwrap();
-        replacement.save_atomic(project_file.to_str().unwrap()).unwrap();
+        let replacement =
+            ProjectDocument::from_layout_json("Replacement", 120.0, 48_000.0, "[]").unwrap();
+        replacement
+            .save_atomic(project_file.to_str().unwrap())
+            .unwrap();
         let before = std::fs::read(&project_file).unwrap();
         assert!(store.checkout_and_restore(&project_file, "main").is_err());
         assert_eq!(std::fs::read(&project_file).unwrap(), before);
@@ -1509,15 +1557,26 @@ mod tests {
         changed.save_atomic(project_file.to_str().unwrap()).unwrap();
         let second = store.commit(&changed, "changed").unwrap();
 
-        let reverted = store.revert_and_restore(&project_file, &first.commit_id).unwrap();
-        assert_eq!(ProjectDocument::load(project_file.to_str().unwrap()).unwrap(), initial);
-        assert_eq!(store.status().unwrap().head, Some(reverted.commit_id.clone()));
+        let reverted = store
+            .revert_and_restore(&project_file, &first.commit_id)
+            .unwrap();
+        assert_eq!(
+            ProjectDocument::load(project_file.to_str().unwrap()).unwrap(),
+            initial
+        );
+        assert_eq!(
+            store.status().unwrap().head,
+            Some(reverted.commit_id.clone())
+        );
         assert_eq!(reverted.parent, Some(second.commit_id.clone()));
 
         let merged = store
             .cherry_pick_and_restore(&project_file, &reverted.commit_id, &["metadata".into()])
             .unwrap();
-        assert_eq!(ProjectDocument::load(project_file.to_str().unwrap()).unwrap(), initial);
+        assert_eq!(
+            ProjectDocument::load(project_file.to_str().unwrap()).unwrap(),
+            initial
+        );
         assert_eq!(store.status().unwrap().head, Some(merged.commit_id));
 
         let openutau_only = store
