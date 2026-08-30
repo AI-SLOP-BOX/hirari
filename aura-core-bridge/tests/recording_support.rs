@@ -35,11 +35,11 @@ fn owner_is_alive(path: &Path) -> bool {
     let Some(pid) = owner else { return false };
     #[cfg(unix)]
     {
-        return Command::new("kill")
+        Command::new("kill")
             .args(["-0", &pid.to_string()])
             .status()
             .map(|status| status.success())
-            .unwrap_or(false);
+            .unwrap_or(false)
     }
     #[cfg(not(unix))]
     {
@@ -122,7 +122,8 @@ pub fn remove_runtime_region_ids(layout: &mut serde_json::Value) {
 #[allow(dead_code)]
 pub fn pcm16_rms(payload: &[u8]) -> f64 {
     let (sum, count) = payload[44..]
-        .chunks_exact(2)
+        .chunks(2)
+        .filter(|sample| sample.len() == 2)
         .map(|sample| {
             let value = i16::from_le_bytes([sample[0], sample[1]]) as f64;
             value * value
@@ -140,7 +141,8 @@ pub fn pcm16_rms(payload: &[u8]) -> f64 {
 #[allow(dead_code)]
 pub fn pcm16_samples(payload: &[u8]) -> Vec<i16> {
     payload[44..]
-        .chunks_exact(2)
+        .chunks(2)
+        .filter(|sample| sample.len() == 2)
         .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
         .collect()
 }
