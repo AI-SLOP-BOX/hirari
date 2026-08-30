@@ -943,7 +943,7 @@ impl AuraCore {
         PathBuf::from(format!("{path}.comping.json"))
     }
 
-    fn sidecar_temp_path(sidecar: &PathBuf) -> PathBuf {
+    fn sidecar_temp_path(sidecar: &std::path::Path) -> PathBuf {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|value| value.as_nanos())

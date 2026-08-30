@@ -397,7 +397,7 @@ pub fn execute(
                             .filter_map(|key| plugin.get(key).and_then(Value::as_str))
                             .collect::<Vec<_>>().join(" ").to_ascii_lowercase();
                         let matches_query = query.is_empty() || text.contains(&query);
-                        let matches_tag = tag.as_deref().map_or(true, |wanted| plugin.get("tags").and_then(Value::as_array)
+                        let matches_tag = tag.as_deref().is_none_or(|wanted| plugin.get("tags").and_then(Value::as_array)
                             .is_some_and(|tags| tags.iter().any(|value| value.as_str().is_some_and(|item| item.eq_ignore_ascii_case(wanted)))));
                         let matches_favorite = !*favorites_only || plugin.get("favorite").and_then(Value::as_bool) == Some(true);
                         matches_query && matches_tag && matches_favorite
@@ -802,6 +802,8 @@ pub fn execute(
             CommandAction::SetRegionPitch { track_id, region_id, semitones } => native_result(core.set_region_pitch_diagnostic_json(*track_id, *region_id, *semitones)),
             CommandAction::SetRegionAudioNoteSegment { track_id, region_id, start_seconds, end_seconds, pitch_offset_cents, formant_offset_cents } => native_result(core.set_region_audio_note_segment_diagnostic_json(*track_id, *region_id, *start_seconds, *end_seconds, *pitch_offset_cents, *formant_offset_cents)),
             CommandAction::ClearRegionAudioNoteSegments { track_id, region_id } => native_result(core.clear_region_audio_note_segments_diagnostic_json(*track_id, *region_id)),
+            CommandAction::WarpRegionAudioNoteSegment { track_id, region_id, segment_start_seconds, new_start_seconds, new_end_seconds } => native_result(core.warp_region_audio_note_segment_diagnostic_json(*track_id, *region_id, *segment_start_seconds, *new_start_seconds, *new_end_seconds)),
+            CommandAction::RemoveRegionAudioNoteSegment { track_id, region_id, segment_start_seconds } => native_result(core.remove_region_audio_note_segment_diagnostic_json(*track_id, *region_id, *segment_start_seconds)),
             CommandAction::Undo => native_result(core.undo_diagnostic_json()),
             CommandAction::Redo => native_result(core.redo_diagnostic_json()),
             CommandAction::ProjectLoad { path } => core
