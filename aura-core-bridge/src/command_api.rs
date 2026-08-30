@@ -1675,7 +1675,7 @@ pub fn validate(document: CommandDocument) -> Result<ValidatedCommand, String> {
                     || name.trim().is_empty()
                     || name.len() > 256
                     || member_track_ids.is_empty()
-                    || member_track_ids.iter().any(|id| *id == 0)
+                    || member_track_ids.contains(&0)
                     || member_track_ids
                         .iter()
                         .any(|id| !unique_members.insert(*id))
@@ -2099,7 +2099,7 @@ pub fn validate(document: CommandDocument) -> Result<ValidatedCommand, String> {
                 tail_seconds,
                 ..
             } => {
-                if track_ids.len() > 4096 || track_ids.iter().any(|id| *id == 0) {
+                if track_ids.len() > 4096 || track_ids.contains(&0) {
                     return Err("stem track selection is invalid".into());
                 }
                 let mut unique = std::collections::HashSet::with_capacity(track_ids.len());

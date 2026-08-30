@@ -759,10 +759,9 @@ pub fn execute(
                 let result = native_result(core.set_midi_note_lyric_diagnostic_json(
                     *track_id, *pitch, *velocity, *start_sample, *length_samples, lyric,
                 ));
-                if result.is_ok() && (!phoneme.is_empty() || !pitch_curve_cents.is_empty() || *vibrato_depth_cents != 0 || *portamento_samples != 0) {
-                    if !core.set_midi_note_articulation(*track_id, *pitch, *start_sample, phoneme, pitch_curve_cents, *vibrato_depth_cents, *portamento_samples) {
-                        return Err(BridgeError::new("midi_articulation_rejected", "vocal note articulation was rejected"));
-                    }
+                if result.is_ok() && (!phoneme.is_empty() || !pitch_curve_cents.is_empty() || *vibrato_depth_cents != 0 || *portamento_samples != 0)
+                    && !core.set_midi_note_articulation(*track_id, *pitch, *start_sample, phoneme, pitch_curve_cents, *vibrato_depth_cents, *portamento_samples) {
+                    return Err(BridgeError::new("midi_articulation_rejected", "vocal note articulation was rejected"));
                 }
                 result
             }

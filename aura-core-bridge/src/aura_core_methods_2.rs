@@ -2,9 +2,9 @@ fn sync_sidecar_parent(path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
         let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-        return std::fs::File::open(parent)
+        std::fs::File::open(parent)
             .and_then(|directory| directory.sync_all())
-            .is_ok();
+            .is_ok()
     }
     #[cfg(not(unix))]
     {
@@ -1652,7 +1652,7 @@ impl AuraCore {
         param_id: u32,
         packed_points: Vec<f64>,
     ) -> String {
-        if packed_points.len() % 3 != 0 {
+        if !packed_points.len().is_multiple_of(3) {
             return "{\"code\":\"invalid_automation_points\",\"retryable\":false}".to_owned();
         }
         if packed_points.len() > 24_576 || packed_points.iter().any(|value| !value.is_finite()) {
@@ -1692,7 +1692,7 @@ impl AuraCore {
         track_id: u32,
         packed_points: Vec<f64>,
     ) -> String {
-        if packed_points.len() % 3 != 0
+        if !packed_points.len().is_multiple_of(3)
             || packed_points.len() > 24_576
             || packed_points.iter().any(|value| !value.is_finite())
         {
@@ -3214,7 +3214,7 @@ impl AuraCore {
         // Beginner-friendly default routing: newly created signal tracks are
         // sent to the first available Bus. Bus/Vocal tracks remain un-routed
         // so the operation cannot create a cycle or a self-route.
-        if id != 0 && matches!(t_type, 0 | 1 | 2) {
+        if id != 0 && matches!(t_type, 0..=2) {
             if let Some(engine) = self.engine.as_ref() {
                 if let Ok(layout) =
                     serde_json::from_str::<serde_json::Value>(&engine.get_project_layout_json())
@@ -3287,7 +3287,7 @@ impl AuraCore {
         let Ok(ids) = serde_json::from_str::<Vec<u32>>(snapshot) else {
             return false;
         };
-        if ids.iter().any(|id| *id == 0) || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+        if ids.contains(&0) || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
             return false;
         }
         let Ok(mut current) = self.aux_track_ids.lock() else {

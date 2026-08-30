@@ -2062,7 +2062,7 @@ impl AuraCore {
             let core = ffi::get_unified_engine(e);
             let pks = ffi::get_track_peaks_l(core);
             out.clear();
-            out.extend_from_slice(&pks);
+            out.extend_from_slice(pks);
         }
     }
 
@@ -2071,7 +2071,7 @@ impl AuraCore {
             let core = ffi::get_unified_engine(e);
             let pks = ffi::get_track_peaks_r(core);
             out.clear();
-            out.extend_from_slice(&pks);
+            out.extend_from_slice(pks);
         }
     }
 
