@@ -1,6 +1,9 @@
+use crate::project_contracts::{
+    MacroMappingContract, MarkerContract, MidiLearnMappingContract, MidiNoteContract,
+    OpenUtauTuningContract, OpenUtauVocalContract, TrackStackContract,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use crate::project_contracts::{MacroMappingContract, MidiLearnMappingContract, MidiNoteContract, OpenUtauTuningContract, OpenUtauVocalContract, TrackStackContract, MarkerContract};
 #[derive(Debug, Clone, Default)]
 pub struct LoudnessData {
     pub integrated: f32,
@@ -219,7 +222,8 @@ pub struct AuraCore {
     /// Runtime pickup latches are separate from the persisted mapping. They
     /// reset when a mapping changes or a project is reloaded.
     midi_pickup_acquired: std::sync::Mutex<HashSet<String>>,
-    pub(crate) production_events: std::sync::Arc<std::sync::Mutex<crate::production_events::EventHub>>,
+    pub(crate) production_events:
+        std::sync::Arc<std::sync::Mutex<crate::production_events::EventHub>>,
 }
 
 #[derive(Clone)]
@@ -538,11 +542,11 @@ fn decode_sandbox_statuses(raw: &[u32]) -> Vec<SandboxStatus> {
     const STATUS_HEADER_V9: u32 = 0x4155_5209;
     let (raw, width) = if raw.first().copied() == Some(STATUS_HEADER_V9) {
         (&raw[1..], 9)
-    } else if raw.len() >= 9 && raw.len() % 9 == 0 {
+    } else if raw.len() >= 9 && raw.len().is_multiple_of(9) {
         (raw, 9)
-    } else if raw.len() >= 8 && raw.len() % 8 == 0 {
+    } else if raw.len() >= 8 && raw.len().is_multiple_of(8) {
         (raw, 8)
-    } else if raw.len() >= 7 && raw.len() % 7 == 0 {
+    } else if raw.len() >= 7 && raw.len().is_multiple_of(7) {
         (raw, 7)
     } else {
         (raw, 6)
@@ -592,10 +596,12 @@ impl AuraCore {
             Ok(changed) => serde_json::json!({
                 "ok": true, "operation": "set_plugin_favorite", "id": id,
                 "favorite": favorite, "changed": changed,
-            }).to_string(),
+            })
+            .to_string(),
             Err(error) => serde_json::json!({
                 "ok": false, "code": "plugin_favorite_failed", "message": error.to_string(),
-            }).to_string(),
+            })
+            .to_string(),
         }
     }
 
@@ -605,12 +611,14 @@ impl AuraCore {
                 "ok": true,
                 "operation": "quarantine_plugin",
                 "plugin": plugin,
-            }).to_string(),
+            })
+            .to_string(),
             Err(error) => serde_json::json!({
                 "ok": false,
                 "code": "plugin_quarantine_failed",
                 "message": error,
-            }).to_string(),
+            })
+            .to_string(),
         }
     }
 
@@ -620,12 +628,14 @@ impl AuraCore {
                 "ok": true,
                 "operation": "clear_plugin_quarantine",
                 "plugin": plugin,
-            }).to_string(),
+            })
+            .to_string(),
             Err(error) => serde_json::json!({
                 "ok": false,
                 "code": "plugin_quarantine_clear_failed",
                 "message": error,
-            }).to_string(),
+            })
+            .to_string(),
         }
     }
 
@@ -645,7 +655,8 @@ impl AuraCore {
                 "alias": alias,
                 "binary_hash": plugin.binary_hash,
                 "path": plugin.path,
-            }).to_string();
+            })
+            .to_string();
         }
         if plugin.format == "internal" {
             let plugin_type = match plugin.path.as_str() {
@@ -660,11 +671,14 @@ impl AuraCore {
                 "Aura/DynamicEQ" => 8,
                 "Aura/MidSide" => 9,
                 "Aura/Width" => 10,
-                _ => return serde_json::json!({
-                    "ok": false,
-                    "code": "unknown_internal_plugin",
-                    "path": plugin.path,
-                }).to_string(),
+                _ => {
+                    return serde_json::json!({
+                        "ok": false,
+                        "code": "unknown_internal_plugin",
+                        "path": plugin.path,
+                    })
+                    .to_string()
+                }
             };
             let result = self.add_plugin_diagnostic_json(track_id, plugin_type);
             return serde_json::json!({
@@ -698,7 +712,8 @@ impl AuraCore {
             "source_path": source_path,
             "note_count": notes.len(),
             "notes": notes,
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub fn openutau_midi_notes_json(
@@ -717,12 +732,14 @@ impl AuraCore {
                 "sample_rate": sample_rate,
                 "ticks_per_beat": ticks_per_beat,
                 "notes": notes,
-            }).to_string(),
+            })
+            .to_string(),
             Err(error) => serde_json::json!({
                 "ok": false,
                 "code": "openutau_midi_conversion_failed",
                 "error": error,
-            }).to_string(),
+            })
+            .to_string(),
         }
     }
 
@@ -773,8 +790,7 @@ impl AuraCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("OpenUtau metadata lock poisoned"))?;
         if !vocals.iter().any(|entry| {
-            entry.source_path == source_path
-                && entry.rendered_audio_path == rendered_audio_path
+            entry.source_path == source_path && entry.rendered_audio_path == rendered_audio_path
         }) {
             vocals.push(OpenUtauVocalContract {
                 source_path: source_path.to_owned(),
@@ -789,7 +805,12 @@ impl AuraCore {
                 rendered_frames: audit.rendered_frames,
                 source_note_count: audit.source_note_count,
                 source_singers: audit.source_singers,
-                tuning: OpenUtauTuningContract { scoop: 0.35, vibrato: 0.45, dynamics: 0.60, consonants: 0.50 },
+                tuning: OpenUtauTuningContract {
+                    scoop: 0.35,
+                    vibrato: 0.45,
+                    dynamics: 0.60,
+                    consonants: 0.50,
+                },
             });
         }
         Ok(())
@@ -805,17 +826,29 @@ impl AuraCore {
         consonants: f32,
     ) -> anyhow::Result<()> {
         let values = [scoop, vibrato, dynamics, consonants];
-        if values.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value)) {
-            return Err(anyhow::anyhow!("OpenUtau tuning values must be normalized 0..=1"));
+        if values
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+        {
+            return Err(anyhow::anyhow!(
+                "OpenUtau tuning values must be normalized 0..=1"
+            ));
         }
-        let mut vocals = self.openutau_vocals.lock()
+        let mut vocals = self
+            .openutau_vocals
+            .lock()
             .map_err(|_| anyhow::anyhow!("OpenUtau metadata lock poisoned"))?;
         let Some(vocal) = vocals.iter_mut().find(|entry| {
             entry.source_path == source_path && entry.rendered_audio_path == rendered_audio_path
         }) else {
             return Err(anyhow::anyhow!("OpenUtau vocal source is not registered"));
         };
-        vocal.tuning = OpenUtauTuningContract { scoop, vibrato, dynamics, consonants };
+        vocal.tuning = OpenUtauTuningContract {
+            scoop,
+            vibrato,
+            dynamics,
+            consonants,
+        };
         Ok(())
     }
 
@@ -829,8 +862,7 @@ impl AuraCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("OpenUtau metadata lock poisoned"))?;
         vocals.retain(|entry| {
-            !(entry.source_path == source_path
-                && entry.rendered_audio_path == rendered_audio_path)
+            !(entry.source_path == source_path && entry.rendered_audio_path == rendered_audio_path)
         });
         Ok(())
     }
@@ -844,46 +876,85 @@ impl AuraCore {
     }
 
     pub fn markers_json(&self) -> String {
-        self.markers.lock().ok()
+        self.markers
+            .lock()
+            .ok()
             .and_then(|value| serde_json::to_string(&*value).ok())
             .unwrap_or_else(|| "[]".to_owned())
     }
 
     pub fn restore_markers_json(&self, snapshot: &str) -> bool {
-        let Ok(candidate) = serde_json::from_str::<Vec<MarkerContract>>(snapshot) else { return false; };
+        let Ok(candidate) = serde_json::from_str::<Vec<MarkerContract>>(snapshot) else {
+            return false;
+        };
         let mut ids = HashSet::with_capacity(candidate.len());
-        if candidate.len() > 65_536 || candidate.iter().any(|marker| marker.validate().is_err() || !ids.insert(marker.id)) { return false; }
-        let Ok(mut current) = self.markers.lock() else { return false; };
+        if candidate.len() > 65_536
+            || candidate
+                .iter()
+                .any(|marker| marker.validate().is_err() || !ids.insert(marker.id))
+        {
+            return false;
+        }
+        let Ok(mut current) = self.markers.lock() else {
+            return false;
+        };
         *current = candidate;
         true
     }
 
     pub fn upsert_marker(&self, id: u32, label: &str, beat: f64, color: &str) -> bool {
-        let marker = MarkerContract { id, label: label.to_owned(), beat, color: color.to_owned() };
-        if marker.validate().is_err() { return false; }
-        let Ok(mut markers) = self.markers.lock() else { return false; };
-        if let Some(existing) = markers.iter_mut().find(|item| item.id == id) { *existing = marker; }
-        else if markers.len() >= 65_536 { return false; } else { markers.push(marker); }
+        let marker = MarkerContract {
+            id,
+            label: label.to_owned(),
+            beat,
+            color: color.to_owned(),
+        };
+        if marker.validate().is_err() {
+            return false;
+        }
+        let Ok(mut markers) = self.markers.lock() else {
+            return false;
+        };
+        if let Some(existing) = markers.iter_mut().find(|item| item.id == id) {
+            *existing = marker;
+        } else if markers.len() >= 65_536 {
+            return false;
+        } else {
+            markers.push(marker);
+        }
         markers.sort_by(|a, b| a.beat.total_cmp(&b.beat).then_with(|| a.id.cmp(&b.id)));
         drop(markers);
-        self.publish_production_event(crate::production_events::ProductionEvent::MarkerChanged { marker_id: id });
+        self.publish_production_event(crate::production_events::ProductionEvent::MarkerChanged {
+            marker_id: id,
+        });
         true
     }
 
     pub fn delete_marker(&self, id: u32) -> bool {
-        let Ok(mut markers) = self.markers.lock() else { return false; };
+        let Ok(mut markers) = self.markers.lock() else {
+            return false;
+        };
         let before = markers.len();
         markers.retain(|marker| marker.id != id);
         let changed = markers.len() != before;
         drop(markers);
-        if changed { self.publish_production_event(crate::production_events::ProductionEvent::MarkerChanged { marker_id: id }); }
+        if changed {
+            self.publish_production_event(
+                crate::production_events::ProductionEvent::MarkerChanged { marker_id: id },
+            );
+        }
         changed
     }
 
     pub fn reset_markers(&self) {
         if let Ok(mut markers) = self.markers.lock() {
             markers.clear();
-            markers.push(MarkerContract { id: 1, label: "START".to_owned(), beat: 0.0, color: "#646496".to_owned() });
+            markers.push(MarkerContract {
+                id: 1,
+                label: "START".to_owned(),
+                beat: 0.0,
+                color: "#646496".to_owned(),
+            });
         }
     }
 
@@ -893,17 +964,25 @@ impl AuraCore {
         };
         let mut ids = HashSet::new();
         if candidate.iter().any(|stack| {
-            stack.id == 0 || !ids.insert(stack.id) || stack.name.trim().is_empty()
-                || stack.name.len() > 256 || !stack.master_gain.is_finite()
+            stack.id == 0
+                || !ids.insert(stack.id)
+                || stack.name.trim().is_empty()
+                || stack.name.len() > 256
+                || !stack.master_gain.is_finite()
                 || !(0.0..=2.0).contains(&stack.master_gain)
                 || {
                     let mut members = HashSet::new();
-                    stack.member_track_ids.iter().any(|id| *id == 0 || !members.insert(*id))
+                    stack
+                        .member_track_ids
+                        .iter()
+                        .any(|id| *id == 0 || !members.insert(*id))
                 }
         }) {
             return false;
         }
-        let Ok(mut current) = self.track_stacks.lock() else { return false; };
+        let Ok(mut current) = self.track_stacks.lock() else {
+            return false;
+        };
         *current = candidate;
         drop(current);
         if let Ok(mut bases) = self.track_stack_base_volumes.lock() {
@@ -916,24 +995,38 @@ impl AuraCore {
     /// Stack gain is therefore idempotent and overlapping stacks remain
     /// deterministic instead of multiplying an already-scaled fader.
     fn apply_track_stack_gains(&self) -> bool {
-        let Ok(stacks) = self.track_stacks.lock() else { return false; };
-        let Ok(mut bases) = self.track_stack_base_volumes.lock() else { return false; };
-        let Some(engine) = self.engine.as_ref() else { return false; };
-        let mut multipliers = bases.keys().copied().map(|track_id| (track_id, 1.0)).collect::<HashMap<_, _>>();
+        let Ok(stacks) = self.track_stacks.lock() else {
+            return false;
+        };
+        let Ok(mut bases) = self.track_stack_base_volumes.lock() else {
+            return false;
+        };
+        let Some(engine) = self.engine.as_ref() else {
+            return false;
+        };
+        let mut multipliers = bases
+            .keys()
+            .copied()
+            .map(|track_id| (track_id, 1.0))
+            .collect::<HashMap<_, _>>();
         for stack in stacks.iter() {
             for track_id in &stack.member_track_ids {
                 multipliers
                     .entry(*track_id)
                     .and_modify(|value| *value *= stack.master_gain)
                     .or_insert(stack.master_gain);
-                let entry = bases.entry(*track_id).or_insert_with(|| engine.get_track_volume(*track_id));
+                let entry = bases
+                    .entry(*track_id)
+                    .or_insert_with(|| engine.get_track_volume(*track_id));
                 if !entry.is_finite() {
                     return false;
                 }
             }
         }
         multipliers.into_iter().all(|(track_id, multiplier)| {
-            let Some(base) = bases.get(&track_id).copied() else { return false; };
+            let Some(base) = bases.get(&track_id).copied() else {
+                return false;
+            };
             engine.set_track_volume(track_id, (base * multiplier).clamp(0.0, 2.0))
         })
     }
@@ -956,7 +1049,9 @@ impl AuraCore {
                     .collect::<Vec<_>>();
                 (
                     !matching.is_empty(),
-                    matching.iter().fold(1.0f32, |product, stack| product * stack.master_gain),
+                    matching
+                        .iter()
+                        .fold(1.0f32, |product, stack| product * stack.master_gain),
                 )
             })
             .unwrap_or((false, 1.0));
@@ -966,7 +1061,9 @@ impl AuraCore {
                 .as_ref()
                 .is_some_and(|engine| engine.set_track_volume(track_id, value));
         }
-        let Ok(mut bases) = self.track_stack_base_volumes.lock() else { return false; };
+        let Ok(mut bases) = self.track_stack_base_volumes.lock() else {
+            return false;
+        };
         let base = if multiplier > f32::EPSILON {
             value / multiplier
         } else {
@@ -996,16 +1093,20 @@ impl AuraCore {
         master_gain: f32,
         collapsed: bool,
     ) -> bool {
-        if id == 0 || name.trim().is_empty() || name.len() > 256
-            || !master_gain.is_finite() || !(0.0..=2.0).contains(&master_gain)
+        if id == 0
+            || name.trim().is_empty()
+            || name.len() > 256
+            || !master_gain.is_finite()
+            || !(0.0..=2.0).contains(&master_gain)
             || member_track_ids.is_empty()
         {
             return false;
         }
         let mut members = HashSet::with_capacity(member_track_ids.len());
-        if member_track_ids.iter().any(|track_id| {
-            *track_id == 0 || !members.insert(*track_id)
-        }) {
+        if member_track_ids
+            .iter()
+            .any(|track_id| *track_id == 0 || !members.insert(*track_id))
+        {
             return false;
         }
         let Ok(mut stacks) = self.track_stacks.lock() else {
@@ -1030,9 +1131,13 @@ impl AuraCore {
             stacks.sort_by_key(|stack| stack.id);
         }
         drop(stacks);
-        if let (Ok(mut bases), Some(engine)) = (self.track_stack_base_volumes.lock(), self.engine.as_ref()) {
+        if let (Ok(mut bases), Some(engine)) =
+            (self.track_stack_base_volumes.lock(), self.engine.as_ref())
+        {
             for track_id in member_track_ids {
-                bases.entry(*track_id).or_insert_with(|| engine.get_track_volume(*track_id));
+                bases
+                    .entry(*track_id)
+                    .or_insert_with(|| engine.get_track_volume(*track_id));
             }
         }
         if self.apply_track_stack_gains() {
@@ -1050,8 +1155,12 @@ impl AuraCore {
             return false;
         }
         let previous_gain = {
-            let Ok(mut stacks) = self.track_stacks.lock() else { return false; };
-            let Some(stack) = stacks.iter_mut().find(|stack| stack.id == id) else { return false; };
+            let Ok(mut stacks) = self.track_stacks.lock() else {
+                return false;
+            };
+            let Some(stack) = stacks.iter_mut().find(|stack| stack.id == id) else {
+                return false;
+            };
             let previous_gain = stack.master_gain;
             stack.master_gain = master_gain;
             previous_gain
@@ -1069,8 +1178,12 @@ impl AuraCore {
     }
 
     pub fn set_track_stack_collapsed(&self, id: u32, collapsed: bool) -> bool {
-        let Ok(mut stacks) = self.track_stacks.lock() else { return false; };
-        let Some(stack) = stacks.iter_mut().find(|stack| stack.id == id) else { return false; };
+        let Ok(mut stacks) = self.track_stacks.lock() else {
+            return false;
+        };
+        let Some(stack) = stacks.iter_mut().find(|stack| stack.id == id) else {
+            return false;
+        };
         stack.collapsed = collapsed;
         true
     }
@@ -1079,7 +1192,9 @@ impl AuraCore {
         if id == 0 {
             return false;
         }
-        let Ok(mut stacks) = self.track_stacks.lock() else { return false; };
+        let Ok(mut stacks) = self.track_stacks.lock() else {
+            return false;
+        };
         let before = stacks.len();
         stacks.retain(|stack| stack.id != id);
         if stacks.len() == before {
@@ -1093,7 +1208,9 @@ impl AuraCore {
         if stack_id == 0 || track_id == 0 {
             return false;
         }
-        let Ok(mut stacks) = self.track_stacks.lock() else { return false; };
+        let Ok(mut stacks) = self.track_stacks.lock() else {
+            return false;
+        };
         let Some(stack) = stacks.iter_mut().find(|stack| stack.id == stack_id) else {
             return false;
         };
@@ -1103,8 +1220,12 @@ impl AuraCore {
         stack.member_track_ids.push(track_id);
         stack.member_track_ids.sort_unstable();
         drop(stacks);
-        if let (Ok(mut bases), Some(engine)) = (self.track_stack_base_volumes.lock(), self.engine.as_ref()) {
-            bases.entry(track_id).or_insert_with(|| engine.get_track_volume(track_id));
+        if let (Ok(mut bases), Some(engine)) =
+            (self.track_stack_base_volumes.lock(), self.engine.as_ref())
+        {
+            bases
+                .entry(track_id)
+                .or_insert_with(|| engine.get_track_volume(track_id));
         }
         if self.apply_track_stack_gains() {
             return true;
@@ -1123,8 +1244,8 @@ impl AuraCore {
         // can construct AuraCore before the shared test guard has a chance to
         // set it.  Compile-time test isolation makes bare `cargo test` safe as
         // well as the CMake/CI entry points that set the variable explicitly.
-        let isolated = cfg!(test)
-            || std::env::var("AURA_NATIVE_TEST_ISOLATION").as_deref() == Ok("1");
+        let isolated =
+            cfg!(test) || std::env::var("AURA_NATIVE_TEST_ISOLATION").as_deref() == Ok("1");
         Self::new_with_mode(isolated)
     }
 
@@ -1201,22 +1322,39 @@ impl AuraCore {
             track_stacks: std::sync::Mutex::new(Vec::new()),
             track_stack_base_volumes: std::sync::Mutex::new(HashMap::new()),
             markers: std::sync::Mutex::new(vec![
-                MarkerContract { id: 1, label: "START".to_owned(), beat: 0.0, color: "#646496".to_owned() },
-                MarkerContract { id: 2, label: "DEVELOPMENT".to_owned(), beat: 32.0, color: "#966464".to_owned() },
+                MarkerContract {
+                    id: 1,
+                    label: "START".to_owned(),
+                    beat: 0.0,
+                    color: "#646496".to_owned(),
+                },
+                MarkerContract {
+                    id: 2,
+                    label: "DEVELOPMENT".to_owned(),
+                    beat: 32.0,
+                    color: "#966464".to_owned(),
+                },
             ]),
             macro_mappings: std::sync::Mutex::new(Vec::new()),
             midi_learn_mappings: std::sync::Mutex::new(Vec::new()),
             mix_snapshots: std::sync::Mutex::new(crate::snapshots::SnapshotOrchestrator::new()),
             midi_pickup_acquired: std::sync::Mutex::new(HashSet::new()),
-            production_events: std::sync::Arc::new(std::sync::Mutex::new(crate::production_events::EventHub::default())),
+            production_events: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::production_events::EventHub::default(),
+            )),
         })
     }
 
-    pub(crate) fn production_event_hub(&self) -> std::sync::Arc<std::sync::Mutex<crate::production_events::EventHub>> {
+    pub(crate) fn production_event_hub(
+        &self,
+    ) -> std::sync::Arc<std::sync::Mutex<crate::production_events::EventHub>> {
         self.production_events.clone()
     }
 
-    pub(crate) fn publish_production_event(&self, event: crate::production_events::ProductionEvent) {
+    pub(crate) fn publish_production_event(
+        &self,
+        event: crate::production_events::ProductionEvent,
+    ) {
         if let Ok(mut hub) = self.production_events.lock() {
             let _ = hub.publish(self.project_generation(), event);
         }
@@ -1477,9 +1615,10 @@ impl AuraCore {
         } else {
             false
         };
-        let after = self.sandbox_snapshots().into_iter().find(|current| {
-            current.track_id == track_id && current.plugin_index == sandbox_index
-        });
+        let after = self
+            .sandbox_snapshots()
+            .into_iter()
+            .find(|current| current.track_id == track_id && current.plugin_index == sandbox_index);
         if ok {
             return serde_json::json!({
                 "ok": true,

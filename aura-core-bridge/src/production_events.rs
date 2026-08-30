@@ -131,7 +131,7 @@ impl EventHub {
             .events
             .iter()
             .filter(|event| event.sequence > cursor.after)
-            .take(limit.max(1).min(4096))
+            .take(limit.clamp(1, 4096))
             .cloned()
             .collect::<Vec<_>>();
         let next = EventCursor {

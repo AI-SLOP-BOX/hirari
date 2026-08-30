@@ -62,67 +62,208 @@ fn copy_file_atomic_replace(source: &std::path::Path, destination: &std::path::P
 }
 
 impl AuraCore {
-    pub fn midi_monitor_filtered_json(&self, status_mask: u8, status_value: u8, start: u64, end: u64) -> String { self.midi_monitor.lock().ok().and_then(|m| serde_json::to_string(&m.filter(status_mask,status_value,start,end)).ok()).unwrap_or_else(|| "[]".to_owned()) }
-    pub fn control_room_json(&self) -> String { self.control_room.lock().ok().and_then(|s| serde_json::to_string(&*s).ok()).unwrap_or_else(|| "{}".into()) }
-    pub fn control_room_monitor_snapshot_json(&self) -> String {
-        self.control_room.lock().ok().map(|s| serde_json::json!({
-            "active_output": s.monitor_outputs.get(s.active_output).cloned(),
-            "monitor_gain": s.effective_monitor_gain(),
-            "talkback_gain": s.effective_talkback_gain(),
-            "cue_gain": s.effective_cue_gain(),
-            "reference_track": s.reference_track,
-            "reference_enabled": s.reference_enabled
-        }).to_string()).unwrap_or_else(|| "{}".into())
+    pub fn midi_monitor_filtered_json(
+        &self,
+        status_mask: u8,
+        status_value: u8,
+        start: u64,
+        end: u64,
+    ) -> String {
+        self.midi_monitor
+            .lock()
+            .ok()
+            .and_then(|m| {
+                serde_json::to_string(&m.filter(status_mask, status_value, start, end)).ok()
+            })
+            .unwrap_or_else(|| "[]".to_owned())
     }
-    pub fn set_control_room_json(&self, state_json: &str) -> bool { let Ok(state)=serde_json::from_str::<crate::control_room::ControlRoomState>(state_json) else { return false; }; if !state.validate() { return false; } self.control_room.lock().map(|mut current| {*current=state; true}).unwrap_or(false) }
-    pub fn expression_map_validate_json(&self, map_json: &str) -> bool { serde_json::from_str::<crate::expression_map::ExpressionMap>(map_json).map(|m|m.validate()).unwrap_or(false) }
-    pub fn accessibility_state_validate_json(&self, state_json: &str) -> bool { serde_json::from_str::<crate::accessibility::AccessibilityState>(state_json).map(|s| s.validate()).unwrap_or(false) }
-    pub fn help_search_json(&self, catalog_json: &str, locale: &str, query: &str) -> String { let Ok(c)=serde_json::from_str::<crate::help_catalog::HelpCatalog>(catalog_json) else { return "[]".to_owned(); }; serde_json::to_string(&c.search(locale, query)).unwrap_or_else(|_| "[]".to_owned()) }
+    pub fn control_room_json(&self) -> String {
+        self.control_room
+            .lock()
+            .ok()
+            .and_then(|s| serde_json::to_string(&*s).ok())
+            .unwrap_or_else(|| "{}".into())
+    }
+    pub fn control_room_monitor_snapshot_json(&self) -> String {
+        self.control_room
+            .lock()
+            .ok()
+            .map(|s| {
+                serde_json::json!({
+                    "active_output": s.monitor_outputs.get(s.active_output).cloned(),
+                    "monitor_gain": s.effective_monitor_gain(),
+                    "talkback_gain": s.effective_talkback_gain(),
+                    "cue_gain": s.effective_cue_gain(),
+                    "reference_track": s.reference_track,
+                    "reference_enabled": s.reference_enabled
+                })
+                .to_string()
+            })
+            .unwrap_or_else(|| "{}".into())
+    }
+    pub fn set_control_room_json(&self, state_json: &str) -> bool {
+        let Ok(state) = serde_json::from_str::<crate::control_room::ControlRoomState>(state_json)
+        else {
+            return false;
+        };
+        if !state.validate() {
+            return false;
+        }
+        self.control_room
+            .lock()
+            .map(|mut current| {
+                *current = state;
+                true
+            })
+            .unwrap_or(false)
+    }
+    pub fn expression_map_validate_json(&self, map_json: &str) -> bool {
+        serde_json::from_str::<crate::expression_map::ExpressionMap>(map_json)
+            .map(|m| m.validate())
+            .unwrap_or(false)
+    }
+    pub fn accessibility_state_validate_json(&self, state_json: &str) -> bool {
+        serde_json::from_str::<crate::accessibility::AccessibilityState>(state_json)
+            .map(|s| s.validate())
+            .unwrap_or(false)
+    }
+    pub fn help_search_json(&self, catalog_json: &str, locale: &str, query: &str) -> String {
+        let Ok(c) = serde_json::from_str::<crate::help_catalog::HelpCatalog>(catalog_json) else {
+            return "[]".to_owned();
+        };
+        serde_json::to_string(&c.search(locale, query)).unwrap_or_else(|_| "[]".to_owned())
+    }
     pub fn translate_ui_json(&self, catalog_json: &str, locale: &str, key: &str) -> String {
-        let Ok(c) = serde_json::from_str::<crate::localization::TranslationCatalog>(catalog_json) else { return "null".to_owned(); };
+        let Ok(c) = serde_json::from_str::<crate::localization::TranslationCatalog>(catalog_json)
+        else {
+            return "null".to_owned();
+        };
         serde_json::to_string(&c.translate(locale, key)).unwrap_or_else(|_| "null".to_owned())
     }
-    pub fn sidechain_port_validate_json(&self, port_json: &str) -> bool { serde_json::from_str::<crate::sidechain::SidechainPort>(port_json).map(|p| p.validate()).unwrap_or(false) }
+    pub fn sidechain_port_validate_json(&self, port_json: &str) -> bool {
+        serde_json::from_str::<crate::sidechain::SidechainPort>(port_json)
+            .map(|p| p.validate())
+            .unwrap_or(false)
+    }
     pub fn plugin_processing_state_validate_json(&self, state_json: &str) -> bool {
-        serde_json::from_str::<crate::plugin_processing::PluginProcessingState>(state_json).map(|s| s.validate()).unwrap_or(false)
+        serde_json::from_str::<crate::plugin_processing::PluginProcessingState>(state_json)
+            .map(|s| s.validate())
+            .unwrap_or(false)
     }
     pub fn plugin_latency_registry_validate_json(&self, registry_json: &str) -> bool {
-        serde_json::from_str::<crate::plugin_processing::PluginLatencyRegistry>(registry_json).map(|r| r.validate()).unwrap_or(false)
+        serde_json::from_str::<crate::plugin_processing::PluginLatencyRegistry>(registry_json)
+            .map(|r| r.validate())
+            .unwrap_or(false)
     }
     pub fn plugin_latency_registry_snapshot_json(&self, registry_json: &str) -> String {
-        let Ok(registry) = serde_json::from_str::<crate::plugin_processing::PluginLatencyRegistry>(registry_json) else { return "{}".into(); };
+        let Ok(registry) =
+            serde_json::from_str::<crate::plugin_processing::PluginLatencyRegistry>(registry_json)
+        else {
+            return "{}".into();
+        };
         serde_json::json!({"ok": registry.validate(), "total_samples": registry.total_samples(), "max": registry.max_latency(), "count": registry.samples.len(), "entries": registry.samples}).to_string()
     }
     pub fn plugin_registry_validate_json(&self, registry_json: &str) -> bool {
-        serde_json::from_str::<crate::plugin_registry::PluginRegistry>(registry_json).map(|r| r.validate()).unwrap_or(false)
+        serde_json::from_str::<crate::plugin_registry::PluginRegistry>(registry_json)
+            .map(|r| r.validate())
+            .unwrap_or(false)
     }
     pub fn plugin_registry_allowed_json(&self, registry_json: &str, plugin_id: &str) -> bool {
-        serde_json::from_str::<crate::plugin_registry::PluginRegistry>(registry_json).map(|r| r.is_allowed(plugin_id)).unwrap_or(false)
+        serde_json::from_str::<crate::plugin_registry::PluginRegistry>(registry_json)
+            .map(|r| r.is_allowed(plugin_id))
+            .unwrap_or(false)
     }
-    pub fn plugin_registry_regressions_json(&self, current_json: &str, baseline_json: &str) -> String {
-        let (Ok(current), Ok(baseline)) = (serde_json::from_str::<crate::plugin_registry::PluginRegistry>(current_json), serde_json::from_str::<crate::plugin_registry::PluginRegistry>(baseline_json)) else { return "[]".into(); };
+    pub fn plugin_registry_regressions_json(
+        &self,
+        current_json: &str,
+        baseline_json: &str,
+    ) -> String {
+        let (Ok(current), Ok(baseline)) = (
+            serde_json::from_str::<crate::plugin_registry::PluginRegistry>(current_json),
+            serde_json::from_str::<crate::plugin_registry::PluginRegistry>(baseline_json),
+        ) else {
+            return "[]".into();
+        };
         serde_json::to_string(&current.regression_ids(&baseline)).unwrap_or_else(|_| "[]".into())
     }
-    pub fn plugin_preset_search_json(&self, browser_json: &str, plugin_id: &str, query: &str, favorites_only: bool, compatible_only: bool) -> String {
-        let Ok(browser) = serde_json::from_str::<crate::plugin_presets::PluginPresetBrowser>(browser_json) else { return "[]".to_owned(); };
-        serde_json::to_string(&browser.search((!plugin_id.trim().is_empty()).then_some(plugin_id), query, favorites_only, compatible_only)).unwrap_or_else(|_| "[]".to_owned())
+    pub fn plugin_preset_search_json(
+        &self,
+        browser_json: &str,
+        plugin_id: &str,
+        query: &str,
+        favorites_only: bool,
+        compatible_only: bool,
+    ) -> String {
+        let Ok(browser) =
+            serde_json::from_str::<crate::plugin_presets::PluginPresetBrowser>(browser_json)
+        else {
+            return "[]".to_owned();
+        };
+        serde_json::to_string(&browser.search(
+            (!plugin_id.trim().is_empty()).then_some(plugin_id),
+            query,
+            favorites_only,
+            compatible_only,
+        ))
+        .unwrap_or_else(|_| "[]".to_owned())
     }
-    pub fn midi_device_profile_validate_json(&self, profile_json: &str) -> bool { serde_json::from_str::<crate::midi_device_profiles::MidiDeviceProfile>(profile_json).map(|p| p.validate()).unwrap_or(false) }
-    pub fn midi_device_patch_search_json(&self, profile_json: &str, query: &str) -> String { let Ok(profile)=serde_json::from_str::<crate::midi_device_profiles::MidiDeviceProfile>(profile_json) else { return "[]".into(); }; serde_json::to_string(&profile.search_patches(query)).unwrap_or_else(|_| "[]".into()) }
-    pub fn remote_transport_parse_json(&self, command: &str) -> String { serde_json::to_string(&crate::hardware::parse_remote_transport(command).map(|value| format!("{value:?}")).unwrap_or_default()).unwrap_or_else(|_| "null".into()) }
+    pub fn midi_device_profile_validate_json(&self, profile_json: &str) -> bool {
+        serde_json::from_str::<crate::midi_device_profiles::MidiDeviceProfile>(profile_json)
+            .map(|p| p.validate())
+            .unwrap_or(false)
+    }
+    pub fn midi_device_patch_search_json(&self, profile_json: &str, query: &str) -> String {
+        let Ok(profile) =
+            serde_json::from_str::<crate::midi_device_profiles::MidiDeviceProfile>(profile_json)
+        else {
+            return "[]".into();
+        };
+        serde_json::to_string(&profile.search_patches(query)).unwrap_or_else(|_| "[]".into())
+    }
+    pub fn remote_transport_parse_json(&self, command: &str) -> String {
+        serde_json::to_string(
+            &crate::hardware::parse_remote_transport(command)
+                .map(|value| format!("{value:?}"))
+                .unwrap_or_default(),
+        )
+        .unwrap_or_else(|_| "null".into())
+    }
     pub fn command_macro_validate_json(&self, macro_json: &str) -> bool {
-        serde_json::from_str::<crate::command_macros::CommandMacro>(macro_json).map(|m| m.validate()).unwrap_or(false)
+        serde_json::from_str::<crate::command_macros::CommandMacro>(macro_json)
+            .map(|m| m.validate())
+            .unwrap_or(false)
     }
-    pub fn midi_device_patch_json(&self, profile_json: &str, bank_msb: u8, bank_lsb: u8, program: u8) -> String {
-        let Ok(profile) = serde_json::from_str::<crate::midi_device_profiles::MidiDeviceProfile>(profile_json) else { return "null".to_owned(); };
-        serde_json::to_string(&profile.find_patch(bank_msb, bank_lsb, program)).unwrap_or_else(|_| "null".to_owned())
+    pub fn midi_device_patch_json(
+        &self,
+        profile_json: &str,
+        bank_msb: u8,
+        bank_lsb: u8,
+        program: u8,
+    ) -> String {
+        let Ok(profile) =
+            serde_json::from_str::<crate::midi_device_profiles::MidiDeviceProfile>(profile_json)
+        else {
+            return "null".to_owned();
+        };
+        serde_json::to_string(&profile.find_patch(bank_msb, bank_lsb, program))
+            .unwrap_or_else(|_| "null".to_owned())
     }
     pub fn workspace_layout_validate_json(&self, layout_json: &str) -> bool {
-        serde_json::from_str::<crate::workspace::WorkspaceLayout>(layout_json).map(|l| l.validate()).unwrap_or(false)
+        serde_json::from_str::<crate::workspace::WorkspaceLayout>(layout_json)
+            .map(|l| l.validate())
+            .unwrap_or(false)
     }
-    pub fn media_tag_search_json(&self, index_json: &str, query: &str, favorites_only: bool) -> String {
-        let Ok(index) = serde_json::from_str::<crate::asset::MediaTagIndex>(index_json) else { return "[]".to_owned(); };
-        serde_json::to_string(&index.search(query, favorites_only)).unwrap_or_else(|_| "[]".to_owned())
+    pub fn media_tag_search_json(
+        &self,
+        index_json: &str,
+        query: &str,
+        favorites_only: bool,
+    ) -> String {
+        let Ok(index) = serde_json::from_str::<crate::asset::MediaTagIndex>(index_json) else {
+            return "[]".to_owned();
+        };
+        serde_json::to_string(&index.search(query, favorites_only))
+            .unwrap_or_else(|_| "[]".to_owned())
     }
     pub fn tempo_sync_json(&self, source_bpm: f64, project_bpm: f64, samples: u64) -> String {
         match crate::asset::tempo_sync_ratio(source_bpm, project_bpm) {
@@ -132,36 +273,68 @@ impl AuraCore {
     }
 
     pub fn add_review_note(&self, author: &str, text: &str, timestamp_ms: u64) -> u64 {
-        self.review_notes.lock().ok().and_then(|mut s| s.add(author, text, timestamp_ms)).unwrap_or(0)
+        self.review_notes
+            .lock()
+            .ok()
+            .and_then(|mut s| s.add(author, text, timestamp_ms))
+            .unwrap_or(0)
     }
 
     pub fn set_review_note_status(&self, id: u64, status: &str) -> bool {
-        let status = match status { "open" => crate::review_notes::ReviewStatus::Open, "resolved" => crate::review_notes::ReviewStatus::Resolved, "rejected" => crate::review_notes::ReviewStatus::Rejected, _ => return false };
-        self.review_notes.lock().map(|mut s| s.set_status(id, status)).unwrap_or(false)
+        let status = match status {
+            "open" => crate::review_notes::ReviewStatus::Open,
+            "resolved" => crate::review_notes::ReviewStatus::Resolved,
+            "rejected" => crate::review_notes::ReviewStatus::Rejected,
+            _ => return false,
+        };
+        self.review_notes
+            .lock()
+            .map(|mut s| s.set_status(id, status))
+            .unwrap_or(false)
     }
 
     pub fn review_notes_json(&self) -> String {
-        self.review_notes.lock().ok().and_then(|s| serde_json::to_string(s.snapshot()).ok()).unwrap_or_else(|| "[]".to_owned())
+        self.review_notes
+            .lock()
+            .ok()
+            .and_then(|s| serde_json::to_string(s.snapshot()).ok())
+            .unwrap_or_else(|| "[]".to_owned())
     }
 
-    pub fn clear_review_notes(&self) { if let Ok(mut s) = self.review_notes.lock() { s.clear(); } }
+    pub fn clear_review_notes(&self) {
+        if let Ok(mut s) = self.review_notes.lock() {
+            s.clear();
+        }
+    }
 
     pub fn plugin_compatibility_snapshot_json(&self) -> String {
-        self.engine.as_ref().map(|engine| engine.plugin_compatibility_snapshot_json()).unwrap_or_else(|| "[]".to_owned())
+        self.engine
+            .as_ref()
+            .map(|engine| engine.plugin_compatibility_snapshot_json())
+            .unwrap_or_else(|| "[]".to_owned())
     }
     pub fn media_usage_diagnostic_json(&self, timeline_json: &str, media_dir: &str) -> String {
         let assets = crate::asset::AssetOrchestrator::new();
-        assets.analyze_media_usage(timeline_json.as_bytes(), media_dir)
+        assets
+            .analyze_media_usage(timeline_json.as_bytes(), media_dir)
             .unwrap_or_else(|| serde_json::json!({"ok":false,"code":"invalid_media_timeline"}))
             .to_string()
     }
     /// Sends an outbound MIDI packet and mirrors it into the monitor so UI
     /// feedback reflects the exact bytes handed to the device adapter.
     pub fn send_midi_message_monitored(&self, unique_id: u32, data: &[u8]) -> bool {
-        if data.is_empty() || data.len() > 4096 { return false; }
-        let sent = self.engine.as_ref().is_some_and(|engine| engine.send_midi_message(unique_id, data));
+        if data.is_empty() || data.len() > 4096 {
+            return false;
+        }
+        let sent = self
+            .engine
+            .as_ref()
+            .is_some_and(|engine| engine.send_midi_message(unique_id, data));
         if sent && data.len() >= 3 {
-            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
             let _ = self.push_midi_monitor_event(timestamp, data[0], data[1], data[2]);
         }
         sent
@@ -170,7 +343,14 @@ impl AuraCore {
     /// Invoke a project-local extension through the same bounded process
     /// runner used by the command API.  Keeping this small adapter here lets
     /// the native UI command palette share the CLI security boundary.
-    pub fn invoke_extension_json(&self, root: &str, extension_id: &str, command_id: &str, payload_json: &str, timeout_ms: u64) -> String {
+    pub fn invoke_extension_json(
+        &self,
+        root: &str,
+        extension_id: &str,
+        command_id: &str,
+        payload_json: &str,
+        timeout_ms: u64,
+    ) -> String {
         let payload = match serde_json::from_str::<serde_json::Value>(payload_json) {
             Ok(value) => value,
             Err(error) => return serde_json::json!({"ok": false, "code": "extension_payload_invalid", "message": error.to_string()}).to_string(),
@@ -191,7 +371,8 @@ impl AuraCore {
                 "ok": false,
                 "code": "invalid_extension_root",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         let (extensions, discovery_errors) = crate::extensions::discover(root);
         let (commands, mut errors) = crate::extensions::command_catalog(root);
@@ -214,18 +395,25 @@ impl AuraCore {
             },
             "recent_run_history": crate::extensions::recent_run_history(root),
             "errors": errors,
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// Toggle a project-local extension without executing it.  This gives
     /// advanced users a reversible switch while keeping disabled extensions
     /// out of both the command palette and declarative UI registry.
-    pub fn set_extension_enabled_json(&self, root: &str, extension_id: &str, enabled: bool) -> String {
+    pub fn set_extension_enabled_json(
+        &self,
+        root: &str,
+        extension_id: &str,
+        enabled: bool,
+    ) -> String {
         if root.trim().is_empty() || extension_id.trim().is_empty() {
             return serde_json::json!({
                 "ok": false,
                 "code": "invalid_extension_activation_request",
-            }).to_string();
+            })
+            .to_string();
         }
         match crate::extensions::set_enabled(root, extension_id, enabled) {
             Ok(()) => serde_json::json!({
@@ -233,12 +421,14 @@ impl AuraCore {
                 "operation": "set_extension_enabled",
                 "extension_id": extension_id,
                 "enabled": enabled,
-            }).to_string(),
+            })
+            .to_string(),
             Err(error) => serde_json::json!({
                 "ok": false,
                 "code": "extension_activation_failed",
                 "message": error,
-            }).to_string(),
+            })
+            .to_string(),
         }
     }
 
@@ -324,7 +514,7 @@ impl AuraCore {
         valid
     }
 
-pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
+    pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let Ok(events) = serde_json::from_str::<Vec<midi::MIDIEvent>>(snapshot) else {
             return false;
         };
@@ -353,7 +543,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                     "code": "invalid_midi_snapshot",
                     "message": error.to_string(),
                     "retryable": false
-                }).to_string();
+                })
+                .to_string();
             }
         };
         if events.iter().any(|event| !event.validate()) {
@@ -361,7 +552,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "code": "invalid_midi_event",
                 "message": "one or more MIDI events failed validation",
                 "retryable": false
-            }).to_string();
+            })
+            .to_string();
         }
         let mut normalized = events;
         if !midi::MIDIOrchestrator::normalize_events(&mut normalized) {
@@ -369,14 +561,16 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "code": "midi_normalization_rejected",
                 "message": "MIDI event normalization was rejected",
                 "retryable": false
-            }).to_string();
+            })
+            .to_string();
         }
         let Ok(mut current) = self.midi_events.lock() else {
             return serde_json::json!({
                 "code": "midi_state_unavailable",
                 "message": "MIDI state lock is poisoned",
                 "retryable": true
-            }).to_string();
+            })
+            .to_string();
         };
         *current = normalized;
         serde_json::json!({"ok": true, "operation": "set_midi_events"}).to_string()
@@ -393,33 +587,53 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     fn apply_swing_scheduled_midi(&self, subdivision_beats: f32, amount: f32) -> bool {
         let subdivision = self.beats_to_samples(subdivision_beats as f64);
-        if subdivision == 0 { return false; }
-        let Ok(current) = self.scheduled_midi_notes.lock() else { return false; };
-        if current.is_empty() { return true; }
+        if subdivision == 0 {
+            return false;
+        }
+        let Ok(current) = self.scheduled_midi_notes.lock() else {
+            return false;
+        };
+        if current.is_empty() {
+            return true;
+        }
         let mut updated = current.clone();
         for note in &mut updated {
             let cell = note.start_sample / subdivision;
-            if cell % 2 != 0 {
+            if !cell.is_multiple_of(2) {
                 let offset = (subdivision as f64 * 0.5 * amount as f64).round();
                 let next = note.start_sample as f64 + offset;
-                if !next.is_finite() || next < 0.0 || next > u64::MAX as f64 { return false; }
+                if !next.is_finite() || next < 0.0 || next > u64::MAX as f64 {
+                    return false;
+                }
                 note.start_sample = next as u64;
             }
         }
         drop(current);
-        let packed = updated.iter().flat_map(|note| [note.track_id as u64, note.pitch as u64,
-            note.velocity as u64, note.start_sample, note.length_samples]).collect();
-        let Some(engine) = self.engine.as_ref() else { return false; };
-        if !engine.replace_midi_notes(packed, true) { return false; }
-        if let Ok(mut current) = self.scheduled_midi_notes.lock() { *current = updated; }
+        let packed = updated
+            .iter()
+            .flat_map(|note| {
+                [
+                    note.track_id as u64,
+                    note.pitch as u64,
+                    note.velocity as u64,
+                    note.start_sample,
+                    note.length_samples,
+                ]
+            })
+            .collect();
+        let Some(engine) = self.engine.as_ref() else {
+            return false;
+        };
+        if !engine.replace_midi_notes(packed, true) {
+            return false;
+        }
+        if let Ok(mut current) = self.scheduled_midi_notes.lock() {
+            *current = updated;
+        }
         true
     }
 
-    pub fn apply_midi_swing_diagnostic_json(
-        &self,
-        subdivision_beats: f32,
-        amount: f32,
-    ) -> String {
+    pub fn apply_midi_swing_diagnostic_json(&self, subdivision_beats: f32, amount: f32) -> String {
         let result = if !subdivision_beats.is_finite()
             || !(0.001..=16.0).contains(&subdivision_beats)
             || !amount.is_finite()
@@ -437,16 +651,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 )
                 .retryable(true),
                 Ok(mut events) => {
-                    if midi::MIDIOrchestrator::apply_swing(
-                        &mut events,
-                        subdivision_beats,
-                        amount,
-                    ) {
+                    if midi::MIDIOrchestrator::apply_swing(&mut events, subdivision_beats, amount) {
                         drop(events);
                         if !self.apply_swing_scheduled_midi(subdivision_beats, amount) {
                             return serde_json::json!({"ok":false,"code":"scheduled_midi_swing_rejected","retryable":false}).to_string();
                         }
-                        return format!("{{\"ok\":true,\"operation\":\"apply_midi_swing\"}}");
+                        return "{\"ok\":true,\"operation\":\"apply_midi_swing\"}".to_owned();
                     }
                     crate::bridge_error::BridgeError::new(
                         "midi_swing_rejected",
@@ -461,31 +671,55 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     fn quantize_scheduled_midi(&self, grid_beats: f32, strength: f32) -> bool {
         let grid_samples = self.beats_to_samples(grid_beats as f64);
-        if grid_samples == 0 { return false; }
-        let Ok(current) = self.scheduled_midi_notes.lock() else { return false; };
-        if current.is_empty() { return true; }
+        if grid_samples == 0 {
+            return false;
+        }
+        let Ok(current) = self.scheduled_midi_notes.lock() else {
+            return false;
+        };
+        if current.is_empty() {
+            return true;
+        }
         let mut updated = current.clone();
         for note in &mut updated {
             let target = ((note.start_sample as f64 / grid_samples as f64).round()
                 * grid_samples as f64) as u64;
             let position = note.start_sample as f64
                 + (target as f64 - note.start_sample as f64) * strength as f64;
-            if !position.is_finite() || position < 0.0 || position > u64::MAX as f64 { return false; }
+            if !position.is_finite() || position < 0.0 || position > u64::MAX as f64 {
+                return false;
+            }
             note.start_sample = position.round() as u64;
         }
         drop(current);
-        let packed = updated.iter().flat_map(|note| [
-            note.track_id as u64, note.pitch as u64, note.velocity as u64,
-            note.start_sample, note.length_samples,
-        ]).collect();
-        let Some(engine) = self.engine.as_ref() else { return false; };
-        if !engine.replace_midi_notes(packed, true) { return false; }
-        if let Ok(mut current) = self.scheduled_midi_notes.lock() { *current = updated; }
+        let packed = updated
+            .iter()
+            .flat_map(|note| {
+                [
+                    note.track_id as u64,
+                    note.pitch as u64,
+                    note.velocity as u64,
+                    note.start_sample,
+                    note.length_samples,
+                ]
+            })
+            .collect();
+        let Some(engine) = self.engine.as_ref() else {
+            return false;
+        };
+        if !engine.replace_midi_notes(packed, true) {
+            return false;
+        }
+        if let Ok(mut current) = self.scheduled_midi_notes.lock() {
+            *current = updated;
+        }
         true
     }
 
     pub fn quantize_midi(&self, grid_beats: f32, strength: f32) -> bool {
-        let Ok(mut events) = self.midi_events.lock() else { return false };
+        let Ok(mut events) = self.midi_events.lock() else {
+            return false;
+        };
         let result = midi::MIDIOrchestrator::quantize(&mut events, grid_beats, strength);
         drop(events);
         result && self.quantize_scheduled_midi(grid_beats, strength)
@@ -501,21 +735,24 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "ok": false,
                 "code": "invalid_midi_quantize",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         let Ok(mut events) = self.midi_events.lock() else {
             return serde_json::json!({
                 "ok": false,
                 "code": "midi_state_unavailable",
                 "retryable": true,
-            }).to_string();
+            })
+            .to_string();
         };
         if !midi::MIDIOrchestrator::quantize(&mut events, grid_beats, strength) {
             return serde_json::json!({
                 "ok": false,
                 "code": "midi_quantize_rejected",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         let event_count = events.len();
         drop(events);
@@ -524,7 +761,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "ok": false,
                 "code": "scheduled_midi_quantize_rejected",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": true,
@@ -532,7 +770,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "grid_beats": grid_beats,
             "strength": strength,
             "event_count": event_count,
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub fn humanize_midi(&self, timing_beats: f32, velocity: i16, seed: u64) -> bool {
@@ -546,27 +785,53 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     fn humanize_scheduled_midi(&self, timing_beats: f32, velocity: i16, mut seed: u64) -> bool {
         let max_offset = self.beats_to_samples(timing_beats.abs() as f64);
-        let Ok(current) = self.scheduled_midi_notes.lock() else { return false; };
-        if current.is_empty() { return true; }
+        let Ok(current) = self.scheduled_midi_notes.lock() else {
+            return false;
+        };
+        if current.is_empty() {
+            return true;
+        }
         let mut updated = current.clone();
         for note in &mut updated {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
             let unit = ((seed >> 33) as f64 / (u32::MAX as f64)) * 2.0 - 1.0;
             let delta = (unit * max_offset as f64).round() as i128;
             let next = note.start_sample as i128 + delta;
-            if next < 0 || next > u64::MAX as i128 { return false; }
+            if next < 0 || next > u64::MAX as i128 {
+                return false;
+            }
             note.start_sample = next as u64;
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
             let velocity_delta = ((seed >> 33) % (velocity.unsigned_abs() as u64 + 1)) as i16;
-            let signed_delta = if seed & 1 == 0 { velocity_delta } else { -velocity_delta };
+            let signed_delta = if seed & 1 == 0 {
+                velocity_delta
+            } else {
+                -velocity_delta
+            };
             note.velocity = (note.velocity as i16 + signed_delta).clamp(1, 127) as u8;
         }
         drop(current);
-        let packed = updated.iter().flat_map(|note| [note.track_id as u64, note.pitch as u64,
-            note.velocity as u64, note.start_sample, note.length_samples]).collect();
-        let Some(engine) = self.engine.as_ref() else { return false; };
-        if !engine.replace_midi_notes(packed, true) { return false; }
-        if let Ok(mut current) = self.scheduled_midi_notes.lock() { *current = updated; }
+        let packed = updated
+            .iter()
+            .flat_map(|note| {
+                [
+                    note.track_id as u64,
+                    note.pitch as u64,
+                    note.velocity as u64,
+                    note.start_sample,
+                    note.length_samples,
+                ]
+            })
+            .collect();
+        let Some(engine) = self.engine.as_ref() else {
+            return false;
+        };
+        if !engine.replace_midi_notes(packed, true) {
+            return false;
+        }
+        if let Ok(mut current) = self.scheduled_midi_notes.lock() {
+            *current = updated;
+        }
         true
     }
 
@@ -592,17 +857,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 )
                 .retryable(true),
                 Ok(mut events) => {
-                    if midi::MIDIOrchestrator::humanize(
-                        &mut events,
-                        timing_beats,
-                        velocity,
-                        seed,
-                    ) {
+                    if midi::MIDIOrchestrator::humanize(&mut events, timing_beats, velocity, seed) {
                         drop(events);
                         if !self.humanize_scheduled_midi(timing_beats, velocity, seed) {
                             return serde_json::json!({"ok":false,"code":"scheduled_midi_humanize_rejected","retryable":false}).to_string();
                         }
-                        return format!("{{\"ok\":true,\"operation\":\"humanize_midi\"}}");
+                        return "{\"ok\":true,\"operation\":\"humanize_midi\"}".to_owned();
                     }
                     crate::bridge_error::BridgeError::new(
                         "midi_humanize_rejected",
@@ -702,11 +962,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let Ok(mut file) = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&temporary) else {
+            .open(&temporary)
+        else {
             return false;
         };
         use std::io::Write;
-        if file.write_all(self.comping_snapshot_json().as_bytes()).is_err()
+        if file
+            .write_all(self.comping_snapshot_json().as_bytes())
+            .is_err()
             || file.sync_all().is_err()
         {
             let _ = std::fs::remove_file(&temporary);
@@ -740,13 +1003,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let Ok(mut file) = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&temporary) else {
+            .open(&temporary)
+        else {
             return false;
         };
         use std::io::Write;
-        if file.write_all(self.midi_events_json().as_bytes()).is_err()
-            || file.sync_all().is_err()
-        {
+        if file.write_all(self.midi_events_json().as_bytes()).is_err() || file.sync_all().is_err() {
             let _ = std::fs::remove_file(&temporary);
             return false;
         }
@@ -776,16 +1038,30 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     pub fn scan_preview_audio_diagnostic_json(&self, path: &str) -> String {
         let result = if path.is_empty() || path.contains('\0') {
-            crate::bridge_error::BridgeError::new("invalid_preview_path", "preview scan path is empty or invalid")
+            crate::bridge_error::BridgeError::new(
+                "invalid_preview_path",
+                "preview scan path is empty or invalid",
+            )
         } else if !Path::new(path).is_dir() {
-            crate::bridge_error::BridgeError::new("preview_directory_not_found", "preview scan path is not a directory").retryable(true)
+            crate::bridge_error::BridgeError::new(
+                "preview_directory_not_found",
+                "preview scan path is not a directory",
+            )
+            .retryable(true)
         } else {
-            match self.preview_audio.lock().map_err(|_| "preview audio lock poisoned".to_owned()).and_then(|mut runtime| runtime.scan(Path::new(path))) {
+            match self
+                .preview_audio
+                .lock()
+                .map_err(|_| "preview audio lock poisoned".to_owned())
+                .and_then(|mut runtime| runtime.scan(Path::new(path)))
+            {
                 Ok(count) => return format!("{{\"ok\":true,\"asset_count\":{count}}}"),
-                Err(error) => crate::bridge_error::BridgeError::new("preview_scan_failed", error).retryable(true),
+                Err(error) => crate::bridge_error::BridgeError::new("preview_scan_failed", error)
+                    .retryable(true),
             }
         };
-        serde_json::to_string(&result).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     /// Returns the actual preview-library entries currently registered by the
@@ -816,12 +1092,23 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn preload_preview_audio_diagnostic_json(&self, id: u64) -> String {
-        let result = match self.preview_audio.lock().map_err(|_| "preview audio lock poisoned".to_owned()).and_then(|mut runtime| runtime.preload(id)) {
+        let result = match self
+            .preview_audio
+            .lock()
+            .map_err(|_| "preview audio lock poisoned".to_owned())
+            .and_then(|mut runtime| runtime.preload(id))
+        {
             Ok(()) => return format!("{{\"ok\":true,\"asset_id\":{id}}}"),
-            Err(error) if error == "audio asset not found" => crate::bridge_error::BridgeError::new("preview_asset_not_found", error).object(format!("asset:{id}")),
-            Err(error) => crate::bridge_error::BridgeError::new("preview_preload_failed", error).object(format!("asset:{id}")).retryable(true),
+            Err(error) if error == "audio asset not found" => {
+                crate::bridge_error::BridgeError::new("preview_asset_not_found", error)
+                    .object(format!("asset:{id}"))
+            }
+            Err(error) => crate::bridge_error::BridgeError::new("preview_preload_failed", error)
+                .object(format!("asset:{id}"))
+                .retryable(true),
         };
-        serde_json::to_string(&result).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn register_preview_audio(&self, path: &str) -> anyhow::Result<u64> {
@@ -841,15 +1128,27 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     pub fn assign_preview_drum_pad_diagnostic_json(&self, pad: usize, id: Option<u64>) -> String {
         let result = if pad >= 16 {
-            crate::bridge_error::BridgeError::new("invalid_preview_pad", "preview drum pad must be between 0 and 15")
-                .object(format!("preview-pad:{pad}"))
-        } else if self.preview_audio.lock().map(|mut runtime| runtime.assign_pad(pad, id)).unwrap_or(false) {
+            crate::bridge_error::BridgeError::new(
+                "invalid_preview_pad",
+                "preview drum pad must be between 0 and 15",
+            )
+            .object(format!("preview-pad:{pad}"))
+        } else if self
+            .preview_audio
+            .lock()
+            .map(|mut runtime| runtime.assign_pad(pad, id))
+            .unwrap_or(false)
+        {
             return format!("{{\"ok\":true,\"pad\":{pad}}}");
         } else {
-            crate::bridge_error::BridgeError::new("preview_asset_not_found", "preview asset is not registered")
-                .object(format!("preview-pad:{pad}"))
+            crate::bridge_error::BridgeError::new(
+                "preview_asset_not_found",
+                "preview asset is not registered",
+            )
+            .object(format!("preview-pad:{pad}"))
         };
-        serde_json::to_string(&result).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     /// Loads a cached pad into the native engine and triggers a one-shot
@@ -874,7 +1173,15 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         if pad >= 16 {
             return "{\"code\":\"invalid_preview_pad\",\"retryable\":false}".to_owned();
         }
-        let result = match self.preview_audio.lock().map_err(|_| "preview audio lock poisoned".to_owned()).and_then(|runtime| runtime.pad_audio(pad).ok_or_else(|| "preview drum pad is not assigned or loaded".to_owned())) {
+        let result = match self
+            .preview_audio
+            .lock()
+            .map_err(|_| "preview audio lock poisoned".to_owned())
+            .and_then(|runtime| {
+                runtime
+                    .pad_audio(pad)
+                    .ok_or_else(|| "preview drum pad is not assigned or loaded".to_owned())
+            }) {
             Ok((samples, source_rate)) => {
                 let Some(engine) = self.engine.as_ref() else {
                     return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
@@ -883,9 +1190,11 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 engine.trigger_preview_sample();
                 return format!("{{\"ok\":true,\"pad\":{pad}}}");
             }
-            Err(error) => crate::bridge_error::BridgeError::new("preview_pad_unavailable", error).object(format!("preview-pad:{pad}")),
+            Err(error) => crate::bridge_error::BridgeError::new("preview_pad_unavailable", error)
+                .object(format!("preview-pad:{pad}")),
         };
-        serde_json::to_string(&result).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     /// Registers, decodes, and immediately previews a browser-selected file.
@@ -921,7 +1230,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn try_set_playing(&self, p: bool) -> bool {
-        let changed = self.engine
+        let changed = self
+            .engine
             .as_ref()
             .is_some_and(|engine| engine.try_set_playing(p));
         if changed {
@@ -943,14 +1253,16 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "ok": true,
                 "operation": "set_playing",
                 "playing": playing,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": false,
             "code": "transport_rejected",
             "retryable": true,
             "playing": playing,
-        }).to_string()
+        })
+        .to_string()
     }
     pub fn set_loop(&self, enabled: bool) {
         if let Some(e) = self.engine.as_ref() {
@@ -975,7 +1287,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "ok": true,
             "operation": "set_metronome",
             "enabled": engine.is_metronome_enabled(),
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub fn set_cycle_range_diagnostic_json(
@@ -987,14 +1300,16 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let Some(engine) = self.engine.as_ref() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
-        if start_sample >= end_sample || !engine.set_cycle_range(start_sample, end_sample, enabled) {
+        if start_sample >= end_sample || !engine.set_cycle_range(start_sample, end_sample, enabled)
+        {
             return serde_json::json!({
                 "ok": false,
                 "code": "invalid_cycle_range",
                 "retryable": false,
                 "start_sample": start_sample,
                 "end_sample": end_sample,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": true,
@@ -1002,7 +1317,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "enabled": enabled,
             "start_sample": start_sample,
             "end_sample": end_sample,
-        }).to_string()
+        })
+        .to_string()
     }
     pub fn is_playing(&self) -> bool {
         self.engine.as_ref().is_some_and(|e| e.is_playing())
@@ -1029,9 +1345,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             .map_or_else(Vec::new, |e| e.get_tempo_events().into_iter().collect())
     }
     pub fn get_time_signature_events(&self) -> Vec<f64> {
-        self.engine
-            .as_ref()
-            .map_or_else(Vec::new, |e| e.get_time_signature_events().into_iter().collect())
+        self.engine.as_ref().map_or_else(Vec::new, |e| {
+            e.get_time_signature_events().into_iter().collect()
+        })
     }
     pub fn set_time_signature_event(&self, beat: f64, numerator: u8, denominator: u8) -> bool {
         if !beat.is_finite() || beat < 0.0 {
@@ -1047,14 +1363,18 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         numerator: u8,
         denominator: u8,
     ) -> String {
-        if !beat.is_finite() || beat < 0.0 || numerator == 0 || numerator > 32 ||
-            !matches!(denominator, 1 | 2 | 4 | 8 | 16 | 32)
+        if !beat.is_finite()
+            || beat < 0.0
+            || numerator == 0
+            || numerator > 32
+            || !matches!(denominator, 1 | 2 | 4 | 8 | 16 | 32)
         {
             return serde_json::json!({
                 "ok": false,
                 "code": "invalid_time_signature",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         if self.set_time_signature_event(beat, numerator, denominator) {
             return serde_json::json!({
@@ -1062,22 +1382,29 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "beat": beat,
                 "numerator": numerator,
                 "denominator": denominator,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": false,
             "code": "time_signature_rejected",
             "retryable": false,
-        }).to_string()
+        })
+        .to_string()
     }
     pub fn set_tempo_event(&self, beat: f64, bpm: f64, ramp: bool) -> bool {
         if !beat.is_finite() || beat < 0.0 || !bpm.is_finite() {
             return false;
         }
-        let changed = self.engine
+        let changed = self
+            .engine
             .as_ref()
             .is_some_and(|e| e.set_tempo_event(beat, bpm, ramp));
-        if changed { self.publish_production_event(crate::production_events::ProductionEvent::TempoMapChanged); }
+        if changed {
+            self.publish_production_event(
+                crate::production_events::ProductionEvent::TempoMapChanged,
+            );
+        }
         changed
     }
     pub fn set_tempo_event_diagnostic_json(&self, beat: f64, bpm: f64, ramp: bool) -> String {
@@ -1088,21 +1415,31 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return "{\"code\":\"tempo_event_out_of_range\",\"retryable\":false}".to_owned();
         }
         if self.set_tempo_event(beat, bpm, ramp) {
-            return serde_json::json!({"ok": true, "beat": beat, "bpm": bpm, "ramp": ramp}).to_string();
+            return serde_json::json!({"ok": true, "beat": beat, "bpm": bpm, "ramp": ramp})
+                .to_string();
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("tempo_event_rejected", "tempo event was rejected")
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "tempo_event_rejected",
+                "tempo event was rejected",
+            )
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn remove_tempo_event(&self, beat: f64) -> bool {
         if !beat.is_finite() || beat <= 0.0 {
             return false;
         }
-        let changed = self.engine
+        let changed = self
+            .engine
             .as_ref()
             .is_some_and(|e| e.remove_tempo_event(beat));
-        if changed { self.publish_production_event(crate::production_events::ProductionEvent::TempoMapChanged); }
+        if changed {
+            self.publish_production_event(
+                crate::production_events::ProductionEvent::TempoMapChanged,
+            );
+        }
         changed
     }
     pub fn remove_tempo_event_diagnostic_json(&self, beat: f64) -> String {
@@ -1113,19 +1450,28 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return serde_json::json!({"ok": true, "beat": beat}).to_string();
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("tempo_event_not_found", "tempo event was not found")
-                .object(format!("tempo:{beat}"))
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "tempo_event_not_found",
+                "tempo event was not found",
+            )
+            .object(format!("tempo:{beat}"))
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn move_tempo_event(&self, from_beat: f64, to_beat: f64) -> bool {
         if !from_beat.is_finite() || !to_beat.is_finite() || from_beat <= 0.0 || to_beat <= 0.0 {
             return false;
         }
-        let changed = self.engine
+        let changed = self
+            .engine
             .as_ref()
             .is_some_and(|e| e.move_tempo_event(from_beat, to_beat));
-        if changed { self.publish_production_event(crate::production_events::ProductionEvent::TempoMapChanged); }
+        if changed {
+            self.publish_production_event(
+                crate::production_events::ProductionEvent::TempoMapChanged,
+            );
+        }
         changed
     }
     pub fn get_tempo(&self) -> f32 {
@@ -1150,16 +1496,23 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         serde_json::to_string(
             &crate::bridge_error::BridgeError::new("tempo_rejected", "tempo update was rejected")
                 .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn master_gain(&self) -> f32 {
-        self.engine.as_ref().map_or(1.0, |engine| engine.get_master_gain())
+        self.engine
+            .as_ref()
+            .map_or(1.0, |engine| engine.get_master_gain())
     }
 
     pub fn set_master_gain(&self, value: f32) -> bool {
-        value.is_finite() && (0.0..=2.0).contains(&value)
-            && self.engine.as_ref().is_some_and(|engine| engine.set_master_gain(value))
+        value.is_finite()
+            && (0.0..=2.0).contains(&value)
+            && self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.set_master_gain(value))
     }
 
     pub fn set_master_gain_diagnostic_json(&self, value: f32) -> String {
@@ -1170,51 +1523,108 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return serde_json::json!({"ok": true, "master_gain": value}).to_string();
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("master_gain_rejected", "master gain update was rejected")
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "master_gain_rejected",
+                "master gain update was rejected",
+            )
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn add_control_room_speaker(&self, name: &str, gain: f32) -> bool {
-        !name.trim().is_empty() && name.len() <= 128 && gain.is_finite() && (0.0..=4.0).contains(&gain)
-            && self.engine.as_ref().is_some_and(|engine| engine.add_control_room_speaker(name, gain))
+        !name.trim().is_empty()
+            && name.len() <= 128
+            && gain.is_finite()
+            && (0.0..=4.0).contains(&gain)
+            && self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.add_control_room_speaker(name, gain))
     }
     pub fn select_control_room_speaker(&self, index: u32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.select_control_room_speaker(index))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.select_control_room_speaker(index))
     }
     pub fn remove_control_room_speaker(&self, index: u32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.remove_control_room_speaker(index))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.remove_control_room_speaker(index))
     }
     pub fn set_control_room_speaker_gain(&self, index: u32, gain: f32) -> bool {
-        gain.is_finite() && (0.0..=4.0).contains(&gain)
-            && self.engine.as_ref().is_some_and(|engine| engine.set_control_room_speaker_gain(index, gain))
+        gain.is_finite()
+            && (0.0..=4.0).contains(&gain)
+            && self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.set_control_room_speaker_gain(index, gain))
     }
     pub fn set_control_room_speaker_enabled(&self, index: u32, enabled: bool) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.set_control_room_speaker_enabled(index, enabled))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.set_control_room_speaker_enabled(index, enabled))
     }
     pub fn upsert_control_room_cue(&self, id: u32, gain: f32, enabled: bool) -> bool {
-        id != 0 && gain.is_finite() && (0.0..=4.0).contains(&gain)
-            && self.engine.as_ref().is_some_and(|engine| engine.upsert_control_room_cue(id, gain, enabled))
+        id != 0
+            && gain.is_finite()
+            && (0.0..=4.0).contains(&gain)
+            && self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.upsert_control_room_cue(id, gain, enabled))
     }
     pub fn remove_control_room_cue(&self, id: u32) -> bool {
-        id != 0 && self.engine.as_ref().is_some_and(|engine| engine.remove_control_room_cue(id))
+        id != 0
+            && self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.remove_control_room_cue(id))
     }
     pub fn set_control_room_cue_enabled(&self, id: u32, enabled: bool) -> bool {
-        id != 0 && self.engine.as_ref().is_some_and(|engine| engine.set_control_room_cue_enabled(id, enabled))
+        id != 0
+            && self
+                .engine
+                .as_ref()
+                .is_some_and(|engine| engine.set_control_room_cue_enabled(id, enabled))
     }
     pub fn control_room_cue_gain(&self, id: u32) -> f32 {
-        self.engine.as_ref().map_or(0.0, |engine| engine.control_room_cue_gain(id))
+        self.engine
+            .as_ref()
+            .map_or(0.0, |engine| engine.control_room_cue_gain(id))
     }
     pub fn control_room_validate(&self) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.control_room_validate())
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.control_room_validate())
     }
-    pub fn set_control_room_dim(&self, enabled: bool) { if let Some(engine) = self.engine.as_ref() { engine.set_control_room_dim(enabled); } }
+    pub fn set_control_room_dim(&self, enabled: bool) {
+        if let Some(engine) = self.engine.as_ref() {
+            engine.set_control_room_dim(enabled);
+        }
+    }
     pub fn set_control_room_talkback(&self, enabled: bool, gain: f32) {
-        if gain.is_finite() { if let Some(engine) = self.engine.as_ref() { engine.set_control_room_talkback(enabled, gain.clamp(0.0, 4.0)); } }
+        if gain.is_finite() {
+            if let Some(engine) = self.engine.as_ref() {
+                engine.set_control_room_talkback(enabled, gain.clamp(0.0, 4.0));
+            }
+        }
     }
-    pub fn control_room_dimmed(&self) -> bool { self.engine.as_ref().is_some_and(|engine| engine.control_room_dimmed()) }
-    pub fn control_room_talkback_enabled(&self) -> bool { self.engine.as_ref().is_some_and(|engine| engine.control_room_talkback_enabled()) }
-    pub fn control_room_monitor_gain(&self) -> f32 { self.engine.as_ref().map_or(0.0, |engine| engine.control_room_monitor_gain()) }
+    pub fn control_room_dimmed(&self) -> bool {
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.control_room_dimmed())
+    }
+    pub fn control_room_talkback_enabled(&self) -> bool {
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.control_room_talkback_enabled())
+    }
+    pub fn control_room_monitor_gain(&self) -> f32 {
+        self.engine
+            .as_ref()
+            .map_or(0.0, |engine| engine.control_room_monitor_gain())
+    }
 
     pub fn set_automation_data(
         &self,
@@ -1222,8 +1632,17 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         param_id: u32,
         packed_points: Vec<f64>,
     ) -> bool {
-        let changed = self.engine.as_ref().is_some_and(|engine| engine.set_automation_data(track_id, param_id, packed_points));
-        if changed { self.publish_production_event(crate::production_events::ProductionEvent::AutomationChanged { target: format!("audio.track.{track_id}.parameter.{param_id}") }); }
+        let changed = self
+            .engine
+            .as_ref()
+            .is_some_and(|engine| engine.set_automation_data(track_id, param_id, packed_points));
+        if changed {
+            self.publish_production_event(
+                crate::production_events::ProductionEvent::AutomationChanged {
+                    target: format!("audio.track.{track_id}.parameter.{param_id}"),
+                },
+            );
+        }
         changed
     }
 
@@ -1241,7 +1660,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         }
         let mut previous_time = f64::NEG_INFINITY;
         for triple in packed_points.chunks_exact(3) {
-            if triple[0] < 0.0 || triple[0].fract() != 0.0
+            if triple[0] < 0.0
+                || triple[0].fract() != 0.0
                 || triple[0] <= previous_time
                 || !(0.0..=1.0).contains(&triple[1])
                 || !(-1.0..=1.0).contains(&triple[2])
@@ -1263,28 +1683,50 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             )
             .object(format!("track:{track_id}/parameter:{param_id}"))
             .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
-    pub fn set_track_delay_automation_diagnostic_json(&self, track_id: u32, packed_points: Vec<f64>) -> String {
-        if packed_points.len() % 3 != 0 || packed_points.len() > 24_576 ||
-            packed_points.iter().any(|value| !value.is_finite()) {
+    pub fn set_track_delay_automation_diagnostic_json(
+        &self,
+        track_id: u32,
+        packed_points: Vec<f64>,
+    ) -> String {
+        if packed_points.len() % 3 != 0
+            || packed_points.len() > 24_576
+            || packed_points.iter().any(|value| !value.is_finite())
+        {
             return "{\"code\":\"invalid_track_delay_automation\",\"retryable\":false}".to_owned();
         }
         let mut previous_time = f64::NEG_INFINITY;
         for triple in packed_points.chunks_exact(3) {
-            if triple[0] < 0.0 || triple[0].fract() != 0.0 || triple[0] <= previous_time
-                || triple[1] < 0.0 || triple[1] > 1.0 || triple[2] < -1.0 || triple[2] > 1.0 {
-                return "{\"code\":\"invalid_track_delay_automation_range\",\"retryable\":false}".to_owned();
+            if triple[0] < 0.0
+                || triple[0].fract() != 0.0
+                || triple[0] <= previous_time
+                || triple[1] < 0.0
+                || triple[1] > 1.0
+                || triple[2] < -1.0
+                || triple[2] > 1.0
+            {
+                return "{\"code\":\"invalid_track_delay_automation_range\",\"retryable\":false}"
+                    .to_owned();
             }
             previous_time = triple[0];
         }
-        let Some(engine) = self.engine.as_ref() else { return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned(); };
+        let Some(engine) = self.engine.as_ref() else {
+            return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
+        };
         if engine.set_track_delay_automation(track_id, packed_points) {
             return format!("{{\"ok\":true,\"track_id\":{track_id},\"operation\":\"set_track_delay_automation\"}}");
         }
-        serde_json::to_string(&crate::bridge_error::BridgeError::new("track_delay_automation_rejected", "track delay automation was rejected").at_generation(self.project_generation()))
-            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(
+            &crate::bridge_error::BridgeError::new(
+                "track_delay_automation_rejected",
+                "track delay automation was rejected",
+            )
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn set_plugin_parameter(
@@ -1339,9 +1781,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "plugin_parameter_rejected",
                 "plugin parameter update was rejected",
             )
-            .object(format!("track:{track_id}/plugin:{plugin_index}/parameter:{parameter_id}"))
+            .object(format!(
+                "track:{track_id}/plugin:{plugin_index}/parameter:{parameter_id}"
+            ))
             .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     /// Analyze a bounded audio window and apply the resulting compressor
@@ -1354,11 +1799,15 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         plugin_index: u32,
         samples: Vec<f32>,
     ) -> String {
-        if track_id == 0 || samples.len() > 262_144 || samples.iter().any(|sample| !sample.is_finite()) {
+        if track_id == 0
+            || samples.len() > 262_144
+            || samples.iter().any(|sample| !sample.is_finite())
+        {
             return serde_json::json!({
                 "code": "invalid_dynamics_target",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
@@ -1380,7 +1829,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                     "track_id": track_id,
                     "plugin_index": plugin_index,
                     "parameter_id": parameter_id,
-                }).to_string();
+                })
+                .to_string();
             }
         }
         if !engine.end_undo_transaction() {
@@ -1397,7 +1847,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "attack_ms": params.attack_ms,
             "release_ms": params.release_ms,
             "sample_count": samples.len(),
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub fn drain_plugin_parameter_events(&self) -> Vec<PluginParameterEvent> {
@@ -1408,14 +1859,21 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn get_plugin_parameter(&self, track_id: u32, plugin_index: u32, parameter_id: u32) -> f32 {
-        self.engine
-            .as_ref()
-            .map_or(0.0, |engine| engine.get_plugin_parameter(track_id, plugin_index, parameter_id))
+        self.engine.as_ref().map_or(0.0, |engine| {
+            engine.get_plugin_parameter(track_id, plugin_index, parameter_id)
+        })
     }
     pub fn get_plugin_parameter_count(&self, track_id: u32, plugin_index: u32) -> u32 {
-        self.engine.as_ref().map_or(0, |engine| engine.get_plugin_parameter_count(track_id, plugin_index))
+        self.engine.as_ref().map_or(0, |engine| {
+            engine.get_plugin_parameter_count(track_id, plugin_index)
+        })
     }
-    pub fn get_plugin_parameter_name(&self, track_id: u32, plugin_index: u32, parameter_id: u32) -> String {
+    pub fn get_plugin_parameter_name(
+        &self,
+        track_id: u32,
+        plugin_index: u32,
+        parameter_id: u32,
+    ) -> String {
         self.engine.as_ref().map_or_else(String::new, |engine| {
             engine.get_plugin_parameter_name(track_id, plugin_index, parameter_id)
         })
@@ -1427,9 +1885,15 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             .is_some_and(|engine| engine.save_plugin_preset(track_id, plugin_index, path))
     }
 
-    pub fn save_plugin_preset_diagnostic_json(&self, track_id: u32, plugin_index: u32, path: &str) -> String {
+    pub fn save_plugin_preset_diagnostic_json(
+        &self,
+        track_id: u32,
+        plugin_index: u32,
+        path: &str,
+    ) -> String {
         if track_id == 0 || path.trim().is_empty() {
-            return serde_json::json!({"code":"invalid_plugin_preset_target","retryable":false}).to_string();
+            return serde_json::json!({"code":"invalid_plugin_preset_target","retryable":false})
+                .to_string();
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
@@ -1446,9 +1910,15 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             .is_some_and(|engine| engine.load_plugin_preset(track_id, plugin_index, path))
     }
 
-    pub fn load_plugin_preset_diagnostic_json(&self, track_id: u32, plugin_index: u32, path: &str) -> String {
+    pub fn load_plugin_preset_diagnostic_json(
+        &self,
+        track_id: u32,
+        plugin_index: u32,
+        path: &str,
+    ) -> String {
         if track_id == 0 || path.trim().is_empty() {
-            return serde_json::json!({"code":"invalid_plugin_preset_target","retryable":false}).to_string();
+            return serde_json::json!({"code":"invalid_plugin_preset_target","retryable":false})
+                .to_string();
         }
         if !std::path::Path::new(path).is_file() {
             return serde_json::json!({"code":"plugin_preset_not_found","retryable":false,"path":path}).to_string();
@@ -1472,7 +1942,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.add_plugin(track_id, plugin_type) {
-            return format!("{{\"ok\":true,\"track_id\":{track_id},\"plugin_type\":{plugin_type}}}");
+            return format!(
+                "{{\"ok\":true,\"track_id\":{track_id},\"plugin_type\":{plugin_type}}}"
+            );
         }
         serde_json::to_string(
             &crate::bridge_error::BridgeError::new(
@@ -1481,16 +1953,20 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             )
             .object(format!("track:{track_id}"))
             .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn plugin_state(&self, track_id: u32, plugin_index: u32) -> Vec<u8> {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return Vec::new();
         };
-        self.engine
-            .as_ref()
-            .map_or_else(Vec::new, |engine| engine.get_plugin_state(track_id, plugin_index).into_iter().collect())
+        self.engine.as_ref().map_or_else(Vec::new, |engine| {
+            engine
+                .get_plugin_state(track_id, plugin_index)
+                .into_iter()
+                .collect()
+        })
     }
 
     pub fn set_plugin_state(&self, track_id: u32, plugin_index: u32, state: &[u8]) -> bool {
@@ -1559,16 +2035,18 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn move_plugin(&self, track_id: u32, from_index: u32, to_index: u32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| {
-            engine.move_plugin(track_id, from_index, to_index)
-        })
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.move_plugin(track_id, from_index, to_index))
     }
     pub fn remove_plugin_diagnostic_json(&self, track_id: u32, plugin_index: u32) -> String {
         if self.engine.is_null() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.remove_plugin(track_id, plugin_index) {
-            return format!("{{\"ok\":true,\"track_id\":{track_id},\"plugin_index\":{plugin_index}}}");
+            return format!(
+                "{{\"ok\":true,\"track_id\":{track_id},\"plugin_index\":{plugin_index}}}"
+            );
         }
         serde_json::to_string(
             &crate::bridge_error::BridgeError::new(
@@ -1577,13 +2055,20 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             )
             .object(format!("track:{track_id}/plugin:{plugin_index}"))
             .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn add_sandboxed_plugin(&self, track_id: u32, path: &str) -> bool {
         let admission = Self::plugin_path_admission(path);
-        if matches!(admission, "missing-path" | "invalid-path" | "unsupported-extension"
-            | "quarantined" | "unadmitted-plugin") {
+        if matches!(
+            admission,
+            "missing-path"
+                | "invalid-path"
+                | "unsupported-extension"
+                | "quarantined"
+                | "unadmitted-plugin"
+        ) {
             return false;
         }
         if admission != "builtin" && crate::plugin_catalog::is_quarantined_path(path) {
@@ -1594,9 +2079,7 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             let Ok(metadata) = std::fs::symlink_metadata(candidate) else {
                 return false;
             };
-            if metadata.file_type().is_symlink()
-                || (!metadata.is_file() && !metadata.is_dir())
-            {
+            if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
                 return false;
             }
         }
@@ -1686,11 +2169,10 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn last_sandbox_failure_text(&self, track_id: u32) -> String {
-        self.engine
-            .as_ref()
-            .map_or_else(|| "engine-unavailable".to_owned(), |engine| {
-                engine.get_last_sandbox_failure_text(track_id).to_string()
-            })
+        self.engine.as_ref().map_or_else(
+            || "engine-unavailable".to_owned(),
+            |engine| engine.get_last_sandbox_failure_text(track_id).to_string(),
+        )
     }
 
     pub fn set_plugin_bypass(&self, track_id: u32, plugin_index: u32, bypassed: bool) -> bool {
@@ -1708,7 +2190,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.set_plugin_bypass(track_id, plugin_index, bypassed) {
-            return format!("{{\"ok\":true,\"track_id\":{track_id},\"plugin_index\":{plugin_index}}}");
+            return format!(
+                "{{\"ok\":true,\"track_id\":{track_id},\"plugin_index\":{plugin_index}}}"
+            );
         }
         serde_json::to_string(
             &crate::bridge_error::BridgeError::new(
@@ -1717,7 +2201,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             )
             .object(format!("track:{track_id}/plugin:{plugin_index}"))
             .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn get_plugin_bypass(&self, track_id: u32, plugin_index: u32) -> bool {
         self.engine
@@ -1733,11 +2218,23 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             let mappings = self
                 .macro_mappings
                 .lock()
-                .map(|items| items.iter().filter(|item| item.macro_index as u32 == macro_index).cloned().collect::<Vec<_>>())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|item| item.macro_index as u32 == macro_index)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default();
             for mapping in mappings {
-                let Some((track_id, plugin_index)) = parse_plugin_instance_id(&mapping.target_instance_id) else { continue };
-                let Ok(parameter_id) = mapping.target_parameter_id.parse::<u32>() else { continue };
+                let Some((track_id, plugin_index)) =
+                    parse_plugin_instance_id(&mapping.target_instance_id)
+                else {
+                    continue;
+                };
+                let Ok(parameter_id) = mapping.target_parameter_id.parse::<u32>() else {
+                    continue;
+                };
                 let normalized = if mapping.invert { 1.0 - value } else { value };
                 let curved = if mapping.curve.abs() < f32::EPSILON {
                     normalized
@@ -1747,13 +2244,20 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 let mapped = mapping.min + curved * (mapping.max - mapping.min);
                 let _ = self.engine.as_ref().is_some_and(|engine| {
                     engine.set_plugin_parameter_without_undo(
-                        track_id, plugin_index, parameter_id, mapped)
+                        track_id,
+                        plugin_index,
+                        parameter_id,
+                        mapped,
+                    )
                 });
             }
         }
     }
 
-    pub fn add_macro_mapping(&self, mapping: crate::project_contracts::MacroMappingContract) -> anyhow::Result<()> {
+    pub fn add_macro_mapping(
+        &self,
+        mapping: crate::project_contracts::MacroMappingContract,
+    ) -> anyhow::Result<()> {
         if mapping.macro_index >= 128
             || mapping.mapping_id.trim().is_empty()
             || mapping.target_instance_id.trim().is_empty()
@@ -1766,8 +2270,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         {
             return Err(anyhow::anyhow!("invalid macro mapping"));
         }
-        let mut mappings = self.macro_mappings.lock().map_err(|_| anyhow::anyhow!("Macro mapping lock poisoned"))?;
-        if mappings.iter().any(|item| item.mapping_id == mapping.mapping_id) {
+        let mut mappings = self
+            .macro_mappings
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Macro mapping lock poisoned"))?;
+        if mappings
+            .iter()
+            .any(|item| item.mapping_id == mapping.mapping_id)
+        {
             return Err(anyhow::anyhow!("macro mapping already exists"));
         }
         if mappings.len() >= 4096 {
@@ -1778,15 +2288,22 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn remove_macro_mapping(&self, mapping_id: &str) -> bool {
-        let Ok(mut mappings) = self.macro_mappings.lock() else { return false };
+        let Ok(mut mappings) = self.macro_mappings.lock() else {
+            return false;
+        };
         let before = mappings.len();
         mappings.retain(|mapping| mapping.mapping_id != mapping_id);
         mappings.len() != before
     }
 
     pub fn macro_mappings_json(&self) -> String {
-        serde_json::to_string(&*self.macro_mappings.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
-            .unwrap_or_else(|_| "[]".to_owned())
+        serde_json::to_string(
+            &*self
+                .macro_mappings
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+        .unwrap_or_else(|_| "[]".to_owned())
     }
 
     pub fn add_midi_learn_mapping(
@@ -1810,7 +2327,10 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             .midi_learn_mappings
             .lock()
             .map_err(|_| anyhow::anyhow!("MIDI mapping lock poisoned"))?;
-        if mappings.iter().any(|item| item.mapping_id == mapping.mapping_id) {
+        if mappings
+            .iter()
+            .any(|item| item.mapping_id == mapping.mapping_id)
+        {
             return Err(anyhow::anyhow!("MIDI mapping already exists"));
         }
         if mappings.len() >= 4096 {
@@ -1824,7 +2344,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn remove_midi_learn_mapping(&self, mapping_id: &str) -> bool {
-        let Ok(mut mappings) = self.midi_learn_mappings.lock() else { return false };
+        let Ok(mut mappings) = self.midi_learn_mappings.lock() else {
+            return false;
+        };
         let before = mappings.len();
         mappings.retain(|mapping| mapping.mapping_id != mapping_id);
         if let Ok(mut acquired) = self.midi_pickup_acquired.lock() {
@@ -1847,17 +2369,21 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let (cycle_start, cycle_end, cycle_enabled, metronome_enabled) = self
             .engine
             .as_ref()
-            .map(|engine| (
-                engine.cycle_start(),
-                engine.cycle_end(),
-                engine.is_loop_enabled(),
-                engine.is_metronome_enabled(),
-            ))
+            .map(|engine| {
+                (
+                    engine.cycle_start(),
+                    engine.cycle_end(),
+                    engine.is_loop_enabled(),
+                    engine.is_metronome_enabled(),
+                )
+            })
             .unwrap_or((0, 0, false, false));
         let engine_capabilities = serde_json::from_str::<serde_json::Value>(
             &self.engine_capabilities_json(),
         )
-        .unwrap_or_else(|_| serde_json::json!({"schema":"aura.engine-capabilities.v1","capabilities":[]}));
+        .unwrap_or_else(
+            |_| serde_json::json!({"schema":"aura.engine-capabilities.v1","capabilities":[]}),
+        );
         serde_json::json!({
             "project_generation": self.project_generation(),
             "audio_generation": self.audio_config_generation(),
@@ -1935,26 +2461,40 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         curve: f32,
         pickup: bool,
     ) -> String {
-        if channel > 16 || controller > 127 || macro_index >= 128 ||
-            !minimum.is_finite() || !maximum.is_finite() || minimum > maximum ||
-            !curve.is_finite() || !(-1.0..=1.0).contains(&curve) {
+        if channel > 16
+            || controller > 127
+            || macro_index >= 128
+            || !minimum.is_finite()
+            || !maximum.is_finite()
+            || minimum > maximum
+            || !curve.is_finite()
+            || !(-1.0..=1.0).contains(&curve)
+        {
             return serde_json::json!({
                 "ok": false,
                 "code": "invalid_midi_macro_mapping",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if !engine.bind_midi_cc_to_macro(
-            channel, controller, macro_index, minimum, maximum, curve, pickup,
+            channel,
+            controller,
+            macro_index,
+            minimum,
+            maximum,
+            curve,
+            pickup,
         ) {
             return serde_json::json!({
                 "ok": false,
                 "code": "midi_macro_mapping_rejected",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": true,
@@ -1966,7 +2506,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "maximum": maximum,
             "curve": curve,
             "pickup": pickup,
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub fn bind_midi_cc14_to_macro_diagnostic_json(
@@ -1979,26 +2520,40 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         curve: f32,
         pickup: bool,
     ) -> String {
-        if channel > 16 || controller > 16_383 || macro_index >= 128 ||
-            !minimum.is_finite() || !maximum.is_finite() || minimum > maximum ||
-            !curve.is_finite() || !(-1.0..=1.0).contains(&curve) {
+        if channel > 16
+            || controller > 16_383
+            || macro_index >= 128
+            || !minimum.is_finite()
+            || !maximum.is_finite()
+            || minimum > maximum
+            || !curve.is_finite()
+            || !(-1.0..=1.0).contains(&curve)
+        {
             return serde_json::json!({
                 "ok": false,
                 "code": "invalid_midi_macro_mapping",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if !engine.bind_midi_cc14_to_macro(
-            channel, controller, macro_index, minimum, maximum, curve, pickup,
+            channel,
+            controller,
+            macro_index,
+            minimum,
+            maximum,
+            curve,
+            pickup,
         ) {
             return serde_json::json!({
                 "ok": false,
                 "code": "midi_macro_mapping_rejected",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": true,
@@ -2010,7 +2565,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "maximum": maximum,
             "curve": curve,
             "pickup": pickup,
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// Feeds a decoded hardware CC event into the native mapping snapshot.
@@ -2033,8 +2589,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             if let Some(engine) = self.engine.as_ref() {
                 engine.handle_midi_cc(channel, controller, value);
             }
-            self.apply_persisted_midi_mapping(device_id, channel, controller as u16,
-                                              f32::from(value) / 127.0);
+            self.apply_persisted_midi_mapping(
+                device_id,
+                channel,
+                controller as u16,
+                f32::from(value) / 127.0,
+            );
         }
     }
 
@@ -2099,7 +2659,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                     .as_ref()
                     .is_some_and(|acquired| !acquired.contains(&mapping.mapping_id))
             {
-                let Some(engine) = self.engine.as_ref() else { continue };
+                let Some(engine) = self.engine.as_ref() else {
+                    continue;
+                };
                 let current = engine.get_plugin_parameter(track_id, plugin_index, parameter_id);
                 let span = (mapping.max - mapping.min).abs().max(0.0001);
                 let target = mapping.min + span * normalized;
@@ -2120,7 +2682,11 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             let mapped = mapping.min + shaped.clamp(0.0, 1.0) * (mapping.max - mapping.min);
             let _ = self.engine.as_ref().is_some_and(|engine| {
                 engine.set_plugin_parameter_without_undo(
-                    track_id, plugin_index, parameter_id, mapped)
+                    track_id,
+                    plugin_index,
+                    parameter_id,
+                    mapped,
+                )
             });
         }
     }
@@ -2157,7 +2723,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn set_route_gain(&self, source_id: u32, dest_id: u32, gain: f32, enabled: bool) -> bool {
-        if source_id == dest_id || !gain.is_finite() || !(0.0..=2.0).contains(&gain)
+        if source_id == dest_id
+            || !gain.is_finite()
+            || !(0.0..=2.0).contains(&gain)
             || (enabled && gain <= 0.0)
         {
             return false;
@@ -2210,10 +2778,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return format!("{{\"ok\":true,\"source_id\":{source_id},\"dest_id\":{dest_id}}}");
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("route_rejected", "route was rejected by the graph")
-                .object(format!("route:{source_id}->{dest_id}"))
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "route_rejected",
+                "route was rejected by the graph",
+            )
+            .object(format!("route:{source_id}->{dest_id}"))
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn set_feedback_route(
@@ -2232,7 +2804,11 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn set_feedback_route_diagnostic_json(
-        &self, source_id: u32, dest_id: u32, gain: f32, enabled: bool,
+        &self,
+        source_id: u32,
+        dest_id: u32,
+        gain: f32,
+        enabled: bool,
     ) -> String {
         if source_id == dest_id {
             return "{\"code\":\"route_self_loop\",\"retryable\":false}".to_owned();
@@ -2247,10 +2823,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return format!("{{\"ok\":true,\"source_id\":{source_id},\"dest_id\":{dest_id}}}");
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("feedback_route_rejected", "feedback route was rejected")
-                .object(format!("route:{source_id}->{dest_id}"))
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "feedback_route_rejected",
+                "feedback route was rejected",
+            )
+            .object(format!("route:{source_id}->{dest_id}"))
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn set_sidechain_link(
@@ -2273,7 +2853,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn set_sidechain_link_diagnostic_json(
-        &self, source_id: u32, dest_id: u32, plugin_index: u32, tap_point: u32, enabled: bool,
+        &self,
+        source_id: u32,
+        dest_id: u32,
+        plugin_index: u32,
+        tap_point: u32,
+        enabled: bool,
     ) -> String {
         if source_id == dest_id {
             return "{\"code\":\"sidechain_self_loop\",\"retryable\":false}".to_owned();
@@ -2285,10 +2870,16 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return format!("{{\"ok\":true,\"source_id\":{source_id},\"dest_id\":{dest_id},\"plugin_index\":{plugin_index}}}");
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("sidechain_rejected", "sidechain link was rejected")
-                .object(format!("sidechain:{source_id}->{dest_id}/plugin:{plugin_index}"))
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "sidechain_rejected",
+                "sidechain link was rejected",
+            )
+            .object(format!(
+                "sidechain:{source_id}->{dest_id}/plugin:{plugin_index}"
+            ))
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
     pub fn has_sidechain_link(&self, source_id: u32, dest_id: u32, plugin_index: u32) -> bool {
@@ -2353,7 +2944,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     pub fn select_audio_device(&self, device_id: u32, sample_rate: u32, buffer_size: u32) -> bool {
         if !matches!(sample_rate, 44_100 | 48_000 | 88_200 | 96_000 | 192_000)
             || !matches!(buffer_size, 32 | 64 | 128 | 256 | 512 | 1024 | 2048)
-            || self.recording_preview_active() {
+            || self.recording_preview_active()
+        {
             return false;
         }
         self.engine.as_ref().is_some_and(|engine| {
@@ -2397,7 +2989,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "sample_rate": sample_rate,
                 "buffer_size": buffer_size,
                 "audio_generation": self.audio_config_generation(),
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": false,
@@ -2417,7 +3010,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 tick: crate::production_timeline::MasterTick(pos as u128),
                 ticks_per_second: sample_rate,
             };
-            self.publish_production_event(crate::production_events::ProductionEvent::PlayheadMoved { clock });
+            self.publish_production_event(
+                crate::production_events::ProductionEvent::PlayheadMoved { clock },
+            );
         }
     }
 
@@ -2430,7 +3025,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "ok": true,
             "operation": "set_playhead",
             "playhead": engine.get_playhead(),
-        }).to_string()
+        })
+        .to_string()
     }
     pub fn set_test_tone(&self, enabled: bool) {
         if let Some(e) = self.engine.as_ref() {
@@ -2443,7 +3039,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         engine.set_test_tone(enabled);
-        serde_json::json!({"ok": true, "operation": "set_test_tone", "enabled": enabled}).to_string()
+        serde_json::json!({"ok": true, "operation": "set_test_tone", "enabled": enabled})
+            .to_string()
     }
 
     // Actions
@@ -2463,10 +3060,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     pub fn set_volume(&self, tid: u32, val: f32) -> bool {
         let changed = self.set_track_volume_with_stack(tid, val);
         if changed {
-            self.publish_production_event(crate::production_events::ProductionEvent::TrackGainChanged {
-                track_id: tid,
-                gain: val,
-            });
+            self.publish_production_event(
+                crate::production_events::ProductionEvent::TrackGainChanged {
+                    track_id: tid,
+                    gain: val,
+                },
+            );
         }
         changed
     }
@@ -2477,10 +3076,30 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         })
     }
 
-    pub fn set_eq_diagnostic_json(&self, tid: u32, low_band: f32, low_cut: f32, high_band: f32, high_cut: f32) -> String {
-        if [low_band, low_cut, high_band, high_cut].iter().any(|value| !value.is_finite()) { return "{\"code\":\"invalid_parameter\",\"message\":\"EQ parameters must be finite\"}".to_owned(); }
-        let ok = self.engine.as_ref().is_some_and(|engine| engine.set_track_eq(tid, low_band, low_cut, high_band, high_cut));
-        if ok { serde_json::json!({"ok":true,"operation":"set_eq","track_id":tid,"low_band":low_band,"low_cut":low_cut,"high_band":high_band,"high_cut":high_cut}).to_string() } else { serde_json::json!({"code":"eq_rejected","track_id":tid}).to_string() }
+    pub fn set_eq_diagnostic_json(
+        &self,
+        tid: u32,
+        low_band: f32,
+        low_cut: f32,
+        high_band: f32,
+        high_cut: f32,
+    ) -> String {
+        if [low_band, low_cut, high_band, high_cut]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return "{\"code\":\"invalid_parameter\",\"message\":\"EQ parameters must be finite\"}"
+                .to_owned();
+        }
+        let ok = self
+            .engine
+            .as_ref()
+            .is_some_and(|engine| engine.set_track_eq(tid, low_band, low_cut, high_band, high_cut));
+        if ok {
+            serde_json::json!({"ok":true,"operation":"set_eq","track_id":tid,"low_band":low_band,"low_cut":low_cut,"high_band":high_band,"high_cut":high_cut}).to_string()
+        } else {
+            serde_json::json!({"code":"eq_rejected","track_id":tid}).to_string()
+        }
     }
 
     /// Apply a bounded gain-staging correction in dB to the current fader
@@ -2489,7 +3108,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         if !gain_db.is_finite() || !(-24.0..=24.0).contains(&gain_db) {
             return serde_json::json!({"code":"invalid_parameter","message":"gain staging correction must be within -24..=24 dB","track_id":tid}).to_string();
         }
-        let Some(engine) = self.engine.as_ref() else { return "{\"code\":\"engine_unavailable\"}".to_owned(); };
+        let Some(engine) = self.engine.as_ref() else {
+            return "{\"code\":\"engine_unavailable\"}".to_owned();
+        };
         let before = engine.get_track_volume(tid);
         let after = (before * 10.0_f32.powf(gain_db / 20.0)).clamp(0.0, 2.0);
         if !engine.set_track_volume(tid, after) {
@@ -2498,10 +3119,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         serde_json::json!({"ok":true,"operation":"apply_gain_staging","track_id":tid,"gain_db":gain_db,"before":before,"after":after}).to_string()
     }
     pub fn set_track_delay_samples(&self, tid: u32, samples: u32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.set_track_delay_samples(tid, samples))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.set_track_delay_samples(tid, samples))
     }
     pub fn track_delay_samples(&self, tid: u32) -> Option<u32> {
-        self.engine.as_ref().map(|engine| engine.get_track_delay_samples(tid))
+        self.engine
+            .as_ref()
+            .map(|engine| engine.get_track_delay_samples(tid))
     }
     pub fn set_track_delay_samples_diagnostic_json(&self, tid: u32, samples: u32) -> String {
         if samples > 8192 {
@@ -2534,7 +3159,13 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         })
     }
 
-    fn set_track_scalar_diagnostic_json<F>(&self, field: &str, tid: u32, val: f32, apply: F) -> String
+    fn set_track_scalar_diagnostic_json<F>(
+        &self,
+        field: &str,
+        tid: u32,
+        val: f32,
+        apply: F,
+    ) -> String
     where
         F: FnOnce(&crate::ffi::AudioEngine, u32, f32) -> bool,
     {
@@ -2585,9 +3216,17 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         // so the operation cannot create a cycle or a self-route.
         if id != 0 && matches!(t_type, 0 | 1 | 2) {
             if let Some(engine) = self.engine.as_ref() {
-                if let Ok(layout) = serde_json::from_str::<serde_json::Value>(&engine.get_project_layout_json()) {
-                    if let Some(bus_id) = layout.get("tracks").and_then(serde_json::Value::as_array)
-                        .and_then(|tracks| tracks.iter().find(|track| track.get("type").and_then(serde_json::Value::as_str) == Some("Bus")))
+                if let Ok(layout) =
+                    serde_json::from_str::<serde_json::Value>(&engine.get_project_layout_json())
+                {
+                    if let Some(bus_id) = layout
+                        .get("tracks")
+                        .and_then(serde_json::Value::as_array)
+                        .and_then(|tracks| {
+                            tracks.iter().find(|track| {
+                                track.get("type").and_then(serde_json::Value::as_str) == Some("Bus")
+                            })
+                        })
                         .and_then(|track| track.get("id").and_then(serde_json::Value::as_u64))
                     {
                         let _ = engine.set_route_gain(id, bus_id as u32, 1.0, true);
@@ -2619,7 +3258,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     pub fn add_aux_track(&self) -> u32 {
         let id = self.add_bus_track();
         if id != 0 {
-            if let Ok(mut aux_ids) = self.aux_track_ids.lock() { aux_ids.insert(id); }
+            if let Ok(mut aux_ids) = self.aux_track_ids.lock() {
+                aux_ids.insert(id);
+            }
             // Keep Aux creation visibly distinct in the arrange/mixer views
             // even though the native signal path uses the shared BusTrack
             // implementation.
@@ -2633,33 +3274,51 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn aux_track_ids_json(&self) -> String {
-        let mut ids = self.aux_track_ids.lock().map(|value| value.iter().copied().collect::<Vec<_>>()).unwrap_or_default();
+        let mut ids = self
+            .aux_track_ids
+            .lock()
+            .map(|value| value.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
         ids.sort_unstable();
         serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_owned())
     }
 
     pub fn restore_aux_track_ids_json(&self, snapshot: &str) -> bool {
-        let Ok(ids) = serde_json::from_str::<Vec<u32>>(snapshot) else { return false; };
-        if ids.iter().any(|id| *id == 0) || ids.windows(2).any(|pair| pair[0] >= pair[1]) { return false; }
-        let Ok(mut current) = self.aux_track_ids.lock() else { return false; };
+        let Ok(ids) = serde_json::from_str::<Vec<u32>>(snapshot) else {
+            return false;
+        };
+        if ids.iter().any(|id| *id == 0) || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return false;
+        }
+        let Ok(mut current) = self.aux_track_ids.lock() else {
+            return false;
+        };
         *current = ids.into_iter().collect();
         true
     }
 
     pub fn add_vca_group(&self, group_id: u32, gain: f32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.add_vca_group(group_id, gain))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.add_vca_group(group_id, gain))
     }
 
     pub fn assign_track_to_vca(&self, track_id: u32, group_id: u32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.assign_track_to_vca(track_id, group_id))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.assign_track_to_vca(track_id, group_id))
     }
 
     pub fn set_vca_group_gain(&self, group_id: u32, gain: f32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.set_vca_group_gain(group_id, gain))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.set_vca_group_gain(group_id, gain))
     }
 
     pub fn get_vca_track_gain(&self, track_id: u32) -> f32 {
-        self.engine.as_ref().map_or(1.0, |engine| engine.get_vca_track_gain(track_id))
+        self.engine
+            .as_ref()
+            .map_or(1.0, |engine| engine.get_vca_track_gain(track_id))
     }
 
     pub fn get_vca_snapshot_json(&self) -> String {
@@ -2684,7 +3343,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "ok": false,
                 "code": "engine_unavailable",
                 "retryable": true,
-            }).to_string();
+            })
+            .to_string();
         };
         let sample_rate = engine.get_sample_rate().round() as u32;
         if total_samples == 0 || sample_rate == 0 {
@@ -2692,7 +3352,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "ok": false,
                 "code": "invalid_freeze_range",
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         if engine.freeze_track(track_id, total_samples, sample_rate) {
             return serde_json::json!({
@@ -2703,19 +3364,22 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "sample_rate": sample_rate,
                 "audio_generation": engine.get_audio_config_generation(),
                 "frozen": true,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": false,
             "code": "freeze_track_rejected",
             "track_id": track_id,
             "retryable": true,
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub fn freeze_track_to_project_end_diagnostic_json(&self, track_id: u32) -> String {
         let Some(engine) = self.engine.as_ref() else {
-            return serde_json::json!({"ok":false,"code":"engine_unavailable","retryable":true}).to_string();
+            return serde_json::json!({"ok":false,"code":"engine_unavailable","retryable":true})
+                .to_string();
         };
         let sample_rate = engine.get_sample_rate().round() as u32;
         if sample_rate == 0 || !engine.freeze_track_to_project_end(track_id, sample_rate) {
@@ -2732,7 +3396,9 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     }
 
     pub fn unfreeze_track(&self, track_id: u32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| engine.unfreeze_track(track_id))
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.unfreeze_track(track_id))
     }
 
     pub fn freeze_track_to_file_diagnostic_json(
@@ -2758,7 +3424,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "sample_rate": sample_rate,
                 "audio_generation": engine.get_audio_config_generation(),
                 "frozen": true,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({"ok": false, "code": "freeze_track_file_rejected", "track_id": track_id, "retryable": true}).to_string()
     }
@@ -2769,7 +3436,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "ok": false,
                 "code": "engine_unavailable",
                 "retryable": true,
-            }).to_string();
+            })
+            .to_string();
         };
         if engine.unfreeze_track(track_id) {
             return serde_json::json!({
@@ -2777,14 +3445,16 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "operation": "unfreeze_track",
                 "track_id": track_id,
                 "frozen": false,
-            }).to_string();
+            })
+            .to_string();
         }
         serde_json::json!({
             "ok": false,
             "code": "track_not_found",
             "track_id": track_id,
             "retryable": false,
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub fn track_freeze_status_diagnostic_json(&self, track_id: u32) -> String {
@@ -2796,7 +3466,8 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
             "operation": "track_freeze_status",
             "track_id": track_id,
             "frozen": engine.is_track_frozen(track_id),
-        }).to_string()
+        })
+        .to_string()
     }
     pub fn add_track_diagnostic_json(&self, t_type: u32) -> String {
         if t_type > 4 {
@@ -2806,22 +3477,31 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
                 "track_type": t_type,
                 "supported_track_types": ["Audio", "Midi", "Instrument", "Bus", "Vocal"],
                 "retryable": false,
-            }).to_string();
+            })
+            .to_string();
         }
         if self.engine.is_null() {
             return serde_json::to_string(
-                &crate::bridge_error::BridgeError::new("engine_unavailable", "audio engine unavailable")
-                    .retryable(true),
-            ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+                &crate::bridge_error::BridgeError::new(
+                    "engine_unavailable",
+                    "audio engine unavailable",
+                )
+                .retryable(true),
+            )
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         let track_id = self.add_track(t_type);
         if track_id != 0 {
             return format!("{{\"ok\":true,\"track_id\":{track_id}}}");
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("track_creation_failed", "track allocation failed")
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "track_creation_failed",
+                "track allocation failed",
+            )
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn remove_track(&self, id: u32) -> bool {
         let removed = self.engine.as_ref().is_some_and(|e| e.remove_track(id));
@@ -2843,18 +3523,26 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
     pub fn remove_track_diagnostic_json(&self, id: u32) -> String {
         if self.engine.is_null() {
             return serde_json::to_string(
-                &crate::bridge_error::BridgeError::new("engine_unavailable", "audio engine unavailable")
-                    .retryable(true),
-            ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+                &crate::bridge_error::BridgeError::new(
+                    "engine_unavailable",
+                    "audio engine unavailable",
+                )
+                .retryable(true),
+            )
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         if self.remove_track(id) {
             return format!("{{\"ok\":true,\"track_id\":{id}}}");
         }
         serde_json::to_string(
-            &crate::bridge_error::BridgeError::new("track_not_found_or_rejected", "track removal rejected")
-                .object(format!("track:{id}"))
-                .at_generation(self.project_generation()),
-        ).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            &crate::bridge_error::BridgeError::new(
+                "track_not_found_or_rejected",
+                "track removal rejected",
+            )
+            .object(format!("track:{id}"))
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn set_track_name(&self, id: u32, name: &str) -> bool {
         self.engine
@@ -2864,10 +3552,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     pub fn set_track_name_diagnostic_json(&self, id: u32, name: &str) -> String {
         if id == 0 || name.trim().is_empty() || name.contains('\0') || name.len() > 256 {
-            let error = crate::bridge_error::BridgeError::new("invalid_track_name", "track id or name is invalid")
-                .object(format!("track:{id}"))
-                .at_generation(self.project_generation());
-            return serde_json::to_string(&error).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+            let error = crate::bridge_error::BridgeError::new(
+                "invalid_track_name",
+                "track id or name is invalid",
+            )
+            .object(format!("track:{id}"))
+            .at_generation(self.project_generation());
+            return serde_json::to_string(&error)
+                .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
@@ -2875,11 +3567,15 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let result = if engine.set_track_name(id, name) {
             return format!("{{\"ok\":true,\"track_id\":{id}}}");
         } else {
-            crate::bridge_error::BridgeError::new("track_not_found_or_rejected", "track rename was rejected")
-                .object(format!("track:{id}"))
-                .at_generation(self.project_generation())
+            crate::bridge_error::BridgeError::new(
+                "track_not_found_or_rejected",
+                "track rename was rejected",
+            )
+            .object(format!("track:{id}"))
+            .at_generation(self.project_generation())
         };
-        serde_json::to_string(&result).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn new_project(&self) {
         if let Some(e) = self.engine.as_ref() {
@@ -2888,8 +3584,12 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         if let Ok(mut chords) = self.chord_track.lock() {
             chords.clear();
         }
-        if let Ok(mut history) = self.chord_history.lock() { history.clear(); }
-        if let Ok(mut redo) = self.chord_redo_history.lock() { redo.clear(); }
+        if let Ok(mut history) = self.chord_history.lock() {
+            history.clear();
+        }
+        if let Ok(mut redo) = self.chord_redo_history.lock() {
+            redo.clear();
+        }
         if let Ok(mut history) = self.midi_lyric_history.lock() {
             history.clear();
         }
@@ -2901,8 +3601,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     pub fn duplicate_track_diagnostic_json(&self, id: u32) -> String {
         if id == 0 {
-            return serde_json::to_string(&crate::bridge_error::BridgeError::new("invalid_track_id", "track id must be non-zero").object(format!("track:{id}")))
-                .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+            return serde_json::to_string(
+                &crate::bridge_error::BridgeError::new(
+                    "invalid_track_id",
+                    "track id must be non-zero",
+                )
+                .object(format!("track:{id}")),
+            )
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
@@ -2911,10 +3617,15 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         if new_id != 0 {
             return format!("{{\"ok\":true,\"source_track_id\":{id},\"track_id\":{new_id}}}");
         }
-        serde_json::to_string(&crate::bridge_error::BridgeError::new("track_not_found_or_rejected", "track duplication was rejected")
+        serde_json::to_string(
+            &crate::bridge_error::BridgeError::new(
+                "track_not_found_or_rejected",
+                "track duplication was rejected",
+            )
             .object(format!("track:{id}"))
-            .at_generation(self.project_generation()))
-            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+            .at_generation(self.project_generation()),
+        )
+        .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn add_region(&self, tid: u32, path: &str, start: f64) -> bool {
         self.engine
@@ -2924,14 +3635,24 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     pub fn add_region_diagnostic_json(&self, tid: u32, path: &str, start: f64) -> String {
         if tid == 0 || path.is_empty() || path.contains('\0') || !start.is_finite() || start < 0.0 {
-            let error = crate::bridge_error::BridgeError::new("invalid_region_input", "region target, path, or start position is invalid")
-                .object(format!("track:{tid}"))
-                .at_generation(self.project_generation());
-            return serde_json::to_string(&error).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+            let error = crate::bridge_error::BridgeError::new(
+                "invalid_region_input",
+                "region target, path, or start position is invalid",
+            )
+            .object(format!("track:{tid}"))
+            .at_generation(self.project_generation());
+            return serde_json::to_string(&error)
+                .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         if !Path::new(path).is_file() {
-            let error = crate::bridge_error::BridgeError::new("region_audio_not_found", "region audio path is not a regular file").object(path).retryable(true);
-            return serde_json::to_string(&error).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+            let error = crate::bridge_error::BridgeError::new(
+                "region_audio_not_found",
+                "region audio path is not a regular file",
+            )
+            .object(path)
+            .retryable(true);
+            return serde_json::to_string(&error)
+                .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
@@ -2939,9 +3660,14 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let result = if engine.add_region(tid, path, start) {
             return format!("{{\"ok\":true,\"track_id\":{tid}}}");
         } else {
-            crate::bridge_error::BridgeError::new("region_add_rejected", "native engine rejected region insertion").object(format!("track:{tid}"))
+            crate::bridge_error::BridgeError::new(
+                "region_add_rejected",
+                "native engine rejected region insertion",
+            )
+            .object(format!("track:{tid}"))
         };
-        serde_json::to_string(&result).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn add_region_at_beat(&self, tid: u32, path: &str, beat: f64) -> bool {
         self.add_region(tid, path, self.beats_to_samples(beat.max(0.0)) as f64)
@@ -2954,14 +3680,24 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
 
     pub fn replace_region_audio_diagnostic_json(&self, tid: u32, rid: u32, path: &str) -> String {
         if tid == 0 || rid == 0 || path.is_empty() || path.contains('\0') {
-            let error = crate::bridge_error::BridgeError::new("invalid_region_input", "track, region, or audio path is invalid")
-                .object(format!("track:{tid}/region:{rid}"))
-                .at_generation(self.project_generation());
-            return serde_json::to_string(&error).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+            let error = crate::bridge_error::BridgeError::new(
+                "invalid_region_input",
+                "track, region, or audio path is invalid",
+            )
+            .object(format!("track:{tid}/region:{rid}"))
+            .at_generation(self.project_generation());
+            return serde_json::to_string(&error)
+                .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         if !Path::new(path).is_file() {
-            let error = crate::bridge_error::BridgeError::new("region_audio_not_found", "replacement audio path is not a regular file").object(path).retryable(true);
-            return serde_json::to_string(&error).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
+            let error = crate::bridge_error::BridgeError::new(
+                "region_audio_not_found",
+                "replacement audio path is not a regular file",
+            )
+            .object(path)
+            .retryable(true);
+            return serde_json::to_string(&error)
+                .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
@@ -2969,8 +3705,13 @@ pub fn set_midi_events_json(&self, snapshot: &str) -> bool {
         let result = if engine.replace_region_audio(tid, rid, path) {
             return format!("{{\"ok\":true,\"track_id\":{tid},\"region_id\":{rid}}}");
         } else {
-            crate::bridge_error::BridgeError::new("region_replace_rejected", "native engine rejected audio replacement").object(format!("track:{tid}/region:{rid}"))
+            crate::bridge_error::BridgeError::new(
+                "region_replace_rejected",
+                "native engine rejected audio replacement",
+            )
+            .object(format!("track:{tid}/region:{rid}"))
         };
-        serde_json::to_string(&result).unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 }
