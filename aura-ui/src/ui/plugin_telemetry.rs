@@ -5,6 +5,7 @@ use crate::ui::plugin_polling;
 use aura_core_bridge::AuraCore;
 use slint::Model;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn update_plugin_telemetry(
     ui: &AppWindow,
     core: &AuraCore,
@@ -73,8 +74,8 @@ pub(crate) fn update_plugin_telemetry(
     }
     let plugin_snapshot = if context_changed || plugin_poll_due || plugin_event_due {
         Some(plugin_polling::snapshot(
-            &core,
-            &tracks,
+            core,
+            tracks,
             selected_row,
             plugin_index,
         ))
@@ -95,7 +96,7 @@ pub(crate) fn update_plugin_telemetry(
     }
     if let Some(snapshot) = plugin_snapshot {
         let values = snapshot.values;
-        let values_changed = plugin_polling::values_changed(&values, &last_plugin_values);
+        let values_changed = plugin_polling::values_changed(&values, last_plugin_values);
         if values_changed {
             *last_plugin_values = values.clone();
             ui.set_plugin_parameter_values(slint::ModelRc::new(slint::VecModel::from(values)));

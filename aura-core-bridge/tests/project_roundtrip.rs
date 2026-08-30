@@ -28,7 +28,7 @@ fn project_layout_round_trips_through_public_core_api() {
 
     let before = core.get_project_layout_json();
     assert!(before.contains("Roundtrip Track"));
-    assert!(core.save_project(&path_text));
+    assert!(core.save_project(path_text));
     assert!(core.load_project(&path_text));
     let after = core.get_project_layout_json();
 

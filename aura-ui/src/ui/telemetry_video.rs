@@ -27,7 +27,9 @@ pub(crate) fn update_video_preview(ui: &AppWindow, core: &AuraCore, last_video_r
                     && frame.len() == expected + 8
                 {
                     let rgba: Vec<_> = frame[8..]
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .map(|p| slint::Rgba8Pixel::new(p[0], p[1], p[2], p[3]))
                         .collect();
                     let mut pixel_buffer =

@@ -9,7 +9,7 @@ pub fn handle_command(
     ui: &AppWindow,
     tracks: &VecModel<Z_Track>,
 ) -> bool {
-    if command.trim().to_ascii_uppercase() != "RECOVER RECORDING" {
+    if !command.trim().eq_ignore_ascii_case("RECOVER RECORDING") {
         return false;
     }
     let Some(track) = (0..tracks.row_count()).find_map(|row| tracks.row_data(row)) else {

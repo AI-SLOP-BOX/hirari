@@ -664,11 +664,8 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
         let weak = weak.clone();
         let core = core.clone();
         move |source_id, dest_id, plugin_index, tap_point| {
-            let valid = source_id >= 0
-                && dest_id >= 0
-                && plugin_index >= 0
-                && tap_point >= 0
-                && tap_point <= 2;
+            let valid =
+                source_id >= 0 && dest_id >= 0 && plugin_index >= 0 && (0..=2).contains(&tap_point);
             let ok = valid
                 && core.set_sidechain_link(
                     source_id as u32,

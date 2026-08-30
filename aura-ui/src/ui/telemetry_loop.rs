@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn install_telemetry_loop(
     ui: &AppWindow,
     core: Rc<AuraCore>,
@@ -402,7 +403,7 @@ pub(crate) fn install_telemetry_loop(
                 let tempo_events = core_tele.get_tempo_events();
                 let mut tempo_beats = Vec::with_capacity(tempo_events.len() / 3);
                 let mut tempo_bpms = Vec::with_capacity(tempo_events.len() / 3);
-                for chunk in tempo_events.chunks_exact(3) {
+                for chunk in tempo_events.as_chunks::<3>().0 {
                     if chunk[0].is_finite() && chunk[1].is_finite() {
                         tempo_beats.push(chunk[0] as f32);
                         tempo_bpms.push(chunk[1] as f32);

@@ -6,6 +6,8 @@ use aura_core_bridge::AuraCore;
 use slint::Model;
 use std::collections::{HashMap, HashSet};
 
+type PreviousMidiMetadata = HashMap<(u32, u8, u64, u64), (String, String, Vec<i16>, u16, u32)>;
+
 pub(crate) fn sync_midi_notes_to_core(
     project_path: &str,
     tracks: &slint::VecModel<Z_Track>,
@@ -17,7 +19,7 @@ pub(crate) fn sync_midi_notes_to_core(
     }
     let mut packed = Vec::new();
     let mut scheduled = Vec::new();
-    let previous_metadata: HashMap<(u32, u8, u64, u64), (String, String, Vec<i16>, u16, u32)> =
+    let previous_metadata: PreviousMidiMetadata =
         serde_json::from_str::<serde_json::Value>(&core.midi_notes_json())
             .ok()
             .and_then(|value| value.as_array().cloned())
@@ -161,11 +163,11 @@ pub(crate) fn sync_midi_notes_from_core(tracks: &slint::VecModel<Z_Track>, core:
     }
 
     let packed = core.midi_notes_snapshot();
-    if packed.len() % 5 != 0 {
+    if !packed.len().is_multiple_of(5) {
         return;
     }
     let mut by_track: HashMap<u32, Vec<ZNote>> = HashMap::new();
-    for item in packed.chunks_exact(5) {
+    for item in packed.as_chunks::<5>().0 {
         let (track_id, pitch, velocity, start, length) =
             (item[0], item[1], item[2], item[3], item[4]);
         if track_id == 0 || pitch > 127 || velocity == 0 || velocity > 127 || length == 0 {

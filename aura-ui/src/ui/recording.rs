@@ -202,8 +202,7 @@ pub fn install(
                             if !beats.is_finite() || beats < 0.0 || !bpm.is_finite() || bpm <= 0.0 {
                                 return None;
                             }
-                            let samples =
-                                (beats as f64 * 60.0 * sample_rate as f64 / bpm as f64).round();
+                            let samples = (beats as f64 * 60.0 * sample_rate / bpm as f64).round();
                             if !samples.is_finite() || samples < 0.0 || samples > u64::MAX as f64 {
                                 None
                             } else {

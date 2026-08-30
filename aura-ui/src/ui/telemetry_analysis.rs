@@ -31,7 +31,7 @@ pub(crate) fn update_analysis_telemetry(
             }
             if changed {
                 track.clips = slint::ModelRc::new(slint::VecModel::from(clips));
-                replace_track(&tracks, track_index, track);
+                replace_track(tracks, track_index, track);
             }
         }
 
@@ -54,7 +54,7 @@ pub(crate) fn update_analysis_telemetry(
         for i in 0..tracks.row_count() {
             let mut trk = tracks.row_data(i).unwrap();
             trk.correlation = core.get_track_correlation(trk.id as u32);
-            replace_track(&tracks, i, trk);
+            replace_track(tracks, i, trk);
         }
 
         // 4. Spectral Masking Heatmap
