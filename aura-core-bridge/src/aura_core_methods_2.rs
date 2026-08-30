@@ -1659,7 +1659,7 @@ impl AuraCore {
             return "{\"code\":\"non_finite_automation_points\",\"retryable\":false}".to_owned();
         }
         let mut previous_time = f64::NEG_INFINITY;
-        for triple in packed_points.chunks_exact(3) {
+        for triple in packed_points.as_chunks::<3>().0 {
             if triple[0] < 0.0
                 || triple[0].fract() != 0.0
                 || triple[0] <= previous_time
@@ -1699,7 +1699,7 @@ impl AuraCore {
             return "{\"code\":\"invalid_track_delay_automation\",\"retryable\":false}".to_owned();
         }
         let mut previous_time = f64::NEG_INFINITY;
-        for triple in packed_points.chunks_exact(3) {
+        for triple in packed_points.as_chunks::<3>().0 {
             if triple[0] < 0.0
                 || triple[0].fract() != 0.0
                 || triple[0] <= previous_time
@@ -2422,6 +2422,7 @@ impl AuraCore {
                 {"id":"control_room","status":"implemented","apis":["control_room_monitor_snapshot_json","set_control_room_dim"]},
                 {"id":"mix_snapshots","status":"implemented","apis":["save_snapshot","restore_snapshot"]},
                 {"id":"plugin_sandbox_catalog","status":"implemented","apis":["installed_plugin_catalog_json"]},
+                {"id":"vst3_sandbox_worker","status":"implemented","apis":["add_sandboxed_plugin","process_sandboxed_plugin_block","process_sandboxed_plugin_midi_block"]},
                 {"id":"export_queue","status":"implemented","apis":["enqueue_export","export_queue_snapshot_json"]},
                 {"id":"vst3_clap_native_gui","status":"integration_required"},
                 {"id":"ara2_partner_integration","status":"integration_required"},

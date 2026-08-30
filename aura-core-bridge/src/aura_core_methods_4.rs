@@ -723,7 +723,9 @@ impl AuraCore {
             return Err(anyhow::anyhow!("native tempo map returned malformed data"));
         }
         document.tempo_events = tempo_values
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|event| crate::project_contracts::TempoEventContract {
                 beat: event[0],
                 bpm: event[1],
@@ -737,7 +739,9 @@ impl AuraCore {
             ));
         }
         document.time_signature_events = signature_values
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(
                 |event| crate::project_contracts::TimeSignatureEventContract {
                     beat: event[0],
@@ -804,9 +808,7 @@ impl AuraCore {
         }
         for artifact in &document.freeze_artifacts {
             let cache_path = std::path::Path::new(&artifact.path);
-            let cache_path = if cache_path.is_absolute() {
-                cache_path.to_path_buf()
-            } else if cache_path.is_file() {
+            let cache_path = if cache_path.is_absolute() || cache_path.is_file() {
                 cache_path.to_path_buf()
             } else {
                 project_parent.join(cache_path)

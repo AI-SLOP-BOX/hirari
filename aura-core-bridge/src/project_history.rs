@@ -1054,9 +1054,9 @@ fn field_changes(
 /// metadata is intentionally best-effort: a valid file may contain a large
 /// unknown chunk before `fmt`/`data`, so the content hash remains authoritative
 /// even when the bounded metadata probe cannot reach those chunks.
-fn fingerprint_asset_file(
-    path: &Path,
-) -> std::io::Result<(u64, String, Option<u32>, Option<u16>, Option<u64>)> {
+type AssetFingerprintData = (u64, String, Option<u32>, Option<u16>, Option<u64>);
+
+fn fingerprint_asset_file(path: &Path) -> std::io::Result<AssetFingerprintData> {
     const HASH_CHUNK_BYTES: usize = 1024 * 1024;
     let mut file = File::open(path)?;
     let byte_count = file.metadata()?.len();
