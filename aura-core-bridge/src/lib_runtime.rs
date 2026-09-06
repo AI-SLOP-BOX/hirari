@@ -1821,11 +1821,11 @@ impl Drop for AuraCore {
     }
 }
 
-include!("aura_core_methods_1.rs");
-include!("aura_core_methods_2.rs");
-include!("aura_core_methods_3.rs");
-include!("aura_core_methods_4.rs");
-include!("aura_core_methods_5.rs");
+include!("aura_core_recording_methods.rs");
+include!("aura_core_engine_methods.rs");
+include!("aura_core_arrangement_methods.rs");
+include!("aura_core_project_methods.rs");
+include!("aura_core_ara2_methods.rs");
 include!("ui_core_compat.rs");
 
 #[cfg(test)]
