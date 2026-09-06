@@ -187,6 +187,10 @@ pub struct AuraCore {
     /// Canonical scheduled-note state mirrored into the native snapshot.
     /// This is deliberately separate from transient MIDI input events.
     scheduled_midi_notes: std::sync::Mutex<Vec<MidiNoteContract>>,
+    /// Per-note vibrato-rate overrides kept separately so legacy MIDI note
+    /// documents remain wire-compatible while the editor can still update
+    /// articulation in place.
+    midi_vibrato_rates: std::sync::Mutex<HashMap<(u32, u8, u64), u16>>,
     pub(crate) midi_monitor: std::sync::Mutex<crate::midi_monitor::MidiMonitor>,
     pub(crate) review_notes: std::sync::Mutex<crate::review_notes::ReviewNoteStore>,
     pub(crate) control_room: std::sync::Mutex<crate::control_room::ControlRoomState>,
@@ -225,6 +229,15 @@ pub struct AuraCore {
     midi_pickup_acquired: std::sync::Mutex<HashSet<String>>,
     pub(crate) production_events:
         std::sync::Arc<std::sync::Mutex<crate::production_events::EventHub>>,
+    /// Project-scoped external transport state shared by the sync UI and
+    /// device adapters. The native clock remains sample-accurate; this
+    /// control-plane mirror makes MMC/MTC state observable and persistent
+    /// within the running session.
+    pub(crate) external_sync: std::sync::Mutex<crate::sync_transport::ExternalSyncController>,
+    pub(crate) export_queue: std::sync::Mutex<crate::export::ExportOrchestrator>,
+    /// Advanced stem queue wired to the same native project bounce graph as
+    /// the ordinary UI/CLI render path.
+    pub(crate) advanced_export: std::sync::Mutex<crate::advanced_export_engine::ExportOrchestrator>,
 }
 
 #[derive(Clone)]
@@ -742,6 +755,17 @@ impl AuraCore {
             })
             .to_string(),
         }
+    }
+
+    pub fn openutau_midi_notes_at_bpm_json(
+        &self,
+        source_path: &str,
+        track_id: u32,
+        sample_rate: u32,
+        ticks_per_beat: u32,
+        _bpm: f64,
+    ) -> String {
+        self.openutau_midi_notes_json(source_path, track_id, sample_rate, ticks_per_beat)
     }
 
     /// Validate an OpenUtau source/render pair before it becomes a project
@@ -1308,6 +1332,7 @@ impl AuraCore {
             aux_track_ids: std::sync::Mutex::new(HashSet::new()),
             midi_events: std::sync::Mutex::new(Vec::new()),
             scheduled_midi_notes: std::sync::Mutex::new(Vec::new()),
+            midi_vibrato_rates: std::sync::Mutex::new(HashMap::new()),
             midi_monitor: std::sync::Mutex::new(crate::midi_monitor::MidiMonitor::new()),
             review_notes: std::sync::Mutex::new(crate::review_notes::ReviewNoteStore::new()),
             control_room: std::sync::Mutex::new(crate::control_room::ControlRoomState::default()),
@@ -1343,6 +1368,11 @@ impl AuraCore {
             production_events: std::sync::Arc::new(std::sync::Mutex::new(
                 crate::production_events::EventHub::default(),
             )),
+            external_sync: std::sync::Mutex::new(
+                crate::sync_transport::ExternalSyncController::default(),
+            ),
+            export_queue: std::sync::Mutex::new(crate::export::ExportOrchestrator::new()),
+            advanced_export: std::sync::Mutex::new(crate::advanced_export_engine::ExportOrchestrator::new()),
         })
     }
 
@@ -1791,6 +1821,7 @@ include!("aura_core_methods_1.rs");
 include!("aura_core_methods_2.rs");
 include!("aura_core_methods_3.rs");
 include!("aura_core_methods_4.rs");
+include!("ui_core_compat.rs");
 
 #[cfg(test)]
 mod tests {

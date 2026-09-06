@@ -107,6 +107,29 @@ hardware, plugin, OpenUtau, and release checks, follow
 The device- and display-dependent acceptance steps are listed in the
 [manual E2E checklist](./docs/MANUAL_E2E_CHECKLIST.md).
 
+To check whether local renders, packaging outputs, or fixture checkouts have
+inflated a working copy, run the read-only footprint audit:
+
+```sh
+scripts/audit_workspace_footprint.sh
+```
+
+It reports the largest generated areas and exact duplicate file contents. It
+does not delete anything; set `AURA_WORKSPACE_MAX_BYTES` to enforce a local
+size budget before packaging.
+
+`AURA_RELEASE_MODE=1` also makes the packaging and release verification paths
+run the strict source hygiene check automatically, so a signed release cannot
+be built from a checkout that still tracks local fixture clones.
+
+The repository also marks fixture clones and generated trees with
+`export-ignore`, keeping them out of `git archive` source distributions even
+before the checkout is fully cleaned up.
+
+For a source/release review, also run `AURA_STRICT_SOURCE_HYGIENE=1
+scripts/audit_repository_hygiene.sh`; this rejects tracked fixture clones such
+as `third_party_synths` and `.openutau-review`.
+
 ### Build your own DAW on Aura
 
 Aura's GUI is an API client, not an engine dependency. The Slint UI and CLI
@@ -172,16 +195,17 @@ scripts/run_openutau_roundtrip.sh
 
 The current preview includes project persistence, MIDI/chord-track data,
 warp-marker metadata, routed offline rendering, loudness telemetry, and
-isolated worker lifecycle checks. The following Cubase Pro-class areas remain
-explicitly unfinished or environment-dependent: VariAudio-style note-level
-pitch/formant editing, phase-coherent multitrack warp, full MIDI Logical
-Editor scripting, native VST3/CLAP instance processing and embedded plug-in
-GUIs, ARA2 plug-in protocol exchange, Windows ASIO I/O, Dolby Atmos object
-rendering/metadata, and physical-controller/device certification. These are
-reported as unavailable or scaffolded by the capability API rather than
-advertised as production support; see [UNIMPLEMENTED_GAPS.md](./docs/UNIMPLEMENTED_GAPS.md)
-and [release readiness](./docs/RELEASE_READINESS.md) for evidence and planned
-implementation boundaries.
+isolated worker lifecycle checks. The engine also includes SDK-disabled VST3
+component/controller creation, macOS AU/VST3 native-editor attach/detach,
+asynchronous waveform decoding, measured-HRTF injection, Vibrato Rate
+editing, and native-renderer-backed export queues. Hardware, vendor SDK, and
+long-running stability claims remain capability-specific. The next major
+integration target is formal ARA2 partner-host exchange; VariAudio-style
+note-level pitch/formant editing, phase-coherent multitrack warp, Windows
+ASIO certification, Dolby Atmos object metadata, and physical-controller
+certification remain future work. See [UNIMPLEMENTED_GAPS.md](./docs/UNIMPLEMENTED_GAPS.md)
+and [release readiness](./docs/RELEASE_READINESS.md) for evidence and exact
+boundaries.
 
 ## ⚖️ Licensing
 
@@ -194,6 +218,21 @@ separate licenses. Distributors must select and comply with an applicable Slint
 license for combined binaries; Aura's MIT license applies only to Aura-owned
 source and does not override Slint's terms.
 
+The packaged desktop application uses Slint's royalty-free option and carries
+the required `AboutSlint` attribution on the Help/Diagnostics surface. The
+royalty-free terms cover Slint as part of an application; they do not grant a
+right to redistribute Slint as a standalone library, and do not permit an
+application that exposes Slint's APIs. Aura's stable API is intentionally
+Slint-free; distributors must not re-export Slint types or handles. A
+distributor choosing the GPL option must follow GPL-3.0 instead.
+
+Aura may also ship optional GPL-3.0-only tools or frontends as separate
+components. Those components are clearly marked and do not change the MIT
+license of the engine, stable API, or other Aura-owned modules. A distributor
+that combines a GPL component into one application must comply with GPL-3.0;
+the MIT-only core remains available for permissive forks and proprietary
+integrations.
+
 OpenUtau is integrated through a bridge and is kept as a separately licensed
 upstream project. Surge XT, Vital, voicebanks, and user audio assets are not
 redistributed by the source repository. See
@@ -205,6 +244,11 @@ When building a combined distribution with third-party components, also read
 
 Public capability claims and the strict release gate are documented in
 [docs/RELEASE_READINESS.md](./docs/RELEASE_READINESS.md).
+
+Local preview bundles use an ad-hoc signature for launch testing. Before
+commercial distribution, run `scripts/sign_and_notarize_release.sh` with
+`AURA_CODESIGN_IDENTITY` set to a Developer ID Application identity; set
+`AURA_NOTARY_PROFILE` to require notarization, stapling, and validation.
 
 ---
 Copyright (c) 2024-2026 Aura DAW Project.

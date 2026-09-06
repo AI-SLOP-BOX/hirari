@@ -3,7 +3,7 @@
 use crate::slint_ui::*;
 use crate::ui::recovery::summarize_candidates;
 use aura_core_bridge::AuraCore;
-use slint::Model;
+use slint::{Model, SharedString};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -72,6 +72,9 @@ pub(crate) fn install_telemetry_loop(
                 ui.set_ui_timer(ui_timer as f32);
                 ui.set_undo_depth(core_tele.undo_depth() as i32);
                 ui.set_redo_depth(core_tele.redo_depth() as i32);
+                if let Ok(Some(generation)) = core_tele.poll_preview_audio_decode() {
+                    ui.set_last_action(format!("PREVIEWING · generation {}", generation).into());
+                }
 
                 crate::ui::plugin_telemetry::update_plugin_telemetry(
                     &ui,
@@ -285,6 +288,26 @@ pub(crate) fn install_telemetry_loop(
                     }
                 }
                 ui.set_audio_device_ready(audio_ready);
+                // Keep the native CoreAudio catalog visible to the settings
+                // surface so device identity and I/O capabilities are
+                // inspectable during a live session.
+                let device_catalog = core_tele.list_audio_devices_json();
+                ui.set_audio_device_catalog(device_catalog.clone().into());
+                if let Ok(devices) = serde_json::from_str::<serde_json::Value>(&device_catalog) {
+                    let names = devices
+                        .as_array()
+                        .map(|entries| {
+                            entries
+                                .iter()
+                                .filter_map(|entry| {
+                                    entry.get("name").and_then(|name| name.as_str())
+                                })
+                                .map(SharedString::from)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    ui.set_audio_device_names(slint::ModelRc::new(slint::VecModel::from(names)));
+                }
                 let sample_rate = core_tele.get_sample_rate();
                 ui.set_audio_sample_rate(if sample_rate.is_finite() {
                     sample_rate.max(0.0) as f32

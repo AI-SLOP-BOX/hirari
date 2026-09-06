@@ -5,7 +5,11 @@ pub struct MidiEvent {
     pub data1: u8,
     pub data2: u8,
 }
-impl MidiEvent { fn validate(&self) -> bool { self.status & 0x80 != 0 && (self.status & 0xF0) != 0xF0 } }
+impl MidiEvent {
+    fn validate(&self) -> bool {
+        self.status & 0x80 != 0 && (self.status & 0xF0) != 0xF0
+    }
+}
 
 pub struct Articulation {
     pub id: u32,
@@ -15,7 +19,20 @@ pub struct Articulation {
     pub channel_remap: Option<u8>,
     pub delay_ms: f32,
 }
-impl Articulation { fn validate(&self) -> bool { self.id != 0 && !self.name.trim().is_empty() && self.name.len() <= 128 && self.triggers.len() <= 64 && self.triggers.iter().all(MidiEvent::validate) && self.velocity_scale.is_finite() && (0.0..=4.0).contains(&self.velocity_scale) && self.channel_remap.map(|ch| ch < 16).unwrap_or(true) && self.delay_ms.is_finite() && (-10_000.0..=10_000.0).contains(&self.delay_ms) } }
+impl Articulation {
+    fn validate(&self) -> bool {
+        self.id != 0
+            && !self.name.trim().is_empty()
+            && self.name.len() <= 128
+            && self.triggers.len() <= 64
+            && self.triggers.iter().all(MidiEvent::validate)
+            && self.velocity_scale.is_finite()
+            && (0.0..=4.0).contains(&self.velocity_scale)
+            && self.channel_remap.map(|ch| ch < 16).unwrap_or(true)
+            && self.delay_ms.is_finite()
+            && (-10_000.0..=10_000.0).contains(&self.delay_ms)
+    }
+}
 
 pub struct ArticulationSet {
     pub articulations: HashMap<u32, Articulation>,
@@ -71,12 +88,24 @@ impl ArticulationOrchestrator {
         // INDUSTRIAL: Implementation of high-performance set management.
         // Rust's safe memory management handles large performance sets with
         // absolute bit-accuracy and high performance.
-        if track_id != 0 && set.articulations.len() <= 4096 && set.articulations.values().all(Articulation::validate) { self.track_sets.insert(track_id, set); }
+        if track_id != 0
+            && set.articulations.len() <= 4096
+            && set.articulations.values().all(Articulation::validate)
+        {
+            self.track_sets.insert(track_id, set);
+        }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide articulation performance state.
     pub fn audit_performance(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic performance auditing logic.
-        self.track_sets.iter().all(|(track, set)| *track != 0 && set.articulations.len() <= 4096 && set.articulations.iter().all(|(id, art)| *id == art.id && art.validate()))
+        self.track_sets.iter().all(|(track, set)| {
+            *track != 0
+                && set.articulations.len() <= 4096
+                && set
+                    .articulations
+                    .iter()
+                    .all(|(id, art)| *id == art.id && art.validate())
+        })
     }
 }

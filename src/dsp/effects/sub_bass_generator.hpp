@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 #include "../iprocessor.hpp"
 #include "../utils/dsp_utils.hpp"
 
@@ -16,6 +17,7 @@ namespace Aura::DSP::Effects {
 class SubBassGenerator : public IProcessor {
 public:
     SubBassGenerator(double sr = 44100.0) : m_sampleRate(sr) {
+        setMix(0.5f);
         reset();
     }
 
@@ -99,12 +101,15 @@ public:
         if (id == 0) m_mix = std::clamp(std::isfinite(value) ? value : 0.0f, 0.0f, 1.0f);
     }
     float getParameter(uint32_t id) const noexcept override { return (id == 0) ? m_mix : 0.0f; }
+    uint32_t getNumParameters() const noexcept override { return 1; }
+    bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override { if (id != 0) return false; out = {0.0f, 1.0f, false}; return true; }
+    void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override { if (outName && maxSize) std::snprintf(outName, maxSize, "%s", id == 0 ? "Sub Amount" : ""); }
 
 private:
     double m_sampleRate = 44100.0;
     float m_env = 0.0f, m_envAttack = 0.995f, m_envRelease = 0.9998f;
     float m_lpfState = 0.0f, m_lastLpf = 0.0f, m_dcBlockState = 0.0f, m_lpfCoeff = 0.9775f;
-    float m_mix = 0.5f, m_targetFreq = 50.0f, m_currFreq = 50.0f;
+    float m_targetFreq = 50.0f, m_currFreq = 50.0f;
     double m_phase = 0.0;
     uint32_t m_zcCount = 0;
     bool m_isPositive = false;

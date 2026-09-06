@@ -133,7 +133,9 @@ mod tests {
         .unwrap();
         assert_eq!(cues.len(), 4);
         assert_eq!(cues[0].clock.tick, MasterTick(0));
-        assert_eq!(cues[2].clock.tick, MasterTick(1_000));
+        // At 120 BPM one beat is 0.5 seconds, so the second cue (beat 1)
+        // lands at 500 master ticks when the timeline runs at 1 kHz.
+        assert_eq!(cues[2].clock.tick, MasterTick(500));
     }
 
     #[test]

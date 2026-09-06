@@ -10,16 +10,48 @@ pub struct AudioVerification {
     pub sha256: String,
 }
 
-pub fn verify(samples: &[f32], max_peak: f32, min_rms: f32) -> Result<AudioVerification, &'static str> {
-    if samples.is_empty() || !max_peak.is_finite() || max_peak < 0.0 || !min_rms.is_finite() || min_rms < 0.0 { return Err("invalid audio verification limits"); }
-    if samples.iter().any(|sample| !sample.is_finite()) { return Err("render contains non-finite samples"); }
-    let peak = samples.iter().map(|sample| sample.abs()).fold(0.0, f32::max);
-    let rms = (samples.iter().map(|sample| f64::from(*sample).powi(2)).sum::<f64>() / samples.len() as f64).sqrt() as f32;
-    if peak > max_peak { return Err("render peak exceeds CI limit"); }
-    if rms < min_rms { return Err("render RMS is below CI limit"); }
+pub fn verify(
+    samples: &[f32],
+    max_peak: f32,
+    min_rms: f32,
+) -> Result<AudioVerification, &'static str> {
+    if samples.is_empty()
+        || !max_peak.is_finite()
+        || max_peak < 0.0
+        || !min_rms.is_finite()
+        || min_rms < 0.0
+    {
+        return Err("invalid audio verification limits");
+    }
+    if samples.iter().any(|sample| !sample.is_finite()) {
+        return Err("render contains non-finite samples");
+    }
+    let peak = samples
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0, f32::max);
+    let rms = (samples
+        .iter()
+        .map(|sample| f64::from(*sample).powi(2))
+        .sum::<f64>()
+        / samples.len() as f64)
+        .sqrt() as f32;
+    if peak > max_peak {
+        return Err("render peak exceeds CI limit");
+    }
+    if rms < min_rms {
+        return Err("render RMS is below CI limit");
+    }
     let mut hash = Sha256::new();
-    for sample in samples { hash.update(sample.to_le_bytes()); }
-    Ok(AudioVerification { sample_count: samples.len(), peak, rms, sha256: format!("{:x}", hash.finalize()) })
+    for sample in samples {
+        hash.update(sample.to_le_bytes());
+    }
+    Ok(AudioVerification {
+        sample_count: samples.len(),
+        peak,
+        rms,
+        sha256: format!("{:x}", hash.finalize()),
+    })
 }
 
 #[cfg(test)]

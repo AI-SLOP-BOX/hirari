@@ -254,6 +254,106 @@ rust::Vec<float> AuraUnifiedEngine::get_region_waveform(uint32_t tid, uint32_t r
 
     return peaks; // Initially empty, will populate on next UI poll
 }
+
+rust::Vec<float> AuraUnifiedEngine::get_region_audio_samples(
+    uint32_t tid, uint32_t rid, uint32_t maxSamples) {
+    rust::Vec<float> samples;
+    if (maxSamples == 0 || maxSamples > 16u * 1024u * 1024u) return samples;
+    std::string regionPath;
+    {
+        std::lock_guard<std::mutex> lock(m_tracksMutex);
+        for (const auto& track : m_tracks) {
+            if (!track || track->getId() != tid) continue;
+            for (const auto& region : track->getRegions()) {
+                if (region.id == rid) { regionPath = region.path; break; }
+            }
+            break;
+        }
+    }
+    if (regionPath.empty()) return samples;
+    auto audio = m_audioDecoderManager.importFile(regionPath);
+    if (!audio || audio->getNumChannels() == 0 || audio->getNumSamples() == 0) return samples;
+    // Never return a partial region: callers write the returned buffer back as
+    // a replacement, so truncating here would silently destroy the tail.
+    if (audio->getNumSamples() > maxSamples) return samples;
+    const uint32_t count = audio->getNumSamples();
+    const float* left = audio->getReadPointer(0);
+    if (!left || count == 0) return samples;
+    samples.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        samples.push_back(std::isfinite(left[i]) ? left[i] : 0.0f);
+    }
+    return samples;
+}
+
+rust::Vec<float> AuraUnifiedEngine::get_region_audio_interleaved(
+    uint32_t tid, uint32_t rid, uint32_t maxFrames) {
+    rust::Vec<float> samples;
+    if (maxFrames == 0 || maxFrames > 16u * 1024u * 1024u) return samples;
+    std::string regionPath;
+    {
+        std::lock_guard<std::mutex> lock(m_tracksMutex);
+        for (const auto& track : m_tracks) {
+            if (!track || track->getId() != tid) continue;
+            for (const auto& region : track->getRegions()) {
+                if (region.id == rid) { regionPath = region.path; break; }
+            }
+            break;
+        }
+    }
+    if (regionPath.empty()) return samples;
+    auto audio = m_audioDecoderManager.importFile(regionPath);
+    if (!audio || audio->getNumChannels() != 2 || audio->getNumSamples() > maxFrames) return samples;
+    const float* left = audio->getReadPointer(0);
+    const float* right = audio->getReadPointer(1);
+    if (!left || !right || audio->getNumSamples() == 0) return samples;
+    samples.reserve(static_cast<size_t>(audio->getNumSamples()) * 2u);
+    for (uint32_t i = 0; i < audio->getNumSamples(); ++i) {
+        samples.push_back(std::isfinite(left[i]) ? left[i] : 0.0f);
+        samples.push_back(std::isfinite(right[i]) ? right[i] : 0.0f);
+    }
+    return samples;
+}
+
+double AuraUnifiedEngine::get_region_sample_rate(uint32_t tid, uint32_t rid) {
+    if (tid == 0 || rid == 0) return 0.0;
+    std::string regionPath;
+    {
+        std::lock_guard<std::mutex> lock(m_tracksMutex);
+        for (const auto& track : m_tracks) {
+            if (!track || track->getId() != tid) continue;
+            for (const auto& region : track->getRegions()) {
+                if (region.id == rid) { regionPath = region.path; break; }
+            }
+            break;
+        }
+    }
+    if (regionPath.empty()) return 0.0;
+    // AudioBuffer intentionally carries no source-rate metadata, so ask the
+    // decoder manager for the rate captured during the same import operation.
+    auto audio = m_audioDecoderManager.importFile(regionPath);
+    if (!audio) return 0.0;
+    const double rate = m_audioDecoderManager.getLastSampleRate();
+    return std::isfinite(rate) && rate > 0.0 ? rate : 0.0;
+}
+
+uint32_t AuraUnifiedEngine::get_region_channel_count(uint32_t tid, uint32_t rid) {
+    std::string regionPath;
+    {
+        std::lock_guard<std::mutex> lock(m_tracksMutex);
+        for (const auto& track : m_tracks) {
+            if (!track || track->getId() != tid) continue;
+            for (const auto& region : track->getRegions()) {
+                if (region.id == rid) { regionPath = region.path; break; }
+            }
+            break;
+        }
+    }
+    if (regionPath.empty()) return 0;
+    auto audio = m_audioDecoderManager.importFile(regionPath);
+    return audio ? audio->getNumChannels() : 0;
+}
+
 void AuraUnifiedEngine::browser_preview(std::string_view path) {
     // Browser actions run on the control/UI side, never from processBlock.
     // Decode before publishing the immutable snapshot so the audio callback
@@ -341,12 +441,19 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
     // fresh request flag for each invocation.
     if (!m_bounceRunning.load(std::memory_order_acquire)) {
         m_bounceCancelRequested.store(false, std::memory_order_release);
+        m_bouncePauseRequested.store(false, std::memory_order_release);
     }
 
     m_bounceProgress.store(0.0f, std::memory_order_release);
     m_bounceState.store(static_cast<uint32_t>(BounceState::Rendering), std::memory_order_release);
 
     const uint64_t owner = aura_callback_thread_token();
+    const bool previousOfflineRenderThread = aura_offline_render_thread;
+    aura_offline_render_thread = true;
+    struct OfflineRenderThreadGuard final {
+        bool previous;
+        ~OfflineRenderThreadGuard() { aura_offline_render_thread = previous; }
+    } offlineRenderThreadGuard{previousOfflineRenderThread};
     bool expected = false;
     const auto offlineAcquireDeadline = std::chrono::steady_clock::now() +
         std::chrono::seconds(5);
@@ -386,6 +493,25 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
             active->store(false, std::memory_order_release);
         }
     } offlineRenderGuard{&m_offlineRenderOwner, &m_offlineRenderActive};
+
+    // Pause is an offline-render control-plane operation.  It is deliberately
+    // checked between blocks so the audio callback is never blocked and the
+    // last completed block remains a valid, deterministic checkpoint.
+    const auto waitForBounceControl = [this]() -> bool {
+        for (;;) {
+            if (m_bounceCancelRequested.load(std::memory_order_acquire)) {
+                return false;
+            }
+            if (!m_bouncePauseRequested.load(std::memory_order_acquire)) {
+                m_bounceState.store(static_cast<uint32_t>(BounceState::Rendering),
+                                    std::memory_order_release);
+                return true;
+            }
+            m_bounceState.store(static_cast<uint32_t>(BounceState::Paused),
+                                std::memory_order_release);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    };
 
     const double configuredRate = m_sampleRate.load(std::memory_order_acquire);
     if (!std::isfinite(configuredRate) || configuredRate <= 0.0 || configuredRate > 384000.0) {
@@ -429,8 +555,23 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
         }
     }
 
-    const uint64_t fallbackLength = static_cast<uint64_t>(outputRate) * 30u;
+    // Empty projects still need a valid, non-zero render for preview/export
+    // callers, but a thirty-second silent fallback makes retries needlessly
+    // expensive (especially for large track graphs).  Use a compact one
+    // second bed; real projects are always bounded by their actual content
+    // extent above.
+    const uint64_t fallbackLength = static_cast<uint64_t>(outputRate);
+    const bool rangeActive = m_offlineRenderRangeActive.load(std::memory_order_acquire);
+    const uint64_t rangeStart = m_offlineRenderStartSample.load(std::memory_order_acquire);
+    const uint64_t rangeEnd = m_offlineRenderEndSample.load(std::memory_order_acquire);
+    if (rangeActive && rangeStart >= rangeEnd) {
+        finishOfflineRender();
+        return false;
+    }
     uint64_t boundedLength = projectEnd > 0 ? projectEnd : fallbackLength;
+    if (rangeActive) {
+        boundedLength = rangeEnd - rangeStart;
+    }
     // A render target may contain stateful processors (reverb, delay, vocal
     // tails) whose output continues after the last region. Keep this tail
     // explicit and bounded instead of silently truncating at projectEnd.
@@ -440,6 +581,15 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
         boundedLength = boundedLength > UINT64_MAX - tail
             ? UINT64_MAX
             : boundedLength + tail;
+    }
+    // The look-ahead limiter owns a small delay line. Always reserve that
+    // latency at the end of a bounce, even when the user-selected effect tail
+    // is zero, otherwise the final delayed samples disappear from the file.
+    if (m_masterLimiter) {
+        const uint64_t limiterTail = m_masterLimiter->getTailSamples();
+        boundedLength = boundedLength > UINT64_MAX - limiterTail
+            ? UINT64_MAX
+            : boundedLength + limiterTail;
     }
     const uint32_t totalSamples = static_cast<uint32_t>(std::min<uint64_t>(boundedLength, UINT32_MAX));
     const std::string outputPath(path);
@@ -464,6 +614,7 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
         bounceR = std::make_unique<AudioBuffer>(1, totalSamples);
     }
     AudioBuffer blockBuffer(2, 1024);
+    bool usedDirectTrackFallback = false;
     
     uint64_t originalPlayhead = m_playhead.load();
     bool wasPlaying = m_isPlaying.load();
@@ -481,7 +632,7 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
         }
     } playbackStateGuard{&m_playhead, &m_isPlaying, originalPlayhead, wasPlaying};
     
-    m_playhead.store(0); 
+    m_playhead.store(rangeActive ? rangeStart : 0);
     m_isPlaying.store(true);
     // Offline renders must be reproducible. Clear the master limiter's
     // look-ahead history so a previous playback/render cannot contaminate the
@@ -495,7 +646,7 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
     }
     
     for (uint32_t s = 0; s < totalSamples; s += 1024) {
-        if (m_bounceCancelRequested.load(std::memory_order_acquire)) {
+        if (!waitForBounceControl()) {
             m_playhead.store(originalPlayhead);
             m_isPlaying.store(wasPlaying);
             finishOfflineRender();
@@ -505,6 +656,30 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
         }
         uint32_t sz = std::min(1024u, totalSamples - s);
         processBlock(blockBuffer, 0, sz);
+        // A stale callback snapshot can fail closed during a device handoff.
+        // If the prepared project clearly contains audio but the graph
+        // produced an entirely empty block, render the immutable track
+        // snapshots directly as a bounded recovery path. This keeps export
+        // useful while the realtime graph publishes its next generation and
+        // avoids silently shipping a valid-looking empty WAV.
+        bool blockHasSignal = false;
+        for (uint32_t sample = 0; sample < sz && !blockHasSignal; ++sample) {
+            blockHasSignal = std::abs(blockBuffer.getReadPointer(0)[sample]) > 1.0e-12f ||
+                              std::abs(blockBuffer.getReadPointer(1)[sample]) > 1.0e-12f;
+        }
+        if (!blockHasSignal && projectEnd > 0) {
+            usedDirectTrackFallback = true;
+            AudioBuffer directTrackBuffer(2, 1024);
+            std::lock_guard<std::mutex> lock(m_tracksMutex);
+            for (const auto& track : m_tracks) {
+                if (!track || track->getType() == Track::Type::Bus ||
+                    track->getType() == Track::Type::Midi) continue;
+                directTrackBuffer.clear(sz);
+                if (track->processInto(directTrackBuffer, sz,
+                                       (rangeActive ? rangeStart : 0) + s))
+                    blockBuffer.addFrom(directTrackBuffer, sz);
+            }
+        }
         if (format == 0) {
             if (!pcmStream->writeFrames(blockBuffer.getReadPointer(0),
                                         blockBuffer.getReadPointer(1), sz)) {
@@ -551,6 +726,9 @@ bool AuraUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
             return false;
         }
         finishOfflineRender();
+        if (usedDirectTrackFallback) {
+            ::Aura::Core::Diagnostics::LogBuffer::post(0, 0, "BOUNCE_DIRECT_TRACK_FALLBACK_USED");
+        }
         m_bounceProgress.store(1.0f, std::memory_order_release);
         m_bounceState.store(static_cast<uint32_t>(BounceState::Completed), std::memory_order_release);
         return true;
@@ -632,6 +810,7 @@ bool AuraUnifiedEngine::bounce_project_async(std::string_view path, uint32_t for
     }
     m_bounceRunning.store(true, std::memory_order_release);
     m_bounceCancelRequested.store(false, std::memory_order_release);
+    m_bouncePauseRequested.store(false, std::memory_order_release);
     m_bounceProgress.store(0.0f, std::memory_order_release);
     m_bounceState.store(static_cast<uint32_t>(BounceState::Queued), std::memory_order_release);
     const std::string outputPath(path);
@@ -657,13 +836,29 @@ uint32_t AuraUnifiedEngine::get_bounce_state() const noexcept {
 bool AuraUnifiedEngine::cancel_bounce() noexcept {
     const uint32_t state = m_bounceState.load(std::memory_order_acquire);
     if (state != static_cast<uint32_t>(BounceState::Queued) &&
-        state != static_cast<uint32_t>(BounceState::Rendering)) {
+        state != static_cast<uint32_t>(BounceState::Rendering) &&
+        state != static_cast<uint32_t>(BounceState::Paused)) {
         return false;
     }
     {
         std::lock_guard<std::mutex> publishLock(m_bouncePublishMutex);
         m_bounceCancelRequested.store(true, std::memory_order_release);
+        m_bouncePauseRequested.store(false, std::memory_order_release);
     }
+    return true;
+}
+
+bool AuraUnifiedEngine::pause_bounce() noexcept {
+    const uint32_t state = m_bounceState.load(std::memory_order_acquire);
+    if (state != static_cast<uint32_t>(BounceState::Rendering)) return false;
+    m_bouncePauseRequested.store(true, std::memory_order_release);
+    return true;
+}
+
+bool AuraUnifiedEngine::resume_bounce() noexcept {
+    const uint32_t state = m_bounceState.load(std::memory_order_acquire);
+    if (state != static_cast<uint32_t>(BounceState::Paused)) return false;
+    m_bouncePauseRequested.store(false, std::memory_order_release);
     return true;
 }
 

@@ -11,6 +11,12 @@
 #include <thread>
 #include <cmath>
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
+#endif
+
 #include "../log_buffer.hpp"
 
 namespace Aura::Core::Plugins {
@@ -80,6 +86,7 @@ public:
         m_stateTransition.store(true, std::memory_order_release);
         m_processFunction.store(nullptr, std::memory_order_release);
         waitForQuiescence();
+        closeNativeEditor(0);
         if (m_auInstance) {
             AudioUnitUninitialize(m_auInstance);
             AudioComponentInstanceDispose(m_auInstance);
@@ -108,6 +115,87 @@ public:
         // prepareToPlay() is the point at which it becomes operational.
         m_state.store(LoadState::InstanceCreated, std::memory_order_release);
         return true;
+    }
+
+    // GUI discovery is deliberately separate from audio readiness.  An AU
+    // can render correctly while exposing no Cocoa editor, and callers must
+    // never treat a successful audio instance as proof that a native view can
+    // be embedded.
+    bool hasNativeEditor() const noexcept override {
+#if defined(__APPLE__)
+        if (!m_auInstance) return false;
+        UInt32 dataSize = 0;
+        Boolean writable = false;
+        return AudioUnitGetPropertyInfo(
+                   m_auInstance, kAudioUnitProperty_CocoaUI,
+                   kAudioUnitScope_Global, 0, &dataSize, &writable) == noErr &&
+               dataSize >= sizeof(AudioUnitCocoaViewInfo);
+#else
+        return false;
+#endif
+    }
+
+    uint64_t openNativeEditor(uintptr_t parent) noexcept override {
+#if defined(__APPLE__)
+        if (!m_auInstance || parent == 0 || m_nativeEditorView) return 0;
+        UInt32 propertySize = 0;
+        Boolean writable = false;
+        if (AudioUnitGetPropertyInfo(m_auInstance, kAudioUnitProperty_CocoaUI,
+                                     kAudioUnitScope_Global, 0, &propertySize, &writable) != noErr ||
+            propertySize < sizeof(AudioUnitCocoaViewInfo)) return 0;
+        AudioUnitCocoaViewInfo info{};
+        UInt32 actualSize = sizeof(info);
+        if (AudioUnitGetProperty(m_auInstance, kAudioUnitProperty_CocoaUI,
+                                 kAudioUnitScope_Global, 0, &info, &actualSize) != noErr ||
+            !info.mCocoaViewBundleLocation || !info.mCocoaViewClass) return 0;
+        m_cocoaBundle = CFBundleCreate(nullptr, info.mCocoaViewBundleLocation);
+        if (!m_cocoaBundle || !CFBundleLoadExecutable(m_cocoaBundle)) {
+            if (m_cocoaBundle) { CFRelease(m_cocoaBundle); m_cocoaBundle = nullptr; }
+            return 0;
+        }
+        char className[256]{};
+        if (!CFStringGetCString(info.mCocoaViewClass, className, sizeof(className), kCFStringEncodingUTF8)) {
+            closeNativeEditor(0);
+            return 0;
+        }
+        Class factoryClass = objc_getClass(className);
+        if (!factoryClass) { closeNativeEditor(0); return 0; }
+        using SendId = id (*)(id, SEL);
+        using SendAUView = id (*)(id, SEL, AudioUnit);
+        id factory = reinterpret_cast<SendId>(objc_msgSend)(reinterpret_cast<id>(factoryClass), sel_registerName("alloc"));
+        factory = factory ? reinterpret_cast<SendId>(objc_msgSend)(factory, sel_registerName("init")) : nil;
+        id view = factory ? reinterpret_cast<SendAUView>(objc_msgSend)(factory, sel_registerName("uiViewForAudioUnit:"), m_auInstance) : nil;
+        if (!view) {
+            if (factory) reinterpret_cast<SendId>(objc_msgSend)(factory, sel_registerName("release"));
+            closeNativeEditor(0);
+            return 0;
+        }
+        using SendSubview = void (*)(id, SEL, id);
+        reinterpret_cast<SendSubview>(objc_msgSend)(reinterpret_cast<id>(parent), sel_registerName("addSubview:"), view);
+        m_nativeEditorFactory = factory;
+        m_nativeEditorView = view;
+        return reinterpret_cast<uint64_t>(view);
+#else
+        (void)parent;
+        return 0;
+#endif
+    }
+
+    bool closeNativeEditor(uint64_t session) noexcept override {
+#if defined(__APPLE__)
+        if (!m_nativeEditorView || (session != 0 && session != reinterpret_cast<uint64_t>(m_nativeEditorView))) return false;
+        using SendVoid = void (*)(id, SEL);
+        reinterpret_cast<SendVoid>(objc_msgSend)(reinterpret_cast<id>(m_nativeEditorView), sel_registerName("removeFromSuperview"));
+        reinterpret_cast<SendVoid>(objc_msgSend)(reinterpret_cast<id>(m_nativeEditorView), sel_registerName("release"));
+        if (m_nativeEditorFactory) reinterpret_cast<SendVoid>(objc_msgSend)(reinterpret_cast<id>(m_nativeEditorFactory), sel_registerName("release"));
+        m_nativeEditorView = nullptr;
+        m_nativeEditorFactory = nullptr;
+        if (m_cocoaBundle) { CFBundleUnloadExecutable(m_cocoaBundle); CFRelease(m_cocoaBundle); m_cocoaBundle = nullptr; }
+        return true;
+#else
+        (void)session;
+        return false;
+#endif
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
@@ -214,7 +302,14 @@ public:
         const auto* events = midi.getEvents();
         for (size_t i = 0; i < midi.size(); ++i) {
             const auto& ev = events[i];
-            if (ev.size >= 3) {
+            // AudioUnit MIDI dispatch accepts a legacy 3-byte message, not a
+            // 128-bit UMP or a variable-length SysEx payload. Also reject
+            // timestamps outside this render slice instead of truncating a
+            // uint64_t offset into an unrelated host sample.
+            const uint8_t status = ev.size > 0 ? ev.data[0] & 0xF0u : 0u;
+            if (ev.size == 3 && ev.data[0] != 0xF0u && status != 0xF0u &&
+                ev.sampleOffset < numSamples &&
+                ev.sampleOffset <= static_cast<uint64_t>(UINT32_MAX)) {
                 MusicDeviceMIDIEvent(m_auInstance, ev.data[0], ev.data[1], ev.data[2], (uint32_t)ev.sampleOffset);
             }
         }
@@ -508,6 +603,11 @@ private:
     std::atomic<uint64_t> m_nonFiniteSamples{0};
     std::atomic<bool> m_stateRestoreFailed{false};
     bool m_transitionPreviousBypass = false;
+#if defined(__APPLE__)
+    CFBundleRef m_cocoaBundle = nullptr;
+    void* m_nativeEditorFactory = nullptr;
+    void* m_nativeEditorView = nullptr;
+#endif
 
     struct ParameterCmd { uint32_t id; float value; uint32_t offsetSamples; };
 

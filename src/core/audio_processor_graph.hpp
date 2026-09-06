@@ -199,6 +199,18 @@ public:
                 continue;
             }
 
+            // Processors may detect an internal invariant violation without
+            // throwing (the realtime contract is noexcept).  Consume that
+            // edge-triggered signal on the audio thread and quarantine the
+            // node so one bad plugin cannot poison every subsequent block.
+            if (node->takeWatchdogTrip()) {
+                m_watchdogTrips.fetch_add(1, std::memory_order_relaxed);
+                if (nodeIndex < m_faultedNodes.size()) m_faultedNodes[nodeIndex] = true;
+                buffer.clear();
+                ++nodeIndex;
+                continue;
+            }
+
             sanitizeBuffer(buffer);
 
             if (mix < 1.0f) {
@@ -269,6 +281,10 @@ public:
         return m_processorFaults.load(std::memory_order_relaxed);
     }
 
+    uint64_t getWatchdogTripCount() const noexcept {
+        return m_watchdogTrips.load(std::memory_order_relaxed);
+    }
+
     uint32_t getFaultedNodeCount() const noexcept {
         uint32_t count = 0;
         for (const bool faulted : m_faultedNodes) if (faulted) ++count;
@@ -325,6 +341,7 @@ private:
     std::atomic<uint64_t> m_sanitizedSamples{0};
     std::atomic<uint64_t> m_rejectedBlocks{0};
     std::atomic<uint64_t> m_processorFaults{0};
+    std::atomic<uint64_t> m_watchdogTrips{0};
 };
 
 } // namespace Aura::Core

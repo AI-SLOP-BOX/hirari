@@ -9,6 +9,7 @@
 #include <utility>
 #include <mutex>
 #include <set>
+#include <limits>
 #include "../audio_buffer.hpp"
 #include "timeline_system.hpp"
 #include "../../io/audio_export_engine.hpp"
@@ -172,7 +173,19 @@ public:
                          std::to_string(job.trackId));
                 return false;
             }
-            uint64_t endSample = timeline.getTrackEndSample(job.trackId);
+            const uint64_t contentEndSample = timeline.getTrackEndSample(job.trackId);
+            uint64_t endSample = contentEndSample;
+            const uint64_t tailSamples = timeline.getTrackTailSamples(job.trackId);
+            // Keep offline delivery bounded while preserving the complete
+            // processor tail (up to the same 30-second safety cap used by
+            // the Rust quick-export planner).
+            const uint64_t maxTail = static_cast<uint64_t>(job.format.sampleRate) * 30u;
+            const uint64_t boundedTail = std::min(tailSamples, maxTail);
+            if (endSample > std::numeric_limits<uint64_t>::max() - boundedTail) {
+                setError("advanced export tail range overflow");
+                return false;
+            }
+            endSample += boundedTail;
             if (endSample == 0) {
                 setError("advanced export track has no audio range: " +
                          std::to_string(job.trackId));

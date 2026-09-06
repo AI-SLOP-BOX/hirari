@@ -15,12 +15,16 @@ namespace Aura::DSP::Effects {
  */
 class PsychoAcousticFocus : public IProcessor {
 public:
-    PsychoAcousticFocus(double sr = 44100.0) : m_sampleRate(sr) {
+    PsychoAcousticFocus(double sr = 44100.0) : m_sampleRate(
+        std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0) {
         updateCoefficients();
     }
 
+    std::string getName() const override { return "Psycho Acoustic Focus"; }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
+
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0;
         updateCoefficients();
     }
 
@@ -29,6 +33,7 @@ public:
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
         (void)midi; (void)context;
+        if (m_bypassed) return;
         const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 32);
         const float amount = std::clamp(m_focusAmount.getNextValue(), 0.0f, 1.0f);
         for (uint32_t c = 0; c < channels; ++c) {
@@ -50,6 +55,7 @@ public:
 
     void reset() noexcept override {
         std::fill(m_hpfState.begin(), m_hpfState.end(), 0.0f);
+        std::fill(m_lastIn.begin(), m_lastIn.end(), 0.0f);
     }
 
     void setFocusAmount(float val) { m_focusAmount.setTarget(val); }

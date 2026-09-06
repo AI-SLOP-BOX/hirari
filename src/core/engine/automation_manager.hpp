@@ -63,8 +63,20 @@ public:
                     const float current = state.currentValues[param].load(std::memory_order_relaxed);
                     const float target = state.targetValues[param].load(std::memory_order_relaxed);
                     const float next = current + (target - current) * blockCoeff;
-                    state.currentValues[param].store(std::isfinite(next) ? next : target,
-                                                     std::memory_order_relaxed);
+                    const float resolved = std::isfinite(next) ? next : target;
+                    state.currentValues[param].store(resolved, std::memory_order_relaxed);
+                    // Retire settled lanes so large projects do not scan all
+                    // 512 parameters on every audio block. Clear first and
+                    // restore the bit if a concurrent UI edit arrived.
+                    if (std::abs(target - resolved) <= 1.0e-5f) {
+                        const uint64_t bitMask = uint64_t{1} << bit;
+                        state.activeMask[wordIndex].fetch_and(~bitMask,
+                                                              std::memory_order_release);
+                        if (state.targetValues[param].load(std::memory_order_acquire) != target) {
+                            state.activeMask[wordIndex].fetch_or(bitMask,
+                                                                 std::memory_order_release);
+                        }
+                    }
                     active &= active - 1u;
                 }
             }

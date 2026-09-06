@@ -254,6 +254,10 @@ rust::String AuraUnifiedEngine::get_project_layout_json() const {
                 !std::filesystem::exists(std::filesystem::path(region.path), pathError);
             ss << "\"path\":\"" << jsonString(region.path) << "\",";
             ss << "\"missing\":" << (missing ? "true" : "false") << ",";
+            // Distinguish a missing file from a file that exists but was not
+            // decoded during project hydration; clients can surface a relink
+            // or decoder error instead of silently showing an empty region.
+            ss << "\"audio_loaded\":" << (region.audio ? "true" : "false") << ",";
             ss << "\"clip_gain\":" << jsonNumber(region.clipGain) << ",";
             ss << "\"fade_in_samples\":" << region.fadeInSamples << ",";
             ss << "\"fade_out_samples\":" << region.fadeOutSamples << ",";
@@ -261,6 +265,16 @@ rust::String AuraUnifiedEngine::get_project_layout_json() const {
             ss << ",\"warp_ratio\":" << jsonNumber(region.warpRatio);
             ss << ",\"pitch_semitones\":" << jsonNumber(region.pitchSemitones);
             ss << ",\"loop_count\":" << region.loopCount;
+            ss << ",\"range_edits\":[";
+            for (size_t ei = 0; ei < region.rangeEdits.size(); ++ei) {
+                if (ei > 0) ss << ",";
+                const auto& edit = region.rangeEdits[ei];
+                ss << "{\"start\":" << edit.start << ",\"end\":" << edit.end
+                   << ",\"gain\":" << jsonNumber(edit.gain)
+                   << ",\"fade_in\":" << edit.fadeIn
+                   << ",\"fade_out\":" << edit.fadeOut << "}";
+            }
+            ss << "]";
             ss << ",\"audio_note_segments\":[";
             for (size_t si = 0; si < region.audioNoteSegments.size(); ++si) {
                 if (si > 0) ss << ",";
@@ -852,6 +866,29 @@ bool AuraUnifiedEngine::set_spatial_position(uint32_t tid, float x, float y, flo
     for (auto& t : m_tracks) {
         if (t->getId() == tid) {
             t->setSpatialPosition(x, y, z);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AuraUnifiedEngine::set_hrtf_kernel(uint32_t tid, const std::vector<float>& left,
+                                        const std::vector<float>& right) {
+    if (left.empty() || left.size() != right.size() ||
+        left.size() > ::Aura::DSP::Spatial::HolographicPanner::kMaxHrtfTaps) return false;
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks) {
+        if (track && track->getId() == tid)
+            return track->setHrtfKernel(left.data(), right.data(), static_cast<uint32_t>(left.size()));
+    }
+    return false;
+}
+
+bool AuraUnifiedEngine::clear_hrtf_kernel(uint32_t tid) {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks) {
+        if (track && track->getId() == tid) {
+            track->clearHrtfKernel();
             return true;
         }
     }

@@ -6,6 +6,8 @@ pub struct TruePeakLimiterEngine {
     pub delay_l: DelayLineEngine,
     pub delay_r: DelayLineEngine,
     pub current_gain: f32,
+    pub z2_l: f32,
+    pub z2_r: f32,
     pub z1_l: f32,
     pub z1_r: f32,
 }
@@ -24,6 +26,8 @@ impl TruePeakLimiterEngine {
             delay_l: DelayLineEngine::new(delay_samples + 1),
             delay_r: DelayLineEngine::new(delay_samples + 1),
             current_gain: 1.0,
+            z2_l: 0.0,
+            z2_r: 0.0,
             z1_l: 0.0,
             z1_r: 0.0,
         }
@@ -31,6 +35,8 @@ impl TruePeakLimiterEngine {
 
     pub fn reset(&mut self) {
         self.current_gain = 1.0;
+        self.z2_l = 0.0;
+        self.z2_r = 0.0;
         self.delay_l.reset();
         self.delay_r.reset();
         self.z1_l = 0.0;
@@ -60,13 +66,25 @@ impl TruePeakLimiterEngine {
             let in_l = if l[s].is_finite() { l[s] } else { 0.0 };
             let in_r = if r[s].is_finite() { r[s] } else { 0.0 };
 
-            // 1. TRUE PEAK DETECTION (4x Oversampling Simulation via Sinc)
+            // 1. TRUE PEAK DETECTION (4x inter-sample quadratic interpolation)
             let peak_l = in_l.abs();
             let peak_r = in_r.abs();
 
-            // Check inter-sample peak using 4-point approximation
-            let isp_l = (in_l * 0.6 + self.z1_l * 0.4).abs();
-            let isp_r = (in_r * 0.6 + self.z1_r * 0.4).abs();
+            // Interpolate the interval [z1, current] using the previous
+            // sample as curvature information, and inspect four fractional
+            // positions. This catches overs between discrete sample peaks.
+            let mut isp_l = 0.0f32;
+            let mut isp_r = 0.0f32;
+            for step in 1..=4 {
+                let t = step as f32 * 0.2;
+                let w0 = 0.5 * t * (t - 1.0);
+                let w1 = 1.0 - t * t;
+                let w2 = 0.5 * t * (t + 1.0);
+                isp_l = isp_l.max((w0 * self.z2_l + w1 * self.z1_l + w2 * in_l).abs());
+                isp_r = isp_r.max((w0 * self.z2_r + w1 * self.z1_r + w2 * in_r).abs());
+            }
+            self.z2_l = self.z1_l;
+            self.z2_r = self.z1_r;
             self.z1_l = in_l;
             self.z1_r = in_r;
 
@@ -101,6 +119,7 @@ impl TruePeakLimiterEngine {
             && self.delay_samples > 0
             && self.delay_l.audit_delay_line() && self.delay_r.audit_delay_line()
             && self.current_gain.is_finite() && (0.0..=1.0).contains(&self.current_gain)
+            && self.z2_l.is_finite() && self.z2_r.is_finite()
             && self.z1_l.is_finite() && self.z1_r.is_finite()
     }
 }

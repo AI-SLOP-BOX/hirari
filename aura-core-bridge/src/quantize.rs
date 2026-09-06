@@ -3,7 +3,12 @@ pub struct QuantizationOptions {
     pub swing: f32,
 }
 impl QuantizationOptions {
-    pub fn validate(&self) -> bool { self.strength.is_finite() && (0.0..=1.0).contains(&self.strength) && self.swing.is_finite() && (-1.0..=1.0).contains(&self.swing) }
+    pub fn validate(&self) -> bool {
+        self.strength.is_finite()
+            && (0.0..=1.0).contains(&self.strength)
+            && self.swing.is_finite()
+            && (-1.0..=1.0).contains(&self.swing)
+    }
 }
 
 pub struct QuantizationOrchestrator;
@@ -27,7 +32,9 @@ impl QuantizationOrchestrator {
         };
         let swing = if opt.swing.is_finite() {
             opt.swing.clamp(-1.0, 1.0) as f64
-        } else { 0.0 };
+        } else {
+            0.0
+        };
         // INDUSTRIAL: Implementation of high-performance grid resolution.
         // Rust's safe memory management handles large performance streams with
         // absolute bit-accuracy and zero-latency.
@@ -44,7 +51,9 @@ impl QuantizationOrchestrator {
                 let cell = (m_f / grid).round();
                 let swing_offset = if (cell as i64).rem_euclid(2) != 0 {
                     grid * 0.5 * swing
-                } else { 0.0 };
+                } else {
+                    0.0
+                };
                 let target = (cell * grid + swing_offset).max(0.0);
 
                 let result = m_f + (target - m_f) * strength;
@@ -59,6 +68,11 @@ impl QuantizationOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide rhythmic synchronization graph.
     pub fn audit_quantization(&self) -> bool {
-        true
+        let options = QuantizationOptions {
+            strength: 1.0,
+            swing: 0.0,
+        };
+        let targets = self.resolve_targets(&[0, 12_000, 24_000], 120.0, 48_000.0, &options);
+        options.validate() && targets.len() == 3 && targets.iter().all(|&sample| sample < u64::MAX)
     }
 }

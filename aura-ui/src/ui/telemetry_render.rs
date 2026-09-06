@@ -40,7 +40,7 @@ pub(crate) fn update_render_telemetry(
                 finish_success(ui, started_ms, output_path, render_lease, elapsed_ms);
                 return;
             }
-            let progress_available = state <= 5 && snapshot.progress_available;
+            let progress_available = state <= 6 && snapshot.progress_available;
             ui.set_render_progress_available(progress_available);
             ui.set_render_progress_indeterminate(state == 2 && !progress_available);
             ui.set_render_progress(snapshot.progress);

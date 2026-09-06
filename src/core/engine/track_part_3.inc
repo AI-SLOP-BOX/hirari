@@ -137,6 +137,17 @@
     float getSpatialX() const { return m_spatialX.load(std::memory_order_relaxed); }
     float getSpatialY() const { return m_spatialY.load(std::memory_order_relaxed); }
     float getSpatialZ() const { return m_spatialZ.load(std::memory_order_relaxed); }
+    bool setHrtfKernel(const float* left, const float* right, uint32_t taps) {
+        if (!left || !right || taps == 0 || taps > ::Aura::DSP::Spatial::HolographicPanner::kMaxHrtfTaps) {
+            return false;
+        }
+        invalidateFrozenForEdit();
+        return m_spatialPanner.setHrtfKernel(left, right, taps);
+    }
+    void clearHrtfKernel() {
+        invalidateFrozenForEdit();
+        m_spatialPanner.clearHrtfKernel();
+    }
     bool isMuted() const { return m_muted.load(std::memory_order_relaxed); }
     void setMuted(bool muted) { invalidateFrozenForEdit(); m_muted.store(muted, std::memory_order_relaxed); }
     bool isPhaseInverted() const { return m_phaseInvert.load(std::memory_order_relaxed); }
@@ -173,6 +184,12 @@
         auto it = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (it == m_regions.end()) return false;
+        for (const auto& current : it->audioNoteSegments) {
+            const bool sameStart = std::abs(current.startSeconds - segment.startSeconds) < 1e-9;
+            const bool overlaps = segment.startSeconds < current.endSeconds &&
+                                  current.startSeconds < segment.endSeconds;
+            if (overlaps && !sameStart) return false;
+        }
         auto segmentIt = std::find_if(it->audioNoteSegments.begin(), it->audioNoteSegments.end(),
             [&](const auto& current) { return std::abs(current.startSeconds - segment.startSeconds) < 1e-9; });
         if (segmentIt == it->audioNoteSegments.end()) it->audioNoteSegments.push_back(std::move(segment));
@@ -215,6 +232,47 @@
             [regionId](const Region& region) { return region.id == regionId; });
         if (it == m_regions.end() || it->audioNoteSegments.empty()) return false;
         it->audioNoteSegments.clear();
+        publishRegionSnapshot();
+        return true;
+    }
+
+    bool warpAudioNoteSegment(uint32_t regionId, double segmentStartSeconds,
+                              double newStartSeconds, double newEndSeconds) {
+        if (!std::isfinite(segmentStartSeconds) || !std::isfinite(newStartSeconds) ||
+            !std::isfinite(newEndSeconds) || newEndSeconds <= newStartSeconds) return false;
+        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+        auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
+            [regionId](const Region& region) { return region.id == regionId; });
+        if (regionIt == m_regions.end()) return false;
+        auto segmentIt = std::find_if(regionIt->audioNoteSegments.begin(),
+            regionIt->audioNoteSegments.end(), [segmentStartSeconds](const auto& segment) {
+                return std::abs(segment.startSeconds - segmentStartSeconds) < 1e-9;
+            });
+        if (segmentIt == regionIt->audioNoteSegments.end() ||
+            !segmentIt->valid()) return false;
+        for (const auto& current : regionIt->audioNoteSegments) {
+            if (&current == &*segmentIt) continue;
+            if (newStartSeconds < current.endSeconds && current.startSeconds < newEndSeconds) return false;
+        }
+        if (!segmentIt->warpTiming(newStartSeconds, newEndSeconds)) return false;
+        std::sort(regionIt->audioNoteSegments.begin(), regionIt->audioNoteSegments.end(),
+            [](const auto& a, const auto& b) { return a.startSeconds < b.startSeconds; });
+        publishRegionSnapshot();
+        return true;
+    }
+
+    bool removeAudioNoteSegment(uint32_t regionId, double segmentStartSeconds) {
+        if (!std::isfinite(segmentStartSeconds)) return false;
+        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+        auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
+            [regionId](const Region& region) { return region.id == regionId; });
+        if (regionIt == m_regions.end()) return false;
+        const auto before = regionIt->audioNoteSegments.size();
+        regionIt->audioNoteSegments.erase(std::remove_if(regionIt->audioNoteSegments.begin(),
+            regionIt->audioNoteSegments.end(), [segmentStartSeconds](const auto& segment) {
+                return std::abs(segment.startSeconds - segmentStartSeconds) < 1e-9;
+            }), regionIt->audioNoteSegments.end());
+        if (regionIt->audioNoteSegments.size() == before) return false;
         publishRegionSnapshot();
         return true;
     }
@@ -329,6 +387,87 @@
             }
         }
         return false;
+    }
+
+    bool setRegionRangeEdit(uint32_t rid, uint64_t start, uint64_t end,
+                            float gain, uint64_t fadeIn, uint64_t fadeOut) {
+        invalidateFrozenForEdit();
+        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+        if (start >= end || !std::isfinite(gain) || gain < 0.0f || gain > 16.0f ||
+            fadeIn > end - start || fadeOut > end - start) return false;
+        for (auto& region : m_regions) {
+            if (region.id != rid || region.locked || end > region.len) continue;
+            auto it = std::find_if(region.rangeEdits.begin(), region.rangeEdits.end(),
+                [start, end](const Region::RangeEdit& edit) {
+                    return edit.start == start && edit.end == end;
+                });
+            if (it == region.rangeEdits.end()) {
+                if (region.rangeEdits.size() >= 4096) return false;
+                region.rangeEdits.push_back({start, end, gain, fadeIn, fadeOut});
+            } else {
+                *it = {start, end, gain, fadeIn, fadeOut};
+            }
+            std::sort(region.rangeEdits.begin(), region.rangeEdits.end(),
+                      [](const Region::RangeEdit& a, const Region::RangeEdit& b) {
+                          return a.start < b.start;
+                      });
+            publishRegionSnapshot();
+            return true;
+        }
+        return false;
+    }
+
+    bool clearRegionRangeEdit(uint32_t rid, uint64_t start, uint64_t end) {
+        invalidateFrozenForEdit();
+        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+        for (auto& region : m_regions) {
+            if (region.id != rid || region.locked) continue;
+            const auto oldSize = region.rangeEdits.size();
+            region.rangeEdits.erase(std::remove_if(region.rangeEdits.begin(), region.rangeEdits.end(),
+                [start, end](const Region::RangeEdit& edit) {
+                    return edit.start == start && edit.end == end;
+                }), region.rangeEdits.end());
+            if (region.rangeEdits.size() != oldSize) {
+                publishRegionSnapshot();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::vector<Region::RangeEdit> regionRangeEdits(uint32_t rid) const {
+        for (const auto& region : m_regions) if (region.id == rid) return region.rangeEdits;
+        return {};
+    }
+
+    bool replaceRegionRangeEdits(uint32_t rid, std::vector<Region::RangeEdit> edits) {
+        if (edits.size() > 4096) return false;
+        invalidateFrozenForEdit();
+        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+        for (auto& region : m_regions) {
+            if (region.id != rid || region.locked) continue;
+            for (auto& edit : edits) {
+                if (edit.start >= edit.end || edit.end > region.len ||
+                    !std::isfinite(edit.gain) || edit.gain < 0.0f || edit.gain > 16.0f) {
+                    return false;
+                }
+                const uint64_t length = edit.end - edit.start;
+                if (edit.fadeIn > length) edit.fadeIn = length;
+                if (edit.fadeOut > length) edit.fadeOut = length;
+            }
+            std::sort(edits.begin(), edits.end(),
+                      [](const Region::RangeEdit& a, const Region::RangeEdit& b) {
+                          return a.start < b.start;
+                      });
+            region.rangeEdits = std::move(edits);
+            publishRegionSnapshot();
+            return true;
+        }
+        return false;
+    }
+
+    bool clearRegionRangeEdits(uint32_t rid) {
+        return replaceRegionRangeEdits(rid, {});
     }
 
     bool setRegionReverse(uint32_t rid, bool reverse) {
@@ -534,6 +673,7 @@
         return points ? *points : std::vector<Aura::Core::ProjectSerializer::AutomationPoint>{};
     }
     bool canProcess(uint32_t sz) const { return m_activeBuffer.getNumSamples() >= sz; }
+
     AudioBuffer& getWorkBuffer(uint32_t) { return m_activeBuffer; }
     double getSampleRate() const noexcept { return m_sampleRate; }
     struct AnalysisEngine {

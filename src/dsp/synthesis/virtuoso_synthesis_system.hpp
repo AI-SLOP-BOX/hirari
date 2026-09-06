@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <vector>
+#include <algorithm>
+#include <cmath>
 #include "virtuoso_orchestra.hpp"
 #include "aura_sampler_pro.hpp"
 #include "synthesis_core.hpp"
@@ -27,7 +29,8 @@ public:
         // PROFESSIONAL RULE: A single "Patch" can trigger multiple engines (Layering).
         if (patchName == "Hybrid Piano") {
             m_orchestra->noteOn(VirtuosoOrchestra::Model::Piano, pitch, velocity);
-            m_sampler->trigger(1.0f, velocity * 0.5f); // Layering a recorded sample for richness
+            m_sampler->noteOn(static_cast<uint32_t>(std::clamp(std::isfinite(pitch) ? pitch : 60.0f, 0.0f, 127.0f)),
+                              std::clamp(std::isfinite(velocity) ? velocity * 0.5f : 0.0f, 0.0f, 1.0f));
         } else {
             m_synth->noteOn(pitch, velocity);
         }
@@ -37,8 +40,9 @@ public:
      * @brief Mixes and renders all synthesis layers (Real-time thread).
      */
     void render(float* l, float* r, size_t numFrames) {
+        if (!l || !r || numFrames == 0) return;
         m_orchestra->render(l, r, numFrames);
-        m_sampler->process(l, numFrames); // Simplified: Assumes mono sampler for now
+        m_sampler->processAdditive(l, r, numFrames);
         m_synth->render(l, r, numFrames);
     }
 

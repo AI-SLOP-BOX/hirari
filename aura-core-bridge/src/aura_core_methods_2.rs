@@ -1238,6 +1238,28 @@ impl AuraCore {
         Ok(())
     }
 
+    /// Queues browser decoding without moving the non-Send native engine to a
+    /// worker. Call `poll_preview_audio_decode` from the main/control loop.
+    pub fn preview_audio_file_async(&self, path: &str) -> u64 {
+        crate::preview_audio_runtime::PreviewAudioRuntime::queue_decode(Path::new(path).to_path_buf())
+    }
+
+    pub fn poll_preview_audio_decode(&self) -> anyhow::Result<Option<u64>> {
+        let Some((generation, result)) =
+            crate::preview_audio_runtime::PreviewAudioRuntime::take_completed_decode()
+        else {
+            return Ok(None);
+        };
+        let (samples, source_rate) = result.map_err(anyhow::Error::msg)?;
+        let engine = self
+            .engine
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("AudioEngine is unavailable"))?;
+        engine.set_preview_sample(&samples, source_rate);
+        engine.trigger_preview_sample();
+        Ok(Some(generation))
+    }
+
     // Transport
     pub fn set_playing(&self, p: bool) {
         if let Some(e) = self.engine.as_ref() {
@@ -2440,10 +2462,14 @@ impl AuraCore {
                 {"id":"mix_snapshots","status":"implemented","apis":["save_snapshot","restore_snapshot"]},
                 {"id":"plugin_sandbox_catalog","status":"implemented","apis":["installed_plugin_catalog_json"]},
                 {"id":"vst3_sandbox_worker","status":"implemented","apis":["add_sandboxed_plugin","process_sandboxed_plugin_block","process_sandboxed_plugin_midi_block"]},
-                {"id":"export_queue","status":"implemented","apis":["enqueue_export","export_queue_snapshot_json"]},
-                {"id":"vst3_clap_native_gui","status":"integration_required"},
-                {"id":"ara2_partner_integration","status":"integration_required"},
-                {"id":"windows_asio_hardware","status":"integration_required"}
+                {"id":"export_queue","status":"implemented","apis":["enqueue_export_job_json","export_queue_snapshot_json","execute_export_queue_json","enqueue_advanced_export_job_json","advanced_export_snapshot_json","execute_advanced_export_json"]},
+                {"id":"async_waveform_decode","status":"implemented","apis":["queue_region_waveform","poll_region_waveform","region_waveform_pending"]},
+                {"id":"midi_vibrato_rate","status":"implemented","apis":["set_midi_note_vibrato_rate_without_undo","midi_notes_json"]},
+                {"id":"measured_hrtf_kernel","status":"integration_required","apis":["set_hrtf_kernel_json","set_hrtf_kernel","clear_hrtf_kernel"]},
+                {"id":"native_plugin_editor_host","status":"host_bind_required","apis":["plugin_editor_capability_diagnostic_json","open_plugin_native_editor_json","close_plugin_native_editor_json"]},
+                {"id":"vst3_clap_native_gui","status":"sdk_or_host_bind_required"},
+                {"id":"ara2_partner_integration","status":"provider_bind_required"},
+                {"id":"windows_asio_hardware","status":"sdk_or_backend_bind_required"}
             ]
         }).to_string()
     }

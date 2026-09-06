@@ -62,4 +62,38 @@ fn region_edit_undo_redo_restores_audio_state() {
     assert!((region_gain().unwrap_or_default() - 1.0).abs() < 0.0001);
     core.redo();
     assert!((region_gain().unwrap_or_default() - 0.25).abs() < 0.0001);
+
+    assert!(core.set_region_range_edit(track_id, region_id, 10, 100, 0.5, 4, 6));
+    let range_count = || {
+        serde_json::from_str::<serde_json::Value>(&core.get_project_layout_json())
+            .ok()
+            .and_then(|layout| layout.as_array().cloned())
+            .and_then(|tracks| {
+                tracks.into_iter().find(|t| {
+                    t.get("id").and_then(serde_json::Value::as_u64) == Some(track_id as u64)
+                })
+            })
+            .and_then(|track| track.get("regions").cloned())
+            .and_then(|regions| regions.as_array().and_then(|items| items.first().cloned()))
+            .and_then(|region| {
+                region
+                    .get("range_edits")
+                    .and_then(serde_json::Value::as_array)
+                    .map(Vec::len)
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(range_count(), 1);
+    core.undo();
+    assert_eq!(range_count(), 0);
+    core.redo();
+    assert_eq!(range_count(), 1);
+    assert!(core.set_region_range_edit(track_id, region_id, 200, 300, 0.8, 0, 0));
+    assert_eq!(range_count(), 2);
+    assert!(core.clear_region_range_edits(track_id, region_id));
+    assert_eq!(range_count(), 0);
+    core.undo();
+    assert_eq!(range_count(), 2);
+    core.redo();
+    assert_eq!(range_count(), 0);
 }

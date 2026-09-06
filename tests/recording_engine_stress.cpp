@@ -62,6 +62,8 @@ int main() {
         right[frame] = -left[frame];
     }
     RecordingEngine recorder;
+    assert(!recorder.start(output.string(), 7'999.0));
+    assert(!recorder.start(output.string(), 384'001.0));
     const auto deadline = durationSeconds > 0.0
         ? std::chrono::steady_clock::now() + std::chrono::duration<double>(durationSeconds)
         : std::chrono::steady_clock::time_point::max();

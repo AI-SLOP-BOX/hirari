@@ -15,14 +15,20 @@ std::deque<MidiInputEvent> inputQueue;
 MIDIClientRef inputClient = 0;
 MIDIPortRef inputPort = 0;
 
-void readInput(const MIDIPacketList* list, void*, void*) {
+void readInput(const MIDIPacketList* list, void* /*readProcRefCon*/, void* srcConnRefCon) {
     if (!list) return;
+    MIDIUniqueID sourceId = 0;
+    if (srcConnRefCon) {
+        MIDIObjectGetIntegerProperty(static_cast<MIDIEndpointRef>(
+                reinterpret_cast<uintptr_t>(srcConnRefCon)),
+            kMIDIPropertyUniqueID, &sourceId);
+    }
     std::lock_guard<std::mutex> lock(inputMutex);
     const MIDIPacket* packet = &list->packet[0];
     for (UInt32 i = 0; i < list->numPackets; ++i) {
         if (!packet) break;
         if (packet->length > 0 && packet->length <= 256 && inputQueue.size() < 1024)
-            inputQueue.push_back(MidiInputEvent{0, std::vector<uint8_t>(packet->data, packet->data + packet->length)});
+            inputQueue.push_back(MidiInputEvent{sourceId, std::vector<uint8_t>(packet->data, packet->data + packet->length)});
         packet = MIDIPacketNext(packet);
     }
 }
@@ -101,7 +107,9 @@ bool start_core_midi_input() {
         inputPort = 0; inputClient = 0; return false;
     }
     for (ItemCount i = 0; i < MIDIGetNumberOfSources(); ++i) {
-        if (MIDIPortConnectSource(inputPort, MIDIGetSource(i), nullptr) != noErr) continue;
+        auto source = MIDIGetSource(i);
+        if (MIDIPortConnectSource(inputPort, source,
+                reinterpret_cast<void*>(source)) != noErr) continue;
     }
     return true;
 }
@@ -120,7 +128,7 @@ std::string poll_core_midi_input_json() {
     while (!inputQueue.empty()) {
         auto event = std::move(inputQueue.front()); inputQueue.pop_front();
         if (!first) json << ','; first = false;
-        json << "{\"data_hex\":\"";
+        json << "{\"source_unique_id\":" << event.source << ",\"data_hex\":\"";
         static constexpr char hex[] = "0123456789abcdef";
         for (uint8_t byte : event.data) json << hex[byte >> 4] << hex[byte & 0xf];
         json << "\"}";

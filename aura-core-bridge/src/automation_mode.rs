@@ -51,7 +51,9 @@ impl AutomationModeOrchestrator {
         // INDUSTRIAL: Implementation of musically intelligent recording logic.
         // Handling Read, Write, Touch, Latch logic with absolute technical integrity.
         self.is_touching = is_touching;
-        if self.write_protected || self.preview { return false; }
+        if self.write_protected || self.preview {
+            return false;
+        }
         match self.current_mode {
             AutomationModeRust::Read => {
                 self.latched = false;
@@ -68,20 +70,38 @@ impl AutomationModeOrchestrator {
             AutomationModeRust::AutoPunch => false,
         }
     }
-    pub fn set_write_protected(&mut self, protected: bool) { self.write_protected = protected; }
-    pub fn set_preview(&mut self, preview: bool) { self.preview = preview; }
+    pub fn set_write_protected(&mut self, protected: bool) {
+        self.write_protected = protected;
+    }
+    pub fn set_preview(&mut self, preview: bool) {
+        self.preview = preview;
+    }
 
-    pub fn set_punch_range(&mut self, start: u64, end: u64) -> bool { if end <= start { return false; } self.punch_start = start; self.punch_end = end; true }
+    pub fn set_punch_range(&mut self, start: u64, end: u64) -> bool {
+        if end <= start {
+            return false;
+        }
+        self.punch_start = start;
+        self.punch_end = end;
+        true
+    }
     pub fn resolve_recording_at(&mut self, position: u64, is_touching: bool) -> bool {
-        if self.write_protected || self.preview { return false; }
-        if self.current_mode == AutomationModeRust::AutoPunch { return self.punch_end > self.punch_start && position >= self.punch_start && position < self.punch_end; }
+        if self.write_protected || self.preview {
+            return false;
+        }
+        if self.current_mode == AutomationModeRust::AutoPunch {
+            return self.punch_end > self.punch_start
+                && position >= self.punch_start
+                && position < self.punch_end;
+        }
         self.resolve_recording_state(is_touching)
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide recording state.
     pub fn audit_automation_mode(&self) -> bool {
         self.punch_end >= self.punch_start
-            && (!matches!(self.current_mode, AutomationModeRust::AutoPunch) || self.punch_end > self.punch_start)
+            && (!matches!(self.current_mode, AutomationModeRust::AutoPunch)
+                || self.punch_end > self.punch_start)
             && (matches!(self.current_mode, AutomationModeRust::Latch) || !self.latched)
             && (!self.is_touching || !matches!(self.current_mode, AutomationModeRust::Read))
     }

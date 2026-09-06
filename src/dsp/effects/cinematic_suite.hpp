@@ -61,6 +61,7 @@ public:
         }
     }
     std::string getName() const override { return "DivineReverb"; }
+    uint32_t getTailSamples() const noexcept override { return kDelaySize * 8u; }
     void reset() noexcept override { std::fill(std::begin(m_delayL), std::end(m_delayL), 0.0f); std::fill(std::begin(m_delayR), std::end(m_delayR), 0.0f); m_index = 0; }
 private:
     static constexpr uint32_t kDelaySize = 257;

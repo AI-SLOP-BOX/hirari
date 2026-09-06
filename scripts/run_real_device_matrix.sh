@@ -57,7 +57,8 @@ else
     record coreaudio_device SKIPPED "requires macOS CoreAudio"
 fi
 
-if [ -n "${AURA_VST3_FIXTURE:-}" ] || [ -e "$HOME/Library/Audio/Plug-Ins/VST3/Surge XT.vst3" ]; then
+if { [ -n "${AURA_VST3_FIXTURE:-}" ] || [ -e "$HOME/Library/Audio/Plug-Ins/VST3/Surge XT.vst3" ]; } \
+    && { [ -x "${AURA_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" ] || [ -n "${AURA_VST3_SDK:-}" ]; }; then
     VST3_SDK_READY=0
     for sdk in "${AURA_VST3_SDK:-}" /tmp/aura-vst3-sdk-new; do
         if [ -n "$sdk" ] && [ -f "$sdk/CMakeLists.txt" ] && [ -d "$sdk/public.sdk" ]; then
@@ -67,6 +68,10 @@ if [ -n "${AURA_VST3_FIXTURE:-}" ] || [ -e "$HOME/Library/Audio/Plug-Ins/VST3/Su
     done
     if [ "$VST3_SDK_READY" -eq 1 ]; then
         run_optional vst3 "$ROOT_DIR/scripts/run_vst3_e2e_local.sh"
+    elif [ -x "${AURA_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" ]; then
+        PREBUILT="${AURA_PLUGIN_HOST_BIN:-$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3}"
+        run_optional vst3 env AURA_PLUGIN_HOST_BIN="$PREBUILT" \
+            "$ROOT_DIR/scripts/run_vst3_e2e_smoke.sh"
     else
         record vst3 SKIPPED "VST3 fixture found but AURA_VST3_SDK is not prepared"
     fi
@@ -78,7 +83,10 @@ if [ "$(uname -s)" = "Darwin" ]; then
     if command -v auval >/dev/null 2>&1; then
         # auval can hang while probing a misbehaving third-party component;
         # bound the probe so the matrix always emits a deterministic result.
-        run_optional au perl -e 'alarm 90; exec @ARGV' \
+        # AU validation may include four isolated-worker recovery passes when
+        # a real component is installed. Bound it, but leave enough room for
+        # cold-start and quarantine/restart cycles on a developer machine.
+        run_optional au perl -e 'alarm 240; exec @ARGV' \
             "$ROOT_DIR/scripts/run_au_e2e_smoke.sh"
     else
         record au SKIPPED "auval is unavailable"
@@ -87,7 +95,7 @@ else
     record au SKIPPED "requires macOS AudioUnit"
 fi
 
-run_required clap perl -e 'alarm 90; exec @ARGV' \
+run_required clap perl -e 'alarm 240; exec @ARGV' \
     "$ROOT_DIR/scripts/run_clap_fixture_smoke.sh"
 
 if [ "$FAILURES" -ne 0 ]; then

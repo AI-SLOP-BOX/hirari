@@ -53,15 +53,43 @@ impl HistoryOrchestrator {
             None => true,
         }
     }
-    pub fn compare_hashes(&self, left: u64, right: u64) -> Option<bool> { self.history.iter().any(|entry| entry.state_hash == left) .then_some(left == right) }
-    pub fn entries_since(&self, timestamp: u64) -> Vec<HistoryEntry> { self.history.iter().filter(|entry| entry.timestamp >= timestamp).cloned().collect() }
-    pub fn entries_between(&self, start: u64, end: u64) -> Vec<HistoryEntry> { if end < start { return Vec::new(); } self.history.iter().filter(|entry| (start..=end).contains(&entry.timestamp)).cloned().collect() }
-    pub fn latest_action(&self) -> Option<&str> { self.history.last().map(|entry| entry.action.as_str()) }
-    pub fn changed_between(&self, left: u64, right: u64) -> bool { left != right }
+    pub fn compare_hashes(&self, left: u64, right: u64) -> Option<bool> {
+        self.history
+            .iter()
+            .any(|entry| entry.state_hash == left)
+            .then_some(left == right)
+    }
+    pub fn entries_since(&self, timestamp: u64) -> Vec<HistoryEntry> {
+        self.history
+            .iter()
+            .filter(|entry| entry.timestamp >= timestamp)
+            .cloned()
+            .collect()
+    }
+    pub fn entries_between(&self, start: u64, end: u64) -> Vec<HistoryEntry> {
+        if end < start {
+            return Vec::new();
+        }
+        self.history
+            .iter()
+            .filter(|entry| (start..=end).contains(&entry.timestamp))
+            .cloned()
+            .collect()
+    }
+    pub fn latest_action(&self) -> Option<&str> {
+        self.history.last().map(|entry| entry.action.as_str())
+    }
+    pub fn changed_between(&self, left: u64, right: u64) -> bool {
+        left != right
+    }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide history synchronization.
     pub fn audit_history(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic history auditing logic.
-        self.history.len() <= 10_000 && self.history.iter().all(|entry| !entry.action.trim().is_empty() && entry.action.len() <= 1024)
+        self.history.len() <= 10_000
+            && self
+                .history
+                .iter()
+                .all(|entry| !entry.action.trim().is_empty() && entry.action.len() <= 1024)
     }
 }

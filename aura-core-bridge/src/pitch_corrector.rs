@@ -68,10 +68,16 @@ impl PitchCorrectorEngine {
     /// INDUSTRIAL: Professional 'Autotune-style' vocal processing.
     /// FIX: Stored ratio in state to apply it continuously.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32], speed: f32) {
-        let len = l.len();
+        let len = l.len().min(r.len());
+        if len == 0 || !speed.is_finite() || !self.audit_pitch_corrector() {
+            return;
+        }
+        let speed = speed.clamp(0.0, 1.0);
 
         for i in 0..len {
-            let in_val = (l[i] + r[i]) * 0.5;
+            let in_l = if l[i].is_finite() { l[i] } else { 0.0 };
+            let in_r = if r[i].is_finite() { r[i] } else { 0.0 };
+            let in_val = (in_l + in_r) * 0.5;
 
             // 1. PITCH DETECTION
             let freq = self.estimate_frequency(in_val);
@@ -88,8 +94,8 @@ impl PitchCorrectorEngine {
             }
 
             // Apply the current ratio continuously
-            l[i] *= self.current_ratio;
-            r[i] *= self.current_ratio;
+            l[i] = (in_l * self.current_ratio).clamp(-1.0, 1.0);
+            r[i] = (in_r * self.current_ratio).clamp(-1.0, 1.0);
         }
     }
 
@@ -103,7 +109,10 @@ impl PitchCorrectorEngine {
         let mut left = input.to_vec();
         let mut right = left.clone();
         preview.process(&mut left, &mut right, speed.clamp(0.0, 1.0));
-        left.into_iter().zip(right).map(|(l, r)| (l + r) * 0.5).collect()
+        left.into_iter()
+            .zip(right)
+            .map(|(l, r)| (l + r) * 0.5)
+            .collect()
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Pitch Corrector state.
@@ -141,5 +150,20 @@ mod tests {
         engine.current_ratio = 1.0;
         engine.active_scale_degrees = [false; 12];
         assert!(!engine.audit_pitch_corrector());
+    }
+
+    #[test]
+    fn process_is_safe_for_mismatched_buffers_and_invalid_speed() {
+        let mut engine = PitchCorrectorEngine::new(48_000.0);
+        let mut left = vec![0.5_f32; 32];
+        let mut right = vec![0.25_f32; 8];
+        engine.process(&mut left, &mut right, 1.5);
+        assert!(left[..8]
+            .iter()
+            .chain(right.iter())
+            .all(|v| v.is_finite() && v.abs() <= 1.0));
+        let before = right.clone();
+        engine.process(&mut left, &mut right, f32::NAN);
+        assert_eq!(right, before);
     }
 }

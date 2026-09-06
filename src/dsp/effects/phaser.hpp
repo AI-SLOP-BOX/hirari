@@ -3,6 +3,8 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 #include "../iprocessor.hpp"
 
 namespace Aura::DSP::Effects {
@@ -20,6 +22,48 @@ public:
         reset();
     }
 
+    std::string getName() const override { return "Stereo Phaser"; }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
+    uint32_t getNumParameters() const noexcept override { return 3; }
+    void setParameter(uint32_t id, float value) noexcept override {
+        if (!std::isfinite(value)) return;
+        if (id == 0) setRate(0.01f + value * 19.99f);
+        else if (id == 1) setFeedback(-0.95f + value * 1.9f);
+        else if (id == 2) setMix(value);
+    }
+    float getParameter(uint32_t id) const noexcept override {
+        if (id == 0) return std::clamp((m_rate - 0.01f) / 19.99f, 0.0f, 1.0f);
+        if (id == 1) return std::clamp((m_feedback + 0.95f) / 1.9f, 0.0f, 1.0f);
+        return id == 2 ? m_mix : 0.0f;
+    }
+    bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override {
+        if (id >= 3) return false; out = {0.0f, 1.0f, false}; return true;
+    }
+    void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
+        if (!outName || maxSize == 0) return;
+        const char* names[] = {"Rate", "Feedback", "Mix"};
+        std::snprintf(outName, maxSize, "%s", id < 3 ? names[id] : "");
+    }
+    std::vector<uint8_t> getState() const override {
+        std::vector<uint8_t> state(28, 0);
+        const uint32_t magic = 0x41555241u; const uint16_t version = 1; const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
+        std::memcpy(state.data(), &magic, 4); std::memcpy(state.data() + 4, &version, 2); std::memcpy(state.data() + 6, &flags, 2);
+        std::memcpy(state.data() + 8, &m_mix, 4); std::memcpy(state.data() + 12, &m_sidechainBusId, 4);
+        const float values[3] = {getParameter(0), getParameter(1), getParameter(2)}; std::memcpy(state.data() + 16, values, sizeof(values));
+        return state;
+    }
+    bool setState(const std::vector<uint8_t>& state) override {
+        if (state.size() != 28) return false;
+        uint32_t magic = 0, sidechain = 0; uint16_t version = 0, flags = 0; float mix = 0.0f, values[3]{};
+        std::memcpy(&magic, state.data(), 4); std::memcpy(&version, state.data() + 4, 2); std::memcpy(&flags, state.data() + 6, 2);
+        std::memcpy(&mix, state.data() + 8, 4); std::memcpy(&sidechain, state.data() + 12, 4); std::memcpy(values, state.data() + 16, sizeof(values));
+        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 || !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
+        for (float value : values) if (!std::isfinite(value) || value < 0.0f || value > 1.0f) return false;
+        m_bypassed = (flags & 1u) != 0; m_mix = mix; m_sidechainBusId = sidechain;
+        for (uint32_t i = 0; i < 3; ++i) setParameter(i, values[i]);
+        return true;
+    }
+
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
         (void)bs;
         m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0;
@@ -32,6 +76,7 @@ public:
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
         (void)midi;
         (void)context;
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
         const uint32_t n = buffer.getNumSamples();
         float* left = buffer.getWritePointer(0);
         float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
@@ -76,6 +121,16 @@ public:
         m_lastOut[0] = m_lastOut[1] = 0.0f;
     }
 
+    uint32_t getTailSamples() const noexcept override {
+        const double rate = std::isfinite(m_sampleRate) && m_sampleRate > 0.0
+            ? m_sampleRate : 44'100.0;
+        const double feedback = std::clamp(std::abs(m_feedback), 0.0f, 0.95f);
+        const double tailSeconds = feedback > 0.0
+            ? std::min(2.0, 0.35 * std::log(1.0e-3) / std::log(feedback))
+            : 0.0;
+        return static_cast<uint32_t>(tailSeconds * rate);
+    }
+
     // Parameters
     void setMix(float m) { if (std::isfinite(m)) m_mix = std::clamp(m, 0.0f, 1.0f); }
     void setRate(float r) { if (std::isfinite(r)) m_rate = std::clamp(r, 0.01f, 20.0f); }
@@ -85,7 +140,6 @@ private:
     double m_sampleRate = 44100.0;
     float m_lfoPhase = 0.0f;
     float m_rate = 0.5f;
-    float m_mix = 0.5f;
     float m_feedback = 0.3f;
 
     std::vector<float> m_filterState[2] = { std::vector<float>(4, 0.0f), std::vector<float>(4, 0.0f) };

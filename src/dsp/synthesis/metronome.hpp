@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 namespace Aura::DSP::Synthesis {
 
@@ -15,10 +16,12 @@ class Metronome {
 public:
     enum class Division { Quarter, Eighth, Sixteenth };
 
-    Metronome(double sr = 44100.0) : m_sampleRate(sr) {}
+    Metronome(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr >= 8000.0 && sr <= 384000.0 ? sr : 44100.0) {}
 
     void process(float* l, float* r, uint64_t startPos, double bpm, uint32_t len) {
-        if (!m_isEnabled) return;
+        if (!m_isEnabled || !l || !r || len == 0 || !std::isfinite(bpm) || bpm <= 0.0 ||
+            !std::isfinite(m_sampleRate) || m_sampleRate <= 0.0 ||
+            startPos > std::numeric_limits<uint64_t>::max() - len) return;
         double samplesPerBeat = (60.0 / bpm) * m_sampleRate;
         double subDiv = samplesPerBeat / 4.0; // 16th note resolution
         if (subDiv < 1.0) subDiv = 1.0;

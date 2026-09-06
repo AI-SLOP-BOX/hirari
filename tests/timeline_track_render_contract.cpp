@@ -42,6 +42,15 @@ int main() {
     assert(std::isfinite(output.getReadPointer(0)[0]));
     assert(std::isfinite(output.getReadPointer(1)[3]));
 
+    // A malformed host block must be rejected before Track::process can
+    // index past the destination buffer.  Existing audio must be cleared,
+    // not partially overwritten.
+    output.getWritePointer(0)[0] = 1.0f;
+    output.getWritePointer(1)[0] = -1.0f;
+    track->process(output, 8, 0);
+    assert(output.getReadPointer(0)[0] == 0.0f);
+    assert(output.getReadPointer(1)[0] == 0.0f);
+
     // Invalid track IDs and undersized destinations must fail without
     // touching the output buffer.
     AudioBuffer undersized(2, 2);

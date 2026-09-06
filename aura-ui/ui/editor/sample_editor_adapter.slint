@@ -21,6 +21,17 @@ export component Z_SampleEditorAdapter {
     callback apply-loop(int);
     callback duplicate-clip();
     callback remove-clip();
+    callback repair-waveform();
+    callback declip-waveform();
+    callback reduce-noise-waveform();
+    callback normalize-waveform();
+    callback soft-clip-waveform();
+    callback declick-waveform();
+    callback stereo-width-waveform();
+    callback detect-transients-waveform();
+    callback mute-selection();
+    callback normalize-selection-peak();
+    callback normalize-selection-rms();
 
     Z_SampleEditor {
         samples: root.samples;
@@ -40,5 +51,16 @@ export component Z_SampleEditorAdapter {
         apply-loop(count) => { root.apply-loop(count); }
         duplicate-clip => { root.duplicate-clip(); }
         remove-clip => { root.remove-clip(); }
+        repair-waveform => { root.repair-waveform(); }
+        declip-waveform => { root.declip-waveform(); }
+        reduce-noise-waveform => { root.reduce-noise-waveform(); }
+        normalize-waveform => { root.normalize-waveform(); }
+        soft-clip-waveform => { root.soft-clip-waveform(); }
+        declick-waveform => { root.declick-waveform(); }
+        stereo-width-waveform => { root.stereo-width-waveform(); }
+        detect-transients-waveform => { root.detect-transients-waveform(); }
+        mute-selection => { root.mute-selection(); }
+        normalize-selection-peak => { root.normalize-selection-peak(); }
+        normalize-selection-rms => { root.normalize-selection-rms(); }
     }
 }

@@ -10,6 +10,7 @@ export component Z_ExportDialog {
     callback start_render(string, string, bool);
     callback start_stems();
     callback start_selected_stem();
+    callback start_midi();
 
     Rectangle {
         width: 520px; height: 440px; background: Style.surface; border_radius: 3px; border_width: 2px; border_color: Style.brand;
@@ -43,6 +44,7 @@ export component Z_ExportDialog {
                 Z_IconButton { icon: "CANCEL"; clicked => { close(); } }
                 Z_IconButton { icon: "EXPORT STEMS"; clicked => { start_stems(); } }
                 Z_IconButton { icon: "EXPORT SELECTED"; clicked => { start_selected_stem(); } }
+                Z_IconButton { icon: "EXPORT MIDI"; clicked => { start_midi(); } }
                 Z_IconButton { icon: "START RENDER"; active-col: Style.brand; clicked => { start_render("WAV", "current", true); } }
             }
         }

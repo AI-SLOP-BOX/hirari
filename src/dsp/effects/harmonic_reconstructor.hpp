@@ -14,12 +14,16 @@ namespace Aura::DSP::Effects {
  */
 class HarmonicReconstructor : public IProcessor {
 public:
-    HarmonicReconstructor(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr > 1000.0 ? static_cast<float>(sr) : 44100.0f), m_cutoff(4500.0f) { updateCoefficients(); }
+    HarmonicReconstructor(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? static_cast<float>(sr) : 44'100.0f), m_cutoff(4500.0f) { updateCoefficients(); }
 
-    void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)bs; if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = static_cast<float>(sr); updateCoefficients(); reset(); }
+    std::string getName() const override { return "Harmonic Reconstructor"; }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
+
+    void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)bs; m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? static_cast<float>(sr) : 44'100.0f; updateCoefficients(); reset(); }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
         (void)midi; (void)context;
+        if (m_bypassed) return;
         const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 32);
         for (uint32_t c = 0; c < channels; ++c) {
             float* data = buffer.getWritePointer(c);

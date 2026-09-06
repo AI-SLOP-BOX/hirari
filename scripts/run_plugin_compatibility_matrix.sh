@@ -6,6 +6,16 @@ set -eu
 OUT=${AURA_PLUGIN_MATRIX_REPORT:-artifacts/plugin-compatibility.tsv}
 mkdir -p "$(dirname "$OUT")"
 printf 'format\tkind\tpath\tarchitecture\tpreset_state\taudio_process\tgui\trecovery\tstatus\n' >"$OUT"
+if [ "${AURA_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] && [ -z "${AURA_PLUGIN_TEST_BIN:-}" ]; then
+  cargo test -p aura-core-bridge --test plugin_sandbox_workflow --no-run --quiet
+  AURA_PLUGIN_TEST_BIN=$(find target/debug/deps -type f -perm -111 \
+    -name 'plugin_sandbox_workflow-*' -print0 | xargs -0 ls -t 2>/dev/null | head -n 1)
+  export AURA_PLUGIN_TEST_BIN
+fi
+if [ "${AURA_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] && [ -z "${AURA_PLUGIN_HOST_BIN:-}" ]; then
+  AURA_PLUGIN_HOST_BIN="$PWD/build-tools/aura-plugin-host-worker"
+  export AURA_PLUGIN_HOST_BIN
+fi
 host_arch=$(uname -m)
 bundle_kind() {
   path=$1
@@ -61,6 +71,19 @@ binary_arch() {
     *) printf unknown ;;
   esac
 }
+run_fixture_smoke() {
+  format=$1
+  path=$2
+  [ "${AURA_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] || return 0
+  [ -x "${AURA_PLUGIN_TEST_BIN:-}" ] || return 0
+  if env AURA_COMPAT_FIXTURE="$path" AURA_PLUGIN_HOST_BIN="${AURA_PLUGIN_HOST_BIN:-}" \
+      AURA_PLUGIN_PATHS="$(dirname "$path")" \
+      "$AURA_PLUGIN_TEST_BIN" third_party_fixture_compatibility_smoke --exact --ignored --test-threads=1 >/dev/null 2>&1; then
+    awk -F '\t' -v OFS='\t' -v p="$path" -v f="$format" \
+      'NR == 1 { print; next } { if ($1 == f && $3 == p) { $5="PASS"; $6="PASS"; $8="PASS"; $9="PASS" } print }' "$OUT" >"$OUT.tmp"
+    mv "$OUT.tmp" "$OUT"
+  fi
+}
 scan() {
   format=$1
   path=$2
@@ -68,6 +91,7 @@ scan() {
   architecture=$(binary_arch "$path")
   if [ -e "$path" ]; then status=FOUND; else status=SKIP; fi
   printf '%s\t%s\t%s\t%s\tUNVERIFIED\tUNVERIFIED\tUNVERIFIED\tUNVERIFIED\t%s\n' "$format" "$kind" "$path" "$architecture" "$status" >>"$OUT"
+  run_fixture_smoke "$format" "$path"
 }
 
 for root in "$HOME/Library/Audio/Plug-Ins/Components" /Library/Audio/Plug-Ins/Components; do

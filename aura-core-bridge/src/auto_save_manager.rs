@@ -1,5 +1,7 @@
 use crate::generation_gate::GenerationGate;
-use crate::persistence::{BackupInfo, PersistenceOrchestrator, RecoveryCandidate};
+use crate::persistence::{
+    BackupInfo, PersistenceOrchestrator, RecoveryCandidate, MAX_RECOVERY_CANDIDATE_BYTES,
+};
 use anyhow::Result;
 
 pub struct AutoSaveOrchestrator {
@@ -139,10 +141,20 @@ impl AutoSaveOrchestrator {
     /// Returns only recovery snapshots that are readable and non-empty, so a
     /// crash-recovery UI never offers a truncated/corrupt candidate.
     pub fn validated_recovery_candidates(&self) -> Result<Vec<RecoveryCandidate>> {
-        Ok(self.recovery_candidates()?.into_iter().filter(|candidate| {
-            std::fs::metadata(&candidate.path).map(|m| m.is_file() && m.len() > 0 && m.len() <= 512 * 1024 * 1024).unwrap_or(false)
-                && std::fs::read(&candidate.path).map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).is_ok()).unwrap_or(false)
-        }).collect())
+        Ok(self
+            .recovery_candidates()?
+            .into_iter()
+            .filter(|candidate| {
+                std::fs::metadata(&candidate.path)
+                    .map(|m| {
+                        m.is_file() && m.len() > 0 && m.len() <= MAX_RECOVERY_CANDIDATE_BYTES
+                    })
+                    .unwrap_or(false)
+                    && std::fs::read(&candidate.path)
+                        .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).is_ok())
+                        .unwrap_or(false)
+            })
+            .collect())
     }
 
     /// Restores a validated recovery generation atomically over the project.
@@ -153,15 +165,46 @@ impl AutoSaveOrchestrator {
             anyhow::bail!("recovery project or candidate path is empty");
         }
         let candidates = self.validated_recovery_candidates()?;
-        if !candidates.iter().any(|entry| entry.path == candidate.path && entry.checksum == candidate.checksum) {
+        if !candidates
+            .iter()
+            .any(|entry| entry.path == candidate.path && entry.checksum == candidate.checksum)
+        {
             anyhow::bail!("recovery candidate is not validated");
         }
         let destination = std::path::Path::new(&self.project_path);
-        let temp = destination.with_extension("aura-recovery.tmp");
-        std::fs::copy(&candidate.path, &temp)?;
+        let file_name = destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("project");
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temp = destination.with_file_name(format!(
+            ".{file_name}.recovery-{}-{nonce}.tmp",
+            std::process::id()
+        ));
+        let mut source = std::fs::File::open(&candidate.path)?;
+        let mut staged = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        if let Err(error) = std::io::copy(&mut source, &mut staged)
+            .and_then(|_| staged.sync_all())
+        {
+            let _ = std::fs::remove_file(&temp);
+            return Err(error.into());
+        }
         if let Err(error) = std::fs::rename(&temp, destination) {
             let _ = std::fs::remove_file(&temp);
             return Err(error.into());
+        }
+        #[cfg(unix)]
+        if let Some(parent) = destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::File::open(parent)?.sync_all()?;
         }
         self.is_dirty = false;
         self.pending_snapshot = None;
@@ -174,7 +217,11 @@ impl AutoSaveOrchestrator {
         self.max_backups > 0
             && self.max_backups <= 10_000
             && (!self.is_running || self.dirty_generation > 0)
-            && self.pending_snapshot.as_ref().map(|data| data.len() <= 512 * 1024 * 1024).unwrap_or(true)
+            && self
+                .pending_snapshot
+                .as_ref()
+                .map(|data| data.len() <= 512 * 1024 * 1024)
+                .unwrap_or(true)
             && (!self.is_running || !self.project_path.trim().is_empty())
     }
 }
@@ -216,7 +263,10 @@ mod tests {
         let path = std::env::temp_dir().join(format!(
             "aura-autosave-queued-{}-{}.json",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         let mut manager = AutoSaveOrchestrator::new();
         manager.start(path.to_string_lossy().into_owned());
@@ -253,6 +303,46 @@ mod tests {
             std::fs::read(&candidates[0].path).unwrap(),
             br#"{"version":1}"#
         );
+
+        let _ = std::fs::remove_file(&path);
+        for candidate in candidates {
+            let _ = std::fs::remove_file(candidate.path);
+        }
+    }
+
+    #[test]
+    fn restore_recovery_candidate_stages_durably_without_leaking_temp_files() {
+        let path = std::env::temp_dir().join(format!(
+            "aura-autosave-restore-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_string = path.to_string_lossy().into_owned();
+        let mut manager = AutoSaveOrchestrator::new();
+        manager.start(path_string.clone());
+        manager.save_snapshot(br#"{"version":1}"#).unwrap();
+        manager.save_snapshot(br#"{"version":2}"#).unwrap();
+        let candidates = manager.validated_recovery_candidates().unwrap();
+        assert_eq!(candidates.len(), 1);
+        manager.mark_dirty();
+        manager.restore_recovery_candidate(&candidates[0]).unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), br#"{"version":1}"#);
+        assert!(!manager.is_dirty);
+        let parent = path.parent().unwrap();
+        let leaked = std::fs::read_dir(parent)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".recovery-")
+            });
+        assert!(!leaked);
 
         let _ = std::fs::remove_file(&path);
         for candidate in candidates {

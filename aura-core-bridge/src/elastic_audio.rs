@@ -122,8 +122,16 @@ impl ElasticAudioEngine {
             let left = source.floor() as usize;
             let right = (left + 1).min(input.len() - 1);
             let amount = source - left as f32;
-            let a = if input[left].is_finite() { input[left] } else { 0.0 };
-            let b = if input[right].is_finite() { input[right] } else { 0.0 };
+            let a = if input[left].is_finite() {
+                input[left]
+            } else {
+                0.0
+            };
+            let b = if input[right].is_finite() {
+                input[right]
+            } else {
+                0.0
+            };
             let value = a + (b - a) * amount;
             *sample = if value.is_finite() { value } else { 0.0 };
         }
@@ -147,7 +155,12 @@ mod tests {
         let mut engine = ElasticAudioEngine::new(48_000.0);
         let input = [0.0, 1.0, 0.0];
         let mut output = [0.0; 5];
-        engine.process(&input, &mut output, 0.5, super::ElasticAudioMode::Polyphonic);
+        engine.process(
+            &input,
+            &mut output,
+            0.5,
+            super::ElasticAudioMode::Polyphonic,
+        );
         assert_eq!(output[0], 0.0);
         assert!((output[1] - 0.5).abs() < 1e-6);
         assert!(output.iter().all(|sample| sample.is_finite()));

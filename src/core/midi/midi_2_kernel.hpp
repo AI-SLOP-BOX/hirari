@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+#include <algorithm>
+#include <array>
 
 namespace Aura::Core::Midi {
 
@@ -31,34 +33,46 @@ public:
         return instance;
     }
 
+    // Realtime-safe entry point: callers provide the destination storage so
+    // UMP decoding never allocates on the audio/MIDI thread.
+    std::size_t processPacketsInto(const UniversalMidiPacket* packets,
+                                   std::size_t packetCount,
+                                   DecodedMidiEvent* output,
+                                   std::size_t outputCapacity) const noexcept {
+        if (!packets || !output || outputCapacity == 0) return 0;
+        const std::size_t limit = std::min(packetCount, outputCapacity);
+        std::size_t written = 0;
+        for (std::size_t index = 0; index < limit; ++index) {
+            const uint32_t w0 = packets[index].data[0];
+            const uint8_t mt = static_cast<uint8_t>((w0 >> 28) & 0x0F);
+            const uint8_t status = static_cast<uint8_t>((w0 >> 16) & 0xF0);
+            if (status < 0x80 || status > 0xE0) continue;
+            const uint8_t channel = static_cast<uint8_t>((w0 >> 16) & 0x0F);
+            const uint8_t data1 = static_cast<uint8_t>((w0 >> 8) & 0x7F);
+            if (mt == 0x2) {
+                output[written++] = {status, channel, data1,
+                                     static_cast<uint8_t>(w0 & 0x7F),
+                                     static_cast<uint16_t>(w0 & 0x7F)};
+            } else if (mt == 0x4) {
+                const uint16_t value = static_cast<uint16_t>((packets[index].data[1] >> 16) & 0xFFFF);
+                const uint8_t data2 = static_cast<uint8_t>(std::min<uint32_t>(127u,
+                    (static_cast<uint32_t>(value) * 127u + 32767u) / 65535u));
+                output[written++] = {status, channel, data1, data2, value};
+            }
+        }
+        return written;
+    }
+
     /**
      * @brief Processes a batch of Universal MIDI Packets and returns decoded events.
      */
     std::vector<DecodedMidiEvent> processPackets(const std::vector<UniversalMidiPacket>& packets) {
         std::vector<DecodedMidiEvent> events;
-        events.reserve(packets.size());
-        
-        for (const auto& packet : packets) {
-            uint32_t w0 = packet.data[0];
-            uint8_t mt = (w0 >> 28) & 0x0F;
-            
-            if (mt == 0x2) { // MIDI 1.0 Channel Voice over UMP (64-bit)
-                uint8_t status = (w0 >> 16) & 0xF0;
-                uint8_t channel = (w0 >> 16) & 0x0F;
-                uint8_t d1 = (w0 >> 8) & 0x7F;
-                uint8_t d2 = w0 & 0x7F;
-                events.push_back({status, channel, d1, d2, static_cast<uint16_t>(d2)});
-            }
-            else if (mt == 0x4) { // MIDI 2.0 Channel Voice (64-bit)
-                uint8_t status = (w0 >> 16) & 0xF0;
-                uint8_t channel = (w0 >> 16) & 0x0F;
-                uint8_t d1 = (w0 >> 8) & 0x7F; // Note or Index
-                uint32_t w1 = packet.data[1];
-                uint16_t val16 = (w1 >> 16) & 0xFFFF; // 16-bit high-resolution velocity/value
-                uint8_t d2 = static_cast<uint8_t>(val16 >> 9); // Downscale to 7-bit for compatibility
-                events.push_back({status, channel, d1, d2, val16});
-            }
-        }
+        events.reserve(std::min<size_t>(packets.size(), 4096));
+        std::array<DecodedMidiEvent, 4096> decoded{};
+        const std::size_t count = processPacketsInto(packets.data(), packets.size(),
+                                                     decoded.data(), decoded.size());
+        events.insert(events.end(), decoded.begin(), decoded.begin() + count);
         return events;
     }
 

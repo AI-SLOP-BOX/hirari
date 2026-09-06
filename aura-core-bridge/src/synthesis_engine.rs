@@ -14,7 +14,9 @@ impl SynthesisEngineOrchestrator {
     }
 
     pub fn set_master_gain(&mut self, gain: f32) {
-        self.master_gain = gain;
+        if gain.is_finite() {
+            self.master_gain = gain.clamp(0.0, 16.0);
+        }
     }
 
     /// INDUSTRIAL: Coordinates voice rendering and applies master gain.
@@ -24,36 +26,72 @@ impl SynthesisEngineOrchestrator {
         // or we orchestrate the calls.
 
         // 2. SIMD Gain Scaling (Compiler auto-vectorizes this safely)
+        if !self.audit_synthesis_engine() {
+            return;
+        }
         let gain = self.master_gain;
         let _num_samples = l.len();
 
         // Use chunks for better vectorization hints
         let (chunks, remainder) = l.as_chunks_mut::<4>();
         for chunk in chunks {
-            chunk[0] *= gain;
-            chunk[1] *= gain;
-            chunk[2] *= gain;
-            chunk[3] *= gain;
+            for sample in chunk {
+                *sample = if sample.is_finite() {
+                    (*sample * gain).clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                };
+            }
         }
         for sample in remainder {
-            *sample *= gain;
+            *sample = if sample.is_finite() {
+                (*sample * gain).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
         }
 
         let (chunks_r, remainder_r) = r.as_chunks_mut::<4>();
         for chunk in chunks_r {
-            chunk[0] *= gain;
-            chunk[1] *= gain;
-            chunk[2] *= gain;
-            chunk[3] *= gain;
+            for sample in chunk {
+                *sample = if sample.is_finite() {
+                    (*sample * gain).clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                };
+            }
         }
         for sample in remainder_r {
-            *sample *= gain;
+            *sample = if sample.is_finite() {
+                (*sample * gain).clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Synthesis state.
     pub fn audit_synthesis_engine(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Synthesis auditing logic.
-        true
+        self.master_gain.is_finite() && (0.0..=16.0).contains(&self.master_gain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SynthesisEngineOrchestrator;
+
+    #[test]
+    fn synthesis_gain_is_bounded_and_finite() {
+        let mut engine = SynthesisEngineOrchestrator::new();
+        engine.set_master_gain(4.0);
+        let mut left = vec![0.4_f32; 8];
+        let mut right = vec![0.2_f32; 3];
+        engine.process(&mut left, &mut right);
+        assert!(left
+            .iter()
+            .chain(right.iter())
+            .all(|v| v.is_finite() && v.abs() <= 1.0));
+        engine.set_master_gain(f32::NAN);
+        assert!(engine.audit_synthesis_engine());
     }
 }

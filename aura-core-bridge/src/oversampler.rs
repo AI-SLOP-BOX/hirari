@@ -34,6 +34,12 @@ impl OversamplerEngine {
 
     /// INDUSTRIAL: UPSAMPLE: 1 in -> 2 out.
     pub fn upsample(&mut self, x: f32) -> (f32, f32) {
+        let x = if x.is_finite() {
+            x.clamp(-4.0, 4.0)
+        } else {
+            0.0
+        };
+        self.sanitize();
         // Stage 1 (All-pass 1)
         let v1 = x - self.a1 * self.s1_l;
         let y1 = self.s1_l + self.a1 * v1;
@@ -49,6 +55,17 @@ impl OversamplerEngine {
 
     /// INDUSTRIAL: DOWNSAMPLE: 2 in -> 1 out.
     pub fn downsample(&mut self, y1: f32, y2: f32) -> f32 {
+        self.sanitize();
+        let y1 = if y1.is_finite() {
+            y1.clamp(-4.0, 4.0)
+        } else {
+            0.0
+        };
+        let y2 = if y2.is_finite() {
+            y2.clamp(-4.0, 4.0)
+        } else {
+            0.0
+        };
         // Polyphase IIR Downsampling (Dual of upsampling)
         let v1 = y1 - self.a1 * self.s1_r;
         let out1 = self.s1_r + self.a1 * v1;
@@ -58,6 +75,46 @@ impl OversamplerEngine {
         let out2 = self.s2_r + self.a2 * v2;
         self.s2_r = v2;
 
-        (out1 + out2) * 0.5
+        let output = (out1 + out2) * 0.5;
+        if output.is_finite() {
+            output.clamp(-4.0, 4.0)
+        } else {
+            0.0
+        }
+    }
+
+    fn sanitize(&mut self) {
+        if !self.a1.is_finite() || !(-1.0..=1.0).contains(&self.a1) {
+            self.a1 = 0.129_676_55;
+        }
+        if !self.a2.is_finite() || !(-1.0..=1.0).contains(&self.a2) {
+            self.a2 = 0.484_189_24;
+        }
+        for state in [
+            &mut self.s1_l,
+            &mut self.s1_r,
+            &mut self.s2_l,
+            &mut self.s2_r,
+        ] {
+            if !state.is_finite() {
+                *state = 0.0;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OversamplerEngine;
+
+    #[test]
+    fn oversampler_sanitizes_corrupt_state_and_audio() {
+        let mut engine = OversamplerEngine::new();
+        engine.a1 = f32::NAN;
+        engine.s1_l = f32::INFINITY;
+        let (a, b) = engine.upsample(f32::NAN);
+        assert!(a.is_finite() && b.is_finite());
+        let out = engine.downsample(f32::INFINITY, f32::NEG_INFINITY);
+        assert!(out.is_finite() && out.abs() <= 4.0);
     }
 }

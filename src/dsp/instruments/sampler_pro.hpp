@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 #include <cmath>
+#include <algorithm>
 #include "../../core/audio_processor_graph.hpp"
 
 namespace Aura::DSP::Instruments {
@@ -48,12 +49,16 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t bs) override {
-        m_sampleRate = sr;
+        if (std::isfinite(sr) && sr >= 8000.0 && sr <= 384000.0 && bs > 0) {
+            m_sampleRate = sr;
+        } else {
+            m_sampleRate = 44100.0;
+        }
     }
 
     void process(Core::AudioBuffer& buffer, const std::vector<uint8_t>& midi) override {
         // 1. MIDI HANDLING (Trigger/Release)
-        for (size_t i = 0; i < midi.size(); i += 3) {
+        for (size_t i = 0; i + 2 < midi.size(); i += 3) {
             uint8_t status = midi[i] & 0xF0;
             uint8_t note = midi[i+1];
             uint8_t velocity = midi[i+2];
@@ -68,6 +73,7 @@ public:
         // 2. AUDIO RENDERING (Voice Summing)
         buffer.clear();
         uint32_t numSamples = buffer.getNumSamples();
+        if (buffer.getNumChannels() < 2 || numSamples == 0 || m_sampleData.empty()) return;
 
         for (auto& voice : m_voices) {
             if (!voice.active) continue;
@@ -85,6 +91,8 @@ public:
                 float sampleValue = m_sampleData[i0] * (1.0f - frac) + m_sampleData[i1] * frac;
 
                 float out = sampleValue * voice.velocity * voice.masterGain;
+                if (!std::isfinite(out)) { out = 0.0f; }
+                out = std::clamp(out, -4.0f, 4.0f);
                 buffer.addSample(0, s, out);
                 buffer.addSample(1, s, out);
 

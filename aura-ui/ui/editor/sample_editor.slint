@@ -9,6 +9,17 @@ export component Z_SampleEditor {
     callback apply-warp(float);
     callback apply-pitch(float);
     callback apply-loop(int);
+    callback repair-waveform();
+    callback declip-waveform();
+    callback reduce-noise-waveform();
+    callback normalize-waveform();
+    callback soft-clip-waveform();
+    callback declick-waveform();
+    callback stereo-width-waveform();
+    callback detect-transients-waveform();
+    callback mute-selection();
+    callback normalize-selection-peak();
+    callback normalize-selection-rms();
     callback duplicate-clip();
     callback remove-clip();
     in property <float> initial-trim-start: 0.0;
@@ -66,6 +77,16 @@ export component Z_SampleEditor {
                 Z_IconButton { icon: "FLEX"; active: flex_mode; clicked => { flex_mode = !flex_mode; flex_ratio = flex_mode ? 1.1 : 1.0; root.apply-warp(flex_ratio); } }
                 Z_IconButton { icon: "PITCH"; active: pitch_semitones != 0.0; clicked => { pitch_semitones = pitch_semitones == 0.0 ? 1.0 : 0.0; root.apply-pitch(pitch_semitones); } }
                 Z_IconButton { icon: "LOOP"; active: loop_count > 1; clicked => { loop_count = loop_count == 1 ? 2 : (loop_count == 2 ? 4 : 1); root.apply-loop(loop_count); } }
+                Z_IconButton { icon: "REPAIR"; clicked => { root.repair-waveform(); } }
+                Z_IconButton { icon: "DECLIP"; clicked => { root.declip-waveform(); } }
+                Z_IconButton { icon: "DENOISE"; clicked => { root.reduce-noise-waveform(); } }
+                Z_IconButton { icon: "MASTER"; clicked => { root.normalize-waveform(); root.soft-clip-waveform(); } }
+                Z_IconButton { icon: "DECLICK"; clicked => { root.declick-waveform(); } }
+                Z_IconButton { icon: "STEREO"; clicked => { root.stereo-width-waveform(); } }
+                Z_IconButton { icon: "TRANSIENT"; clicked => { root.detect-transients-waveform(); } }
+                Z_IconButton { icon: "MUTE SEL"; clicked => { root.mute-selection(); } }
+                Z_IconButton { icon: "PEAK SEL"; clicked => { root.normalize-selection-peak(); } }
+                Z_IconButton { icon: "RMS SEL"; clicked => { root.normalize-selection-rms(); } }
                 Z_IconButton { icon: "DUPLICATE"; clicked => { root.duplicate-clip(); } }
                 Z_IconButton { icon: "DELETE CLIP"; clicked => { root.remove-clip(); } }
                 Z_IconButton { 

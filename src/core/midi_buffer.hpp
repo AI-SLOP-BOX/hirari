@@ -77,30 +77,24 @@ public:
     }
 
     /**
-     * @brief Deterministic, in-place Shell Sort (O(n log n) approx).
-     * Allocation-free and safe for the audio thread.
+     * @brief Stable, in-place timestamp sort.
+     *
+     * Insertion sort is intentional here: the block is already nearly sorted
+     * in normal playback, it performs no allocation on the audio thread, and
+     * (unlike an unstable Shell sort) preserves producer order for events at
+     * the same sample. That ordering is observable for note-off/note-on and
+     * articulation changes sharing a boundary.
      */
     void sort() {
         if (m_count < 2) return;
-        // Optimization: Check if already sorted (common case for timeline playback)
-        bool alreadySorted = true;
         for (size_t i = 1; i < m_count; ++i) {
-            if (m_events[i].sampleOffset < m_events[i-1].sampleOffset) {
-                alreadySorted = false;
-                break;
+            MidiEvent current = m_events[i];
+            size_t j = i;
+            while (j > 0 && m_events[j - 1].sampleOffset > current.sampleOffset) {
+                m_events[j] = m_events[j - 1];
+                --j;
             }
-        }
-        if (alreadySorted) return;
-
-        for (size_t gap = m_count / 2; gap > 0; gap /= 2) {
-            for (size_t i = gap; i < m_count; i++) {
-                MidiEvent temp = m_events[i];
-                size_t j;
-                for (j = i; j >= gap && m_events[j - gap].sampleOffset > temp.sampleOffset; j -= gap) {
-                    m_events[j] = m_events[j - gap];
-                }
-                m_events[j] = temp;
-            }
+            m_events[j] = current;
         }
     }
 

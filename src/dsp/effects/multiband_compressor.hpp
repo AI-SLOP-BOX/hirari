@@ -56,8 +56,14 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t /*bs*/) noexcept override {
+        if (!std::isfinite(sr) || sr < 100.0 || sr > 384000.0) return;
         m_sampleRate = sr;
         m_lowBandUnit.m_sr = sr; m_midBandUnit.m_sr = sr; m_highBandUnit.m_sr = sr;
+    }
+
+    uint32_t getTailSamples() const noexcept override {
+        return static_cast<uint32_t>(std::min(30.0 * std::clamp(m_sampleRate, 100.0, 384000.0),
+            0.8 * std::clamp(m_sampleRate, 100.0, 384000.0)));
     }
 
 private:

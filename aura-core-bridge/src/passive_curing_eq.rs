@@ -42,15 +42,22 @@ pub struct PassiveCuringEqEngine {
 
 impl PassiveCuringEqEngine {
     pub fn new(sr: f64) -> Self {
-        Self {
-            sample_rate: sr,
+        let sample_rate = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sr
+        } else {
+            48_000.0
+        };
+        let mut engine = Self {
+            sample_rate,
             low_boost: BiquadCoeffs::new(),
             low_atten: BiquadCoeffs::new(),
             high_boost: BiquadCoeffs::new(),
             high_atten: BiquadCoeffs::new(),
             state_l: [0.0; 16],
             state_r: [0.0; 16],
-        }
+        };
+        engine.set_parameters(0.0, 0.0, 0.0, 0.0);
+        engine
     }
 
     pub fn reset(&mut self) {
@@ -117,6 +124,12 @@ impl PassiveCuringEqEngine {
         high_boost_db: f32,
         high_cut_db: f32,
     ) {
+        if [low_boost_db, low_cut_db, high_boost_db, high_cut_db]
+            .iter()
+            .any(|value| !value.is_finite() || value.abs() > 24.0)
+        {
+            return;
+        }
         self.low_boost = self.calculate_biquad(60.0, low_boost_db, 0.5, FilterType::ShelfLow);
         self.low_atten = self.calculate_biquad(80.0, -low_cut_db, 0.4, FilterType::ShelfLow);
         self.high_boost = self.calculate_biquad(3000.0, high_boost_db, 2.0, FilterType::Peak);
@@ -134,7 +147,10 @@ impl PassiveCuringEqEngine {
 
     /// INDUSTRIAL: High-end Analog Circuit Emulation of the EQP-1A Passive EQ.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        let len = l.len().min(r.len());
+        if len == 0 || !self.audit_passive_curing_eq() {
+            return;
+        }
 
         let lb = &self.low_boost;
         let la = &self.low_atten;
@@ -142,27 +158,82 @@ impl PassiveCuringEqEngine {
         let ha = &self.high_atten;
 
         for i in 0..len {
-            let mut x = l[i];
+            let mut x = if l[i].is_finite() { l[i] } else { 0.0 };
             x = Self::apply_filter(x, lb, &mut self.state_l[0..4]);
             x = Self::apply_filter(x, la, &mut self.state_l[4..8]);
             x = Self::apply_filter(x, hb, &mut self.state_l[8..12]);
             x = Self::apply_filter(x, ha, &mut self.state_l[12..16]);
-            l[i] = x;
+            l[i] = if x.is_finite() {
+                x.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
         }
 
         for i in 0..len {
-            let mut x = r[i];
+            let mut x = if r[i].is_finite() { r[i] } else { 0.0 };
             x = Self::apply_filter(x, lb, &mut self.state_r[0..4]);
             x = Self::apply_filter(x, la, &mut self.state_r[4..8]);
             x = Self::apply_filter(x, hb, &mut self.state_r[8..12]);
             x = Self::apply_filter(x, ha, &mut self.state_r[12..16]);
-            r[i] = x;
+            r[i] = if x.is_finite() {
+                x.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Passive Curing EQ state.
     pub fn audit_passive_curing_eq(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Passive Curing EQ auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self
+                .state_l
+                .iter()
+                .chain(self.state_r.iter())
+                .all(|v| v.is_finite() && v.abs() <= 16.0)
+            && [
+                &self.low_boost,
+                &self.low_atten,
+                &self.high_boost,
+                &self.high_atten,
+            ]
+            .iter()
+            .all(|c| {
+                [c.b0, c.b1, c.b2, c.a1, c.a2]
+                    .iter()
+                    .all(|v| v.is_finite() && v.abs() <= 16.0)
+                    && 1.0 + c.a1 + c.a2 > 0.0
+                    && 1.0 - c.a1 + c.a2 > 0.0
+                    && 1.0 - c.a2 > 0.0
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PassiveCuringEqEngine;
+
+    #[test]
+    fn passive_eq_initializes_and_handles_mismatched_buffers() {
+        let mut eq = PassiveCuringEqEngine::new(48_000.0);
+        let mut left = vec![f32::NAN, 0.5, 2.0];
+        let mut right = vec![0.25, 0.25];
+        eq.process(&mut left, &mut right);
+        assert!(left[..2]
+            .iter()
+            .chain(right.iter())
+            .all(|v| v.is_finite() && v.abs() <= 1.0));
+        assert!(eq.audit_passive_curing_eq());
+    }
+
+    #[test]
+    fn passive_eq_rejects_invalid_parameter_update() {
+        let mut eq = PassiveCuringEqEngine::new(48_000.0);
+        let before_b0 = eq.low_boost.b0;
+        eq.set_parameters(f32::NAN, 0.0, 0.0, 0.0);
+        assert_eq!(eq.low_boost.b0, before_b0);
+        assert!(eq.audit_passive_curing_eq());
     }
 }

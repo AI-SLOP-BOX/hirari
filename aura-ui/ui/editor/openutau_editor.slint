@@ -12,6 +12,7 @@ export component Z_OpenUtauEditor inherits Rectangle {
     in property <string> status: "OPENUTAU READY";
     in-out property <float> scoop: 0.35;
     in-out property <float> vibrato: 0.45;
+    in-out property <float> vibrato-rate: 0.45;
     in-out property <float> dynamics: 0.60;
     in-out property <float> consonants: 0.50;
     in property <[string]> notes: [];
@@ -46,6 +47,7 @@ export component Z_OpenUtauEditor inherits Rectangle {
             spacing: 12px;
             VerticalLayout { horizontal-stretch: 1; Text { text: "しゃくり"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> scoop; } }
             VerticalLayout { horizontal-stretch: 1; Text { text: "ビブラート"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> vibrato; } }
+            VerticalLayout { horizontal-stretch: 1; Text { text: "速度"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> vibrato-rate; } }
             VerticalLayout { horizontal-stretch: 1; Text { text: "強弱"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> dynamics; } }
             VerticalLayout { horizontal-stretch: 1; Text { text: "子音"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> consonants; } }
             Button { text: "調教をUSTXへ反映"; clicked => { apply-tuning(); } }

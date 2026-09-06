@@ -143,6 +143,125 @@ installed plugins become usable without changing the command schema:
 rendered vocal at beat zero on the requested track. Follow-up region commands
 can move, trim, warp, or replace it through the same transaction boundary.
 
+The read-only `openutau_singer_catalog` operation lists locally installed
+Singer voicebanks for an audio-client selector:
+
+```json
+{"op":"openutau_singer_catalog"}
+```
+
+The response is bounded, sorted, and excludes symbolic-link directories.
+
+Use the read-only `openutau_vocals` operation to inspect registered source and
+render pairs, selected Singer metadata, tuning, and content hashes:
+
+```json
+{"op":"openutau_vocals"}
+```
+
+Singer-specific pronunciation controls are exposed through the stable client
+API as normalized values (`scoop`, `vibrato`, `dynamics`, and `consonants`),
+each constrained to `0..=1`; invalid values or unregistered source/render
+pairs are rejected before mutation.
+
+Use `set_open_utau_singer` with project-write permission to change the selected
+Singer for a registered source/render pair:
+
+```json
+{"op":"set_open_utau_singer","source_path":"./voice.ustx","rendered_audio_path":"./voice.wav","singer":"KasaneTeto"}
+```
+
+Use `set_open_utau_tuning` with project-write permission to update the
+normalized pronunciation controls without re-rendering the source:
+
+```json
+{"op":"set_open_utau_tuning","source_path":"./voice.ustx","rendered_audio_path":"./voice.wav","scoop":0.25,"vibrato":0.75,"dynamics":0.5,"consonants":0.4}
+```
+
+`render_vocal_notes_wav` renders an explicit canonical MIDI/OpenUtau note JSON
+array, while `render_scheduled_vocal_notes_wav` renders the notes currently
+stored in the project. Both are isolated external-side-effect actions and
+require an explicit system-write permission:
+
+```json
+{"op":"render_scheduled_vocal_notes_wav","sample_rate":48000,"max_samples":96000,"output_path":"./preview.wav"}
+```
+
+The scheduled form is useful for UI and automation clients because it cannot
+silently diverge from the project's current piano-roll state.
+
+`vocal_alignment` provides a bounded, read-only timing analysis for lead and
+double-vocal envelopes. It returns alignment factors for downstream warping:
+
+```json
+{"op":"vocal_alignment","lead_envelope":[0.0,0.5,1.0],"dub_envelope":[0.0,0.4,0.9],"tightness":0.75}
+```
+
+Use `vocal_lyric_preview` for a direct lyric-level audition before phoneme or
+pitch-curve editing:
+
+```json
+{"op":"vocal_lyric_preview","lyric":"あ","frequency":220.0,"sample_rate":48000.0,"length":4096}
+```
+
+`openutau_status` reports whether the OpenUtau application and helper assets
+are available to the current client:
+
+```json
+{"op":"openutau_status"}
+```
+
+`drum_replacer_triggers` converts a mono drum recording into sample-accurate
+MIDI trigger events for layering with a sampler. The response includes both
+structured events and a deterministic little-endian `midi_stream_hex` payload:
+
+```json
+{"op":"drum_replacer_triggers","samples":[0.0,0.0,0.8,0.2],"sample_rate":48000.0,"target_note":36,"sensitivity":0.4,"retrigger_samples":512}
+```
+
+To publish the rendered voice directly into the arrangement, use
+`render_scheduled_vocal_notes_to_region` with an existing audio track and a
+start position:
+
+```json
+{"op":"render_scheduled_vocal_notes_to_region","track_id":1,"start":0.0,"sample_rate":48000,"max_samples":96000,"output_path":"./voice.wav"}
+```
+
+This writes the WAV and registers it as an audio region in one audited
+operation, making the generated voice immediately available to the mixer and
+waveform editor.
+
+For editing an existing note's pronunciation or pitch expression without
+replacing its MIDI timing, use the reversible `set_midi_note_articulation`
+action:
+
+```json
+{"op":"set_midi_note_articulation","track_id":1,"pitch":60,"start_sample":0,"phoneme":"a","pitch_curve_cents":[0,35,-10],"vibrato_depth_cents":24,"portamento_samples":96}
+```
+
+Canonical project notes also persist `vibrato_rate_millihz` (500..20000 mHz,
+default 5000). OpenUtau imports retain this speed and the vocal preview/render
+fallback uses it whenever no explicit pitch curve is present.
+
+Legacy UST `VBR=length,period,depth,...` records are normalized the same way:
+period is converted from milliseconds to mHz and depth to cents before the
+note enters the canonical contract.
+
+Scheduled vocal notes expose the same live edit through
+`set_midi_note_vibrato_rate(track_id, pitch, start_sample, vibrato_rate_millihz)`.
+
+Pitch-segment clients can update the live project state with
+`set_pitch_segment_vibrato_rate(start_sample, end_sample, vibrato_rate_millihz)`
+after validating a focused edit through
+`edit_pitch_segment_vibrato_rate_json`.
+The combined `edit_pitch_segment_vibrato_json` helper updates depth and rate
+atomically for serialized editor state.
+
+Vocal preview and WAV-render responses also include `rendered_note_count`,
+`skipped_rest_count`, `skipped_invalid_count`, and
+`skipped_probability_count`. These counters let a client explain why a score
+produced fewer audible notes without inspecting the source document again.
+
 `undo` and `redo` are first-class command actions, so GUI, CLI, and automation
 clients share the native history rather than maintaining separate local undo
 stacks.
@@ -307,3 +426,46 @@ filesystem work.
 The desktop handoff uses `/Applications/OpenUtau.app` by default. Portable
 installs, forks, and CI fixtures may set `AURA_OPENUTAU_APP` to an alternate
 application bundle; the status API and UI launch action resolve the same path.
+
+Waveform mastering measurements are available as read-only commands. Loudness
+returns integrated LUFS, short-term LUFS, and loudness range; true-peak uses the
+engine's 4x inter-sample estimator:
+
+```json
+{"op":"analyze_waveform_loudness","left":[0.1,0.0],"right":[0.1,0.0],"sample_rate":48000}
+{"op":"analyze_waveform_true_peak","left":[0.1,0.0],"right":[0.1,0.0]}
+{"op":"analyze_waveform_transients","left":[0.0,0.0,0.8,0.8],"right":[0.0,0.0,0.8,0.8],"window":2,"sensitivity":0.75}
+{"op":"normalize_waveform_loudness","samples":[0.1,0.1,0.1,0.1],"sample_rate":48000,"channels":2,"target_lufs":-14.0,"max_true_peak_dbtp":-1.0}
+{"op":"normalize_region_loudness","track_id":1,"region_id":1,"target_lufs":-14.0,"max_true_peak_dbtp":-1.0}
+```
+
+Both channels must have equal, finite lengths. Loudness accepts 8–384 kHz and
+up to two million samples; true-peak has the same sample bound. The active
+realtime device can be selected with a system-write command:
+
+```json
+{"op":"select_audio_device","device_id":1,"sample_rate":48000,"buffer_size":256}
+```
+
+Transient indices can be committed as AudioWarp hitpoints with a reversible
+project-write command. Source and timeline arrays must be strictly increasing
+and have matching lengths; the native renderer applies the resulting stretch
+ratio atomically to the addressed region:
+
+```json
+{"op":"replace_region_warp_markers","region_id":1,"source_samples":[0,24000,48000],"timeline_samples":[0,26400,52800]}
+{"op":"clear_region_warp_markers","region_id":1}
+```
+
+Supported sample rates are 44.1, 48, 88.2, 96, and 192 kHz; buffer sizes are
+powers of two from 32 through 2048. Native device
+availability is checked by the audio backend and rejected without changing the
+project when the device is unavailable.
+Use the read-only `inspect_audio_device` operation to obtain the current ready
+state, active format, callback count, dropped input blocks, fallback status,
+and enumerated device catalog in one response.
+Successful device selection also returns the resulting `audio_generation` so
+clients can immediately refresh their generation token.
+`apply_audio_config` uses the same supported format set to reconfigure the
+backend atomically and returns the new audio generation, or a structured
+driver diagnostic when reconfiguration is rejected.

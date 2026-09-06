@@ -71,7 +71,10 @@ impl BusSystemOrchestrator {
     }
 
     pub fn add_bus(&mut self, bus_id: u32) -> bool {
-        if bus_id == 0 || self.buses.len() >= 65_536 || self.buses.iter().any(|bus| bus.id == bus_id) {
+        if bus_id == 0
+            || self.buses.len() >= 65_536
+            || self.buses.iter().any(|bus| bus.id == bus_id)
+        {
             return false;
         }
         self.buses.push(BusRust {
@@ -86,7 +89,9 @@ impl BusSystemOrchestrator {
     }
 
     pub fn remove_bus(&mut self, bus_id: u32) -> bool {
-        let Some(index) = self.buses.iter().position(|bus| bus.id == bus_id) else { return false; };
+        let Some(index) = self.buses.iter().position(|bus| bus.id == bus_id) else {
+            return false;
+        };
         self.buses.remove(index);
         self.active_order.retain(|id| *id != bus_id);
         true
@@ -94,21 +99,34 @@ impl BusSystemOrchestrator {
 
     pub fn set_active_order(&mut self, order: Vec<u32>) -> bool {
         let ids: std::collections::HashSet<u32> = self.buses.iter().map(|bus| bus.id).collect();
-        if order.len() != ids.len() || order.iter().any(|id| !ids.contains(id)) || order.windows(2).any(|pair| pair[0] == pair[1]) { return false; }
+        if order.len() != ids.len()
+            || order.iter().any(|id| !ids.contains(id))
+            || order.windows(2).any(|pair| pair[0] == pair[1])
+        {
+            return false;
+        }
         self.active_order = order;
         true
     }
 
     pub fn set_bus_gain_db(&mut self, bus_id: u32, gain_db: f32) -> bool {
-        if !gain_db.is_finite() || !(-120.0..=24.0).contains(&gain_db) { return false; }
-        let Some(bus) = self.buses.iter_mut().find(|bus| bus.id == bus_id) else { return false; };
+        if !gain_db.is_finite() || !(-120.0..=24.0).contains(&gain_db) {
+            return false;
+        }
+        let Some(bus) = self.buses.iter_mut().find(|bus| bus.id == bus_id) else {
+            return false;
+        };
         bus.gain_db = gain_db;
         true
     }
 
     pub fn set_bus_pan(&mut self, bus_id: u32, pan: f32) -> bool {
-        if !pan.is_finite() || !(-1.0..=1.0).contains(&pan) { return false; }
-        let Some(bus) = self.buses.iter_mut().find(|bus| bus.id == bus_id) else { return false; };
+        if !pan.is_finite() || !(-1.0..=1.0).contains(&pan) {
+            return false;
+        }
+        let Some(bus) = self.buses.iter_mut().find(|bus| bus.id == bus_id) else {
+            return false;
+        };
         bus.pan = pan;
         true
     }
@@ -158,7 +176,9 @@ impl BusSystemOrchestrator {
     /// Mixes active buses in MixConsole order into a bounded stereo master
     /// buffer without mutating the individual bus buffers.
     pub fn mix_active_busses(&self, len: usize) -> Option<(Vec<f32>, Vec<f32>)> {
-        if len > 4_194_304 || !self.audit_bus_system() { return None; }
+        if len > 4_194_304 || !self.audit_bus_system() {
+            return None;
+        }
         let mut left = vec![0.0f32; len];
         let mut right = vec![0.0f32; len];
         for bus_id in &self.active_order {
@@ -188,10 +208,16 @@ impl BusSystemOrchestrator {
             && self.active_order.iter().all(|id| unique_ids.contains(id))
             && self.active_order.len() == unique_ids.len()
             && self.buses.iter().all(|bus| {
-                    bus.data_l.len() == bus.data_r.len()
-                    && bus.gain_db.is_finite() && (-120.0..=24.0).contains(&bus.gain_db)
-                    && bus.pan.is_finite() && (-1.0..=1.0).contains(&bus.pan)
-                    && bus.data_l.iter().chain(bus.data_r.iter()).all(|sample| sample.is_finite())
+                bus.data_l.len() == bus.data_r.len()
+                    && bus.gain_db.is_finite()
+                    && (-120.0..=24.0).contains(&bus.gain_db)
+                    && bus.pan.is_finite()
+                    && (-1.0..=1.0).contains(&bus.pan)
+                    && bus
+                        .data_l
+                        .iter()
+                        .chain(bus.data_r.iter())
+                        .all(|sample| sample.is_finite())
             })
     }
 }

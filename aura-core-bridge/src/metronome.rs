@@ -3,6 +3,9 @@ pub struct MetronomeOrchestrator {
     pub sample_rate: f64,
 }
 
+const MIN_METRONOME_SAMPLE_RATE: f64 = 8_000.0;
+const MAX_METRONOME_SAMPLE_RATE: f64 = 384_000.0;
+
 impl Default for MetronomeOrchestrator {
     fn default() -> Self {
         Self::new()
@@ -27,7 +30,7 @@ impl MetronomeOrchestrator {
     pub fn process_metronome(&self, out_l: &mut [f32], out_r: &mut [f32], playhead: u64, bpm: f64) {
         if !self.is_enabled
             || !self.sample_rate.is_finite()
-            || self.sample_rate <= 0.0
+            || !(MIN_METRONOME_SAMPLE_RATE..=MAX_METRONOME_SAMPLE_RATE).contains(&self.sample_rate)
             || !bpm.is_finite()
             || bpm <= 0.0
         {
@@ -68,7 +71,9 @@ impl MetronomeOrchestrator {
     }
 
     pub fn audit_metronome(&self) -> bool {
-        self.sample_rate.is_finite() && self.sample_rate > 0.0
+        self.sample_rate.is_finite()
+            && (MIN_METRONOME_SAMPLE_RATE..=MAX_METRONOME_SAMPLE_RATE)
+                .contains(&self.sample_rate)
     }
 }
 
@@ -90,5 +95,11 @@ mod tests {
         metronome.sample_rate = 48_000.0;
         metronome.process_metronome(&mut left, &mut right, 0, f64::NAN);
         assert!(metronome.audit_metronome());
+
+        metronome.sample_rate = 1.0;
+        assert!(!metronome.audit_metronome());
+        metronome.process_metronome(&mut left, &mut right, 0, 120.0);
+        assert!(left.iter().all(|sample| sample.is_nan()));
+        assert!(right.iter().all(|sample| sample.is_infinite()));
     }
 }

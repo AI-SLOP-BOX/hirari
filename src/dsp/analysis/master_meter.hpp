@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include <atomic>
+#include <array>
 #include "analysis_engine.hpp"
 #include "goniometer.hpp"
 #include "spectrum_analyzer.hpp"
@@ -45,22 +46,37 @@ public:
         { -0.0012f, 0.0055f, -0.0157f, 0.0354f, -0.0711f, 0.2812f, 0.8123f, -0.0645f, 0.0264f, -0.0104f, 0.0033f, -0.0007f }
     };
 
-    MasterMeter(double sr = 44100.0) : m_sampleRate(sr), m_analysis(sr) {}
+    MasterMeter(double sr = 44100.0)
+        : m_sampleRate(std::isfinite(sr) && sr >= 8000.0 && sr <= 384000.0 ? sr : 44100.0), m_analysis(m_sampleRate) {}
 
     void prepareToPlay(double sr, [[maybe_unused]] uint32_t bs) {
-        m_sampleRate = sr;
+        m_sampleRate = std::isfinite(sr) && sr >= 8000.0 && sr <= 384000.0 ? sr : 44100.0;
+        reset();
+    }
+
+    void reset() noexcept {
+        m_peakL.store(0.0f, std::memory_order_relaxed);
+        m_peakR.store(0.0f, std::memory_order_relaxed);
+        m_truePeakL.store(0.0f, std::memory_order_relaxed);
+        m_truePeakR.store(0.0f, std::memory_order_relaxed);
+        m_rmsL.store(0.0f, std::memory_order_relaxed);
+        m_rmsR.store(0.0f, std::memory_order_relaxed);
+        m_historyL.fill(0.0f);
+        m_historyR.fill(0.0f);
     }
 
     /**
      * @brief BLOCK ANALYSIS: High-precision telemetry for the output bus.
      */
     void process(const float* l, const float* r, uint32_t samples) {
+        if (!l || !r || samples == 0 || !std::isfinite(m_sampleRate) || m_sampleRate <= 0.0) return;
         // ... (existing peak detection logic)
         float sumL = 0, sumR = 0, maxL = 0, maxR = 0;
         float trueMaxL = 0, trueMaxR = 0;
 
         for (uint32_t s = 0; s < samples; ++s) {
-            float sL = std::abs(l[s]), sR = std::abs(r[s]);
+            float sL = std::isfinite(l[s]) ? std::fabs(l[s]) : 0.0f;
+            float sR = std::isfinite(r[s]) ? std::fabs(r[s]) : 0.0f;
             sumL += sL * sL; sumR += sR * sR;
             maxL = std::max(maxL, sL); maxR = std::max(maxR, sR);
             
@@ -69,9 +85,13 @@ public:
                 float sumPolyL = 0.0f, sumPolyR = 0.0f;
                 for (int tap = 0; tap < 12; ++tap) {
                     int idx = (int)s - tap + 6; // Center-aligned tap
-                    if (idx >= 0 && idx < (int)samples) {
-                        sumPolyL += l[idx] * kFirCoeffs[phase][tap];
-                        sumPolyR += r[idx] * kFirCoeffs[phase][tap];
+                    if (idx >= -6 && idx < (int)samples) {
+                        const float inL = idx < 0 ? m_historyL[static_cast<size_t>(idx + 6)]
+                                                  : (std::isfinite(l[idx]) ? l[idx] : 0.0f);
+                        const float inR = idx < 0 ? m_historyR[static_cast<size_t>(idx + 6)]
+                                                  : (std::isfinite(r[idx]) ? r[idx] : 0.0f);
+                        sumPolyL += inL * kFirCoeffs[phase][tap];
+                        sumPolyR += inR * kFirCoeffs[phase][tap];
                     }
                 }
                 trueMaxL = std::max(trueMaxL, std::abs(sumPolyL));
@@ -108,6 +128,12 @@ public:
 
         // 5. SPECTRUM ANALYSIS
         m_spectrum.process(l, samples, m_sampleRate);
+        const uint32_t historyCount = std::min<uint32_t>(6u, samples);
+        for (uint32_t i = 0; i < historyCount; ++i) {
+            const uint32_t source = samples - historyCount + i;
+            m_historyL[6u - historyCount + i] = std::isfinite(l[source]) ? l[source] : 0.0f;
+            m_historyR[6u - historyCount + i] = std::isfinite(r[source]) ? r[source] : 0.0f;
+        }
     }
 
     std::vector<float> getSpectrogramL() const { return m_analysis.getSpectrogramL(); }
@@ -133,6 +159,8 @@ private:
     std::atomic<float> m_peakL{0}, m_peakR{0};
     std::atomic<float> m_truePeakL{0}, m_truePeakR{0};
     std::atomic<float> m_rmsL{0}, m_rmsR{0};
+    std::array<float, 6> m_historyL{};
+    std::array<float, 6> m_historyR{};
     AnalysisEngine m_analysis;
     Goniometer m_goniometer;
     SpectrumAnalyzer m_spectrum;

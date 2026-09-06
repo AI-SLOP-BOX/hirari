@@ -51,33 +51,71 @@ public:
             uint64_t gridEnd = gridStart > UINT64_MAX - gridTicks
                 ? UINT64_MAX : gridStart + gridTicks;
 
-            // Apply swing offset to odd-indexed grid lines (offbeats)
-            int64_t swingOffsetTicks = 0;
-            if (gridIndex % 2 == 1) {
-                swingOffsetTicks = static_cast<int64_t>(swingShift * 0.5 *
-                                                         static_cast<float>(gridTicks));
-            }
+            // Apply swing to the grid line being considered, not the interval
+            // containing the note. The interval's right edge is often the
+            // odd offbeat (the old code incorrectly left it unswung).
+            const auto swingOffsetFor = [gridTicks, swingShift](uint64_t index) {
+                return index % 2 == 1
+                    ? static_cast<int64_t>(swingShift * 0.5 * static_cast<float>(gridTicks))
+                    : int64_t{0};
+            };
+            const int64_t startSwing = swingOffsetFor(gridIndex);
+            const int64_t endSwing = swingOffsetFor(gridIndex + (gridEnd == UINT64_MAX ? 0 : 1));
 
             // Choose nearest grid line (start or next), accounting for swing
-            int64_t distToStart = static_cast<int64_t>(note.startTick) -
-                                   static_cast<int64_t>(gridStart) - swingOffsetTicks;
-            int64_t distToEnd = gridEnd > static_cast<uint64_t>(INT64_MAX)
-                ? INT64_MAX
-                : static_cast<int64_t>(note.startTick) - static_cast<int64_t>(gridEnd) - swingOffsetTicks;
+            // MIDI tick positions are 64-bit unsigned; never narrow them
+            // directly into signed arithmetic near the project-size limit.
+            const int64_t originalSigned = note.startTick > static_cast<uint64_t>(INT64_MAX)
+                ? INT64_MAX : static_cast<int64_t>(note.startTick);
+            const int64_t gridStartSigned = gridStart > static_cast<uint64_t>(INT64_MAX)
+                ? INT64_MAX : static_cast<int64_t>(gridStart);
+            const int64_t gridEndSigned = gridEnd > static_cast<uint64_t>(INT64_MAX)
+                ? INT64_MAX : static_cast<int64_t>(gridEnd);
+            const int64_t distToStart = originalSigned - gridStartSigned - startSwing;
+            const int64_t distToEnd = originalSigned - gridEndSigned - endSwing;
 
             int64_t nearestGridTick;
             if (std::abs(distToStart) <= std::abs(distToEnd)) {
-                nearestGridTick = static_cast<int64_t>(gridStart) + swingOffsetTicks;
+                nearestGridTick = gridStartSigned + startSwing;
             } else {
-                nearestGridTick = static_cast<int64_t>(gridEnd) + swingOffsetTicks;
+                nearestGridTick = gridEndSigned + endSwing;
             }
+            nearestGridTick = std::clamp(nearestGridTick, int64_t{0}, INT64_MAX);
 
             // Lerp between original position and quantized position by strength
-            int64_t originalTick = static_cast<int64_t>(note.startTick);
+            int64_t originalTick = originalSigned;
             int64_t quantizedTick = originalTick +
                 static_cast<int64_t>(clampedStrength * static_cast<float>(nearestGridTick - originalTick));
 
             note.startTick = static_cast<uint64_t>(std::max(int64_t{0}, quantizedTick));
+        }
+    }
+
+    /**
+     * @brief Quantizes both note starts and ends while preserving a minimum
+     * musical duration. This is the length-aware mode used by piano-roll
+     * editors; the legacy quantize() remains start-only for compatibility.
+     */
+    static void quantizeWithLength(std::vector<MIDINote>& notes, Resolution res,
+                                   float swing, float strength) {
+        if (!std::isfinite(strength) || strength <= 0.0f) return;
+        const uint64_t grid = resolutionToTicks(res);
+        if (grid == 0) return;
+        std::vector<uint64_t> ends;
+        ends.reserve(notes.size());
+        for (const auto& note : notes) {
+            ends.push_back(note.startTick > UINT64_MAX - note.lengthTicks
+                ? UINT64_MAX : note.startTick + note.lengthTicks);
+        }
+        quantize(notes, res, swing, strength);
+        for (size_t i = 0; i < notes.size(); ++i) {
+            MIDINote endpoint{ends[i], 0, 0, 0};
+            std::vector<MIDINote> endpointNotes{endpoint};
+            quantize(endpointNotes, res, swing, strength);
+            const uint64_t end = endpointNotes.front().startTick;
+            const uint64_t minimum = std::max<uint64_t>(1, grid / 4);
+            const uint64_t duration = end > notes[i].startTick ? end - notes[i].startTick : minimum;
+            notes[i].lengthTicks = std::max(minimum, duration);
         }
     }
 

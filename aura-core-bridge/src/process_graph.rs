@@ -12,6 +12,7 @@ pub struct ExecutionStageRust {
 pub struct ExecutionOrchestrator {
     pub stages: Vec<ExecutionStageRust>,
     pub version: u64,
+    pub invalid_graph: bool,
 }
 
 impl Default for ExecutionOrchestrator {
@@ -25,6 +26,7 @@ impl ExecutionOrchestrator {
         Self {
             stages: Vec::new(),
             version: 0,
+            invalid_graph: false,
         }
     }
 
@@ -33,11 +35,22 @@ impl ExecutionOrchestrator {
         // INDUSTRIAL: Implementation of high-performance Kahn's variant for stage generation.
         // Rust's ParallelStageEngine ensures bit-accurate task distribution.
         self.stages.clear();
+        self.invalid_graph = false;
         let mut in_degree = HashMap::new();
         let mut adjacency = HashMap::new();
         let mut invalid_graph = false;
 
         for n in nodes {
+            if n.dependencies.contains(&n.id) {
+                invalid_graph = true;
+            }
+            let mut unique_dependencies = std::collections::HashSet::new();
+            if n.dependencies
+                .iter()
+                .any(|dep| !unique_dependencies.insert(*dep))
+            {
+                invalid_graph = true;
+            }
             if in_degree.insert(n.id, n.dependencies.len()).is_some() {
                 invalid_graph = true;
             }
@@ -53,6 +66,7 @@ impl ExecutionOrchestrator {
         }
 
         if invalid_graph {
+            self.invalid_graph = true;
             self.version += 1;
             return;
         }
@@ -98,6 +112,7 @@ impl ExecutionOrchestrator {
 
         if invalid_graph || in_degree.values().any(|&degree| degree != 0) {
             self.stages.clear();
+            self.invalid_graph = true;
         }
 
         self.version += 1;
@@ -105,7 +120,51 @@ impl ExecutionOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide execution state.
     pub fn audit_process_graph(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic execution auditing logic.
-        true
+        if self.invalid_graph || self.version == 0 {
+            return !self.invalid_graph && self.stages.is_empty();
+        }
+        let mut seen = std::collections::HashSet::new();
+        self.stages.iter().all(|stage| {
+            !stage.node_ids.is_empty() && stage.node_ids.iter().all(|id| seen.insert(*id))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExecutionOrchestrator, ProcessNodeRust};
+
+    #[test]
+    fn process_graph_rejects_duplicate_and_self_dependencies() {
+        let mut graph = ExecutionOrchestrator::new();
+        graph.compile(&[
+            ProcessNodeRust {
+                id: 1,
+                dependencies: vec![],
+            },
+            ProcessNodeRust {
+                id: 2,
+                dependencies: vec![1, 1],
+            },
+        ]);
+        assert!(graph.stages.is_empty());
+        assert!(!graph.audit_process_graph());
+        graph.compile(&[ProcessNodeRust {
+            id: 1,
+            dependencies: vec![1],
+        }]);
+        assert!(graph.stages.is_empty());
+    }
+
+    #[test]
+    fn process_graph_audit_rejects_duplicate_stage_nodes() {
+        let mut graph = ExecutionOrchestrator::new();
+        graph.compile(&[ProcessNodeRust {
+            id: 1,
+            dependencies: vec![],
+        }]);
+        assert!(graph.audit_process_graph());
+        graph.stages[0].node_ids.push(1);
+        assert!(!graph.audit_process_graph());
     }
 }

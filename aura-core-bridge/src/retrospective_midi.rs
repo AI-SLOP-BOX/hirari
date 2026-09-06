@@ -89,7 +89,11 @@ impl RetrospectiveMidiOrchestrator {
         // here makes merged MIDI ports deterministic without allocating new
         // event payloads.
         let start = current_tick.saturating_sub(lookback_ticks);
-        while self.shadow_buffer.front().is_some_and(|event| event.tick < start) {
+        while self
+            .shadow_buffer
+            .front()
+            .is_some_and(|event| event.tick < start)
+        {
             if let Some(removed) = self.shadow_buffer.pop_front() {
                 self.total_bytes = self.total_bytes.saturating_sub(removed.payload.len());
             }

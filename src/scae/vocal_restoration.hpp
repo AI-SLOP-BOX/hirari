@@ -5,7 +5,9 @@
 #include <memory>
 #include <complex>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 #include "../core/audio_buffer.hpp"
 #include "../dsp/analysis/fft_engine.hpp"
@@ -41,18 +43,39 @@ public:
         uint32_t hop = m_fftSize / 4;
         uint32_t numSamples = buffer.getNumSamples();
         
-        // Ensure overlap buffer is ready
-        if (m_overlapBuffer.getNumSamples() < numSamples + m_fftSize) {
-            m_overlapBuffer.setSize(buffer.getNumChannels(), numSamples + m_fftSize);
+        if (numSamples == 0 || buffer.getNumChannels() == 0) return;
+
+        // Keep the synthesis accumulator and its exact window-power weights in
+        // lockstep.  A fixed 1/1.5 factor is only correct in the middle of a
+        // long stream; it creates a fade at the beginning/end of every clip
+        // and changes whenever the window or hop size changes.
+        const uint32_t requiredSamples = numSamples + m_fftSize;
+        // Ensure overlap buffer is ready.  The channel-count check matters
+        // when a mono preview is followed by a stereo render of the same
+        // processor instance.
+        if (m_overlapBuffer.getNumSamples() < requiredSamples ||
+            m_overlapBuffer.getNumChannels() != buffer.getNumChannels()) {
+            m_overlapBuffer.setSize(buffer.getNumChannels(), requiredSamples);
             m_overlapBuffer.clear();
+            m_overlapNorm.assign(requiredSamples, 0.0f);
+        } else if (m_overlapNorm.size() < requiredSamples) {
+            // This branch is defensive for instances created before the
+            // normalization workspace was introduced.
+            m_overlapNorm.resize(requiredSamples, 0.0f);
         }
 
         for (uint32_t ch = 0; ch < buffer.getNumChannels(); ++ch) {
             float* data = buffer.getWritePointer(ch);
             float* accum = m_overlapBuffer.getWritePointer(ch);
 
-            for (uint32_t offset = 0; offset + m_fftSize <= numSamples; offset += hop) {
-                for (uint32_t i = 0; i < m_fftSize; ++i) m_frameScratch[i] = data[offset + i] * m_window[i];
+            // Pad the final frame with zeroes so short clips and the tail of
+            // arbitrary-length clips are restored too.  The accumulator has
+            // m_fftSize of headroom for this final overlap.
+            for (uint32_t offset = 0; offset < numSamples; offset += hop) {
+                for (uint32_t i = 0; i < m_fftSize; ++i) {
+                    const uint32_t source = offset + i;
+                    m_frameScratch[i] = source < numSamples ? data[source] * m_window[i] : 0.0f;
+                }
                 
                 m_fft.forward(m_frameScratch, m_freqScratch);
 
@@ -69,27 +92,57 @@ public:
                 // --- HONEST FIX: PROPER OVERLAP-ADD ---
                 for (uint32_t i = 0; i < m_fftSize; ++i) {
                     accum[offset + i] += m_frameScratch[i] * m_window[i];
+                    // Window power is channel-independent; accumulate it
+                    // once, otherwise a stereo render would divide both
+                    // channels by twice the correct denominator.
+                    if (ch == 0) {
+                        m_overlapNorm[offset + i] += m_window[i] * m_window[i];
+                    }
                 }
             }
 
-            // Standardize output (Normalization for 4x overlap Hann)
-            float norm = 1.0f / (1.5f); // Approximation for Hann 75% overlap sum
             for (uint32_t s = 0; s < numSamples; ++s) {
-                data[s] = accum[s] * norm;
+                // The exact OLA denominator also handles the two clipped
+                // edges of a finite render.  Preserve uncovered samples only
+                // as a defensive fallback for the zero-valued Hann endpoint.
+                const float weight = m_overlapNorm[s];
+                if (weight > 1.0e-8f) data[s] = accum[s] / weight;
                 accum[s] = accum[s + numSamples]; // Shift remaining overlap
             }
             std::memset(accum + numSamples, 0, m_fftSize * sizeof(float));
         }
+
+        // The window denominator is shared by all channels.  Shift it only
+        // after every channel has consumed the same current-block weights;
+        // doing this inside the channel loop would normalize the second
+        // channel against a different (already shifted) timeline.
+        for (uint32_t s = 0; s < numSamples; ++s) {
+            m_overlapNorm[s] = m_overlapNorm[s + numSamples];
+        }
+        std::fill(m_overlapNorm.begin() + numSamples, m_overlapNorm.end(), 0.0f);
     }
 
     /**
      * @brief DE-ESSER: Industrial 1ms Look-ahead Sibilance Suppression.
      */
     void deEss(Core::AudioBuffer& buffer, float thresholdDb = -20.0f, float intensity = 0.5f) {
+        deEss(buffer, thresholdDb, intensity, 48000.0f);
+    }
+
+    /** @brief Sample-rate aware de-essing entry point. */
+    void deEss(Core::AudioBuffer& buffer, float thresholdDb, float intensity,
+               float sampleRate) {
+        if (!std::isfinite(sampleRate) || sampleRate < 8000.0f || sampleRate > 384000.0f ||
+            !std::isfinite(thresholdDb) || !std::isfinite(intensity)) {
+            return;
+        }
+        intensity = std::clamp(intensity, 0.0f, 1.0f);
+        thresholdDb = std::clamp(thresholdDb, -120.0f, 0.0f);
         const float threshold = std::exp(thresholdDb * 0.11512925465f); // Fast dB to gain
         uint32_t sz = buffer.getNumSamples();
         if (sz == 0 || buffer.getNumChannels() == 0) return;
-        uint32_t lookahead = 48; // ~1ms at 48kHz
+        const uint32_t lookahead = std::clamp(
+            static_cast<uint32_t>(std::lround(sampleRate * 0.001f)), 1u, 4096u);
 
         for (uint32_t ch = 0; ch < buffer.getNumChannels(); ++ch) {
             float* data = buffer.getWritePointer(ch);
@@ -112,14 +165,28 @@ public:
      * OFFLINE: Used for 'Un-Mix' workflows in cinematic post-production.
      */
     static std::shared_ptr<Core::AudioBuffer> extractStem(const Core::AudioBuffer& source, StemType type) {
+        return extractStem(source, type, 44100.0f);
+    }
+
+    /**
+     * @brief Sample-rate aware stem extraction for offline restoration.
+     * The legacy overload remains 44.1 kHz compatible, while hosts that know
+     * the region rate can avoid a shifted cutoff at 48/96 kHz.
+     */
+    static std::shared_ptr<Core::AudioBuffer> extractStem(
+        const Core::AudioBuffer& source, StemType type, float sampleRate) {
         auto result = std::make_shared<Core::AudioBuffer>(source.getNumChannels(), source.getNumSamples());
+
+        if (!std::isfinite(sampleRate) || sampleRate < 8000.0f || sampleRate > 384000.0f) {
+            return result;
+        }
         
         const uint32_t numSamples = source.getNumSamples();
         const uint32_t numChannels = source.getNumChannels();
 
         // Biquad coefficient computer
-        auto computeLPF = [](float freq, float q) {
-            float w0 = 2.0f * static_cast<float>(M_PI) * freq / 44100.0f;
+        auto computeLPF = [sampleRate](float freq, float q) {
+            float w0 = 2.0f * static_cast<float>(M_PI) * freq / sampleRate;
             float alpha = std::sin(w0) / (2.0f * q);
             float cosw0 = std::cos(w0);
             float a0 = 1.0f + alpha;
@@ -132,8 +199,8 @@ public:
             return std::array<float, 5>{b0, b1, b2, a1, a2};
         };
 
-        auto computeHPF = [](float freq, float q) {
-            float w0 = 2.0f * static_cast<float>(M_PI) * freq / 44100.0f;
+        auto computeHPF = [sampleRate](float freq, float q) {
+            float w0 = 2.0f * static_cast<float>(M_PI) * freq / sampleRate;
             float alpha = std::sin(w0) / (2.0f * q);
             float cosw0 = std::cos(w0);
             float a0 = 1.0f + alpha;
@@ -197,6 +264,16 @@ public:
 
         return result;
     }
+
+private:
+    uint32_t m_fftSize;
+    Aura::DSP::Analysis::FFTEngine m_fft;
+    std::vector<float> m_window;
+    std::vector<float> m_noiseFloor;
+    std::vector<float> m_frameScratch;
+    std::vector<std::complex<float>> m_freqScratch;
+    Core::AudioBuffer m_overlapBuffer;
+    std::vector<float> m_overlapNorm;
 };
 
 } // namespace Aura::SCAE::Intelligence

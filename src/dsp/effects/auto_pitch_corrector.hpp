@@ -5,6 +5,8 @@
 #include <complex>
 #include <algorithm>
 #include <atomic>
+#include <cstring>
+#include <cstdio>
 #include "../analysis/fast_fft.hpp"
 #include "../iprocessor.hpp"
 
@@ -19,8 +21,8 @@ namespace Aura::Core::DSP::Effects {
 class AutoPitchCorrector : public ::Aura::DSP::IProcessor {
 public:
     AutoPitchCorrector(double sr, size_t fftSize = 1024) 
-        : m_sampleRate(std::isfinite(sr) && sr > 0.0 ? sr : 44100.0),
-          m_fftSize(std::clamp<size_t>(fftSize, 64, 16384)),
+        : m_sampleRate(std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0),
+          m_fftSize(normalizeFftSize(fftSize)),
           m_fft(m_fftSize) {
         m_complexBufL.resize(m_fftSize);
         m_complexBufR.resize(m_fftSize);
@@ -36,20 +38,22 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        if (std::isfinite(sr) && sr > 0.0) m_sampleRate = sr;
+        (void)bs;
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0;
         reset();
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& context) noexcept override {
         if (m_bypassed) return;
         
-        if (buffer.getNumChannels() < 2) return;
+        if (buffer.getNumChannels() == 0) return;
         float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
-        if (!l || !r) return;
+        float* r = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : l;
+        if (!l) return;
         size_t n = buffer.getNumSamples();
         
-        processInternal(l, r, n, m_response, m_scaleMask);
+        processInternal(l, r, n, m_response.load(std::memory_order_relaxed),
+                        m_scaleMask.load(std::memory_order_relaxed));
     }
 
     void reset() noexcept override {
@@ -67,18 +71,66 @@ public:
     uint32_t getLatencySamples() const noexcept override {
         return static_cast<uint32_t>(m_fftSize); 
     }
+    uint32_t getTailSamples() const noexcept override {
+        return static_cast<uint32_t>(m_fftSize);
+    }
+
+    std::string getName() const override { return "Auto Pitch Corrector"; }
+    uint32_t getNumParameters() const noexcept override { return 2; }
+    bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override {
+        if (id == 0) { out = {0.0f, 1.0f, false}; return true; }
+        if (id == 1) { out = {0.0f, 4095.0f, true}; return true; }
+        return false;
+    }
+    void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
+        if (!outName || maxSize == 0) return;
+        const char* name = id == 0 ? "Correction Response" : (id == 1 ? "Scale Mask" : "");
+        std::snprintf(outName, maxSize, "%s", name);
+    }
+
+    std::vector<uint8_t> getState() const override {
+        std::vector<uint8_t> state(32, 0);
+        const uint32_t magic = 0x41555241u; const uint16_t version = 1;
+        const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
+        std::memcpy(state.data(), &magic, 4); std::memcpy(state.data()+4, &version, 2);
+        std::memcpy(state.data()+6, &flags, 2); std::memcpy(state.data()+8, &m_mix, 4);
+        std::memcpy(state.data()+12, &m_sidechainBusId, 4);
+        const float response = m_response.load(std::memory_order_relaxed);
+        const float mask = static_cast<float>(m_scaleMask.load(std::memory_order_relaxed));
+        std::memcpy(state.data()+16, &response, 4); std::memcpy(state.data()+20, &mask, 4);
+        return state;
+    }
+    bool setState(const std::vector<uint8_t>& state) override {
+        if (state.size() != 32) return false;
+        uint32_t magic = 0, sidechain = 0; uint16_t version = 0, flags = 0; float mix = 0.0f;
+        std::memcpy(&magic, state.data(), 4); std::memcpy(&version, state.data()+4, 2);
+        std::memcpy(&flags, state.data()+6, 2); std::memcpy(&mix, state.data()+8, 4); std::memcpy(&sidechain, state.data()+12, 4);
+        float response = 0.0f, mask = 0.0f; std::memcpy(&response, state.data()+16, 4); std::memcpy(&mask, state.data()+20, 4);
+        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 || !std::isfinite(mix) || mix < 0.0f || mix > 1.0f ||
+            !std::isfinite(response) || response < 0.0f || response > 1.0f || !std::isfinite(mask) || mask < 0.0f || mask > 4095.0f) return false;
+        m_bypassed = (flags & 1u) != 0; m_mix = mix; m_sidechainBusId = sidechain;
+        setParameter(0, response); setParameter(1, mask);
+        return true;
+    }
 
     void setParameter(uint32_t id, float value) noexcept override {
         switch(id) {
-            case 0: m_response = std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.5f; break;
-            case 1: m_scaleMask = static_cast<uint32_t>(value); break;
+            case 0: m_response.store(std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.5f,
+                                     std::memory_order_relaxed); break;
+            case 1:
+                // Scale masks are a 12-bit pitch-class set. Avoid converting
+                // negative/NaN UI values directly to uint32_t.
+                m_scaleMask.store(std::isfinite(value)
+                    ? static_cast<uint32_t>(std::lround(std::clamp(value, 0.0f, 4095.0f)))
+                    : 0x0FFFu, std::memory_order_relaxed);
+                break;
         }
     }
 
     float getParameter(uint32_t id) const noexcept override {
         switch(id) {
-            case 0: return m_response;
-            case 1: return static_cast<float>(m_scaleMask);
+            case 0: return m_response.load(std::memory_order_relaxed);
+            case 1: return static_cast<float>(m_scaleMask.load(std::memory_order_relaxed));
         }
         return 0.0f;
     }
@@ -87,6 +139,13 @@ public:
     float getCorrectionAmount() const { return m_lastCorrectionAmount.load(); }
 
 private:
+    static size_t normalizeFftSize(size_t requested) noexcept {
+        requested = std::clamp<size_t>(requested, 64, 16384);
+        size_t size = 64;
+        while (size < requested && size < 16384) size <<= 1;
+        return size;
+    }
+
     void processInternal(float* l, float* r, size_t numFrames, float response, uint32_t scaleMask) {
         if (numFrames == 0) return;
         
@@ -232,13 +291,18 @@ private:
         };
 
         processChannel(l, m_complexBufL, m_shiftedL, m_lastPhaseL, m_accumPhaseL);
-        processChannel(r, m_complexBufR, m_shiftedR, m_lastPhaseR, m_accumPhaseR);
+        if (r != l) processChannel(r, m_complexBufR, m_shiftedR, m_lastPhaseR, m_accumPhaseR);
     }
 
     void calculateLPC(const float* data, size_t n, std::vector<float>& coeffs) {
+        if (!data || n < 16 || coeffs.size() < 12) return;
         float r[14] = {0}; 
         for (int k = 0; k <= 12; ++k) {
-            for (int i = 0; i < (int)n - k; ++i) r[k] += data[i] * data[i+k];
+            for (int i = 0; i < (int)n - k; ++i) {
+                const float a = std::isfinite(data[i]) ? data[i] : 0.0f;
+                const float b = std::isfinite(data[i + k]) ? data[i + k] : 0.0f;
+                r[k] += a * b;
+            }
         }
         if (r[0] < 1e-9f) return;
 
@@ -246,15 +310,17 @@ private:
         for (int i = 1; i <= 12; ++i) {
             float s = 0;
             for (int j = 1; j < i; ++j) s += a[j] * r[i - j];
-            k_ref = (r[i] - s) / e;
+            if (!std::isfinite(e) || e < 1.0e-9f) break;
+            k_ref = std::clamp((r[i] - s) / e, -0.98f, 0.98f);
             a[i] = k_ref;
             for (int j = 1; j < i; ++j) {
                 float old_a = a[j];
                 a[j] = old_a - k_ref * a[i - j];
             }
             e *= (1.0f - k_ref * k_ref);
+            if (!std::isfinite(e)) break;
         }
-        for (int i = 0; i < 12; ++i) coeffs[i] = a[i+1];
+        for (int i = 0; i < 12; ++i) coeffs[i] = std::isfinite(a[i + 1]) ? a[i + 1] : 0.0f;
     }
 
     float getLPCEnvelope(size_t bin, const std::vector<float>& lpc) {
@@ -275,8 +341,8 @@ private:
     std::vector<float> m_lpcCoeffs;
     std::vector<float> m_realBuf, m_imagBuf;
     float m_currentCorrection = 0.0f;
-    float m_response = 0.5f;
-    uint32_t m_scaleMask = 0xFFF;
+    std::atomic<float> m_response{0.5f};
+    std::atomic<uint32_t> m_scaleMask{0xFFF};
     std::atomic<float> m_detectedFreq{0.0f};
     std::atomic<float> m_lastCorrectionAmount{0.0f};
 };

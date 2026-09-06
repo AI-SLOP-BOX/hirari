@@ -1,8 +1,57 @@
+use aura_core_bridge::piano_visualizer::{PianoNote, PianoVisualizer, PianoVisualizerConfig};
 use aura_core_bridge::AuraCore;
 use slint::{ComponentHandle, Model, VecModel};
 use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static PIANO_BOUNCE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn beat_to_seconds(beat: f64, packed_events: &[f64], fallback_bpm: f32) -> f64 {
+    if !beat.is_finite() || beat <= 0.0 {
+        return 0.0;
+    }
+    let mut cursor_beat = 0.0;
+    let mut cursor_seconds = 0.0;
+    let mut bpm = f64::from(fallback_bpm.max(1.0));
+    let mut ramp = false;
+    for event in packed_events.as_chunks::<3>().0 {
+        let event_beat = event[0];
+        let event_bpm = event[1];
+        if !event_beat.is_finite() || !event_bpm.is_finite() || event_beat < cursor_beat {
+            continue;
+        }
+        if event_beat > beat {
+            break;
+        }
+        let segment_beats = event_beat - cursor_beat;
+        if segment_beats > 0.0 {
+            let effective_bpm = if ramp {
+                (bpm + event_bpm.max(1.0)) * 0.5
+            } else {
+                bpm
+            };
+            cursor_seconds += segment_beats * 60.0 / effective_bpm.max(1.0);
+        }
+        cursor_beat = event_beat;
+        bpm = event_bpm.max(1.0);
+        ramp = event[2].is_finite() && event[2] > 0.5;
+    }
+    cursor_seconds + (beat - cursor_beat).max(0.0) * 60.0 / bpm.max(1.0)
+}
+
+fn piano_bounce_path() -> std::path::PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let sequence = PIANO_BOUNCE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "aura-piano-mix-{}-{nonce}-{sequence}.wav",
+        std::process::id(),
+    ))
+}
 
 use crate::slint_ui::{
     choose_audio_file, clamp_selection_index, display_path, midi_notes_path,
@@ -81,6 +130,70 @@ pub fn handle_command(
                             .into(),
                     );
                 }
+            }
+            true
+        }
+        "PIANO VISUALIZER" => {
+            let selected = clamp_selection_index(ui.get_sel_idx(), tracks.row_count());
+            let Some(track) = tracks.row_data(selected) else {
+                ui.set_last_action("PIANO VISUALIZER: SELECT A MIDI TRACK".into());
+                return true;
+            };
+            // MIDI note positions are stored in beats.  Convert using the
+            // project's active tempo instead of the old 120-BPM shortcut so
+            // the rendered piano video stays sample-accurate for user tempo
+            // changes (the tempo map's first event is the Core fallback).
+            let fallback_bpm = core.get_tempo();
+            let tempo_events = core.get_tempo_events();
+            let notes: Vec<PianoNote> = track
+                .piano_roll_notes
+                .iter()
+                .filter_map(|note| {
+                    let start_beat = f64::from(note.start_beat).max(0.0);
+                    let end_beat = start_beat + f64::from(note.length_beats.max(0.0));
+                    let start = beat_to_seconds(start_beat, &tempo_events, fallback_bpm);
+                    let duration =
+                        (beat_to_seconds(end_beat, &tempo_events, fallback_bpm) - start).max(0.0);
+                    (duration > 0.0).then_some(PianoNote {
+                        start_seconds: start.max(0.0),
+                        duration_seconds: duration,
+                        pitch: note.pitch.clamp(0, 127) as u8,
+                        velocity: note.velocity.clamp(1, 127) as u8,
+                        channel: 0,
+                    })
+                })
+                .collect();
+            let Some(output) = rfd::FileDialog::new()
+                .set_title("Export Piano Visualizer MP4")
+                .add_filter("MP4 video", &["mp4"])
+                .set_file_name("aura-piano.mp4")
+                .save_file()
+            else {
+                ui.set_last_action("PIANO VISUALIZER CANCELLED".into());
+                return true;
+            };
+            ui.set_last_action("PIANO VISUALIZER RENDERING…".into());
+            let bounced_audio = piano_bounce_path();
+            let result = if core.bounce_project(bounced_audio.to_string_lossy().as_ref(), 0) {
+                PianoVisualizer::render_to_mp4_from_wav(
+                    &notes,
+                    &bounced_audio,
+                    &PianoVisualizerConfig::default(),
+                    &output,
+                )
+            } else {
+                Err(
+                    aura_core_bridge::piano_visualizer::PianoVisualizerError::Encoder(
+                        "Aura project bounce failed".into(),
+                    ),
+                )
+            };
+            let _ = fs::remove_file(&bounced_audio);
+            match result {
+                Ok(()) => ui.set_last_action(
+                    format!("PIANO VIDEO EXPORTED · {}", display_path(&output)).into(),
+                ),
+                Err(error) => ui.set_last_action(format!("PIANO VIDEO FAILED · {error}").into()),
             }
             true
         }
@@ -305,5 +418,36 @@ pub fn handle_command(
             true
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn piano_visualizer_uses_project_tempo_for_beat_conversion() {
+        assert!((super::beat_to_seconds(1.0, &[], 120.0) - 0.5).abs() < f64::EPSILON);
+        assert!((super::beat_to_seconds(1.0, &[], 60.0) - 1.0).abs() < f64::EPSILON);
+        assert!((super::beat_to_seconds(1.0, &[], 240.0) - 0.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn piano_visualizer_clamps_invalid_tempo_safely() {
+        assert!((super::beat_to_seconds(1.0, &[], 0.0) - 60.0).abs() < f64::EPSILON);
+        assert!((super::beat_to_seconds(1.0, &[], -10.0) - 60.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn piano_visualizer_integrates_tempo_events() {
+        let events = [0.0, 120.0, 0.0, 4.0, 60.0, 0.0];
+        assert!((super::beat_to_seconds(4.0, &events, 120.0) - 2.0).abs() < 1e-9);
+        assert!((super::beat_to_seconds(6.0, &events, 120.0) - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn piano_visualizer_bounce_paths_are_unique() {
+        let first = super::piano_bounce_path();
+        let second = super::piano_bounce_path();
+        assert_ne!(first, second);
+        assert_eq!(first.extension().and_then(|ext| ext.to_str()), Some("wav"));
     }
 }

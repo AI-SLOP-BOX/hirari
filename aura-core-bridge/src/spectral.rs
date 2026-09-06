@@ -17,6 +17,15 @@ impl SpectrumOrchestrator {
     pub fn update_average(&mut self, input_mags: &[f32]) {
         // INDUSTRIAL: Implementation of high-performance spectral smoothing.
         // Rust's iterator chains are optimized into efficient SIMD instructions by LLVM.
+        if input_mags.len() != self.bins
+            || self.bins == 0
+            || self.bins > 65_536
+            || input_mags
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return;
+        }
         for (avg, &new) in self.averaged_input.iter_mut().zip(input_mags.iter()) {
             *avg = 0.99 * (*avg) + 0.01 * new;
         }
@@ -24,6 +33,9 @@ impl SpectrumOrchestrator {
 
     /// INDUSTRIAL: Calculates the matching curve with forensic accuracy and SIMD-optimized dB conversion.
     pub fn calculate_match_curve(&self) -> Vec<f32> {
+        if !self.audit_spectral_balance() {
+            return Vec::new();
+        }
         let mut curve = vec![0.0; self.bins];
 
         for i in 0..self.bins {
@@ -47,7 +59,54 @@ impl SpectrumOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide spectral balance.
     pub fn audit_spectral_balance(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic spectral auditing logic.
-        true
+        // A profile is only usable when both sides have the same bounded
+        // shape and every magnitude is a finite, non-negative value.  The
+        // matcher takes logarithms, so accepting NaN/negative bins here would
+        // turn a malformed analysis into an invalid mastering curve.
+        self.bins > 0
+            && self.bins <= 65_536
+            && self.target_spectrum.len() == self.bins
+            && self.averaged_input.len() == self.bins
+            && self
+                .target_spectrum
+                .iter()
+                .chain(self.averaged_input.iter())
+                .all(|value| value.is_finite() && *value >= 0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SpectrumOrchestrator;
+
+    #[test]
+    fn spectral_audit_rejects_malformed_profiles() {
+        let mut spectrum = SpectrumOrchestrator::new(8);
+        assert!(spectrum.audit_spectral_balance());
+        spectrum.target_spectrum[2] = f32::NAN;
+        assert!(!spectrum.audit_spectral_balance());
+        spectrum.target_spectrum[2] = 1.0;
+        spectrum.averaged_input[3] = -0.1;
+        assert!(!spectrum.audit_spectral_balance());
+    }
+
+    #[test]
+    fn spectral_audit_rejects_shape_mismatch() {
+        let mut spectrum = SpectrumOrchestrator::new(4);
+        spectrum.target_spectrum.pop();
+        assert!(!spectrum.audit_spectral_balance());
+        assert!(spectrum.calculate_match_curve().is_empty());
+    }
+
+    #[test]
+    fn spectral_average_rejects_invalid_input_atomically() {
+        let mut spectrum = SpectrumOrchestrator::new(4);
+        let before = spectrum.averaged_input.clone();
+        spectrum.update_average(&[1.0, 2.0]);
+        assert_eq!(spectrum.averaged_input, before);
+        spectrum.update_average(&[1.0, f32::NAN, 2.0, 3.0]);
+        assert_eq!(spectrum.averaged_input, before);
+        spectrum.update_average(&[1.0, 2.0, 3.0, 4.0]);
+        assert_ne!(spectrum.averaged_input, before);
     }
 }

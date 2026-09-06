@@ -35,11 +35,15 @@ impl SidechainDuckEngine {
     }
 
     pub fn set_depth(&mut self, depth: f32) {
-        if depth.is_finite() { self.depth = depth.clamp(0.0, 1.0); }
+        if depth.is_finite() {
+            self.depth = depth.clamp(0.0, 1.0);
+        }
     }
 
     pub fn try_set_depth(&mut self, depth: f32) -> bool {
-        if !depth.is_finite() || !(0.0..=1.0).contains(&depth) { return false; }
+        if !depth.is_finite() || !(0.0..=1.0).contains(&depth) {
+            return false;
+        }
         self.depth = depth;
         true
     }

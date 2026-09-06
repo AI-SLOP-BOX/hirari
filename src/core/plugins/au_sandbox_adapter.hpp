@@ -228,6 +228,11 @@ public:
         return status == noErr;
     }
 
+    bool reset() noexcept {
+        if (!m_ready || !m_unit) return false;
+        return AudioUnitReset(m_unit, kAudioUnitScope_Global, 0) == noErr;
+    }
+
 private:
     static OSType fourCC(CFTypeRef value) noexcept {
         if (value && CFGetTypeID(value) == CFNumberGetTypeID()) {

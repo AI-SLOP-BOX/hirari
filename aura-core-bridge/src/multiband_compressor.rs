@@ -74,8 +74,15 @@ impl MultibandCompressorEngine {
     }
 
     pub fn set_split_freqs(&mut self, low_mid: f32, mid_high: f32) {
-        self.low_mid_freq = low_mid;
-        self.mid_high_freq = mid_high;
+        let nyquist = (self.sample_rate as f32 * 0.49).max(20.0);
+        if low_mid.is_finite()
+            && mid_high.is_finite()
+            && (20.0..nyquist).contains(&low_mid)
+            && (low_mid..nyquist).contains(&mid_high)
+        {
+            self.low_mid_freq = low_mid;
+            self.mid_high_freq = mid_high;
+        }
     }
 
     fn process_lpf(&mut self, input: f32, freq: f32, idx: usize) -> f32 {
@@ -92,11 +99,14 @@ impl MultibandCompressorEngine {
 
     /// INDUSTRIAL: 3-Band Dynamics Processor with 1st-order complementary crossover.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        let len = l.len().min(r.len());
+        if !self.audit_multiband_compressor() {
+            return;
+        }
 
         for s in 0..len {
-            let in_l = l[s];
-            let in_r = r[s];
+            let in_l = if l[s].is_finite() { l[s] } else { 0.0 };
+            let in_r = if r[s].is_finite() { r[s] } else { 0.0 };
 
             // 1. COMPLEMENTARY CROSSOVER (1st-order, 6dB/oct)
             let low_l = self.process_lpf(in_l, self.low_mid_freq, 0);
@@ -113,14 +123,65 @@ impl MultibandCompressorEngine {
             let gain_m = self.mid_band_unit.process(mid_l.abs().max(mid_r.abs()));
             let gain_h = self.high_band_unit.process(high_l.abs().max(high_r.abs()));
 
-            l[s] = low_l * gain_l + mid_l * gain_m + high_l * gain_h;
-            r[s] = low_r * gain_l + mid_r * gain_m + high_r * gain_h;
+            l[s] = (low_l * gain_l + mid_l * gain_m + high_l * gain_h).clamp(-1.0, 1.0);
+            r[s] = (low_r * gain_l + mid_r * gain_m + high_r * gain_h).clamp(-1.0, 1.0);
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Multiband Compressor state.
     pub fn audit_multiband_compressor(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Multiband Compressor auditing logic.
-        true
+        let nyquist = self.sample_rate * 0.5;
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.low_mid_freq.is_finite()
+            && self.mid_high_freq.is_finite()
+            && (20.0..nyquist as f32).contains(&self.low_mid_freq)
+            && (self.low_mid_freq..nyquist as f32).contains(&self.mid_high_freq)
+            && self
+                .filters
+                .iter()
+                .all(|value| value.is_finite() && value.abs() <= 4.0)
+            && [
+                &self.low_band_unit,
+                &self.mid_band_unit,
+                &self.high_band_unit,
+            ]
+            .iter()
+            .all(|band| {
+                band.sample_rate.is_finite()
+                    && (8_000.0..=384_000.0).contains(&band.sample_rate)
+                    && band.env.is_finite()
+                    && (0.0..=4.0).contains(&band.env)
+                    && band.gain.is_finite()
+                    && (0.0..=1.0).contains(&band.gain)
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MultibandCompressorEngine;
+
+    #[test]
+    fn multiband_processing_is_stereo_safe_and_finite() {
+        let mut engine = MultibandCompressorEngine::new(48_000.0);
+        engine.set_split_freqs(180.0, 2_400.0);
+        let mut left = vec![0.8_f32; 512];
+        let mut right = vec![0.4_f32; 256];
+        engine.process(&mut left, &mut right);
+        assert!(left[..256]
+            .iter()
+            .chain(right.iter())
+            .all(|s| s.is_finite() && s.abs() <= 1.0));
+        assert!(engine.audit_multiband_compressor());
+    }
+
+    #[test]
+    fn multiband_audit_rejects_corrupt_state_and_split_updates() {
+        let mut engine = MultibandCompressorEngine::new(48_000.0);
+        engine.set_split_freqs(20_000.0, 100.0);
+        assert_eq!(engine.low_mid_freq, 200.0);
+        engine.filters[0] = f32::NAN;
+        assert!(!engine.audit_multiband_compressor());
     }
 }

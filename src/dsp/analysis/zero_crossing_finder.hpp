@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <algorithm>
+#include <limits>
 
 namespace Aura::DSP::Analysis {
 
@@ -20,11 +21,21 @@ public:
      * @return The optimal sample index for a clean cut.
      */
     static size_t findNearest(const float* data, size_t targetPos, size_t numSamples, size_t searchRange = 128) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::ZeroCrossingOrchestrator.
-        // Rust's SIMD-optimized sign-change detection ensures that 
-        // waveform alignment is always perfectly smooth and technically superior.
-        return targetPos;
+        if (!data || numSamples == 0) return 0;
+        targetPos = std::min(targetPos, numSamples - 1u);
+        const size_t begin = targetPos > searchRange ? targetPos - searchRange : 0;
+        const size_t end = std::min(numSamples - 1u, targetPos + searchRange);
+        size_t best = targetPos;
+        float bestScore = std::numeric_limits<float>::max();
+        for (size_t i = begin; i <= end; ++i) {
+            const float current = std::isfinite(data[i]) ? data[i] : 0.0f;
+            const float next = i + 1u < numSamples && std::isfinite(data[i + 1u]) ? data[i + 1u] : current;
+            const bool crossing = (current <= 0.0f && next >= 0.0f) || (current >= 0.0f && next <= 0.0f);
+            const float score = crossing ? std::fabs(current) + 0.05f * static_cast<float>(std::abs(static_cast<int64_t>(i) - static_cast<int64_t>(targetPos)))
+                                         : 1000.0f + std::fabs(current);
+            if (score < bestScore) { bestScore = score; best = i; }
+        }
+        return best;
     }
 
 };

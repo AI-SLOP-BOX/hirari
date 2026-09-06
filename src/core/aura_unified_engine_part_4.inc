@@ -156,6 +156,53 @@ bool AuraUnifiedEngine::set_region_fades(uint32_t tid, uint32_t rid, float fadeI
     return true;
 }
 
+bool AuraUnifiedEngine::set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start,
+                                              uint64_t end, float gain, uint64_t fadeIn,
+                                              uint64_t fadeOut) {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (auto& track : m_tracks) {
+        if (track->getId() != tid) continue;
+        const auto before = track->regionRangeEdits(rid);
+        if (!track->setRegionRangeEdit(rid, start, end, gain, fadeIn, fadeOut)) return false;
+        auto after = track->regionRangeEdits(rid);
+        m_undoManager.performAction("Region Range Edit",
+            [track, rid, before] { track->replaceRegionRangeEdits(rid, before); },
+            [track, rid, after] { track->replaceRegionRangeEdits(rid, after); });
+        return true;
+    }
+    return false;
+}
+
+bool AuraUnifiedEngine::clear_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start,
+                                                uint64_t end) {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (auto& track : m_tracks) {
+        if (track->getId() != tid) continue;
+        const auto before = track->regionRangeEdits(rid);
+        if (!track->clearRegionRangeEdit(rid, start, end)) return false;
+        auto after = track->regionRangeEdits(rid);
+        m_undoManager.performAction("Clear Region Range Edit",
+            [track, rid, before] { track->replaceRegionRangeEdits(rid, before); },
+            [track, rid, after] { track->replaceRegionRangeEdits(rid, after); });
+        return true;
+    }
+    return false;
+}
+
+bool AuraUnifiedEngine::clear_region_range_edits(uint32_t tid, uint32_t rid) {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (auto& track : m_tracks) {
+        if (track->getId() != tid) continue;
+        const auto before = track->regionRangeEdits(rid);
+        if (before.empty() || !track->clearRegionRangeEdits(rid)) return false;
+        m_undoManager.performAction("Clear Region Range Edits",
+            [track, rid, before] { track->replaceRegionRangeEdits(rid, before); },
+            [track, rid] { track->clearRegionRangeEdits(rid); });
+        return true;
+    }
+    return false;
+}
+
 bool AuraUnifiedEngine::set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) {
     std::shared_ptr<Track> target;
     bool before = false;
@@ -315,6 +362,35 @@ bool AuraUnifiedEngine::clear_region_audio_note_segments(uint32_t tid, uint32_t 
         }
     }
     return target && target->clearAudioNoteSegments(rid);
+}
+
+bool AuraUnifiedEngine::warp_region_audio_note_segment(
+    uint32_t tid, uint32_t rid, double segmentStartSeconds,
+    double newStartSeconds, double newEndSeconds) {
+    if (!std::isfinite(segmentStartSeconds) || segmentStartSeconds < 0.0 ||
+        !std::isfinite(newStartSeconds) || newStartSeconds < 0.0 ||
+        !std::isfinite(newEndSeconds) || newEndSeconds <= newStartSeconds ||
+        newEndSeconds - newStartSeconds > 24.0 * 60.0) return false;
+    std::shared_ptr<Track> target;
+    {
+        std::lock_guard<std::mutex> lock(m_tracksMutex);
+        for (auto& track : m_tracks)
+            if (track->getId() == tid) { target = track; break; }
+    }
+    return target && target->warpAudioNoteSegment(rid, segmentStartSeconds,
+                                                   newStartSeconds, newEndSeconds);
+}
+
+bool AuraUnifiedEngine::remove_region_audio_note_segment(uint32_t tid, uint32_t rid,
+                                                          double segmentStartSeconds) {
+    if (!std::isfinite(segmentStartSeconds) || segmentStartSeconds < 0.0) return false;
+    std::shared_ptr<Track> target;
+    {
+        std::lock_guard<std::mutex> lock(m_tracksMutex);
+        for (auto& track : m_tracks)
+            if (track->getId() == tid) { target = track; break; }
+    }
+    return target && target->removeAudioNoteSegment(rid, segmentStartSeconds);
 }
 
 bool AuraUnifiedEngine::analyze_region_audio_note_segments(uint32_t tid, uint32_t rid,
@@ -577,6 +653,20 @@ bool AuraUnifiedEngine::loadProject(std::string_view path) {
                     r.syncGroup = rs.syncGroup;
                     r.processingHistory = rs.processingHistory;
                     r.audioNoteSegments = rs.audioNoteSegments;
+                    r.rangeEdits.clear();
+                    r.rangeEdits.reserve(std::min<size_t>(rs.rangeEdits.size(), 4096));
+                    for (const auto& edit : rs.rangeEdits) {
+                        // Reject malformed persisted edits before they reach
+                        // the real-time renderer.  This mirrors serializer
+                        // validation and protects hand-edited project files.
+                        if (edit.start >= edit.end || (r.len > 0 && edit.end > r.len) ||
+                            !std::isfinite(edit.gain) || edit.gain < 0.0f || edit.gain > 16.0f ||
+                            edit.fadeIn > edit.end - edit.start || edit.fadeOut > edit.end - edit.start) {
+                            continue;
+                        }
+                        if (r.rangeEdits.size() >= 4096) break;
+                        r.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
+                    }
                     // Hydrate audio during project load so an opened project
                     // is immediately playable. Missing files remain visible
                     // as unloaded regions and can be repaired via Relink.
@@ -588,6 +678,22 @@ bool AuraUnifiedEngine::loadProject(std::string_view path) {
                             if (r.sourceOffset >= r.audio->getNumSamples()) continue;
                             r.len = std::min(r.len, r.audio->getNumSamples() - r.sourceOffset);
                         }
+                    }
+                    // The persisted region length may have been larger than
+                    // the decoded media (for example after an external file
+                    // was replaced).  Revalidate range edits against the
+                    // final playable length so the renderer never evaluates
+                    // stale offsets beyond the audio buffer.
+                    if (!r.rangeEdits.empty()) {
+                        const auto playableLength = r.len;
+                        r.rangeEdits.erase(
+                            std::remove_if(r.rangeEdits.begin(), r.rangeEdits.end(),
+                                [playableLength](const Region::RangeEdit& edit) {
+                                    return edit.start >= edit.end || edit.end > playableLength ||
+                                           edit.fadeIn > edit.end - edit.start ||
+                                           edit.fadeOut > edit.end - edit.start;
+                                }),
+                            r.rangeEdits.end());
                     }
                     t->addRegion(r);
                     break;
@@ -650,6 +756,7 @@ bool AuraUnifiedEngine::loadProject(std::string_view path) {
         m_pdcManager.resetForProject();
         sidechainManager.resetForProject();
         m_routingEngine.resetForProject();
+        m_controlRoom.resetForProject();
         m_sidechainRoutes.clear();
         m_regionIdCounter.store(nextRegionId, std::memory_order_release);
         m_trackIdCounter.store(nextTrackId, std::memory_order_release);
@@ -762,6 +869,10 @@ bool AuraUnifiedEngine::saveProject(std::string_view path) {
             rs.syncGroup = region.syncGroup;
             rs.processingHistory = region.processingHistory;
             rs.audioNoteSegments = region.audioNoteSegments;
+            rs.rangeEdits.clear();
+            for (const auto& edit : region.rangeEdits) {
+                rs.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
+            }
             state.regions.push_back(rs);
         }
     }

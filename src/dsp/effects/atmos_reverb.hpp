@@ -1,3 +1,4 @@
+#pragma once
 #include <vector>
 #include <array>
 #include <cmath>
@@ -14,16 +15,18 @@ namespace Aura::DSP::Effects {
  */
 class AtmosReverb : public IProcessor {
 public:
-    AtmosReverb(double sr = 44100.0) : m_sampleRate(sr) {
+    AtmosReverb(double sr = 44100.0) : m_sampleRate(44100.0) {
         m_delays.resize(12);
-        for (auto& d : m_delays) d.resize(4410, 0.0f); 
+        setSampleRate(sr);
     }
+
+    std::string getName() const override { return "Atmos Immersive Reverb"; }
 
     /**
      * @brief PROCESS IMMERSIVE: FDN processing with Denormal Protection.
      */
-    void processImmersive(const std::vector<float*>& buffers, uint32_t numSamples) {
-        const uint32_t channels = std::min<uint32_t>(static_cast<uint32_t>(buffers.size()), 12);
+    void processImmersiveRaw(float* const* buffers, uint32_t bufferCount, uint32_t numSamples) {
+        const uint32_t channels = std::min<uint32_t>(bufferCount, 12);
         if (channels == 0 || numSamples == 0) return;
         for (uint32_t s = 0; s < numSamples; ++s) {
             float input = 0.0f;
@@ -55,26 +58,36 @@ public:
                 if (!buffers[c]) continue;
                 const float wet = m_state[c] * 0.35f + mean * 0.15f;
                 const float dry = std::isfinite(buffers[c][s]) ? buffers[c][s] : 0.0f;
-                buffers[c][s] = std::isfinite(dry * 0.8f + wet * 0.2f) ? dry * 0.8f + wet * 0.2f : 0.0f;
+                const float out = dry * 0.8f + wet * 0.2f;
+                buffers[c][s] = std::isfinite(out) ? std::clamp(out, -16.0f, 16.0f) : 0.0f;
             }
         }
+    }
+
+    void processImmersive(const std::vector<float*>& buffers, uint32_t numSamples) {
+        processImmersiveRaw(buffers.data(), static_cast<uint32_t>(buffers.size()), numSamples);
     }
 
 
     void process(float* l, float* r, uint32_t numSamples) {
         if (!l || !r) return;
-        std::vector<float*> buffers{l, r};
-        processImmersive(buffers, numSamples);
+        m_bufferPointers[0] = l;
+        m_bufferPointers[1] = r;
+        for (size_t c = 2; c < m_bufferPointers.size(); ++c) m_bufferPointers[c] = nullptr;
+        processImmersiveRaw(m_bufferPointers.data(), 2, numSamples);
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)bs; setSampleRate(sr); reset(); }
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
         (void)midi; (void)context;
-        if (buffer.getNumChannels() == 0) return;
-        std::vector<float*> buffers;
-        buffers.reserve(std::min<uint32_t>(buffer.getNumChannels(), 12));
-        for (uint32_t c = 0; c < std::min<uint32_t>(buffer.getNumChannels(), 12); ++c) buffers.push_back(buffer.getWritePointer(c));
-        processImmersive(buffers, buffer.getNumSamples());
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 12);
+        for (uint32_t c = 0; c < 12; ++c) {
+            m_bufferPointers[c] = c < channels ? buffer.getWritePointer(c) : nullptr;
+        }
+        // The fixed pointer array avoids an allocation on every realtime
+        // block while retaining the existing vector-based public helper.
+        processImmersiveRaw(m_bufferPointers.data(), channels, buffer.getNumSamples());
     }
     void reset() noexcept override {
         for (auto& delay : m_delays) std::fill(delay.begin(), delay.end(), 0.0f);
@@ -82,14 +95,28 @@ public:
         m_writeIndices.fill(0);
     }
 
-    void setSampleRate(double sr) { m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0; }
-    uint32_t getLatency() const { return 0; }
+    void setSampleRate(double sr) {
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0
+            ? sr : 44'100.0;
+        const size_t delaySamples = std::max<size_t>(1u, static_cast<size_t>(m_sampleRate * 0.1));
+        for (auto& delay : m_delays) delay.assign(delaySamples, 0.0f);
+        m_writeIndices.fill(0);
+    }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
+    uint32_t getTailSamples() const noexcept override {
+        // The immersive tank feeds back at 0.82; reserve enough traversals
+        // for the decay to fall below the export noise floor.
+        const size_t longest = m_delays.empty() ? 0u : m_delays.front().size();
+        return static_cast<uint32_t>(std::min<size_t>(longest * 40u,
+            static_cast<size_t>(m_sampleRate * 30.0)));
+    }
 
 private:
     double m_sampleRate;
     std::vector<std::vector<float>> m_delays;
     std::array<size_t, 12> m_writeIndices{};
     std::array<float, 12> m_state{};
+    std::array<float*, 12> m_bufferPointers{};
 };
 
 } // namespace Aura::DSP::Effects

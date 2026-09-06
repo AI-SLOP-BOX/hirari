@@ -1,8 +1,8 @@
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use sha2::{Digest, Sha256};
 
 pub struct AssetMetadataRust {
     pub uuid: String,
@@ -164,12 +164,7 @@ impl ResourceOrchestrator {
             }
             let source = fs::canonicalize(&asset.path)
                 .map_err(|error| format!("asset canonicalization failed: {error}"))?;
-            if !source.is_file()
-                || source
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_none()
-            {
+            if !source.is_file() || source.file_name().and_then(|name| name.to_str()).is_none() {
                 return Err(format!("asset is not a regular file: {}", asset.path));
             }
         }
@@ -196,8 +191,8 @@ impl ResourceOrchestrator {
             if source.file_name().and_then(|name| name.to_str()).is_none() {
                 return Err(format!("asset has no valid filename: {}", source.display()));
             }
-            let suffix = match fs::read(&source) {
-                Ok(bytes) => Self::content_suffix(&bytes),
+            let suffix = match Self::content_suffix(&source) {
+                Ok(value) => value,
                 Err(error) => return Err(format!("asset read failed: {error}")),
             };
             let stem = source
@@ -213,7 +208,18 @@ impl ResourceOrchestrator {
             let destination = target.join(filename);
             if destination.exists() {
                 if !destination.is_file() {
-                    return Err(format!("asset destination is not a file: {}", destination.display()));
+                    return Err(format!(
+                        "asset destination is not a file: {}",
+                        destination.display()
+                    ));
+                }
+                let existing_suffix = Self::content_suffix(&destination)
+                    .map_err(|error| format!("asset destination read failed: {error}"))?;
+                if existing_suffix != suffix {
+                    return Err(format!(
+                        "asset destination content mismatch: {}",
+                        destination.display()
+                    ));
                 }
                 continue;
             }
@@ -244,10 +250,10 @@ impl ResourceOrchestrator {
                 return Err(format!("asset copy failed: {error}"));
             }
             let published = File::open(&temporary)
-                    .and_then(|file| file.sync_all())
-                    .and_then(|_| fs::rename(&temporary, &destination))
-                    .and_then(|_| Self::sync_parent_directory(&destination))
-                    .is_ok();
+                .and_then(|file| file.sync_all())
+                .and_then(|_| fs::rename(&temporary, &destination))
+                .and_then(|_| Self::sync_parent_directory(&destination))
+                .is_ok();
             if !published {
                 let _ = fs::remove_file(&temporary);
                 for path in created {
@@ -260,15 +266,25 @@ impl ResourceOrchestrator {
         Ok(())
     }
 
-    fn content_suffix(bytes: &[u8]) -> String {
+    fn content_suffix(path: &Path) -> io::Result<String> {
         // Asset names are part of the project-owned namespace. Use the same
         // cryptographic identity family as project history rather than a
         // 32-bit non-cryptographic suffix that can collide easily.
-        let digest = Sha256::digest(bytes);
-        digest[..16]
+        let mut file = File::open(path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 1024 * 1024];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        let digest = hasher.finalize();
+        Ok(digest[..16]
             .iter()
             .map(|byte| format!("{byte:02x}"))
-            .collect()
+            .collect())
     }
 
     fn sync_parent_directory(path: &Path) -> std::io::Result<()> {
@@ -335,6 +351,16 @@ mod tests {
                 .count(),
             0
         );
+        let existing = std::fs::read_dir(&target)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        std::fs::write(&existing, b"tampered").unwrap();
+        assert!(resources
+            .try_consolidate_project(target.to_string_lossy().into_owned())
+            .is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -387,12 +413,24 @@ mod tests {
         std::fs::write(&replacement, b"wav").unwrap();
         let mut resources = ResourceOrchestrator::new();
         resources.assets.push(super::AssetMetadataRust {
-            uuid: "missing".into(), path: root.join("old").join("take.wav").to_string_lossy().into_owned(),
-            size: 0, format: "wav".into(), tags: Vec::new(), is_missing: true,
+            uuid: "missing".into(),
+            path: root
+                .join("old")
+                .join("take.wav")
+                .to_string_lossy()
+                .into_owned(),
+            size: 0,
+            format: "wav".into(),
+            tags: Vec::new(),
+            is_missing: true,
         });
         resources.assets.push(super::AssetMetadataRust {
-            uuid: "candidate".into(), path: replacement.to_string_lossy().into_owned(),
-            size: 3, format: "wav".into(), tags: Vec::new(), is_missing: false,
+            uuid: "candidate".into(),
+            path: replacement.to_string_lossy().into_owned(),
+            size: 3,
+            format: "wav".into(),
+            tags: Vec::new(),
+            is_missing: false,
         });
         resources.resolve_missing_assets();
         assert_eq!(resources.assets[0].path, replacement.to_string_lossy());

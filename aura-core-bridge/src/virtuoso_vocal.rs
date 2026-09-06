@@ -151,6 +151,17 @@ impl ZdfFilter {
     }
 
     pub fn process(&mut self, in_val: f32) -> f32 {
+        if !in_val.is_finite()
+            || !self.s1.is_finite()
+            || !self.s2.is_finite()
+            || !self.a1.is_finite()
+            || !self.a2.is_finite()
+            || !self.a3.is_finite()
+            || !self.k.is_finite()
+        {
+            self.reset();
+            return 0.0;
+        }
         let v3 = in_val - self.s2;
         let v1 = self.a1 * self.s1 + self.a2 * v3;
         let v2 = self.s2 + self.a2 * self.s1 + self.a3 * v3;
@@ -158,12 +169,13 @@ impl ZdfFilter {
         self.s1 = 2.0 * v1 - self.s1;
         self.s2 = 2.0 * v2 - self.s2;
 
-        match self.filter_type {
+        let out = match self.filter_type {
             ZdfFilterType::LowPass => v2,
             ZdfFilterType::HighPass => in_val - self.k * v1 - v2,
             ZdfFilterType::BandPass => v1,
             ZdfFilterType::Notch => in_val - self.k * v1,
-        }
+        };
+        if out.is_finite() { out.clamp(-4.0, 4.0) } else { self.reset(); 0.0 }
     }
 }
 
@@ -179,6 +191,7 @@ pub struct VirtuosoVocalEngine {
 
 impl VirtuosoVocalEngine {
     pub fn new(sr: f64) -> Self {
+        let sr = if sr.is_finite() && sr >= 8_000.0 { sr.clamp(8_000.0, 384_000.0) } else { 44_100.0 };
         let mut formant_filter_l = ZdfFilter::new();
         let mut formant_filter_r = ZdfFilter::new();
         formant_filter_l.sample_rate = sr;
@@ -204,7 +217,8 @@ impl VirtuosoVocalEngine {
 
     /// INDUSTRIAL: High-end Pitch & Formant Shifter (Vocal Transformer).
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let pitch_ratio = 2.0f32.powf(self.pitch_shift_semi / 12.0);
+        if !self.audit_virtuoso_vocal() { return; }
+        let pitch_ratio = 2.0f32.powf(self.pitch_shift_semi / 12.0).clamp(0.25, 4.0);
 
         // --- 1. Pitch Shifting ---
         self.shifter_l.process(l, pitch_ratio);
@@ -217,18 +231,57 @@ impl VirtuosoVocalEngine {
         self.formant_filter_r
             .update(formant_freq, 1.5, ZdfFilterType::BandPass);
 
-        let len = l.len();
+        let len = l.len().min(r.len());
         for s in 0..len {
             let wet_l = self.formant_filter_l.process(l[s]);
             let wet_r = self.formant_filter_r.process(r[s]);
-            l[s] = l[s] * 0.4 + wet_l * 0.6; // Blend faked formant
-            r[s] = r[s] * 0.4 + wet_r * 0.6;
+            l[s] = (l[s] * 0.4 + wet_l * 0.6).clamp(-1.0, 1.0); // Blend faked formant
+            r[s] = (r[s] * 0.4 + wet_r * 0.6).clamp(-1.0, 1.0);
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Virtuoso Vocal state.
     pub fn audit_virtuoso_vocal(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Virtuoso Vocal auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.pitch_shift_semi.is_finite()
+            && (-48.0..=48.0).contains(&self.pitch_shift_semi)
+            && self.formant_shift.is_finite()
+            && (-48.0..=48.0).contains(&self.formant_shift)
+            && self.shifter_l.write_idx < self.shifter_l.delay_buf.len()
+            && self.shifter_r.write_idx < self.shifter_r.delay_buf.len()
+            && self.shifter_l.phase1.is_finite()
+            && self.shifter_l.phase2.is_finite()
+            && self.shifter_r.phase1.is_finite()
+            && self.shifter_r.phase2.is_finite()
+            && self.formant_filter_l.sample_rate == self.sample_rate
+            && self.formant_filter_r.sample_rate == self.sample_rate
+            && [&self.formant_filter_l, &self.formant_filter_r].iter().all(|f| {
+                f.s1.is_finite() && f.s2.is_finite() && f.g.is_finite() && f.k.is_finite()
+                    && f.a1.is_finite() && f.a2.is_finite() && f.a3.is_finite()
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VirtuosoVocalEngine;
+
+    #[test]
+    fn process_handles_mismatched_buffers_and_audits_state() {
+        let mut e = VirtuosoVocalEngine::new(48_000.0);
+        e.pitch_shift_semi = 7.0;
+        let mut l = vec![0.2; 32];
+        let mut r = vec![0.2; 17];
+        e.process(&mut l, &mut r);
+        assert!(l[..17].iter().all(|v| v.is_finite()));
+        assert!(e.audit_virtuoso_vocal());
+    }
+
+    #[test]
+    fn invalid_state_is_rejected() {
+        let mut e = VirtuosoVocalEngine::new(48_000.0);
+        e.pitch_shift_semi = f32::NAN;
+        assert!(!e.audit_virtuoso_vocal());
     }
 }

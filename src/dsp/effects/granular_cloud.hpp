@@ -1,4 +1,7 @@
+#pragma once
 #include <vector>
+#include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <algorithm>
 #include <array>
@@ -26,6 +29,7 @@ public:
     };
 
     GranularCloud() : m_writeIdx(0) {
+        setMix(0.35f);
         // Pre-initialize window table (Hanning)
         for (size_t i = 0; i < kWindowSize; ++i) {
             m_windowTable[i] = 0.5f * (1.0f - std::cos(Utils::DSPUtils::TWO_PI * i / kWindowSize));
@@ -51,6 +55,33 @@ public:
             m_circBufferL.assign(samples, 0.0f);
             m_circBufferR.assign(samples, 0.0f);
         }
+    }
+
+    // A spawned grain can remain audible for up to 10,000 samples.  Report
+    // that state so bounce/export does not truncate ambient tails.
+    uint32_t getTailSamples() const noexcept override { return 10000u; }
+    std::string getName() const override { return "Granular Cloud"; }
+    uint32_t getNumParameters() const noexcept override { return 2; }
+    float getParameter(uint32_t id) const noexcept override { return id == 0 ? m_mix : (id == 1 ? m_density : 0.0f); }
+    bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override { if (id >= 2) return false; out = {0.0f, 1.0f, false}; return true; }
+    void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override { if (outName && maxSize) std::snprintf(outName, maxSize, "%s", id == 0 ? "Mix" : (id == 1 ? "Density" : "")); }
+    std::vector<uint8_t> getState() const override {
+        std::vector<uint8_t> state(24, 0);
+        const uint32_t magic = 0x41555241u; const uint16_t version = 1; const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
+        std::memcpy(state.data(), &magic, 4); std::memcpy(state.data() + 4, &version, 2); std::memcpy(state.data() + 6, &flags, 2);
+        std::memcpy(state.data() + 8, &m_mix, 4); std::memcpy(state.data() + 12, &m_sidechainBusId, 4);
+        const float values[2] = {m_mix, m_density}; std::memcpy(state.data() + 16, values, sizeof(values));
+        return state;
+    }
+    bool setState(const std::vector<uint8_t>& state) override {
+        if (state.size() != 24) return false;
+        uint32_t magic = 0, sidechain = 0; uint16_t version = 0, flags = 0; float mix = 0.0f, values[2]{};
+        std::memcpy(&magic, state.data(), 4); std::memcpy(&version, state.data() + 4, 2); std::memcpy(&flags, state.data() + 6, 2);
+        std::memcpy(&mix, state.data() + 8, 4); std::memcpy(&sidechain, state.data() + 12, 4); std::memcpy(values, state.data() + 16, sizeof(values));
+        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 || !std::isfinite(mix) || mix < 0.0f || mix > 1.0f ||
+            !std::isfinite(values[0]) || !std::isfinite(values[1]) || values[0] < 0.0f || values[0] > 1.0f || values[1] < 0.0f || values[1] > 1.0f) return false;
+        m_bypassed = (flags & 1u) != 0; m_sidechainBusId = sidechain; setMix(values[0]); setParameter(1, values[1]);
+        return true;
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
@@ -144,7 +175,6 @@ private:
     uint32_t m_writeIdx = 0;
     uint32_t m_rngState = 0xACE1;
     float m_density = 0.2f;
-    float m_mix = 0.35f;
     float m_spawnAccumulator = 0.0f;
 };
 

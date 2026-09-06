@@ -2,6 +2,7 @@ pub struct Voice {
     pub active: bool,
     pub position: f64,
     pub pitch_ratio: f64,
+    pub sample_rate_ratio: f64,
     pub velocity: f32,
     pub env_level: f32,
     pub env_state: u32, // 0=Idle, 1=Attack, 2=Decay, 3=Sustain, 4=Release
@@ -17,6 +18,8 @@ pub struct SampleData {
     pub loop_start: usize,
     pub loop_end: usize,
     pub looping: bool,
+    /// Native rate of the asset; zero uses the engine/project rate.
+    pub source_sample_rate: f64,
 }
 
 pub struct SamplerEngineEngine {
@@ -35,6 +38,7 @@ impl SamplerEngineEngine {
                 active: false,
                 position: 0.0,
                 pitch_ratio: 1.0,
+                sample_rate_ratio: 1.0,
                 velocity: 1.0,
                 env_level: 0.0,
                 env_state: 0,
@@ -59,6 +63,9 @@ impl SamplerEngineEngine {
                 && (sample.right.is_empty() || sample.right.len() == sample.left.len())
                 && sample.loop_start <= sample.loop_end
                 && sample.loop_end <= sample.left.len()
+                && (sample.source_sample_rate == 0.0
+                    || (sample.source_sample_rate.is_finite()
+                        && (8_000.0..=384_000.0).contains(&sample.source_sample_rate)))
         });
     }
 
@@ -129,8 +136,8 @@ impl SamplerEngineEngine {
                     .clamp(-1.0e6, 1.0e6);
 
                 let v_mut = &mut self.voices[v_idx];
-                let step = if v_mut.pitch_ratio.is_finite() {
-                    v_mut.pitch_ratio
+                let step = if v_mut.pitch_ratio.is_finite() && v_mut.sample_rate_ratio.is_finite() {
+                    v_mut.pitch_ratio * v_mut.sample_rate_ratio
                 } else {
                     0.0
                 };
@@ -210,6 +217,17 @@ impl SamplerEngineEngine {
         v.velocity = velocity as f32 / 127.0;
         v.position = 0.0;
         v.pitch_ratio = 2.0f64.powf((note as f64 - root_note as f64) / 12.0);
+        v.sample_rate_ratio = self
+            .sample
+            .as_ref()
+            .map(|sample| {
+                if sample.source_sample_rate > 0.0 && self.sample_rate > 0.0 {
+                    sample.source_sample_rate / self.sample_rate
+                } else {
+                    1.0
+                }
+            })
+            .unwrap_or(1.0);
         v.env_state = 1;
         v.env_level = 0.0;
     }
@@ -249,12 +267,29 @@ impl SamplerEngineEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Sampler state.
     pub fn audit_sampler_engine(&self) -> bool {
+        let free_voice_ledger_valid = self.free_voices.len() <= self.voices.len()
+            && self.free_voices.iter().enumerate().all(|(position, &voice_idx)| {
+                voice_idx < self.voices.len()
+                    && self.voices[voice_idx].active == false
+                    && self.free_voices[..position].iter().all(|&prior| prior != voice_idx)
+            })
+            && self.voices.iter().enumerate().all(|(voice_idx, voice)| {
+                voice.active
+                    || self
+                        .free_voices
+                        .iter()
+                        .any(|&free_idx| free_idx == voice_idx)
+            });
+
         self.sample_rate.is_finite()
             && self.sample_rate > 0.0
             && self.voices.len() == 64
+            && free_voice_ledger_valid
             && self.voices.iter().all(|voice| {
                 voice.position.is_finite()
                     && voice.pitch_ratio.is_finite()
+                    && voice.sample_rate_ratio.is_finite()
+                    && (0.0..=64.0).contains(&voice.sample_rate_ratio)
                     && voice.velocity.is_finite()
                     && voice.env_level.is_finite()
                     && voice.brightness.is_finite()
@@ -266,6 +301,9 @@ impl SamplerEngineEngine {
                     && (sample.right.is_empty() || sample.right.len() == sample.left.len())
                     && sample.loop_start <= sample.loop_end
                     && sample.loop_end <= sample.left.len()
+                    && (sample.source_sample_rate == 0.0
+                        || (sample.source_sample_rate.is_finite()
+                            && (8_000.0..=384_000.0).contains(&sample.source_sample_rate)))
                     && sample.left.iter().all(|value| value.is_finite())
                     && sample.right.iter().all(|value| value.is_finite())
             })
@@ -283,6 +321,7 @@ mod tests {
             loop_start: 0,
             loop_end: 0,
             looping: false,
+            source_sample_rate: 0.0,
         }
     }
 
@@ -297,6 +336,39 @@ mod tests {
 
         assert!(left.iter().any(|sample| sample.abs() > 0.001));
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn source_sample_rate_is_applied_to_voice_step() {
+        let mut engine = SamplerEngineEngine::new(48_000.0);
+        let mut sample = impulse_sample();
+        sample.source_sample_rate = 24_000.0;
+        engine.set_sample(Some(sample));
+        engine.note_on(60, 127, 60);
+        assert!((engine.voices[63].sample_rate_ratio - 0.5).abs() < f64::EPSILON);
+        assert!(engine.audit_sampler_engine());
+
+        let mut invalid = impulse_sample();
+        invalid.source_sample_rate = 1_000.0;
+        engine.set_sample(Some(invalid));
+        assert!(engine.sample.is_none());
+    }
+
+    #[test]
+    fn audit_rejects_corrupt_free_voice_ledger() {
+        let mut engine = SamplerEngineEngine::new(48_000.0);
+        assert!(engine.audit_sampler_engine());
+
+        engine.free_voices.push(0);
+        assert!(!engine.audit_sampler_engine());
+
+        engine.free_voices.pop();
+        engine.free_voices[0] = 64;
+        assert!(!engine.audit_sampler_engine());
+
+        engine.free_voices[0] = 0;
+        engine.voices[0].active = true;
+        assert!(!engine.audit_sampler_engine());
     }
 
     #[test]

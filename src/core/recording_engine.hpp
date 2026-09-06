@@ -76,9 +76,7 @@ public:
         // into the next recording session.
         m_ringBuffer.reset();
         if (path.empty()) return false;
-        if (!std::isfinite(sr) || sr <= 0.0 ||
-            sr > static_cast<double>(std::numeric_limits<uint32_t>::max() /
-                                     (kChannels * (kBitsPerSample / 8)))) {
+        if (!std::isfinite(sr) || sr < 8'000.0 || sr > 384'000.0) {
             return false;
         }
 
@@ -86,6 +84,7 @@ public:
         std::filesystem::path fsPath(path);
         if (fsPath.has_parent_path()) {
             std::filesystem::create_directories(fsPath.parent_path(), ec);
+            if (ec) return false;
         }
 
         m_sampleRate = sr;

@@ -1,4 +1,5 @@
 import { Style } from "../style.slint";
+import { AboutSlint } from "std-widgets.slint";
 
 export component Z_DiagnosticsPage inherits Rectangle {
     in property <string> engine-state: "ENGINE IDLE";
@@ -69,6 +70,10 @@ export component Z_DiagnosticsPage inherits Rectangle {
         }
 
         Rectangle { vertical-stretch: 1; }
+        // Slint Royalty-Free attribution. Keep this on the Help/diagnostics
+        // surface so it is reachable from the application's top-level Help
+        // menu in commercial desktop distributions.
+        AboutSlint { height: 72px; }
         Text { text: "判定基準: dropout 0 · callback overrun 0 · worker残留 0 · project corruption 0"; font-size: 9px; color: Style.text-muted; }
     }
 }

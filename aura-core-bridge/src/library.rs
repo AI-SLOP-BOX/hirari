@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use sha2::{Digest, Sha256};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AssetMetadata {
@@ -63,11 +65,10 @@ impl LibraryOrchestrator {
                 Ok(metadata) if metadata.is_file() && metadata.len() > 0 => metadata,
                 _ => continue,
             };
-            let bytes = match fs::read(&canonical) {
-                Ok(bytes) if !bytes.is_empty() => bytes,
+            let content_hash = match sha256_file(&canonical) {
+                Some(hash) if !hash.is_empty() => hash,
                 _ => continue,
             };
-            let content_hash = sha256_hex(&bytes);
             let id = stable_asset_id(&content_hash, &mut ids);
             let name = match canonical.file_name().and_then(|name| name.to_str()) {
                 Some(name) if !name.is_empty() => name.to_owned(),
@@ -109,17 +110,16 @@ impl LibraryOrchestrator {
                 Ok(path) => path,
                 Err(_) => return false,
             };
-            let Ok(bytes) = fs::read(&path) else { return false; };
             asset.content_hash.len() == 64
-                && asset.content_hash == sha256_hex(&bytes)
+                && sha256_file(&path).as_deref() == Some(asset.content_hash.as_str())
                 && seen.insert(path)
         })
     }
 
     pub fn add_asset(&mut self, mut asset: AssetMetadata) {
         if asset.content_hash.is_empty() {
-            if let Ok(bytes) = fs::read(&asset.path) {
-                asset.content_hash = sha256_hex(&bytes);
+            if let Some(hash) = sha256_file(&asset.path) {
+                asset.content_hash = hash;
             }
         }
         if is_valid_asset(&asset) {
@@ -138,39 +138,106 @@ impl LibraryOrchestrator {
 
     pub fn search(&self, query: &str, favorite_only: bool) -> Vec<&AssetMetadata> {
         let needle = query.trim().to_ascii_lowercase();
-        let mut results: Vec<_> = self.assets.iter().filter(|asset| {
-            (!favorite_only || asset.tags.iter().any(|tag| tag.eq_ignore_ascii_case("favorite")))
-                && (needle.is_empty() || asset.name.to_ascii_lowercase().contains(&needle) || asset.path.to_ascii_lowercase().contains(&needle) || asset.tags.iter().any(|tag| tag.to_ascii_lowercase().contains(&needle)))
-        }).collect();
+        let mut results: Vec<_> = self
+            .assets
+            .iter()
+            .filter(|asset| {
+                (!favorite_only
+                    || asset
+                        .tags
+                        .iter()
+                        .any(|tag| tag.eq_ignore_ascii_case("favorite")))
+                    && (needle.is_empty()
+                        || asset.name.to_ascii_lowercase().contains(&needle)
+                        || asset.path.to_ascii_lowercase().contains(&needle)
+                        || asset
+                            .tags
+                            .iter()
+                            .any(|tag| tag.to_ascii_lowercase().contains(&needle)))
+            })
+            .collect();
         results.sort_by_key(|asset| (asset.name.to_ascii_lowercase(), asset.id));
         results
     }
 
     pub fn duplicate_groups(&self) -> Vec<Vec<u64>> {
         let mut by_hash = std::collections::BTreeMap::<&str, Vec<u64>>::new();
-        for asset in &self.assets { if !asset.content_hash.is_empty() { by_hash.entry(asset.content_hash.as_str()).or_default().push(asset.id); } }
-        by_hash.into_values().filter_map(|mut ids| { ids.sort_unstable(); (ids.len() > 1).then_some(ids) }).collect()
+        for asset in &self.assets {
+            if !asset.content_hash.is_empty() {
+                by_hash
+                    .entry(asset.content_hash.as_str())
+                    .or_default()
+                    .push(asset.id);
+            }
+        }
+        by_hash
+            .into_values()
+            .filter_map(|mut ids| {
+                ids.sort_unstable();
+                (ids.len() > 1).then_some(ids)
+            })
+            .collect()
     }
 
-    pub fn offline_assets(&self) -> Vec<u64> { let mut ids: Vec<_> = self.assets.iter().filter(|asset| !Path::new(&asset.path).is_file()).map(|asset| asset.id).collect(); ids.sort_unstable(); ids }
+    pub fn offline_assets(&self) -> Vec<u64> {
+        let mut ids: Vec<_> = self
+            .assets
+            .iter()
+            .filter(|asset| !Path::new(&asset.path).is_file())
+            .map(|asset| asset.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
 
     pub fn set_tag(&mut self, asset_id: u64, tag: &str, enabled: bool) -> bool {
         let tag = tag.trim();
-        if tag.is_empty() || tag.len() > 128 || tag.contains('\0') { return false; }
-        let Some(asset) = self.assets.iter_mut().find(|asset| asset.id == asset_id) else { return false; };
-        if enabled { if !asset.tags.iter().any(|existing| existing.eq_ignore_ascii_case(tag)) { asset.tags.push(tag.to_owned()); asset.tags.sort_by_key(|value| value.to_ascii_lowercase()); } }
-        else { asset.tags.retain(|existing| !existing.eq_ignore_ascii_case(tag)); }
+        if tag.is_empty() || tag.len() > 128 || tag.contains('\0') {
+            return false;
+        }
+        let Some(asset) = self.assets.iter_mut().find(|asset| asset.id == asset_id) else {
+            return false;
+        };
+        if enabled {
+            if !asset
+                .tags
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(tag))
+            {
+                asset.tags.push(tag.to_owned());
+                asset.tags.sort_by_key(|value| value.to_ascii_lowercase());
+            }
+        } else {
+            asset
+                .tags
+                .retain(|existing| !existing.eq_ignore_ascii_case(tag));
+        }
         true
     }
 
-    pub fn set_favorite(&mut self, asset_id: u64, enabled: bool) -> bool { self.set_tag(asset_id, "favorite", enabled) }
+    pub fn set_favorite(&mut self, asset_id: u64, enabled: bool) -> bool {
+        self.set_tag(asset_id, "favorite", enabled)
+    }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+fn sha256_file(path: impl AsRef<Path>) -> Option<String> {
+    let mut file = File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).ok()?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Some(
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
 }
 
 fn stable_asset_id(hash: &str, used: &mut HashSet<u64>) -> u64 {
@@ -198,9 +265,15 @@ fn collect_audio_files(root: &Path, output: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        let Ok(file_type) = fs::symlink_metadata(&path).map(|metadata| metadata.file_type()) else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             collect_audio_files(&path, output);
-        } else if path.is_file() && is_audio_file(&path) {
+        } else if file_type.is_file() && is_audio_file(&path) {
             output.push(path);
         }
     }
@@ -216,11 +289,13 @@ fn is_valid_asset(asset: &AssetMetadata) -> bool {
     }
     let path = Path::new(&asset.path);
     match fs::metadata(path) {
-        Ok(metadata) => metadata.is_file()
-            && metadata.len() == asset.size
-            && is_audio_file(path)
-            && asset.content_hash.len() == 64
-            && asset.content_hash == fs::read(path).map(|bytes| sha256_hex(&bytes)).unwrap_or_default(),
+        Ok(metadata) => {
+            metadata.is_file()
+                && metadata.len() == asset.size
+                && is_audio_file(path)
+                && asset.content_hash.len() == 64
+                && sha256_file(path).as_deref() == Some(asset.content_hash.as_str())
+        }
         Err(_) => false,
     }
 }
@@ -254,8 +329,39 @@ mod tests {
         assert_eq!(library.assets.len(), 2);
 
         fs::write(root.join("one.wav"), b"changed").unwrap();
-        assert!(!library.audit_assets(), "library audit must detect byte replacement");
+        assert!(
+            !library.audit_assets(),
+            "library audit must detect byte replacement"
+        );
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_library_does_not_follow_symlinked_audio_files_or_directories() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!(
+            "aura-library-symlink-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let outside = root.with_extension("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(root.join("real.wav"), b"RIFF").unwrap();
+        fs::write(outside.join("hidden.wav"), b"RIFF").unwrap();
+        symlink(outside.join("hidden.wav"), root.join("linked.wav")).unwrap();
+        symlink(&outside, root.join("linked-dir")).unwrap();
+
+        let mut library = LibraryOrchestrator::new();
+        library.scan_library(root.to_str().unwrap());
+        assert_eq!(library.assets.len(), 1);
+        assert_eq!(library.assets[0].name, "real.wav");
+
+        fs::remove_dir_all(&root).unwrap();
+        fs::remove_dir_all(&outside).unwrap();
     }
 }

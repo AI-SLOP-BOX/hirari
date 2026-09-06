@@ -55,7 +55,11 @@ impl OfflineOrchestrator {
         if source_data.is_empty() || chain_id.trim().is_empty() {
             return Err(OfflineProcessError::EmptyBuffer);
         }
-        let actual_end = if end == usize::MAX { source_data.len() } else { end };
+        let actual_end = if end == usize::MAX {
+            source_data.len()
+        } else {
+            end
+        };
         if start >= actual_end || actual_end > source_data.len() {
             // `usize::MAX` is the sentinel used by the compatibility method.
             if end != usize::MAX {

@@ -32,6 +32,15 @@ public:
 
     LFO(float freq = 1.0f, Waveform wave = Waveform::Sine) : m_freq(freq), m_wave(wave) {}
 
+    void setFrequency(float frequency) noexcept {
+        m_freq = std::isfinite(frequency) ? std::max(0.0f, frequency) : 0.0f;
+    }
+    void setWaveform(Waveform waveform) noexcept { m_wave = waveform; }
+    void reset(float phase = 0.0f) noexcept {
+        m_phase = std::isfinite(phase) ? phase - std::floor(phase) : 0.0;
+        m_randomState = 0x9E3779B9u;
+    }
+
     float getNextValue(double sr) override {
         if (!(sr > 0.0) || !std::isfinite(sr)) return 0.0f;
         const float frequency = std::isfinite(m_freq) ? std::max(0.0f, m_freq) : 0.0f;
@@ -80,6 +89,16 @@ public:
         if (!mod) return;
         std::lock_guard<std::mutex> lock(m_mutex);
         m_modulators[targetParamId] = {std::move(mod), clampAmount(amount)};
+    }
+
+    bool removeModulator(uint32_t targetParamId) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_modulators.erase(targetParamId) != 0;
+    }
+
+    void clear() noexcept {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_modulators.clear();
     }
 
     float getModulatedValue(uint32_t paramId, float baseValue, double sr) {

@@ -28,7 +28,9 @@ public:
         void reset() { x1 = x2 = y1 = y2 = 0.0f; }
     };
 
-    ProceduralFoleyKernel() : m_noiseGen(std::random_device{}()) {
+    // A fixed default seed keeps offline renders reproducible. Callers that
+    // explicitly want variation can provide their own seed per take.
+    explicit ProceduralFoleyKernel(uint32_t seed = 0xA0F0E1u) : m_noiseGen(seed) {
         resetFilters();
     }
 
@@ -36,8 +38,8 @@ public:
      * @brief Generates a single Foley event (e.g. footstep).
      */
     void triggerEvent(float hardness, float friction) {
-        m_hardness = std::clamp(hardness, 0.0f, 1.0f);
-        m_friction = std::clamp(friction, 0.0f, 1.0f);
+        m_hardness = std::isfinite(hardness) ? std::clamp(hardness, 0.0f, 1.0f) : 0.5f;
+        m_friction = std::isfinite(friction) ? std::clamp(friction, 0.0f, 1.0f) : 0.0f;
 
         // Strike impulse envelope setting
         m_strikeEnv = 1.0f;
@@ -90,6 +92,9 @@ public:
 private:
     void resetFilters() {
         for (auto& mode : m_modes) mode.reset();
+        m_hardness = 0.5f;
+        m_friction = 0.0f;
+        m_strikeDecay = 0.99f;
         m_frictionLP = 0.0f;
         m_strikeEnv = 0.0f;
         m_frictionEnv = 0.0f;

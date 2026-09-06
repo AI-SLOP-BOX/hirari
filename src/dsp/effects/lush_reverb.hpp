@@ -15,15 +15,20 @@ namespace Aura::DSP::Effects {
  */
 class LushReverb : public IProcessor {
 public:
-    explicit LushReverb(double sampleRate = 44100.0) : m_sampleRate(sampleRate > 1000.0 ? sampleRate : 44100.0) {
-        setupDelays();
+    explicit LushReverb(double sampleRate = 44100.0) : m_sampleRate(44100.0) {
+        setSampleRate(sampleRate);
     }
 
+    std::string getName() const override { return "Lush Reverb"; }
+
     void setupDelays() {
-        // Multi-prime delay lengths for high modal density (8x8 FDN)
-        std::array<int, 8> len = {1117, 1373, 1601, 2111, 2711, 3121, 3701, 4127};
+        // Multi-prime delay lengths at the reference rate; scale in seconds
+        // so the reverb character remains consistent at 48/96/192 kHz.
+        constexpr std::array<int, 8> base = {1117, 1373, 1601, 2111, 2711, 3121, 3701, 4127};
+        const double scale = m_sampleRate / 44100.0;
         for (int i = 0; i < 8; ++i) {
-            m_delayLines[i].assign(len[i], 0.0f);
+            const size_t length = std::max<size_t>(1u, static_cast<size_t>(std::llround(base[i] * scale)));
+            m_delayLines[i].assign(length, 0.0f);
             m_writeIndices[i] = 0;
         }
     }
@@ -53,15 +58,22 @@ public:
                 m_writeIndices[i] = (m_writeIndices[i] + 1) % line.size();
                 if ((i & 1u) == 0) wetL += m_filterState[i]; else wetR += m_filterState[i];
             }
-            l[s] = inL * 0.75f + wetL * 0.03125f;
-            r[s] = inR * 0.75f + wetR * 0.03125f;
+            const float outL = inL * 0.75f + wetL * 0.03125f;
+            const float outR = inR * 0.75f + wetR * 0.03125f;
+            if (r == l) {
+                const float mono = 0.5f * (outL + outR);
+                l[s] = std::isfinite(mono) ? std::clamp(mono, -16.0f, 16.0f) : 0.0f;
+            } else {
+                l[s] = std::isfinite(outL) ? std::clamp(outL, -16.0f, 16.0f) : 0.0f;
+                r[s] = std::isfinite(outR) ? std::clamp(outR, -16.0f, 16.0f) : 0.0f;
+            }
         }
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)bs; setSampleRate(sr); reset(); }
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
         (void)midi; (void)context;
-        if (buffer.getNumChannels() == 0) return;
+        if (m_bypassed || buffer.getNumChannels() == 0) return;
         float* l = buffer.getWritePointer(0);
         float* r = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : l;
         process(l, r, buffer.getNumSamples());
@@ -74,11 +86,19 @@ public:
 
 
     void setSampleRate(double sr) {
-        m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0;
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44100.0;
         setupDelays();
     }
 
-    uint32_t getLatency() const { return 0; }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
+    uint32_t getTailSamples() const noexcept override {
+        // At 0.85 feedback, roughly 48 longest-delay traversals reach the
+        // practical -60 dB floor used by offline renderers.
+        size_t longest = 0;
+        for (const auto& line : m_delayLines) longest = std::max(longest, line.size());
+        return static_cast<uint32_t>(std::min<size_t>(longest * 48u,
+            static_cast<size_t>(m_sampleRate * 30.0)));
+    }
 
 private:
     double m_sampleRate;

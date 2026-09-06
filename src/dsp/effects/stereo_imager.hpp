@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 #include "../iprocessor.hpp"
 #include "../math/fast_math.hpp"
 
@@ -13,8 +14,20 @@ namespace Aura::DSP::Effects {
  */
 class StereoImager : public IProcessor {
 public:
-    StereoImager(double sr = 44100.0) : m_sampleRate(sr) {
+    StereoImager(double sr = 44100.0) : m_sampleRate(
+        std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0) {
         setWidth(1.0f); // Neutral width
+    }
+
+    std::string getName() const override { return "Stereo Imager"; }
+    uint32_t getNumParameters() const noexcept override { return 1; }
+    void setParameter(uint32_t id, float value) noexcept override { if (id == 0 && std::isfinite(value)) setWidth(value * 4.0f); }
+    float getParameter(uint32_t id) const noexcept override { return id == 0 ? std::clamp(m_width / 4.0f, 0.0f, 1.0f) : 0.0f; }
+    bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override {
+        if (id != 0) return false; out = {0.0f, 1.0f, false}; return true;
+    }
+    void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
+        if (outName && maxSize > 0) std::snprintf(outName, maxSize, "%s", id == 0 ? "Width" : "");
     }
 
     /**
@@ -24,6 +37,15 @@ public:
     void setWidth(float width) {
         m_width = std::clamp(width, 0.0f, 4.0f);
         m_targetSideGain = m_width;
+    }
+
+    void prepareToPlay(double sr, uint32_t) noexcept override {
+        setSampleRate(sr);
+        reset();
+    }
+
+    void reset() noexcept override {
+        m_currentSideGain = std::clamp(m_targetSideGain, 0.0f, 4.0f);
     }
 
     void process(float* l, float* r, uint32_t numSamples) {
@@ -46,7 +68,9 @@ public:
     }
 
 
-    void setSampleRate(double sr) { if (std::isfinite(sr) && sr > 0.0) m_sampleRate = sr; }
+    void setSampleRate(double sr) {
+        if (std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0) m_sampleRate = sr;
+    }
     uint32_t getLatencySamples() const noexcept override { return 0; }
 
 private:

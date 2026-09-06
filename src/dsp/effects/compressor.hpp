@@ -23,7 +23,8 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t /*bs*/) noexcept override {
-        m_sampleRate = sr;
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0
+            ? sr : 44'100.0;
         // --- HONEST FIX: PRE-ALLOCATE RT-SAFE ---
         // Avoids memory allocation during process() even if lookahead changes.
         m_delayL.fill(0.0f);
@@ -64,6 +65,14 @@ public:
 
 
     uint32_t getLatencySamples() const noexcept override { return m_lookaheadSamples; }
+    uint32_t getTailSamples() const noexcept override {
+        const double rate = std::isfinite(m_sampleRate) && m_sampleRate > 0.0
+            ? m_sampleRate : 44'100.0;
+        const double release = std::clamp(static_cast<double>(releaseMs()), 0.1, 2000.0);
+        const double tail = static_cast<double>(m_lookaheadSamples) +
+            (release * 0.001 * rate * 7.0);
+        return static_cast<uint32_t>(std::min(tail, 30.0 * rate));
+    }
 
     void reset() noexcept override {
         m_envelope = 0.0f; m_currentGr = 1.0f; m_rmsSum = 0.0f;

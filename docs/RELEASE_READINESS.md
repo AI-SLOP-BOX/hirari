@@ -1,8 +1,37 @@
 # Release readiness
 
+## Public-source boundary (2026-09-06)
+
+The source tree is suitable for a technical-preview publication after the
+repository review and license-notice pass. Native third-party editor detection
+is exposed as a capability, but the UI intentionally reports
+`available_not_embedded` until a platform HWND/NSView host is supplied. The
+parameter fallback is therefore a real, supported path rather than a fake
+vendor GUI. Windows ASIO and SDK-dependent VST3 remain environment-gated
+capabilities and must not be advertised as universally available.
+
 アプリバンドル生成はステージング先で完了・署名してから原子置換する。コンパイルや署名が途中で失敗しても、直前の既知のバンドルを先に削除しない。
 
-## 現行ツリー再検証（2026-08-29 追加）
+## 現行ツリー再検証（2026-09-04）
+
+### 2026-09-05 external VST3 worker evidence
+
+With the installed Vital VST3 fixture and the already-built isolated VST3
+worker, the bounded worker suite passed all five scenarios: real instance
+processing, audio reconfiguration, instrument state restore with finite note
+audio, crash quarantine, and overrun quarantine/recovery. This is evidence for
+that exact macOS worker/fixture pair; it does not turn every VST3 binary or
+every platform into a compatibility claim. A clean SDK-enabled worker build
+still requires the official Steinberg SDK checkout.
+
+The full strict real-device matrix also passed with zero skips on the attached
+macOS host: software device transition, CoreAudio, Vital VST3, AU, and CLAP.
+The evidence report is `/tmp/aura-real-device-evidence-current/matrix-20260905-135839.tsv`.
+
+After the MIDI export UI wiring, the release smoke was rerun with reduced
+stress rounds and passed: release bundle build, ad-hoc signature verification,
+resource/license bundle verification, headless readiness, GUI launch, and
+release metadata ZIP verification.
 
 - `cargo check --workspace --locked`: 成功
 - `cargo test --workspace --all-targets --locked -- --test-threads=1`: 成功（失敗 0）
@@ -15,13 +44,32 @@
 - Recording stress / cancellation / recovery gate: 成功
 - Software device transition contract: 成功
 - macOS CoreAudio initialize/start/stop/reconfigure contract: 成功
-- `cargo fmt --all -- --check`: 成功
+- `cargo fmt --all -- --check`: 既存の未整形差分により未通過（リリース前に専用整形コミットが必要）
 - Release metadata ZIP + SHA-256 verification: 成功
 - `scripts/setup_dev.sh` (現行Rust/Xcode/CMake/FFmpeg環境): 成功
 - `scripts/run_clean_build.sh` (隔離ターゲットでfetch/check/全テスト): 成功
 - AU実機E2E（Apple auval + Surge XT worker、状態復元・再構成・過負荷隔離）: 成功
 - Release realtime callback soak (ignored long-duration test, 30 s): 成功、deadline miss 0
-- Manual UI E2E: 未実行（ホストMacのロックにより自動操作不可、詳細は [`MANUAL_E2E_RESULTS.md`](MANUAL_E2E_RESULTS.md)）
+- Manual UI E2E: 成功（Quick Start、Electronicテンプレート、Piano Roll、Mixer、Diagnostics/Slint attributionを実機確認。詳細は [`MANUAL_E2E_RESULTS.md`](MANUAL_E2E_RESULTS.md)）
+
+- Release bundle license notices: 成功（`LICENSE`、`THIRD_PARTY_NOTICES.md`、`LICENSE-COMBINED-DISTRIBUTION.md`をResourcesへ同梱し、bundle verifierで必須検査）
+- Release debug-hook exclusion: 成功（本番バイナリに`AURA_UI_SMOKE`文字列なし）
+- Distribution signing boundary: `scripts/sign_and_notarize_release.sh`を追加。Developer ID未設定時は失敗し、公証プロファイル指定時はsubmit／staple／validateを必須化する。
+- Session XML persistence: 属性エスケープ／復号、保存前のID・有限値検証、flush／POSIX fsync後のatomic renameを実装し、特殊文字・不正入力・保存途中クラッシュに対する回帰契約を通過。
+
+### Strict gate rerun (2026-09-05)
+
+Short-round strict verification reached 83% and passed CLI/native/Rust/UI,
+sanitizer, fuzz, codec, recording, lifecycle, project-soak, and device-
+transition gates. The only stop was the external-plugin matrix, which correctly
+failed closed because `AURA_VST3_SDK` is not configured; no VST3 compatibility
+claim is made without the official SDK and fixture.
+
+The post-change fast gate completed with 980 core tests passing and zero
+failures, including project persistence, rendering, routing, recording,
+plugin-state, loudness, pitch, and UI-facing stable API suites. The latest
+audio-I/O hardening also verifies chunked canonical WAV decoding, streaming
+recording-spool metadata recovery, and pre-allocation WAVE64 size rejection.
 
 ## 現行ツリー再検証（2026-08-29）
 

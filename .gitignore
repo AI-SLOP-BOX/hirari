@@ -71,8 +71,15 @@ target/
 config.json
 *.local
 .slint-tmp/
+__pycache__/
+*.py[cod]
 
 # Local audit outputs; release archives should be copied to an external
 # artifact store rather than committed into the source tree.
 artifacts/
 release-metadata/
+
+# Optional local vendor checkouts.  These are fetched for development or
+# contract tests and must not become part of the Aura source distribution.
+third_party/
+third_party_synths/

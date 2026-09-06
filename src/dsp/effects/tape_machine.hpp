@@ -24,8 +24,12 @@ public:
     }
 
     void prepareToPlay(double sr, [[maybe_unused]] uint32_t bs) noexcept override {
-        m_sampleRate = sr;
+        if (std::isfinite(sr) && sr >= 100.0 && sr <= 384000.0) m_sampleRate = sr;
     }
+
+    // The delay line is part of the audible state and must be included by
+    // offline renderers when they flush the final block.
+    uint32_t getTailSamples() const noexcept override { return 67u; }
 
     /**
      * @brief PROCESS: Applies magnetic character and speed instability.
@@ -37,11 +41,16 @@ public:
         for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
             const float speed = 1.0f + m_flutter * 0.0025f * std::sin(m_flutterPhase);
             const uint32_t delay = static_cast<uint32_t>(std::clamp(12.0f * speed, 1.0f, 64.0f));
-            const float l = m_delayL.process(buffer.getReadPointer(0)[i], delay);
-            const float r = channels > 1 ? m_delayR.process(buffer.getReadPointer(1)[i], delay + 3) : l;
+            const float* inL = buffer.getReadPointer(0);
+            const float* inR = channels > 1 ? buffer.getReadPointer(1) : inL;
+            float* outL = buffer.getWritePointer(0);
+            float* outR = channels > 1 ? buffer.getWritePointer(1) : outL;
+            if (!inL || !outL || !inR || !outR) return;
+            const float l = m_delayL.process(std::isfinite(inL[i]) ? inL[i] : 0.0f, delay);
+            const float r = channels > 1 ? m_delayR.process(std::isfinite(inR[i]) ? inR[i] : 0.0f, delay + 3) : l;
             const float hiss = m_noise * std::sin(m_lfoPhase * 17.0f + 0.37f);
-            buffer.getWritePointer(0)[i] = std::tanh(l * drive) / std::max(1.0f, drive) + hiss;
-            if (channels > 1) buffer.getWritePointer(1)[i] = std::tanh(r * drive) / std::max(1.0f, drive) - hiss;
+            outL[i] = std::isfinite(l) ? std::tanh(l * drive) / std::max(1.0f, drive) + hiss : 0.0f;
+            if (channels > 1) outR[i] = std::isfinite(r) ? std::tanh(r * drive) / std::max(1.0f, drive) - hiss : 0.0f;
             m_lfoPhase += 0.37f / static_cast<float>(std::max(1.0, m_sampleRate));
             m_flutterPhase += 0.8f / static_cast<float>(std::max(1.0, m_sampleRate));
             if (m_lfoPhase > 6.2831853f) m_lfoPhase -= 6.2831853f;

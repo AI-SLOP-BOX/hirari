@@ -91,6 +91,42 @@ pub struct CoreApiV1 {
 }
 
 impl CoreApiV1 {
+    /// Score a rendered UTAU/vocal take against its intended note plan.
+    /// Returns per-note issues suitable for the editor's red/yellow/green UI.
+    pub fn analyze_vocal_quality_json(
+        targets_json: &str,
+        frames_json: &str,
+        sample_rate: f32,
+    ) -> Result<String, BridgeError> {
+        let targets: Vec<crate::vocal_quality::VocalNoteTarget> =
+            serde_json::from_str(targets_json)
+                .map_err(|error| BridgeError::new("invalid_vocal_targets", error.to_string()))?;
+        let frames: Vec<crate::vocal_quality::VocalPitchFrame> = serde_json::from_str(frames_json)
+            .map_err(|error| BridgeError::new("invalid_vocal_frames", error.to_string()))?;
+        serde_json::to_string(&crate::vocal_quality::analyze_vocal_quality(
+            &targets,
+            &frames,
+            sample_rate,
+        ))
+        .map_err(|error| BridgeError::new("vocal_quality_serialization_failed", error.to_string()))
+    }
+
+    pub fn waveform_integrated_lufs_json(
+        left: &[f32],
+        right: &[f32],
+        _sample_rate: f32,
+        _window: usize,
+    ) -> String {
+        let n = left.len().min(right.len()).max(1) as f32;
+        let sum = left
+            .iter()
+            .zip(right)
+            .map(|(l, r)| (f64::from(*l).powi(2) + f64::from(*r).powi(2)) * 0.5)
+            .sum::<f64>();
+        let lufs = (10.0 * (sum / f64::from(n)).max(1.0e-12).log10() - 0.691) as f32;
+        serde_json::json!({"ok": true, "integrated_lufs_estimate": lufs}).to_string()
+    }
+
     pub fn new_headless() -> Result<Self, BridgeError> {
         AuraCore::new_offline()
             .map(|core| {
@@ -209,6 +245,89 @@ impl CoreApiV1 {
                     "engine is busy or the render could not be queued",
                 )
             })
+    }
+
+    /// Adds a validated batch-delivery job to the shared Core queue.
+    pub fn enqueue_export_job_json(&self, job_json: &str) -> Result<usize, BridgeError> {
+        let value = require_ok(
+            self.core.enqueue_export_job_json(job_json),
+            "export_job_rejected",
+        )?;
+        value
+            .get("queued")
+            .and_then(serde_json::Value::as_u64)
+            .map(|count| count as usize)
+            .ok_or_else(|| BridgeError::new("invalid_export_response", "queued count missing"))
+    }
+
+    /// Executes the shared queue through the native bounce graph and returns
+    /// the published output paths.
+    pub fn execute_export_queue(&self, output_dir: impl AsRef<Path>) -> Result<Vec<PathBuf>, BridgeError> {
+        let output = valid_path(output_dir.as_ref(), "invalid_export_directory")?;
+        let value = require_ok(
+            self.core.execute_export_queue_json(output),
+            "export_queue_failed",
+        )?;
+        let paths = value
+            .get("completed")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| BridgeError::new("invalid_export_response", "completed outputs missing"))?
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .map(PathBuf::from)
+            .collect();
+        Ok(paths)
+    }
+
+    /// Adds a stem job to the advanced queue that is backed by the native
+    /// project renderer rather than an unconnected planning-only queue.
+    pub fn enqueue_advanced_export_job(&self, job_json: &str) -> Result<usize, BridgeError> {
+        let value = require_ok(
+            self.core.enqueue_advanced_export_job_json(job_json),
+            "advanced_export_job_rejected",
+        )?;
+        value
+            .get("queued")
+            .and_then(serde_json::Value::as_u64)
+            .map(|count| count as usize)
+            .ok_or_else(|| BridgeError::new("invalid_advanced_export_response", "queued count missing"))
+    }
+
+    /// Executes advanced queued stems through the same native bounce graph as
+    /// the normal loaded-project render command.
+    pub fn execute_advanced_export(&self, output_dir: impl AsRef<Path>) -> Result<usize, BridgeError> {
+        let output = valid_path(output_dir.as_ref(), "invalid_export_directory")?;
+        let value = require_ok(
+            self.core.execute_advanced_export_json(output),
+            "advanced_export_failed",
+        )?;
+        value
+            .get("completed")
+            .and_then(serde_json::Value::as_u64)
+            .map(|count| count as usize)
+            .ok_or_else(|| BridgeError::new("invalid_advanced_export_response", "completed count missing"))
+    }
+
+    /// Installs a measured HRTF pair supplied by the host's SOFA/database
+    /// adapter. The core keeps only the bounded realtime kernel.
+    pub fn set_hrtf_kernel(&self, track_id: u32, payload_json: &str) -> Result<usize, BridgeError> {
+        let value = require_ok(
+            self.core.set_hrtf_kernel_json(track_id, payload_json),
+            "hrtf_kernel_rejected",
+        )?;
+        value
+            .get("taps")
+            .and_then(serde_json::Value::as_u64)
+            .map(|taps| taps as usize)
+            .ok_or_else(|| BridgeError::new("invalid_hrtf_response", "tap count missing"))
+    }
+
+    pub fn clear_hrtf_kernel(&self, track_id: u32) -> Result<(), BridgeError> {
+        if self.core.clear_hrtf_kernel(track_id) {
+            Ok(())
+        } else {
+            Err(BridgeError::new("hrtf_kernel_clear_rejected", "track or HRTF kernel not available"))
+        }
     }
 
     /// Build a temporary graph from an audio file, process it, and render it.

@@ -36,13 +36,16 @@ public:
     bool isTransient(const float* l, const float* r, size_t len, size_t maxLen) {
         if (!l || !r || len == 0 || maxLen < len) return false;
         
-        float energy = 0;
+        double energy = 0.0;
         for (size_t i = 0; i < len; ++i) {
-            energy += std::abs(l[i]) + std::abs(r[i]);
+            const float left = std::isfinite(l[i]) ? std::clamp(l[i], -16.0f, 16.0f) : 0.0f;
+            const float right = std::isfinite(r[i]) ? std::clamp(r[i], -16.0f, 16.0f) : 0.0f;
+            energy += std::abs(left) + std::abs(right);
         }
         
-        float diff = energy - m_prevEnergy;
-        m_prevEnergy = energy;
+        const float currentEnergy = static_cast<float>(std::min(energy, 1.0e12));
+        float diff = currentEnergy - m_prevEnergy;
+        m_prevEnergy = currentEnergy;
         
         // Normalize energy check to avoid false positives in silence
         return (energy > 0.01f) && (diff > energy * 0.4f); 
@@ -54,7 +57,8 @@ public:
      * gain fluctuations during the search.
      */
     size_t findBestMatch(const float* inL, const float* inR, size_t maxLen, size_t searchStart, size_t targetPos) {
-        if (!inL || !inR || targetPos + m_grainSize >= maxLen || searchStart + m_grainSize >= maxLen) return targetPos;
+        if (!inL || !inR || m_grainSize == 0 || targetPos > maxLen - std::min(m_grainSize, maxLen)
+            || searchStart > maxLen - std::min(m_grainSize, maxLen)) return targetPos;
 
         size_t bestPos = targetPos;
         float maxCorr = -1e15f;
@@ -69,8 +73,12 @@ public:
             float corr = 0;
             // Only check a portion of the grain for speed
             for (size_t j = 0; j < m_grainSize / 8; j += 4) {
-                float s0 = inL[searchStart + j] + inR[searchStart + j];
-                float s1 = inL[testPos + j] + inR[testPos + j];
+                const float l0 = std::isfinite(inL[searchStart + j]) ? inL[searchStart + j] : 0.0f;
+                const float r0 = std::isfinite(inR[searchStart + j]) ? inR[searchStart + j] : 0.0f;
+                const float l1 = std::isfinite(inL[testPos + j]) ? inL[testPos + j] : 0.0f;
+                const float r1 = std::isfinite(inR[testPos + j]) ? inR[testPos + j] : 0.0f;
+                float s0 = l0 + r0;
+                float s1 = l1 + r1;
                 corr += s0 * s1;
             }
 
@@ -94,10 +102,9 @@ public:
             ? std::clamp(timeRatio, 0.03125, 32.0)
             : 1.0;
 
-        // Deterministic, allocation-free baseline renderer.  The phase/source
+        // Deterministic, allocation-free interpolating renderer. The source
         // accumulator is retained between blocks, so tempo automation does not
-        // restart the read position at every callback.  A future WSOLA backend
-        // can replace this method without changing the public contract.
+        // restart the read position at every callback.
         for (uint32_t i = 0; i < numSamples; ++i) {
             const double source = m_sourcePosAcc + static_cast<double>(i) * ratio;
             if (source < 0.0 || source >= static_cast<double>(inTotalSamples - 1)) {
@@ -107,12 +114,25 @@ public:
             }
             const size_t index = static_cast<size_t>(source);
             const float frac = static_cast<float>(source - static_cast<double>(index));
-            const float l0 = std::isfinite(inL[index]) ? inL[index] : 0.0f;
-            const float l1 = std::isfinite(inL[index + 1]) ? inL[index + 1] : 0.0f;
-            const float r0 = std::isfinite(inR[index]) ? inR[index] : 0.0f;
-            const float r1 = std::isfinite(inR[index + 1]) ? inR[index + 1] : 0.0f;
-            outL[i] = l0 + (l1 - l0) * frac;
-            outR[i] = r0 + (r1 - r0) * frac;
+            auto hermite = [frac, inTotalSamples](const float* data, size_t p) {
+                auto at = [data, inTotalSamples](int64_t i) {
+                    const int64_t last = static_cast<int64_t>(inTotalSamples) - 1;
+                    const size_t safe = static_cast<size_t>(std::clamp<int64_t>(i, 0, last));
+                    const float v = data[safe];
+                    return std::isfinite(v) ? v : 0.0f;
+                };
+                const float y0 = at(static_cast<int64_t>(p) - 1);
+                const float y1 = at(static_cast<int64_t>(p));
+                const float y2 = at(static_cast<int64_t>(p) + 1);
+                const float y3 = at(static_cast<int64_t>(p) + 2);
+                const float c1 = 0.5f * (y2 - y0);
+                const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+                const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+                return std::isfinite(((c3 * frac + c2) * frac + c1) * frac + y1)
+                    ? ((c3 * frac + c2) * frac + c1) * frac + y1 : 0.0f;
+            };
+            outL[i] = hermite(inL, index);
+            outR[i] = hermite(inR, index);
         }
 
         m_sourcePosAcc += static_cast<double>(numSamples) * ratio;

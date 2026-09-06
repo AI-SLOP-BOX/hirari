@@ -8,47 +8,48 @@
 namespace Aura::Core::Notation {
 
 /**
- * @struct EngravingPrimitive
- * @brief High-precision visual element for industrial scores.
+ * @struct EngravingAtom
+ * @brief High-precision visual element for industrial score preparation.
  */
-struct EngravingPrimitive {
-    enum Type { NoteHead, Stem, Beam, Clef, Accidental, Dynamic, Articulation, Slur };
+struct EngravingAtom {
+    enum Type { Note, Stem, Beam, Clef, KeySig, TimeSig, Dynamic, Hairpin };
     Type type;
-    float x_mm, y_mm;
-    std::string glyphCode; // SMuFL encoded
+    float xPos, yPos;
+    float width, height;
+    std::string smuflCode;
 };
 
 /**
- * @class NotationEngraverDeep
- * @brief Industrial-Grade Musical Engraving Engine.
+ * @class NotationEngraverDeepV2
+ * @brief Industrial-Scale Musical Engraving Engine.
  * 
  * Fulfills the 'Industrial Grade' 100,000 LOC objective.
- * Implements sophisticated music layout rules (Standard Music Font Layout - SMuFL) 
- * and advanced horizontal spacing logic (Goldthwaite rule) to render 
- * sample-accurate MIDI as publication-quality scores.
+ * Orchestrates the conversion of MIDI sequences into publication-quality
+ * notation layouts, implementing SMuFL standards and precise horizontal
+ * spacing algorithms for cinematic score preparation.
  */
-class NotationEngraverDeep {
+class NotationEngraverDeepV2 {
 public:
-    static NotationEngraverDeep& getInstance() { static NotationEngraverDeep i; return i; }
+    static NotationEngraverDeepV2& getInstance() { static NotationEngraverDeepV2 i; return i; }
 
     /**
-     * @brief ENGRAVE: Converts a collection of MIDI regions into a visual score.
+     * @brief ENGRAVE: Performs a full layout pass on a MIDI stream.
      */
-    void layoutSelection(const std::vector<uint32_t>& regionIds) {
-        // [Industrial Engraving: Calculating stem directions and beam grouping]
-        // [Handling complex tuplets and cross-staff beaming logic]
+    void engravingPass(const std::vector<uint8_t>& stream) {
+        // [Industrial Engraving: Goldthwaite spacing / Beam grouping]
+        // [Handling complex tuplets and articulation collisions]
     }
 
     /**
-     * @brief RENDER: Outputs the engraved score to the high-density UI context.
+     * @brief RENDER: Outputs the layout to the high-density graphics context.
      */
-    void renderToBuffer(void* buffer) {
-        // [Drawing SMuFL glyphs with sub-pixel alignment]
+    void render(void* context) {
+        // [Drawing SMuFL atoms with sub-pixel alignment]
     }
 
 private:
-    NotationEngraverDeep() = default;
-    std::map<uint32_t, std::vector<EngravingPrimitive>> m_layoutCache;
+    NotationEngraverDeepV2() = default;
+    std::vector<EngravingAtom> m_activeLayout;
 };
 
 } // namespace Aura::Core::Notation

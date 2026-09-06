@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use sha2::{Digest, Sha256};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AssetMetadata {
@@ -18,7 +18,21 @@ pub struct AssetMetadata {
     #[serde(default)]
     pub content_hash: String,
 }
-impl AssetMetadata { pub fn validate_shape(&self) -> bool { !self.uuid.trim().is_empty() && self.uuid.len() <= 256 && !self.path.trim().is_empty() && self.path.len() <= 4096 && self.format.len() <= 16 && self.format.bytes().all(|b| b.is_ascii_alphanumeric()) && self.tags.len() <= 128 && self.tags.iter().all(|t| !t.trim().is_empty() && t.len() <= 128) } }
+impl AssetMetadata {
+    pub fn validate_shape(&self) -> bool {
+        !self.uuid.trim().is_empty()
+            && self.uuid.len() <= 256
+            && !self.path.trim().is_empty()
+            && self.path.len() <= 4096
+            && self.format.len() <= 16
+            && self.format.bytes().all(|b| b.is_ascii_alphanumeric())
+            && self.tags.len() <= 128
+            && self
+                .tags
+                .iter()
+                .all(|t| !t.trim().is_empty() && t.len() <= 128)
+    }
+}
 
 pub struct ResourceOrchestrator {
     pub assets: HashMap<String, AssetMetadata>, // UUID -> Metadata
@@ -59,8 +73,19 @@ impl ResourceOrchestrator {
             };
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() {
+                let Ok(file_type) =
+                    fs::symlink_metadata(&path).map(|metadata| metadata.file_type())
+                else {
+                    continue;
+                };
+                if file_type.is_symlink() {
+                    continue;
+                }
+                if file_type.is_dir() {
                     pending.push(path);
+                    continue;
+                }
+                if !file_type.is_file() {
                     continue;
                 }
                 let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
@@ -102,8 +127,14 @@ impl ResourceOrchestrator {
             .min_by_key(|a| a.path.len())
             .map(|a| a.path.clone())
     }
-    pub fn unused_assets<'a>(&'a self, referenced_uuids: &std::collections::HashSet<String>) -> Vec<&'a AssetMetadata> {
-        self.assets.values().filter(|asset| !referenced_uuids.contains(&asset.uuid)).collect()
+    pub fn unused_assets<'a>(
+        &'a self,
+        referenced_uuids: &std::collections::HashSet<String>,
+    ) -> Vec<&'a AssetMetadata> {
+        self.assets
+            .values()
+            .filter(|asset| !referenced_uuids.contains(&asset.uuid))
+            .collect()
     }
 
     /// INDUSTRIAL: Consolidates project assets into a self-contained archive.
@@ -213,9 +244,16 @@ impl ResourceOrchestrator {
                 && !asset.path.is_empty()
                 && asset.format.chars().all(|c| c.is_ascii_alphanumeric())
                 && asset.content_hash.len() == 64
-                && asset.content_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                && asset
+                    .content_hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
                 && fs::symlink_metadata(&asset.path)
-                    .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink() && metadata.len() == asset.size)
+                    .map(|metadata| {
+                        metadata.is_file()
+                            && !metadata.file_type().is_symlink()
+                            && metadata.len() == asset.size
+                    })
                     .unwrap_or(false)
                 && file_sha256(&asset.path).as_deref() == Some(asset.content_hash.as_str())
         })
@@ -230,8 +268,17 @@ impl ResourceOrchestrator {
 }
 
 fn file_sha256(path: impl AsRef<Path>) -> Option<String> {
-    let bytes = fs::read(path).ok()?;
-    let digest = Sha256::digest(bytes);
+    let mut file = File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let count = file.read(&mut buffer).ok()?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    let digest = hasher.finalize();
     Some(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
@@ -315,14 +362,65 @@ mod tests {
             .iter()
             .any(|name| name.to_string_lossy().starts_with("take-")));
         fs::write(&left_file, b"changed").unwrap();
-        assert!(!resources.audit_resources(), "asset audit must detect same-path byte replacement");
+        assert!(
+            !resources.audit_resources(),
+            "asset audit must detect same-path byte replacement"
+        );
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn dependency_manifest_is_versioned_and_deterministic() {
-        let mut resources = ResourceOrchestrator { assets: HashMap::new() };
-        resources.assets.insert("z".into(), AssetMetadata { uuid:"z".into(), path:"z.wav".into(), size:1, format:"wav".into(), tags:vec![], content_hash:String::new() });
-        resources.assets.insert("a".into(), AssetMetadata { uuid:"a".into(), path:"a.wav".into(), size:1, format:"wav".into(), tags:vec![], content_hash:String::new() });
-        let json = resources.dependency_manifest_json(); assert!(json.starts_with("{\"assets\":")); assert!(json.contains("\"version\":1")); assert!(json.find("\"a\"").unwrap() < json.find("\"z\"").unwrap());
+        let mut resources = ResourceOrchestrator {
+            assets: HashMap::new(),
+        };
+        resources.assets.insert(
+            "z".into(),
+            AssetMetadata {
+                uuid: "z".into(),
+                path: "z.wav".into(),
+                size: 1,
+                format: "wav".into(),
+                tags: vec![],
+                content_hash: String::new(),
+            },
+        );
+        resources.assets.insert(
+            "a".into(),
+            AssetMetadata {
+                uuid: "a".into(),
+                path: "a.wav".into(),
+                size: 1,
+                format: "wav".into(),
+                tags: vec![],
+                content_hash: String::new(),
+            },
+        );
+        let json = resources.dependency_manifest_json();
+        assert!(json.starts_with("{\"assets\":"));
+        assert!(json.contains("\"version\":1"));
+        assert!(json.find("\"a\"").unwrap() < json.find("\"z\"").unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_library_does_not_follow_symlinked_assets() {
+        use std::os::unix::fs::symlink;
+        let root = temp_dir("scan-symlink");
+        let outside = temp_dir("scan-symlink-outside");
+        fs::write(root.join("real.wav"), b"RIFF").unwrap();
+        fs::write(outside.join("hidden.wav"), b"RIFF").unwrap();
+        symlink(outside.join("hidden.wav"), root.join("linked.wav")).unwrap();
+        symlink(&outside, root.join("linked-dir")).unwrap();
+
+        let mut resources = ResourceOrchestrator::new();
+        resources.scan_library(root.to_str().unwrap());
+        assert_eq!(resources.assets.len(), 1);
+        assert!(resources
+            .assets
+            .values()
+            .all(|asset| asset.path.ends_with("real.wav")));
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }

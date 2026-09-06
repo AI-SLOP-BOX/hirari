@@ -24,7 +24,9 @@ impl SmootherOrchestrator {
 
     /// INDUSTRIAL: Resets the smoother state with absolute temporal precision and sync sovereignty.
     pub fn reset(&mut self, value: f32) {
-        if !value.is_finite() { return; }
+        if !value.is_finite() {
+            return;
+        }
         self.target = value;
         self.current = value;
     }
@@ -63,9 +65,12 @@ impl SmootherOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide parameter smoothing state.
     pub fn audit_parameter_smoother(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic curve auditing logic.
-        self.target.is_finite() && self.current.is_finite()
-            && self.base_coeff.is_finite() && (0.0..=1.0).contains(&self.base_coeff)
-            && self.sample_rate.is_finite() && self.sample_rate > 0.0
+        self.target.is_finite()
+            && self.current.is_finite()
+            && self.base_coeff.is_finite()
+            && (0.0..=1.0).contains(&self.base_coeff)
+            && self.sample_rate.is_finite()
+            && self.sample_rate > 0.0
     }
 }
 

@@ -18,9 +18,11 @@
 #include "src/io/wav_loader_utils.hpp"
 #include "src/io/audio_export_engine.hpp"
 #include "src/io/assets/caching_subsystem.hpp"
+#include "src/io/assets/audio_asset_library.hpp"
 #include "src/core/io/bounce_system.hpp"
 #include "src/core/io/ffmpeg_engine.hpp"
 #include "src/core/offline_renderer.hpp"
+#include "src/core/io/session_io.hpp"
 #include "src/core/engine/latency_manager.hpp"
 #include "src/core/engine/midi_orchestrator.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"
@@ -28,6 +30,8 @@
 #include "src/core/engine/undo_transaction_manager.hpp"
 #include "src/core/midi_buffer.hpp"
 #include "src/core/plugins/midi_fragment_transport.hpp"
+#include "src/dsp/synthesis/sampler_engine.hpp"
+#include "src/synthesis/sampler_map.hpp"
 #include "src/core/recording_engine.hpp"
 #include "src/io/persistence/auto_save_engine.hpp"
 #include "src/io/persistence/export_manager.hpp"
@@ -46,18 +50,26 @@
 #include "src/dsp/mixing/neural_dynamics_model.hpp"
 #include "src/dsp/mixing/sidechain_manager.hpp"
 #include "src/dsp/analysis/spectral_processor.hpp"
+#include "src/dsp/effects/console_model.hpp"
+#include "src/core/dsp/effects/procedural_foley_kernel.hpp"
+#include "src/dsp/effects/spectral_ducker.hpp"
+#include "src/dsp/effects/arpeggiator.hpp"
+#include "src/dsp/effects/chorus.hpp"
 #include "src/dsp/effects/compressor.hpp"
 #include "src/io/persistence/project_encoder.hpp"
 #include "src/core/database/project_db.hpp"
 #include "src/io/persistence/wav_writer.hpp"
 #include "src/core/utils/wav_writer.hpp"
 #include "src/io/audio_interface.hpp"
+#include "src/core/external/audio_driver_pro.hpp"
+#include "src/core/external/jack_bridge_deep.hpp"
 #include "src/core/AuraPluginSDK.hpp"
 #include <atomic>
 #include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <thread>
 #if !defined(_WIN32)
@@ -126,6 +138,70 @@ public:
 }
 
 int main() {
+    {
+        auto& driver = Aura::Core::External::AudioDriverPro::getInstance();
+        driver.closeStream();
+        bool callbackOpened = false;
+        bool callbackClosed = false;
+        uint32_t callbackFrames = 0;
+        driver.bindExternalBackend(
+            Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+            [&](double rate, int frames) {
+                callbackOpened = rate == 48'000.0 && frames == 256;
+                return callbackOpened;
+            },
+            [&] { callbackClosed = true; },
+            [&](float* const* outputs, float* const*, uint32_t frames) {
+                callbackFrames = frames;
+                if (outputs && outputs[0]) outputs[0][0] = 0.25f;
+            });
+        if (!driver.openStream(Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+                               0, 48'000.0, 256) || !callbackOpened) return 83;
+        float output[2][4]{};
+        float input[2][4]{};
+        float* outputs[] = {output[0], output[1]};
+        float* inputs[] = {input[0], input[1]};
+        if (!driver.processBlock(outputs, inputs, 4) || callbackFrames != 4 || output[0][0] != 0.25f)
+            return 82;
+        driver.closeStream();
+        if (!callbackClosed) return 80;
+        driver.bindExternalBackend(
+            Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+            [](double, int) { return false; }, [] {});
+
+        if (driver.openStream(Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+                              0, 48'000.0, 256)) return 84;
+        if (driver.isOpen() || driver.lastError().empty()) return 85;
+#if !defined(AURA_ENABLE_ASIO_SDK)
+        if (driver.openStream(Aura::Core::External::AudioDriverPro::Backend::ASIO,
+                              0, 48'000.0, 256)) return 86;
+        if (driver.isOpen() || driver.lastError().find("ASIO SDK") == std::string::npos)
+            return 87;
+#endif
+        auto& jack = Aura::Core::External::JackBridgeDeep::getInstance();
+        jack.shutdown();
+#if !defined(AURA_ENABLE_JACK)
+        if (jack.tryInitialize("aura-contract") || jack.isRunning() ||
+            jack.lastError().find("AURA_ENABLE_JACK") == std::string::npos) return 88;
+#endif
+    }
+    const std::string xmlProbe = "C:\\Audio & Mix/<take>\"lead\"'";
+    if (Aura::Core::IO::SessionIO::unescapeXmlAttribute(
+            Aura::Core::IO::SessionIO::escapeXmlAttribute(xmlProbe)) != xmlProbe) return 81;
+    const auto sessionProbe = std::filesystem::temp_directory_path() / "aura-session-atomic-contract.xml";
+    Aura::Core::IO::SessionIO::getInstance().saveProject(sessionProbe.string(), {});
+    Aura::Core::IO::SessionIO::getInstance().saveProject(
+        sessionProbe.string(), {std::shared_ptr<Aura::Core::Engine::Track>{}});
+    std::ifstream sessionInput(sessionProbe, std::ios::binary);
+    const std::string sessionXml((std::istreambuf_iterator<char>(sessionInput)), {});
+    std::error_code sessionCleanup;
+    std::filesystem::remove(sessionProbe, sessionCleanup);
+    if (sessionXml.find("<AuraProject") == std::string::npos ||
+        sessionXml.find("</AuraProject>") == std::string::npos) return 82;
+    for (const auto& entry : std::filesystem::directory_iterator(sessionProbe.parent_path())) {
+        const auto name = entry.path().filename().string();
+        if (name.rfind("aura-session-atomic-contract.xml.tmp-", 0) == 0) return 83;
+    }
     {
         SDKContractFactory factory;
         const auto descriptor = factory.getDescriptor();
@@ -225,8 +301,11 @@ int main() {
     audioPool.purgeUnused();
     std::error_code peakCleanup;
     std::filesystem::remove(peakWav, peakCleanup);
-    Aura::Core::Plugins::VST3HostProcessor vst3;
-    Aura::Core::Plugins::CLAPHostProcessor clap;
+    // These hosts embed fixed-size realtime mailboxes. Keep them off the
+    // test's main stack so the contract remains runnable on macOS's default
+    // 8 MiB thread stack even when the sandbox protocol grows.
+    auto vst3 = std::make_unique<Aura::Core::Plugins::VST3HostProcessor>();
+    auto clap = std::make_unique<Aura::Core::Plugins::CLAPHostProcessor>();
     // The built-in compressor is part of the production plugin contract, not
     // merely a header-only type. Exercise prepare/process/parameter/state so
     // a future refactor cannot leave the browser-visible plugin unlinked.
@@ -251,12 +330,103 @@ int main() {
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }
+    // Procedural Foley must be deterministic for offline renders and must
+    // fail closed when a UI/FFI caller supplies non-finite event controls.
+    {
+        Aura::Core::DSP::Effects::ProceduralFoleyKernel first;
+        Aura::Core::DSP::Effects::ProceduralFoleyKernel second;
+        first.triggerEvent(std::numeric_limits<float>::quiet_NaN(), 0.65f);
+        second.triggerEvent(0.5f, 0.65f);
+        std::array<float, 512> firstBlock{};
+        std::array<float, 512> secondBlock{};
+        first.process(firstBlock.data(), static_cast<uint32_t>(firstBlock.size()));
+        second.process(secondBlock.data(), static_cast<uint32_t>(secondBlock.size()));
+        for (size_t sample = 0; sample < firstBlock.size(); ++sample) {
+            if (!std::isfinite(firstBlock[sample]) || !std::isfinite(secondBlock[sample]) ||
+                std::abs(firstBlock[sample] - secondBlock[sample]) > 1.0e-6f) return 76;
+        }
+    }
+    {
+        auto& assetLibrary = Aura::IO::Assets::AudioAssetLibrary::getInstance();
+        assetLibrary.registerPatch("Contract Bass", "Bass", "/tmp/aura-contract-bass.aura");
+        assetLibrary.registerPatch("Contract Drums", "Drums", "/tmp/aura-contract-drums.aura");
+        assetLibrary.registerPatch("Contract Keys", "Keys", "/tmp/aura-contract-keys.aura");
+        const auto categories = assetLibrary.categories();
+        if (categories.size() < 3 || !std::is_sorted(categories.begin(), categories.end()) ||
+            std::find(categories.begin(), categories.end(), "Bass") == categories.end() ||
+            std::find(categories.begin(), categories.end(), "Drums") == categories.end() ||
+            std::find(categories.begin(), categories.end(), "Keys") == categories.end()) return 77;
+    }
+    // The sampler must consume both legacy MIDI and MIDI 2.0 UMP note events,
+    // including sustain pedal state, through the same realtime dispatcher.
+    {
+        static std::array<float, 4096> sample{};
+        sample.fill(0.25f);
+        auto sampler = std::make_unique<Aura::DSP::Synthesis::SamplerEngine>(48'000.0);
+        sampler->addZone({60, 0, 127, 1, 127, {sample.data(), sample.size()}});
+        auto block = std::make_unique<Aura::Core::AudioBuffer>(2, 32);
+        auto midi = std::make_unique<Aura::Core::MidiBuffer>();
+        const uint8_t umpOn[] = {0x40, 0x90, 60, 0, 0x7f, 0, 0, 0,
+                                 0, 0, 0, 0, 0, 0, 0, 0};
+        midi->addEvent(0, umpOn, sizeof(umpOn));
+        Aura::DSP::ProcessContext context{};
+        context.sampleRate = 48'000.0;
+        context.blockSize = 32;
+        sampler->process(*block, *midi, context);
+        if (block->sanitizeNonFinite() != 0) return 69;
+        const uint8_t sustainDown[] = {0xB0, 64, 127};
+        const uint8_t noteOff[] = {0x80, 60, 0};
+        midi->clear();
+        midi->addEvent(0, sustainDown, sizeof(sustainDown));
+        midi->addEvent(1, noteOff, sizeof(noteOff));
+        sampler->process(*block, *midi, context);
+        if (block->sanitizeNonFinite() != 0) return 70;
+        const uint8_t sustainUp[] = {0xB0, 64, 0};
+        midi->clear();
+        midi->addEvent(0, sustainUp, sizeof(sustainUp));
+        sampler->process(*block, *midi, context);
+        if (block->sanitizeNonFinite() != 0) return 71;
+    }
+    // A looped zone must continue producing audio after the source reaches
+    // its end, while keeping the output finite.
+    {
+        static std::array<float, 8> loopSample{};
+        for (size_t i = 0; i < loopSample.size(); ++i) loopSample[i] = 0.1f + 0.1f * static_cast<float>(i);
+        auto sampler = std::make_unique<Aura::DSP::Synthesis::SamplerEngine>(48'000.0);
+        sampler->addZone({60, 60, 60, 1, 127, {loopSample.data(), loopSample.size()}, 2, 6, true});
+        auto block = std::make_unique<Aura::Core::AudioBuffer>(1, 32);
+        auto midi = std::make_unique<Aura::Core::MidiBuffer>();
+        const uint8_t noteOn[] = {0x90, 60, 127};
+        midi->addEvent(0, noteOn, sizeof(noteOn));
+        Aura::DSP::ProcessContext context{};
+        context.sampleRate = 48'000.0;
+        context.blockSize = 32;
+        sampler->process(*block, *midi, context);
+        if (block->sanitizeNonFinite() != 0) return 74;
+        bool hasTail = false;
+        for (uint32_t i = 8; i < block->getNumSamples(); ++i)
+            hasTail = hasTail || std::abs(block->getReadPointer(0)[i]) > 1.0e-5f;
+        if (!hasTail) return 75;
+    }
+    {
+        Aura::Synthesis::SamplerMap map;
+        map.addZone(-1, 60, 1, 127, "invalid.wav");
+        map.addZone(0, 127, 0, 127, "layer-a.wav");
+        map.addZone(0, 127, 0, 127, "layer-b.wav");
+        if (map.resolveSample(60, 100).empty() || map.resolveSample(60, 100).empty()) return 72;
+        Aura::Synthesis::SamplerMap independent;
+        independent.addZone(0, 127, 0, 127, "layer-a.wav");
+        if (independent.resolveSample(60, 100) != "layer-a.wav") return 73;
+    }
     Aura::Core::PluginHost::ClapHostInterface legacyClap("builtin://compile-contract");
     Aura::Core::Engine::MIDIOrchestrator midiOrchestrator;
-    Aura::Core::Plugins::PluginSandboxHost sandbox("builtin://compile-contract");
+    // The sandbox host owns bounded shared-memory staging arrays sized for
+    // the maximum plugin protocol block. Allocate it on the heap to keep
+    // this broad native contract below the platform thread-stack limit.
+    auto sandbox = std::make_unique<Aura::Core::Plugins::PluginSandboxHost>("builtin://compile-contract");
     Aura::Core::EffectChain chain;
     Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode recovery =
-        sandbox.isAlive()
+        sandbox->isAlive()
             ? Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock
             : Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined;
     static_assert(Aura::Core::Plugins::SandboxProtocol::kStatusHeaderV9 == 0x41555209u);
@@ -490,7 +660,9 @@ int main() {
     auto& infrastructure = Aura::Core::Plugins::PluginHostInfrastructure::getInstance();
     if (!infrastructure.registerPlugin(admitted)) return 28;
     std::string admissionError;
+    admissionError = "stale diagnostic";
     if (!infrastructure.validatePlugin(admitted.uuid, &admissionError)) return 29;
+    if (!admissionError.empty()) return 33;
     {
         std::ofstream output(admittedPath, std::ios::binary | std::ios::trunc);
         output << "fixture-v2-with-a-new-binary-fingerprint";
@@ -526,6 +698,14 @@ int main() {
     std::filesystem::remove(symlinkPath, cleanup);
     std::filesystem::remove(symlinkTarget, cleanup);
 #endif
+    const auto uppercasePath = std::filesystem::temp_directory_path() /
+                               "aura-admission-contract-uppercase.VST3";
+    {
+        std::ofstream output(uppercasePath, std::ios::binary | std::ios::trunc);
+        output << "uppercase-extension";
+    }
+    if (!Aura::Core::Plugins::PluginAdmission::isSafeCandidate(uppercasePath, "vst3")) return 32;
+    std::filesystem::remove(uppercasePath, cleanup);
     auto ai = Aura::SCAE::Intelligence::LocalAIModels::startStemSeparation(temp.string());
     const auto aiResult = ai.get();
     if (aiResult.success || aiResult.error.empty()) return 4;
@@ -673,7 +853,7 @@ int main() {
     // valid BWF payload instead of silently writing the old all-zero stub.
     const auto offlinePath = std::filesystem::temp_directory_path() /
                              "aura-offline-render-contract.wav";
-    Aura::Core::OfflineRenderer offline(48'000.0,
+    auto offline = std::make_unique<Aura::Core::OfflineRenderer>(48'000.0,
         [](Aura::Core::AudioBuffer& buffer, uint32_t count) {
             for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
                 float* samples = buffer.getWritePointer(c);
@@ -682,7 +862,7 @@ int main() {
                 }
             }
         });
-    offline.renderToFile(offlinePath.string(), 0.01);
+    offline->renderToFile(offlinePath.string(), 0.01);
     std::ifstream offlineInput(offlinePath, std::ios::binary);
     std::vector<uint8_t> offlineBytes((std::istreambuf_iterator<char>(offlineInput)), {});
     std::error_code offlineCleanup;
@@ -734,6 +914,61 @@ int main() {
         return 30;
     }
     std::filesystem::remove(multichannelSaverPath, offlineCleanup);
+
+    // Exercise the canonical decoder across its bounded read chunk boundary;
+    // this guards against regressions that only pass on tiny fixture files.
+    const auto chunkedSaverPath = std::filesystem::temp_directory_path() / "aura-wav-saver-chunked-contract.wav";
+    std::vector<std::vector<float>> chunkedAudio(2, std::vector<float>(20'000));
+    for (size_t frame = 0; frame < chunkedAudio[0].size(); ++frame) {
+        chunkedAudio[0][frame] = (frame % 97 == 0) ? 0.75f : -0.125f;
+        chunkedAudio[1][frame] = (frame % 113 == 0) ? -0.5f : 0.25f;
+    }
+    if (!Aura::IO::WavSaver::save(chunkedSaverPath.string(), chunkedAudio, 48'000)) return 31;
+    try {
+        Aura::Core::IO::WavDecoder chunkedDecoder;
+        if (!chunkedDecoder.open(chunkedSaverPath.string())) return 32;
+        Aura::Core::AudioBuffer chunkedBuffer;
+        chunkedDecoder.decodeFull(chunkedBuffer);
+        if (chunkedBuffer.getNumChannels() != 2 || chunkedBuffer.getNumSamples() != 20'000 ||
+            std::abs(chunkedBuffer.getReadPointer(0)[16'384] + 0.125f) > 0.01f ||
+            std::abs(chunkedBuffer.getReadPointer(1)[19'999] - 0.25f) > 0.01f) return 33;
+    } catch (...) {
+        return 34;
+    }
+    std::filesystem::remove(chunkedSaverPath, offlineCleanup);
+
+    const auto oversizedExpansionPath = std::filesystem::temp_directory_path() /
+                                        "aura-wav-expansion-limit-contract.wav";
+    {
+        constexpr uint32_t expansionDataBytes = 300u * 1024u * 1024u;
+        std::ofstream oversized(oversizedExpansionPath, std::ios::binary | std::ios::trunc);
+        const uint32_t riffSize = 36u + expansionDataBytes;
+        const uint32_t fmtSize = 16;
+        const uint16_t pcm = 1, channels = 2, align = 4, bits = 16;
+        const uint32_t sampleRate = 48'000, byteRate = sampleRate * align;
+        const uint32_t dataId = 0x61746164u;
+        oversized.write("RIFF", 4);
+        oversized.write(reinterpret_cast<const char*>(&riffSize), sizeof(riffSize));
+        oversized.write("WAVEfmt ", 8);
+        oversized.write(reinterpret_cast<const char*>(&fmtSize), sizeof(fmtSize));
+        oversized.write(reinterpret_cast<const char*>(&pcm), sizeof(pcm));
+        oversized.write(reinterpret_cast<const char*>(&channels), sizeof(channels));
+        oversized.write(reinterpret_cast<const char*>(&sampleRate), sizeof(sampleRate));
+        oversized.write(reinterpret_cast<const char*>(&byteRate), sizeof(byteRate));
+        oversized.write(reinterpret_cast<const char*>(&align), sizeof(align));
+        oversized.write(reinterpret_cast<const char*>(&bits), sizeof(bits));
+        oversized.write(reinterpret_cast<const char*>(&dataId), sizeof(dataId));
+        oversized.write(reinterpret_cast<const char*>(&expansionDataBytes), sizeof(expansionDataBytes));
+        oversized.seekp(static_cast<std::streamoff>(44ull + expansionDataBytes - 1ull));
+        oversized.put('\0');
+    }
+    Aura::Core::IO::WavDecoder oversizedDecoder;
+    Aura::Core::AudioBuffer oversizedBuffer;
+    const bool openedOversized = oversizedDecoder.open(oversizedExpansionPath.string());
+    if (!openedOversized) return 35;
+    oversizedDecoder.decodeFull(oversizedBuffer);
+    std::filesystem::remove(oversizedExpansionPath, offlineCleanup);
+    if (oversizedBuffer.getNumChannels() != 0 || oversizedBuffer.getNumSamples() != 0) return 36;
 
     auto& waveformCache = Aura::UI::WaveformCache::getInstance();
     waveformCache.clearRegion(77);
@@ -923,12 +1158,195 @@ int main() {
     const float neuralOutput = neural.process(std::numeric_limits<float>::infinity(), malformedWeights);
     if (!std::isfinite(neuralOutput)) return 37;
     Aura::DSP::Analysis::SpectralProcessor spectral;
+    Aura::Core::AudioBuffer invalidSpectralBuffer(1, 128);
+    spectral.applyMask(invalidSpectralBuffer, 48'000.0,
+                       Aura::DSP::Analysis::SpectralProcessor::Rect{
+                           std::numeric_limits<float>::quiet_NaN(), 0.0f, 1.0f, 100.0f},
+                       0.0f);
+    if (spectral.canUndo()) return 80;
+    std::string spectralFactoryError;
+    auto spectralPlugin = Aura::Core::Plugins::PluginFactory::create(
+        Aura::Core::Plugins::PluginDescription{"Spectral Restoration", "Aura", Aura::Core::Plugins::PluginFormat::Internal, ""},
+        &spectralFactoryError);
+    if (!spectralPlugin || spectralPlugin->getName() != "Spectral Restoration" ||
+        !spectralFactoryError.empty()) return 75;
+    if (spectralPlugin->getTailSamples() <= spectralPlugin->getLatencySamples()) return 92;
+    spectralPlugin->setBypassed(true);
+    spectralPlugin->setSidechainBus(7);
+    const auto spectralState = spectralPlugin->getState();
+    if (spectralState.size() != 24u) return 76;
+    auto restoredSpectral = Aura::Core::Plugins::PluginFactory::create(
+        Aura::Core::Plugins::PluginDescription{"Spectral Restoration", "Aura", Aura::Core::Plugins::PluginFormat::Internal, ""});
+    if (!restoredSpectral || !restoredSpectral->setState(spectralState) ||
+        !restoredSpectral->isBypassed() || restoredSpectral->getSidechainBus() != 7u) return 77;
     Aura::Core::AudioBuffer spectralBuffer(1, 2048);
     spectralBuffer.getWritePointer(0)[0] = 1.0f;
     spectral.applyMask(spectralBuffer, 48'000.0,
                        Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 1.0f, 24'000.0f},
                        0.5f);
     if (!std::isfinite(spectralBuffer.getReadPointer(0)[0])) return 38;
+    Aura::Core::AudioBuffer multiRegion(1, 4096);
+    for (uint32_t i = 0; i < multiRegion.getNumSamples(); ++i)
+        multiRegion.getWritePointer(0)[i] = 0.25f;
+    double energyBefore = 0.0;
+    for (uint32_t i = 0; i < multiRegion.getNumSamples(); ++i)
+        energyBefore += std::fabs(multiRegion.getReadPointer(0)[i]);
+    const std::vector<Aura::DSP::Analysis::SpectralProcessor::Rect> regions{
+        {0.0f, 0.0f, 0.04f, 900.0f},
+        {0.04f, 1'100.0f, 0.08f, 2'000.0f}};
+    spectral.applySpectralGain(multiRegion, 48'000.0, regions, 0.0f);
+    double energyAfter = 0.0;
+    for (uint32_t i = 0; i < multiRegion.getNumSamples(); ++i)
+        energyAfter += std::fabs(multiRegion.getReadPointer(0)[i]);
+    if (!spectral.canUndo(multiRegion) || spectral.undoDepth(multiRegion) != 1u ||
+        !(energyAfter < energyBefore)) return 88;
+    if (!spectral.undo(multiRegion) || spectral.canUndo(multiRegion)) return 89;
+    Aura::Core::AudioBuffer brushRegion(1, 4096);
+    for (uint32_t i = 0; i < brushRegion.getNumSamples(); ++i)
+        brushRegion.getWritePointer(0)[i] = 0.25f;
+    const std::vector<Aura::DSP::Analysis::SpectralProcessor::RegionGain> brushMask{
+        {{0.0f, 0.0f, 0.04f, 900.0f}, 0.0f},
+        {{0.04f, 1'100.0f, 0.08f, 2'000.0f}, 2.0f}};
+    spectral.applySpectralMask(brushRegion, 48'000.0, brushMask);
+    if (!spectral.canUndo(brushRegion) || spectral.undoLabel(brushRegion) != "Spectral Brush" ||
+        !spectral.undo(brushRegion)) return 93;
+    Aura::Core::AudioBuffer selectedClicks(1, 2048);
+    selectedClicks.getWritePointer(0)[300] = 1.0f;
+    selectedClicks.getWritePointer(0)[1500] = 1.0f;
+    if (spectral.removeClicks(selectedClicks, 48'000.0,
+                              Aura::DSP::Analysis::SpectralProcessor::Rect{0.005f, 0.0f, 0.010f, 20'000.0f},
+                              0.1f, 2) == 0 ||
+        std::fabs(selectedClicks.getReadPointer(0)[1500] - 1.0f) > 1.0e-6f ||
+        std::fabs(selectedClicks.getReadPointer(0)[300]) > 0.5f) return 90;
+    Aura::Core::AudioBuffer selectedClips(1, 2048);
+    selectedClips.getWritePointer(0)[499] = 0.1f;
+    selectedClips.getWritePointer(0)[500] = 1.0f;
+    selectedClips.getWritePointer(0)[501] = 1.0f;
+    selectedClips.getWritePointer(0)[502] = 0.1f;
+    selectedClips.getWritePointer(0)[1500] = 1.0f;
+    if (spectral.repairClipped(selectedClips, 48'000.0,
+                               Aura::DSP::Analysis::SpectralProcessor::Rect{0.009f, 0.0f, 0.011f, 20'000.0f},
+                               0.98f) == 0 ||
+        std::fabs(selectedClips.getReadPointer(0)[1500] - 1.0f) > 1.0e-6f ||
+        std::fabs(selectedClips.getReadPointer(0)[500] - 1.0f) < 1.0e-3f) return 91;
+    spectralBuffer.getWritePointer(0)[100] = 1.0f;
+    spectralBuffer.getWritePointer(0)[101] = -1.0f;
+    if (spectral.removeClicks(spectralBuffer, 0.25f, 2) == 0) return 68;
+    spectralBuffer.getWritePointer(0)[200] = 1.0f;
+    spectralBuffer.getWritePointer(0)[201] = 1.0f;
+    if (spectral.repairClipped(spectralBuffer, 0.98f) == 0) return 67;
+    spectral.reduceNoise(spectralBuffer, 48'000.0, 0.75f, 0.05f);
+    spectral.interpolateRegion(
+        spectralBuffer, 48'000.0,
+        Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 200.0f, 0.02f, 2'000.0f},
+        0.8f);
+    for (uint32_t i = 0; i < spectralBuffer.getNumSamples(); ++i)
+        if (!std::isfinite(spectralBuffer.getReadPointer(0)[i])) return 70;
+    if (!spectral.canUndo() || !spectral.undo(spectralBuffer) || !spectral.canRedo() ||
+        !spectral.redo(spectralBuffer)) return 74;
+    if (spectral.undoDepth() == 0 || spectral.redoDepth() != 0) return 82;
+    Aura::DSP::Analysis::SpectralProcessor ownershipHistory;
+    Aura::Core::AudioBuffer ownerA(1, 128), ownerB(1, 128);
+    ownershipHistory.applyMask(ownerA, 48'000.0,
+                               Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 1.0f, 2'000.0f},
+                               0.5f);
+    if (ownershipHistory.undo(ownerB) || !ownershipHistory.canUndo()) return 85;
+    ownershipHistory.applyMask(ownerB, 48'000.0,
+                               Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 1.0f, 2'000.0f},
+                               0.5f);
+    if (!ownershipHistory.canUndo(ownerA) || !ownershipHistory.undo(ownerA) ||
+        !ownershipHistory.canUndo(ownerB)) return 86;
+    ownershipHistory.clearHistory(ownerA);
+    if (ownershipHistory.canUndo(ownerA) || !ownershipHistory.canUndo(ownerB)) return 87;
+    Aura::DSP::Effects::SpectralRestorationProcessor restoration(48'000.0);
+    restoration.applySpectralGain(
+        spectralBuffer,
+        Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 100.0f, 0.02f, 8'000.0f},
+        0.25f);
+    restoration.healRegion(
+        spectralBuffer,
+        Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 100.0f, 0.02f, 8'000.0f},
+        0.5f);
+    restoration.reduceNoise(
+        spectralBuffer,
+        Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 0.02f, 0.0f},
+        0.5f, 0.05f);
+    Aura::Core::AudioBuffer localNoise(1, 4096);
+    for (uint32_t i = 0; i < localNoise.getNumSamples(); ++i)
+        localNoise.getWritePointer(0)[i] = 0.1f;
+    restoration.reduceNoise(
+        localNoise,
+        Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 0.01f, 0.0f},
+        0.5f, 0.05f);
+    if (std::fabs(localNoise.getReadPointer(0)[3500] - 0.1f) > 1.0e-6f) return 79;
+    restoration.eraseHarmonics(
+        spectralBuffer, 60.0f,
+        Aura::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 0.02f, 4'000.0f},
+        4, 4.0f);
+    if (restoration.undoLabelOffline() != "Remove Hum") return 84;
+    if (!restoration.canUndoOffline() || !restoration.undoOffline(spectralBuffer) ||
+        !restoration.canRedoOffline() || restoration.redoLabelOffline() != "Remove Hum" ||
+        !restoration.redoOffline(spectralBuffer)) return 78;
+    if (restoration.undoDepthOffline() == 0 || restoration.redoDepthOffline() != 0) return 83;
+    restoration.reset();
+    if (restoration.canUndoOffline() || restoration.canRedoOffline()) return 81;
+    Aura::DSP::Effects::DivineConsoleStrip console;
+    console.prepareToPlay(48'000.0, 64);
+    if (!console.setBand(0, 120.0f, 6.0f, 0.8f) || console.getNumParameters() != 7) return 71;
+    Aura::Core::AudioBuffer consoleBuffer(2, 64);
+    for (uint32_t i = 0; i < 64; ++i) {
+        consoleBuffer.getWritePointer(0)[i] = 0.1f;
+        consoleBuffer.getWritePointer(1)[i] = 0.1f;
+    }
+    Aura::Core::MidiBuffer consoleMidi;
+    Aura::DSP::ProcessContext consoleContext{};
+    consoleContext.sampleRate = 48'000.0; consoleContext.blockSize = 64;
+    console.process(consoleBuffer, consoleMidi, consoleContext);
+    for (uint32_t i = 0; i < 64; ++i)
+        if (!std::isfinite(consoleBuffer.getReadPointer(0)[i])) return 72;
+    const auto consoleState = console.getState();
+    Aura::DSP::Effects::DivineConsoleStrip restoredConsole;
+    if (!restoredConsole.setState(consoleState) || restoredConsole.getNumParameters() != 7) return 73;
+    Aura::DSP::Effects::SidechainSpectralDucker ducker;
+    ducker.prepareToPlay(48'000.0, 128);
+    Aura::Core::AudioBuffer duckBuffer(2, 1024), sidechainBuffer(2, 1024);
+    for (uint32_t i = 0; i < 1024; ++i) {
+        duckBuffer.getWritePointer(0)[i] = 0.1f;
+        duckBuffer.getWritePointer(1)[i] = -0.1f;
+        sidechainBuffer.getWritePointer(0)[i] = (i % 32 == 0) ? 1.0f : 0.0f;
+        sidechainBuffer.getWritePointer(1)[i] = sidechainBuffer.getReadPointer(0)[i];
+    }
+    Aura::DSP::ProcessContext duckContext{};
+    duckContext.sampleRate = 48'000.0; duckContext.blockSize = 1024;
+    duckContext.sidechainBuffer = &sidechainBuffer;
+    Aura::Core::MidiBuffer duckMidi;
+    ducker.process(duckBuffer, duckMidi, duckContext);
+    for (uint32_t i = 0; i < 1024; ++i)
+        if (!std::isfinite(duckBuffer.getReadPointer(0)[i]) || !std::isfinite(duckBuffer.getReadPointer(1)[i])) return 74;
+    Aura::DSP::Effects::Arpeggiator arp;
+    arp.prepareToPlay(48'000.0, 256);
+    Aura::Core::AudioBuffer arpAudio(2, 256);
+    Aura::Core::MidiBuffer arpMidi;
+    arpMidi.addNoteOn(2, 60, 100, 0);
+    arpMidi.addNoteOn(2, 64, 100, 1);
+    Aura::DSP::ProcessContext arpContext{};
+    arpContext.sampleRate = 48'000.0; arpContext.bpm = 120.0; arpContext.blockStart = 0; arpContext.blockSize = 256;
+    arp.process(arpAudio, arpMidi, arpContext);
+    Aura::Core::MidiBuffer releaseMidi;
+    releaseMidi.addNoteOff(2, 64, 2);
+    arp.process(arpAudio, releaseMidi, arpContext);
+    if (arp.getNumParameters() != 1) return 75;
+    Aura::DSP::Effects::StereoChorus chorus;
+    chorus.prepareToPlay(48'000.0, 64);
+    chorus.setParameter(0, 0.4f); chorus.setParameter(1, 0.65f);
+    Aura::Core::AudioBuffer chorusBuffer(2, 64);
+    for (uint32_t i = 0; i < 64; ++i) { chorusBuffer.getWritePointer(0)[i] = 0.2f; chorusBuffer.getWritePointer(1)[i] = -0.2f; }
+    Aura::Core::MidiBuffer chorusMidi;
+    chorus.process(chorusBuffer, chorusMidi, duckContext);
+    for (uint32_t i = 0; i < 64; ++i)
+        if (!std::isfinite(chorusBuffer.getReadPointer(0)[i]) || !std::isfinite(chorusBuffer.getReadPointer(1)[i])) return 76;
+    Aura::DSP::Effects::StereoChorus restoredChorus;
+    if (!restoredChorus.setState(chorus.getState()) || restoredChorus.getNumParameters() != 2) return 77;
     auto legacyDriver = Aura::IO::HardwareFactory::createDefault();
     if (!legacyDriver || !legacyDriver->initialize(48'000.0, 256) ||
         legacyDriver->getDeviceName().empty()) return 39;
@@ -995,6 +1413,22 @@ int main() {
     if (wave64MultiInfo.numChannels != 3 || wave64MultiDecoded.size() != 3 ||
         wave64MultiDecoded[2].size() != 2 ||
         std::abs(wave64MultiDecoded[2][0] - 0.75f) > 0.0001f) return 53;
+    const auto oversizedWave64Path = std::filesystem::temp_directory_path() /
+                                     "aura-native-wave64-oversized-contract.w64";
+    {
+        std::ofstream oversized(oversizedWave64Path, std::ios::binary | std::ios::trunc);
+        oversized.seekp(static_cast<std::streamoff>(Aura::IO::WavLoader::kMaximumDecodedBytes + 2ull * 1024ull * 1024ull - 1ull));
+        oversized.put('\0');
+    }
+    bool oversizedRejected = false;
+    try {
+        Aura::IO::WavLoader::WavInfo oversizedInfo{};
+        (void)Aura::IO::WavLoader::loadWave64(oversizedWave64Path.string(), oversizedInfo);
+    } catch (const std::runtime_error&) {
+        oversizedRejected = true;
+    }
+    std::filesystem::remove(oversizedWave64Path, offlineCleanup);
+    if (!oversizedRejected) return 61;
     const auto reservedTempPath = std::filesystem::temp_directory_path() /
                                   "aura-native-wav-reservation-contract.tmp";
     std::filesystem::remove(reservedTempPath, offlineCleanup);

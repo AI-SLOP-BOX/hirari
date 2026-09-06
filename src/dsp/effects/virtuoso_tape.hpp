@@ -6,6 +6,8 @@
 #include <random>
 #include <string>
 #include <array>
+#include <cstdio>
+#include <cstring>
 #include "../../core/audio_buffer.hpp"
 #include "../iprocessor.hpp"
 
@@ -26,7 +28,7 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t) noexcept override {
-        m_sampleRate = sr > 0.0 ? sr : 44100.0;
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0;
         setupBuffers();
         reset();
     }
@@ -103,15 +105,49 @@ public:
     }
 
     // Parameters
-    void setDrive(float db) { m_driveDb = db; }
-    void setHiss(float level) { m_hissLevel = level; }
-    void setWow(float d) { m_wowDepth = d; }
+    void setDrive(float db) { if (std::isfinite(db)) m_driveDb = std::clamp(db, -12.0f, 36.0f); }
+    void setHiss(float level) { if (std::isfinite(level)) m_hissLevel = std::clamp(level, 0.0f, 0.002f); }
+    void setWow(float d) { if (std::isfinite(d)) m_wowDepth = std::clamp(d, 0.0f, 1.0f); }
     
     uint32_t getLatencySamples() const noexcept override { 
         return static_cast<uint32_t>(m_delayOffset); 
     }
+    uint32_t getTailSamples() const noexcept override { return kBufferSize; }
 
     std::string getName() const override { return "VirtuosoTapeSaturator"; }
+    uint32_t getNumParameters() const noexcept override { return 4; }
+    void setParameter(uint32_t id, float value) noexcept override {
+        if (!std::isfinite(value)) return;
+        value = std::clamp(value, 0.0f, 1.0f);
+        if (id == 0) setDrive(-12.0f + value * 48.0f);
+        else if (id == 1) setHiss(value * 0.002f);
+        else if (id == 2) setWow(value);
+        else if (id == 3) setMix(value);
+    }
+    float getParameter(uint32_t id) const noexcept override {
+        if (id == 0) return std::clamp((m_driveDb + 12.0f) / 48.0f, 0.0f, 1.0f);
+        if (id == 1) return std::clamp(m_hissLevel / 0.002f, 0.0f, 1.0f);
+        if (id == 2) return std::clamp(m_wowDepth, 0.0f, 1.0f);
+        return id == 3 ? m_mix : 0.0f;
+    }
+    bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override { if (id >= 4) return false; out = {0.0f, 1.0f, false}; return true; }
+    void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
+        if (!outName || maxSize == 0) return;
+        const char* names[] = {"Drive", "Hiss", "Wow", "Mix"};
+        std::snprintf(outName, maxSize, "%s", id < 4 ? names[id] : "");
+    }
+    std::vector<uint8_t> getState() const override {
+        std::vector<uint8_t> state(32, 0); const uint32_t magic = 0x41555241u; const uint16_t version = 1; const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
+        std::memcpy(state.data(), &magic, 4); std::memcpy(state.data()+4, &version, 2); std::memcpy(state.data()+6, &flags, 2); std::memcpy(state.data()+8, &m_mix, 4); std::memcpy(state.data()+12, &m_sidechainBusId, 4);
+        float values[4]{}; for (uint32_t i=0;i<4;++i) values[i]=getParameter(i); std::memcpy(state.data()+16, values, sizeof(values)); return state;
+    }
+    bool setState(const std::vector<uint8_t>& state) override {
+        if (state.size() != 32) return false; uint32_t magic=0, sidechain=0; uint16_t version=0, flags=0; float mix=0.0f, values[4]{};
+        std::memcpy(&magic,state.data(),4); std::memcpy(&version,state.data()+4,2); std::memcpy(&flags,state.data()+6,2); std::memcpy(&mix,state.data()+8,4); std::memcpy(&sidechain,state.data()+12,4); std::memcpy(values,state.data()+16,sizeof(values));
+        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 || !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
+        for (float value : values) if (!std::isfinite(value) || value < 0.0f || value > 1.0f) return false;
+        m_bypassed=(flags&1u)!=0; m_mix=mix; m_sidechainBusId=sidechain; for (uint32_t i=0;i<4;++i) setParameter(i,values[i]); return true;
+    }
 
 private:
     void setupBuffers() {
@@ -133,7 +169,6 @@ private:
     float m_delayOffset = 50.0f;
 
     float m_driveDb = 12.0f;
-    float m_mix = 1.0f; 
     float m_bias = 0.05f;      // Asymmetrical Tube/Tape Bias
     float m_hissLevel = 0.00001f;
     float m_wowDepth = 0.15f;

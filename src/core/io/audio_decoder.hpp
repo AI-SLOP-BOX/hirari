@@ -175,58 +175,70 @@ public:
         if (frames == 0 || frames > std::numeric_limits<uint32_t>::max()) return;
         uint32_t totalSamples = static_cast<uint32_t>(frames);
 
+        // The encoded payload limit alone is not sufficient: 512 MB of
+        // interleaved 16-bit stereo expands to more than 2 GB of planar
+        // float output. Reject that expansion before AudioBuffer::resize so
+        // malformed or merely oversized assets cannot trigger an OOM.
+        if (frames > std::numeric_limits<uint64_t>::max() / m_channels) return;
+        const uint64_t outputSamples = frames * m_channels;
+        if (outputSamples > std::numeric_limits<uint64_t>::max() / sizeof(float)) return;
+        const uint64_t outputBytes = outputSamples * sizeof(float);
+        if (outputBytes > kMaximumDecodedBytes) return;
+
         out.resize(m_channels, totalSamples);
 
-        if (m_dataSize > kMaximumDecodedBytes ||
-            m_dataSize > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
-            m_dataSize > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) return;
-        std::vector<char> buffer(static_cast<size_t>(m_dataSize));
-        file.read(buffer.data(), static_cast<std::streamsize>(m_dataSize));
-        if (!file) { out.resize(0, 0); return; }
+        if (m_dataSize > kMaximumDecodedBytes) return;
+        if (frameBytes > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) return;
 
-        if (m_format == 1) { // PCM Integer
+        // Decode in bounded chunks. The previous implementation allocated a
+        // second buffer as large as the complete take in addition to the
+        // output channels, which made otherwise valid 512 MB files spike to
+        // roughly 1 GB before returning any audio.
+        constexpr uint32_t kChunkFrames = 16384;
+        const uint64_t chunkBytes64 = frameBytes * kChunkFrames;
+        if (chunkBytes64 == 0 || chunkBytes64 > static_cast<uint64_t>(std::numeric_limits<size_t>::max()) ||
+            chunkBytes64 > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) return;
+        std::vector<char> buffer(static_cast<size_t>(chunkBytes64));
+        auto decode_sample = [&](const uint8_t* source) -> float {
+            if (m_format == 3 && m_bitsPerSample == 32) {
+                float sample = 0.0f;
+                std::memcpy(&sample, source, sizeof(sample));
+                return std::isfinite(sample) ? sample : 0.0f;
+            }
             if (m_bitsPerSample == 16) {
-                for (uint32_t s = 0; s < totalSamples; ++s) {
-                    for (uint32_t c = 0; c < m_channels; ++c) {
-                        int16_t sample = 0;
-                        std::memcpy(&sample, buffer.data() + (s * m_channels + c) * sizeof(sample), sizeof(sample));
-                        out.getWritePointer(c)[s] = static_cast<float>(sample) / 32768.0f;
-                    }
-                }
-            } else if (m_bitsPerSample == 24) {
-                const uint8_t* src = reinterpret_cast<const uint8_t*>(buffer.data());
-                for (uint32_t s = 0; s < totalSamples; ++s) {
-                    for (uint32_t c = 0; c < m_channels; ++c) {
-                        uint32_t idx = (s * m_channels + c) * 3;
-                        const int32_t value = static_cast<int32_t>(
-                            static_cast<uint32_t>(src[idx]) |
-                            (static_cast<uint32_t>(src[idx + 1]) << 8) |
-                            (static_cast<uint32_t>(src[idx + 2]) << 16));
-                        const int32_t signedValue = (value & 0x00800000) != 0
-                            ? value | static_cast<int32_t>(0xFF000000u)
-                            : value;
-                        out.getWritePointer(c)[s] = static_cast<float>(signedValue) / 8388608.0f;
-                    }
-                }
-            } else if (m_bitsPerSample == 32) {
-                for (uint32_t s = 0; s < totalSamples; ++s) {
-                    for (uint32_t c = 0; c < m_channels; ++c) {
-                        int32_t sample = 0;
-                        std::memcpy(&sample, buffer.data() + (s * m_channels + c) * sizeof(sample), sizeof(sample));
-                        out.getWritePointer(c)[s] = static_cast<float>(sample) / 2147483648.0f;
-                    }
+                int16_t sample = 0;
+                std::memcpy(&sample, source, sizeof(sample));
+                return static_cast<float>(sample) / 32768.0f;
+            }
+            if (m_bitsPerSample == 24) {
+                const int32_t value = static_cast<int32_t>(
+                    static_cast<uint32_t>(source[0]) |
+                    (static_cast<uint32_t>(source[1]) << 8) |
+                    (static_cast<uint32_t>(source[2]) << 16));
+                const int32_t signed_value = (value & 0x00800000) != 0
+                    ? value | static_cast<int32_t>(0xFF000000u) : value;
+                return static_cast<float>(signed_value) / 8388608.0f;
+            }
+            int32_t sample = 0;
+            std::memcpy(&sample, source, sizeof(sample));
+            return static_cast<float>(sample) / 2147483648.0f;
+        };
+        uint64_t processed = 0;
+        while (processed < frames) {
+            const uint32_t current_frames = static_cast<uint32_t>(
+                std::min<uint64_t>(kChunkFrames, frames - processed));
+            const uint64_t current_bytes = static_cast<uint64_t>(current_frames) * frameBytes;
+            file.read(buffer.data(), static_cast<std::streamsize>(current_bytes));
+            if (!file) { out.resize(0, 0); return; }
+            for (uint32_t frame = 0; frame < current_frames; ++frame) {
+                const uint64_t output_frame = processed + frame;
+                for (uint32_t channel = 0; channel < m_channels; ++channel) {
+                    const auto* source = reinterpret_cast<const uint8_t*>(buffer.data()) +
+                        static_cast<size_t>((static_cast<uint64_t>(frame) * m_channels + channel) * bytesPerSample);
+                    out.getWritePointer(channel)[output_frame] = decode_sample(source);
                 }
             }
-        } else if (m_format == 3) { // IEEE Float
-            if (m_bitsPerSample == 32) {
-                for (uint32_t s = 0; s < totalSamples; ++s) {
-                    for (uint32_t c = 0; c < m_channels; ++c) {
-                        float sample = 0.0f;
-                        std::memcpy(&sample, buffer.data() + (s * m_channels + c) * sizeof(sample), sizeof(sample));
-                        out.getWritePointer(c)[s] = std::isfinite(sample) ? sample : 0.0f;
-                    }
-                }
-            }
+            processed += current_frames;
         }
     }
 
@@ -279,9 +291,17 @@ public:
         try {
             const auto tempRoot = std::filesystem::temp_directory_path(error);
             if (error) return false;
-            const auto token = std::chrono::steady_clock::now().time_since_epoch().count();
-            const auto temp = tempRoot / ("aura-import-" + std::to_string(getpid()) +
-                                          "-" + std::to_string(token) + ".wav");
+            // Create a private 0700 directory atomically.  A predictable
+            // output pathname under the shared temp root would let another
+            // process pre-place a symlink before ffmpeg opens it with `-y`.
+            std::string directoryTemplate = (tempRoot / "aura-import-XXXXXX").string();
+            std::vector<char> directoryBuffer(directoryTemplate.begin(), directoryTemplate.end());
+            directoryBuffer.push_back('\0');
+            char* directory = ::mkdtemp(directoryBuffer.data());
+            if (directory == nullptr) return false;
+            const auto tempDirectory = std::filesystem::path(directory);
+            m_temporaryDirectory = tempDirectory;
+            const auto temp = tempDirectory / "decoded.wav";
             if (!decodeToWav(path, temp)) return false;
             // Register ownership before parsing so any subsequent failure is
             // covered by the same cleanup path.
@@ -338,14 +358,31 @@ private:
         if (spawnResult != 0) return false;
 
         int status = 0;
-        while (waitpid(child, &status, 0) < 0) {
-            if (errno != EINTR) {
+        constexpr auto kDecodeTimeout = std::chrono::seconds(120);
+        const auto deadline = std::chrono::steady_clock::now() + kDecodeTimeout;
+        for (;;) {
+            const pid_t waited = waitpid(child, &status, WNOHANG);
+            if (waited == child) break;
+            if (waited < 0 && errno != EINTR) {
                 kill(child, SIGTERM);
                 waitpid(child, &status, 0);
                 std::error_code error;
                 std::filesystem::remove(output, error);
                 return false;
             }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                // A malformed or adversarial media stream must not hold the
+                // DAW's import/control path forever. Reap the child after a
+                // bounded graceful termination so no zombie survives.
+                kill(child, SIGTERM);
+                while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+                std::error_code error;
+                std::filesystem::remove(output, error);
+                return false;
+            }
+            // Avoid a hot spin while still checking often enough to keep the
+            // timeout deterministic on long-running codec jobs.
+            usleep(10'000);
         }
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             std::error_code error;
@@ -369,14 +406,17 @@ private:
 
     std::string m_sourcePath;
     std::string m_formatName;
+    std::filesystem::path m_temporaryDirectory;
     std::filesystem::path m_temporaryWav;
     WavDecoder m_delegate;
 
     void removeTemporaryWav() noexcept {
-        if (m_temporaryWav.empty()) return;
+        if (m_temporaryWav.empty() && m_temporaryDirectory.empty()) return;
         std::error_code error;
-        std::filesystem::remove(m_temporaryWav, error);
+        if (!m_temporaryWav.empty()) std::filesystem::remove(m_temporaryWav, error);
+        if (!m_temporaryDirectory.empty()) std::filesystem::remove(m_temporaryDirectory, error);
         m_temporaryWav.clear();
+        m_temporaryDirectory.clear();
     }
 };
 
@@ -414,7 +454,7 @@ public:
         // The manager is a compatibility singleton used by multiple engine
         // sessions.  Keep the result pair (status, sample rate) coherent for
         // callers that import concurrently from waveform/render threads.
-        std::lock_guard<std::mutex> lock(m_stateMutex);
+        std::unique_lock<std::mutex> lock(m_stateMutex);
         m_lastImportStatus = ImportStatus::Success;
         if (path.empty()) {
             m_lastImportStatus = ImportStatus::EmptyPath;
@@ -450,8 +490,30 @@ public:
             m_lastImportStatus = ImportStatus::UnsupportedFormat;
             return nullptr;
         }
-        
+
+        std::error_code sizeError;
+        std::error_code timeError;
+        const auto fileSize = std::filesystem::file_size(path, sizeError);
+        const auto modified = std::filesystem::last_write_time(path, timeError);
+        if (!sizeError && !timeError) {
+            auto cached = m_cache.find(path);
+            if (cached != m_cache.end() && cached->second.fileSize == fileSize &&
+                cached->second.modified == modified) {
+                if (auto audio = cached->second.audio.lock()) {
+                    m_lastSampleRate = cached->second.sampleRate;
+                    return audio;
+                }
+                m_cache.erase(cached);
+            }
+        }
+
+        // Decoder open/decode may invoke an external process and can take
+        // seconds (or up to the bounded FFmpeg timeout). Never hold the
+        // manager mutex across that work: waveform requests, status polling,
+        // and unrelated imports must remain responsive.
+        lock.unlock();
         if (!decoder->open(path)) {
+            lock.lock();
             m_lastImportStatus = ImportStatus::InvalidAudioFile;
             return nullptr;
         }
@@ -459,18 +521,38 @@ public:
         auto out = std::make_shared<AudioBuffer>();
         decoder->decodeFull(*out);
         if (out->getNumChannels() == 0 || out->getNumSamples() == 0) {
+            lock.lock();
             m_lastImportStatus = ImportStatus::DecodeFailed;
             return nullptr;
         }
+        lock.lock();
         m_lastSampleRate = decoder->getSampleRate();
         m_lastImportStatus = ImportStatus::Success;
+        if (!sizeError && !timeError) {
+            m_cache[path] = CacheEntry{out, fileSize, modified, m_lastSampleRate};
+            // Keep the control-plane cache bounded over long sessions with
+            // many one-shot imports. Live buffers remain owned by regions;
+            // only expired weak entries are discarded here.
+            for (auto it = m_cache.begin(); it != m_cache.end();) {
+                if (it->second.audio.expired()) it = m_cache.erase(it);
+                else ++it;
+            }
+            while (m_cache.size() > 1024) m_cache.erase(m_cache.begin());
+        }
         return out;
     }
 
 private:
+    struct CacheEntry {
+        std::weak_ptr<AudioBuffer> audio;
+        uintmax_t fileSize = 0;
+        std::filesystem::file_time_type modified{};
+        double sampleRate = 44100.0;
+    };
     mutable std::mutex m_stateMutex;
     ImportStatus m_lastImportStatus = ImportStatus::Success;
     double m_lastSampleRate = 44100.0;
+    std::map<std::string, CacheEntry> m_cache;
 };
 
 } // namespace Aura::Core::IO

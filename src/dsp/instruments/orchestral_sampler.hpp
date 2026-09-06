@@ -4,8 +4,10 @@
 #include <string>
 #include <map>
 #include <memory>
+#include <cmath>
 #include "../../core/audio_buffer.hpp"
 #include "../../core/midi_buffer.hpp"
+#include "../iprocessor.hpp"
 
 namespace Aura::DSP::Instruments {
 
@@ -51,19 +53,31 @@ public:
     };
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& ctx) {
+        (void)ctx;
+        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
         float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
+        float* r = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : l;
         uint32_t len = buffer.getNumSamples();
+        if (!l || !r) return;
 
-        handleMidi(midi, ctx);
+        midi.sort();
+        size_t eventIndex = 0;
 
         // INDUSTRIAL: SIMD-ready block rendering
         for (uint32_t s = 0; s < len; ++s) {
+            while (eventIndex < midi.size() && midi.getEvents()[eventIndex].sampleOffset <= s) {
+                applyMidiEvent(midi.getEvents()[eventIndex]);
+                ++eventIndex;
+            }
             float out = 0.0f;
             for (auto& v : m_voices) {
-                if (!v.active) continue;
+                if (!v.active || !v.sampleData || v.sampleSize == 0 || v.samplePointer >= v.sampleSize) {
+                    if (v.active) v.active = false;
+                    continue;
+                }
 
-                float sample = v.sampleData[v.samplePointer];
+                float sample = std::isfinite(v.sampleData[v.samplePointer])
+                    ? v.sampleData[v.samplePointer] : 0.0f;
                 float gain = (v.velocity / 127.0f) * v.env;
                 out += sample * gain;
 
@@ -80,20 +94,19 @@ public:
                     v.env = std::min(1.0f, v.env + 0.1f); // Fast attack
                 }
             }
-            l[s] += out;
-            r[s] += out;
+            l[s] = std::isfinite(l[s] + out) ? l[s] + out : 0.0f;
+            if (r != l) r[s] = std::isfinite(r[s] + out) ? r[s] + out : 0.0f;
         }
     }
 
 private:
-    void handleMidi(Core::MidiBuffer& midi, const ProcessContext& ctx) {
-        for (const auto& ev : midi) {
-            uint8_t status = ev.data[0] & 0xF0;
-            if (status == 0x90 && ev.data[2] > 0) {
-                triggerVoice(ev.data[1], ev.data[2], m_currentArtic);
-            } else if (status == 0x80) {
-                for (auto& v : m_voices) if (v.active && v.note == ev.data[1]) v.releasing = true;
-            }
+    void applyMidiEvent(const Core::MidiEvent& ev) {
+        if (ev.size < 3) return;
+        const uint8_t status = ev.data[0] & 0xF0u;
+        if (status == 0x90u && ev.data[2] > 0) {
+            triggerVoice(ev.data[1], ev.data[2], ev.articulationId);
+        } else if (status == 0x80u || (status == 0x90u && ev.data[2] == 0)) {
+            for (auto& v : m_voices) if (v.active && v.note == ev.data[1]) v.releasing = true;
         }
     }
 
@@ -106,7 +119,7 @@ private:
             }
         }
 
-        if (!target || target->data.empty()) return;
+        if (!target || target->data.empty() || target->data.size() > UINT32_MAX) return;
 
         for (auto& v : m_voices) {
             if (!v.active) {
@@ -117,6 +130,10 @@ private:
                 return;
             }
         }
+        // Deterministic voice stealing when polyphony is exhausted.
+        m_voices[0].active = true; m_voices[0].note = note; m_voices[0].velocity = vel;
+        m_voices[0].samplePointer = 0; m_voices[0].sampleSize = static_cast<uint32_t>(target->data.size());
+        m_voices[0].sampleData = target->data.data(); m_voices[0].env = 0.0f; m_voices[0].releasing = false;
     }
 
     std::vector<SampleZone> m_zones;

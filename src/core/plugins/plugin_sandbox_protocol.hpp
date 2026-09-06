@@ -10,6 +10,7 @@ namespace Aura::Core::Plugins::SandboxProtocol {
 inline constexpr uint8_t kReady = 0xA1;
 inline constexpr uint8_t kShutdown = 0xA2;
 inline constexpr uint8_t kHeartbeat = 0xA3;
+inline constexpr uint8_t kReset = 0xA4;
 inline constexpr uint8_t kError = 0xAF;
 inline constexpr uint8_t kErrorLoad = 0xB0;
 inline constexpr uint8_t kErrorAbi = 0xB1;

@@ -4,6 +4,8 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstring>
 #include "../../core/audio_buffer.hpp"
 #include "../iprocessor.hpp"
 
@@ -92,6 +94,43 @@ public:
     }
 
     std::string getName() const override { return "VirtuosoPultec"; }
+    uint32_t getNumParameters() const noexcept override { return 5; }
+    void setParameter(uint32_t id, float value) noexcept override {
+        if (!std::isfinite(value)) return;
+        value = std::clamp(value, 0.0f, 1.0f);
+        if (id == 0) m_lowFreq = 20.0f + value * 180.0f;
+        else if (id == 1) m_lowBoost = value * 12.0f;
+        else if (id == 2) m_lowAtten = value * 12.0f;
+        else if (id == 3) m_highFreq = 1000.0f + value * 19000.0f;
+        else if (id == 4) m_highBoost = value * 12.0f;
+    }
+    float getParameter(uint32_t id) const noexcept override {
+        if (id == 0) return (m_lowFreq - 20.0f) / 180.0f;
+        if (id == 1) return m_lowBoost / 12.0f;
+        if (id == 2) return m_lowAtten / 12.0f;
+        if (id == 3) return (m_highFreq - 1000.0f) / 19000.0f;
+        return id == 4 ? m_highBoost / 12.0f : 0.0f;
+    }
+    bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override { if (id >= 5) return false; out = {0.0f, 1.0f, false}; return true; }
+    void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override { if (!outName || !maxSize) return; const char* names[] = {"Low Frequency", "Low Boost", "Low Atten", "High Frequency", "High Boost"}; std::snprintf(outName, maxSize, "%s", id < 5 ? names[id] : ""); }
+    std::vector<uint8_t> getState() const override {
+        std::vector<uint8_t> state(36, 0);
+        const uint32_t magic = 0x41555241u; const uint16_t version = 1; const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
+        std::memcpy(state.data(), &magic, 4); std::memcpy(state.data() + 4, &version, 2); std::memcpy(state.data() + 6, &flags, 2);
+        std::memcpy(state.data() + 8, &m_mix, 4); std::memcpy(state.data() + 12, &m_sidechainBusId, 4);
+        const float values[5] = {getParameter(0), getParameter(1), getParameter(2), getParameter(3), getParameter(4)};
+        std::memcpy(state.data() + 16, values, sizeof(values)); return state;
+    }
+    bool setState(const std::vector<uint8_t>& state) override {
+        if (state.size() != 36) return false;
+        uint32_t magic = 0, sidechain = 0; uint16_t version = 0, flags = 0; float mix = 0.0f, values[5]{};
+        std::memcpy(&magic, state.data(), 4); std::memcpy(&version, state.data() + 4, 2); std::memcpy(&flags, state.data() + 6, 2);
+        std::memcpy(&mix, state.data() + 8, 4); std::memcpy(&sidechain, state.data() + 12, 4); std::memcpy(values, state.data() + 16, sizeof(values));
+        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 || !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
+        for (float value : values) if (!std::isfinite(value) || value < 0.0f || value > 1.0f) return false;
+        m_bypassed = (flags & 1u) != 0; m_mix = mix; m_sidechainBusId = sidechain;
+        for (uint32_t i = 0; i < 5; ++i) setParameter(i, values[i]); return true;
+    }
 
     void setParameters(float lowFreq, float lowBoost, float lowAtten, float highFreq, float highBoost) {
         if (std::isfinite(lowFreq)) m_lowFreq = std::clamp(lowFreq, 20.0f, 200.0f);

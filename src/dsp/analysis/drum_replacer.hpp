@@ -22,20 +22,32 @@ public:
     };
 
     static std::vector<TriggerEvent> convertToMidi(const float* buffer, size_t size, double sr, uint8_t targetNote = 36) {
+        const uint64_t guard = std::isfinite(sr) && sr > 0.0 ? static_cast<uint64_t>(sr * 0.020) : 0;
+        return convertToMidiWithConfig(buffer, size, sr, targetNote, 0.15f, guard);
+    }
+
+    static std::vector<TriggerEvent> convertToMidiWithConfig(const float* buffer, size_t size,
+                                                              double sr, uint8_t targetNote,
+                                                              float sensitivity,
+                                                              uint64_t retriggerSamples) {
         std::vector<TriggerEvent> result;
-        if (buffer == nullptr || size < 2 || !std::isfinite(sr) || sr <= 0.0) {
+        if (buffer == nullptr || size < 2 || !std::isfinite(sr) || sr < 8000.0 || sr > 384000.0 ||
+            !std::isfinite(sensitivity) || sensitivity < 0.0f || sensitivity > 1.0f) {
             return result;
         }
 
         const uint8_t note = std::min<uint8_t>(targetNote, 127);
-        const Aura::Core::DSP::Analysis::TransientDetector detector(sr);
-        const auto transients = detector.analyze(buffer, size, 0.15f);
+        Aura::Core::DSP::Analysis::TransientDetector detector(sr);
+        const auto transients = detector.analyze(buffer, size, sensitivity);
         result.reserve(transients.size());
+        uint64_t lastPosition = 0;
+        bool hasLast = false;
 
         for (const auto& transient : transients) {
             if (!std::isfinite(transient.strength) || transient.strength <= 0.0f) {
                 continue;
             }
+            if (hasLast && transient.sampleIndex < lastPosition + retriggerSamples) continue;
 
             // Flux is unbounded, while MIDI velocity is 7-bit.  Compress the
             // detector strength into a useful musical range and keep silence
@@ -45,6 +57,8 @@ public:
                 1.0f,
                 127.0f);
             result.push_back({transient.sampleIndex, velocity, note});
+            lastPosition = transient.sampleIndex;
+            hasLast = true;
         }
         return result;
     }

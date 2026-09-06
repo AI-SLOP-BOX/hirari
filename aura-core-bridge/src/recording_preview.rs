@@ -7,6 +7,8 @@
 
 /// Hard upper bound for the interleaved sample buffer (64 MiB of `f32`).
 pub const MAX_PREVIEW_SAMPLES: usize = 16_777_216;
+pub const MIN_RECORDING_SAMPLE_RATE: f32 = 8_000.0;
+pub const MAX_RECORDING_SAMPLE_RATE: f32 = 384_000.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordingPreviewError {
@@ -40,7 +42,8 @@ impl RecordingPreviewRegion {
 
     pub fn audit(&self) -> bool {
         self.sample_rate.is_finite()
-            && self.sample_rate > 0.0
+            && (MIN_RECORDING_SAMPLE_RATE..=MAX_RECORDING_SAMPLE_RATE)
+                .contains(&self.sample_rate)
             && self.channels > 0
             && !self.samples.is_empty()
             && self.samples.len().is_multiple_of(self.channels as usize)
@@ -66,7 +69,9 @@ impl RecordingPreview {
         channels: u16,
         max_frames: usize,
     ) -> Result<Self, RecordingPreviewError> {
-        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        if !sample_rate.is_finite()
+            || !(MIN_RECORDING_SAMPLE_RATE..=MAX_RECORDING_SAMPLE_RATE).contains(&sample_rate)
+        {
             return Err(RecordingPreviewError::InvalidSampleRate);
         }
         if channels == 0 {
@@ -177,7 +182,8 @@ impl RecordingPreview {
     pub fn audit(&self) -> bool {
         self.channels > 0
             && self.sample_rate.is_finite()
-            && self.sample_rate > 0.0
+            && (MIN_RECORDING_SAMPLE_RATE..=MAX_RECORDING_SAMPLE_RATE)
+                .contains(&self.sample_rate)
             && self.samples.len().is_multiple_of(self.channels as usize)
             && self.frame_count() <= self.max_frames
             && self.samples.iter().all(|sample| sample.is_finite())
@@ -244,6 +250,7 @@ mod tests {
     #[test]
     fn constructor_rejects_invalid_configuration() {
         assert!(RecordingPreview::try_new(0.0, 2, 4).is_err());
+        assert!(RecordingPreview::try_new(1.0, 2, 4).is_err());
         assert!(RecordingPreview::try_new(48_000.0, 0, 4).is_err());
         assert!(RecordingPreview::try_new(48_000.0, 2, 0).is_err());
         assert!(RecordingPreview::try_new(48_000.0, 2, MAX_PREVIEW_SAMPLES).is_err());

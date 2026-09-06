@@ -104,16 +104,36 @@ struct MidiOutputContext {
 bool midiOutputTryPush(const Aura::Core::Plugins::ClapAbi::OutputEvents* output,
                        const Aura::Core::Plugins::ClapAbi::EventHeader* header) {
     auto* context = static_cast<MidiOutputContext*>(output ? output->ctx : nullptr);
-    if (!context || !context->shared || !header || header->space_id != Aura::Core::Plugins::ClapAbi::kCoreEventSpaceId ||
-        header->type != Aura::Core::Plugins::ClapAbi::kEventMidi || header->size < sizeof(Aura::Core::Plugins::ClapAbi::EventMidi))
+    if (!context || !context->shared || !header ||
+        header->space_id != Aura::Core::Plugins::ClapAbi::kCoreEventSpaceId)
         return false;
     if (header->time >= context->frames) return false;
-    const auto* midi = reinterpret_cast<const Aura::Core::Plugins::ClapAbi::EventMidi*>(header);
-    // The fixed mailbox currently carries channel-voice MIDI only. Do not
-    // silently lose system/SysEx output: report it through the same bounded
-    // diagnostic counter used for mailbox overflow.
-    if ((midi->data[0] & 0xF0u) == 0xF0u) {
-        context->shared->outputMidiDropped.fetch_add(1, std::memory_order_relaxed);
+    uint8_t data[Aura::Core::Plugins::SandboxProtocol::kMaxMidiPayloadBytes]{};
+    uint32_t dataSize = 0;
+    if (header->type == Aura::Core::Plugins::ClapAbi::kEventMidi) {
+        if (header->size < sizeof(Aura::Core::Plugins::ClapAbi::EventMidi)) return false;
+        Aura::Core::Plugins::ClapAbi::EventMidi midi{};
+        std::memcpy(&midi, header, sizeof(midi));
+        std::memcpy(data, midi.data, sizeof(midi.data));
+        dataSize = sizeof(midi.data);
+    } else if (header->type == Aura::Core::Plugins::ClapAbi::kEventMidiSysex) {
+        if (header->size < sizeof(Aura::Core::Plugins::ClapAbi::EventMidiSysex)) return false;
+        Aura::Core::Plugins::ClapAbi::EventMidiSysex sysex{};
+        std::memcpy(&sysex, header, sizeof(sysex));
+        if (sysex.buffer == nullptr || sysex.size == 0 ||
+            sysex.size > sizeof(data)) {
+            context->shared->outputMidiDropped.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        std::memcpy(data, sysex.buffer, sysex.size);
+        dataSize = sysex.size;
+    } else if (header->type == Aura::Core::Plugins::ClapAbi::kEventMidi2) {
+        if (header->size < sizeof(Aura::Core::Plugins::ClapAbi::EventMidi2)) return false;
+        Aura::Core::Plugins::ClapAbi::EventMidi2 midi2{};
+        std::memcpy(&midi2, header, sizeof(midi2));
+        std::memcpy(data, midi2.data, sizeof(midi2.data));
+        dataSize = sizeof(midi2.data);
+    } else {
         return false;
     }
     const uint32_t index = context->shared->outputMidiEvents.load(std::memory_order_relaxed);
@@ -123,9 +143,9 @@ bool midiOutputTryPush(const Aura::Core::Plugins::ClapAbi::OutputEvents* output,
     }
     auto& destination = context->shared->outputMidi[index];
     destination.sampleOffset = header->time;
-    destination.size = 3;
+    destination.size = dataSize;
     destination.articulationId = 0;
-    std::memcpy(destination.data, midi->data, 3);
+    std::memcpy(destination.data, data, dataSize);
     context->shared->outputMidiEvents.store(index + 1, std::memory_order_release);
     return true;
 }
@@ -161,6 +181,21 @@ const Aura::Core::Plugins::ClapAbi::EventHeader* midiInputGet(
     }
     const auto* event = &context->events[index];
     if (event->size < 3 || event->sampleOffset > UINT32_MAX) return nullptr;
+    // A MIDI 2.0 UMP is carried losslessly in the fixed 16-byte payload.
+    // Expose it as CLAP_EVENT_MIDI2 instead of rejecting it as a non-legacy
+    // two/three-byte MIDI message.
+    if (event->size == sizeof(Aura::Core::Plugins::ClapAbi::EventMidi2::data)) {
+        static thread_local Aura::Core::Plugins::ClapAbi::EventMidi2 convertedMidi2{};
+        convertedMidi2.header.size = sizeof(convertedMidi2);
+        convertedMidi2.header.time = static_cast<uint32_t>(event->sampleOffset);
+        convertedMidi2.header.space_id = Aura::Core::Plugins::ClapAbi::kCoreEventSpaceId;
+        convertedMidi2.header.type = Aura::Core::Plugins::ClapAbi::kEventMidi2;
+        convertedMidi2.header.flags = 0;
+        convertedMidi2.port_index = 0;
+        convertedMidi2.reserved = 0;
+        std::memcpy(convertedMidi2.data, event->data, sizeof(convertedMidi2.data));
+        return &convertedMidi2.header;
+    }
     static thread_local Aura::Core::Plugins::ClapAbi::EventMidi converted{};
     converted.header.size = sizeof(converted);
     converted.header.time = static_cast<uint32_t>(event->sampleOffset);
@@ -596,6 +631,22 @@ int main(int argc, char** argv) {
             uint8_t command = 0;
             const ssize_t bytes = ::read(controlFd, &command, sizeof(command));
             if (bytes != 1 || command == Aura::Core::Plugins::SandboxProtocol::kShutdown) break;
+            if (command == Aura::Core::Plugins::SandboxProtocol::kReset) {
+                bool resetOk = true;
+                if (clapStarted && clapPlugin) {
+                    clapPlugin->stop_processing(clapPlugin);
+                    clapPlugin->deactivate(clapPlugin);
+                    resetOk = clapPlugin->activate(clapPlugin, sampleRate, minFrames, maxFrames);
+                    resetOk = resetOk && clapPlugin->start_processing(clapPlugin);
+                }
+#if defined(AURA_ENABLE_VST3_SDK)
+                if (vst3Started) resetOk = vst3Runtime.reset() && resetOk;
+#endif
+#if defined(__APPLE__)
+                if (auStarted) resetOk = auRuntime.reset() && resetOk;
+#endif
+                if (!resetOk) shared->processErrors.fetch_add(1, std::memory_order_release);
+            }
         }
         shared->heartbeat.fetch_add(1, std::memory_order_relaxed);
         const uint64_t stateRequest = shared->stateRequestSequence.load(std::memory_order_acquire);

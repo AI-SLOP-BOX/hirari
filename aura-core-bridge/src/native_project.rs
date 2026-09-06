@@ -13,6 +13,8 @@ use std::path::Path;
 
 const MAGIC: u32 = 0x4155_5241;
 const MAX_PROJECT_BYTES: usize = 256 * 1024 * 1024;
+const MIN_PROJECT_SAMPLE_RATE: u32 = 8_000;
+const MAX_PROJECT_SAMPLE_RATE: u32 = 384_000;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NativeProjectInspection {
@@ -33,7 +35,9 @@ pub fn is_native_project(path: impl AsRef<Path>) -> Result<bool> {
     let mut file = std::fs::File::open(path)
         .with_context(|| format!("failed to read project {}", path.display()))?;
     let mut magic = [0u8; 4];
-    let read = file.read(&mut magic).context("failed to read project header")?;
+    let read = file
+        .read(&mut magic)
+        .context("failed to read project header")?;
     Ok(read == magic.len() && u32::from_le_bytes(magic) == MAGIC)
 }
 
@@ -43,7 +47,10 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<NativeProjectInspection> {
         .with_context(|| format!("failed to stat project {}", path.display()))?
         .len();
     if size > MAX_PROJECT_BYTES as u64 {
-        bail!("native project exceeds {} byte inspection limit", MAX_PROJECT_BYTES);
+        bail!(
+            "native project exceeds {} byte inspection limit",
+            MAX_PROJECT_BYTES
+        );
     }
     let bytes = std::fs::read(path)
         .with_context(|| format!("failed to read project {}", path.display()))?;
@@ -57,7 +64,10 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<NativeProjectInspection> {
     }
     let sample_rate = read_u32(&bytes, 8).context("native project sample rate is truncated")?;
     let bpm = read_f64(&bytes, 12).context("native project tempo is truncated")?;
-    if sample_rate == 0 || !bpm.is_finite() || !(20.0..=300.0).contains(&bpm) {
+    if !(MIN_PROJECT_SAMPLE_RATE..=MAX_PROJECT_SAMPLE_RATE).contains(&sample_rate)
+        || !bpm.is_finite()
+        || !(20.0..=300.0).contains(&bpm)
+    {
         bail!("native project header contains invalid audio or tempo metadata");
     }
 
@@ -79,8 +89,12 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<NativeProjectInspection> {
             bail!("native project checksum trailer is truncated");
         }
         let payload_len = bytes.len() - 4;
-        let stored = read_u32(&bytes, payload_len).context("native project checksum is truncated")?;
-        (&bytes[..payload_len], crc32(&bytes[..payload_len]) == stored)
+        let stored =
+            read_u32(&bytes, payload_len).context("native project checksum is truncated")?;
+        (
+            &bytes[..payload_len],
+            crc32(&bytes[..payload_len]) == stored,
+        )
     } else {
         (&bytes[..], true)
     };
@@ -91,7 +105,9 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<NativeProjectInspection> {
     // Counts are safe to expose from the fixed header without pretending that
     // this lightweight inspector has hydrated the full native graph.
     let (track_count, region_count) = parse_counts(payload, version, count_offset)
-        .map_or((read_u32(payload, count_offset), None), |counts| (Some(counts.0), Some(counts.1)));
+        .map_or((read_u32(payload, count_offset), None), |counts| {
+            (Some(counts.0), Some(counts.1))
+        });
 
     Ok(NativeProjectInspection {
         format: "aura-native-binary",
@@ -124,7 +140,10 @@ fn read_f64(bytes: &[u8], offset: usize) -> Option<f64> {
 }
 
 fn parse_counts(bytes: &[u8], version: u32, track_offset: usize) -> Option<(u32, u32)> {
-    let mut cursor = Cursor { bytes, offset: track_offset };
+    let mut cursor = Cursor {
+        bytes,
+        offset: track_offset,
+    };
     let track_count = cursor.u32()?;
     if track_count > 512 {
         return None;
@@ -245,8 +264,12 @@ mod tests {
         bytes.extend_from_slice(&3u32.to_le_bytes());
         let checksum = crc32(&bytes);
         bytes.extend_from_slice(&checksum.to_le_bytes());
-        let path = std::env::temp_dir().join(format!("aura-native-inspect-{}.aura", std::process::id()));
-        std::fs::File::create(&path).unwrap().write_all(&bytes).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("aura-native-inspect-{}.aura", std::process::id()));
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
         let result = inspect(&path).unwrap();
         assert_eq!(result.format, "aura-native-binary");
         assert_eq!(result.version, 28);
@@ -274,6 +297,30 @@ mod tests {
         std::fs::write(&path, bytes).unwrap();
         let error = inspect(&path).unwrap_err().to_string();
         assert!(error.contains("checksum") || error.contains("trailer"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_native_project_sample_rate_below_audio_floor() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&28u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&120.0f64.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        let checksum = crc32(&bytes);
+        bytes.extend_from_slice(&checksum.to_le_bytes());
+        let path = std::env::temp_dir().join(format!(
+            "aura-native-inspect-invalid-rate-{}.aura",
+            std::process::id()
+        ));
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
+        assert!(inspect(&path).is_err());
         let _ = std::fs::remove_file(path);
     }
 }

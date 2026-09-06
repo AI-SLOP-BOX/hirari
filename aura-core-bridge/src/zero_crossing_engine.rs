@@ -25,9 +25,11 @@ impl ZeroCrossingOrchestrator {
         let end = target_pos.saturating_add(search_range).min(num_samples - 1);
 
         let mut best_pos = target_pos;
-        let mut min_abs = 1.0f32;
+        let mut min_abs = f32::INFINITY;
+        let mut best_distance = usize::MAX;
 
-        for i in start..end {
+        for i in start..=end {
+            if i + 1 >= num_samples { break; }
             // Logic: Check for a sign change between adjacent samples
             let a = if data[i].is_finite() { data[i] } else { 0.0 };
             let b = if data[i + 1].is_finite() {
@@ -38,17 +40,19 @@ impl ZeroCrossingOrchestrator {
             let sign_change = (a >= 0.0 && b < 0.0) || (a < 0.0 && b >= 0.0);
 
             if sign_change {
-                // Return the sample that is closest to absolute zero
-                return if a.abs() < b.abs() {
-                    i as u64
-                } else {
-                    (i + 1) as u64
-                };
+                let candidate = if a.abs() < b.abs() { i } else { i + 1 };
+                let distance = candidate.abs_diff(target_pos);
+                if distance < best_distance || (distance == best_distance && a.abs().min(b.abs()) < min_abs) {
+                    best_distance = distance;
+                    min_abs = a.abs().min(b.abs());
+                    best_pos = candidate;
+                }
+                continue;
             }
 
             // Fallback: If no sign change is found, track the absolute minimum value
             let abs_val = a.abs();
-            if abs_val < min_abs {
+            if best_distance == usize::MAX && abs_val < min_abs {
                 min_abs = abs_val;
                 best_pos = i;
             }
@@ -97,7 +101,8 @@ impl ZeroCrossingOrchestrator {
         let mut best_pos = target_pos;
         let mut min_sum = 2.0f32;
 
-        for i in start..end {
+        for i in start..=end {
+            if i + 1 >= num_samples { break; }
             let left_sample = if left[i].is_finite() { left[i] } else { 0.0 };
             let right_sample = if right[i].is_finite() { right[i] } else { 0.0 };
             let sum_abs = left_sample.abs() + right_sample.abs();
@@ -112,7 +117,7 @@ impl ZeroCrossingOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide waveform alignment state.
     pub fn audit_zero_crossing_engine(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic alignment auditing logic.
-        true
+        self.find_nearest(&[1.0, -1.0], 0, 1) <= 1
+            && self.find_interpolated(&[-1.0, 1.0], 0, 1).is_some()
     }
 }

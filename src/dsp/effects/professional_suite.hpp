@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include "../iprocessor.hpp"
 #include "../../core/audio_buffer.hpp"
 #include "../mixing/state_variable_filter.hpp"
@@ -22,7 +23,7 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t) noexcept override {
-        m_sampleRate = sr > 0.0 ? sr : 44100.0;
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0;
         const size_t delayLength = static_cast<size_t>(m_sampleRate * 0.1); // 100ms max delay
         m_delays.resize(8);
         for (auto& d : m_delays) {
@@ -93,7 +94,11 @@ public:
         }
     }
 
-    const char* getName() const override { return "ProChorus"; }
+    std::string getName() const override { return "ProChorus"; }
+    uint32_t getTailSamples() const noexcept override {
+        return static_cast<uint32_t>(std::min(0.1 * std::max(1.0, m_sampleRate),
+                                              static_cast<double>(std::numeric_limits<uint32_t>::max())));
+    }
 
     void reset() noexcept override {
         for (auto& d : m_delays) {
@@ -134,10 +139,14 @@ public:
 
     void prepareToPlay(double sr, uint32_t) noexcept override {
         m_sampleRate = sr > 0.0 ? sr : 44100.0;
-        m_filterL = Mixing::StateVariableFilter(m_sampleRate);
-        m_filterR = Mixing::StateVariableFilter(m_sampleRate);
-        m_detectorL = Mixing::StateVariableFilter(m_sampleRate);
-        m_detectorR = Mixing::StateVariableFilter(m_sampleRate);
+        m_filterL.setSampleRate(m_sampleRate);
+        m_filterR.setSampleRate(m_sampleRate);
+        m_detectorL.setSampleRate(m_sampleRate);
+        m_detectorR.setSampleRate(m_sampleRate);
+        m_filterL.reset();
+        m_filterR.reset();
+        m_detectorL.reset();
+        m_detectorR.reset();
         reset();
     }
 
@@ -196,7 +205,7 @@ public:
         }
     }
 
-    const char* getName() const override { return "DynamicEQPro"; }
+    std::string getName() const override { return "DynamicEQPro"; }
 
     void reset() noexcept override {
         m_filterL.reset();
@@ -296,7 +305,7 @@ public:
         }
     }
 
-    const char* getName() const override { return "TapeSatPro"; }
+    std::string getName() const override { return "TapeSatPro"; }
 
     void reset() noexcept override {
         std::fill(m_wowDelayL.begin(), m_wowDelayL.end(), 0.0f);

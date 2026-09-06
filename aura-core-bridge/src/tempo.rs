@@ -12,7 +12,9 @@ pub struct TempoOrchestrator {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct TapTempo { taps: Vec<u64> }
+pub struct TapTempo {
+    taps: Vec<u64>,
+}
 impl TapTempo {
     pub fn tap(&mut self, timestamp_ms: u64) -> Option<f64> {
         if let Some(&last) = self.taps.last() {
@@ -31,12 +33,18 @@ impl TapTempo {
         if self.taps.len() < 2 {
             return None;
         }
-        let mut intervals: Vec<u64> = self.taps.windows(2).map(|window| window[1] - window[0]).collect();
+        let mut intervals: Vec<u64> = self
+            .taps
+            .windows(2)
+            .map(|window| window[1] - window[0])
+            .collect();
         intervals.sort_unstable();
         let median = intervals[intervals.len() / 2] as f64;
         Some((60_000.0 / median).clamp(20.0, 300.0))
     }
-    pub fn clear(&mut self) { self.taps.clear(); }
+    pub fn clear(&mut self) {
+        self.taps.clear();
+    }
 }
 
 impl Default for TempoOrchestrator {
@@ -58,24 +66,78 @@ impl TempoOrchestrator {
         }
     }
 
-    pub fn upsert_event(&mut self, event: TempoEvent) -> bool { if event.bpm.is_finite() && (20.0..=999.0).contains(&event.bpm) && event.world_beats.is_finite() && event.world_beats >= 0.0 { if let Some(old)=self.events.iter_mut().find(|e|e.sample_pos==event.sample_pos) { *old=event; } else { self.events.push(event); } self.events.sort_by_key(|e|e.sample_pos); true } else { false } }
-    pub fn remove_event(&mut self, sample_pos: u64) -> bool { if sample_pos==0 { return false; } let n=self.events.len(); self.events.retain(|e|e.sample_pos!=sample_pos); n!=self.events.len() }
+    pub fn upsert_event(&mut self, event: TempoEvent) -> bool {
+        if event.bpm.is_finite()
+            && (20.0..=999.0).contains(&event.bpm)
+            && event.world_beats.is_finite()
+            && event.world_beats >= 0.0
+        {
+            if let Some(old) = self
+                .events
+                .iter_mut()
+                .find(|e| e.sample_pos == event.sample_pos)
+            {
+                *old = event;
+            } else {
+                self.events.push(event);
+            }
+            self.events.sort_by_key(|e| e.sample_pos);
+            true
+        } else {
+            false
+        }
+    }
+    pub fn remove_event(&mut self, sample_pos: u64) -> bool {
+        if sample_pos == 0 {
+            return false;
+        }
+        let n = self.events.len();
+        self.events.retain(|e| e.sample_pos != sample_pos);
+        n != self.events.len()
+    }
 
     /// Moves a tempo-map node during time-warp editing while preserving the
     /// unique, strictly ordered event invariant.
     pub fn move_event(&mut self, from_sample: u64, to_sample: u64) -> bool {
-        if from_sample == 0 || to_sample == 0 || from_sample == to_sample || self.events.iter().any(|event| event.sample_pos == to_sample) { return false; }
-        let Some(index) = self.events.iter().position(|event| event.sample_pos == from_sample) else { return false; };
+        if from_sample == 0
+            || to_sample == 0
+            || from_sample == to_sample
+            || self
+                .events
+                .iter()
+                .any(|event| event.sample_pos == to_sample)
+        {
+            return false;
+        }
+        let Some(index) = self
+            .events
+            .iter()
+            .position(|event| event.sample_pos == from_sample)
+        else {
+            return false;
+        };
         let mut candidate = self.events.clone();
         candidate[index].sample_pos = to_sample;
         candidate.sort_by_key(|event| event.sample_pos);
-        if candidate.first().map(|event| event.sample_pos) != Some(0) || candidate.windows(2).any(|pair| pair[0].sample_pos >= pair[1].sample_pos) { return false; }
+        if candidate.first().map(|event| event.sample_pos) != Some(0)
+            || candidate
+                .windows(2)
+                .any(|pair| pair[0].sample_pos >= pair[1].sample_pos)
+        {
+            return false;
+        }
         self.events = candidate;
         true
     }
 
     pub fn set_ramp(&mut self, sample_pos: u64, ramp: bool) -> bool {
-        let Some(event) = self.events.iter_mut().find(|event| event.sample_pos == sample_pos) else { return false; };
+        let Some(event) = self
+            .events
+            .iter_mut()
+            .find(|event| event.sample_pos == sample_pos)
+        else {
+            return false;
+        };
         event.ramp = ramp;
         true
     }
@@ -235,7 +297,11 @@ impl TempoOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide temporal synchronization graph.
     pub fn audit_tempo(&self) -> bool {
         !self.events.is_empty()
-            && self.events.first().map(|event| event.sample_pos == 0).unwrap_or(false)
+            && self
+                .events
+                .first()
+                .map(|event| event.sample_pos == 0)
+                .unwrap_or(false)
             && self.events.windows(2).all(|pair| {
                 pair[0].sample_pos < pair[1].sample_pos
                     && pair[0].world_beats.is_finite()
@@ -342,8 +408,18 @@ mod tests {
     #[test]
     fn time_warp_moves_nodes_without_collisions() {
         let mut tempo = TempoOrchestrator::new();
-        assert!(tempo.upsert_event(TempoEvent { sample_pos: 48_000, bpm: 100.0, ramp: false, world_beats: 0.0 }));
-        assert!(tempo.upsert_event(TempoEvent { sample_pos: 96_000, bpm: 110.0, ramp: false, world_beats: 0.0 }));
+        assert!(tempo.upsert_event(TempoEvent {
+            sample_pos: 48_000,
+            bpm: 100.0,
+            ramp: false,
+            world_beats: 0.0
+        }));
+        assert!(tempo.upsert_event(TempoEvent {
+            sample_pos: 96_000,
+            bpm: 110.0,
+            ramp: false,
+            world_beats: 0.0
+        }));
         assert!(tempo.move_event(96_000, 72_000));
         assert!(!tempo.move_event(72_000, 48_000));
         assert!(tempo.set_ramp(72_000, true));

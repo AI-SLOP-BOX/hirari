@@ -16,6 +16,8 @@ public:
         float x, y, w, h;
         std::string title;
         bool visible;
+        bool crashed = false;
+        bool nativeEditor = false;
     };
 
     void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, const State& state) {
@@ -34,8 +36,7 @@ public:
         // --- CHROME STYLE: CRASH RECOVERY ICON ---
         // HONEST FIX: If a plugin 'crashed' (bypassed), show a yellow warning 
         // with the 'Restore' action tooltip.
-        bool isCrashed = false; // Demo state
-        if (isCrashed) {
+        if (state.crashed) {
              kernel.drawText("!", state.x + state.w - 70, state.y + 20, 12, 0xFFEAB308); // Yellow Alert
              kernel.drawText("RESTORE", state.x + state.w - 110, state.y + 20, 8, 0xFFEAB308);
         }
@@ -45,7 +46,12 @@ public:
         kernel.drawCircle(state.x + state.w - 32, state.y + 16, 5, 0xFFFFCC00); // Yellow
         kernel.drawCircle(state.x + state.w - 49, state.y + 16, 5, 0xFFFF3B30); // Red (Close)
 
-        // --- 3. PLUGIN CONTROLS (Mock Compressor/EQ/ChromaGlow) ---
+        // --- 3. PLUGIN CONTROLS ---
+        // Vendor views are rendered by the platform host when available;
+        // these controls are the explicit parameter fallback.
+        kernel.drawText(state.nativeEditor ? "NATIVE EDITOR HOST" : "PARAMETER FALLBACK",
+                        state.x + 12, state.y + 46, 8,
+                        state.nativeEditor ? 0xFF86EFAC : 0xFFFBBF24);
         if (state.title.find("Comp") != std::string::npos) {
              drawCompressorUI(kernel, state.x, state.y + 32, state.w, state.h - 32);
         } else if (state.title.find("ChromaGlow") != std::string::npos) {

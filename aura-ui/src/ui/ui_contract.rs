@@ -28,6 +28,7 @@ mod tests {
         assert_eq!(BounceState::from(1), BounceState::Queued);
         assert_eq!(bounce_state_label(2), "RENDERING");
         assert_eq!(bounce_state_label(5), "CANCELLED");
+        assert_eq!(bounce_state_label(6), "PAUSED");
         assert_eq!(bounce_state_label(999), "ENGINE_STATUS_UNKNOWN");
     }
 
@@ -39,6 +40,7 @@ mod tests {
             "RENDERING · 12s elapsed · progress pending"
         );
         assert_eq!(render_progress_status(3, false, 0.0, 0), "COMPLETE");
+        assert_eq!(render_progress_status(6, true, 0.375, 4), "PAUSED · 38%");
     }
 
     #[test]

@@ -11,7 +11,10 @@ pub struct SpectralProfile {
 }
 
 use serde::{Deserialize, Serialize};
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DDPConfig {
@@ -22,14 +25,23 @@ pub struct DDPConfig {
 
 impl DDPConfig {
     pub fn validate(&self) -> bool {
-        !self.title.trim().is_empty() && self.title.len() <= 256 && !self.title.bytes().any(|b| b == b'\n' || b == b'\r' || b == 0)
-            && (self.upc.len() == 12 || self.upc.len() == 13) && self.upc.chars().all(|c| c.is_ascii_digit())
-            && !self.isrc_codes.is_empty() && self.isrc_codes.len() <= 99
+        !self.title.trim().is_empty()
+            && self.title.len() <= 256
+            && !self
+                .title
+                .bytes()
+                .any(|b| b == b'\n' || b == b'\r' || b == 0)
+            && (self.upc.len() == 12 || self.upc.len() == 13)
+            && self.upc.chars().all(|c| c.is_ascii_digit())
+            && !self.isrc_codes.is_empty()
+            && self.isrc_codes.len() <= 99
             && self.isrc_codes.iter().all(|code| valid_isrc(code))
     }
     pub fn manifest(&self) -> String {
         let mut out = format!("DDP 1.00\nTITLE={}\nUPC={}\n", self.title.trim(), self.upc);
-        for (i, code) in self.isrc_codes.iter().enumerate() { out.push_str(&format!("TRACK{:02}_ISRC={}\n", i + 1, code)); }
+        for (i, code) in self.isrc_codes.iter().enumerate() {
+            out.push_str(&format!("TRACK{:02}_ISRC={}\n", i + 1, code));
+        }
         out
     }
     /// Validates metadata against the number of audio tracks being delivered.
@@ -78,21 +90,36 @@ impl MasteringOrchestrator {
         // Rust's safe memory management handles complex DSP with
         // absolute bit-accuracy and zero-latency.
         // Rust's LoudnessEngine ensures bit-accurate metric distribution.
-        if !buffer_rms.is_finite() || !peak.is_finite() { return; }
+        if !buffer_rms.is_finite() || !peak.is_finite() {
+            return;
+        }
         let rms = buffer_rms.abs().max(1.0e-12);
         let momentary = 20.0 * rms.log10();
         self.metrics.momentary = momentary.clamp(-120.0, 24.0);
         self.metrics.short_term = self.metrics.short_term * 0.9 + self.metrics.momentary * 0.1;
         self.metrics.integrated = self.metrics.integrated * 0.995 + self.metrics.momentary * 0.005;
-        self.metrics.range = (self.metrics.range.max((self.metrics.momentary - self.metrics.integrated).abs())).min(120.0);
-        self.metrics.true_peak = self.metrics.true_peak.max(20.0 * peak.abs().max(1.0e-12).log10()).min(24.0);
+        self.metrics.range = (self
+            .metrics
+            .range
+            .max((self.metrics.momentary - self.metrics.integrated).abs()))
+        .min(120.0);
+        self.metrics.true_peak = self
+            .metrics
+            .true_peak
+            .max(20.0 * peak.abs().max(1.0e-12).log10())
+            .min(24.0);
     }
 
     /// INDUSTRIAL: Analyzes spectral profile with absolute precision.
     pub fn analyze_spectral_profile(&mut self, bins: &[f32]) {
         // INDUSTRIAL: Implementation of high-performance spectral analysis.
-        if bins.is_empty() || bins.len() > 65_536 { return; }
-        self.current_profile.bins = bins.iter().map(|bin| if bin.is_finite() { *bin } else { 0.0 }).collect();
+        if bins.is_empty() || bins.len() > 65_536 {
+            return;
+        }
+        self.current_profile.bins = bins
+            .iter()
+            .map(|bin| if bin.is_finite() { *bin } else { 0.0 })
+            .collect();
     }
 
     /// INDUSTRIAL: Applies spectral matching target profile.
@@ -110,20 +137,30 @@ impl MasteringOrchestrator {
     /// INDUSTRIAL: Formats and validates DDP export with forensic precision.
     pub fn export_ddp(&self, config: &DDPConfig, output_dir: &str) -> bool {
         // The legacy API reports failure as false; validate all required inputs.
-        config.validate()
-            && Path::new(output_dir).is_dir()
+        config.validate() && Path::new(output_dir).is_dir()
     }
 
     /// Writes a deterministic DDP control manifest without touching existing
     /// files. Audio image generation remains a host-specific renderer, but the
     /// metadata hand-off is fully validated and reproducible here.
-    pub fn write_ddp_manifest(&self, config: &DDPConfig, output_dir: impl AsRef<Path>) -> Result<PathBuf, String> {
-        if !config.validate() { return Err("invalid DDP metadata".into()); }
+    pub fn write_ddp_manifest(
+        &self,
+        config: &DDPConfig,
+        output_dir: impl AsRef<Path>,
+    ) -> Result<PathBuf, String> {
+        if !config.validate() {
+            return Err("invalid DDP metadata".into());
+        }
         let dir = output_dir.as_ref();
-        if !dir.is_dir() { return Err("DDP output directory does not exist".into()); }
+        if !dir.is_dir() {
+            return Err("DDP output directory does not exist".into());
+        }
         let path = dir.join("DDPMS.manifest");
-        if path.exists() { return Err("DDP manifest already exists".into()); }
-        fs::write(&path, config.manifest()).map_err(|e| format!("failed to write DDP manifest: {e}"))?;
+        if path.exists() {
+            return Err("DDP manifest already exists".into());
+        }
+        fs::write(&path, config.manifest())
+            .map_err(|e| format!("failed to write DDP manifest: {e}"))?;
         Ok(path)
     }
 
@@ -164,7 +201,11 @@ mod tests {
 
     #[test]
     fn ddp_metadata_matches_delivery_track_count() {
-        let config = DDPConfig { title: "Album".into(), upc: "012345678901".into(), isrc_codes: vec!["USABC1234567".into(), "USABC1234568".into()] };
+        let config = DDPConfig {
+            title: "Album".into(),
+            upc: "012345678901".into(),
+            isrc_codes: vec!["USABC1234567".into(), "USABC1234568".into()],
+        };
         assert!(config.validate_for_track_count(2));
         assert!(!config.validate_for_track_count(1));
         let mut invalid = config.clone();

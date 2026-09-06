@@ -137,6 +137,7 @@ public:
         uint32_t n = stOut.getNumSamples();
         float* L = stOut.getWritePointer(0);
         float* R = stOut.getWritePointer(1);
+        if (!L || !R || !std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(pos.z)) return;
         
         float dist = std::sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
         float radius = std::max(0.1f, dist);
@@ -151,17 +152,22 @@ public:
         float ildL = std::clamp(1.0f - 0.5f * std::max(0.0f, azimuth_rad), 0.3f, 1.0f);
         float ildR = std::clamp(1.0f + 0.5f * std::min(0.0f, azimuth_rad), 0.3f, 1.0f);
         
-        // Elevation spectral notch (simplistic pinna model)
-        (void)elevation; // Reserved for the future pinna filter implementation.
+        // Elevation cue: attenuate the direct component at high elevation to
+        // emulate the broad pinna notch without allocating an HRTF kernel.
+        const float pinna = std::clamp(1.0f - 0.18f * std::abs(elevation) /
+            (0.5f * 3.14159265358979323846f), 0.72f, 1.0f);
+        ildL *= pinna;
+        ildR *= pinna;
 
         for (uint32_t s = 0; s < n; ++s) {
             int delay = (int)std::abs(itd_s);
-            float sL = (itd_s > 0) ? ((s >= (uint32_t)delay) ? monoIn[s-delay] : 0) : monoIn[s];
-            float sR = (itd_s < 0) ? ((s >= (uint32_t)delay) ? monoIn[s-delay] : 0) : monoIn[s];
+            const float in = std::isfinite(monoIn[s]) ? monoIn[s] : 0.0f;
+            float sL = (itd_s > 0) ? ((s >= (uint32_t)delay) ? monoIn[s-delay] : 0) : in;
+            float sR = (itd_s < 0) ? ((s >= (uint32_t)delay) ? monoIn[s-delay] : 0) : in;
             
             // Apply spectral "color" of atmosphere
-            L[s] += sL * ildL;
-            R[s] += sR * ildR;
+            L[s] = std::isfinite(L[s] + sL * ildL) ? L[s] + sL * ildL : 0.0f;
+            R[s] = std::isfinite(R[s] + sR * ildR) ? R[s] + sR * ildR : 0.0f;
         }
     }
 

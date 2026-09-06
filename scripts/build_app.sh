@@ -3,6 +3,16 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 APP_DIR="$ROOT_DIR/packaging/Aura DAW.app"
+
+SIGNING_IDENTITY="-"
+if [ "${AURA_RELEASE_MODE:-0}" = "1" ]; then
+    : "${AURA_CODESIGN_IDENTITY:?AURA_CODESIGN_IDENTITY is required in release mode}"
+    SIGNING_IDENTITY="$AURA_CODESIGN_IDENTITY"
+    # A signed artifact must not be produced from a checkout that still
+    # tracks local fixture clones.  Keep ordinary developer builds usable,
+    # but fail closed for the release path.
+    AURA_STRICT_SOURCE_HYGIENE=1 "$ROOT_DIR/scripts/audit_repository_hygiene.sh"
+fi
 STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aura-app-stage.XXXXXX")
 STAGED_APP="$STAGE_DIR/Aura DAW.app"
 cleanup() { rm -rf "$STAGE_DIR"; }
@@ -35,6 +45,18 @@ printf '%s\n' \
     'metal=optional' \
     'status=generated' > "$RESOURCE_MANIFEST"
 chmod 644 "$RESOURCE_MANIFEST"
+
+# Ship the license boundary with every application bundle.  Keeping these
+# notices inside the artifact makes the MIT core, optional GPL components, and
+# Slint/other third-party obligations visible to downstream redistributors
+# without requiring access to the source repository.
+for notice in LICENSE THIRD_PARTY_NOTICES.md LICENSE-COMBINED-DISTRIBUTION.md; do
+    if [ ! -s "$ROOT_DIR/$notice" ]; then
+        echo "Missing required distribution notice: $ROOT_DIR/$notice" >&2
+        exit 1
+    fi
+    install -m 644 "$ROOT_DIR/$notice" "$CONTENTS_DIR/Resources/$notice"
+done
 
 # The isolated plug-in worker is part of the application runtime.  Omitting it
 # makes every third-party plug-in appear to fail with MissingHelper when the
@@ -89,7 +111,7 @@ if command -v codesign >/dev/null 2>&1; then
     # layout. Remove it before signing so verification reflects the current
     # Contents tree instead of stale resource entries.
     rm -rf "$CONTENTS_DIR/_CodeSignature"
-    codesign --force --deep --sign - "$APP_DIR" >/dev/null
+    codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR" >/dev/null
 fi
 
 # Re-record the post-signing executable bodies.  The first signature seals the
@@ -102,7 +124,7 @@ fi
     printf 'worker_source=build-tools/aura-plugin-host-worker\n'
 } > "$BUILD_MANIFEST"
 if command -v codesign >/dev/null 2>&1; then
-    codesign --force --deep --sign - "$APP_DIR" >/dev/null
+    codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR" >/dev/null
 fi
 
 # Publish atomically only after the complete bundle has been built and signed.

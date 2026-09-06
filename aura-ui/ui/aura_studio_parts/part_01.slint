@@ -138,6 +138,11 @@ export component AppWindow inherits Window {
     // Keep the externally visible selection row valid whenever the engine
     // replaces the track model (including a blank project).
     property <int> selected_row: tracks.length > 0 ? Math.min(Math.max(sel_idx, 0), tracks.length - 1) : 0;
+    // Testable readiness contract for the primary editor surface. This is
+    // intentionally derived from the same conditions that gate the visible
+    // arrangement layer, so a future pixel/screenshot harness has one stable
+    // signal to assert before sampling the window.
+    in property <bool> project_surface_ready: tracks.length > 0 && !show_genesis;
     in-out property <bool> mx_open: false; in-out property <int> bot_view: 0; // 0: MIXER, 1: AUDIO_EDITOR, 2: PIANO_ROLL
     // Production mode keeps the primary DAW workflow focused. Experimental
     // consoles remain available through the ADV toggle when needed.
@@ -161,6 +166,7 @@ export component AppWindow inherits Window {
     in-out property <string> plugin_catalog_query: "";
     in-out property <float> openutau_scoop: 0.35;
     in-out property <float> openutau_vibrato: 0.45;
+    in-out property <float> openutau_vibrato_rate: 0.45;
     in-out property <float> openutau_dynamics: 0.60;
     in-out property <float> openutau_consonants: 0.50;
     in-out property <bool> pr_open: false;
@@ -185,6 +191,9 @@ export component AppWindow inherits Window {
     in-out property <float> plugin-track-latency-ms: 0.0;
     in-out property <float> plugin-pdc-compensation-ms: 0.0;
     in-out property <string> plugin-pdc-status: "UNAVAILABLE";
+    in-out property <bool> plugin-parameter-error: false;
+    in-out property <string> plugin-editor-capability: "NO PLUGIN SELECTED";
+    in-out property <bool> plugin-bypassed: false;
     // The browser starts empty and is populated by the real preview runtime
     // after the user chooses a library directory. Never present fake assets.
     in property <[Z_Sample_Entry]> sample_entries: [];
@@ -194,6 +203,8 @@ export component AppWindow inherits Window {
     in property <int> sandbox_failures: 0;
     in-out property <string> auto_save_status: "Auto-save: New Project";
     in property <bool> audio_device_ready: false;
+    in property <string> audio_device_catalog: "[]";
+    in property <[string]> audio_device_names: [];
     in property <float> audio_sample_rate: 0.0;
     in property <string> audio_diagnostic: "▶ 440Hz テストトーン";
     in property <int> input_dropped_blocks: 0;
@@ -274,6 +285,8 @@ export component AppWindow inherits Window {
     in property <int> buffer_size: 0;
     in property <[float]> cpu_history: [0.1, 0.2, 0.15, 0.3, 0.25, 0.4, 0.35, 0.5];
     in-out property <bool> is_dim: false;
+    in-out property <bool> is_talkback: false;
+    in-out property <bool> is_monitor_enabled: true;
     in property <string> time_sig: "4/4";
     in property <string> record_format: "WAV 24b";
     in property <string> clock_source: "INT";
@@ -355,10 +368,13 @@ export component AppWindow inherits Window {
                         Text { text: t; font-size: 12px; color: Style.text-primary; font-weight: 600; horizontal-alignment: center; }
                         Text { text: "Template"; font-size: Style.font-xxs; color: Style.brand; font-weight: 500; }
                     }
+                    // The Rust command handler defers hiding this surface until
+                    // after the synchronous Core mutation returns. This avoids
+                    // a re-entrant layout pass on native Slint backends.
                     TouchArea { clicked => { show_genesis = false; CommandActions.palette_exec("INIT_" + t); } }
                 }
             }
-            Z_IconButton { icon: "↻ RESTORE RECENT SESSION"; clicked => { show_genesis = false; CommandActions.palette_exec("RESTORE RECENT SESSION"); } }
+            Z_IconButton { icon: "↻ RESTORE RECENT SESSION"; clicked => { CommandActions.palette_exec("RESTORE RECENT SESSION"); } }
         }
     }
 
@@ -394,7 +410,12 @@ export component AppWindow inherits Window {
                     Text { text: render_error; font-size: Style.font-xxs; color: Style.alert; horizontal-alignment: right; }
                 }
             }
-            if (is_rendering) : Z_IconButton { icon: "✕ CANCEL RENDER"; clicked => { RenderActions.cancel_render(); } }
+            if (is_rendering) : HorizontalLayout {
+                alignment: center; spacing: 10px;
+                if (render_state == "PAUSED") : Z_IconButton { icon: "▶ RESUME RENDER"; clicked => { RenderActions.resume_render(); } }
+                if (render_state != "PAUSED") : Z_IconButton { icon: "Ⅱ PAUSE RENDER"; clicked => { RenderActions.pause_render(); } }
+                Z_IconButton { icon: "✕ CANCEL RENDER"; clicked => { RenderActions.cancel_render(); } }
+            }
         }
     }
 

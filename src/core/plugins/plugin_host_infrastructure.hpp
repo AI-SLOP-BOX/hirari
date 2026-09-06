@@ -256,6 +256,7 @@ public:
     }
 
     bool validatePlugin(const std::string& uuid, std::string* error = nullptr) const {
+        if (error) error->clear();
         PluginDescriptor descriptor;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -268,9 +269,10 @@ public:
         }
         if (descriptor.format == "Internal") return true;
         std::error_code ec;
+        const auto binaryPath = std::filesystem::path(descriptor.binaryPath);
         if (descriptor.binaryPath.empty() ||
-            std::filesystem::is_symlink(std::filesystem::symlink_status(descriptor.binaryPath)) ||
-            !std::filesystem::exists(descriptor.binaryPath, ec) || ec ||
+            !PluginAdmission::isSafeCandidate(binaryPath, descriptor.format) ||
+            !std::filesystem::exists(binaryPath, ec) || ec ||
             PluginCacheManager::getInstance().isBlacklisted(descriptor.binaryPath)) {
             if (error) *error = "plugin binary is unavailable or blacklisted";
             return false;
@@ -425,7 +427,12 @@ private:
         return "path-" + std::to_string(static_cast<unsigned long long>(value));
     }
 
-    PluginHostInfrastructure() = default;
+    PluginHostInfrastructure() {
+        // Ship core processors in the registry so they are discoverable by
+        // the same UI/CLI path as scanned third-party plugins.
+        registerInternal("Gain", "builtin-gain");
+        registerInternal("Spectral Restoration", "builtin-spectral-restoration");
+    }
     std::map<std::string, PluginDescriptor> m_registry;
     mutable std::mutex m_mutex;
 };

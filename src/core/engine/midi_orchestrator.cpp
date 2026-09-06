@@ -39,10 +39,19 @@ void MIDIOrchestrator::processMPE(MidiBuffer& buffer) {
             if (m_mpeNotes[channel].active) {
                 m_mpeNotes[channel].pressure = msg.data[1] / 127.0f;
             }
+        } else if (status == 0xA0) { // Polyphonic key pressure (MIDI 1.0)
+            if (m_mpeNotes[channel].active && msg.data[1] == m_mpeNotes[channel].noteNumber) {
+                m_mpeNotes[channel].pressure = msg.data[2] / 127.0f;
+            }
+        } else if (status == 0xB0 && msg.data[1] == 74) { // MPE timbre / slide
+            if (m_mpeNotes[channel].active) {
+                m_mpeNotes[channel].timbre = msg.data[2] / 127.0f;
+            }
         } else if (status == 0xE0) { // Pitch Bend
             if (m_mpeNotes[channel].active) {
                 uint16_t bend = (msg.data[2] << 7) | msg.data[1];
-                m_mpeNotes[channel].bend = (bend - 8192) / 8192.0f;
+                m_mpeNotes[channel].bend =
+                    (static_cast<int>(bend) - 8192) / 8192.0f;
             }
         }
     }

@@ -5,6 +5,8 @@
 #include <atomic>
 #include <cstring>
 #include <functional>
+#include <algorithm>
+#include <cmath>
 #include "../../core/audio_buffer.hpp"
 
 namespace Aura::Core::Plugins {
@@ -46,9 +48,18 @@ public:
         m_sharedBus.sequence.store(seq + 1, std::memory_order_release);
         uint32_t samples = std::min(buffer.getNumSamples(), SharedAudioBus::MaxSamples);
         m_sharedBus.numSamples.store(samples, std::memory_order_relaxed);
-        
-        for (uint32_t c = 0; c < buffer.getNumChannels() && c < SharedAudioBus::MaxChannels; ++c) {
-            std::memcpy(m_sharedBus.data[c], buffer.getReadPointer(c), samples * sizeof(float));
+
+        for (uint32_t c = 0; c < SharedAudioBus::MaxChannels; ++c) {
+            const float* source = c < buffer.getNumChannels() ? buffer.getReadPointer(c) : nullptr;
+            for (uint32_t sample = 0; sample < samples; ++sample) {
+                const float value = source ? source[sample] : 0.0f;
+                m_sharedBus.data[c][sample] = std::isfinite(value) ? value : 0.0f;
+            }
+            // Clear the unused portion so a remote reader cannot consume a
+            // stale tail if it observes a larger frame during recovery.
+            for (uint32_t sample = samples; sample < SharedAudioBus::MaxSamples; ++sample) {
+                m_sharedBus.data[c][sample] = 0.0f;
+            }
         }
         m_sharedBus.sequence.store(seq + 2, std::memory_order_release);
     }
@@ -72,8 +83,20 @@ public:
             if ((begin & 1u) || begin < expectedSeq) continue;
             uint32_t samplesInBus = m_sharedBus.numSamples.load(std::memory_order_relaxed);
             uint32_t samplesToCopy = std::min(buffer.getNumSamples(), samplesInBus);
-            for (uint32_t c = 0; c < buffer.getNumChannels() && c < SharedAudioBus::MaxChannels; ++c) {
-                std::memcpy(buffer.getWritePointer(c), m_sharedBus.data[c], samplesToCopy * sizeof(float));
+            for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
+                float* destination = buffer.getWritePointer(c);
+                if (!destination) continue;
+                if (c < SharedAudioBus::MaxChannels) {
+                    for (uint32_t sample = 0; sample < samplesToCopy; ++sample) {
+                        const float value = m_sharedBus.data[c][sample];
+                        destination[sample] = std::isfinite(value) ? value : 0.0f;
+                    }
+                    for (uint32_t sample = samplesToCopy; sample < buffer.getNumSamples(); ++sample) {
+                        destination[sample] = 0.0f;
+                    }
+                } else {
+                    std::fill(destination, destination + buffer.getNumSamples(), 0.0f);
+                }
             }
             const uint64_t end = m_sharedBus.sequence.load(std::memory_order_acquire);
             if (begin == end && !(end & 1u)) return true;

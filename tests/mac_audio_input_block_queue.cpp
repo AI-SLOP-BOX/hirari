@@ -32,5 +32,16 @@ int main() {
 
     assert(!queue.push_planar(input, 2, MacAudioInputBlockQueue::kMaxFrames + 1));
     assert(queue.dropped_blocks() == 1);
+
+    // A malformed consumer must not leave the queue head permanently stuck.
+    MacAudioInputBlockQueue malformed;
+    assert(malformed.push_planar(input, 2, 4));
+    float* missingChannel[2] = {outputLeft, nullptr};
+    MacAudioInputBlockQueue::BlockInfo malformedInfo;
+    uint64_t malformedDropped = 0;
+    assert(!malformed.poll(missingChannel, 2, 4, malformedInfo, malformedDropped));
+    assert(malformedDropped == 1);
+    assert(!malformed.poll(output, 2, 4, malformedInfo, malformedDropped));
+    assert(malformedDropped == 1);
     return 0;
 }

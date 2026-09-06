@@ -13,11 +13,18 @@ class AHDSR {
 public:
     enum class State { Idle, Attack, Hold, Decay, Sustain, Release };
 
-    AHDSR(double sr = 44100.0) : m_sampleRate(sr) {}
+    AHDSR(double sr = 44100.0)
+        : m_sampleRate(std::isfinite(sr) && sr >= 1000.0 ? sr : 44100.0) {}
 
     void setParameters(float a, float h, float d, float s, float r) {
-        m_attack = a; m_hold = h; m_decay = d; m_sustain = s; m_release = r;
+        m_attack = sanitizeTime(a, 0.01f);
+        m_hold = sanitizeTime(h, 0.0f);
+        m_decay = sanitizeTime(d, 0.1f);
+        m_sustain = std::isfinite(s) ? std::clamp(s, 0.0f, 1.0f) : 0.7f;
+        m_release = sanitizeTime(r, 0.2f);
     }
+
+    void reset() noexcept { m_state = State::Idle; m_currentValue = 0.0f; m_counter = 0; }
 
     void trigger() {
         m_state = State::Attack;
@@ -58,6 +65,10 @@ public:
     bool isActive() const { return m_state != State::Idle; }
 
 private:
+    static float sanitizeTime(float value, float fallback) noexcept {
+        return std::isfinite(value) ? std::clamp(value, 1.0e-5f, 60.0f) : fallback;
+    }
+
     double m_sampleRate;
     State m_state = State::Idle;
     float m_currentValue = 0.0f;

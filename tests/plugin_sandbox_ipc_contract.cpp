@@ -30,6 +30,11 @@ int main(int argc, char** argv) {
     assert(host.start());
     assert(host.isAlive());
     assert(host.failure() == Aura::Core::Plugins::PluginSandboxHost::Failure::None);
+    // Starting an already-live host is an idempotency error, not an invalid
+    // path.  Preserve the healthy diagnostic state for UI/recovery callers.
+    assert(!host.start());
+    assert(host.isAlive());
+    assert(host.failure() == Aura::Core::Plugins::PluginSandboxHost::Failure::None);
     assert(host.activeSampleRate() == 44100);
     assert(host.activeChannels() == 2);
 
@@ -134,6 +139,20 @@ int main(int argc, char** argv) {
     assert(!unsupported.start());
     assert(unsupported.failure() == Aura::Core::Plugins::PluginSandboxHost::Failure::PluginFormatUnsupported);
     ::unlink(unsupportedPath);
+
+    const char* symlinkTargetPath = "/tmp/aura_sandbox_symlink_target.clap";
+    const char* symlinkPath = "/tmp/aura_sandbox_symlink.clap";
+    const int targetFd = ::open(symlinkTargetPath, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+    assert(targetFd >= 0);
+    assert(::write(targetFd, &marker, 1) == 1);
+    ::close(targetFd);
+    ::unlink(symlinkPath);
+    assert(::symlink(symlinkTargetPath, symlinkPath) == 0);
+    Aura::Core::Plugins::PluginSandboxHost symlinked(symlinkPath);
+    assert(!symlinked.start());
+    assert(symlinked.failure() == Aura::Core::Plugins::PluginSandboxHost::Failure::InvalidPluginPath);
+    ::unlink(symlinkPath);
+    ::unlink(symlinkTargetPath);
     return 0;
 #endif
 }

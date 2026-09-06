@@ -94,6 +94,7 @@ public:
     };
     
     struct RegionState {
+        struct RangeEdit { uint64_t start = 0; uint64_t end = 0; float gain = 1.0f; uint64_t fadeIn = 0; uint64_t fadeOut = 0; };
         uint32_t id = 0;
         uint32_t trackId;
         uint64_t samplePosition;
@@ -112,6 +113,7 @@ public:
         double warpRatio = 1.0;
         float pitchSemitones = 0.0f;
         uint32_t loopCount = 1;
+        std::vector<RangeEdit> rangeEdits;
         bool locked = false;
         uint32_t syncGroup = 0;
         std::vector<::aura::editing::EventProcessingStep> processingHistory;
@@ -145,7 +147,7 @@ public:
         std::vector<MarkerState> markers;
         std::vector<ArrangerPartState> arrangerParts;
         std::vector<TempoEventState> tempoEvents;
-        uint32_t version = 35;
+        uint32_t version = 36;
         bool valid = false;
     };
 
@@ -288,6 +290,23 @@ public:
                 const uint32_t count = static_cast<uint32_t>(std::min<size_t>(r.processingHistory.size(), 4096)); writeLE(stream, count);
                 for (const auto& step : r.processingHistory) { writeLE(stream, step.id); writeLE(stream, step.parameter); writeLE(stream, static_cast<uint8_t>(step.enabled ? 1 : 0)); const uint32_t len = static_cast<uint32_t>(std::min<size_t>(step.operation.size(), 256)); writeLE(stream, len); if (len) stream.write(step.operation.data(), len); }
             }
+            if (state.version >= 36) {
+                uint32_t count = 0;
+                for (const auto& edit : r.rangeEdits) {
+                    if (edit.start < edit.end && std::isfinite(edit.gain) && edit.gain >= 0.0f &&
+                        edit.gain <= 16.0f && edit.fadeIn <= edit.end - edit.start &&
+                        edit.fadeOut <= edit.end - edit.start && count < 4096) count++;
+                }
+                writeLE(stream, count);
+                for (const auto& edit : r.rangeEdits) {
+                    if (edit.start >= edit.end || !std::isfinite(edit.gain) || edit.gain < 0.0f ||
+                        edit.gain > 16.0f || edit.fadeIn > edit.end - edit.start ||
+                        edit.fadeOut > edit.end - edit.start || count == 0) continue;
+                    writeLE(stream, edit.start); writeLE(stream, edit.end); writeLE(stream, edit.gain);
+                    writeLE(stream, edit.fadeIn); writeLE(stream, edit.fadeOut);
+                    count--;
+                }
+            }
         }
         if (state.version >= 26) {
             const uint32_t sidechainCount = static_cast<uint32_t>(state.sidechains.size());
@@ -412,7 +431,7 @@ public:
         uint32_t version = 0;
         std::memcpy(&magic, bytes.data(), sizeof(magic));
         std::memcpy(&version, bytes.data() + sizeof(magic), sizeof(version));
-        if (magic != 0x41555241u || version == 0 || version > 35) return {};
+        if (magic != 0x41555241u || version == 0 || version > 36) return {};
         size_t payloadSize = bytes.size();
         if (version >= 27) {
             if (bytes.size() < sizeof(uint32_t) * 3u) return {};
@@ -634,6 +653,11 @@ public:
                     const uint32_t count = readLE<uint32_t>(file); if (!file || count > 4096) return {};
                     r.processingHistory.resize(count);
                     for (auto& step : r.processingHistory) { step.id = readLE<uint32_t>(file); step.parameter = readLE<float>(file); step.enabled = readLE<uint8_t>(file) != 0; const uint32_t len = readLE<uint32_t>(file); if (!file || len > 256) return {}; step.operation.resize(len); if (len) file.read(step.operation.data(), len); if (!file || step.operation.empty()) return {}; }
+                }
+                if (version >= 36) {
+                    const uint32_t count = readLE<uint32_t>(file); if (!file || count > 4096) return {};
+                    r.rangeEdits.resize(count);
+                    for (auto& edit : r.rangeEdits) { edit.start = readLE<uint64_t>(file); edit.end = readLE<uint64_t>(file); edit.gain = readLE<float>(file); edit.fadeIn = readLE<uint64_t>(file); edit.fadeOut = readLE<uint64_t>(file); if (!file || edit.start >= edit.end || !std::isfinite(edit.gain) || edit.gain < 0.0f || edit.gain > 16.0f || edit.fadeIn > edit.end - edit.start || edit.fadeOut > edit.end - edit.start) return {}; }
                 }
             }
         }

@@ -14,7 +14,12 @@ namespace Aura::DSP::Analysis {
  */
 class FastFFT {
 public:
-    explicit FastFFT(size_t n) : m_size(n) {
+    explicit FastFFT(size_t n) : m_size(n), m_valid(n >= 2 && n <= (1u << 20) && (n & (n - 1)) == 0) {
+        if (!m_valid) {
+            m_size = 0;
+            m_log2n = 0;
+            return;
+        }
         m_log2n = static_cast<size_t>(std::log2(n));
         m_rev.resize(n);
         for (size_t i = 0; i < n; ++i) {
@@ -31,11 +36,14 @@ public:
         }
     }
 
+    bool valid() const noexcept { return m_valid; }
+
     /**
      * @brief In-place FFT (Iterative, Split-Complex)
      * INDUSTRIAL: Using separate Real/Imaginary arrays for optimal cache-locality and SIMD-readiness.
      */
     void forward(float* real, float* imag) {
+        if (!m_valid || !real || !imag) return;
         // 1. Bit-reversal permutation
         for (size_t i = 0; i < m_size; ++i) {
             if (i < m_rev[i]) {
@@ -70,6 +78,7 @@ public:
     }
 
     void inverse(float* real, float* imag) {
+        if (!m_valid || !real || !imag) return;
         // Conjugate (imag = -imag) -> FFT -> Conjugate -> Scale
         for (size_t i = 0; i < m_size; ++i) imag[i] = -imag[i];
         forward(real, imag);
@@ -91,6 +100,7 @@ private:
     }
 
     size_t m_size, m_log2n;
+    bool m_valid = false;
     std::vector<size_t> m_rev;
     std::vector<float> m_twiddleR;
     std::vector<float> m_twiddleI;

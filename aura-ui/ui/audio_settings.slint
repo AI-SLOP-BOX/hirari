@@ -4,6 +4,8 @@ import { AudioSettingsActions } from "./actions/audio_settings_actions.slint";
 
 export component Z_AudioSettings inherits Rectangle {
     in property <bool> ready: false;
+    in property <string> device-catalog: "[]";
+    in property <[string]> device-names: [];
     in property <float> sample-rate: 0.0;
     in property <int> buffer-size: 0;
     in property <int> dropped-blocks: 0;
@@ -18,6 +20,14 @@ export component Z_AudioSettings inherits Rectangle {
         Text { text: "Audio Settings"; color: Style.text-primary; font-size: 16px; font-weight: 700; }
         Text { text: root.ready ? "Device connected" : "Device offline"; color: root.ready ? Style.ok : Style.record; font-size: 12px; }
         Text { text: root.dropped-blocks > 0 ? "Input drops: " + root.dropped-blocks : "Input stream: stable"; color: root.dropped-blocks > 0 ? Style.record : Style.ok; font-size: 11px; }
+        Text { text: "Devices: " + root.device-catalog; color: Style.text-tertiary; font-size: 10px; overflow: elide; }
+        HorizontalLayout {
+            spacing: 6px;
+            for device[idx] in root.device-names : Z_IconButton {
+                icon: device; compact: true; enabled: !root.busy; button-width: 180px;
+                clicked => { AudioSettingsActions.select_device(idx); }
+            }
+        }
         Text { text: root.busy ? "Stop playback or recording before changing audio format." : "Audio format changes are safe while stopped."; color: root.busy ? Style.record : Style.text-tertiary; font-size: 11px; }
         HorizontalLayout {
             spacing: 10px;
@@ -31,6 +41,7 @@ export component Z_AudioSettings inherits Rectangle {
         HorizontalLayout {
             spacing: 10px;
             Text { text: "Buffer"; color: Style.text-secondary; vertical-alignment: center; }
+            Z_IconButton { icon: "32"; compact: true; enabled: !root.busy; button-width: 58px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 32); } }
             Z_IconButton { icon: "64"; compact: true; enabled: !root.busy; button-width: 58px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 64); } }
             Z_IconButton { icon: "128"; compact: true; enabled: !root.busy; button-width: 64px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 128); } }
             Z_IconButton { icon: "256"; compact: true; enabled: !root.busy; button-width: 64px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 256); } }
@@ -41,6 +52,7 @@ export component Z_AudioSettings inherits Rectangle {
         Text { text: "Current: " + (root.sample-rate > 0 ? Math.round(root.sample-rate) + " Hz" : "--") + " · " + (root.buffer-size > 0 ? root.buffer-size + " samples" : "--"); color: Style.text-tertiary; font-size: 12px; }
         Text { text: root.diagnostic; color: Style.text-secondary; font-size: 11px; overflow: elide; }
         Z_IconButton { icon: "Reconnect Audio"; button-width: 140px; active-col: Style.record; clicked => { AudioSettingsActions.reconnect(); } }
+        Z_IconButton { icon: "Use first listed device"; button-width: 180px; enabled: !root.busy; clicked => { AudioSettingsActions.select_default_device(); } }
         Rectangle { vertical-stretch: 1; }
     }
 }

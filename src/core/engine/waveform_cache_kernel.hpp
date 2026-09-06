@@ -4,6 +4,8 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <cmath>
+#include <algorithm>
 
 namespace Aura::Core::Engine {
 
@@ -24,21 +26,56 @@ struct PeakPair {
 class WaveformCacheKernel {
 public:
     WaveformCacheKernel(uint32_t samplesPerPixel = 256) 
-        : m_samplesPerPixel(samplesPerPixel) {}
+        : m_samplesPerPixel(std::max<uint32_t>(1u, samplesPerPixel)) {}
 
     /**
      * @brief Generate peak data from a raw buffer.
      */
     void generateForBlock(const float* data, uint32_t size) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // Waveform peak generation and high-density memory management 
-        // are now handled securely in the Rust layer.
-        // Rust's SIMDPeakEngine ensures bit-accurate visual representation.
-        // Rust's ForensicAuditor ensures absolute asset integrity.
+        if (!data || size == 0) return;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (uint32_t i = 0; i < size; ++i) {
+            const float sample = std::isfinite(data[i]) ? data[i] : 0.0f;
+            if (m_sampleCounter == 0) { m_currentMin = sample; m_currentMax = sample; }
+            else { m_currentMin = std::min(m_currentMin, sample); m_currentMax = std::max(m_currentMax, sample); }
+            if (++m_sampleCounter >= m_samplesPerPixel) {
+                m_peaks.push_back({m_currentMin, m_currentMax});
+                m_sampleCounter = 0;
+            }
+        }
+    }
+
+    void flush() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_sampleCounter == 0) return;
+        m_peaks.push_back({m_currentMin, m_currentMax});
+        m_sampleCounter = 0;
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_peaks.clear(); m_sampleCounter = 0; m_currentMin = 0.0f; m_currentMax = 0.0f;
     }
 
 
     const std::vector<PeakPair>& getPeaks() const { return m_peaks; }
+
+    std::vector<PeakPair> copyPeaks() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_peaks;
+    }
+
+    size_t peakCount() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_peaks.size();
+    }
+
+    bool getPeak(size_t index, PeakPair& out) const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (index >= m_peaks.size()) return false;
+        out = m_peaks[index];
+        return true;
+    }
 
 private:
     uint32_t m_samplesPerPixel;

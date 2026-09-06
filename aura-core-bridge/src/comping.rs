@@ -9,7 +9,10 @@ pub struct Take {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ScoredTake { pub take_id: u32, pub score: f32 }
+pub struct ScoredTake {
+    pub take_id: u32,
+    pub score: f32,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompSegment {
@@ -51,22 +54,51 @@ impl CompingOrchestrator {
     }
 
     pub fn auto_select_take(&self, start: u64, end: u64, scores: &[ScoredTake]) -> Option<u32> {
-        if end <= start || scores.len() > self.takes.len() { return None; }
-        scores.iter().filter(|s| s.score.is_finite() && self.takes.iter().any(|t| t.id==s.take_id && t.start_sample<=start && t.end_sample>=end)).max_by(|a,b| a.score.total_cmp(&b.score)).map(|s| s.take_id)
+        if end <= start || scores.len() > self.takes.len() {
+            return None;
+        }
+        scores
+            .iter()
+            .filter(|s| {
+                s.score.is_finite()
+                    && self.takes.iter().any(|t| {
+                        t.id == s.take_id && t.start_sample <= start && t.end_sample >= end
+                    })
+            })
+            .max_by(|a, b| a.score.total_cmp(&b.score))
+            .map(|s| s.take_id)
     }
 
     /// Build a complete comp automatically by selecting the highest-scoring
     /// take for each fixed-size window. Windows without a valid take fail
     /// atomically, so callers never receive a partially-built comp.
-    pub fn auto_comp(&mut self, start: u64, end: u64, window: u64, scores: &[ScoredTake], crossfade_samples: u32) -> bool {
-        if end <= start || window == 0 || crossfade_samples as u64 > window { return false; }
+    pub fn auto_comp(
+        &mut self,
+        start: u64,
+        end: u64,
+        window: u64,
+        scores: &[ScoredTake],
+        crossfade_samples: u32,
+    ) -> bool {
+        if end <= start || window == 0 || crossfade_samples as u64 > window {
+            return false;
+        }
         let mut segments = Vec::new();
         let mut pos = start;
         while pos < end {
             let next = pos.saturating_add(window).min(end);
-            let Some(take_id) = self.auto_select_take(pos, next, scores) else { return false; };
-            segments.push(CompSegment { take_id, start: pos, len: next - pos, crossfade_samples: crossfade_samples.min((next - pos) as u32) });
-            if next == end { break; }
+            let Some(take_id) = self.auto_select_take(pos, next, scores) else {
+                return false;
+            };
+            segments.push(CompSegment {
+                take_id,
+                start: pos,
+                len: next - pos,
+                crossfade_samples: crossfade_samples.min((next - pos) as u32),
+            });
+            if next == end {
+                break;
+            }
             pos = next;
         }
         self.set_segments(segments);
@@ -79,30 +111,53 @@ impl CompingOrchestrator {
         // Rust's safe memory management handles large arrangement streams with
         // absolute bit-accuracy and zero-latency.
         // Rust's ArrangementEngine ensures bit-accurate arrangement synchronization.
-        if take.id == 0 || take.name.trim().is_empty() || take.start_sample >= take.end_sample
+        if take.id == 0
+            || take.name.trim().is_empty()
+            || take.start_sample >= take.end_sample
             || self.takes.iter().any(|existing| {
-                existing.id == take.id
-                    || existing.name.eq_ignore_ascii_case(take.name.trim())
-            }) { return; }
-        self.takes.push(Take { name: take.name.trim().to_owned(), ..take });
+                existing.id == take.id || existing.name.eq_ignore_ascii_case(take.name.trim())
+            })
+        {
+            return;
+        }
+        self.takes.push(Take {
+            name: take.name.trim().to_owned(),
+            ..take
+        });
     }
 
     /// Removes a take and any comp regions that reference it.
     pub fn remove_take(&mut self, take_id: u32) -> bool {
-        let Some(index) = self.takes.iter().position(|take| take.id == take_id) else { return false; };
+        let Some(index) = self.takes.iter().position(|take| take.id == take_id) else {
+            return false;
+        };
         self.takes.remove(index);
-        self.current_comp.retain(|segment| segment.take_id != take_id);
+        self.current_comp
+            .retain(|segment| segment.take_id != take_id);
         true
     }
 
-    pub fn clear_comp(&mut self) { self.current_comp.clear(); }
+    pub fn clear_comp(&mut self) {
+        self.current_comp.clear();
+    }
 
     /// Replaces the take used by an existing comp interval without disturbing
     /// neighboring regions.
     pub fn replace_segment_take(&mut self, start: u64, len: u64, take_id: u32) -> bool {
-        let Some(index) = self.current_comp.iter().position(|segment| segment.start == start && segment.len == len) else { return false; };
-        let segment = CompSegment { take_id, ..self.current_comp[index].clone() };
-        if !self.segment_fits_take(&segment) { return false; }
+        let Some(index) = self
+            .current_comp
+            .iter()
+            .position(|segment| segment.start == start && segment.len == len)
+        else {
+            return false;
+        };
+        let segment = CompSegment {
+            take_id,
+            ..self.current_comp[index].clone()
+        };
+        if !self.segment_fits_take(&segment) {
+            return false;
+        }
         self.current_comp[index] = segment;
         true
     }
@@ -160,15 +215,19 @@ impl CompingOrchestrator {
     /// update. Existing segments are replaced only when they occupy exactly
     /// the same timeline interval, making punch-in comp edits deterministic.
     pub fn add_segment(&mut self, segment: CompSegment) -> bool {
-        if segment.len == 0 || segment.crossfade_samples as u64 > segment.len
+        if segment.len == 0
+            || segment.crossfade_samples as u64 > segment.len
             || segment.start > u64::MAX.saturating_sub(segment.len)
-            || !self.segment_fits_take(&segment) {
+            || !self.segment_fits_take(&segment)
+        {
             return false;
         }
         let end = segment.start + segment.len;
-        if let Some(index) = self.current_comp.iter().position(|existing| {
-            existing.start == segment.start && existing.len == segment.len
-        }) {
+        if let Some(index) = self
+            .current_comp
+            .iter()
+            .position(|existing| existing.start == segment.start && existing.len == segment.len)
+        {
             self.current_comp[index] = segment;
             return true;
         }
@@ -186,17 +245,12 @@ impl CompingOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide arrangement synchronization graph.
     pub fn audit_comping(&self) -> bool {
         self.takes.iter().all(|take| {
-            take.id != 0
-                && !take.name.trim().is_empty()
-                && take.start_sample < take.end_sample
-        })
-        && self.takes.iter().enumerate().all(|(index, take)| {
+            take.id != 0 && !take.name.trim().is_empty() && take.start_sample < take.end_sample
+        }) && self.takes.iter().enumerate().all(|(index, take)| {
             self.takes[..index].iter().all(|previous| {
-                previous.id != take.id
-                    && !previous.name.eq_ignore_ascii_case(take.name.trim())
+                previous.id != take.id && !previous.name.eq_ignore_ascii_case(take.name.trim())
             })
-        })
-        && self.current_comp.windows(2).all(|pair| {
+        }) && self.current_comp.windows(2).all(|pair| {
             pair[0].len > 0
                 && pair[0].crossfade_samples as u64 <= pair[0].len
                 && pair[0].start <= u64::MAX - pair[0].len
@@ -212,15 +266,14 @@ impl CompingOrchestrator {
     /// buffer is deterministic and non-destructive: source takes are never
     /// modified, and each segment reads from its own take-relative range.
     pub fn render_audio(&self, take_audio: &[(u32, &[f32])]) -> Vec<f32> {
-        let total = self
-            .current_comp
-            .iter()
-            .try_fold(0usize, |total, segment| {
-                total
-                    .checked_add(usize::try_from(segment.len).ok()?)
-                    .filter(|&total| total <= Self::MAX_RENDER_FRAMES)
-            });
-        let Some(total) = total else { return Vec::new(); };
+        let total = self.current_comp.iter().try_fold(0usize, |total, segment| {
+            total
+                .checked_add(usize::try_from(segment.len).ok()?)
+                .filter(|&total| total <= Self::MAX_RENDER_FRAMES)
+        });
+        let Some(total) = total else {
+            return Vec::new();
+        };
         let mut output = Vec::with_capacity(total);
         for segment in &self.current_comp {
             let Some((_, source)) = take_audio.iter().find(|(id, _)| *id == segment.take_id) else {
@@ -232,7 +285,9 @@ impl CompingOrchestrator {
             let Some(take) = self.takes.iter().find(|take| take.id == segment.take_id) else {
                 return Vec::new();
             };
-            if segment.start < take.start_sample { return Vec::new(); }
+            if segment.start < take.start_sample {
+                return Vec::new();
+            }
             let relative_start = segment.start - take.start_sample;
             let start = relative_start as usize;
             let end = start.saturating_add(segment.len as usize);
@@ -341,7 +396,12 @@ mod tests {
     #[test]
     fn comp_lane_take_replacement_and_removal_are_safe() {
         let mut comp = orchestrator();
-        comp.set_segments(vec![CompSegment { take_id: 1, start: 0, len: 500, crossfade_samples: 8 }]);
+        comp.set_segments(vec![CompSegment {
+            take_id: 1,
+            start: 0,
+            len: 500,
+            crossfade_samples: 8,
+        }]);
         assert!(comp.replace_segment_take(0, 500, 2));
         assert_eq!(comp.current_comp[0].take_id, 2);
         assert!(!comp.replace_segment_take(0, 500, 99));

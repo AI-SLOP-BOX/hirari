@@ -14,6 +14,17 @@ namespace Aura::Graphics::UI {
  */
 class ProfessionalInspector {
 public:
+    void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float x, float y,
+                float w, float h,
+                const std::vector<std::shared_ptr<Core::Engine::Track>>& tracks) {
+        if (tracks.empty() || !tracks.front()) {
+            kernel.drawGradientRect(x, y, w, std::min(22.0f, h), 0xFF353538, 0xFF212123);
+            kernel.drawText("Inspector: No track selected", x + 10, y + 16, 9.5f, 0xFFF1F5F9);
+            return;
+        }
+        render(kernel, x, y, w, h, *tracks.front());
+    }
+
     void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float x, float y, float w, float h, const Core::Engine::Track& track) {
         
         // --- 1. SECTION: REGION SETTINGS ---

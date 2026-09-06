@@ -5,6 +5,7 @@
 
 #include "../src/core/engine/modulator_system.hpp"
 #include "../src/dsp/library/dsp_standard_pro.hpp"
+#include "../src/dsp/analysis/drum_replacer.hpp"
 
 int main() {
     using Aura::DSP::Library::DSPStandardPro;
@@ -30,5 +31,17 @@ int main() {
     const float value = modulators.getModulatedValue(17, 1.0f, 48000.0);
     assert(std::isfinite(value));
     assert(std::abs(modulators.getModulatedValue(999, 0.25f, 48000.0) - 0.25f) < 1.0e-6f);
+
+    // Drum replacement accepts only sane audio rates/profiles and clamps
+    // emitted MIDI values to the 7-bit wire contract.
+    const float drum[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+    const auto rejected = Aura::DSP::Analysis::DrumReplacer::convertToMidiWithConfig(
+        drum, 4, 48000.0, 36, 1.5f, 256);
+    assert(rejected.empty());
+    const auto stream = Aura::DSP::Analysis::DrumReplacer::generateMidiStream({
+        {0, 240.0f, 200},
+    });
+    assert(stream.size() == 14);
+    assert(stream[8] == 0x90 && stream[9] == 127 && stream[10] == 127);
     return 0;
 }

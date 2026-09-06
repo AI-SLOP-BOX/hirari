@@ -26,11 +26,15 @@ public:
         reset();
     }
 
+    std::string getName() const override { return "Vintage Passive EQ"; }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
+
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
         m_sampleRate = sr;
-        m_smoothLowBoost.setSampleRate(sr);
-        m_smoothLowAtten.setSampleRate(sr);
-        m_smoothHighBoost.setSampleRate(sr);
+        // ParameterSmoother exposes smoothing time rather than a raw sample-rate setter.
+        m_smoothLowBoost.setSmoothingTime(20.0f, static_cast<float>(sr));
+        m_smoothLowAtten.setSmoothingTime(20.0f, static_cast<float>(sr));
+        m_smoothHighBoost.setSmoothingTime(20.0f, static_cast<float>(sr));
         
         m_smoothLowBoost.setTarget(m_lowBoost.load(std::memory_order_relaxed));
         m_smoothLowAtten.setTarget(m_lowAtten.load(std::memory_order_relaxed));
@@ -47,6 +51,7 @@ public:
      * @brief Applies passive EQ curves channel-by-channel with parameter smoothing.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
+        if (m_bypassed) return;
         uint32_t channels = buffer.getNumChannels();
         uint32_t samples = buffer.getNumSamples();
         
@@ -65,6 +70,7 @@ public:
         // 3. Process signal
         for (uint32_t c = 0; c < channels && c < 2; ++c) {
             float* p = buffer.getWritePointer(c);
+            if (!p) continue;
             for (uint32_t i = 0; i < samples; ++i) {
                 float val = p[i];
                 val = m_lowFilter[c].process(val);

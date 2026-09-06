@@ -20,12 +20,16 @@ impl BusTrackOrchestrator {
     }
 
     pub fn set_input_gain(&mut self, gain: f32) -> bool {
-        if !gain.is_finite() || !(-4.0..=4.0).contains(&gain) { return false; }
+        if !gain.is_finite() || !(-4.0..=4.0).contains(&gain) {
+            return false;
+        }
         self.input_gain = gain;
         true
     }
 
-    pub fn set_phase_inverted(&mut self, inverted: bool) { self.invert_phase = inverted; }
+    pub fn set_phase_inverted(&mut self, inverted: bool) {
+        self.invert_phase = inverted;
+    }
 
     /// INDUSTRIAL: Fetches and processes audio from the bus with absolute signal precision and transparency.
     pub fn fetch_audio(&self, l: &mut [f32], r: &mut [f32]) {

@@ -37,12 +37,23 @@ public:
         return results;
     }
 
-    ClashInfo detect(const float* /*spectrumA*/, const float* /*spectrumB*/, size_t /*size*/, double /*sampleRate*/) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::MixClashDetectorEngine.
-        // Rust's SIMD-optimized spectral overlap calculation ensures that 
-        // mix protection is always perfectly smooth and technically superior.
-        return ClashInfo{0.0f, 0.0f, AdviceCode::None};
+    ClashInfo detect(const float* spectrumA, const float* spectrumB, size_t size, double sampleRate) {
+        if (!spectrumA || !spectrumB || size == 0 || !std::isfinite(sampleRate) || sampleRate <= 0.0) return {};
+        float totalA = 0.0f, totalB = 0.0f, overlap = 0.0f, peak = 0.0f;
+        size_t peakBin = 0;
+        for (size_t i = 0; i < size; ++i) {
+            const float a = std::isfinite(spectrumA[i]) ? std::max(0.0f, spectrumA[i]) : 0.0f;
+            const float b = std::isfinite(spectrumB[i]) ? std::max(0.0f, spectrumB[i]) : 0.0f;
+            totalA += a; totalB += b;
+            const float shared = std::min(a, b);
+            overlap += shared;
+            if (shared > peak) { peak = shared; peakBin = i; }
+        }
+        const float masking = std::clamp(overlap / std::max(1.0e-6f, std::min(totalA, totalB)), 0.0f, 1.0f);
+        const float center = static_cast<float>(peakBin) * static_cast<float>(sampleRate) / static_cast<float>(size);
+        const AdviceCode advice = masking > 0.75f ? AdviceCode::SidechainKickBass :
+                                  (masking > 0.5f ? AdviceCode::NotchTrackB : AdviceCode::ClarityOK);
+        return {masking, center, advice};
     }
 
 };

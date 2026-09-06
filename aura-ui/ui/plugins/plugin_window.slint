@@ -14,6 +14,9 @@ export component Z_PluginWnd {
     in property <float> track-latency-ms: 0.0;
     in property <float> pdc-compensation-ms: 0.0;
     in property <string> pdc-status: "UNAVAILABLE";
+    in property <string> editor-capability: "NO PLUGIN SELECTED";
+    in property <bool> bypassed: false;
+    in property <bool> parameter-error: false;
     in-out property <int> sidechain-source-id: -1;
     in property <string> sidechain-source-name: "";
     in-out property <bool> sidechain-enabled: false;
@@ -32,6 +35,9 @@ export component Z_PluginWnd {
                 spacing: 8px;
                 Rectangle { width: 12px; height: 12px; border_radius: 6px; background: root.active ? Style.ok : #333; }
                     Text { text: name + " | DSP"; font-size: 11px; font-weight: 700; color: Style.text-primary; horizontal-stretch: 1; }
+                Button { text: root.bypassed ? "BYPASSED" : "BYPASS"; clicked => { PluginActions.set_plugin_bypass(root.track-id, root.plugin-index, !root.bypassed); } }
+                Button { text: "OPEN NATIVE UI"; enabled: root.editor-capability == "NATIVE EDITOR AVAILABLE · UI HOST PENDING"; clicked => { PluginActions.open_native_editor(root.track-id, root.plugin-index); } }
+                Button { text: "RESET HOST"; clicked => { PluginActions.reset_sandboxed_plugin(root.track-id, root.plugin-index); } }
                 Z_IconButton { icon: "×"; clicked => { close(); } }
             }
             
@@ -53,19 +59,22 @@ export component Z_PluginWnd {
                         // Scale
                         for s in [0, -3, -6, -12, -20] : Text { text: s + ""; font-size: Style.font-xxs; color: #333; y: (-s/20.0) * parent.height; x: 2px; }
                     }
-                    VerticalLayout {
-                        spacing: 8px;
-                        for p_idx in 4 : Rectangle {
-                            height: parameter-names.length > 0 && p_idx >= parameter-names.length ? 0px : 24px;
-                            opacity: parameter-names.length > 0 && p_idx >= parameter-names.length ? 0.0 : 1.0;
-                            background: Style.surface;
-                            HorizontalLayout {
-                                padding: 4px;
-                                Text { text: parameter-names.length > p_idx ? parameter-names[p_idx] : "PARAM " + p_idx; font-size: 8px; color: #666; vertical-alignment: center; horizontal-stretch: 1; }
-                                Slider {
-                                    value: parameter-values.length > p_idx ? parameter-values[p_idx] * 100.0 : 50.0;
-                                    width: 80px;
-                                    changed(v) => { param_changed(p_idx, v); }
+                    Flickable {
+                        viewport-height: 210px;
+                        VerticalLayout {
+                            spacing: 8px;
+                            for p_idx in (root.parameter-error ? 0 : (parameter-names.length > 0 ? parameter-names.length : 4)) : Rectangle {
+                                height: 24px;
+                                opacity: 1.0;
+                                background: Style.surface;
+                                HorizontalLayout {
+                                    padding: 4px;
+                                    Text { text: parameter-names.length > p_idx ? parameter-names[p_idx] : "PARAM " + p_idx; font-size: 8px; color: #666; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Slider {
+                                        value: parameter-values.length > p_idx ? parameter-values[p_idx] * 100.0 : 50.0;
+                                        width: 80px;
+                                        changed(v) => { param_changed(p_idx, v); }
+                                    }
                                 }
                             }
                         }
@@ -151,11 +160,12 @@ export component Z_PluginWnd {
                 }
             }
             if (root.pdc-status != "READY") : Text { text: root.pdc-status == "UNAVAILABLE" ? "PDC unavailable" : (root.pdc-status == "NO_PLUGIN" ? "No PDC plugin" : (root.pdc-status == "ERROR" ? "PDC error" : "PDC calculating")); font-size: Style.font-xxs; color: Style.text-tertiary; }
+            if (root.parameter-error) : Text { text: "Plugin parameters unavailable · host returned an invalid snapshot"; font-size: Style.font-xxs; color: Style.record; }
             HorizontalLayout {
                 padding-top: 10px; spacing: 8px;
                 Text { text: root.pdc-status == "READY" ? "PDC " + Math.round(root.pdc-compensation-ms * 100.0) / 100.0 + " ms" : "PDC " + root.pdc-status; font-size: Style.font-xxs; color: Style.text-tertiary; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "Host parameters"; font-size: Style.font-xxs; color: Style.text-muted; }
+                Text { text: root.editor-capability; font-size: Style.font-xxs; color: root.editor-capability == "NATIVE EDITOR · EMBEDDED" ? Style.ok : (root.editor-capability == "NATIVE EDITOR AVAILABLE · UI HOST PENDING" ? Style.record : Style.text-muted); }
             }
         }
     }

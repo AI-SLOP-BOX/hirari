@@ -19,21 +19,38 @@ public:
         , m_phase(0.0f) {
     }
 
+    void reset() noexcept {
+        std::fill(m_delayBuffer.begin(), m_delayBuffer.end(), 0.0f);
+        m_writeIdx = 0;
+        m_phase = 0.0f;
+        m_lastOut = 0.0f;
+    }
+
     /**
      * @brief Performs formant-preserving pitch shifting.
      */
     void process(const float* input, float* output, uint32_t samples, 
-                 float ratio, float /*f0*/, double /*sr*/) {
+                 float ratio, float f0, double sr, float formantRatio = 1.0f,
+                 float timingRatio = 1.0f) {
+        // Keep the shifter's delay-time model tied to the actual stream rate;
+        // callers that omit an invalid rate fall back to the constructor rate.
+        const double effectiveSampleRate = std::isfinite(sr) && sr >= 8'000.0
+            ? sr : m_sampleRate;
+        const float rateScale = static_cast<float>(std::clamp(effectiveSampleRate / 48'000.0, 0.5, 2.0));
+        const float safeF0 = std::isfinite(f0) && f0 > 20.0f ? std::clamp(f0, 20.0f, 2'000.0f) : 140.0f;
+        const float period = static_cast<float>(effectiveSampleRate) / safeF0;
+        const float safeFormantRatio = std::isfinite(formantRatio) ? std::clamp(formantRatio, 0.25f, 4.0f) : 1.0f;
+        const float safeTimingRatio = std::isfinite(timingRatio) ? std::clamp(timingRatio, 0.25f, 4.0f) : 1.0f;
         
         ratio = std::clamp(ratio, 0.5f, 2.0f);
-        float tilt = (ratio - 1.0f) * 0.4f; 
+        float tilt = std::clamp((ratio - 1.0f) * 0.4f + (safeFormantRatio - 1.0f) * 0.1f, -0.8f, 0.8f);
         
-        float minDelay = 512.0f;
-        float maxDelay = 4096.0f;
+        const float minDelay = std::clamp(std::max(2.0f * period, 256.0f * rateScale), 256.0f, 2048.0f);
+        const float maxDelay = std::clamp(std::max(8.0f * period, minDelay + 256.0f), minDelay + 256.0f, 7000.0f);
         float delayRange = maxDelay - minDelay;
 
         // Modulate delay phase speed based on pitch ratio
-        float phaseSpeed = (ratio - 1.0f) / delayRange;
+        float phaseSpeed = (ratio - 1.0f) * safeTimingRatio / delayRange;
 
         for (uint32_t s = 0; s < samples; ++s) {
             m_delayBuffer[m_writeIdx] = input[s];

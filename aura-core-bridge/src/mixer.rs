@@ -48,9 +48,16 @@ impl MixerOrchestrator {
 
     /// INDUSTRIAL: Processes an audio signal and updates true-peak state with absolute precision.
     pub fn process_signal(&mut self, index: usize, data: &[f32], sample_rate: f64) {
-        if !sample_rate.is_finite() || sample_rate <= 0.0 || data.is_empty() { return; }
+        if !sample_rate.is_finite() || sample_rate <= 0.0 || data.is_empty() {
+            return;
+        }
         if self.meters.len() <= index {
-            self.meters.resize_with(index + 1, || MeterState { peak: 0.0, true_peak: 0.0, hold_peak: 0.0, previous_sample: 0.0 });
+            self.meters.resize_with(index + 1, || MeterState {
+                peak: 0.0,
+                true_peak: 0.0,
+                hold_peak: 0.0,
+                previous_sample: 0.0,
+            });
         }
         let meter = &mut self.meters[index];
         let mut peak = 0.0f32;
@@ -74,19 +81,31 @@ impl MixerOrchestrator {
     }
 
     pub fn decay_hold_peak(&mut self, db_per_tick: f32) -> bool {
-        if !db_per_tick.is_finite() || !(0.0..=120.0).contains(&db_per_tick) { return false; }
+        if !db_per_tick.is_finite() || !(0.0..=120.0).contains(&db_per_tick) {
+            return false;
+        }
         let factor = 10.0f32.powf(-db_per_tick / 20.0);
-        for meter in &mut self.meters { meter.hold_peak = (meter.hold_peak * factor).max(meter.true_peak); }
+        for meter in &mut self.meters {
+            meter.hold_peak = (meter.hold_peak * factor).max(meter.true_peak);
+        }
         true
     }
 
-    pub fn reset_hold_peaks(&mut self) { for meter in &mut self.meters { meter.hold_peak = meter.true_peak; } }
+    pub fn reset_hold_peaks(&mut self) {
+        for meter in &mut self.meters {
+            meter.hold_peak = meter.true_peak;
+        }
+    }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide mixing state and level consistency.
     pub fn audit_mixing(&self) -> bool {
-        self.meters.iter().all(|meter| meter.peak.is_finite()
-            && meter.true_peak.is_finite() && meter.hold_peak.is_finite()
-            && meter.peak >= 0.0 && meter.true_peak >= 0.0
-            && meter.hold_peak >= meter.true_peak)
+        self.meters.iter().all(|meter| {
+            meter.peak.is_finite()
+                && meter.true_peak.is_finite()
+                && meter.hold_peak.is_finite()
+                && meter.peak >= 0.0
+                && meter.true_peak >= 0.0
+                && meter.hold_peak >= meter.true_peak
+        })
     }
 }

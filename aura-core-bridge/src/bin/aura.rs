@@ -2,6 +2,7 @@ use aura_core_bridge::command_api::{
     audit_log_json, capabilities, diff, validate, validate_request_envelope, CommandAction,
     CommandDocument, Permission, ProtocolRequest, PROTOCOL_VERSION,
 };
+use aura_core_bridge::piano_visualizer::{PianoNote, PianoVisualizer, PianoVisualizerConfig};
 use aura_core_bridge::production_session::{ProductionRevision, ProductionSession};
 use aura_core_bridge::project::ProjectDocument;
 use aura_core_bridge::stable_api::{CoreApiV1, MixRenderRequest, WaveContainer};
@@ -97,7 +98,7 @@ fn render_project_stems(
 }
 
 fn usage() -> ! {
-    eprintln!("usage: aura capabilities | aura audit-log <ledger-path> | aura project init <project> [name] [sample-rate] | aura project inspect <project> | aura project manifest <project> | aura project production init <project> [fps] | aura project production inspect <project> | aura project production revision <project> <message> [author] [--audio-hash HASH] [--vfx-hash HASH] | aura track add <project> <name> [type] | aura track rename <project> <track-id> <name> | aura track delete <project> <track-id> | aura plugin insert <project> <track-id> <plugin-type> | aura mix analyze <left.wav> <right.wav> | aura render mix <project> <output.wav> [wav|wave64] | aura render stems <project> <output-dir> [format] | aura ci verify <audio.wav> [max-peak] [min-rms] | aura diff | aura validate");
+    eprintln!("usage: aura capabilities | aura audit-log <ledger-path> | aura project init <project> [name] [sample-rate] | aura project inspect <project> | aura project manifest <project> | aura project production init <project> [fps] | aura project production inspect <project> | aura project production revision <project> <message> [author] [--audio-hash HASH] [--vfx-hash HASH] | aura track add <project> <name> [type] | aura track rename <project> <track-id> <name> | aura track delete <project> <track-id> | aura plugin insert <project> <track-id> <plugin-type> | aura mix analyze <left.wav> <right.wav> | aura render mix <project> <output.wav> [wav|wave64] | aura render stems <project> <output-dir> [format] | aura render piano <notes.json> <audio.wav> <output.mp4> [sample-rate] [channels] | aura ci verify <audio.wav> [max-peak] [min-rms] | aura diff | aura validate");
     std::process::exit(2);
 }
 
@@ -107,6 +108,73 @@ fn main() {
     // while probing alternatives, so dispatching these read/write operations
     // here keeps `project inspect` and `project manifest` deterministic.
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    if raw_args.first().map(String::as_str) == Some("render")
+        && raw_args.get(1).map(String::as_str) == Some("piano")
+    {
+        if !(5..=7).contains(&raw_args.len()) {
+            usage();
+        }
+        let notes_text = match std::fs::read_to_string(&raw_args[2]) {
+            Ok(text) => text,
+            Err(error) => {
+                eprintln!(
+                    "{{\"ok\":false,\"error\":{}}}",
+                    serde_json::to_string(&error.to_string()).unwrap()
+                );
+                std::process::exit(1);
+            }
+        };
+        let notes: Vec<PianoNote> = match serde_json::from_str(&notes_text) {
+            Ok(notes) => notes,
+            Err(error) => {
+                eprintln!(
+                    "{{\"ok\":false,\"error\":{}}}",
+                    serde_json::to_string(&format!("invalid notes JSON: {error}")).unwrap()
+                );
+                std::process::exit(1);
+            }
+        };
+        let audio = match read_pcm16_wav(&raw_args[3]) {
+            Ok(audio) => audio,
+            Err(error) => {
+                eprintln!(
+                    "{{\"ok\":false,\"error\":{}}}",
+                    serde_json::to_string(&error).unwrap()
+                );
+                std::process::exit(1);
+            }
+        };
+        let sample_rate = raw_args
+            .get(5)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(48_000);
+        let channels = raw_args
+            .get(6)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(2);
+        let config = PianoVisualizerConfig::default();
+        match PianoVisualizer::render_to_mp4(
+            &notes,
+            &audio,
+            sample_rate,
+            channels,
+            &config,
+            std::path::Path::new(&raw_args[4]),
+        ) {
+            Ok(()) => println!(
+                "{{\"ok\":true,\"operation\":\"piano_visualizer\",\"output_path\":{}}}",
+                serde_json::to_string(&raw_args[4]).unwrap()
+            ),
+            Err(error) => {
+                eprintln!(
+                    "{{\"ok\":false,\"error\":{}}}",
+                    serde_json::to_string(&error.to_string()).unwrap()
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if raw_args.first().map(String::as_str) == Some("project") {
         match raw_args.get(1).map(String::as_str) {
             Some("production") if raw_args.get(2).map(String::as_str) == Some("revision") => {

@@ -48,12 +48,19 @@ namespace Aura::Core::BridgeFFI {
         result.reserve(512);
         const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
         
-        // --- INDUSTRIAL MEL-FILTERBANK (Simplified) ---
-        for (int i = 0; i < 512; ++i) {
-            // Logarithmic mapping (Mel-scale approximation)
-            float mel_idx = 2595.0f * std::log10(1.0f + (i * 20.0f) / 700.0f) * 0.1f;
-            uint32_t src_idx = (uint32_t)std::clamp(mel_idx, 0.0f, 511.0f);
-            result.push_back(telemetry.spectrum[src_idx]);
+        const double sampleRate = std::clamp(m_engine->get_sample_rate(), 8000.0, 384000.0);
+        const double nyquist = sampleRate * 0.5;
+        for (size_t i = 0; i < 512; ++i) {
+            // Log-frequency display mapping with linear interpolation between
+            // FFT bins, avoiding the low-frequency pile-up of integer lookup.
+            const double normalized = static_cast<double>(i) / 511.0;
+            const double frequency = 20.0 * std::pow(nyquist / 20.0, normalized);
+            const double bin = frequency / nyquist * 511.0;
+            const size_t lo = std::min<size_t>(static_cast<size_t>(bin), 511);
+            const size_t hi = std::min<size_t>(lo + 1, 511);
+            const float a = std::isfinite(telemetry.spectrum[lo]) ? telemetry.spectrum[lo] : 0.0f;
+            const float b = std::isfinite(telemetry.spectrum[hi]) ? telemetry.spectrum[hi] : a;
+            result.push_back(std::clamp(a + (b - a) * static_cast<float>(bin - lo), 0.0f, 1.0f));
         }
         return result;
     }
@@ -217,11 +224,19 @@ namespace Aura::Core::BridgeFFI {
         if (!m_engine) return result;
         result.reserve(128);
         const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
-        for (size_t i = 0; i < 128; ++i) {
-            const size_t begin = i * 4;
-            float sum = 0.0f;
-            for (size_t bin = begin; bin < std::min<size_t>(begin + 4, 512); ++bin) sum += telemetry.spectrum[bin];
-            result.push_back(sum * 0.25f);
+        for (size_t band = 0; band < 128; ++band) {
+            const float center = static_cast<float>(band) / 127.0f * 511.0f;
+            const float width = std::max(1.0f, 511.0f / 127.0f);
+            const int first = std::max(0, static_cast<int>(std::floor(center - width)));
+            const int last = std::min(511, static_cast<int>(std::ceil(center + width)));
+            float weighted = 0.0f, weightSum = 0.0f;
+            for (int bin = first; bin <= last; ++bin) {
+                const float weight = std::max(0.0f, 1.0f - std::fabs(static_cast<float>(bin) - center) / width);
+                const float value = std::isfinite(telemetry.spectrum[bin]) ? telemetry.spectrum[bin] : 0.0f;
+                weighted += std::max(0.0f, value) * weight;
+                weightSum += weight;
+            }
+            result.push_back(weightSum > 0.0f ? std::clamp(weighted / weightSum, 0.0f, 1.0f) : 0.0f);
         }
         return result;
     }
@@ -232,7 +247,24 @@ namespace Aura::Core::BridgeFFI {
     }
 
     rust::Vec<float> AnalysisHub::get_motion_vectors_v() const {
-        return {};
+        rust::Vec<float> result;
+        if (!m_engine) return result;
+        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        result.reserve(128 * 2);
+        // Encode spectral motion as a compact vector field: x is signed local
+        // spectral slope, y is positive onset/energy movement. This keeps the
+        // UI independent of the analyzer's internal FFT size.
+        for (size_t band = 0; band < 128; ++band) {
+            const size_t bin = std::min<size_t>(band * 4, 511);
+            const size_t next = std::min<size_t>(bin + 3, 511);
+            const float left = std::isfinite(telemetry.spectrum[bin]) ? telemetry.spectrum[bin] : 0.0f;
+            const float right = std::isfinite(telemetry.spectrum[next]) ? telemetry.spectrum[next] : 0.0f;
+            const float slope = std::clamp(right - left, -1.0f, 1.0f);
+            const float magnitude = std::clamp(0.5f * (std::fabs(left) + std::fabs(right)), 0.0f, 1.0f);
+            result.push_back(slope * (0.25f + 0.75f * magnitude));
+            result.push_back(magnitude);
+        }
+        return result;
     }
 
     float AnalysisHub::get_motion_energy() const {
@@ -244,7 +276,34 @@ namespace Aura::Core::BridgeFFI {
     }
 
     rust::Vec<float> AnalysisHub::get_synesthesia_colors_v() const {
-        return {};
+        rust::Vec<float> result;
+        if (!m_engine) return result;
+        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        result.reserve(128 * 3);
+        // Map each spectral band to a stable RGB triplet. Hue follows pitch
+        // class while brightness follows measured band energy.
+        for (size_t band = 0; band < 128; ++band) {
+            const size_t bin = std::min<size_t>(band * 4, 511);
+            const float raw = std::isfinite(telemetry.spectrum[bin]) ? telemetry.spectrum[bin] : 0.0f;
+            const float value = std::clamp(std::fabs(raw), 0.0f, 1.0f);
+            const float hue = static_cast<float>(band % 12) / 12.0f;
+            const float h6 = hue * 6.0f;
+            const int sector = static_cast<int>(h6) % 6;
+            const float f = h6 - std::floor(h6);
+            const float q = value * (1.0f - 0.65f * f);
+            const float t = value * (1.0f - 0.65f * (1.0f - f));
+            float r = 0.0f, g = 0.0f, b = 0.0f;
+            switch (sector) {
+                case 0: r = value; g = t; break;
+                case 1: r = q; g = value; break;
+                case 2: g = value; b = t; break;
+                case 3: g = q; b = value; break;
+                case 4: r = t; b = value; break;
+                default: r = value; b = q; break;
+            }
+            result.push_back(r); result.push_back(g); result.push_back(b);
+        }
+        return result;
     }
 
 } // namespace Aura::Core::BridgeFFI

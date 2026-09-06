@@ -18,7 +18,18 @@ namespace Aura::Core::Engine {
  */
 class Metronome {
 public:
-    explicit Metronome(double = 44100.0) {}
+    explicit Metronome(double sr = 44100.0) { setSampleRate(sr); }
+
+    void setSampleRate(double sr) noexcept {
+        m_sampleRate = (std::isfinite(sr) && sr >= 8000.0 && sr <= 384000.0) ? sr : 44100.0;
+        reset();
+    }
+    void reset() noexcept {
+        m_clickSampleCount = 0;
+        m_clickPhase = m_clickPhaseStep = m_clickEnvelope = m_clickEnvelopeDecay = 0.0f;
+        m_lastPlayhead = 0;
+        m_hasPlayhead = false;
+    }
 
     void setEnabled(bool e) { m_isEnabled.store(e, std::memory_order_release); }
     bool isEnabled() const { return m_isEnabled.load(std::memory_order_acquire); }
@@ -27,7 +38,8 @@ public:
      * @brief Render metronome click pulses into the output buffers on beat boundaries.
      */
     void process(float* l, float* r, uint32_t numSamples, uint64_t playhead, double sr, double bpm) {
-        if (!m_isEnabled.load(std::memory_order_acquire) || bpm <= 0.0 || sr <= 0.0) return;
+        if (!l || !r || numSamples == 0 || !m_isEnabled.load(std::memory_order_acquire) ||
+            !std::isfinite(bpm) || bpm <= 0.0 || !std::isfinite(sr) || sr < 8000.0 || sr > 384000.0) return;
 
         // A callback can be handed a block whose end crosses uint64_t's
         // boundary only after an astronomically long session.  Do not wrap
@@ -65,8 +77,8 @@ public:
 
             if (m_clickSampleCount > 0) {
                 float clickVal = std::sin(m_clickPhase) * m_clickEnvelope;
-                l[i] += clickVal;
-                r[i] += clickVal;
+                l[i] = std::isfinite(l[i]) ? std::clamp(l[i] + clickVal, -16.0f, 16.0f) : clickVal;
+                r[i] = std::isfinite(r[i]) ? std::clamp(r[i] + clickVal, -16.0f, 16.0f) : clickVal;
 
                 m_clickPhase += m_clickPhaseStep;
                 m_clickEnvelope = std::max(0.0f, m_clickEnvelope - m_clickEnvelopeDecay);
@@ -79,6 +91,7 @@ public:
 
 private:
     std::atomic<bool> m_isEnabled{false};
+    double m_sampleRate = 44100.0;
 
     // Click generator state
     uint32_t m_clickSampleCount = 0;

@@ -13,6 +13,7 @@ pub struct VirtuosoPitchEngine {
 
 impl VirtuosoPitchEngine {
     pub fn new(sr: f64) -> Self {
+        let sr = if sr.is_finite() && sr >= 8_000.0 { sr.clamp(8_000.0, 384_000.0) } else { 44_100.0 };
         Self {
             sample_rate: sr,
             shifter_l: PitchShifter::new(),
@@ -45,11 +46,12 @@ impl VirtuosoPitchEngine {
 
     /// INDUSTRIAL: Real-time Intelligent Pitch Correction.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        if !self.audit_virtuoso_pitch() { return; }
+        let len = l.len().min(r.len());
 
         // --- 1. PITCH DETECTION (Zero-Crossing Autocorrelation) ---
         for s in 0..len {
-            let in_val = l[s]; // Use Left channel for pitch detection
+            let in_val = if l[s].is_finite() { l[s] } else { 0.0 }; // Use Left channel for pitch detection
             if (in_val > 0.0 && self.last_in <= 0.0) || (in_val < 0.0 && self.last_in >= 0.0) {
                 let period = (self.write_count - self.last_cross) as f32;
                 if period > 0.0 {
@@ -63,7 +65,7 @@ impl VirtuosoPitchEngine {
 
         // --- 2. INTELLIGENT SNAP-TO-SCALE (Logic Pro Style) ---
         self.target_pitch = self.snap_to_scale(self.detected_pitch);
-        let shift_ratio = self.target_pitch / (self.detected_pitch + 1e-6);
+        let shift_ratio = (self.target_pitch / (self.detected_pitch + 1e-6)).clamp(0.25, 4.0);
 
         // --- 3. PITCH SHIFTING ---
         self.shifter_l.process(l, shift_ratio);
@@ -72,7 +74,29 @@ impl VirtuosoPitchEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Virtuoso Pitch state.
     pub fn audit_virtuoso_pitch(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Virtuoso Pitch auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.last_cross <= self.write_count
+            && self.last_in.is_finite()
+            && self.detected_pitch.is_finite()
+            && (1.0..=20_000.0).contains(&self.detected_pitch)
+            && self.target_pitch.is_finite()
+            && (1.0..=20_000.0).contains(&self.target_pitch)
+            && self.shifter_l.write_idx < self.shifter_l.delay_buf.len()
+            && self.shifter_r.write_idx < self.shifter_r.delay_buf.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VirtuosoPitchEngine;
+
+    #[test]
+    fn mismatched_buffers_are_safe() {
+        let mut engine = VirtuosoPitchEngine::new(48_000.0);
+        let mut left = vec![0.1; 32];
+        let mut right = vec![0.1; 7];
+        engine.process(&mut left, &mut right);
+        assert!(engine.audit_virtuoso_pitch());
     }
 }

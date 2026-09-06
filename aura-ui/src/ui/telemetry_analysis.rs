@@ -5,6 +5,14 @@ use crate::ui::sync::replace_track;
 use aura_core_bridge::ffi::BridgeEvent;
 use aura_core_bridge::AuraCore;
 use slint::Model;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+static ASYNC_WAVEFORM_REQUESTS: OnceLock<Mutex<HashMap<u64, (u32, u32)>>> = OnceLock::new();
+
+fn waveform_requests() -> &'static Mutex<HashMap<u64, (u32, u32)>> {
+    ASYNC_WAVEFORM_REQUESTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 pub(crate) fn update_analysis_telemetry(
     ui: &AppWindow,
@@ -14,24 +22,57 @@ pub(crate) fn update_analysis_telemetry(
     ev_buffer: &mut Vec<BridgeEvent>,
 ) {
     // --- INDUSTRIAL TELEMETRY SYNC ---
+    // Completed waveform decodes are consumed here, never on the UI event
+    // handler that opened the project. A request ID is mapped back to its
+    // track/clip only after the worker has published a complete peak vector.
+    let completed_requests: Vec<(u64, u32, u32)> = waveform_requests()
+        .lock()
+        .map(|requests| requests.iter().map(|(id, &(track, clip))| (*id, track, clip)).collect())
+        .unwrap_or_default();
+    for (request, track_id, clip_id) in completed_requests {
+        if core.region_waveform_pending(request) {
+            continue;
+        }
+        let waveform = core.poll_region_waveform(request);
+        if !waveform.is_empty() {
+            for index in 0..tracks.row_count() {
+                let Some(mut track) = tracks.row_data(index) else { continue; };
+                if track.id as u32 != track_id { continue; }
+                let mut clips: Vec<Z_Clip> = track.clips.iter().collect();
+                if let Some(clip) = clips.iter_mut().find(|clip| clip.id as u32 == clip_id) {
+                    clip.points = slint::ModelRc::new(slint::VecModel::from(waveform.clone()));
+                    track.clips = slint::ModelRc::new(slint::VecModel::from(clips));
+                    replace_track(tracks, index, track);
+                }
+                break;
+            }
+        }
+        if let Ok(mut requests) = waveform_requests().lock() {
+            requests.remove(&request);
+        }
+    }
+
     if waveform_due {
-        // Keep clip previews synchronized with decoded engine data.
+        // Queue missing clip peaks. The worker performs decode/peak extraction;
+        // this loop only schedules bounded requests and remains responsive.
         for track_index in 0..tracks.row_count() {
-            let Some(mut track) = tracks.row_data(track_index) else {
+            let Some(track) = tracks.row_data(track_index) else {
                 continue;
             };
-            let mut clips: Vec<Z_Clip> = track.clips.iter().collect();
-            let mut changed = false;
-            for clip in &mut clips {
-                let waveform = core.get_region_waveform(track.id as u32, clip.id as u32);
-                if !waveform.is_empty() {
-                    clip.points = slint::ModelRc::new(slint::VecModel::from(waveform));
-                    changed = true;
+            for clip in track.clips.iter() {
+                if clip.points.row_count() != 0 { continue; }
+                let already_queued = waveform_requests()
+                    .lock()
+                    .map(|requests| requests.values().any(|&(track_id, clip_id)|
+                        track_id == track.id as u32 && clip_id == clip.id as u32))
+                    .unwrap_or(true);
+                if already_queued { continue; }
+                let request = core.queue_region_waveform(track.id as u32, clip.id as u32);
+                if request != 0 {
+                    if let Ok(mut requests) = waveform_requests().lock() {
+                        requests.insert(request, (track.id as u32, clip.id as u32));
+                    }
                 }
-            }
-            if changed {
-                track.clips = slint::ModelRc::new(slint::VecModel::from(clips));
-                replace_track(tracks, track_index, track);
             }
         }
 
@@ -52,7 +93,12 @@ pub(crate) fn update_analysis_telemetry(
 
         // 3. Track Correlation
         for i in 0..tracks.row_count() {
-            let mut trk = tracks.row_data(i).unwrap();
+            // The track model can be replaced by a project/recovery callback
+            // between row_count() and this pass.  Treat a vanished row as a
+            // normal synchronization race instead of crashing the UI thread.
+            let Some(mut trk) = tracks.row_data(i) else {
+                continue;
+            };
             trk.correlation = core.get_track_correlation(trk.id as u32);
             replace_track(tracks, i, trk);
         }

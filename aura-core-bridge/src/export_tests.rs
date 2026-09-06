@@ -23,7 +23,10 @@ mod tests {
         let bytes = fs::read(&path).unwrap();
         assert_eq!(&bytes[0..4], b"RIFF");
         assert_eq!(&bytes[24..28], b"WAVE");
-        assert_eq!(u64::from_le_bytes(bytes[16..24].try_into().unwrap()), bytes.len() as u64);
+        assert_eq!(
+            u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
+            bytes.len() as u64
+        );
         assert_eq!(&bytes[40..44], b"fmt ");
         assert_eq!(&bytes[80..84], b"data");
         assert_eq!(u64::from_le_bytes(bytes[96..104].try_into().unwrap()), 40);
@@ -33,13 +36,27 @@ mod tests {
 
     #[test]
     fn wave64_float_writer_round_trips_through_reader() {
-        let path = std::env::temp_dir().join(format!("aura-export-roundtrip-{}.w64", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("aura-export-roundtrip-{}.w64", std::process::id()));
         let source = vec![0.0, 0.5, -0.5, 1.0];
         write_wave64_float32(&path, &source, 96_000, 2).unwrap();
         let (rate, channels, decoded) = read_wave64_float32(&path).unwrap();
         assert_eq!(rate, 96_000);
         assert_eq!(channels, 2);
         assert_eq!(decoded, source);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn wave64_reader_rejects_oversized_files_before_loading() {
+        let path =
+            std::env::temp_dir().join(format!("aura-export-oversized-{}.w64", std::process::id()));
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(513 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(
+            read_wave64_float32(&path),
+            Err(WavExportError::FileTooLarge)
+        );
         let _ = fs::remove_file(path);
     }
 
@@ -69,8 +86,7 @@ mod tests {
         ));
         // Two frames in explicit L/R/C order. The payload must remain
         // interleaved in that order rather than being silently downmixed.
-        write_wav_pcm16(&path, &[0.25, -0.25, 0.5, -0.5, 0.75, -0.75], 48_000, 3)
-            .unwrap();
+        write_wav_pcm16(&path, &[0.25, -0.25, 0.5, -0.5, 0.75, -0.75], 48_000, 3).unwrap();
         let bytes = fs::read(&path).unwrap();
         assert_eq!(u16::from_le_bytes([bytes[22], bytes[23]]), 3);
         assert_eq!(u16::from_le_bytes([bytes[32], bytes[33]]), 6);
@@ -145,10 +161,32 @@ mod tests {
     }
 
     #[test]
+    fn low_level_writers_share_the_same_sample_rate_floor() {
+        let path = std::env::temp_dir().join(format!(
+            "aura-invalid-rate-{}.wav",
+            std::process::id()
+        ));
+        assert_eq!(
+            write_wav_pcm(&path, &[0.0, 0.0], 1, 1, 16),
+            Err(WavExportError::InvalidSampleRate)
+        );
+        assert_eq!(
+            write_wav_float32(&path, &[0.0, 0.0], 1, 1),
+            Err(WavExportError::InvalidSampleRate)
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn orchestrator_exposes_explicit_wave64_export() {
-        let path = std::env::temp_dir().join(format!("aura-wave64-orchestrator-{}.w64", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "aura-wave64-orchestrator-{}.w64",
+            std::process::id()
+        ));
         let mut orchestrator = ExportOrchestrator::new();
-        orchestrator.export_interleaved_buffer_to_wave64(&path, &[0.0, 0.25], 48_000, 2, true).unwrap();
+        orchestrator
+            .export_interleaved_buffer_to_wave64(&path, &[0.0, 0.25], 48_000, 2, true)
+            .unwrap();
         let (_, channels, samples) = read_wave64_float32(&path).unwrap();
         assert_eq!(channels, 2);
         assert_eq!(samples, vec![0.0, 0.25]);
@@ -173,10 +211,8 @@ mod tests {
 
     #[test]
     fn orchestrator_keeps_pcm_and_float_encoding_explicit() {
-        let root = std::env::temp_dir().join(format!(
-            "aura-orchestrated-format-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("aura-orchestrated-format-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let mut orchestrator = ExportOrchestrator::new();
@@ -241,12 +277,64 @@ mod tests {
     }
 
     #[test]
+    fn rejects_export_jobs_below_audio_sample_rate_floor() {
+        let mut orchestrator = ExportOrchestrator::new();
+        orchestrator.add_job(ExportJob {
+            name: "invalid-rate".into(),
+            codec: Codec::WAV,
+            bit_depth: 16,
+            sample_rate: 1,
+            normalize: false,
+            lufs_target: -14.0,
+        });
+        assert!(orchestrator.jobs.is_empty());
+        assert_eq!(orchestrator.last_error.as_deref(), Some("invalid export job"));
+        assert!(!orchestrator.audit_export());
+    }
+
+    #[test]
+    fn rejects_queue_codecs_and_depths_without_connected_writers() {
+        let mut orchestrator = ExportOrchestrator::new();
+        orchestrator.add_job(ExportJob {
+            name: "lossy-in-queue".into(),
+            codec: Codec::MP3,
+            bit_depth: 16,
+            sample_rate: 48_000,
+            normalize: false,
+            lufs_target: -14.0,
+        });
+        orchestrator.add_job(ExportJob {
+            name: "wide-aiff".into(),
+            codec: Codec::AIFF,
+            bit_depth: 24,
+            sample_rate: 48_000,
+            normalize: false,
+            lufs_target: -14.0,
+        });
+        assert!(orchestrator.jobs.is_empty());
+        assert_eq!(orchestrator.last_error.as_deref(), Some("invalid export job"));
+    }
+
+    #[test]
     fn selection_normalization_and_dither_are_deterministic() {
         let source = [0.25_f32, -0.5, 0.75, -1.0, 0.5, 0.0];
-        assert_eq!(select_frame_range(&source, 2, 1, 2).unwrap(), vec![0.75, -1.0]);
-        assert_eq!(select_frame_range(&source, 2, 2, 4), Err(WavExportError::InvalidTask));
+        assert_eq!(
+            select_frame_range(&source, 2, 1, 2).unwrap(),
+            vec![0.75, -1.0]
+        );
+        assert_eq!(
+            select_frame_range(&source, 2, 2, 4),
+            Err(WavExportError::InvalidTask)
+        );
         let normalized = prepare_export_buffer(&source, 16, true, false).unwrap();
-        assert!((normalized.iter().fold(0.0_f32, |peak, value| peak.max(value.abs())) - 1.0).abs() < 0.001);
+        assert!(
+            (normalized
+                .iter()
+                .fold(0.0_f32, |peak, value| peak.max(value.abs()))
+                - 1.0)
+                .abs()
+                < 0.001
+        );
         let first = prepare_export_buffer(&source, 16, false, true).unwrap();
         let second = prepare_export_buffer(&source, 16, false, true).unwrap();
         assert_eq!(first, second);
@@ -265,7 +353,10 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let paths = export_stems_to_wav(
             &directory,
-            &[("Drums".into(), vec![0.2, -0.2]), ("Bass Bus".into(), vec![0.4, -0.4])],
+            &[
+                ("Drums".into(), vec![0.2, -0.2]),
+                ("Bass Bus".into(), vec![0.4, -0.4]),
+            ],
             48_000,
             1,
             24,
@@ -284,7 +375,8 @@ mod tests {
 
     #[test]
     fn aiff_writer_emits_big_endian_pcm16_and_atomic_output() {
-        let path = std::env::temp_dir().join(format!("aura-aiff-{}-{}.aiff", std::process::id(), 1));
+        let path =
+            std::env::temp_dir().join(format!("aura-aiff-{}-{}.aiff", std::process::id(), 1));
         let _ = fs::remove_file(&path);
         write_aiff_pcm16(&path, &[1.0, -1.0], 44_100, 1).unwrap();
         let bytes = fs::read(&path).unwrap();
@@ -300,13 +392,26 @@ mod tests {
 
     #[test]
     fn orchestrator_exports_aiff_jobs_with_aiff_extension() {
-        let directory = std::env::temp_dir().join(format!("aura-aiff-batch-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("aura-aiff-batch-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let mut orchestrator = ExportOrchestrator::new();
-        orchestrator.add_job(ExportJob { name: "Vocal Mix".into(), codec: Codec::AIFF, bit_depth: 16, sample_rate: 44_100, normalize: false, lufs_target: -14.0 });
-        let paths = orchestrator.execute_jobs_with_buffers(&directory, &[vec![0.0, 0.25, -0.25, 0.0]], 1).unwrap();
+        orchestrator.add_job(ExportJob {
+            name: "Vocal Mix".into(),
+            codec: Codec::AIFF,
+            bit_depth: 16,
+            sample_rate: 44_100,
+            normalize: false,
+            lufs_target: -14.0,
+        });
+        let paths = orchestrator
+            .execute_jobs_with_buffers(&directory, &[vec![0.0, 0.25, -0.25, 0.0]], 1)
+            .unwrap();
         assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0].extension().and_then(|value| value.to_str()), Some("aiff"));
+        assert_eq!(
+            paths[0].extension().and_then(|value| value.to_str()),
+            Some("aiff")
+        );
         assert_eq!(&fs::read(&paths[0]).unwrap()[0..4], b"FORM");
         let _ = fs::remove_dir_all(directory);
     }
@@ -323,12 +428,25 @@ mod tests {
 
     #[test]
     fn orchestrator_exports_flac_jobs_when_ffmpeg_is_available() {
-        let directory = std::env::temp_dir().join(format!("aura-flac-batch-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("aura-flac-batch-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         let mut orchestrator = ExportOrchestrator::new();
-        orchestrator.add_job(ExportJob { name: "Master Mix".into(), codec: Codec::FLAC, bit_depth: 16, sample_rate: 44_100, normalize: false, lufs_target: -14.0 });
-        let paths = orchestrator.execute_jobs_with_buffers(&directory, &[vec![0.0_f32; 4096]], 1).unwrap();
-        assert_eq!(paths[0].extension().and_then(|value| value.to_str()), Some("flac"));
+        orchestrator.add_job(ExportJob {
+            name: "Master Mix".into(),
+            codec: Codec::FLAC,
+            bit_depth: 16,
+            sample_rate: 44_100,
+            normalize: false,
+            lufs_target: -14.0,
+        });
+        let paths = orchestrator
+            .execute_jobs_with_buffers(&directory, &[vec![0.0_f32; 4096]], 1)
+            .unwrap();
+        assert_eq!(
+            paths[0].extension().and_then(|value| value.to_str()),
+            Some("flac")
+        );
         assert_eq!(&fs::read(&paths[0]).unwrap()[0..4], b"fLaC");
         let _ = fs::remove_dir_all(directory);
     }

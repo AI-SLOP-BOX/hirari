@@ -284,6 +284,15 @@ bool AuraUnifiedEngine::restart_sandboxed_plugin(uint32_t trackId, uint32_t sand
     return false;
 }
 
+bool AuraUnifiedEngine::reset_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks) {
+        if (track && track->getId() == trackId)
+            return track->resetSandboxedPlugin(sandboxIndex);
+    }
+    return false;
+}
+
 std::vector<AuraUnifiedEngine::SandboxStatus> AuraUnifiedEngine::get_sandbox_statuses() {
     const auto tracks = get_tracks_snapshot();
     std::vector<SandboxStatus> result;
@@ -426,6 +435,29 @@ uint32_t AuraUnifiedEngine::get_plugin_parameter_count(uint32_t tid, uint32_t pl
     for (const auto& track : m_tracks)
         if (track && track->getId() == tid) return track->getPluginParameterCount(pluginIndex);
     return 0;
+}
+bool AuraUnifiedEngine::has_plugin_native_editor(uint32_t tid, uint32_t pluginIndex) const {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks)
+        if (track && track->getId() == tid)
+            return track->hasPluginNativeEditor(pluginIndex);
+    return false;
+}
+uint64_t AuraUnifiedEngine::open_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
+                                                      uintptr_t parent) const {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks)
+        if (track && track->getId() == tid)
+            return track->openPluginNativeEditor(pluginIndex, parent);
+    return 0;
+}
+bool AuraUnifiedEngine::close_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
+                                                   uint64_t session) const {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks)
+        if (track && track->getId() == tid)
+            return track->closePluginNativeEditor(pluginIndex, session);
+    return false;
 }
 std::string AuraUnifiedEngine::get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
                                                          uint32_t parameterId) const {

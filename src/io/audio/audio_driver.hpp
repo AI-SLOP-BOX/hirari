@@ -26,7 +26,7 @@ public:
     ~RealtimeAudioDriver() { stop(); }
 
     bool start(::Aura::AuraEngine& engine, double sr, uint32_t bs) {
-        if (!std::isfinite(sr) || sr <= 0.0 || bs == 0 || bs > 8192 ||
+        if (!std::isfinite(sr) || sr < 8000.0 || sr > 384000.0 || bs == 0 || bs > 8192 ||
             m_running.exchange(true, std::memory_order_acq_rel)) {
             return false;
         }
@@ -48,7 +48,13 @@ public:
 
             while (m_running.load(std::memory_order_acquire)) {
                 try {
+                    std::fill(L.begin(), L.end(), 0.0f);
+                    std::fill(R.begin(), R.end(), 0.0f);
                     engine.process(L.data(), R.data(), bs);
+                    for (uint32_t i = 0; i < bs; ++i) {
+                        if (!std::isfinite(L[i])) L[i] = 0.0f;
+                        if (!std::isfinite(R[i])) R[i] = 0.0f;
+                    }
                 } catch (...) {
                     // Never allow an exception to cross the realtime thread
                     // boundary. Emit one block of silence and keep the device

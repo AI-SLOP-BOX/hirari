@@ -83,11 +83,18 @@ impl RoutingOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide signal synchronization graph.
     pub fn audit_routing(&self) -> bool {
         let mut connections = std::collections::HashSet::new();
-        self.connections.iter().all(|connection| connection.source_id != 0
-            && connection.dest_id != 0 && connection.source_id != connection.dest_id
-            && connection.gain.is_finite() && connections.insert((connection.source_id, connection.dest_id)))
-            && self.sidechain_links.iter().all(|link| link.dest_track_id != 0
-                && link.source_track_id != 0 && link.dest_track_id != link.source_track_id
-                && link.level.is_finite() && link.level.abs() <= 64.0)
+        self.connections.iter().all(|connection| {
+            connection.source_id != 0
+                && connection.dest_id != 0
+                && connection.source_id != connection.dest_id
+                && connection.gain.is_finite()
+                && connections.insert((connection.source_id, connection.dest_id))
+        }) && self.sidechain_links.iter().all(|link| {
+            link.dest_track_id != 0
+                && link.source_track_id != 0
+                && link.dest_track_id != link.source_track_id
+                && link.level.is_finite()
+                && link.level.abs() <= 64.0
+        })
     }
 }

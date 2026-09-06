@@ -269,9 +269,12 @@ pub fn run() {
         .nth(1)
         .filter(|path| !path.trim().is_empty());
     if let Some(path) = startup_project.as_deref() {
-        if core.load_project(path) {
+        if core.load_project(path) && !core.get_project_layout_json().trim().is_empty() {
             // The startup project is also the default target for Save.
             // The shared path cell is initialized below before callbacks run.
+            // A project supplied on the command line is already an explicit
+            // session choice, so do not cover it with the New Project surface.
+            ui.set_show_genesis(false);
         }
     }
 
@@ -407,10 +410,23 @@ pub fn run() {
             .invoke_palette_exec("INIT_ELECTRONIC".into());
         let track_count = ui.get_tracks().row_count();
         let last_action = ui.get_last_action().to_string();
-        if track_count != 5 || !last_action.contains("TEMPLATE READY: ELECTRONIC") {
+        let visible_project = !ui.get_show_genesis()
+            && ui.get_workspace_preset().as_str() == "arrange"
+            && ui.get_bot_view() == 0
+            && ui.get_sel_idx() == 0
+            && ui.get_project_surface_ready();
+        if track_count != 5
+            || !last_action.contains("TEMPLATE READY: ELECTRONIC")
+            || !visible_project
+        {
             eprintln!(
-                "AURA_UI_SMOKE template_navigation failed tracks={} action={}",
-                track_count, last_action
+                "AURA_UI_SMOKE template_navigation failed tracks={} action={} genesis={} workspace={} bot_view={} sel_idx={}",
+                track_count,
+                last_action,
+                ui.get_show_genesis(),
+                ui.get_workspace_preset(),
+                ui.get_bot_view(),
+                ui.get_sel_idx(),
             );
             std::process::exit(1);
         }

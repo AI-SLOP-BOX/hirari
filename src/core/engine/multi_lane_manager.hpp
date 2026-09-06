@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <atomic>
+#include <algorithm>
 
 namespace Aura::Core::Engine {
 
@@ -26,28 +27,35 @@ struct Lane {
 class MultiLaneManager {
 public:
     void addLane(const Lane& lane) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // Vertical lane registration and tracking are now handled in the Rust layer.
-        // Rust's VerticalOrchestratorEngine ensures bit-accurate parameter distribution.
+        for (auto& existing : m_lanes) {
+            if (existing.id == lane.id) { existing = lane; return; }
+        }
+        m_lanes.push_back(lane);
     }
 
     void setLaneMuted(uint32_t laneId, bool muted) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // Lane state management is now securely handled by Rust.
+        for (auto& lane : m_lanes) if (lane.id == laneId) { lane.muted = muted; return; }
     }
 
     const std::vector<Lane>& getLanes() const { return m_lanes; }
 
+    std::vector<Lane> copyLanes() const { return m_lanes; }
+
+    bool removeLane(uint32_t laneId) {
+        const auto it = std::find_if(m_lanes.begin(), m_lanes.end(),
+            [laneId](const Lane& lane) { return lane.id == laneId; });
+        if (it == m_lanes.end()) return false;
+        m_lanes.erase(it);
+        return true;
+    }
+
     /**
      * @brief Resolve which lanes should be active for a given time block.
      */
-    void resolveActiveLanes(uint64_t /*start*/, uint64_t /*end*/, std::vector<uint32_t>& activeIds) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::MultiLaneOrchestrator.
-        // Rust's high-precision active lane resolver ensures that comping selection 
-        // and lane switching are technically superior and perfectly synchronized.
-        // Rust's ActiveLaneResolver ensures bit-accurate comping calculation.
-        // Rust's ForensicAuditor ensures absolute tracking integrity.
+    void resolveActiveLanes(uint64_t start, uint64_t end, std::vector<uint32_t>& activeIds) {
+        (void)start; (void)end;
+        activeIds.clear();
+        for (const auto& lane : m_lanes) if (lane.visible && !lane.muted) activeIds.push_back(lane.id);
     }
 
 private:

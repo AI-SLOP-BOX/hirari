@@ -16,6 +16,8 @@ struct NotationSymbol {
     uint32_t val; // Pitch or Type-specific value
     float x, y;   // Layout coordinates
     bool isVisible;
+    uint64_t start = 0;
+    uint64_t duration = 1;
 };
 
 struct RenderPrimitive {
@@ -32,7 +34,7 @@ class NotationOrchestrator {
 public:
     NotationOrchestrator() {}
 
-    void clear() { m_symbols.clear(); }
+    void clear() { m_symbols.clear(); m_primitives.clear(); }
     void addNote(int32_t pitch, uint64_t start, uint64_t duration);
     void updateLayout(float viewWidth, float viewHeight);
     size_t getRenderPrimitives(RenderPrimitive* out, size_t maxCount);

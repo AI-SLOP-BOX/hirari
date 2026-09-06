@@ -92,7 +92,29 @@ pub mod ffi {
         fn move_tempo_event(self: &AudioEngine, from_beat: f64, to_beat: f64) -> bool;
         fn get_tempo(self: &AudioEngine) -> f32;
         fn set_tempo(self: &AudioEngine, bpm: f32) -> bool;
+        fn midi_clock_tick(self: &AudioEngine, timestamp: u64);
+        fn midi_clock_ticks(self: &AudioEngine) -> u64;
+        fn midi_clock_last_tick(self: &AudioEngine) -> u64;
+        fn midi_clock_rate(self: &AudioEngine) -> f64;
+        fn set_midi_clock_rate(self: &AudioEngine, bpm: f64);
         fn set_master_gain(self: &AudioEngine, value: f32) -> bool;
+        fn add_control_room_speaker(self: &AudioEngine, name: &str, gain: f32) -> bool;
+        fn reset_control_room(self: &AudioEngine);
+        fn select_control_room_speaker(self: &AudioEngine, index: u32) -> bool;
+        fn rename_control_room_speaker(self: &AudioEngine, index: u32, name: &str) -> bool;
+        fn remove_control_room_speaker(self: &AudioEngine, index: u32) -> bool;
+        fn set_control_room_speaker_gain(self: &AudioEngine, index: u32, gain: f32) -> bool;
+        fn set_control_room_speaker_enabled(self: &AudioEngine, index: u32, enabled: bool) -> bool;
+        fn upsert_control_room_cue(self: &AudioEngine, id: u32, gain: f32, enabled: bool) -> bool;
+        fn remove_control_room_cue(self: &AudioEngine, id: u32) -> bool;
+        fn set_control_room_cue_enabled(self: &AudioEngine, id: u32, enabled: bool) -> bool;
+        fn control_room_cue_gain(self: &AudioEngine, id: u32) -> f32;
+        fn control_room_validate(self: &AudioEngine) -> bool;
+        fn set_control_room_dim(self: &AudioEngine, enabled: bool);
+        fn set_control_room_talkback(self: &AudioEngine, enabled: bool, gain: f32);
+        fn control_room_dimmed(self: &AudioEngine) -> bool;
+        fn control_room_talkback_enabled(self: &AudioEngine) -> bool;
+        fn control_room_monitor_gain(self: &AudioEngine) -> f32;
         fn get_master_gain(self: &AudioEngine) -> f32;
         fn set_track_volume(self: &AudioEngine, tid: u32, value: f32) -> bool;
         fn get_track_volume(self: &AudioEngine, tid: u32) -> f32;
@@ -106,6 +128,8 @@ pub mod ffi {
         fn clear_offline_render_target(self: &AudioEngine);
         fn set_offline_render_tail_seconds(self: &AudioEngine, seconds: f32);
         fn set_offline_render_options(self: &AudioEngine, pre_fader: bool, include_inserts: bool);
+        fn set_offline_render_range(self: &AudioEngine, start_sample: u64, end_sample: u64) -> bool;
+        fn clear_offline_render_range(self: &AudioEngine);
         fn set_phase_invert(self: &AudioEngine, tid: u32, inverted: bool) -> bool;
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
         fn is_silent_fallback(self: &AudioEngine) -> bool;
@@ -154,6 +178,13 @@ pub mod ffi {
         fn set_preview_sample(self: &AudioEngine, samples: &[f32], source_rate: f64);
         // Native graph render boundary; mutable slices are caller-owned audio buffers.
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
+        fn quantize_audio_group_stereo(self: &AudioEngine, left: &mut [f32], right: &mut [f32], bpm: f32, sample_rate: f64, strength: f32, swing: f32) -> bool;
+        fn quantize_audio_group(self: &AudioEngine, planar: &mut [f32], channels: u32, frames: u64, bpm: f32, sample_rate: f64, strength: f32, swing: f32) -> bool;
+        fn process_pitch_shift_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32], ratio: f32, fundamental_hz: f32, sample_rate: f64, formant_ratio: f32, timing_ratio: f32);
+        fn apply_spectral_gain_stereo(self: &AudioEngine, left: &mut [f32], right: &mut [f32], t0: f32, f0: f32, t1: f32, f1: f32, gain: f32, sample_rate: f64) -> bool;
+        fn reduce_noise_stereo(self: &AudioEngine, left: &mut [f32], right: &mut [f32], amount: f32, profile_seconds: f32, sample_rate: f64) -> bool;
+        fn repair_clipped_stereo(self: &AudioEngine, left: &mut [f32], right: &mut [f32], ceiling: f32) -> bool;
+        fn remove_hum_stereo(self: &AudioEngine, left: &mut [f32], right: &mut [f32], fundamental_hz: f32, harmonics: u32, bandwidth_hz: f32, t0: f32, f0: f32, t1: f32, f1: f32, sample_rate: f64) -> bool;
         fn trigger_preview_sample(self: &AudioEngine);
         fn clear_preview_sample(self: &AudioEngine);
         fn shutdown(self: &AudioEngine);
@@ -175,6 +206,7 @@ pub mod ffi {
         fn non_finite_plugin_samples(self: &AudioEngine) -> u64;
         fn retry_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
         fn restart_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
+        fn reset_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
         fn get_sandbox_statuses(self: &AudioEngine) -> Vec<u32>;
         fn get_last_sandbox_failure(self: &AudioEngine, track_id: u32) -> u32;
         fn get_last_sandbox_failure_text(self: &AudioEngine, track_id: u32) -> String;
@@ -198,6 +230,18 @@ pub mod ffi {
             fade_in: f32,
             fade_out: f32,
         ) -> bool;
+        fn set_region_range_edit(
+            self: &AudioEngine,
+            tid: u32,
+            rid: u32,
+            start: u64,
+            end: u64,
+            gain: f32,
+            fade_in: u64,
+            fade_out: u64,
+        ) -> bool;
+        fn clear_region_range_edit(self: &AudioEngine, tid: u32, rid: u32, start: u64, end: u64) -> bool;
+        fn clear_region_range_edits(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn set_region_reverse(self: &AudioEngine, tid: u32, rid: u32, reverse: bool) -> bool;
         fn set_region_warp_ratio(self: &AudioEngine, tid: u32, rid: u32, ratio: f64) -> bool;
         fn set_region_pitch_semitones(
@@ -225,6 +269,8 @@ pub mod ffi {
             formant_cents: f64,
         ) -> bool;
         fn clear_region_audio_note_segments(self: &AudioEngine, tid: u32, rid: u32) -> bool;
+        fn warp_region_audio_note_segment(self: &AudioEngine, tid: u32, rid: u32, segment_start: f64, new_start: f64, new_end: f64) -> bool;
+        fn remove_region_audio_note_segment(self: &AudioEngine, tid: u32, rid: u32, segment_start: f64) -> bool;
         fn analyze_region_audio_note_segments(self: &AudioEngine, tid: u32, rid: u32, sample_rate: f64) -> bool;
         fn set_region_loop_count(self: &AudioEngine, tid: u32, rid: u32, count: u32) -> bool;
         fn set_region_trim(
@@ -249,6 +295,8 @@ pub mod ffi {
             length_samples: u64,
         );
         fn set_spatial_position(self: &AudioEngine, tid: u32, x: f32, y: f32, z: f32) -> bool;
+        fn set_hrtf_kernel(self: &AudioEngine, tid: u32, left: Vec<f32>, right: Vec<f32>) -> bool;
+        fn clear_hrtf_kernel(self: &AudioEngine, tid: u32) -> bool;
         fn set_track_armed(self: &AudioEngine, tid: u32, armed: bool) -> bool;
         fn set_automation_data(
             self: &AudioEngine,
@@ -324,7 +372,13 @@ pub mod ffi {
         fn bounce_project_async(self: &AudioEngine, path: &str, format: u32) -> bool;
         fn get_bounce_progress(self: &AudioEngine) -> f32;
         fn get_bounce_state(self: &AudioEngine) -> u32;
+        fn has_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
+        fn plugin_native_editor_embedded(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
+        fn open_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32, parent: u64) -> u64;
+        fn close_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
         fn cancel_bounce(self: &AudioEngine) -> bool;
+        fn pause_bounce(self: &AudioEngine) -> bool;
+        fn resume_bounce(self: &AudioEngine) -> bool;
         fn execute_auto_mixing(self: &AudioEngine) -> bool;
         fn execute_auto_arrangement(self: &AudioEngine) -> bool;
         fn set_project_scale(self: &AudioEngine, root: i32, scale_type: i32) -> bool;
@@ -357,7 +411,9 @@ pub mod ffi {
         fn audio_range_overflowed(self: &AudioEngine) -> bool;
         fn get_block_size(self: &AudioEngine) -> u32;
         fn get_latency_ms(self: &AudioEngine) -> f32;
+        fn get_master_tail_ms(self: &AudioEngine) -> f32;
         fn get_track_latency_ms(self: &AudioEngine, tid: u32) -> f32;
+        fn get_track_tail_ms(self: &AudioEngine, tid: u32) -> f32;
         fn get_track_pdc_compensation_ms(self: &AudioEngine, tid: u32) -> f32;
         fn set_low_latency_mode(self: &AudioEngine, active: bool) -> bool;
         fn low_latency_mode(self: &AudioEngine) -> bool;
@@ -372,6 +428,13 @@ pub mod ffi {
                         expected_project_generation: u64, expected_audio_generation: u64) -> bool;
 
         fn get_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> Vec<f32>;
+        fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
+        fn poll_region_waveform(self: &AudioEngine, request: u64) -> Vec<f32>;
+        fn region_waveform_pending(self: &AudioEngine, request: u64) -> bool;
+        fn get_region_audio_samples(self: &AudioEngine, tid: u32, rid: u32) -> Vec<f32>;
+        fn get_region_audio_interleaved(self: &AudioEngine, tid: u32, rid: u32) -> Vec<f32>;
+        fn get_region_sample_rate(self: &AudioEngine, tid: u32, rid: u32) -> f64;
+        fn get_region_channel_count(self: &AudioEngine, tid: u32, rid: u32) -> u32;
         fn duplicate_region(self: &AudioEngine, tid: u32, rid: u32, start_sample: u64) -> u32;
         fn get_mixer_levels_v(self: &AnalysisHub) -> Vec<f32>;
         fn get_spectral_data_v(self: &AnalysisHub) -> Vec<f32>;

@@ -17,25 +17,33 @@ namespace Aura::DSP::Effects {
  */
 class DeEsser : public IProcessor {
 public:
-    DeEsser() : m_threshold(0.5f), m_reduction(0.0f) {
+    DeEsser() : m_threshold(0.5f) {
         reset();
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
+        (void)bs;
+        if (!std::isfinite(sr) || sr < 100.0 || sr > 384000.0) return;
         m_sampleRate = sr;
         updateFilters();
+    }
+
+    uint32_t getTailSamples() const noexcept override {
+        return static_cast<uint32_t>(std::min(30.0 * std::clamp(m_sampleRate, 100.0, 384000.0),
+            0.32 * std::clamp(m_sampleRate, 100.0, 384000.0)));
     }
 
     /**
      * @brief PROCESS: Dynamically ducks high frequencies when sibilance is detected.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
-        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
+        if (m_bypassed || buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
 
         const uint32_t numSamples = buffer.getNumSamples();
         const bool isStereo = buffer.getNumChannels() >= 2;
         float* left = buffer.getWritePointer(0);
         float* right = isStereo ? buffer.getWritePointer(1) : nullptr;
+        if (!left || (isStereo && !right)) return;
 
         const float thresh = std::clamp(m_threshold, 0.001f, 1.0f);
         const float intensity = std::clamp(m_intensity, 0.0f, 2.0f);

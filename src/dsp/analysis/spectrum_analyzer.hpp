@@ -26,11 +26,12 @@ public:
     }
 
     void process(const float* data, size_t size, double sr) {
-        if (!data || size < kFFTSize || !std::isfinite(sr) || sr <= 0.0) return;
+        if (!data || size < kFFTSize || !std::isfinite(sr) || sr < 1.0 || sr > 768000.0) return;
 
         // 1. WINDOWED PREP
         for (size_t i = 0; i < kFFTSize; ++i) {
-            m_realBuffer[i] = data[i] * m_win[i];
+            const float sample = std::isfinite(data[i]) ? data[i] : 0.0f;
+            m_realBuffer[i] = sample * m_win[i];
             m_imagBuffer[i] = 0.0f;
         }
         
@@ -43,7 +44,8 @@ public:
         for (uint32_t b = 0; b < kFFTSize / 2; ++b) {
             float r = m_realBuffer[b];
             float im = m_imagBuffer[b];
-            float mag = std::sqrt(r * r + im * im) / kFFTSize; 
+            float mag = std::sqrt(r * r + im * im) / kFFTSize;
+            if (!std::isfinite(mag)) mag = 0.0f;
             float freq = (float)b * (float)sr / (float)kFFTSize;
             
             if (freq > 20.0f) {

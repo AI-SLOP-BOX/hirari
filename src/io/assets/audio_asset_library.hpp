@@ -97,6 +97,10 @@ public:
         std::vector<std::string> result;
         result.reserve(m_categoryMap.size());
         for (const auto& [category, _] : m_categoryMap) result.push_back(category);
+        // The backing index is an unordered_map. Sort the public catalog so
+        // browser rows and serialized UI snapshots remain deterministic
+        // across processes and standard-library implementations.
+        std::sort(result.begin(), result.end());
         return result;
     }
 

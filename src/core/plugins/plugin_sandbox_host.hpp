@@ -13,6 +13,7 @@
 #include <limits>
 #include <cstdlib>
 #include <cctype>
+#include <filesystem>
 #if !defined(_WIN32)
 #include <cerrno>
 #include <csignal>
@@ -35,6 +36,7 @@ extern char** environ;
 #include "../audio_buffer.hpp"
 #include "../midi_buffer.hpp"
 #include "plugin_sandbox_protocol.hpp"
+#include "plugin_admission.hpp"
 
 namespace Aura::Core::Plugins {
 
@@ -95,10 +97,27 @@ public:
     bool start() {
         std::lock_guard<std::recursive_mutex> lifecycleLock(m_lifecycleMutex);
         m_failure.store(Failure::None, std::memory_order_release);
-        if (m_pluginPath.empty() || isAlive()) {
+        if (m_pluginPath.empty()) {
             m_failure.store(Failure::InvalidPluginPath, std::memory_order_release);
             return false;
         }
+        // Keep direct sandbox users subject to the same admission boundary as
+        // the registry. Built-in protocol URIs are handled by the worker and
+        // are intentionally exempt from filesystem admission.
+        if (m_pluginPath.rfind("builtin://", 0) != 0) {
+            std::string expectedFormat;
+            if (m_requestedFormat == "vst3" || m_requestedFormat == "VST3") expectedFormat = "VST3";
+            else if (m_requestedFormat == "au" || m_requestedFormat == "AU") expectedFormat = "AU";
+            else if (m_requestedFormat == "clap" || m_requestedFormat == "CLAP") expectedFormat = "CLAP";
+            if (!PluginAdmission::isSafeCandidate(std::filesystem::path(m_pluginPath), expectedFormat)) {
+                m_failure.store(Failure::InvalidPluginPath, std::memory_order_release);
+                return false;
+            }
+        }
+        // A live worker is not a path error.  Keep the existing lifecycle
+        // state intact so callers can distinguish an idempotency mistake
+        // from a genuinely invalid plugin path and recover deterministically.
+        if (isAlive()) return false;
         std::string helperPath;
         if (const char* configured = std::getenv("AURA_PLUGIN_HOST_BIN"); configured && *configured != '\0') {
             helperPath = configured;
@@ -283,7 +302,19 @@ public:
         // The first launch of a large plugin may fault in its code signature
         // pages and initialize worker-side state.  A one-second deadline made
         // a healthy plugin look dead when the DAW was under startup load.
-        if (!waitForReady(5000)) {
+        // Vendor bundles may perform signature validation and one-time
+        // preset/shader discovery before sending the ready byte.  Keep the
+        // handshake bounded, but give real VST3 hosts the same cold-start
+        // budget as the Rust lifecycle tests (30s).
+        int readyTimeoutMs = 30000;
+        if (const char* configured = std::getenv("AURA_PLUGIN_READY_TIMEOUT_MS")) {
+            char* end = nullptr;
+            const long value = std::strtol(configured, &end, 10);
+            if (end != configured && *end == '\0') {
+                readyTimeoutMs = static_cast<int>(std::clamp(value, 1000L, 120000L));
+            }
+        }
+        if (!waitForReady(readyTimeoutMs)) {
             stop();
             if (m_failure.load(std::memory_order_acquire) == Failure::None) {
                 m_failure.store(Failure::HandshakeTimeout, std::memory_order_release);
@@ -380,6 +411,20 @@ public:
             m_sharedName.clear();
         }
         unmapShared();
+#endif
+    }
+
+    // Control-plane reset for the isolated worker. This is intentionally
+    // separate from DSP::IProcessor::reset(), which may be called on the
+    // realtime thread and therefore cannot write to the lifecycle pipe.
+    bool requestPluginReset() noexcept {
+        std::lock_guard<std::recursive_mutex> lifecycleLock(m_lifecycleMutex);
+#if defined(_WIN32)
+        return false;
+#else
+        if (!m_processAlive.load(std::memory_order_acquire) || m_controlFd < 0) return false;
+        const uint8_t command = SandboxProtocol::kReset;
+        return ::write(m_controlFd, &command, sizeof(command)) == 1;
 #endif
     }
 
@@ -661,6 +706,14 @@ public:
                  sourceIndex < midi.size() && inputMidiCount < SandboxProtocol::kMaxMidiEvents;
                  ++sourceIndex) {
                 const auto& event = midi.getEvents()[sourceIndex];
+                // The mailbox belongs to this exact render slice. Do not
+                // forward a later event and rely on each plugin adapter to
+                // clamp or discard it differently; doing so breaks sample
+                // accuracy at loop and sub-block boundaries.
+                if (event.sampleOffset >= currentFrames) {
+                    m_shared->inputMidiTruncations.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
                 if (event.size > sizeof(SandboxProtocol::MidiEvent::data)) {
                     // Keep large SysEx/MIDI 2.0 payloads intact in the
                     // bounded extended ring instead of truncating them into

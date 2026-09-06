@@ -22,6 +22,28 @@ pub fn install(
             let Some(ui) = weak.upgrade() else { return };
             let command = raw_command.trim();
             ui.set_last_action(format!("AI EXEC: {command}").into());
+            // Template creation mutates both the native graph and the bound
+            // Slint model. Defer it one event-loop turn so the originating
+            // TouchArea finishes its layout pass before the model changes.
+            // This avoids a native macOS frame teardown that used to leave
+            // only the chrome visible after selecting a template.
+            if command.starts_with("INIT_") && !ui_smoke_mode() {
+                let deferred_command = command.to_owned();
+                let deferred_ui = ui.clone_strong();
+                let deferred_core = core.clone();
+                let deferred_tracks = tracks.clone();
+                let deferred_path = last_saved_path.clone();
+                slint::Timer::single_shot(std::time::Duration::from_millis(1), move || {
+                    crate::ui::templates::handle_command(
+                        &deferred_command,
+                        &deferred_core,
+                        &deferred_ui,
+                        &deferred_tracks,
+                        &deferred_path,
+                    );
+                });
+                return;
+            }
             let handled = crate::ui::diagnostics::handle_command(
                 command,
                 &core,
@@ -63,4 +85,17 @@ pub fn install(
                 ui.set_last_action(format!("COMMAND NOT AVAILABLE: {command}").into());
             }
         });
+}
+
+// Keep the test-only environment hook out of production binaries entirely.
+// Besides reducing attack surface, this lets release-bundle verification
+// prove that debug smoke entry points were not linked into the shipped app.
+#[cfg(debug_assertions)]
+fn ui_smoke_mode() -> bool {
+    std::env::var_os("AURA_UI_SMOKE").is_some()
+}
+
+#[cfg(not(debug_assertions))]
+fn ui_smoke_mode() -> bool {
+    false
 }

@@ -11,6 +11,7 @@ if [ "${AURA_RELEASE_MODE:-0}" = "1" ]; then
     AURA_FAIL_ON_RETRY=1
     export AURA_REQUIRE_ARCH AURA_REQUIRE_APP_SMOKE AURA_REQUIRE_PLUGIN_SMOKE AURA_REQUIRE_CODESIGN
     export AURA_FAIL_ON_RETRY
+    AURA_STRICT_SOURCE_HYGIENE=1 "$ROOT_DIR/scripts/audit_repository_hygiene.sh"
 fi
 APP_DIR="${1:-$ROOT_DIR/packaging/Aura DAW.app}"
 case "$APP_DIR" in
@@ -35,6 +36,12 @@ test -s "$BUILD_MANIFEST" || {
     echo "release bundle build manifest is missing or empty" >&2
     exit 1
 }
+for notice in LICENSE THIRD_PARTY_NOTICES.md LICENSE-COMBINED-DISTRIBUTION.md; do
+    test -s "$CONTENTS/Resources/$notice" || {
+        echo "release bundle license notice is missing or empty: $notice" >&2
+        exit 1
+    }
+done
 
 # Keep the package contract explicit: an app with a native main executable
 # and worker but no resource directory is usually a stale or hand-assembled

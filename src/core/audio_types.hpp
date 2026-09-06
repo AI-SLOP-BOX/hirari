@@ -20,6 +20,8 @@ namespace Aura::Core {
 struct SampleBuffer {
     const float* data = nullptr;
     size_t length = 0;
+    // Native sample rate of the referenced asset; zero uses project rate.
+    double sampleRate = 0.0;
 };
 
 /**
@@ -46,6 +48,11 @@ struct SamplerZone {
     uint8_t lowVelocity = 1;
     uint8_t highVelocity = 127;
     SampleBuffer buffer;
+    uint32_t loopStart = 0;
+    uint32_t loopEnd = 0;
+    bool loopEnabled = false;
+    // Native sample rate of the mapped asset; zero means project rate.
+    double sourceSampleRate = 0.0;
 };
 
 namespace Bridge {

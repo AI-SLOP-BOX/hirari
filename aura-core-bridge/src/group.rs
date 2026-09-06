@@ -1,12 +1,52 @@
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkMask { pub volume: bool, pub pan: bool, pub mute: bool, pub solo: bool }
-impl Default for LinkMask { fn default() -> Self { Self{volume:true,pan:true,mute:true,solo:false} } }
+pub struct LinkMask {
+    pub volume: bool,
+    pub pan: bool,
+    pub mute: bool,
+    pub solo: bool,
+}
+impl Default for LinkMask {
+    fn default() -> Self {
+        Self {
+            volume: true,
+            pan: true,
+            mute: true,
+            solo: false,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct VcaGroup { pub id: u32, pub member_tracks: Vec<u32>, pub gain_db: f32, pub muted: bool }
-impl VcaGroup { pub fn validate(&self) -> bool { self.id != 0 && !self.member_tracks.is_empty() && self.member_tracks.len() <= 1024 && self.member_tracks.iter().all(|id| *id != 0) && self.member_tracks.iter().enumerate().all(|(i,id)| self.member_tracks[..i].iter().all(|p| p != id)) && self.gain_db.is_finite() && (-120.0..=24.0).contains(&self.gain_db) } pub fn linear_gain(&self) -> f32 { 10.0_f32.powf(self.gain_db / 20.0) } pub fn effective_gain_db(&self, track_gain_db: f32) -> Option<f32> { (self.validate() && track_gain_db.is_finite()).then_some((track_gain_db + self.gain_db).clamp(-120.0, 24.0)) } }
+pub struct VcaGroup {
+    pub id: u32,
+    pub member_tracks: Vec<u32>,
+    pub gain_db: f32,
+    pub muted: bool,
+}
+impl VcaGroup {
+    pub fn validate(&self) -> bool {
+        self.id != 0
+            && !self.member_tracks.is_empty()
+            && self.member_tracks.len() <= 1024
+            && self.member_tracks.iter().all(|id| *id != 0)
+            && self
+                .member_tracks
+                .iter()
+                .enumerate()
+                .all(|(i, id)| self.member_tracks[..i].iter().all(|p| p != id))
+            && self.gain_db.is_finite()
+            && (-120.0..=24.0).contains(&self.gain_db)
+    }
+    pub fn linear_gain(&self) -> f32 {
+        10.0_f32.powf(self.gain_db / 20.0)
+    }
+    pub fn effective_gain_db(&self, track_gain_db: f32) -> Option<f32> {
+        (self.validate() && track_gain_db.is_finite())
+            .then_some((track_gain_db + self.gain_db).clamp(-120.0, 24.0))
+    }
+}
 
 pub struct EditGroup {
     pub id: u32,
@@ -55,11 +95,33 @@ impl GroupOrchestrator {
     }
 
     pub fn try_create_edit_group(&mut self, group_id: u32, track_ids: Vec<u32>) -> bool {
-        if group_id == 0 || track_ids.is_empty() || track_ids.len() > 1024 || track_ids.contains(&0) || track_ids.iter().enumerate().any(|(i, id)| track_ids[..i].contains(id)) { return false; }
-        if let Some(previous) = self.edit_groups.remove(&group_id) { for track in previous.track_ids { if self.track_to_group.get(&track) == Some(&group_id) { self.track_to_group.remove(&track); } } }
+        if group_id == 0
+            || track_ids.is_empty()
+            || track_ids.len() > 1024
+            || track_ids.contains(&0)
+            || track_ids
+                .iter()
+                .enumerate()
+                .any(|(i, id)| track_ids[..i].contains(id))
+        {
+            return false;
+        }
+        if let Some(previous) = self.edit_groups.remove(&group_id) {
+            for track in previous.track_ids {
+                if self.track_to_group.get(&track) == Some(&group_id) {
+                    self.track_to_group.remove(&track);
+                }
+            }
+        }
         let mut tracks = HashSet::new();
         for tid in track_ids {
-            if let Some(previous_id) = self.track_to_group.insert(tid, group_id) { if previous_id != group_id { if let Some(previous) = self.edit_groups.get_mut(&previous_id) { previous.track_ids.remove(&tid); } } }
+            if let Some(previous_id) = self.track_to_group.insert(tid, group_id) {
+                if previous_id != group_id {
+                    if let Some(previous) = self.edit_groups.get_mut(&previous_id) {
+                        previous.track_ids.remove(&tid);
+                    }
+                }
+            }
             tracks.insert(tid);
         }
 
@@ -91,12 +153,43 @@ impl GroupOrchestrator {
         }
         Vec::new()
     }
-    pub fn set_link_mask(&mut self, group_id: u32, link: LinkMask) -> bool { self.edit_groups.get_mut(&group_id).map(|g| { g.link = link; true }).unwrap_or(false) }
-    pub fn remove_edit_group(&mut self, group_id: u32) -> bool { let Some(group)=self.edit_groups.remove(&group_id) else { return false; }; for track in group.track_ids { if self.track_to_group.get(&track)==Some(&group_id) { self.track_to_group.remove(&track); } } true }
+    pub fn set_link_mask(&mut self, group_id: u32, link: LinkMask) -> bool {
+        self.edit_groups
+            .get_mut(&group_id)
+            .map(|g| {
+                g.link = link;
+                true
+            })
+            .unwrap_or(false)
+    }
+    pub fn remove_edit_group(&mut self, group_id: u32) -> bool {
+        let Some(group) = self.edit_groups.remove(&group_id) else {
+            return false;
+        };
+        for track in group.track_ids {
+            if self.track_to_group.get(&track) == Some(&group_id) {
+                self.track_to_group.remove(&track);
+            }
+        }
+        true
+    }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide edit group synchronization graph.
     pub fn audit_group_integrity(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic sync auditing logic.
-        self.edit_groups.iter().all(|(id, group)| *id != 0 && group.id == *id && !group.track_ids.is_empty() && group.track_ids.iter().all(|track| *track != 0 && self.track_to_group.get(track) == Some(id))) && self.track_to_group.iter().all(|(track, id)| self.edit_groups.get(id).map(|g| g.track_ids.contains(track)).unwrap_or(false))
+        self.edit_groups.iter().all(|(id, group)| {
+            *id != 0
+                && group.id == *id
+                && !group.track_ids.is_empty()
+                && group
+                    .track_ids
+                    .iter()
+                    .all(|track| *track != 0 && self.track_to_group.get(track) == Some(id))
+        }) && self.track_to_group.iter().all(|(track, id)| {
+            self.edit_groups
+                .get(id)
+                .map(|g| g.track_ids.contains(track))
+                .unwrap_or(false)
+        })
     }
 }

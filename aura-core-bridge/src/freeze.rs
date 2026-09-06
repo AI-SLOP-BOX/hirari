@@ -47,18 +47,43 @@ impl FreezeOrchestrator {
 
     /// Validated/idempotent freeze registration for project commands.
     pub fn try_freeze(&mut self, track_id: u32, path: &str) -> bool {
-        if track_id == 0 || path.trim().is_empty() || path.len() > 4096 || path.contains('\0') || path.contains("..") { return false; }
-        if self.frozen_tracks.iter().any(|freeze| freeze.track_id == track_id) { return false; }
-        self.frozen_tracks.push(FreezeInfo { track_id, path: path.trim().to_owned(), checksum: checksum_for(track_id, path.trim()) });
+        if track_id == 0
+            || path.trim().is_empty()
+            || path.len() > 4096
+            || path.contains('\0')
+            || path.contains("..")
+        {
+            return false;
+        }
+        if self
+            .frozen_tracks
+            .iter()
+            .any(|freeze| freeze.track_id == track_id)
+        {
+            return false;
+        }
+        self.frozen_tracks.push(FreezeInfo {
+            track_id,
+            path: path.trim().to_owned(),
+            checksum: checksum_for(track_id, path.trim()),
+        });
         true
     }
 
     pub fn is_current(&self, track_id: u32, path: &str) -> bool {
-        self.frozen_tracks.iter().any(|freeze| freeze.track_id == track_id && freeze.path == path && freeze.checksum == checksum_for(track_id, path))
+        self.frozen_tracks.iter().any(|freeze| {
+            freeze.track_id == track_id
+                && freeze.path == path
+                && freeze.checksum == checksum_for(track_id, path)
+        })
     }
 
     pub fn frozen_track_ids(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self.frozen_tracks.iter().map(|freeze| freeze.track_id).collect();
+        let mut ids: Vec<u32> = self
+            .frozen_tracks
+            .iter()
+            .map(|freeze| freeze.track_id)
+            .collect();
         ids.sort_unstable();
         ids
     }

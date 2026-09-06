@@ -21,6 +21,11 @@ pub struct StateVariableFilter {
 
 impl StateVariableFilter {
     pub fn new(sr: f64) -> Self {
+        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sr
+        } else {
+            48_000.0
+        };
         Self {
             sample_rate: sr,
             g: 0.0,
@@ -142,6 +147,9 @@ impl AtmosEQEngine {
 
     /// INDUSTRIAL: Applies EQ to up to 12 channels simultaneously.
     pub fn process_immersive(&mut self, channels: &mut [&mut [f32]], bands: &[Band]) {
+        if !self.audit_atmos_eq() {
+            return;
+        }
         let num_channels = channels.len().min(12);
         let num_bands = bands.len().min(8);
 
@@ -171,7 +179,20 @@ impl AtmosEQEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Atmos EQ state.
     pub fn audit_atmos_eq(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Atmos EQ auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.filters.len() == 12
+            && self.filters.iter().all(|bands| {
+                bands.len() == 8
+                    && bands.iter().all(|f| {
+                        f.sample_rate == self.sample_rate
+                            && [f.g, f.k, f.a1, f.a2, f.a3, f.ic1, f.ic2]
+                                .iter()
+                                .all(|v| v.is_finite())
+                            && f.g >= 0.0
+                            && f.k > 0.0
+                            && f.a1.is_finite()
+                    })
+            })
     }
 }

@@ -17,10 +17,24 @@ pub struct Preset {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ProjectTemplate { pub name: String, pub author: String, pub version: u32, pub layout_json: String, pub tags: Vec<String> }
+pub struct ProjectTemplate {
+    pub name: String,
+    pub author: String,
+    pub version: u32,
+    pub layout_json: String,
+    pub tags: Vec<String>,
+}
 
 impl ProjectTemplate {
-    pub fn validate(&self) -> bool { !self.name.trim().is_empty() && self.name.len() <= 256 && self.author.len() <= 256 && self.version > 0 && self.layout_json.len() <= 64 * 1024 * 1024 && serde_json::from_str::<serde_json::Value>(&self.layout_json).is_ok() && self.tags.len() <= 64 }
+    pub fn validate(&self) -> bool {
+        !self.name.trim().is_empty()
+            && self.name.len() <= 256
+            && self.author.len() <= 256
+            && self.version > 0
+            && self.layout_json.len() <= 64 * 1024 * 1024
+            && serde_json::from_str::<serde_json::Value>(&self.layout_json).is_ok()
+            && self.tags.len() <= 64
+    }
 }
 
 pub struct PresetOrchestrator {
@@ -40,9 +54,22 @@ impl PresetOrchestrator {
         }
     }
 
-    pub fn search_templates<'a>(templates: &'a [ProjectTemplate], query: &str) -> Vec<&'a ProjectTemplate> {
+    pub fn search_templates<'a>(
+        templates: &'a [ProjectTemplate],
+        query: &str,
+    ) -> Vec<&'a ProjectTemplate> {
         let q = query.trim().to_ascii_lowercase();
-        templates.iter().filter(|t| t.validate() && (q.is_empty() || t.name.to_ascii_lowercase().contains(&q) || t.tags.iter().any(|tag| tag.to_ascii_lowercase().contains(&q)))).collect()
+        templates
+            .iter()
+            .filter(|t| {
+                t.validate()
+                    && (q.is_empty()
+                        || t.name.to_ascii_lowercase().contains(&q)
+                        || t.tags
+                            .iter()
+                            .any(|tag| tag.to_ascii_lowercase().contains(&q)))
+            })
+            .collect()
     }
 
     /**

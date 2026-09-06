@@ -54,6 +54,8 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
                         articulation: 0,
                         selected: false,
                         lyric: "".into(),
+                        vibrato_amount: 0.0,
+                        vibrato_rate_millihz: 5000,
                     });
                 }
             } else {
@@ -171,6 +173,8 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
                             articulation: 0,
                             selected: false,
                             lyric: "".into(),
+                            vibrato_amount: 0.0,
+                            vibrato_rate_millihz: 5000,
                         });
                         sanitize_notes(&mut notes);
                         track.piano_roll_notes = slint::ModelRc::new(VecModel::from(notes));
@@ -346,6 +350,8 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
                             articulation: 0,
                             selected: false,
                             lyric: "".into(),
+                            vibrato_amount: 0.0,
+                            vibrato_rate_millihz: 5000,
                         });
                     }
                 }
@@ -431,6 +437,8 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
                                 articulation: 0,
                                 selected: false,
                                 lyric: "".into(),
+                                vibrato_amount: 0.0,
+                                vibrato_rate_millihz: 5000,
                             });
                         }
                     }

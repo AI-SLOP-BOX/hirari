@@ -61,6 +61,15 @@ public:
         return a.value + (b.value - a.value) * shaped;
     }
 
+    // Snapshot for UI editors; callers never observe the mutable shared list.
+    std::vector<Point> getPoints() const {
+        const auto points = std::atomic_load_explicit(&m_pointList, std::memory_order_acquire);
+        return points ? *points : std::vector<Point>{};
+    }
+
+    // Lock-free alias used by realtime renderers and legacy UI clients.
+    float evaluateAtNoLock(double time) const { return getValueAt(time); }
+
 private:
     mutable std::mutex m_pointListMutex;
     std::shared_ptr<std::vector<Point>> m_pointList;

@@ -115,6 +115,38 @@ pub(crate) fn install(
             }
         }
     });
+
+    ui.global::<RenderActions>().on_pause_render({
+        let weak = weak.clone();
+        let core = core.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                if core.pause_render() {
+                    ui.set_render_state("PAUSED".into());
+                    ui.set_render_error("RENDER PAUSED · CHECKPOINT RETAINED".into());
+                    ui.set_last_action("RENDER PAUSED".into());
+                } else {
+                    ui.set_last_action("PAUSE REJECTED · RENDER NOT ACTIVE".into());
+                }
+            }
+        }
+    });
+
+    ui.global::<RenderActions>().on_resume_render({
+        let weak = weak.clone();
+        let core = core.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                if core.resume_render() {
+                    ui.set_render_state("RENDERING".into());
+                    ui.set_render_error("RENDER RESUMED".into());
+                    ui.set_last_action("RENDER RESUMED".into());
+                } else {
+                    ui.set_last_action("RESUME REJECTED · RENDER NOT PAUSED".into());
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]

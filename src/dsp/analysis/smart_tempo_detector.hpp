@@ -4,6 +4,7 @@
 #include <cmath>
 #include <map>
 #include <algorithm>
+#include "tempo_analyzer.hpp"
 
 namespace Aura::DSP::Analysis {
 
@@ -13,18 +14,15 @@ namespace Aura::DSP::Analysis {
  */
 class SmartTempoDetector {
 public:
-    explicit SmartTempoDetector(double sr) : m_sampleRate(sr) {}
+    explicit SmartTempoDetector(double sr) : m_sampleRate(std::isfinite(sr) && sr >= 8000.0 ? sr : 44100.0) {}
 
     /**
      * @brief Detects the primary BPM of an audio buffer with industrial precision and rhythmic sovereignty.
      * INDUSTRIAL: Delegating envelope extraction and autocorrelation to the Rust 'TempoOrchestrator'.
      */
     double detectBPM(const std::vector<float>& buffer) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::TempoOrchestrator.
-        // Rust's SIMD-optimized math handles temporal analysis and BPM identification 
-        // with absolute bit-accuracy and high performance.
-        return 120.0;
+        if (buffer.empty()) return 120.0;
+        return SmartTempoAnalyzer::detectBPM(buffer.data(), buffer.size(), m_sampleRate).bpm;
     }
 
 private:

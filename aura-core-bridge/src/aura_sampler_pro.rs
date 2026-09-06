@@ -18,6 +18,24 @@ pub struct SamplerVoice {
     pub start_time: u64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::AuraSamplerProEngine;
+
+    #[test]
+    fn loop_region_updates_atomically_and_can_be_disabled() {
+        let mut engine = AuraSamplerProEngine::new(48_000.0);
+        assert!(engine.set_loop_region(2, 8, true));
+        assert!(engine.is_looping);
+        assert_eq!((engine.loop_start, engine.loop_end), (2, 8));
+        assert!(!engine.set_loop_region(8, 8, true));
+        assert_eq!((engine.loop_start, engine.loop_end), (2, 8));
+        assert!(engine.set_loop_region(0, 0, false));
+        assert!(!engine.is_looping);
+        assert_eq!((engine.loop_start, engine.loop_end), (0, 0));
+    }
+}
+
 pub struct AuraSamplerProEngine {
     pub sample_rate: f64,
     pub voices: Vec<SamplerVoice>,
@@ -59,9 +77,34 @@ impl AuraSamplerProEngine {
         }
     }
 
+    /// Configure the fallback loop used by samples without zone metadata.
+    /// Disabling the loop clears the previous range so stale settings cannot
+    /// affect a later render.
+    pub fn set_loop_region(&mut self, start: u64, end: u64, enabled: bool) -> bool {
+        if !enabled {
+            self.is_looping = false;
+            self.loop_start = 0;
+            self.loop_end = 0;
+            return true;
+        }
+        if start >= end || end - start < 2 {
+            return false;
+        }
+        self.loop_start = start;
+        self.loop_end = end;
+        self.is_looping = true;
+        true
+    }
+
     /// INDUSTRIAL: Processes an audio block with TPT SVF filtering and Cubic interpolation.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32], data_l: &[f32], data_r: &[f32]) {
-        if l.len() != r.len() || data_l.len() != data_r.len() || !self.sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&self.sample_rate) {
+        if l.len() != r.len()
+            || data_l.len() != data_r.len()
+            || data_l.len() < 4
+            || (self.is_looping
+                && (self.loop_end > data_l.len() as u64 || self.loop_start >= self.loop_end))
+            || !self.audit_aura_sampler_pro()
+        {
             return;
         }
         let num_frames = l.len();
@@ -155,14 +198,24 @@ impl AuraSamplerProEngine {
                         v.filter_r_z1 = 2.0 * v1r - v.filter_r_z1;
                         v.filter_r_z2 = 2.0 * v2r - v.filter_r_z2;
 
-                        l[idx_global] += v2l;
-                        r[idx_global] += v2r;
+                        l[idx_global] = (l[idx_global] + if v2l.is_finite() { v2l } else { 0.0 })
+                            .clamp(-4.0, 4.0);
+                        r[idx_global] = (r[idx_global] + if v2r.is_finite() { v2r } else { 0.0 })
+                            .clamp(-4.0, 4.0);
 
                         v.playback_pos += v.current_speed as f64;
                         current_env += env_step;
 
                         if self.is_looping && v.playback_pos >= self.loop_end as f64 {
-                            v.playback_pos -= (self.loop_end - self.loop_start) as f64;
+                            let loop_len = (self.loop_end - self.loop_start) as f64;
+                            if loop_len > 0.0 {
+                                v.playback_pos = self.loop_start as f64
+                                    + (v.playback_pos - self.loop_start as f64)
+                                        .rem_euclid(loop_len);
+                            } else {
+                                v.active = false;
+                                break;
+                            }
                         }
                     } else {
                         v.active = false;
@@ -180,9 +233,26 @@ impl AuraSamplerProEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Sampler state.
     pub fn audit_aura_sampler_pro(&self) -> bool {
-        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
             && self.voices.len() <= 256
             && (!self.is_looping || self.loop_end > self.loop_start)
-            && self.voices.iter().all(|v| v.note <= 127 && v.playback_pos.is_finite() && v.current_speed.is_finite() && v.target_speed.is_finite() && v.slide_rate.is_finite() && v.velocity.is_finite() && (0.0..=1.0).contains(&v.velocity) && v.filter_cutoff.is_finite() && v.filter_resonance.is_finite() && (0.0..=1.0).contains(&v.filter_resonance))
+            && self.voices.iter().all(|v| {
+                v.note <= 127
+                    && v.playback_pos.is_finite()
+                    && v.playback_pos >= 0.0
+                    && v.current_speed.is_finite()
+                    && (0.0..=16.0).contains(&v.current_speed)
+                    && v.target_speed.is_finite()
+                    && (0.0..=16.0).contains(&v.target_speed)
+                    && v.slide_rate.is_finite()
+                    && (0.0..=1.0).contains(&v.slide_rate)
+                    && v.velocity.is_finite()
+                    && (0.0..=1.0).contains(&v.velocity)
+                    && v.filter_cutoff.is_finite()
+                    && v.filter_cutoff >= 0.0
+                    && v.filter_resonance.is_finite()
+                    && (0.0..=1.0).contains(&v.filter_resonance)
+            })
     }
 }

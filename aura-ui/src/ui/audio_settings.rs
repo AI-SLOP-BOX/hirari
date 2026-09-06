@@ -35,8 +35,10 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>) {
         let core = core.clone();
         move |sample_rate, buffer_size| {
             let busy = core.is_playing() || core.recording_preview_active();
-            let valid_values =
-                (8_000..=384_000).contains(&sample_rate) && (1..=16_384).contains(&buffer_size);
+            // Keep the UI preflight aligned with the public Core contract so
+            // unsupported values are rejected before touching the device.
+            let valid_values = matches!(sample_rate, 44_100 | 48_000 | 88_200 | 96_000 | 192_000)
+                && matches!(buffer_size, 32 | 64 | 128 | 256 | 512 | 1024 | 2048);
             let diagnostic = if !busy && valid_values {
                 core.apply_audio_config_diagnostic_json(sample_rate as u32, buffer_size as u32)
             } else {
@@ -72,6 +74,85 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>) {
                         UiErrorKind::AudioDevice,
                         &detail,
                         "Stop playback and choose a supported sample rate or buffer size",
+                    )
+                    .into()
+                });
+            }
+        }
+    });
+    ui.global::<AudioSettingsActions>()
+        .on_select_default_device({
+            let weak = weak.clone();
+            let core = core.clone();
+            move || {
+                let catalog =
+                    serde_json::from_str::<serde_json::Value>(&core.list_audio_devices_json()).ok();
+                let device_id = catalog
+                    .as_ref()
+                    .and_then(|value| value.as_array())
+                    .and_then(|devices| devices.first())
+                    .and_then(|device| device.get("id"))
+                    .and_then(|id| id.as_u64())
+                    .map(|id| id.min(u32::MAX as u64) as u32);
+                let sample_rate = match core.get_sample_rate().round() as u32 {
+                    44_100 | 48_000 | 88_200 | 96_000 | 192_000 => {
+                        core.get_sample_rate().round() as u32
+                    }
+                    _ => 48_000,
+                };
+                let buffer_size = match core.get_buffer_size() {
+                    32 | 64 | 128 | 256 | 512 | 1024 | 2048 => core.get_buffer_size(),
+                    _ => 256,
+                };
+                let selected = device_id
+                    .is_some_and(|id| core.select_audio_device(id, sample_rate, buffer_size));
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_last_action(if selected {
+                        "AUDIO DEVICE SELECTED".into()
+                    } else {
+                        ui_error_with_action(
+                            UiErrorKind::AudioDevice,
+                            "device selection failed",
+                            "Reconnect Audio and verify an input/output device is available",
+                        )
+                        .into()
+                    });
+                }
+            }
+        });
+    ui.global::<AudioSettingsActions>().on_select_device({
+        let weak = weak.clone();
+        let core = core.clone();
+        move |index| {
+            let catalog =
+                serde_json::from_str::<serde_json::Value>(&core.list_audio_devices_json()).ok();
+            let device_id = catalog
+                .as_ref()
+                .and_then(|value| value.as_array())
+                .and_then(|devices| devices.get(index.max(0) as usize))
+                .and_then(|device| device.get("id"))
+                .and_then(|id| id.as_u64())
+                .map(|id| id.min(u32::MAX as u64) as u32);
+            let sample_rate = match core.get_sample_rate().round() as u32 {
+                44_100 | 48_000 | 88_200 | 96_000 | 192_000 => {
+                    core.get_sample_rate().round() as u32
+                }
+                _ => 48_000,
+            };
+            let buffer_size = match core.get_buffer_size() {
+                64 | 128 | 256 | 512 | 1024 | 2048 => core.get_buffer_size(),
+                _ => 256,
+            };
+            let selected =
+                device_id.is_some_and(|id| core.select_audio_device(id, sample_rate, buffer_size));
+            if let Some(ui) = weak.upgrade() {
+                ui.set_last_action(if selected {
+                    format!("AUDIO DEVICE SELECTED: {index}").into()
+                } else {
+                    ui_error_with_action(
+                        UiErrorKind::AudioDevice,
+                        "device selection failed",
+                        "Reconnect Audio and verify the selected device supports input or output",
                     )
                     .into()
                 });

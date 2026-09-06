@@ -18,7 +18,8 @@ impl QuantizationOrchestrator {
         sample_rate: f64,
         options: &QuantizationOptions
     ) -> Vec<u64> {
-        if !bpm.is_finite() || bpm <= 0.0 || !sample_rate.is_finite() || sample_rate <= 0.0 {
+        if !bpm.is_finite() || !(20.0..=400.0).contains(&bpm) || !sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate)
+            || !options.strength.is_finite() || !options.swing.is_finite() {
             return vec![0; transients.len()];
         }
 
@@ -74,7 +75,8 @@ impl QuantizationOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide rhythmic synchronization graph.
     pub fn audit_quantization(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic rhythmic auditing logic.
-        true
+        let options = QuantizationOptions { strength: 1.0, swing: 0.5 };
+        let result = self.resolve_quantization_targets(&[0, 12_000, 24_000], 120.0, 48_000.0, &options);
+        result.len() == 3 && result.windows(2).all(|pair| pair[0] <= pair[1])
     }
 }

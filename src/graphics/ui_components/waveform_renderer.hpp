@@ -28,8 +28,12 @@ struct MipmapLevel {
  */
 class WaveformRenderer {
 public:
-    WaveformRenderer() { }
-    void initialize(float, float) { }
+    WaveformRenderer() = default;
+    void initialize(float viewportWidth, float viewportHeight) noexcept {
+        m_viewportWidth = std::isfinite(viewportWidth) ? std::max(0.0f, viewportWidth) : 0.0f;
+        m_viewportHeight = std::isfinite(viewportHeight) ? std::max(0.0f, viewportHeight) : 0.0f;
+        m_vramDirty = true;
+    }
 
     /**
      * @brief 数時間のWAVファイルから、GPU用のミップマップ（遠景・近景用データ）を事前生成する
@@ -46,7 +50,7 @@ public:
         for (uint32_t spp : lodLevels) {
             MipmapLevel level;
             level.samplesPerPixel = spp;
-            size_t numBlocks = numSamples / spp;
+            size_t numBlocks = (numSamples + spp - 1u) / spp;
             level.minMaxPairs.resize(numBlocks * 2);
 
             for (size_t b = 0; b < numBlocks; ++b) {
@@ -55,11 +59,17 @@ public:
 
                 // --- HONEST FIX: SIMD MIN/MAX (Simplification: using std::minMax for now, but compiler will vectorize) ---
                 // For actual manual SIMD, we'd use _mm_min_ps / _mm_max_ps
-                for (size_t i = 0; i < spp; ++i) {
+                const size_t blockStart = b * spp;
+                const size_t blockLength = std::min<size_t>(spp, numSamples - blockStart);
+                for (size_t i = 0; i < blockLength; ++i) {
                     float s = ptr[i];
+                    if (!std::isfinite(s)) continue;
                     if (s < bMin) bMin = s;
                     if (s > bMax) bMax = s;
                 }
+                if (bMin > bMax) bMin = bMax = 0.0f;
+                bMin = std::clamp(bMin, -4.0f, 4.0f);
+                bMax = std::clamp(bMax, -4.0f, 4.0f);
                 level.minMaxPairs[b * 2] = bMin;
                 level.minMaxPairs[b * 2 + 1] = bMax;
             }
@@ -121,6 +131,8 @@ public:
 private:
     std::vector<MipmapLevel> m_mipmaps;
     bool m_vramDirty = false;
+    float m_viewportWidth = 0.0f;
+    float m_viewportHeight = 0.0f;
 };
 
 } // namespace Aura::Graphics::UI

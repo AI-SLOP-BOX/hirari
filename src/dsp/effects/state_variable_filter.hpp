@@ -22,7 +22,7 @@ public:
     }
 
     void setType(Type t) { m_type = t; }
-    void prepareToPlay(double sr, uint32_t bs) { m_sampleRate = sr; }
+    void prepareToPlay(double sr, uint32_t bs) { (void)bs; m_sampleRate = sr; }
     
     /**
      * @brief SET PARAMS: SVF Logic for Analog Modeling.

@@ -349,7 +349,7 @@ void AuraUnifiedEngine::perform_autonomous_correction() {
 }
 
 bool AuraUnifiedEngine::checkSystemHealth() const {
-    return m_engineDiagnostics.getHealth().isRealTimeSafe.load();
+    return m_engineDiagnostics.getHealth().isRealTimeSafe.load() && m_controlRoom.validate();
 }
 
 AuraUnifiedEngine::WaveformCache::~WaveformCache() {

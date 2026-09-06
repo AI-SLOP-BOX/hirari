@@ -88,13 +88,21 @@ impl LoudnessMeterEngine {
             let in_r = if r[s].is_finite() { r[s] } else { 0.0 };
             let sample_peak = in_l.abs().max(in_r.abs());
             self.peak_db = self.peak_db.max(20.0 * sample_peak.max(1.0e-12).log10());
-            self.true_peak_db = self.true_peak_db.max(20.0 * sample_peak.max(1.0e-12).log10());
+            self.true_peak_db = self
+                .true_peak_db
+                .max(20.0 * sample_peak.max(1.0e-12).log10());
             if self.sample_count > 0 {
                 for fraction in 1..4 {
                     let t = fraction as f32 * 0.25;
                     let interpolated_l = self.previous_input_l + (in_l - self.previous_input_l) * t;
                     let interpolated_r = self.previous_input_r + (in_r - self.previous_input_r) * t;
-                    self.true_peak_db = self.true_peak_db.max(20.0 * interpolated_l.abs().max(interpolated_r.abs()).max(1.0e-12).log10());
+                    self.true_peak_db = self.true_peak_db.max(
+                        20.0 * interpolated_l
+                            .abs()
+                            .max(interpolated_r.abs())
+                            .max(1.0e-12)
+                            .log10(),
+                    );
                 }
             }
             self.previous_input_l = in_l;
@@ -140,23 +148,45 @@ impl LoudnessMeterEngine {
     pub fn audit_loudness_meter(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic Loudness Meter auditing logic.
         self.integrated_lufs.is_finite()
-            && self.energy_sum.is_finite() && self.energy_sum >= 0.0
+            && self.energy_sum.is_finite()
+            && self.energy_sum >= 0.0
             && (self.sample_count == 0 || self.integrated_lufs >= -240.0)
-            && self.peak_db.is_finite() && self.true_peak_db.is_finite()
+            && self.peak_db.is_finite()
+            && self.true_peak_db.is_finite()
             && self.true_peak_db + 1.0e-4 >= self.peak_db
-            && self.previous_input_l.is_finite() && self.previous_input_r.is_finite()
-            && [self.hp_s1_l, self.hp_s2_l, self.hp_s1_r, self.hp_s2_r,
-                self.shelf_s1_l, self.shelf_s2_l, self.shelf_s1_r, self.shelf_s2_r]
-                .iter().all(|value| value.is_finite())
+            && self.previous_input_l.is_finite()
+            && self.previous_input_r.is_finite()
+            && [
+                self.hp_s1_l,
+                self.hp_s2_l,
+                self.hp_s1_r,
+                self.hp_s2_r,
+                self.shelf_s1_l,
+                self.shelf_s2_l,
+                self.shelf_s1_r,
+                self.shelf_s2_r,
+            ]
+            .iter()
+            .all(|value| value.is_finite())
     }
 
     pub fn snapshot(&self) -> LoudnessMeterSnapshot {
-        LoudnessMeterSnapshot { integrated_lufs: self.integrated_lufs, peak_db: self.peak_db, true_peak_db: self.true_peak_db, sample_count: self.sample_count }
+        LoudnessMeterSnapshot {
+            integrated_lufs: self.integrated_lufs,
+            peak_db: self.peak_db,
+            true_peak_db: self.true_peak_db,
+            sample_count: self.sample_count,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LoudnessMeterSnapshot { pub integrated_lufs: f32, pub peak_db: f32, pub true_peak_db: f32, pub sample_count: u64 }
+pub struct LoudnessMeterSnapshot {
+    pub integrated_lufs: f32,
+    pub peak_db: f32,
+    pub true_peak_db: f32,
+    pub sample_count: u64,
+}
 
 #[cfg(test)]
 mod tests {

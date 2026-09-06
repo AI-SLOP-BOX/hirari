@@ -7,20 +7,141 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include "rust/cxx.h"
 #include "aura_unified_engine.hpp"
+#include "plugins/native_editor_host.hpp"
+#include "dsp/vocal/psola_pitch_shifter.hpp"
+#include "dsp/analysis/spectral_processor.hpp"
 #include "bridge_types.hpp"
 #include "../io/wav_loader_utils.hpp"
 
+#include "driver/mac_audio_driver_host.hpp" // also provides the bounded input queue
 #if defined(__APPLE__)
-#include "driver/mac_audio_driver_host.hpp"
 #include "driver/mac_midi_device_host.hpp"
+#elif defined(AURA_ENABLE_JACK)
+#include "external/jack_bridge_deep.hpp"
 #endif
 
 namespace Aura::Core::BridgeFFI {
 
 #if defined(__APPLE__)
 using AudioDriverHost = ::Aura::Core::Driver::MacAudioDriverHost;
+#elif defined(AURA_ENABLE_JACK)
+// JACK is opt-in at compile time.  When enabled, this adapter is the driver
+// owned by the same AudioEngine session as the macOS CoreAudio host; the JACK
+// realtime callback therefore enters the production AuraUnifiedEngine graph
+// instead of a parallel test-only graph.
+class JackAudioDriverHost final {
+public:
+    using ProcessCallback = ::Aura::Core::External::JackBridgeDeep::ProcessCallback;
+
+    bool start() {
+        auto& jack = ::Aura::Core::External::JackBridgeDeep::getInstance();
+        if (!jack.tryInitialize("Aura DAW")) {
+            m_status = "start-failed";
+            m_error = jack.lastError();
+            return false;
+        }
+        jack.setProcessCallback(m_callback, m_context);
+        m_running = true;
+        m_status = "running";
+        m_error.clear();
+        return true;
+    }
+
+    void stop() noexcept {
+        m_running = false;
+        auto& jack = ::Aura::Core::External::JackBridgeDeep::getInstance();
+        jack.setProcessCallback(nullptr, nullptr);
+        jack.shutdown();
+        m_status = "stopped";
+    }
+
+    bool is_running() const noexcept { return m_running &&
+        ::Aura::Core::External::JackBridgeDeep::getInstance().isRunning(); }
+    double sample_rate() const noexcept {
+        return ::Aura::Core::External::JackBridgeDeep::getInstance().sampleRate();
+    }
+    uint32_t buffer_size() const noexcept {
+        return ::Aura::Core::External::JackBridgeDeep::getInstance().bufferSize();
+    }
+    bool isSilentFallback() const noexcept { return false; }
+    void try_reconnect() { if (!is_running()) (void)start(); }
+
+    bool reconfigure(double sampleRate, uint32_t bufferSize) {
+        if (!std::isfinite(sampleRate) || sampleRate < 8000.0 ||
+            sampleRate > 384000.0 || bufferSize == 0) {
+            m_error = "invalid JACK configuration";
+            return false;
+        }
+        // JACK negotiates these values with the server.  A requested format
+        // is accepted only when the server reports the same format after the
+        // restart; this avoids claiming a graph/device match that is false.
+        stop();
+        if (!start()) return false;
+        const auto& jack = ::Aura::Core::External::JackBridgeDeep::getInstance();
+        if (std::abs(jack.sampleRate() - sampleRate) > 0.5 ||
+            jack.bufferSize() != bufferSize) {
+            m_error = "JACK server rejected the requested sample rate or buffer size";
+            stop();
+            m_status = "start-failed";
+            return false;
+        }
+        return true;
+    }
+
+    const char* status() const noexcept { return m_status.c_str(); }
+    int32_t last_error_code() const noexcept { return m_error.empty() ? 0 : 1; }
+    const char* last_error() const noexcept { return m_error.c_str(); }
+    float output_peak() const noexcept { return m_outputPeak.load(std::memory_order_acquire); }
+    uint64_t callback_count() const noexcept { return m_callbackCount.load(std::memory_order_acquire); }
+    uint64_t dropped_input_blocks() const noexcept { return m_inputQueue.dropped_blocks(); }
+    bool poll_input_block(float* const* destination,
+                          uint32_t destinationChannelCapacity,
+                          uint32_t destinationFrameCapacity,
+                          ::Aura::Core::Driver::MacAudioInputBlockQueue::BlockInfo& info,
+                          uint64_t& droppedBlocks) noexcept {
+        return m_inputQueue.poll(destination, destinationChannelCapacity,
+                                 destinationFrameCapacity, info, droppedBlocks);
+    }
+    void capture_input(const float* const* channels, uint32_t channelCount,
+                       uint32_t frameCount) noexcept {
+        (void)m_inputQueue.push_planar(channels, channelCount, frameCount);
+    }
+    const char* list_devices_json() const noexcept {
+        return "[{\"id\":0,\"name\":\"JACK server\",\"api\":\"JACK\"}]";
+    }
+    bool select_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) {
+        return deviceId == 0 && reconfigure(sampleRate, bufferSize);
+    }
+    void set_process_callback(ProcessCallback callback, void* context) noexcept {
+        m_callback = callback;
+        m_context = context;
+        if (is_running()) {
+            ::Aura::Core::External::JackBridgeDeep::getInstance().setProcessCallback(callback, context);
+        }
+    }
+
+    void record_callback(uint32_t frames, float peak) noexcept {
+        m_callbackCount.fetch_add(1, std::memory_order_relaxed);
+        m_outputPeak.store(peak, std::memory_order_relaxed);
+        (void)frames;
+    }
+
+private:
+    ProcessCallback m_callback = nullptr;
+    void* m_context = nullptr;
+    std::atomic<bool> m_running{false};
+    std::atomic<uint64_t> m_callbackCount{0};
+    std::atomic<float> m_outputPeak{0.0f};
+    ::Aura::Core::Driver::MacAudioInputBlockQueue m_inputQueue;
+    std::string m_status = "stopped";
+    std::string m_error;
+};
+using AudioDriverHost = JackAudioDriverHost;
 #else
 // Non-macOS builds currently have no native audio-device implementation.
 // Keep the bridge constructible for offline/UI use, but never report a fake
@@ -32,6 +153,27 @@ public:
     bool is_running() const noexcept { return false; }
     bool isSilentFallback() const noexcept { return true; }
     void try_reconnect() const noexcept { m_error = "native audio backend unavailable"; }
+    using ProcessCallback = void (*)(const float* const*, float* const*, uint32_t, void*) noexcept;
+    void set_process_callback(ProcessCallback callback, void* context) noexcept {
+        m_callback = callback;
+        m_context = context;
+    }
+    // The fallback has no hardware callback, but offline/test callers still
+    // need the exact same callback boundary as JACK/CoreAudio. This explicit
+    // dispatcher never claims a running device; it only invokes a callback
+    // when the caller supplies a bounded output block.
+    bool dispatch_process_callback(float* left, float* right, uint32_t frames) const noexcept {
+        if (!m_callback || !left || !right || frames == 0) return false;
+        float* outputs[2] = {left, right};
+        m_callback(nullptr, outputs, frames, m_context);
+        return true;
+    }
+    using InputBlockInfo = ::Aura::Core::Driver::MacAudioInputBlockQueue::BlockInfo;
+    bool poll_input_block(float* const*, uint32_t, uint32_t, InputBlockInfo&, uint64_t& dropped) noexcept {
+        dropped = 0;
+        return false;
+    }
+    void capture_input(const float* const*, uint32_t, uint32_t) noexcept {}
     float output_peak() const noexcept { return 0.0f; }
     uint64_t callback_count() const noexcept { return 0; }
     uint64_t dropped_input_blocks() const noexcept { return 0; }
@@ -40,6 +182,8 @@ public:
 private:
     mutable std::string m_error = "native audio backend unavailable";
     bool m_running = false;
+    ProcessCallback m_callback = nullptr;
+    void* m_context = nullptr;
 };
 
 using AudioDriverHost = UnavailableAudioDriver;
@@ -119,6 +263,11 @@ public:
     }
     float get_tempo() const { return m_engine ? m_engine->get_tempo() : 120.0f; }
     bool set_tempo(float bpm) const { return m_engine && m_engine->set_tempo(bpm); }
+    void midi_clock_tick(uint64_t timestamp) const { if (m_engine) m_engine->midi_clock_tick(timestamp); }
+    uint64_t midi_clock_ticks() const { return m_engine ? m_engine->midi_clock_ticks() : 0; }
+    uint64_t midi_clock_last_tick() const { return m_engine ? m_engine->midi_clock_last_tick() : 0; }
+    double midi_clock_rate() const { return m_engine ? m_engine->midi_clock_rate() : 120.0; }
+    void set_midi_clock_rate(double bpm) const { if (m_engine) m_engine->set_midi_clock_rate(bpm); }
     bool set_track_volume(uint32_t tid, float value) const {
         return m_engine && m_engine->set_track_volume(tid, value);
     }
@@ -128,6 +277,25 @@ public:
     bool set_master_gain(float value) const {
         return m_engine && m_engine->set_master_gain(value);
     }
+    bool add_control_room_speaker(rust::Str name, float gain) const {
+        return m_engine && m_engine->add_control_room_speaker(std::string(name), gain);
+    }
+    void reset_control_room() const { if (m_engine) m_engine->reset_control_room(); }
+    bool select_control_room_speaker(uint32_t index) const { return m_engine && m_engine->select_control_room_speaker(index); }
+    bool rename_control_room_speaker(uint32_t index, rust::Str name) const { return m_engine && m_engine->rename_control_room_speaker(index, std::string(name)); }
+    bool remove_control_room_speaker(uint32_t index) const { return m_engine && m_engine->remove_control_room_speaker(index); }
+    bool set_control_room_speaker_gain(uint32_t index, float gain) const { return m_engine && m_engine->set_control_room_speaker_gain(index, gain); }
+    bool set_control_room_speaker_enabled(uint32_t index, bool enabled) const { return m_engine && m_engine->set_control_room_speaker_enabled(index, enabled); }
+    bool upsert_control_room_cue(uint32_t id, float gain, bool enabled) const { return m_engine && m_engine->upsert_control_room_cue(id, gain, enabled); }
+    bool remove_control_room_cue(uint32_t id) const { return m_engine && m_engine->remove_control_room_cue(id); }
+    bool set_control_room_cue_enabled(uint32_t id, bool enabled) const { return m_engine && m_engine->set_control_room_cue_enabled(id, enabled); }
+    float control_room_cue_gain(uint32_t id) const { return m_engine ? m_engine->control_room_cue_gain(id) : 0.0f; }
+    bool control_room_validate() const { return m_engine && m_engine->control_room_validate(); }
+    void set_control_room_dim(bool enabled) const { if (m_engine) m_engine->set_control_room_dim(enabled); }
+    void set_control_room_talkback(bool enabled, float gain) const { if (m_engine) m_engine->set_control_room_talkback(enabled, gain); }
+    bool control_room_dimmed() const { return m_engine && m_engine->control_room_dimmed(); }
+    bool control_room_talkback_enabled() const { return m_engine && m_engine->control_room_talkback_enabled(); }
+    float control_room_monitor_gain() const { return m_engine ? m_engine->control_room_monitor_gain() : 0.0f; }
     void clear_undo_history() const {
         if (m_engine) m_engine->clear_undo_history();
     }
@@ -164,6 +332,12 @@ public:
     void set_offline_render_options(bool preFader, bool includeInserts) const noexcept {
         if (m_engine) m_engine->set_offline_render_options(preFader, includeInserts);
     }
+    bool set_offline_render_range(uint64_t startSample, uint64_t endSample) const noexcept {
+        return m_engine && m_engine->set_offline_render_range(startSample, endSample);
+    }
+    void clear_offline_render_range() const noexcept {
+        if (m_engine) m_engine->clear_offline_render_range();
+    }
     bool set_phase_invert(uint32_t tid, bool inverted) const {
         return m_engine && m_engine->set_phase_invert(tid, inverted);
     }
@@ -196,6 +370,9 @@ public:
         return rust::String(m_driver->status());
 #else
         if (m_driver->isSilentFallback()) return rust::String("silent-fallback");
+#if defined(AURA_ENABLE_JACK)
+        return rust::String(m_driver->status());
+#endif
 #endif
         return rust::String("stopped");
     }
@@ -251,6 +428,17 @@ public:
     bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
 #if defined(__APPLE__)
         return m_driver && m_driver->select_device(deviceId, sampleRate, bufferSize);
+#elif defined(AURA_ENABLE_JACK)
+        if (!m_driver || !m_driver->select_device(deviceId, sampleRate, bufferSize)) return false;
+        if (!m_engine || !m_driver->is_running()) return false;
+        m_engine->waitForAudioCallbacks();
+        ::Aura::Core::Engine::EngineConfig cfg;
+        cfg.tempo = m_engine->get_tempo();
+        cfg.sampleRate = m_driver->sample_rate();
+        cfg.blockSize = m_driver->buffer_size();
+        m_engine->apply_config(cfg);
+        return std::abs(m_engine->get_sample_rate() - cfg.sampleRate) < 0.5 &&
+               m_engine->get_block_size() == cfg.blockSize;
 #else
         (void)deviceId; (void)sampleRate; (void)bufferSize; return false;
 #endif
@@ -260,6 +448,7 @@ public:
     }
     uint32_t get_block_size() const { return m_engine ? m_engine->get_block_size() : 0; }
     float get_latency_ms() const { return m_engine ? m_engine->get_latency_ms() : 0.0f; }
+    float get_master_tail_ms() const { return m_engine ? m_engine->get_master_tail_ms() : 0.0f; }
     void set_test_tone(bool enabled) const { if (m_engine) m_engine->set_test_tone(enabled); }
     void set_preview_sample(rust::Slice<const float> samples, double sourceRate) const {
         if (m_engine) m_engine->set_preview_sample(samples.data(), samples.size(), sourceRate);
@@ -275,8 +464,142 @@ public:
             left.size() > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize) {
             return;
         }
+#if !defined(__APPLE__) && !defined(AURA_ENABLE_JACK)
+        // Keep the non-hardware fallback on the same callback boundary as a
+        // real driver. The dispatcher invokes process_driver_block, which
+        // owns the single native graph render; do not render it a second time
+        // below.
+        if (m_driver && m_driver->dispatch_process_callback(
+                left.data(), right.data(), static_cast<uint32_t>(left.size()))) return;
+#endif
         float* channels[2] = {left.data(), right.data()};
         if (m_engine) m_engine->processBlockDirect(channels, 2, static_cast<uint32_t>(left.size()));
+    }
+
+    bool quantize_audio_group_stereo(rust::Slice<float> left, rust::Slice<float> right,
+                                     float bpm, double sample_rate, float strength,
+                                     float swing) const noexcept {
+        if (!m_engine || left.size() == 0 || left.size() != right.size()) return false;
+        float* buffers[2] = {left.data(), right.data()};
+        return m_engine->quantizeAudioGroup(buffers, 2, left.size(), bpm, sample_rate,
+                                            strength, swing);
+    }
+    // Phase-coherent group warp for an arbitrary number of linked microphones.
+    // `planar` is laid out channel-by-channel (all frames of ch0, then ch1...).
+    bool quantize_audio_group(rust::Slice<float> planar, uint32_t channels,
+                              uint64_t frames, float bpm, double sample_rate,
+                              float strength, float swing) const noexcept {
+        if (!m_engine || channels == 0 || channels > 32 || frames == 0 ||
+            frames > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize ||
+            planar.size() != static_cast<size_t>(channels) * frames) return false;
+        std::array<float*, 32> buffers{};
+        for (uint32_t c = 0; c < channels; ++c) buffers[c] = planar.data() + static_cast<size_t>(c) * frames;
+        return m_engine->quantizeAudioGroup(buffers.data(), channels, frames, bpm,
+                                            sample_rate, strength, swing);
+    }
+
+    void process_pitch_shift_block(rust::Slice<float> left, rust::Slice<float> right,
+                                   float ratio, float fundamental_hz,
+                                   double sample_rate, float formant_ratio,
+                                   float timing_ratio) const noexcept {
+        if (left.empty() || left.size() != right.size() || left.size() > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize ||
+            !std::isfinite(ratio) || ratio < 0.5f || ratio > 2.0f || !std::isfinite(fundamental_hz) || fundamental_hz <= 0.0f ||
+            !std::isfinite(sample_rate) || sample_rate < 8'000.0 || sample_rate > 384'000.0 ||
+            !std::isfinite(formant_ratio) || formant_ratio < 0.25f || formant_ratio > 4.0f ||
+            !std::isfinite(timing_ratio) || timing_ratio < 0.25f || timing_ratio > 4.0f) return;
+        static thread_local ::Aura::Core::DSP::Vocal::PsolaPitchShifter shifterL;
+        static thread_local ::Aura::Core::DSP::Vocal::PsolaPitchShifter shifterR;
+        static thread_local double lastSampleRate = 0.0;
+        if (lastSampleRate != sample_rate) {
+            shifterL.reset();
+            shifterR.reset();
+            lastSampleRate = sample_rate;
+        }
+        static thread_local std::vector<float> inL;
+        static thread_local std::vector<float> inR;
+        if (inL.capacity() < left.size()) inL.reserve(::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize);
+        if (inR.capacity() < right.size()) inR.reserve(::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize);
+        inL.assign(left.data(), left.data() + left.size());
+        inR.assign(right.data(), right.data() + right.size());
+        shifterL.process(inL.data(), left.data(), static_cast<uint32_t>(left.size()), ratio, fundamental_hz, sample_rate, formant_ratio, timing_ratio);
+        shifterR.process(inR.data(), right.data(), static_cast<uint32_t>(right.size()), ratio, fundamental_hz, sample_rate, formant_ratio, timing_ratio);
+    }
+
+    // Offline spectral-canvas edit exposed at the same bridge boundary as
+    // pitch processing. The AudioBuffer wraps caller-owned slices, so no
+    // second copy of the clip is made; the processor validates all bounds and
+    // keeps edits out of the realtime callback path.
+    bool apply_spectral_gain_stereo(rust::Slice<float> left, rust::Slice<float> right,
+                                    float t0, float f0, float t1, float f1,
+                                    float gain, double sample_rate) const noexcept {
+        if (left.empty() || left.size() != right.size() ||
+            left.size() > 16u * 1024u * 1024u ||
+            !std::isfinite(t0) || !std::isfinite(f0) || !std::isfinite(t1) ||
+            !std::isfinite(f1) || !std::isfinite(gain) ||
+            !std::isfinite(sample_rate) || sample_rate < 8'000.0 ||
+            sample_rate > 384'000.0) return false;
+        float* channels[2] = {left.data(), right.data()};
+        ::Aura::Core::AudioBuffer view;
+        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
+        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        processor.applySpectralGain(view, sample_rate,
+                                    {t0, f0, t1, f1}, gain);
+        for (size_t i = 0; i < left.size(); ++i)
+            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
+        return true;
+    }
+
+    bool reduce_noise_stereo(rust::Slice<float> left, rust::Slice<float> right,
+                             float amount, float profile_seconds,
+                             double sample_rate) const noexcept {
+        if (left.empty() || left.size() != right.size() ||
+            left.size() > 16u * 1024u * 1024u || !std::isfinite(amount) ||
+            !std::isfinite(profile_seconds) || !std::isfinite(sample_rate) ||
+            sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
+        float* channels[2] = {left.data(), right.data()};
+        ::Aura::Core::AudioBuffer view;
+        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
+        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        processor.reduceNoise(view, sample_rate, amount, profile_seconds);
+        for (size_t i = 0; i < left.size(); ++i)
+            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
+        return true;
+    }
+
+    bool repair_clipped_stereo(rust::Slice<float> left, rust::Slice<float> right,
+                               float ceiling) const noexcept {
+        if (left.empty() || left.size() != right.size() ||
+            left.size() > 16u * 1024u * 1024u || !std::isfinite(ceiling)) return false;
+        float* channels[2] = {left.data(), right.data()};
+        ::Aura::Core::AudioBuffer view;
+        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
+        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        (void)processor.repairClipped(view, ceiling);
+        for (size_t i = 0; i < left.size(); ++i)
+            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
+        return true;
+    }
+
+    bool remove_hum_stereo(rust::Slice<float> left, rust::Slice<float> right,
+                           float fundamental_hz, uint32_t harmonics,
+                           float bandwidth_hz, float t0, float f0,
+                           float t1, float f1, double sample_rate) const noexcept {
+        if (left.empty() || left.size() != right.size() ||
+            left.size() > 16u * 1024u * 1024u || !std::isfinite(fundamental_hz) ||
+            fundamental_hz <= 0.0f || harmonics == 0 ||
+            !std::isfinite(bandwidth_hz) || bandwidth_hz <= 0.0f ||
+            !std::isfinite(t0) || !std::isfinite(f0) || !std::isfinite(t1) ||
+            !std::isfinite(f1) || !std::isfinite(sample_rate) ||
+            sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
+        float* channels[2] = {left.data(), right.data()};
+        ::Aura::Core::AudioBuffer view;
+        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
+        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        processor.removeHum(view, sample_rate, fundamental_hz,
+                             {t0, f0, t1, f1}, harmonics, bandwidth_hz);
+        for (size_t i = 0; i < left.size(); ++i)
+            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
+        return true;
     }
     void trigger_preview_sample() const { if (m_engine) m_engine->trigger_preview_sample(); }
     void clear_preview_sample() const { if (m_engine) m_engine->clear_preview_sample(); }
@@ -326,6 +649,12 @@ public:
         // Device/sample-rate/block-size changes are control-thread events.
         // Quiesce any callback that still owns the previous audio context
         // before rebuilding track processors and PDC state.
+#if defined(AURA_ENABLE_JACK)
+        if (m_driver && m_driver->is_running() &&
+            !m_driver->reconfigure(static_cast<double>(sr), bs)) {
+            return false;
+        }
+#endif
         m_engine->waitForAudioCallbacks();
         m_engine->apply_config(cfg);
 #endif
@@ -457,6 +786,9 @@ public:
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
         return m_engine && m_engine->restart_sandboxed_plugin(trackId, sandboxIndex);
     }
+    bool reset_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
+        return m_engine && m_engine->reset_sandboxed_plugin(trackId, sandboxIndex);
+    }
     rust::Vec<uint32_t> get_sandbox_statuses() const {
         rust::Vec<uint32_t> result;
         if (!m_engine) return result;
@@ -546,6 +878,9 @@ public:
     float get_track_latency_ms(uint32_t tid) const {
         return m_engine ? m_engine->get_track_latency_ms(tid) : 0.0f;
     }
+    float get_track_tail_ms(uint32_t tid) const {
+        return m_engine ? m_engine->get_track_tail_ms(tid) : 0.0f;
+    }
     float get_track_pdc_compensation_ms(uint32_t tid) const {
         return m_engine ? m_engine->get_track_pdc_compensation_ms(tid) : 0.0f;
     }
@@ -611,7 +946,43 @@ public:
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
     float get_bounce_progress() const noexcept { return m_engine ? m_engine->get_bounce_progress() : 0.0f; }
     uint32_t get_bounce_state() const noexcept { return m_engine ? m_engine->get_bounce_state() : 0; }
+    bool has_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const noexcept {
+        return m_engine && m_engine->has_plugin_native_editor(trackId, pluginIndex);
+    }
+    void bind_native_editor_host(::Aura::Core::Plugins::NativeEditorHost::OpenCallback open,
+                                 ::Aura::Core::Plugins::NativeEditorHost::CloseCallback close) {
+        m_nativeEditorHost.bind(std::move(open), std::move(close));
+    }
+    void clear_native_editor_host() { m_nativeEditorHost.clear(); }
+    uint64_t open_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex,
+                                       uint64_t parent) const {
+        if (!m_engine || !m_engine->has_plugin_native_editor(trackId, pluginIndex)) return 0;
+        uint64_t session = 0;
+        if (m_nativeEditorHost.open(trackId, pluginIndex, static_cast<uintptr_t>(parent), session))
+            return session;
+        // When no platform wrapper is bound, let a direct VST3/AU processor
+        // attach its native view to the supplied parent surface. This keeps
+        // the SDK-enabled path usable from the same bridge instead of
+        // silently falling back to parameter controls.
+        session = m_engine->open_plugin_native_editor(
+            trackId, pluginIndex, static_cast<uintptr_t>(parent));
+        if (session != 0) m_nativeEditorHost.adopt(trackId, pluginIndex, session);
+        return session;
+    }
+    bool close_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const {
+        const uint64_t session = m_nativeEditorHost.session(trackId, pluginIndex);
+        const bool processorClosed = session != 0 && m_engine &&
+            m_engine->close_plugin_native_editor(trackId, pluginIndex, session);
+        const bool wrapperClosed = m_nativeEditorHost.close(trackId, pluginIndex);
+        if (processorClosed && !wrapperClosed) m_nativeEditorHost.forget(trackId, pluginIndex);
+        return wrapperClosed || processorClosed;
+    }
+    bool plugin_native_editor_embedded(uint32_t trackId, uint32_t pluginIndex) const {
+        return m_nativeEditorHost.embedded(trackId, pluginIndex);
+    }
     bool cancel_bounce() const noexcept { return m_engine && m_engine->cancel_bounce(); }
+    bool pause_bounce() const noexcept { return m_engine && m_engine->pause_bounce(); }
+    bool resume_bounce() const noexcept { return m_engine && m_engine->resume_bounce(); }
     uint32_t get_undo_count() const { return m_engine ? m_engine->get_undo_count() : 0; }
     uint32_t get_redo_count() const { return m_engine ? m_engine->get_redo_count() : 0; }
     void execute_restoration(uint32_t tid, float intensity) const { if (m_engine) m_engine->execute_restoration(tid, intensity); }
@@ -643,6 +1014,16 @@ public:
     bool set_region_gain(uint32_t tid, uint32_t rid, float gain) const { return m_engine && m_engine->set_region_gain(tid, rid, gain); }
     bool set_region_muted(uint32_t tid, uint32_t rid, bool muted) const { return m_engine && m_engine->set_region_muted(tid, rid, muted); }
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) const { return m_engine && m_engine->set_region_fades(tid, rid, fadeIn, fadeOut); }
+    bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
+                               float gain, uint64_t fadeIn, uint64_t fadeOut) const {
+        return m_engine && m_engine->set_region_range_edit(tid, rid, start, end, gain, fadeIn, fadeOut);
+    }
+    bool clear_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end) const {
+        return m_engine && m_engine->clear_region_range_edit(tid, rid, start, end);
+    }
+    bool clear_region_range_edits(uint32_t tid, uint32_t rid) const {
+        return m_engine && m_engine->clear_region_range_edits(tid, rid);
+    }
     bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) const { return m_engine && m_engine->set_region_reverse(tid, rid, reverse); }
     bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio) const { return m_engine && m_engine->set_region_warp_ratio(tid, rid, ratio); }
     bool set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones) const { return m_engine && m_engine->set_region_pitch_semitones(tid, rid, semitones); }
@@ -660,6 +1041,13 @@ public:
     }
     bool clear_region_audio_note_segments(uint32_t tid, uint32_t rid) const {
         return m_engine && m_engine->clear_region_audio_note_segments(tid, rid);
+    }
+    bool warp_region_audio_note_segment(uint32_t tid, uint32_t rid, double segmentStart,
+                                        double newStart, double newEnd) const {
+        return m_engine && m_engine->warp_region_audio_note_segment(tid, rid, segmentStart, newStart, newEnd);
+    }
+    bool remove_region_audio_note_segment(uint32_t tid, uint32_t rid, double segmentStart) const {
+        return m_engine && m_engine->remove_region_audio_note_segment(tid, rid, segmentStart);
     }
     bool analyze_region_audio_note_segments(uint32_t tid, uint32_t rid, double sampleRate) const {
         return m_engine && m_engine->analyze_region_audio_note_segments(tid, rid, sampleRate);
@@ -709,6 +1097,16 @@ public:
         return packed;
     }
     bool set_spatial_position(uint32_t tid, float x, float y, float z) const { return m_engine && m_engine->set_spatial_position(tid, x, y, z); }
+    bool set_hrtf_kernel(uint32_t tid, rust::Vec<float> left,
+                         rust::Vec<float> right) const {
+        if (!m_engine || left.empty() || left.size() != right.size()) return false;
+        std::vector<float> left_copy(left.begin(), left.end());
+        std::vector<float> right_copy(right.begin(), right.end());
+        return m_engine->set_hrtf_kernel(tid, left_copy, right_copy);
+    }
+    bool clear_hrtf_kernel(uint32_t tid) const {
+        return m_engine && m_engine->clear_hrtf_kernel(tid);
+    }
     void set_automation_record_mode(uint32_t mode) const {
         if (m_engine) m_engine->set_automation_record_mode(mode);
     }
@@ -781,6 +1179,58 @@ public:
     rust::Vec<float> get_region_waveform(uint32_t tid, uint32_t rid) const {
         return m_engine ? m_engine->get_region_waveform(tid, rid, 128) : rust::Vec<float>{};
     }
+    uint64_t queue_region_waveform(uint32_t tid, uint32_t rid) const {
+        if (!m_engine || tid == 0 || rid == 0) return 0;
+        const uint64_t request = s_waveformSequence.fetch_add(1, std::memory_order_relaxed) + 1;
+        {
+            std::lock_guard<std::mutex> lock(s_waveformMutex);
+            s_waveformPending.insert(request);
+        }
+        auto engine = m_engine;
+        std::thread([engine = std::move(engine), request, tid, rid] {
+            std::vector<float> waveform;
+            if (engine) {
+                const auto peaks = engine->get_region_waveform(tid, rid, 128);
+                waveform.assign(peaks.begin(), peaks.end());
+            }
+            std::lock_guard<std::mutex> lock(s_waveformMutex);
+            s_waveformPending.erase(request);
+            s_waveformResults.emplace(request, std::move(waveform));
+        }).detach();
+        return request;
+    }
+    rust::Vec<float> poll_region_waveform(uint64_t request) const {
+        rust::Vec<float> result;
+        if (request == 0) return result;
+        std::vector<float> waveform;
+        {
+            std::lock_guard<std::mutex> lock(s_waveformMutex);
+            const auto it = s_waveformResults.find(request);
+            if (it == s_waveformResults.end()) return result;
+            waveform = std::move(it->second);
+            s_waveformResults.erase(it);
+        }
+        for (const float sample : waveform) result.push_back(sample);
+        return result;
+    }
+    bool region_waveform_pending(uint64_t request) const noexcept {
+        std::lock_guard<std::mutex> lock(s_waveformMutex);
+        return s_waveformPending.find(request) != s_waveformPending.end();
+    }
+    rust::Vec<float> get_region_audio_samples(uint32_t tid, uint32_t rid) const {
+        return m_engine ? m_engine->get_region_audio_samples(tid, rid, 16u * 1024u * 1024u)
+                        : rust::Vec<float>{};
+    }
+    rust::Vec<float> get_region_audio_interleaved(uint32_t tid, uint32_t rid) const {
+        return m_engine ? m_engine->get_region_audio_interleaved(tid, rid, 16u * 1024u * 1024u)
+                        : rust::Vec<float>{};
+    }
+    double get_region_sample_rate(uint32_t tid, uint32_t rid) const {
+        return m_engine ? m_engine->get_region_sample_rate(tid, rid) : 0.0;
+    }
+    uint32_t get_region_channel_count(uint32_t tid, uint32_t rid) const {
+        return m_engine ? m_engine->get_region_channel_count(tid, rid) : 0;
+    }
     float get_cpu_total_v() const;
     rust::String get_project_layout_json() const;
     rust::String get_routing_snapshot_json() const;
@@ -805,11 +1255,48 @@ public:
     std::shared_ptr<::Aura::Core::Engine::AuraUnifiedEngine> get_core_shared() const { return m_engine; }
 
 private:
+#if !defined(__APPLE__)
+    void sync_jack_graph_config() const {
+#if defined(AURA_ENABLE_JACK)
+        if (!m_driver || !m_driver->is_running() || !m_engine) return;
+        m_engine->waitForAudioCallbacks();
+        ::Aura::Core::Engine::EngineConfig cfg;
+        cfg.tempo = m_engine->get_tempo();
+        cfg.sampleRate = m_driver->sample_rate();
+        cfg.blockSize = m_driver->buffer_size();
+        m_engine->apply_config(cfg);
+#endif
+    }
+    static void process_driver_block(const float* const* inputs, float* const* outputs,
+                                     uint32_t frames, void* context) noexcept {
+        auto* self = static_cast<AudioEngine*>(context);
+        if (!self || !self->m_engine || !outputs || !outputs[0] || !outputs[1] || frames == 0 ||
+            frames > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize) return;
+#if defined(AURA_ENABLE_JACK)
+        if (self->m_driver && inputs && inputs[0] && inputs[1])
+            self->m_driver->capture_input(inputs, 2, frames);
+#endif
+        float* channels[2] = {outputs[0], outputs[1]};
+        self->m_engine->processBlockDirect(channels, 2, frames);
+#if defined(AURA_ENABLE_JACK)
+        const float peak = std::max(std::abs(*std::max_element(outputs[0], outputs[0] + frames,
+            [](float a, float b) { return std::abs(a) < std::abs(b); })),
+            std::abs(*std::max_element(outputs[1], outputs[1] + frames,
+            [](float a, float b) { return std::abs(a) < std::abs(b); })));
+        if (self->m_driver) self->m_driver->record_callback(frames, std::isfinite(peak) ? peak : 0.0f);
+#endif
+    }
+#endif
     // Session-owned graph. AnalysisHub receives a shared reference to this
     // same graph, while separate FFI handles receive separate project state.
     std::shared_ptr<::Aura::Core::Engine::AuraUnifiedEngine> m_engine;
+    inline static std::atomic<uint64_t> s_waveformSequence{0};
+    inline static std::mutex s_waveformMutex;
+    inline static std::unordered_set<uint64_t> s_waveformPending;
+    inline static std::unordered_map<uint64_t, std::vector<float>> s_waveformResults;
     std::unique_ptr<AudioDriverHost> m_driver;
     mutable std::mutex m_configMutex;
+    mutable ::Aura::Core::Plugins::NativeEditorHost m_nativeEditorHost;
 };
 
 } // namespace Aura::Core::BridgeFFI

@@ -9,9 +9,11 @@ use crate::vfx_bindings::VfxBindingGraph;
 use crate::vfx_timeline_bridge::VfxCue;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub const PRODUCTION_SESSION_VERSION: u32 = 1;
+const MAX_PRODUCTION_SIDECAR_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProductionRevision {
@@ -109,8 +111,28 @@ impl ProductionSession {
         if !path.is_file() {
             return Ok(None);
         }
-        let bytes = std::fs::read(&path)
+        let file = std::fs::File::open(&path)
             .with_context(|| format!("read production sidecar {}", path.display()))?;
+        let size = file
+            .metadata()
+            .with_context(|| format!("stat production sidecar {}", path.display()))?
+            .len();
+        if size > MAX_PRODUCTION_SIDECAR_BYTES {
+            anyhow::bail!(
+                "production sidecar exceeds {} byte limit",
+                MAX_PRODUCTION_SIDECAR_BYTES
+            );
+        }
+        let mut bytes = Vec::with_capacity(size as usize);
+        file.take(MAX_PRODUCTION_SIDECAR_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .with_context(|| format!("read production sidecar {}", path.display()))?;
+        if bytes.len() as u64 > MAX_PRODUCTION_SIDECAR_BYTES {
+            anyhow::bail!(
+                "production sidecar exceeds {} byte limit",
+                MAX_PRODUCTION_SIDECAR_BYTES
+            );
+        }
         let session: Self = serde_json::from_slice(&bytes).context("decode production sidecar")?;
         session.validate()?;
         Ok(Some(session))
@@ -156,5 +178,23 @@ mod tests {
         let project =
             std::env::temp_dir().join(format!("aura-no-production-{}.aura", std::process::id()));
         assert!(ProductionSession::load_sidecar(project).unwrap().is_none());
+    }
+
+    #[test]
+    fn oversized_sidecar_is_rejected_before_decode() {
+        let root = std::env::temp_dir().join(format!(
+            "aura-production-session-oversized-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("song.aura");
+        let sidecar = ProductionSession::sidecar_path(&project);
+        let file = std::fs::File::create(&sidecar).unwrap();
+        file.set_len(MAX_PRODUCTION_SIDECAR_BYTES + 1).unwrap();
+
+        let result = ProductionSession::load_sidecar(&project);
+
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -64,11 +64,19 @@ public:
         kernel.drawRoundedRect(x, y, w, h, 4.0f, 0x11FFFFFF);
 
         // --- 2. SAMPLE LEVEL WAVEFORM (Logic 'File' Editor) ---
-        float step = (float)waveform.size() / w;
-        for (int i = 0; i < (int)w; ++i) {
-            float sample = waveform[(size_t)(i * step)];
-            float wh = std::abs(sample) * (h * 0.8f);
-            kernel.drawLine(x + i, y + h/2 - wh/2, x + i, y + h/2 + wh/2, 1.0f, 0xFF3D85C6); // Logic Wave Blue
+        if (waveform.empty() || w <= 1.0f || h <= 1.0f) return;
+        const uint32_t pixelWidth = static_cast<uint32_t>(std::max(1.0f, std::floor(w)));
+        const float step = static_cast<float>(waveform.size()) / static_cast<float>(pixelWidth);
+        for (uint32_t i = 0; i < pixelWidth; ++i) {
+            const size_t start = std::min(waveform.size() - 1u, static_cast<size_t>(i * step));
+            const size_t end = std::min(waveform.size(), std::max(start + 1u, static_cast<size_t>((i + 1u) * step)));
+            float peak = 0.0f;
+            for (size_t j = start; j < end; ++j) {
+                if (std::isfinite(waveform[j])) peak = std::max(peak, std::fabs(waveform[j]));
+            }
+            const float sample = std::clamp(peak, 0.0f, 1.0f);
+            float wh = sample * (h * 0.8f);
+            kernel.drawLine(x + static_cast<float>(i), y + h/2 - wh/2, x + static_cast<float>(i), y + h/2 + wh/2, 1.0f, 0xFF3D85C6); // Logic Wave Blue
         }
 
         // Selection / Loop markers

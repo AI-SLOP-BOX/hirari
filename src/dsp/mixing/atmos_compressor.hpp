@@ -22,7 +22,8 @@ public:
         bool linkAll = true; // Essential for spatial phase coherence
     };
 
-    AtmosCompressor(double sr = 44100.0) : m_sampleRate(sr) {}
+    AtmosCompressor(double sr = 44100.0) : m_sampleRate(
+        std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0) {}
 
     /**
      * @brief PROCESS IMMERSIVE: Applies linked compression to up to 12 channels.
@@ -68,7 +69,10 @@ public:
     }
     void reset() noexcept override { m_gain = 1.0f; }
 
-    void setSampleRate(double sr) { if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = sr; }
+    void setSampleRate(double sr) {
+        if (std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0) m_sampleRate = sr;
+        else m_sampleRate = 44'100.0;
+    }
     uint32_t getLatency() const { return 0; }
 
 private:

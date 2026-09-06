@@ -24,7 +24,11 @@ pub struct KWeightingFilterEngine {
 
 impl KWeightingFilterEngine {
     pub fn new(sample_rate: f64) -> Self {
-        let sample_rate = if sample_rate.is_finite() && sample_rate > 1.0 { sample_rate } else { 48_000.0 };
+        let sample_rate = if sample_rate.is_finite() && sample_rate > 1.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
         let mut engine = Self {
             sample_rate,
             z1_l_stage1: 0.0,
@@ -51,8 +55,24 @@ impl KWeightingFilterEngine {
     }
 
     pub fn set_sample_rate(&mut self, sr: f64) {
-        self.sample_rate = if sr.is_finite() && sr > 1.0 { sr } else { 48_000.0 };
+        self.sample_rate = if sr.is_finite() && sr > 1.0 {
+            sr
+        } else {
+            48_000.0
+        };
+        self.reset_state();
         self.setup_coefficients();
+    }
+
+    pub fn reset_state(&mut self) {
+        self.z1_l_stage1 = 0.0;
+        self.z2_l_stage1 = 0.0;
+        self.z1_r_stage1 = 0.0;
+        self.z2_r_stage1 = 0.0;
+        self.z1_l_stage2 = 0.0;
+        self.z2_l_stage2 = 0.0;
+        self.z1_r_stage2 = 0.0;
+        self.z2_r_stage2 = 0.0;
     }
 
     pub fn setup_coefficients(&mut self) {
@@ -76,55 +96,137 @@ impl KWeightingFilterEngine {
         let k = (std::f64::consts::PI * f0 / fs).tan();
         let common = 1.0 + k / q0 + k * k;
 
-        self.b0_stage2 = 1.0;
-        self.b1_stage2 = -2.0;
-        self.b2_stage2 = 1.0;
+        self.b0_stage2 = (1.0 / common) as f32;
+        self.b1_stage2 = (-2.0 / common) as f32;
+        self.b2_stage2 = (1.0 / common) as f32;
         self.a1_stage2 = (2.0 * (k * k - 1.0) / common) as f32;
         self.a2_stage2 = ((1.0 - k / q0 + k * k) / common) as f32;
     }
 
     /// INDUSTRIAL: Processes a stereo sample with K-Weighting.
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
-        // Stage 1: High Shelf (Pre-filter)
-        let v_l1 = self.b0_stage1 * l
-            + self.b1_stage1 * self.z1_l_stage1
-            + self.b2_stage1 * self.z2_l_stage1
-            - self.a1_stage1 * self.z1_l_stage1
-            - self.a2_stage1 * self.z2_l_stage1;
-        self.z2_l_stage1 = self.z1_l_stage1;
-        self.z1_l_stage1 = v_l1;
+        fn stage(
+            input: f32,
+            b0: f32,
+            b1: f32,
+            b2: f32,
+            a1: f32,
+            a2: f32,
+            z1: &mut f32,
+            z2: &mut f32,
+        ) -> f32 {
+            // Transposed Direct Form II: z1/z2 are delayed state values,
+            // not input history. This keeps the recursive denominator stable.
+            let output = b0 * input + *z1;
+            let next_z1 = b1 * input - a1 * output + *z2;
+            let next_z2 = b2 * input - a2 * output;
+            *z1 = if next_z1.is_finite() { next_z1 } else { 0.0 };
+            *z2 = if next_z2.is_finite() { next_z2 } else { 0.0 };
+            if output.is_finite() {
+                output
+            } else {
+                0.0
+            }
+        }
 
-        let v_r1 = self.b0_stage1 * r
-            + self.b1_stage1 * self.z1_r_stage1
-            + self.b2_stage1 * self.z2_r_stage1
-            - self.a1_stage1 * self.z1_r_stage1
-            - self.a2_stage1 * self.z2_r_stage1;
-        self.z2_r_stage1 = self.z1_r_stage1;
-        self.z1_r_stage1 = v_r1;
-
-        // Stage 2: High Pass (RLB-filter)
-        let out_l = self.b0_stage2 * v_l1
-            + self.b1_stage2 * self.z1_l_stage2
-            + self.b2_stage2 * self.z2_l_stage2
-            - self.a1_stage2 * self.z1_l_stage2
-            - self.a2_stage2 * self.z2_l_stage2;
-        self.z2_l_stage2 = self.z1_l_stage2;
-        self.z1_l_stage2 = out_l;
-
-        let out_r = self.b0_stage2 * v_r1
-            + self.b1_stage2 * self.z1_r_stage2
-            + self.b2_stage2 * self.z2_r_stage2
-            - self.a1_stage2 * self.z1_r_stage2
-            - self.a2_stage2 * self.z2_r_stage2;
-        self.z2_r_stage2 = self.z1_r_stage2;
-        self.z1_r_stage2 = out_r;
-
+        let v_l1 = stage(
+            l,
+            self.b0_stage1,
+            self.b1_stage1,
+            self.b2_stage1,
+            self.a1_stage1,
+            self.a2_stage1,
+            &mut self.z1_l_stage1,
+            &mut self.z2_l_stage1,
+        );
+        let v_r1 = stage(
+            r,
+            self.b0_stage1,
+            self.b1_stage1,
+            self.b2_stage1,
+            self.a1_stage1,
+            self.a2_stage1,
+            &mut self.z1_r_stage1,
+            &mut self.z2_r_stage1,
+        );
+        let out_l = stage(
+            v_l1,
+            self.b0_stage2,
+            self.b1_stage2,
+            self.b2_stage2,
+            self.a1_stage2,
+            self.a2_stage2,
+            &mut self.z1_l_stage2,
+            &mut self.z2_l_stage2,
+        );
+        let out_r = stage(
+            v_r1,
+            self.b0_stage2,
+            self.b1_stage2,
+            self.b2_stage2,
+            self.a1_stage2,
+            self.a2_stage2,
+            &mut self.z1_r_stage2,
+            &mut self.z2_r_stage2,
+        );
         (out_l, out_r)
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide K-Weighting Filter state.
     pub fn audit_k_weighting_filter(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic K-Weighting Filter auditing logic.
-        true
+        let finite = [
+            self.sample_rate,
+            self.b0_stage1 as f64,
+            self.b1_stage1 as f64,
+            self.b2_stage1 as f64,
+            self.a1_stage1 as f64,
+            self.a2_stage1 as f64,
+            self.b0_stage2 as f64,
+            self.b1_stage2 as f64,
+            self.b2_stage2 as f64,
+            self.a1_stage2 as f64,
+            self.a2_stage2 as f64,
+        ]
+        .iter()
+        .all(|v| v.is_finite())
+            && self.sample_rate > 1.0;
+        let stable = |a1: f32, a2: f32| {
+            // Jury conditions for a(z)=1+a1*z^-1+a2*z^-2.
+            a2.abs() < 1.0 && 1.0 + a1 + a2 > 0.0 && 1.0 - a1 + a2 > 0.0
+        };
+        finite && stable(self.a1_stage1, self.a2_stage1) && stable(self.a1_stage2, self.a2_stage2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KWeightingFilterEngine;
+
+    #[test]
+    fn transposed_df2_remains_finite_for_impulse_and_silence() {
+        let mut filter = KWeightingFilterEngine::new(48_000.0);
+        for i in 0..4096 {
+            let input = if i == 0 { 1.0 } else { 0.0 };
+            let (l, r) = filter.process(input, input);
+            assert!(l.is_finite() && r.is_finite());
+        }
+        assert!(filter.audit_k_weighting_filter());
+    }
+
+    #[test]
+    fn audit_rejects_unstable_denominator() {
+        let mut filter = KWeightingFilterEngine::new(48_000.0);
+        filter.a2_stage1 = 1.0;
+        assert!(!filter.audit_k_weighting_filter());
+    }
+
+    #[test]
+    fn sample_rate_change_clears_old_filter_history() {
+        let mut filter = KWeightingFilterEngine::new(48_000.0);
+        let _ = filter.process(1.0, -1.0);
+        filter.set_sample_rate(96_000.0);
+        assert_eq!(filter.z1_l_stage1, 0.0);
+        assert_eq!(filter.z2_r_stage2, 0.0);
+        assert_eq!(filter.sample_rate, 96_000.0);
     }
 }

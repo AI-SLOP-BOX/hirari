@@ -4,6 +4,7 @@
 #include <cmath>
 #include <array>
 #include <complex>
+#include <algorithm>
 
 namespace Aura::DSP::Library {
 
@@ -22,6 +23,12 @@ public:
     struct BiquadCoeffs { double b0, b1, b2, a1, a2; };
 
     static BiquadCoeffs designPeak(double freq, double gainDb, double q, double sr) {
+        if (!std::isfinite(freq) || !std::isfinite(gainDb) || !std::isfinite(q) ||
+            !std::isfinite(sr) || sr <= 0.0 || q <= 0.0) {
+            return {};
+        }
+        freq = std::clamp(freq, 1.0, sr * 0.49);
+        gainDb = std::clamp(gainDb, -120.0, 120.0);
         double A = std::pow(10.0, gainDb / 40.0);
         double w0 = 2.0 * M_PI * freq / sr;
         double alpha = std::sin(w0) / (2.0 * q);
@@ -32,6 +39,8 @@ public:
 
     // --- 2. OSCILLATORS (BLEP Pro Deep Elite) ---
     static float polyBLEPElite(float t, float dt) {
+        if (!std::isfinite(t) || !std::isfinite(dt) || dt <= 0.0f || dt >= 1.0f) return 0.0f;
+        t -= std::floor(t);
         if (t < dt) {
             t /= dt;
             return t + t - t * t - 1.0f;
@@ -44,6 +53,7 @@ public:
 
     // --- 3. SATURATION (Vacuum Tube Modeling Pro) ---
     static float tubeSaturatePro(float x, float drive) {
+        if (!std::isfinite(x) || !std::isfinite(drive) || drive < 0.0f) return 0.0f;
         float xd = x * drive;
         return xd / (1.0f + std::abs(xd)); // Soft asymm clip
     }

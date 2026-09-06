@@ -8,21 +8,66 @@ pub struct LoudnessState {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LoudnessPreset { EbuR128, AtscA85, Streaming, JapaneseBroadcast }
+pub enum LoudnessPreset {
+    EbuR128,
+    AtscA85,
+    Streaming,
+    JapaneseBroadcast,
+}
 
 impl LoudnessPreset {
-    pub fn limits(self) -> (f32, f32) { match self { Self::EbuR128 => (-23.0, -1.0), Self::AtscA85 => (-24.0, -2.0), Self::Streaming => (-14.0, -1.0), Self::JapaneseBroadcast => (-24.0, -1.0) } }
-    pub fn compliant(self, integrated: f32, true_peak: f32) -> bool { let (target, peak)=self.limits(); integrated.is_finite() && true_peak.is_finite() && (integrated-target).abs() <= 1.0 && true_peak <= peak }
+    pub fn limits(self) -> (f32, f32) {
+        match self {
+            Self::EbuR128 => (-23.0, -1.0),
+            Self::AtscA85 => (-24.0, -2.0),
+            Self::Streaming => (-14.0, -1.0),
+            Self::JapaneseBroadcast => (-24.0, -1.0),
+        }
+    }
+    pub fn compliant(self, integrated: f32, true_peak: f32) -> bool {
+        let (target, peak) = self.limits();
+        integrated.is_finite()
+            && true_peak.is_finite()
+            && (integrated - target).abs() <= 1.0
+            && true_peak <= peak
+    }
     pub fn evaluate(self, integrated: f32, true_peak: f32) -> LoudnessReport {
         let (target, peak) = self.limits();
-        LoudnessReport { target_lufs: target, integrated_lufs: integrated, true_peak_db: true_peak, delta_lufs: integrated - target, peak_headroom_db: peak - true_peak, compliant: self.compliant(integrated, true_peak) }
+        LoudnessReport {
+            target_lufs: target,
+            integrated_lufs: integrated,
+            true_peak_db: true_peak,
+            delta_lufs: integrated - target,
+            peak_headroom_db: peak - true_peak,
+            compliant: self.compliant(integrated, true_peak),
+        }
     }
-    pub fn validate_delivery(self, reports: &[(f32, f32)]) -> bool { !reports.is_empty() && reports.iter().all(|(lufs, peak)| self.compliant(*lufs, *peak)) }
+    pub fn validate_delivery(self, reports: &[(f32, f32)]) -> bool {
+        !reports.is_empty()
+            && reports
+                .iter()
+                .all(|(lufs, peak)| self.compliant(*lufs, *peak))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LoudnessReport { pub target_lufs: f32, pub integrated_lufs: f32, pub true_peak_db: f32, pub delta_lufs: f32, pub peak_headroom_db: f32, pub compliant: bool }
-impl LoudnessReport { pub fn valid(&self) -> bool { self.target_lufs.is_finite() && self.integrated_lufs.is_finite() && self.true_peak_db.is_finite() && self.delta_lufs.is_finite() && self.peak_headroom_db.is_finite() } }
+pub struct LoudnessReport {
+    pub target_lufs: f32,
+    pub integrated_lufs: f32,
+    pub true_peak_db: f32,
+    pub delta_lufs: f32,
+    pub peak_headroom_db: f32,
+    pub compliant: bool,
+}
+impl LoudnessReport {
+    pub fn valid(&self) -> bool {
+        self.target_lufs.is_finite()
+            && self.integrated_lufs.is_finite()
+            && self.true_peak_db.is_finite()
+            && self.delta_lufs.is_finite()
+            && self.peak_headroom_db.is_finite()
+    }
+}
 
 pub struct LoudnessOrchestrator {
     pub state: LoudnessState,
@@ -109,8 +154,8 @@ impl LoudnessOrchestrator {
         // energy for the long-term value.  The sample-rate read also guards
         // against callers accidentally passing an invalid device rate.
         let integration_alpha = (data.len() as f32 / safe_sample_rate).clamp(0.0001, 1.0);
-        self.state.integrated = self.state.integrated * (1.0 - integration_alpha)
-            + integrated_db * integration_alpha;
+        self.state.integrated =
+            self.state.integrated * (1.0 - integration_alpha) + integrated_db * integration_alpha;
         self.state.true_peak = self.state.true_peak.max(peak_db);
     }
 

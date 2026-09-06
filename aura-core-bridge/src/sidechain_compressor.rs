@@ -33,11 +33,24 @@ impl SidechainCompressorEngine {
         self.release = release;
     }
 
-    pub fn try_set_params(&mut self, threshold: f32, ratio: f32, attack_ms: f32, release_ms: f32) -> bool {
-        if !threshold.is_finite() || !(1e-5..=4.0).contains(&threshold)
-            || !ratio.is_finite() || !(1.0..=1000.0).contains(&ratio)
-            || !attack_ms.is_finite() || !(0.01..=10_000.0).contains(&attack_ms)
-            || !release_ms.is_finite() || !(0.01..=30_000.0).contains(&release_ms) { return false; }
+    pub fn try_set_params(
+        &mut self,
+        threshold: f32,
+        ratio: f32,
+        attack_ms: f32,
+        release_ms: f32,
+    ) -> bool {
+        if !threshold.is_finite()
+            || !(1e-5..=4.0).contains(&threshold)
+            || !ratio.is_finite()
+            || !(1.0..=1000.0).contains(&ratio)
+            || !attack_ms.is_finite()
+            || !(0.01..=10_000.0).contains(&attack_ms)
+            || !release_ms.is_finite()
+            || !(0.01..=30_000.0).contains(&release_ms)
+        {
+            return false;
+        }
         self.set_params(threshold, ratio, attack_ms, release_ms);
         true
     }
@@ -45,17 +58,7 @@ impl SidechainCompressorEngine {
     /// INDUSTRIAL: Professional High-performance Ducking Engine using the Sidechain input.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32], sidechain: Option<(&[f32], &[f32])>) {
         let len = l.len().min(r.len());
-        if !self.sample_rate.is_finite()
-            || self.sample_rate <= 0.0
-            || !self.threshold.is_finite()
-            || self.threshold <= 0.0
-            || !self.ratio.is_finite()
-            || self.ratio < 1.0
-            || !self.attack.is_finite()
-            || self.attack <= 0.0
-            || !self.release.is_finite()
-            || self.release <= 0.0
-        {
+        if len == 0 || !self.audit_sidechain_compressor() {
             return;
         }
 
@@ -105,13 +108,19 @@ impl SidechainCompressorEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Sidechain Compressor state.
     pub fn audit_sidechain_compressor(&self) -> bool {
         self.sample_rate.is_finite()
-            && self.sample_rate > 100.0
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
             && self.threshold.is_finite()
-            && self.threshold > 0.0
+            && (1e-5..=4.0).contains(&self.threshold)
             && self.ratio.is_finite()
-            && self.ratio >= 1.0
+            && (1.0..=1000.0).contains(&self.ratio)
+            && self.attack.is_finite()
+            && (0.01..=10_000.0).contains(&self.attack)
+            && self.release.is_finite()
+            && (0.01..=30_000.0).contains(&self.release)
             && self.env.is_finite()
+            && (0.0..=4.0).contains(&self.env)
             && self.current_gain.is_finite()
+            && (0.0..=1.0).contains(&self.current_gain)
     }
 }
 

@@ -3,17 +3,30 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MIDIEventKind {
-    ControlChange { controller: u8, value: u8 },
-    PitchBend { value: f32 },
-    ChannelAftertouch { pressure: f32 },
+    ControlChange {
+        controller: u8,
+        value: u8,
+    },
+    PitchBend {
+        value: f32,
+    },
+    ChannelAftertouch {
+        pressure: f32,
+    },
     /// MIDI 1.0 SysEx payload without the surrounding F0/F7 framing. The
     /// event model owns the bytes so a device disconnect cannot invalidate a
     /// queued message.
-    SysEx { data: Vec<u8> },
+    SysEx {
+        data: Vec<u8>,
+    },
     /// MIDI 2.0 channel voice message represented in its semantic form.
     /// `status` is the high-nibble message type (0x8..=0xE), `index` is the
     /// note/controller index, and `value` preserves the full 32-bit payload.
-    Midi2ChannelVoice { status: u8, index: u8, value: u32 },
+    Midi2ChannelVoice {
+        status: u8,
+        index: u8,
+        value: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -73,11 +86,7 @@ impl MIDIOrchestrator {
     /// Decode one 64-bit MIDI 2.0 Channel Voice UMP into the common project
     /// event model. The group nibble is intentionally ignored here; device
     /// routing resolves groups before events reach a track.
-    pub fn decode_midi2_channel_voice(
-        beat: f32,
-        word0: u32,
-        word1: u32,
-    ) -> Option<MIDIEvent> {
+    pub fn decode_midi2_channel_voice(beat: f32, word0: u32, word1: u32) -> Option<MIDIEvent> {
         if ((word0 >> 28) & 0x0f) != 0x04 {
             return None;
         }
@@ -87,7 +96,11 @@ impl MIDIOrchestrator {
         let event = MIDIEvent {
             beat,
             channel,
-            kind: MIDIEventKind::Midi2ChannelVoice { status, index, value: word1 },
+            kind: MIDIEventKind::Midi2ChannelVoice {
+                status,
+                index,
+                value: word1,
+            },
         };
         event.validate().then_some(event)
     }
@@ -96,7 +109,11 @@ impl MIDIOrchestrator {
     /// are omitted from the persisted event and are added by the device
     /// adapter when transmitting.
     pub fn sysex_event(beat: f32, channel: u8, data: Vec<u8>) -> Option<MIDIEvent> {
-        let event = MIDIEvent { beat, channel, kind: MIDIEventKind::SysEx { data } };
+        let event = MIDIEvent {
+            beat,
+            channel,
+            kind: MIDIEventKind::SysEx { data },
+        };
         event.validate().then_some(event)
     }
 
@@ -124,31 +141,77 @@ impl MIDIOrchestrator {
 
     /// INDUSTRIAL: Processes MPE data with absolute precision and MIDI sovereignty.
     pub fn process_mpe(&mut self, buffer: &mut [u8]) {
-        if !self.mpe_enabled { return; }
+        if !self.mpe_enabled {
+            return;
+        }
         // Consume packed MIDI-1 channel voice messages.  MPE uses channel
         // pressure and pitch bend on the note's member channel; malformed
         // trailing bytes are ignored rather than being interpreted as a new
         // event.
         for message in buffer.as_chunks::<3>().0 {
             let status = message[0];
-            if status & 0x80 == 0 { continue; }
+            if status & 0x80 == 0 {
+                continue;
+            }
             let channel = status & 0x0f;
             let kind = status & 0xf0;
             let data1 = message[1] & 0x7f;
             let data2 = message[2] & 0x7f;
-            if channel == 0 { continue; }
+            if channel == 0 {
+                continue;
+            }
             match kind {
                 0x90 if data2 != 0 => {
-                    if let Some(note) = self.mpe_notes.iter_mut().find(|note| note.channel == channel && note.note_number == data1) {
-                        note.pressure = data2 as f32 / 127.0;
+                    if let Some(note) = self
+                        .mpe_notes
+                        .iter_mut()
+                        .find(|note| note.channel == channel && note.note_number == data1)
+                    {
+                        // A note-on velocity is not per-note pressure. Keep
+                        // the expressive dimension neutral until an actual
+                        // channel-pressure message arrives.
+                        note.pressure = 0.0;
                     } else if self.mpe_notes.len() < 128 {
-                        self.mpe_notes.push(MPENoteState { note_number: data1, channel, pressure: data2 as f32 / 127.0, timbre: 0.0, bend: 0.0 });
+                        self.mpe_notes.push(MPENoteState {
+                            note_number: data1,
+                            channel,
+                            pressure: 0.0,
+                            timbre: 0.0,
+                            bend: 0.0,
+                        });
                     }
                 }
-                0x80 | 0x90 => self.mpe_notes.retain(|note| !(note.channel == channel && note.note_number == data1)),
-                0xD0 => if let Some(note) = self.mpe_notes.iter_mut().find(|note| note.channel == channel) { note.pressure = data1 as f32 / 127.0; },
-                0xE0 => if let Some(note) = self.mpe_notes.iter_mut().find(|note| note.channel == channel) { note.bend = ((u16::from(data2) << 7 | u16::from(data1)) as f32 - 8192.0) / 8192.0; },
-                0xB0 if data1 == 74 => if let Some(note) = self.mpe_notes.iter_mut().find(|note| note.channel == channel) { note.timbre = data2 as f32 / 127.0; },
+                0x80 | 0x90 => self
+                    .mpe_notes
+                    .retain(|note| !(note.channel == channel && note.note_number == data1)),
+                0xD0 => {
+                    if let Some(note) = self
+                        .mpe_notes
+                        .iter_mut()
+                        .find(|note| note.channel == channel)
+                    {
+                        note.pressure = data1 as f32 / 127.0;
+                    }
+                }
+                0xE0 => {
+                    if let Some(note) = self
+                        .mpe_notes
+                        .iter_mut()
+                        .find(|note| note.channel == channel)
+                    {
+                        note.bend =
+                            ((u16::from(data2) << 7 | u16::from(data1)) as f32 - 8192.0) / 8192.0;
+                    }
+                }
+                0xB0 if data1 == 74 => {
+                    if let Some(note) = self
+                        .mpe_notes
+                        .iter_mut()
+                        .find(|note| note.channel == channel)
+                    {
+                        note.timbre = data2 as f32 / 127.0;
+                    }
+                }
                 _ => {}
             }
         }
@@ -241,20 +304,30 @@ impl MIDIOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide MIDI synchronization graph.
     pub fn audit_midi(&self) -> bool {
-        self.mpe_notes.iter().all(|note| {
-            note.note_number < 128
-                && note.channel < 16
-                && note.pressure.is_finite()
-                && (0.0..=1.0).contains(&note.pressure)
-                && note.timbre.is_finite()
-                && (0.0..=1.0).contains(&note.timbre)
-                && note.bend.is_finite()
-                && (-1.0..=1.0).contains(&note.bend)
-        }) && self
-            .articulation_maps
-            .len() <= 4096
-            && self.articulation_maps.iter().all(|map| map.id != 0 && !map.name.trim().is_empty() && map.name.len() <= 128 && !map.name.contains('\0') && map.trigger_channel < 16)
-            && self.articulation_maps.iter().enumerate().all(|(i,map)| self.articulation_maps[..i].iter().all(|prev| prev.id != map.id))
+        self.mpe_notes.len() <= 128
+            && self.mpe_notes.iter().all(|note| {
+                note.note_number < 128
+                    && note.channel < 16
+                    && note.pressure.is_finite()
+                    && (0.0..=1.0).contains(&note.pressure)
+                    && note.timbre.is_finite()
+                    && (0.0..=1.0).contains(&note.timbre)
+                    && note.bend.is_finite()
+                    && (-1.0..=1.0).contains(&note.bend)
+            })
+            && self.articulation_maps.len() <= 4096
+            && self.articulation_maps.iter().all(|map| {
+                map.id != 0
+                    && !map.name.trim().is_empty()
+                    && map.name.len() <= 128
+                    && !map.name.contains('\0')
+                    && map.trigger_channel < 16
+            })
+            && self.articulation_maps.iter().enumerate().all(|(i, map)| {
+                self.articulation_maps[..i]
+                    .iter()
+                    .all(|prev| prev.id != map.id)
+            })
             && self.cc_mappings.keys().all(|key| {
                 let channel = (key >> 8) & 0xff;
                 let controller = key & 0xff;

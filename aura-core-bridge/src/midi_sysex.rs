@@ -52,7 +52,11 @@ pub struct Sysex8Packet {
 }
 
 pub fn encode_sysex8(packet: &Sysex8Packet) -> Result<[u32; 4], UmpError> {
-    if packet.group > 15 || packet.status > 3 || packet.payload.is_empty() || packet.payload.len() > 12 {
+    if packet.group > 15
+        || packet.status > 3
+        || packet.payload.is_empty()
+        || packet.payload.len() > 12
+    {
         return Err(UmpError::InvalidWordCount);
     }
     let first = (0x5u32 << 28)
@@ -75,9 +79,14 @@ pub fn encode_sysex8(packet: &Sysex8Packet) -> Result<[u32; 4], UmpError> {
 
 pub fn decode_sysex8(words: [u32; 4]) -> Result<Sysex8Packet, UmpError> {
     validate_ump_packet(&words)?;
-    let bytes = words.into_iter().flat_map(u32::to_be_bytes).collect::<Vec<_>>();
+    let bytes = words
+        .into_iter()
+        .flat_map(u32::to_be_bytes)
+        .collect::<Vec<_>>();
     let length = ((words[0] >> 16) & 0x0f) as usize;
-    if length == 0 || length > 12 { return Err(UmpError::InvalidWordCount); }
+    if length == 0 || length > 12 {
+        return Err(UmpError::InvalidWordCount);
+    }
     Ok(Sysex8Packet {
         group: ((words[0] >> 24) & 0x0f) as u8,
         status: ((words[0] >> 20) & 0x0f) as u8,
@@ -243,8 +252,16 @@ mod tests {
 
     #[test]
     fn sysex8_round_trips_complete_packet() {
-        let packet = Sysex8Packet { group: 2, status: 3, stream_id: 9, payload: (1..=12).collect() };
-        assert_eq!(decode_sysex8(encode_sysex8(&packet).unwrap()).unwrap(), packet);
+        let packet = Sysex8Packet {
+            group: 2,
+            status: 3,
+            stream_id: 9,
+            payload: (1..=12).collect(),
+        };
+        assert_eq!(
+            decode_sysex8(encode_sysex8(&packet).unwrap()).unwrap(),
+            packet
+        );
         assert!(validate_ump_packet(&[0x530c_0900, 0, 0, 0]).is_ok());
     }
 }

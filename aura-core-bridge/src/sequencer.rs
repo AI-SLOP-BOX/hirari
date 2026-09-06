@@ -91,7 +91,9 @@ impl SequencerOrchestrator {
                     seed ^= seed << 25;
                     seed ^= seed >> 27;
                     let roll = seed.wrapping_mul(0x2545_F491_4F6C_DD1D) % 100;
-                    if roll >= probability as u64 { continue; }
+                    if roll >= probability as u64 {
+                        continue;
+                    }
                 }
                 let scaled_step = samples_per_step * step as f64;
                 let offset = self.resolve_step_timing(step as u32) * samples_per_step;
@@ -122,9 +124,14 @@ impl SequencerOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide rhythmic synchronization graph.
     pub fn audit_sequencer(&self) -> bool {
         self.lanes.len() <= 128
-            && self.swing_amount.is_finite() && (-1.0..=1.0).contains(&self.swing_amount)
-            && self.humanize_amount.is_finite() && (0.0..=1.0).contains(&self.humanize_amount)
-            && self.lanes.iter().all(|lane| lane.velocities.iter().all(|v| *v <= 127))
+            && self.swing_amount.is_finite()
+            && (-1.0..=1.0).contains(&self.swing_amount)
+            && self.humanize_amount.is_finite()
+            && (0.0..=1.0).contains(&self.humanize_amount)
+            && self
+                .lanes
+                .iter()
+                .all(|lane| lane.velocities.iter().all(|v| *v <= 127))
     }
 }
 

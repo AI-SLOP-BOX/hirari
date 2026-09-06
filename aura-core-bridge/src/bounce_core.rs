@@ -29,25 +29,57 @@ impl BounceCoreOrchestrator {
     }
 
     /// INDUSTRIAL: Executes a professional batch render with absolute parallel precision.
-    pub fn execute_professional_batch_render(&mut self, tasks: &[ExportTask]) {
-        // INDUSTRIAL: Implementation of high-performance parallel rendering.
-        // Rust's safe memory management handles complex multi-threaded stem exports with
-        // absolute bit-accuracy and zero-latency.
-        // Rust's RenderEngine ensures bit-accurate audio calculation.
-        // Rust's BatchExportEngine ensures zero-technical drift in task distribution.
+    pub fn execute_professional_batch_render(
+        &mut self,
+        tasks: &[ExportTask],
+    ) -> Result<(), WavExportError> {
+        // There is no safe implicit renderer for this legacy entry point. Do
+        // not report a successful professional bounce merely because tasks
+        // were queued; callers must provide the native graph callback below.
+        if tasks.is_empty() {
+            self.last_error = Some("no export tasks queued".into());
+            return Err(WavExportError::InvalidTask);
+        }
+        if tasks
+            .iter()
+            .any(|task| task.track_id == 0 || task.label.trim().is_empty())
+        {
+            self.last_error = Some("invalid export task".into());
+            return Err(WavExportError::InvalidTask);
+        }
         self.active_tasks = tasks.len();
-        self.last_error = if tasks.iter().any(|task| task.label.trim().is_empty()) {
-            Some("invalid export task".into())
-        } else if tasks.is_empty() {
-            Some("no export tasks queued".into())
-        } else {
-            None
-        };
+        self.last_error = Some("renderer callback is required".into());
+        Err(WavExportError::RendererNotConnected)
     }
 
-    /// INDUSTRIAL: Processes a single isolated professional export.
-    pub fn process_single_professional_export(&self, task: &ExportTask) {
-        let _valid = task.track_id > 0 && !task.label.trim().is_empty();
+    /// Processes one export through the supplied native-graph callback.
+    pub fn process_single_professional_export_with_renderer<F>(
+        &mut self,
+        output_dir: &Path,
+        task: &ExportTask,
+        sample_rate: u32,
+        channels: u16,
+        mut render: F,
+    ) -> Result<(), WavExportError>
+    where
+        F: FnMut(&ExportTask) -> Result<Vec<f32>, String>,
+    {
+        self.render_batch_with_renderer(output_dir, std::slice::from_ref(task), sample_rate, channels, |item| render(item))
+            .map(|_| ())
+    }
+
+    /// Legacy single-export entry point. It now fails explicitly instead of
+    /// silently accepting a task without rendering any audio.
+    pub fn process_single_professional_export(
+        &mut self,
+        task: &ExportTask,
+    ) -> Result<(), WavExportError> {
+        if task.track_id == 0 || task.label.trim().is_empty() {
+            self.last_error = Some("invalid export task".into());
+            return Err(WavExportError::InvalidTask);
+        }
+        self.last_error = Some("renderer callback is required".into());
+        Err(WavExportError::RendererNotConnected)
     }
 
     /// Render and publish a complete stem batch through a caller-owned
@@ -69,7 +101,8 @@ impl BounceCoreOrchestrator {
             self.last_error = Some("invalid bounce output directory".into());
             return Err(WavExportError::InvalidPath);
         }
-        if tasks.is_empty() || !(1..=384_000).contains(&sample_rate)
+        if tasks.is_empty()
+            || !(1..=384_000).contains(&sample_rate)
             || !(1..=32).contains(&channels)
         {
             self.last_error = Some("invalid bounce batch".into());
@@ -109,9 +142,9 @@ impl BounceCoreOrchestrator {
 
         let mut published = Vec::with_capacity(outputs.len());
         for (path, samples) in outputs {
-            if let Err(error) = export_interleaved_buffer_to_wav(
-                &path, &samples, sample_rate, channels, true,
-            ) {
+            if let Err(error) =
+                export_interleaved_buffer_to_wav(&path, &samples, sample_rate, channels, true)
+            {
                 for old_path in &published {
                     let _ = std::fs::remove_file(old_path);
                 }
@@ -172,7 +205,11 @@ fn safe_filename(name: &str) -> String {
             result.push('_');
         }
     }
-    if result.is_empty() { "track".to_owned() } else { result }
+    if result.is_empty() {
+        "track".to_owned()
+    } else {
+        result
+    }
 }
 
 #[cfg(test)]
@@ -206,29 +243,77 @@ mod tests {
     }
 
     #[test]
-    fn batch_render_rolls_back_when_a_later_stem_is_invalid() {
+    fn legacy_professional_entry_points_never_claim_success_without_renderer() {
+        let task = ExportTask {
+            track_id: 1,
+            label: "Preview".into(),
+            is_multi_channel: false,
+        };
+        let mut bounce = BounceCoreOrchestrator::new();
+        assert_eq!(
+            bounce.execute_professional_batch_render(std::slice::from_ref(&task)),
+            Err(WavExportError::RendererNotConnected)
+        );
+        assert_eq!(
+            bounce.process_single_professional_export(&task),
+            Err(WavExportError::RendererNotConnected)
+        );
+    }
+
+    #[test]
+    fn single_professional_export_uses_the_supplied_renderer() {
         let output_dir = std::env::temp_dir().join(format!(
-            "aura-bounce-batch-{}",
-            std::process::id()
+            "aura-single-render-{}-{}",
+            std::process::id(),
+            1
         ));
+        fs::create_dir_all(&output_dir).unwrap();
+        let task = ExportTask {
+            track_id: 1,
+            label: "Preview".into(),
+            is_multi_channel: false,
+        };
+        let mut bounce = BounceCoreOrchestrator::new();
+        assert_eq!(
+            bounce.process_single_professional_export_with_renderer(
+                &output_dir,
+                &task,
+                48_000,
+                2,
+                |_| Ok(vec![0.0, 0.0, 0.25, -0.25]),
+            ),
+            Ok(())
+        );
+        assert!(output_dir.join("0001_Preview.wav").is_file());
+        let _ = fs::remove_dir_all(output_dir);
+    }
+
+    #[test]
+    fn batch_render_rolls_back_when_a_later_stem_is_invalid() {
+        let output_dir =
+            std::env::temp_dir().join(format!("aura-bounce-batch-{}", std::process::id()));
         let _ = fs::remove_dir_all(&output_dir);
         fs::create_dir_all(&output_dir).unwrap();
         let tasks = vec![
-            ExportTask { track_id: 1, label: "Lead Vocal".into(), is_multi_channel: false },
-            ExportTask { track_id: 2, label: "Bass".into(), is_multi_channel: false },
+            ExportTask {
+                track_id: 1,
+                label: "Lead Vocal".into(),
+                is_multi_channel: false,
+            },
+            ExportTask {
+                track_id: 2,
+                label: "Bass".into(),
+                is_multi_channel: false,
+            },
         ];
         let mut bounce = BounceCoreOrchestrator::new();
-        let result = bounce.render_batch_with_renderer(
-            &output_dir,
-            &tasks,
-            48_000,
-            1,
-            |task| if task.track_id == 1 {
+        let result = bounce.render_batch_with_renderer(&output_dir, &tasks, 48_000, 1, |task| {
+            if task.track_id == 1 {
                 Ok(vec![0.0])
             } else {
                 Ok(vec![f32::NAN])
-            },
-        );
+            }
+        });
         assert_eq!(result, Err(WavExportError::NonFiniteSample));
         assert!(!output_dir.join("0001_Lead_Vocal.wav").exists());
         let _ = fs::remove_dir_all(output_dir);

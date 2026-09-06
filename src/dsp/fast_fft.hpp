@@ -14,7 +14,7 @@ namespace Aura::DSP {
 class FastFFT {
 public:
     static void process(float* buffer, uint32_t n) {
-        if (n == 0 || (n & (n - 1)) != 0) return; // Must be power of 2
+        if (!buffer || n < 2 || n > (1u << 20) || (n & (n - 1)) != 0) return; // Must be a bounded power of 2
 
         // Bit-reversal permutation
         for (uint32_t i = 1, j = 0; i < n; i++) {
@@ -42,6 +42,7 @@ public:
     }
 
     static void computeBands(const float* fftResult, uint32_t n, float* bands) {
+        if (!fftResult || !bands || n < 8 || n > (1u << 20) || (n & (n - 1)) != 0) return;
         // Simple 4-band split: Sub, Low, Mid, High
         uint32_t bSize = n / 8; // Focus on first quarter (Nyquist/2)
         for (int b = 0; b < 4; ++b) {

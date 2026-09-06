@@ -12,6 +12,12 @@ AudioEngine::AudioEngine() : AudioEngine(true) {}
 AudioEngine::AudioEngine(bool startDevice)
         : m_engine(std::make_shared<::Aura::Core::Engine::AuraUnifiedEngine>()) {
         m_driver = std::make_unique<AudioDriverHost>();
+#if !defined(__APPLE__)
+        // The optional JACK host and the offline fallback both use this same
+        // callback boundary. The fallback stores the callback and dispatches
+        // it from process_audio_block without claiming hardware availability.
+        m_driver->set_process_callback(&AudioEngine::process_driver_block, this);
+#endif
         if (!startDevice) return;
         // Control-plane clients (CLI, offline render, project inspection and
         // isolated tests) must be able to construct an engine without taking
@@ -48,6 +54,8 @@ AudioEngine::AudioEngine(bool startDevice)
             ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
             ::Aura::Core::StatusQueue::Severity::Warning,
             "Audio backend unavailable on this platform; using offline backend.");
+        } else {
+            sync_jack_graph_config();
         }
 #endif
     }
@@ -70,6 +78,9 @@ bool AudioEngine::start_audio_device() const {
         // leave the graph logically playing while no callback can consume it.
         m_engine->set_playing(false);
     }
+#if !defined(__APPLE__)
+    if (started) sync_jack_graph_config();
+#endif
     return started;
 }
 
@@ -147,14 +158,13 @@ bool AudioEngine::start_audio_device() const {
 
     rust::Vec<float> AudioEngine::poll_audio_input() const {
         rust::Vec<float> result;
-#if defined(__APPLE__)
         if (!m_driver) return result;
         constexpr uint32_t kMaxChannels = 2;
         constexpr uint32_t kMaxFrames = 4096;
         float left[kMaxFrames]{};
         float right[kMaxFrames]{};
         float* channels[kMaxChannels] = {left, right};
-        ::Aura::Core::Driver::MacAudioDriverHost::InputBlockInfo info{};
+        ::Aura::Core::Driver::MacAudioInputBlockQueue::BlockInfo info{};
         uint64_t dropped = 0;
         if (!m_driver->poll_input_block(channels, kMaxChannels, kMaxFrames, info, dropped))
             return result;
@@ -162,9 +172,6 @@ bool AudioEngine::start_audio_device() const {
         for (uint32_t frame = 0; frame < info.frameCount; ++frame)
             for (uint32_t channel = 0; channel < info.channelCount; ++channel)
                 result.push_back(channels[channel][frame]);
-#else
-        (void)m_driver;
-#endif
         return result;
     }
 

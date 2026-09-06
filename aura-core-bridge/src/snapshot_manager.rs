@@ -74,7 +74,12 @@ impl SnapshotOrchestrator {
     /// Returns snapshots in a stable order for UI lists and interchange.
     pub fn list_snapshots(&self) -> Vec<&ProjectSnapshotRust> {
         let mut snapshots: Vec<_> = self.snapshots.values().collect();
-        snapshots.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()).then(a.id.cmp(&b.id)));
+        snapshots.sort_by(|a, b| {
+            a.name
+                .to_ascii_lowercase()
+                .cmp(&b.name.to_ascii_lowercase())
+                .then(a.id.cmp(&b.id))
+        });
         snapshots
     }
 
@@ -92,7 +97,11 @@ impl SnapshotOrchestrator {
         }
         let mut ids = std::collections::HashSet::with_capacity(self.snapshots.len());
         self.snapshots.values().all(|snapshot| {
-            snapshot.id != 0 && ids.insert(snapshot.id) && !snapshot.name.is_empty() && snapshot.name.len() <= 256 && !snapshot.name.contains('\0')
+            snapshot.id != 0
+                && ids.insert(snapshot.id)
+                && !snapshot.name.is_empty()
+                && snapshot.name.len() <= 256
+                && !snapshot.name.contains('\0')
         })
     }
 }

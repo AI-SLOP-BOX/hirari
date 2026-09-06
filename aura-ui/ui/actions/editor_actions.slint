@@ -18,4 +18,15 @@ export global EditorActions {
     callback loop_clip(int, int);
     callback duplicate_clip(int);
     callback remove_clip(int);
+    callback repair_waveform(int);
+    callback declip_waveform(int);
+    callback reduce_noise_waveform(int);
+    callback normalize_waveform(int);
+    callback soft_clip_waveform(int);
+    callback declick_waveform(int);
+    callback stereo_width_waveform(int);
+    callback detect_transients_waveform(int);
+    callback mute_selection(int);
+    callback normalize_selection_peak(int);
+    callback normalize_selection_rms(int);
 }

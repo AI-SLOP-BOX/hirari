@@ -10,10 +10,14 @@ namespace Aura::Core::DSP::Synthesis {
  */
 void AuraSamplerPro::process(float* outputL, float* outputR, size_t numFrames) {
     if (outputL == nullptr || outputR == nullptr || numFrames == 0) return;
-
-    // Clear output buffers
     std::fill(outputL, outputL + numFrames, 0.0f);
     std::fill(outputR, outputR + numFrames, 0.0f);
+
+    processAdditive(outputL, outputR, numFrames);
+}
+
+void AuraSamplerPro::processAdditive(float* outputL, float* outputR, size_t numFrames) {
+    if (outputL == nullptr || outputR == nullptr || numFrames == 0) return;
 
     for (int i = 0; i < kMaxVoices; ++i) {
         auto& voice = m_voices[i];
@@ -29,6 +33,15 @@ void AuraSamplerPro::process(float* outputL, float* outputR, size_t numFrames) {
         const float* leftData = zone->left.data();
         const float* rightData = zone->right.empty() ? zone->left.data() : zone->right.data();
 
+        // Resolve the effective loop once per voice.  A zone loop takes
+        // precedence over the sampler fallback loop and must be honoured as
+        // soon as playback crosses its end (not only after the sample ends).
+        const uint64_t configuredLoopStart = voice.loopEnabled ? voice.loopStart : m_loopStart.load(std::memory_order_relaxed);
+        const uint64_t configuredLoopEnd = voice.loopEnabled ? voice.loopEnd : m_loopEnd.load(std::memory_order_relaxed);
+        const bool looping = (voice.loopEnabled || m_isLooping.load(std::memory_order_relaxed)) &&
+                             configuredLoopEnd > configuredLoopStart + 1 &&
+                             configuredLoopEnd <= sampleSize;
+
         // Dynamic 1st-order LPF filter coefficients based on voice cutoff
         const float cutoff = std::clamp(voice.filterCutoff, 20.0f, 20000.0f);
         const float rc = 1.0f / (2.0f * static_cast<float>(M_PI) * cutoff);
@@ -43,26 +56,24 @@ void AuraSamplerPro::process(float* outputL, float* outputR, size_t numFrames) {
 
             double pos = voice.playbackPos;
             size_t idx0 = static_cast<size_t>(pos);
-            size_t idx1 = idx0 + 1;
 
-            // Handle looping or end-of-sample
-            if (idx0 >= sampleSize) {
-                if (m_isLooping && m_loopEnd > m_loopStart && m_loopEnd <= sampleSize) {
-                    voice.playbackPos = static_cast<double>(m_loopStart);
-                    pos = voice.playbackPos;
-                    idx0 = static_cast<size_t>(pos);
-                    idx1 = idx0 + 1;
-                } else {
-                    voice.markAsAvailable();
-                    break;
-                }
+            // Handle looping at the configured loop end, including the
+            // interpolation sample that straddles the loop boundary.
+            if (looping && pos >= static_cast<double>(configuredLoopEnd)) {
+                const double loopLength = static_cast<double>(configuredLoopEnd - configuredLoopStart);
+                voice.playbackPos = static_cast<double>(configuredLoopStart) +
+                                    std::fmod(std::max(0.0, pos - configuredLoopStart), loopLength);
+                pos = voice.playbackPos;
+                idx0 = static_cast<size_t>(pos);
+            } else if (idx0 >= sampleSize) {
+                voice.markAsAvailable();
+                break;
             }
 
-            float frac = static_cast<float>(pos - idx0);
-
-            // Interpolate samples
-            float sampleL = leftData[idx0] * (1.0f - frac) + (idx1 < sampleSize ? leftData[idx1] : 0.0f) * frac;
-            float sampleR = rightData[idx0] * (1.0f - frac) + (idx1 < sampleSize ? rightData[idx1] : 0.0f) * frac;
+            const float sampleL = interpolateSample(leftData, sampleSize, pos, looping,
+                                                     configuredLoopStart, configuredLoopEnd);
+            const float sampleR = interpolateSample(rightData, sampleSize, pos, looping,
+                                                     configuredLoopStart, configuredLoopEnd);
 
             // Apply Envelope & Velocity
             float amp = voice.envelope.getNextValue() * voice.velocity;
@@ -81,7 +92,7 @@ void AuraSamplerPro::process(float* outputL, float* outputR, size_t numFrames) {
 
             // Update playback speed and slide transitions
             voice.updateSlide();
-            voice.playbackPos += voice.currentSpeed;
+            voice.playbackPos += static_cast<double>(voice.currentSpeed) * voice.sampleRateRatio;
         }
     }
 }

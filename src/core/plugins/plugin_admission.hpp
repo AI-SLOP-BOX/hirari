@@ -25,7 +25,12 @@ inline bool isSafeCandidate(const std::filesystem::path& path,
     if (!std::filesystem::is_directory(status) && !std::filesystem::is_regular_file(status)) {
         return false;
     }
-    return expectedFormat.empty() || formatForPath(path) == expectedFormat;
+    if (expectedFormat.empty()) return true;
+    std::string normalizedExpected = expectedFormat;
+    for (char& character : normalizedExpected) {
+        character = static_cast<char>(std::toupper(static_cast<unsigned char>(character)));
+    }
+    return formatForPath(path) == normalizedExpected;
 }
 
 } // namespace Aura::Core::Plugins::PluginAdmission

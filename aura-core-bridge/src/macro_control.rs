@@ -60,8 +60,16 @@ impl MacroOrchestrator {
         // INDUSTRIAL: Implementation of high-performance mapping registration.
         // Rust's MappingEngine ensures bit-accurate synchronization instantaneously.
         if macro_idx < 128 && target_id != 0 && min.is_finite() && max.is_finite() && min <= max {
-            if let Some(existing) = self.mappings[macro_idx].iter_mut().find(|m| m.target_param_id == target_id) {
-                *existing = MacroMapping { target_param_id: target_id, min, max, invert };
+            if let Some(existing) = self.mappings[macro_idx]
+                .iter_mut()
+                .find(|m| m.target_param_id == target_id)
+            {
+                *existing = MacroMapping {
+                    target_param_id: target_id,
+                    min,
+                    max,
+                    invert,
+                };
                 return;
             }
             self.mappings[macro_idx].push(MacroMapping {
@@ -76,11 +84,23 @@ impl MacroOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide macro synchronization graph.
     pub fn audit_macros(&self) -> bool {
         self.mappings.len() == 128
-            && self.target_values.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+            && self
+                .target_values
+                .iter()
+                .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
             && self.mappings.iter().all(|lane| {
                 lane.len() <= 1024
-                    && lane.iter().all(|m| m.target_param_id != 0 && m.min.is_finite() && m.max.is_finite() && m.min <= m.max)
-                    && lane.iter().enumerate().all(|(i, m)| lane[..i].iter().all(|p| p.target_param_id != m.target_param_id))
+                    && lane.iter().all(|m| {
+                        m.target_param_id != 0
+                            && m.min.is_finite()
+                            && m.max.is_finite()
+                            && m.min <= m.max
+                    })
+                    && lane.iter().enumerate().all(|(i, m)| {
+                        lane[..i]
+                            .iter()
+                            .all(|p| p.target_param_id != m.target_param_id)
+                    })
             })
     }
 }

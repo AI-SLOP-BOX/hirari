@@ -3,6 +3,8 @@
 #include <vector>
 #include <array>
 #include <mutex>
+#include <memory>
+#include <algorithm>
 #include "../audio_buffer.hpp"
 
 namespace Aura::Core::Engine {
@@ -21,18 +23,38 @@ public:
     static ImmersiveBusManager& getInstance() { static ImmersiveBusManager i; return i; }
 
     void writeToBus(uint32_t busId, const AudioBuffer& buffer) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::ImmersiveBusOrchestrator.
-        // Rust's high-precision spatial routing engine ensures that 3D bus allocation 
-        // and routing are technically superior and perfectly synchronized.
-        // Rust's SpatialRoutingEngine ensures bit-accurate spatial distribution.
-        // Rust's BufferAllocationEngine ensures zero-technical drift in memory management.
-        // Rust's ForensicAuditor ensures absolute immersive integrity.
+        if (busId >= kMaxBusses || buffer.isEmpty()) return;
+        std::lock_guard<std::mutex> lock(m_mutexes[busId]);
+        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), kChannelsPerBus);
+        const uint32_t samples = buffer.getNumSamples();
+        if (!m_busBuffers[busId] || m_busBuffers[busId]->getNumChannels() != channels ||
+            m_busBuffers[busId]->getNumSamples() != samples) {
+            std::lock_guard<std::mutex> allocLock(m_allocationMutex);
+            auto next = std::make_unique<AudioBuffer>(channels, samples);
+            if (!next || next->isEmpty()) return;
+            m_busBuffers[busId] = std::move(next);
+        }
+        auto& destination = *m_busBuffers[busId];
+        destination.clear();
+        for (uint32_t c = 0; c < channels; ++c) {
+            const float* src = buffer.getReadPointer(c);
+            float* dst = destination.getWritePointer(c);
+            if (src && dst) std::copy_n(src, samples, dst);
+        }
     }
 
     void readFromBus(uint32_t busId, AudioBuffer& target) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // Bus reading and zero-copy spatial synchronization are now handled in the Rust layer.
+        if (busId >= kMaxBusses) return;
+        std::lock_guard<std::mutex> lock(m_mutexes[busId]);
+        const auto& source = m_busBuffers[busId];
+        if (!source || source->isEmpty()) { target.clear(); return; }
+        const uint32_t channels = std::min(source->getNumChannels(), target.getNumChannels());
+        const uint32_t samples = std::min(source->getNumSamples(), target.getNumSamples());
+        for (uint32_t c = 0; c < channels; ++c) {
+            const float* src = source->getReadPointer(c);
+            float* dst = target.getWritePointer(c);
+            if (src && dst) std::copy_n(src, samples, dst);
+        }
     }
 
 private:

@@ -9,6 +9,14 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <memory>
+#include <cstring>
+#include <filesystem>
+#include <chrono>
+#include <atomic>
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 #include "../engine/track.hpp"
 
 namespace Aura::Core::IO {
@@ -25,23 +33,88 @@ class SessionIO {
 public:
     static SessionIO& getInstance() { static SessionIO i; return i; }
 
+    // XML attributes must be escaped at the persistence boundary.  Project
+    // paths and region names routinely contain ampersands, quotes, or angle
+    // brackets; writing them verbatim creates a file that cannot be reopened.
+    static std::string escapeXmlAttribute(const std::string& value) {
+        std::string escaped;
+        escaped.reserve(value.size());
+        for (const char ch : value) {
+            switch (ch) {
+            case '&': escaped += "&amp;"; break;
+            case '<': escaped += "&lt;"; break;
+            case '>': escaped += "&gt;"; break;
+            case '"': escaped += "&quot;"; break;
+            case '\'': escaped += "&apos;"; break;
+            default: escaped += ch; break;
+            }
+        }
+        return escaped;
+    }
+
+    static std::string unescapeXmlAttribute(std::string value) {
+        const std::pair<const char*, const char*> entities[] = {
+            {"&quot;", "\""}, {"&apos;", "'"}, {"&gt;", ">"},
+            {"&lt;", "<"}, {"&amp;", "&"},
+        };
+        for (const auto& [entity, replacement] : entities) {
+            size_t offset = 0;
+            while ((offset = value.find(entity, offset)) != std::string::npos) {
+                value.replace(offset, std::strlen(entity), replacement);
+                offset += std::strlen(replacement);
+            }
+        }
+        return value;
+    }
+
     /**
      * @brief SAVE: Serializes all engine states to a project XML file.
      */
     void saveProject(const std::string& path, const std::vector<std::shared_ptr<Engine::Track>>& tracks) {
-        std::ofstream file(path);
+        if (path.empty()) return;
+        const std::filesystem::path destination(path);
+        const auto parent = destination.parent_path();
+        if (!parent.empty()) {
+            std::error_code parentError;
+            if (!std::filesystem::is_directory(parent, parentError) || parentError) return;
+        }
+
+        std::unordered_set<uint32_t> trackIds;
+        std::unordered_set<uint32_t> regionIds;
+        for (const auto& track : tracks) {
+            if (!track) continue;
+            if (!trackIds.insert(track->getId()).second || !std::isfinite(track->getVolume())) return;
+            for (const auto& region : track->getRegions()) {
+                if (!regionIds.insert(region.id).second || region.path.find('\0') != std::string::npos ||
+                    region.name.find('\0') != std::string::npos || !std::isfinite(region.clipGain)) {
+                    return;
+                }
+            }
+        }
+
+        // Never stream directly into the user's project. A power loss or a
+        // full volume during serialization must leave the last known-good
+        // project intact. Rename within the same directory for atomic publish.
+        static std::atomic<uint64_t> saveSequence{0};
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto sequence = saveSequence.fetch_add(1, std::memory_order_relaxed);
+        const std::filesystem::path temporary = destination.string() + ".tmp-" +
+            std::to_string(nonce) + "-" + std::to_string(sequence);
+        std::ofstream file(temporary, std::ios::out | std::ios::trunc);
+        if (!file.is_open()) return;
         file << "<AuraProject version=\"1.0\">\n";
         
         for (auto& track : tracks) {
+            if (!track) continue;
             file << "  <Track id=\"" << track->getId() << "\">\n";
             file << "    <Volume value=\"" << track->getVolume() << "\"/>\n";
             for (const auto& region : track->getRegions()) {
                 file << "    <Region id=\"" << region.id << "\" "
-                     << "path=\"" << region.path << "\" "
+                     << "path=\"" << escapeXmlAttribute(region.path) << "\" "
                      << "start=\"" << region.start << "\" "
                      << "len=\"" << region.len << "\" "
                      << "muted=\"" << (region.muted ? "true" : "false") << "\" "
-                     << "name=\"" << region.name << "\" "
+                     << "name=\"" << escapeXmlAttribute(region.name) << "\" "
                      << "clipGain=\"" << region.clipGain << "\" "
                      << "fadeIn=\"" << region.fadeInSamples << "\" "
                      << "fadeOut=\"" << region.fadeOutSamples << "\"/>\n";
@@ -50,6 +123,30 @@ public:
         }
         
         file << "</AuraProject>\n";
+        file.flush();
+        const bool writeOk = file.good();
+        file.close();
+        if (!writeOk) {
+            std::error_code cleanup;
+            std::filesystem::remove(temporary, cleanup);
+            return;
+        }
+        if (!durableFlush(temporary)) {
+            std::error_code cleanup;
+            std::filesystem::remove(temporary, cleanup);
+            return;
+        }
+        std::error_code publishError;
+        std::filesystem::rename(temporary, destination, publishError);
+        if (publishError) {
+            std::error_code cleanup;
+            std::filesystem::remove(temporary, cleanup);
+            return;
+        }
+        // Persist the directory entry as well as the file contents. This is
+        // the POSIX durability boundary for an atomic rename; on platforms
+        // without directory descriptors the helper is a safe no-op.
+        (void)durableFlushDirectory(parent.empty() ? std::filesystem::path(".") : parent);
     }
 
     /**
@@ -74,8 +171,14 @@ public:
         const std::string xml((std::istreambuf_iterator<char>(file)),
                                std::istreambuf_iterator<char>());
 
-        // Basic structural validation
-        if (xml.find("<AuraProject") == std::string::npos || xml.find("</AuraProject>") == std::string::npos) {
+        // Basic structural validation. Require one complete root document and
+        // reject trailing non-whitespace bytes so concatenated/partially
+        // recovered files cannot be accepted as valid sessions.
+        const auto rootStart = xml.find("<AuraProject");
+        const auto rootEnd = xml.rfind("</AuraProject>");
+        if (rootStart == std::string::npos || rootEnd == std::string::npos ||
+            rootStart != xml.find_first_not_of(" \t\r\n") ||
+            xml.find_first_not_of(" \t\r\n", rootEnd + 14) != std::string::npos) {
             return;
         }
 
@@ -101,10 +204,10 @@ public:
         std::unordered_set<uint32_t> trackIds;
         std::unordered_set<uint32_t> regionIds;
 
-        static const std::regex trackBlockPattern(R"(<Track\s+id="([0-9]+)">([\s\S]*?)</Track>)");
-        static const std::regex volumePattern(R"(<Volume\s+value="([^"]+)"/>)");
-        static const std::regex regionPattern(R"(<Region\s+([^/>]+)/>)");
-        static const std::regex attrPattern(R"((\w+)="([^"]*)")");
+        static const std::regex trackBlockPattern(R"REGEX(<Track\s+id="([0-9]+)">([\s\S]*?)</Track>)REGEX");
+        static const std::regex volumePattern(R"REGEX(<Volume\s+value="([^"]+)"/>)REGEX");
+        static const std::regex regionPattern(R"REGEX(<Region\s+([^/>]+)/>)REGEX");
+        static const std::regex attrPattern(R"REGEX((\w+)="([^"]*)")REGEX");
 
         auto trackIt = std::sregex_iterator(xml.begin(), xml.end(), trackBlockPattern);
         auto trackEnd = std::sregex_iterator();
@@ -198,7 +301,8 @@ public:
                     std::from_chars(foText.data(), foText.data() + foText.size(), rFadeOut);
                 }
 
-                RestoredRegion rRegion{rId, attrMap["path"], rStart, rLen, rMuted, rName, rClipGain, rFadeIn, rFadeOut};
+                RestoredRegion rRegion{rId, unescapeXmlAttribute(attrMap["path"]), rStart, rLen, rMuted,
+                                       unescapeXmlAttribute(rName), rClipGain, rFadeIn, rFadeOut};
                 rTrack.regions.push_back(rRegion);
             }
 
@@ -234,6 +338,36 @@ public:
     }
 
 private:
+    static bool durableFlush(const std::filesystem::path& path) noexcept {
+#if !defined(_WIN32)
+        const int descriptor = ::open(path.c_str(), O_RDONLY);
+        if (descriptor < 0) return false;
+        const bool flushed = ::fsync(descriptor) == 0;
+        (void)::close(descriptor);
+        return flushed;
+#else
+        (void)path;
+        return true;
+#endif
+    }
+
+    static bool durableFlushDirectory(const std::filesystem::path& path) noexcept {
+#if !defined(_WIN32)
+#ifdef O_DIRECTORY
+        const int descriptor = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
+#else
+        const int descriptor = ::open(path.c_str(), O_RDONLY);
+#endif
+        if (descriptor < 0) return false;
+        const bool flushed = ::fsync(descriptor) == 0;
+        (void)::close(descriptor);
+        return flushed;
+#else
+        (void)path;
+        return true;
+#endif
+    }
+
     SessionIO() = default;
 };
 

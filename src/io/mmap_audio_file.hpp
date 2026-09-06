@@ -97,7 +97,8 @@ public:
                     static_cast<uint64_t>(m_numChannels) * (m_bitDepth / 8u);
                 const uint64_t expectedByteRate =
                     static_cast<uint64_t>(m_sampleRate) * expectedBlockAlign;
-                if (m_numChannels == 0 || m_sampleRate == 0 ||
+                if (m_numChannels == 0 || m_numChannels > 32 || m_sampleRate == 0 ||
+                    m_sampleRate > 384000 ||
                     (m_formatTag != 1 && m_formatTag != 3) ||
                     (m_bitDepth != 16 && m_bitDepth != 24 && m_bitDepth != 32) ||
                     expectedBlockAlign > std::numeric_limits<uint16_t>::max() ||
@@ -111,7 +112,11 @@ public:
                 m_dataSize = (isRf64 && size == std::numeric_limits<uint32_t>::max())
                     ? rf64DataSize : payload;
             }
-            const size_t aligned = payload + (payload & 1u);
+            const size_t padding = payload & 1u;
+            if (payload > std::numeric_limits<size_t>::max() - padding) {
+                fail("RIFF chunk alignment overflows");
+            }
+            const size_t aligned = payload + padding;
             if (aligned > m_fileSize - offset - 8) {
                 fail("Invalid RIFF chunk alignment");
             }

@@ -44,7 +44,9 @@ impl GroupOrchestrator {
 
     /// INDUSTRIAL: Adds a track to a group with absolute memory precision and grouping sovereignty.
     pub fn add_track_to_group(&mut self, track_id: u32, group_id: u32) {
-        if track_id == 0 || group_id == 0 { return; }
+        if track_id == 0 || group_id == 0 {
+            return;
+        }
         self.groups.entry(group_id).or_default().insert(track_id);
         self.track_to_groups
             .entry(track_id)
@@ -56,13 +58,39 @@ impl GroupOrchestrator {
     }
 
     pub fn remove_track_from_group(&mut self, track_id: u32, group_id: u32) -> bool {
-        let removed = self.groups.get_mut(&group_id).map(|tracks| tracks.remove(&track_id)).unwrap_or(false);
-        if let Some(groups) = self.track_to_groups.get_mut(&track_id) { groups.remove(&group_id); if groups.is_empty() { self.track_to_groups.remove(&track_id); } }
-        if self.groups.get(&group_id).is_some_and(|tracks| tracks.is_empty()) { self.groups.remove(&group_id); self.group_configs.remove(&group_id); self.last_propagated_attributes.remove(&group_id); }
+        let removed = self
+            .groups
+            .get_mut(&group_id)
+            .map(|tracks| tracks.remove(&track_id))
+            .unwrap_or(false);
+        if let Some(groups) = self.track_to_groups.get_mut(&track_id) {
+            groups.remove(&group_id);
+            if groups.is_empty() {
+                self.track_to_groups.remove(&track_id);
+            }
+        }
+        if self
+            .groups
+            .get(&group_id)
+            .is_some_and(|tracks| tracks.is_empty())
+        {
+            self.groups.remove(&group_id);
+            self.group_configs.remove(&group_id);
+            self.last_propagated_attributes.remove(&group_id);
+        }
         removed
     }
 
-    pub fn tracks_in_group(&self, group_id: u32) -> Vec<u32> { let mut tracks: Vec<_> = self.groups.get(&group_id).into_iter().flat_map(|set| set.iter().copied()).collect(); tracks.sort_unstable(); tracks }
+    pub fn tracks_in_group(&self, group_id: u32) -> Vec<u32> {
+        let mut tracks: Vec<_> = self
+            .groups
+            .get(&group_id)
+            .into_iter()
+            .flat_map(|set| set.iter().copied())
+            .collect();
+        tracks.sort_unstable();
+        tracks
+    }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide group state.
     pub fn audit_group_manager(&self) -> bool {

@@ -21,12 +21,10 @@
                     }
                     
                     Rectangle { width: 1px; background: Style.border; height: 16px; y: 5px; }
-
                     HorizontalLayout {
                         spacing: 8px; horizontal-stretch: 1;
                         Text { text: last_action; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; vertical-alignment: center; }
                     }
-
                     HorizontalLayout {
                         spacing: 12px; alignment: center; 
                         VerticalLayout {
@@ -48,6 +46,8 @@
                     HorizontalLayout {
                         spacing: 10px; alignment: center;
                         Text { text: input_dropped_blocks > 0 ? "Input drops: " + input_dropped_blocks : (audio_device_ready ? "音声: 準備完了" : "音声: オフライン"); font-size: 8px; color: input_dropped_blocks > 0 ? Style.record : (audio_device_ready ? Style.ok : Style.record); }
+                        Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: true; button-width: 54px; clicked => { TransportActions.toggle_play(); } }
+                        Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: true; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
                         Z_IconButton { icon: "Scan Plugins"; compact: true; button-width: 82px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); } }
                         if (!audio_device_ready) : Z_IconButton { icon: "Reconnect"; compact: true; button-width: 64px; active-col: Style.record; clicked => { CommandActions.palette_exec("RECONNECT_AUDIO"); } }
                         Z_IconButton { icon: "Audio Settings"; compact: true; button-width: 82px; clicked => { bot_view = 20; mx_open = true; pr_open = false; } }
@@ -63,7 +63,6 @@
             }
         }
     }
-
     if (bot_view == 19) : Rectangle {
         // Keep the diagnostics surface below the production navigation bar.
         // Keep diagnostics below the production navigation bar.
@@ -81,7 +80,6 @@
             range-overflow: root.diagnostic_range_overflow;
         }
     }
-
     // Production-mode workflow pages need an explicit surface once a template
     // has loaded. The legacy bottom-panel tree can have no measurable parent
     // in the full arrangement layout, which previously made Export/MIDI Learn
@@ -141,7 +139,7 @@
                                 Text { text: plugin.name; font-size: 11px; color: Style.text; font-weight: 600; }
                                 Text { text: plugin.format + "  ·  " + plugin.capability + "  ·  " + (plugin.binary_bytes / 1024) + " KiB  ·  " + plugin.binary_hash; font-size: 8px; color: Style.text-muted; }
                             }
-                            Text { text: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? "READY" : "CHECK"; font-size: 8px; color: plugin.capability == "vst3-sdk-required" || plugin.capability == "au-worker-unavailable" || plugin.capability == "worker-unavailable" ? Style.solo : Style.ok; vertical-alignment: center; }
+                            Text { text: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? "READY" : "CHECK"; font-size: 8px; color: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? Style.ok : Style.solo; vertical-alignment: center; }
                             Z_IconButton { icon: "★"; compact: true; selected: plugin.favorite; active-col: Style.brand; clicked => { plugin-favorite-changed(plugin.id, !plugin.favorite); } }
                             Z_IconButton { icon: "INSERT"; compact: false; button-width: 72px; clicked => { PluginActions.insert_plugin(plugin.id); } }
                         }
@@ -151,7 +149,6 @@
             }
         }
     }
-
     // --- AURA COMMAND SPOTLIGHT ---
     if (pal_open) : Rectangle {
         z: 9500; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.7);
@@ -182,7 +179,6 @@
             }
         }
     }
-
     if (fx_open) : Rectangle {
         z: 400; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.4);
         TouchArea { clicked => { fx_open = false; } }
@@ -195,9 +191,9 @@
             track-latency-ms: root.plugin-track-latency-ms;
             pdc-compensation-ms: root.plugin-pdc-compensation-ms;
             pdc-status: root.plugin-pdc-status;
+            editor-capability: root.plugin-editor-capability; bypassed: root.plugin-bypassed; parameter-error: root.plugin-parameter-error;
             preset-path: root.plugin-preset-path;
-            // Source selection is explicit; never silently route from the
-            // neighboring track.  Routing UI supplies the selected source.
+            // Explicit source; routing UI supplies the selected source.
             sidechain-source-id: root.sidechain-source-id;
             sidechain-source-name: root.sidechain-source-name;
             sidechain-result: root.sidechain-result;
@@ -214,7 +210,6 @@
             Text { text: "Plugin\nNo Track Selected"; color: Style.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
         }
     }
-
     // --- INTERACTIVE EXPORT MANIFEST (FINAL DISTILLATION) ---
     if (is_rendering) : Rectangle {
         background: Style.surface-0.with-alpha(0.9); z: 1000;
@@ -253,6 +248,7 @@
                         }
                     }
                 }
+                HorizontalLayout { alignment: center; spacing: 8px; if (render_state == "PAUSED") : Z_IconButton { icon: "▶ RESUME"; clicked => { RenderActions.resume_render(); } } if (render_state != "PAUSED") : Z_IconButton { icon: "Ⅱ PAUSE"; clicked => { RenderActions.pause_render(); } } Z_IconButton { icon: "✕ CANCEL"; clicked => { RenderActions.cancel_render(); } } }
             }
         }
     }
@@ -389,9 +385,9 @@
             start_render(fmt, sr, b) => { export_open = false; RenderActions.start_render(""); }
             start_stems => { export_open = false; CommandActions.palette_exec("EXPORT STEMS"); }
             start_selected_stem => { export_open = false; CommandActions.palette_exec("EXPORT SELECTED STEM"); }
+            start_midi => { export_open = false; CommandActions.palette_exec("EXPORT MIDI"); }
         }
     }
-
     if (spotlight_active) : Rectangle {
         z: 1000; width: 100%; height: 100%; background: #000.with-alpha(0.6);
         TouchArea { clicked => { spotlight_active = false; } }
@@ -400,12 +396,14 @@
 
     // Final visible arrangement surface. This stays above legacy editor layers
     // so every loaded track remains visible while the deeper editor is migrated.
-    if (root.tracks.length >= 4) : Rectangle {
+    if (root.tracks.length >= 1) : Rectangle {
         width: 100%; height: 100%; z: 12000; clip: true; background: transparent;
         Rectangle {
             x: 0px; y: 0px; width: 100%; height: 32px; background: #202226; border-width: 1px; border-color: Style.border;
             HorizontalLayout {
                 padding-left: 8px; padding-right: 8px; spacing: 4px;
+                Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: false; button-width: 54px; clicked => { TransportActions.toggle_play(); } }
+                Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: false; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
                 Z_IconButton {
                     icon: "Editor"; compact: false; button-width: 58px;
                     active: bot_view == 0;
@@ -509,7 +507,7 @@
             render-path <=> root.openutau_render_path;
             status: root.openutau_status;
             scoop <=> root.openutau_scoop;
-            vibrato <=> root.openutau_vibrato;
+            vibrato <=> root.openutau_vibrato; vibrato-rate <=> root.openutau_vibrato_rate;
             dynamics <=> root.openutau_dynamics;
             consonants <=> root.openutau_consonants;
             notes: root.openutau_notes;
@@ -522,13 +520,15 @@
         if (bot_view == ViewModes.preferences) : Z_AudioSettings {
             x: 0px; y: 32px; width: 100%; height: parent.height - 32px;
             ready: root.audio_device_ready;
+            device-catalog: root.audio_device_catalog;
+            device-names: root.audio_device_names;
             sample-rate: root.audio_sample_rate;
             buffer-size: root.buffer_size;
             dropped-blocks: root.input_dropped_blocks;
             diagnostic: root.audio_diagnostic;
             busy: root.is_ply || root.is_rec;
         }
-        if (bot_view == 0) : Rectangle {
+        if (bot_view == 0 && root.tracks.length >= 4) : Rectangle {
         x: ins_open ? Style.inspector-w : 0px; y: 205px;
         width: parent.width - (ins_open ? Style.inspector-w : 0px);
         height: 192px; clip: true; background: transparent;
@@ -568,7 +568,7 @@
             }
         }
         }
-        if (bot_view == 2) : Rectangle {
+        if (bot_view == 2 && root.tracks.length > 0) : Rectangle {
             x: 0px; y: 34px; width: 100%; height: 520px; z: 5; background: Style.surface-1; border-width: 1px; border-color: Style.border; clip: true;
             Text { text: "Piano Roll  |  Track " + (root.sel_idx + 1); x: 12px; y: 8px; font-size: 11px; color: Style.text; font-weight: 700; }
             Text { text: "Click the grid to add notes  ·  Snap " + root.snap_val; x: 190px; y: 9px; font-size: 9px; color: Style.text-muted; }

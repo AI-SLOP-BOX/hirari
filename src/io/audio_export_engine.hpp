@@ -94,6 +94,14 @@ public:
                     destinationError) return false;
             }
             size_t stemIndex = 0;
+            std::vector<std::filesystem::path> publishedStems;
+            publishedStems.reserve(destinations.size());
+            const auto rollbackStems = [&]() noexcept {
+                for (const auto& generated : publishedStems) {
+                    std::error_code cleanup;
+                    std::filesystem::remove(generated, cleanup);
+                }
+            };
             for (const auto& track : tracks) {
                 if (!track || track->getId() == 0) continue;
                 std::string label = track->getName();
@@ -116,7 +124,11 @@ public:
                             onProgress(static_cast<float>(stemIndex) / total + progress / total);
                         }
                     });
-                if (!rendered) return false;
+                if (!rendered) {
+                    rollbackStems();
+                    return false;
+                }
+                publishedStems.emplace_back(stem.filename);
                 ++stemIndex;
             }
             if (onProgress) onProgress(1.0f);

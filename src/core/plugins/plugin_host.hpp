@@ -19,6 +19,7 @@
 #include "../midi_buffer.hpp"
 #include "plugin_admission.hpp"
 #include "process_sandbox_processor.hpp"
+#include "../../dsp/effects/spectral_restoration_processor.hpp"
 
 namespace Aura::Core::Plugins {
 
@@ -111,6 +112,10 @@ public:
         }
         if (description.name == "Gain" || description.name == "Built-in Gain") {
             return std::make_shared<BuiltinGainProcessor>();
+        }
+        if (description.name == "Spectral Restoration" ||
+            description.name == "SpectraLayers Restoration") {
+            return std::make_shared<::Aura::DSP::Effects::SpectralRestorationProcessor>();
         }
         if (error) *error = "unknown internal plugin: " + description.name;
         return {};
@@ -261,7 +266,13 @@ public:
         }
     }
 
-    void reset() noexcept override {}
+    void reset() noexcept override {
+        // Keep reset realtime-safe. ProcessSandboxProcessor clears its
+        // recovery boundary without stopping the child worker; a later
+        // control-plane reconfigure/restart performs plugin-specific reset.
+        if (m_sandbox) m_sandbox->reset();
+        m_processFailed.store(false, std::memory_order_release);
+    }
     uint32_t getLatencySamples() const noexcept override {
         return m_sandbox ? m_sandbox->getLatencySamples() : m_latency;
     }
@@ -397,8 +408,14 @@ public:
         if (!raw || *raw == '\0') return {};
         std::string paths(raw);
         size_t begin = 0;
+        const char separator =
+#if defined(_WIN32)
+            ';';
+#else
+            ':';
+#endif
         while (begin <= paths.size()) {
-            const size_t end = paths.find(':', begin);
+            const size_t end = paths.find(separator, begin);
             const size_t length = end == std::string::npos ? paths.size() - begin : end - begin;
             if (length > 0) folders.emplace_back(paths.substr(begin, length));
             if (end == std::string::npos) break;

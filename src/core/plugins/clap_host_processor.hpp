@@ -102,7 +102,11 @@ public:
                 --m_inputEventCount;
                 continue;
             }
-            const bool midi2 = event.size == sizeof(ClapAbi::EventMidi2);
+            // Core MidiEvent stores the 128-bit UMP payload, not the CLAP
+            // event envelope (header/port metadata). Compare against the
+            // payload width so MIDI 2.0 input is not misclassified and
+            // rejected as an invalid legacy message.
+            const bool midi2 = event.size == sizeof(ClapAbi::EventMidi2::data);
             const bool sysex = !midi2 && event.size >= 2 && event.data[0] == 0xf0;
             if (midi2) {
                 converted.midi2.header = {sizeof(ClapAbi::EventMidi2),
@@ -151,11 +155,19 @@ public:
         }
         // CLAP consumers are allowed to assume monotonically nondecreasing
         // event times. Parameter snapshots are emitted at time zero, so sort
-        // the bounded in-place array instead of relying on insertion order.
-        std::stable_sort(m_inputEvents.begin(), m_inputEvents.begin() + m_inputEventCount,
-            [](const InputEvent& lhs, const InputEvent& rhs) noexcept {
-                return lhs.midi.header.time < rhs.midi.header.time;
-            });
+        // the bounded array with insertion sort. `std::stable_sort` is not
+        // suitable on the audio thread because standard library
+        // implementations may allocate a temporary buffer.
+        for (uint32_t i = 1; i < m_inputEventCount; ++i) {
+            InputEvent current = m_inputEvents[i];
+            uint32_t j = i;
+            while (j > 0 && m_inputEvents[j - 1].midi.header.time >
+                             current.midi.header.time) {
+                m_inputEvents[j] = m_inputEvents[j - 1];
+                --j;
+            }
+            m_inputEvents[j] = current;
+        }
         m_inputEventsContext.events = m_inputEvents.data();
         m_inputEventsContext.count = m_inputEventCount;
         const ClapAbi::AudioBuffer audio{m_channelPointers.data(), nullptr, channels, 0, 0};
@@ -170,6 +182,11 @@ public:
         if (plugin->process(plugin, &processData) == ClapAbi::Error) {
             m_processFailed.store(true, std::memory_order_release);
         }
+        // A CLAP plugin may emit output events in a different order from the
+        // input events (the ABI does not make producer order a timestamp
+        // guarantee). Keep Aura's sample-accurate MIDI contract monotonic at
+        // the boundary while preserving producer order for equal timestamps.
+        midi.sort();
         // A third-party plugin must not be allowed to poison the rest of the
         // graph with NaN/Inf.  Sanitize at the format boundary and retain a
         // lock-free diagnostic counter for the UI/telemetry plane.

@@ -92,6 +92,57 @@ public:
         return m_gains[s][d].load(std::memory_order_acquire);
     }
 
+    // Direct-routing fanout for the audio callback.  The destination list is
+    // supplied by the compiled graph/UI snapshot; this method performs no
+    // allocation or locking and applies every active send sample-accurately.
+    void fanoutStereo(uint32_t sourceId, const float* left, const float* right,
+                      float* const* destinationLeft, float* const* destinationRight,
+                      const uint32_t* destinationIds, uint32_t destinationCount,
+                      uint32_t frames) const noexcept {
+        if (sourceId >= kMaxNodes || !left || !right || !destinationLeft ||
+            !destinationRight || !destinationIds || destinationCount == 0 || frames == 0)
+            return;
+        const uint32_t count = std::min(destinationCount, kMaxNodes);
+        for (uint32_t d = 0; d < count; ++d) {
+            const uint32_t destination = destinationIds[d];
+            if (destination >= kMaxNodes || !destinationLeft[d] || !destinationRight[d]) continue;
+            const float gain = m_gains[sourceId][destination].load(std::memory_order_acquire);
+            if (!(gain > 0.0f) || !std::isfinite(gain)) continue;
+            for (uint32_t i = 0; i < frames; ++i) {
+                const float l = std::isfinite(left[i]) ? left[i] : 0.0f;
+                const float r = std::isfinite(right[i]) ? right[i] : 0.0f;
+                destinationLeft[d][i] += l * gain;
+                destinationRight[d][i] += r * gain;
+            }
+        }
+    }
+
+    // Channel-interleaved variant used by immersive/ADM buses.  Each entry in
+    // the channel arrays points to one planar channel; the same direct-route
+    // gain is applied to every channel without allocating on the RT thread.
+    void fanoutPlanar(uint32_t sourceId, const float* const* sourceChannels,
+                      float* const* const* destinationChannels,
+                      const uint32_t* destinationIds, uint32_t destinationCount,
+                      uint32_t channelCount, uint32_t frames) const noexcept {
+        if (sourceId >= kMaxNodes || !sourceChannels || !destinationChannels ||
+            !destinationIds || destinationCount == 0 || channelCount == 0 || frames == 0)
+            return;
+        const uint32_t count = std::min(destinationCount, kMaxNodes);
+        const uint32_t channels = std::min(channelCount, 32u);
+        for (uint32_t d = 0; d < count; ++d) {
+            const uint32_t destination = destinationIds[d];
+            if (destination >= kMaxNodes || !destinationChannels[d]) continue;
+            const float gain = m_gains[sourceId][destination].load(std::memory_order_acquire);
+            if (!(gain > 0.0f) || !std::isfinite(gain)) continue;
+            for (uint32_t c = 0; c < channels; ++c) {
+                if (!sourceChannels[c] || !destinationChannels[d][c]) continue;
+                for (uint32_t i = 0; i < frames; ++i)
+                    destinationChannels[d][c][i] +=
+                        (std::isfinite(sourceChannels[c][i]) ? sourceChannels[c][i] : 0.0f) * gain;
+            }
+        }
+    }
+
     static constexpr uint32_t kMaxNodes = 128;
     static constexpr uint32_t kMaxFeedbackConnections = 16;
     static constexpr uint32_t kMaxFeedbackSamples = 8192;

@@ -37,9 +37,10 @@ impl GrooveOrchestrator {
         // INDUSTRIAL: Implementation of high-performance rhythmic quantization logic.
         // Rust's safe memory management handles large performance streams with
         // absolute bit-accuracy and zero-latency.
-        if map_index >= self.library.len() {
+        if map_index >= self.library.len() || !strength.is_finite() {
             return;
         }
+        let strength = strength.clamp(0.0, 1.0);
         let map = &self.library[map_index];
         if map.points.is_empty() {
             return;
@@ -71,7 +72,12 @@ impl GrooveOrchestrator {
             positions[i] = (pos as i64 + shift).max(0) as u64;
 
             if let Some(ref mut vels) = velocities {
-                vels[i] *= (1.0 - strength) + (target.velocity_mult * strength);
+                if i < vels.len() {
+                    vels[i] *= (1.0 - strength) + (target.velocity_mult * strength);
+                    if !vels[i].is_finite() {
+                        vels[i] = 0.0;
+                    }
+                }
             }
         }
     }
@@ -106,7 +112,19 @@ impl GrooveOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide rhythmic synchronization graph.
     pub fn audit_groove(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic groove auditing logic.
-        true
+        self.library.len() <= 4096
+            && self.library.iter().all(|map| {
+                !map.name.trim().is_empty()
+                    && map.name.len() <= 128
+                    && map.points.len() <= 1_000_000
+                    && map
+                        .points
+                        .windows(2)
+                        .all(|pair| pair[0].source_tick < pair[1].source_tick)
+                    && map.points.iter().all(|point| {
+                        point.velocity_mult.is_finite()
+                            && (0.0..=4.0).contains(&point.velocity_mult)
+                    })
+            })
     }
 }

@@ -11,12 +11,36 @@ pub struct GlossaryEntry {
 
 pub fn entries() -> Vec<GlossaryEntry> {
     vec![
-        GlossaryEntry { term: "Track", explanation: "A lane that contains audio or MIDI you want to edit.", related_operations: &["add_track", "set_track_name"] },
-        GlossaryEntry { term: "Bus", explanation: "A shared channel that combines several tracks for group processing.", related_operations: &["set_route", "add_plugin"] },
-        GlossaryEntry { term: "Aux", explanation: "A return channel used for shared effects such as reverb or delay.", related_operations: &["add_aux_track", "set_route"] },
-        GlossaryEntry { term: "Automation", explanation: "A recorded parameter change that moves over time.", related_operations: &["set_automation", "set_volume"] },
-        GlossaryEntry { term: "Stem", explanation: "An exported group of related tracks as its own audio file.", related_operations: &["bounce_stems"] },
-        GlossaryEntry { term: "Latency", explanation: "The delay between an input action and hearing its result.", related_operations: &["set_low_latency_mode"] },
+        GlossaryEntry {
+            term: "Track",
+            explanation: "A lane that contains audio or MIDI you want to edit.",
+            related_operations: &["add_track", "set_track_name"],
+        },
+        GlossaryEntry {
+            term: "Bus",
+            explanation: "A shared channel that combines several tracks for group processing.",
+            related_operations: &["set_route", "add_plugin"],
+        },
+        GlossaryEntry {
+            term: "Aux",
+            explanation: "A return channel used for shared effects such as reverb or delay.",
+            related_operations: &["add_aux_track", "set_route"],
+        },
+        GlossaryEntry {
+            term: "Automation",
+            explanation: "A recorded parameter change that moves over time.",
+            related_operations: &["set_automation", "set_volume"],
+        },
+        GlossaryEntry {
+            term: "Stem",
+            explanation: "An exported group of related tracks as its own audio file.",
+            related_operations: &["bounce_stems"],
+        },
+        GlossaryEntry {
+            term: "Latency",
+            explanation: "The delay between an input action and hearing its result.",
+            related_operations: &["set_low_latency_mode"],
+        },
     ]
 }
 

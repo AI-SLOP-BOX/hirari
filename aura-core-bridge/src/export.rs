@@ -100,7 +100,7 @@ pub fn write_wav_float32(
             WavExportError::InvalidPath
         });
     }
-    if !(1..=384_000).contains(&sample_rate) {
+    if !(8_000..=384_000).contains(&sample_rate) {
         return Err(WavExportError::InvalidSampleRate);
     }
     if !(1..=32).contains(&channels) {
@@ -204,7 +204,7 @@ pub fn write_wave64_float32(
             WavExportError::InvalidPath
         });
     }
-    if !(1..=384_000).contains(&sample_rate) {
+    if !(8_000..=384_000).contains(&sample_rate) {
         return Err(WavExportError::InvalidSampleRate);
     }
     if !(1..=32).contains(&channels) {
@@ -316,6 +316,16 @@ pub fn read_wave64_float32(path: &Path) -> Result<(u32, u16, Vec<f32>), WavExpor
         0x64, 0x61, 0x74, 0x61, 0x2e, 0x91, 0xcf, 0x11, 0xa5, 0xd6, 0x28, 0xdb, 0x04, 0xc1, 0x00,
         0x00,
     ];
+    // Refuse pathological/sparse inputs before allocating a buffer for them.
+    // The bounded reader is intended for files produced by Aura, not arbitrary
+    // multi-gigabyte containers.
+    const MAX_WAVE64_BYTES: u64 = 512 * 1024 * 1024;
+    let file_size = fs::metadata(path)
+        .map_err(|error| WavExportError::Io(error.to_string()))?
+        .len();
+    if file_size > MAX_WAVE64_BYTES {
+        return Err(WavExportError::FileTooLarge);
+    }
     let bytes = fs::read(path).map_err(|error| WavExportError::Io(error.to_string()))?;
     if bytes.len() < 40 || bytes[0..16] != RIFF_GUID || bytes[24..40] != WAVE_GUID {
         return Err(WavExportError::UnsupportedFormat);
@@ -362,7 +372,7 @@ pub fn read_wave64_float32(path: &Path) -> Result<(u32, u16, Vec<f32>), WavExpor
                     .map_err(|_| WavExportError::UnsupportedFormat)?,
             );
             let bits = u16::from_le_bytes([bytes[payload_start + 14], bytes[payload_start + 15]]);
-            if channels == 0 || channels > 32 || !(1..=384_000).contains(&rate) || bits != 32 {
+            if channels == 0 || channels > 32 || !(8_000..=384_000).contains(&rate) || bits != 32 {
                 return Err(WavExportError::UnsupportedFormat);
             }
             format = Some((rate, channels));
@@ -406,7 +416,7 @@ pub fn write_wav_pcm(
     if samples.is_empty() {
         return Err(WavExportError::EmptyBuffer);
     }
-    if !(1..=384_000).contains(&sample_rate) {
+    if !(8_000..=384_000).contains(&sample_rate) {
         return Err(WavExportError::InvalidSampleRate);
     }
     if !(1..=32).contains(&channels) {
@@ -539,7 +549,7 @@ pub fn write_aiff_pcm(
 ) -> Result<(), WavExportError> {
     if path.as_os_str().is_empty() { return Err(WavExportError::InvalidPath); }
     if samples.is_empty() { return Err(WavExportError::EmptyBuffer); }
-    if !(1..=384_000).contains(&sample_rate) { return Err(WavExportError::InvalidSampleRate); }
+    if !(8_000..=384_000).contains(&sample_rate) { return Err(WavExportError::InvalidSampleRate); }
     if !(1..=32).contains(&channels) { return Err(WavExportError::InvalidChannelCount); }
     if !matches!(bit_depth, 8 | 16 | 24 | 32) { return Err(WavExportError::UnsupportedFormat); }
     if !samples.len().is_multiple_of(channels as usize) { return Err(WavExportError::IncompleteFrame); }
@@ -985,8 +995,14 @@ impl ExportOrchestrator {
         // absolute bit-accuracy and zero-latency.
         // Rust's JobEngine ensures bit-accurate job distribution.
         if job.name.trim().is_empty()
-            || !(1..=384_000).contains(&job.sample_rate)
+            || !(8_000..=384_000).contains(&job.sample_rate)
             || !matches!(job.bit_depth, 16 | 24 | 32)
+            // The queue has native writers for PCM WAV, AIFF-PCM16 and FLAC.
+            // Lossy codecs need an external encoder and are intentionally
+            // rejected here rather than failing asynchronously after queuing.
+            || matches!(job.codec, Codec::MP3 | Codec::AAC)
+            // AIFF is supported by the built-in writer only at PCM16.
+            || (matches!(job.codec, Codec::AIFF) && job.bit_depth != 16)
             || !job.lufs_target.is_finite()
         {
             self.last_error = Some("invalid export job".into());
@@ -1162,7 +1178,7 @@ impl ExportOrchestrator {
     pub fn audit_export(&self) -> bool {
         self.jobs.iter().all(|job| {
             !job.name.trim().is_empty()
-                && (1..=384_000).contains(&job.sample_rate)
+                && (8_000..=384_000).contains(&job.sample_rate)
                 && matches!(job.bit_depth, 16 | 24 | 32)
                 && job.lufs_target.is_finite()
         }) && self.last_error.is_none()

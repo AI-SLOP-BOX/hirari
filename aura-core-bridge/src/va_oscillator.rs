@@ -16,6 +16,7 @@ pub struct VaOscillatorEngine {
 
 impl VaOscillatorEngine {
     pub fn new(sample_rate: f64) -> Self {
+        let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) { sample_rate } else { 48_000.0 };
         let mut engine = Self {
             sample_rate,
             phase: 0.0,
@@ -28,7 +29,7 @@ impl VaOscillatorEngine {
     }
 
     pub fn set_frequency(&mut self, freq: f64) {
-        self.freq = freq;
+        if freq.is_finite() { self.freq = freq.clamp(0.0, self.sample_rate * 0.49); }
         self.update_increment();
     }
 
@@ -38,6 +39,7 @@ impl VaOscillatorEngine {
 
     /// INDUSTRIAL: Renders the next sample of the chosen waveform.
     pub fn process(&mut self) -> f32 {
+        if !self.audit_va_oscillator() { return 0.0; }
         let mut out: f32;
         let p = self.phase;
         let dt = self.increment;
@@ -60,12 +62,9 @@ impl VaOscillatorEngine {
             }
         }
 
-        self.phase += dt;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
+        self.phase = (self.phase + dt).rem_euclid(1.0);
 
-        out
+        if out.is_finite() { out.clamp(-1.5, 1.5) } else { 0.0 }
     }
 
     fn bleach(&self, mut t: f64, dt: f64) -> f64 {
@@ -81,12 +80,14 @@ impl VaOscillatorEngine {
     }
 
     fn update_increment(&mut self) {
-        self.increment = self.freq / self.sample_rate;
+        self.increment = if self.sample_rate.is_finite() && self.sample_rate > 0.0 { self.freq / self.sample_rate } else { 0.0 };
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide VA state.
     pub fn audit_va_oscillator(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic VA auditing logic.
-        true
+        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.phase.is_finite() && (0.0..1.0).contains(&self.phase)
+            && self.freq.is_finite() && (0.0..=self.sample_rate * 0.49).contains(&self.freq)
+            && self.increment.is_finite() && (0.0..=0.49).contains(&self.increment)
     }
 }

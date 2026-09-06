@@ -12,6 +12,12 @@ pub struct Analyzer8kHzEngine {
 
 impl Analyzer8kHzEngine {
     pub fn new(sample_rate: f64) -> Self {
+        let sample_rate =
+            if sample_rate.is_finite() && (16_000.0..=384_000.0).contains(&sample_rate) {
+                sample_rate
+            } else {
+                48_000.0
+            };
         let mut engine = Self {
             sample_rate,
             b0: 0.0,
@@ -43,7 +49,7 @@ impl Analyzer8kHzEngine {
 
     /// INDUSTRIAL: Processes an audio block with SIMD-accelerated precision.
     pub fn analyze(&mut self, buffer: &[f32]) {
-        if buffer.is_empty() {
+        if buffer.is_empty() || !self.audit_analyzer_8khz() {
             return;
         }
 
@@ -51,17 +57,20 @@ impl Analyzer8kHzEngine {
         let mut z1 = self.z1;
         let mut z2 = self.z2;
 
-        for &x in buffer {
+        for &raw in buffer {
+            let x = if raw.is_finite() { raw } else { 0.0 };
             let y = self.b0 * x + self.b1 * z1 + self.b2 * z2 - self.a1 * z1 - self.a2 * z2;
             z2 = z1;
             z1 = y;
-            sum_sq += y * y;
+            if y.is_finite() {
+                sum_sq += y * y;
+            }
         }
 
         self.z1 = z1;
         self.z2 = z2;
 
-        let rms = (sum_sq / buffer.len() as f32).sqrt();
+        let rms = (sum_sq / buffer.len() as f32).sqrt().clamp(0.0, 16.0);
         self.high_freq_energy
             .store(rms.to_bits(), std::sync::atomic::Ordering::Relaxed);
     }
@@ -75,7 +84,20 @@ impl Analyzer8kHzEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide signal state.
     pub fn audit_analyzer_8khz(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic signal auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (16_000.0..=384_000.0).contains(&self.sample_rate)
+            && [
+                self.b0,
+                self.b1,
+                self.b2,
+                self.a1,
+                self.a2,
+                self.z1,
+                self.z2,
+                self.get_energy(),
+            ]
+            .iter()
+            .all(|v| v.is_finite())
+            && self.a2.abs() < 1.0
     }
 }

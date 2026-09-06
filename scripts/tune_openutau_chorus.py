@@ -16,6 +16,17 @@ PITCH_RE = re.compile(
 VIB_RE = re.compile(r"^\s+vibrato: .*?$", re.M)
 
 
+def bounded_vibrato_period(value, default=190):
+    """Return a portable OpenUtau period even for malformed CLI input."""
+    try:
+        period = float(value)
+    except (TypeError, ValueError):
+        period = float(default)
+    if not period == period or period in (float("inf"), float("-inf")):
+        period = float(default)
+    return int(max(40, min(400, period)))
+
+
 def tuned_pitch(index, tone, next_tone, scoop_amount):
     # Use scoops only where a singer would actually need an attack gesture.
     # Applying the same dip to every note is what makes a tuned UTAU phrase
@@ -40,7 +51,7 @@ def tuned_pitch(index, tone, next_tone, scoop_amount):
     )
 
 
-def tune(text, scoop_amount=8, vibrato_depth=10, vibrato_length=28, dynamics=0.6, consonants=0.5):
+def tune(text, scoop_amount=8, vibrato_depth=10, vibrato_length=28, dynamics=0.6, consonants=0.5, vibrato_period=190):
     # Match the singer identifier installed by OpenUtau on macOS.  Keeping
     # this normalization here prevents old Aura drafts from opening as
     # [Missing] even when the Teto voicebank is installed.
@@ -74,7 +85,7 @@ def tune(text, scoop_amount=8, vibrato_depth=10, vibrato_length=28, dynamics=0.6
         is_cadence = index in {5, 9, 11, len(blocks) - 1}
         vib_len = int(vibrato_length) if is_cadence else 0
         vib_depth = int(vibrato_depth) if is_cadence else 0
-        vibrato = "    vibrato: {length: %d, period: 190, depth: %d, in: 32, out: 28, shift: 0, drift: 0, vol_link: 0}" % (vib_len, vib_depth)
+        vibrato = "    vibrato: {length: %d, period: %d, depth: %d, in: 32, out: 28, shift: 0, drift: 0, vol_link: 0}" % (vib_len, bounded_vibrato_period(vibrato_period), vib_depth)
         body = VIB_RE.sub(vibrato, body, count=1)
         # Keep the USTX at version 0.9 compatibility.  Per-phoneme
         # expressions are not understood by older OpenUtau builds, so the
@@ -139,7 +150,8 @@ def main():
         lyrics = ["ひ", "か", "り", "ほ", "ど", "け", "る", "よ", "る", "に", "き", "み", "と", "み", "つ", "け"]
         tones = [60, 62, 64, 64, 62, 60, 62, 64, 65, 64, 67, 65, 64, 62, 60, 60]
         voice_dir = os.environ.get("AURA_TETO_VOICE_DIR", "/Users/REDACTED/Library/Application Support/OpenUtau/Singers/KasaneTeto")
-        lines = ["[#SETTING]", "Tempo=120", "ProjectName=Aura Teto Tuned", f"VoiceDir={voice_dir}", "", "[#VERSION]", "UST Version1.2", ""]
+        tempo = os.environ.get("AURA_VOCAL_TEMPO", "120")
+        lines = ["[#SETTING]", f"Tempo={tempo}", "ProjectName=Aura Teto Tuned", f"VoiceDir={voice_dir}", "", "[#VERSION]", "UST Version1.2", ""]
         for index, (lyric, tone) in enumerate(zip(lyrics, tones)):
             scoop = -max(1, int(args[0] if args else 8)) if index % 3 else -max(1, int((args[0] if args else 8) * 0.5))
             depth = int(args[1] if len(args) > 1 else 10)
@@ -149,7 +161,8 @@ def main():
             scoop = 0 if abs(leap) < 3 else (-max(2, min(8, int(args[0] if args else 4))) if leap > 0 else max(1, min(4, int((args[0] if args else 4) * 0.45))))
             piches = ",".join(str(v) for v in (scoop, 0, max(-6, min(6, int(leap * 1.5))), 0, 0))
             cadence = index in {5, 9, 11, len(lyrics) - 1}
-            vbr = f"{length},190,{depth},32,28,0" if cadence else "0,190,0,0,0,0"
+            period = bounded_vibrato_period(args[5] if len(args) > 5 else 190)
+            vbr = f"{length},{period},{depth},32,28,0" if cadence else f"0,{period},0,0,0,0"
             lines.extend([
                 f"[#{index:04d}]", "Length=480", f"Lyric={lyric}", f"NoteNum={tone}",
                 f"Intensity={velocity}", "Modulation=0", f"PreUtterance={max(0, 60 - int((args[4] if len(args) > 4 else 0.5) * 40))}",
@@ -158,7 +171,7 @@ def main():
         lines.append("[#TRACKEND]")
         destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
     else:
-        destination.write_text(tune(source.read_text(encoding="utf-8"), *args[:5]), encoding="utf-8")
+        destination.write_text(tune(source.read_text(encoding="utf-8"), *args[:6]), encoding="utf-8")
         source_text = destination.read_text(encoding="utf-8")
         blocks = list(NOTE_RE.finditer(source_text))
         tones = []

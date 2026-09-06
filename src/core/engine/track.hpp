@@ -31,6 +31,7 @@
 namespace Aura::Core::Engine {
 
 struct Region {
+    struct RangeEdit { uint64_t start = 0; uint64_t end = 0; float gain = 1.0f; uint64_t fadeIn = 0; uint64_t fadeOut = 0; };
     uint32_t id;
     std::string path;
     uint64_t start;
@@ -51,6 +52,7 @@ struct Region {
     // Non-destructive VariAudio-style note edits for this audio region.
     std::vector<::aura::editing::AudioNoteSegment> audioNoteSegments;
     uint32_t loopCount = 1;
+    std::vector<RangeEdit> rangeEdits;
     bool locked = false;
     uint32_t syncGroup = 0;
     std::vector<::aura::editing::EventProcessingStep> processingHistory;

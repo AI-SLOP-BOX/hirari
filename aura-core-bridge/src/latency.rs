@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::Serialize;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LatencyNode {
@@ -70,12 +70,33 @@ impl LatencyOrchestrator {
     }
 
     pub fn over_threshold(&self, node_id: u32, threshold_samples: u32) -> bool {
-        self.nodes.get(&node_id).map(|n| n.intrinsic_latency > threshold_samples).unwrap_or(false)
+        self.nodes
+            .get(&node_id)
+            .map(|n| n.intrinsic_latency > threshold_samples)
+            .unwrap_or(false)
     }
 
-    pub fn snapshot(&self) -> Vec<&LatencyNode> { let mut nodes: Vec<_> = self.nodes.values().collect(); nodes.sort_by_key(|n| n.id); nodes }
-    pub fn total_compensation(&self) -> u64 { self.nodes.values().map(|n| n.compensation_offset as u64).sum() }
-    pub fn nodes_over_threshold(&self, threshold_samples: u32) -> Vec<u32> { let mut ids: Vec<_> = self.nodes.values().filter(|n| n.intrinsic_latency > threshold_samples).map(|n| n.id).collect(); ids.sort_unstable(); ids }
+    pub fn snapshot(&self) -> Vec<&LatencyNode> {
+        let mut nodes: Vec<_> = self.nodes.values().collect();
+        nodes.sort_by_key(|n| n.id);
+        nodes
+    }
+    pub fn total_compensation(&self) -> u64 {
+        self.nodes
+            .values()
+            .map(|n| n.compensation_offset as u64)
+            .sum()
+    }
+    pub fn nodes_over_threshold(&self, threshold_samples: u32) -> Vec<u32> {
+        let mut ids: Vec<_> = self
+            .nodes
+            .values()
+            .filter(|n| n.intrinsic_latency > threshold_samples)
+            .map(|n| n.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide timing synchronization graph.
     pub fn audit_latency(&self) -> bool {

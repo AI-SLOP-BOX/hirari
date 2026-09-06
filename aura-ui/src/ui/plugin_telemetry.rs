@@ -21,6 +21,19 @@ pub(crate) fn update_plugin_telemetry(
     let selected_track = tracks.row_data(selected_row);
     let track_id = selected_track.as_ref().map(|track| track.id).unwrap_or(-1);
     let plugin_context = (track_id, plugin_index);
+    if plugin_context != *last_plugin_context || *plugin_elapsed_ms >= 64 {
+        let bypassed = if track_id >= 0 && plugin_index >= 0 {
+            core.get_plugin_bypass(track_id as u32, plugin_index as u32)
+        } else {
+            false
+        };
+        ui.set_plugin_bypassed(bypassed);
+    }
+    if plugin_context != *last_plugin_context || *plugin_elapsed_ms >= 64 {
+        ui.set_plugin_editor_capability(
+            plugin_polling::editor_capability_label(core, track_id, plugin_index).into(),
+        );
+    }
     let pdc_due = *pdc_elapsed_ms >= 256;
     let pdc_context_changed = plugin_context != *last_pdc_context;
     if pdc_due {
@@ -95,6 +108,7 @@ pub(crate) fn update_plugin_telemetry(
         ui.set_plugin_parameter_names(slint::ModelRc::new(slint::VecModel::from(names)));
     }
     if let Some(snapshot) = plugin_snapshot {
+        ui.set_plugin_parameter_error(!snapshot.available);
         let values = snapshot.values;
         let values_changed = plugin_polling::values_changed(&values, last_plugin_values);
         if values_changed {

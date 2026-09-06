@@ -30,6 +30,8 @@ public:
         for (uint32_t i = 0; i < 2048; ++i) {
             m_window[i] = 0.5f * (1.0f - std::cos(2.0f * M_PI * i / 2047.0f));
         }
+        if (!std::isfinite(m_sampleRate) || m_sampleRate < 8000.0 || m_sampleRate > 384000.0)
+            m_sampleRate = 44100.0;
     }
 
     /**
@@ -37,6 +39,8 @@ public:
      * @param ratio: 1.0 = Normal, 2.0 = Half speed, 0.5 = Double speed.
      */
     void process(const float* input, float* output, uint32_t numSamples, float ratio) {
+        if (!input || !output || numSamples == 0) return;
+        if (!std::isfinite(ratio) || ratio <= 0.0f) ratio = 1.0f;
         if (std::abs(ratio - 1.0f) < 0.01f || ratio < 0.2f || ratio > 5.0f) {
             std::copy(input, input + numSamples, output);
             return;
@@ -44,7 +48,8 @@ public:
 
         // 1. Load input block into continuous input history buffer
         for (uint32_t i = 0; i < numSamples; ++i) {
-            m_inputHistory[(m_inputHistoryPos + i) % m_inputHistory.size()] = input[i];
+            const float value = std::isfinite(input[i]) ? std::clamp(input[i], -16.0f, 16.0f) : 0.0f;
+            m_inputHistory[(m_inputHistoryPos + i) % m_inputHistory.size()] = value;
         }
 
         std::fill(output, output + numSamples, 0.0f);
@@ -80,7 +85,8 @@ public:
 
             // Extract the final overlap-added sample at the current playhead position
             uint64_t readPos = absOutPos % m_overlapBuffer.size();
-            output[outIdx] = m_overlapBuffer[readPos] * 0.5f; // Scaling factor for window overlap
+            output[outIdx] = std::isfinite(m_overlapBuffer[readPos])
+                ? m_overlapBuffer[readPos] * 0.5f : 0.0f; // overlap normalization
             m_overlapBuffer[readPos] = 0.0f; // Clear buffer for subsequent cycles
         }
 

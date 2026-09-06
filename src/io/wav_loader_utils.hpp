@@ -28,6 +28,11 @@ namespace Aura::IO {
  */
 class WavLoader {
 public:
+    // Keep the WAVE64 path consistent with the canonical WAV decoder: the
+    // reader is an offline helper, but it must still reject oversized input
+    // before allocating a file-sized buffer.
+    static constexpr uint64_t kMaximumDecodedBytes = 512ull * 1024ull * 1024ull;
+
     struct WavInfo {
         uint32_t sampleRate;
         uint16_t numChannels;
@@ -90,6 +95,31 @@ public:
                 ",\"channels\":" + std::to_string(result.info.numChannels) +
                 ",\"bit_depth\":" + std::to_string(result.info.bitDepth) +
                 ",\"samples\":" + std::to_string(result.info.numSamples);
+            double peak = 0.0;
+            long double sumSquares = 0.0L;
+            uint64_t finiteSamples = 0;
+            uint64_t nonFiniteSamples = 0;
+            for (const auto& channel : result.channels) {
+                for (const float sample : channel) {
+                    if (!std::isfinite(sample)) {
+                        ++nonFiniteSamples;
+                        continue;
+                    }
+                    const double magnitude = std::abs(static_cast<double>(sample));
+                    peak = std::max(peak, magnitude);
+                    sumSquares += static_cast<long double>(sample) * sample;
+                    ++finiteSamples;
+                }
+            }
+            const double meanSquare = finiteSamples == 0
+                ? 0.0 : static_cast<double>(sumSquares / finiteSamples);
+            const double rmsLufsEstimate = meanSquare > 0.0
+                ? std::max(-120.0, 10.0 * std::log10(meanSquare) - 0.691)
+                : -120.0;
+            json += ",\"peak_linear\":" + std::to_string(peak) +
+                ",\"rms_lufs_estimate\":" + std::to_string(rmsLufsEstimate) +
+                ",\"finite_samples\":" + std::to_string(finiteSamples) +
+                ",\"non_finite_samples\":" + std::to_string(nonFiniteSamples);
         } else {
             json += ",\"error\":\"" + escape(result.error) + "\"";
         }
@@ -138,7 +168,12 @@ public:
         if (!file.is_open()) throw std::runtime_error("WAVE64 file not found: " + path);
         file.seekg(0, std::ios::end); const auto end = file.tellg();
         if (end < 40) throw std::runtime_error("WAVE64 header is truncated.");
-        const auto size = static_cast<uint64_t>(end); file.seekg(0, std::ios::beg);
+        const auto size = static_cast<uint64_t>(end);
+        if (size > kMaximumDecodedBytes + 1024ull * 1024ull ||
+            size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+            throw std::runtime_error("WAVE64 file exceeds the decoded size limit.");
+        }
+        file.seekg(0, std::ios::beg);
         std::vector<uint8_t> bytes(static_cast<size_t>(size));
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (!file || !std::equal(riff.begin(), riff.end(), bytes.begin()) || !std::equal(wave.begin(), wave.end(), bytes.begin() + 24)) throw std::runtime_error("Invalid WAVE64 header.");
@@ -182,179 +217,6 @@ public:
     /// is only one WAVE parsing implementation and one set of format rules.
     static std::vector<std::vector<float>> loadLegacy(const std::string& path, WavInfo& outInfo) {
         return load(path, outInfo);
-#if 0
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open()) throw std::runtime_error("Wave File Not Found: " + path);
-
-        file.seekg(0, std::ios::end);
-        const std::streamoff fileSize = file.tellg();
-        if (fileSize < 12) throw std::runtime_error("WAVE header is truncated.");
-        file.seekg(0, std::ios::beg);
-
-        char riff[12];
-        file.read(riff, 12);
-        if (std::string(riff, 4) != "RIFF" || std::string(riff + 8, 4) != "WAVE") {
-            throw std::runtime_error("Not a valid WAVE file.");
-        }
-        const auto decodeU16 = [](const uint8_t* bytes) -> uint16_t {
-            return static_cast<uint16_t>(bytes[0]) |
-                   (static_cast<uint16_t>(bytes[1]) << 8);
-        };
-        const auto decodeU32 = [](const uint8_t* bytes) -> uint32_t {
-            return static_cast<uint32_t>(bytes[0]) |
-                   (static_cast<uint32_t>(bytes[1]) << 8) |
-                   (static_cast<uint32_t>(bytes[2]) << 16) |
-                   (static_cast<uint32_t>(bytes[3]) << 24);
-        };
-        uint32_t riffPayloadSize = decodeU32(reinterpret_cast<const uint8_t*>(riff + 4));
-        if (riffPayloadSize < 4 ||
-            static_cast<uint64_t>(riffPayloadSize) + 8ull >
-                static_cast<uint64_t>(fileSize)) {
-            throw std::runtime_error("WAVE RIFF size is inconsistent with the file.");
-        }
-
-        bool fmtFound = false;
-        bool dataFound = false;
-        uint32_t dataSize = 0;
-        std::streamoff dataOffset = 0;
-        uint16_t format = 0;
-        uint32_t byteRate = 0;
-        uint16_t blockAlign = 0;
-
-        while (static_cast<std::streamoff>(file.tellg()) >= 0 &&
-               static_cast<std::streamoff>(file.tellg()) + static_cast<std::streamoff>(8) <= fileSize) {
-            char chunkId[4];
-            uint8_t chunkSizeBytes[4];
-            file.read(chunkId, 4);
-            file.read(reinterpret_cast<char*>(chunkSizeBytes), sizeof(chunkSizeBytes));
-            if (!file) break;
-            const uint32_t chunkSize = decodeU32(chunkSizeBytes);
-
-            std::string id(chunkId, 4);
-            const std::streamoff chunkData = file.tellg();
-            const std::streamoff chunkEnd = chunkData + static_cast<std::streamoff>(chunkSize);
-            if (chunkEnd < chunkData || chunkEnd > fileSize) {
-                throw std::runtime_error("WAVE chunk exceeds file bounds.");
-            }
-            if (id == "fmt ") {
-                if (chunkSize < 16) throw std::runtime_error("WAVE fmt chunk is truncated.");
-                uint8_t bytes2[2]{};
-                uint8_t bytes4[4]{};
-                file.read(reinterpret_cast<char*>(bytes2), 2); format = decodeU16(bytes2);
-                file.read(reinterpret_cast<char*>(bytes2), 2); outInfo.numChannels = decodeU16(bytes2);
-                file.read(reinterpret_cast<char*>(bytes4), 4); outInfo.sampleRate = decodeU32(bytes4);
-                file.read(reinterpret_cast<char*>(bytes4), 4); byteRate = decodeU32(bytes4);
-                file.read(reinterpret_cast<char*>(bytes2), 2); blockAlign = decodeU16(bytes2);
-                file.read(reinterpret_cast<char*>(bytes2), 2); outInfo.bitDepth = decodeU16(bytes2);
-                if (!file) throw std::runtime_error("WAVE fmt chunk is truncated.");
-                if (format == 0xFFFE && chunkSize >= 40) {
-                    file.seekg(chunkData + 18, std::ios::beg);
-                    uint16_t validBits = 0;
-                    file.read(reinterpret_cast<char*>(bytes2), 2); validBits = decodeU16(bytes2);
-                    file.seekg(chunkData + 24, std::ios::beg);
-                    uint16_t subformat = 0;
-                    file.read(reinterpret_cast<char*>(bytes2), 2); subformat = decodeU16(bytes2);
-                    (void)validBits;
-                    if (subformat == 1 || subformat == 3) format = subformat;
-                }
-                file.seekg(chunkEnd, std::ios::beg);
-                fmtFound = true;
-            } else if (id == "data") {
-                dataSize = chunkSize;
-                dataOffset = chunkData;
-                dataFound = true;
-                file.seekg(chunkEnd, std::ios::beg);
-            } else {
-                file.seekg(chunkEnd, std::ios::beg);
-            }
-            if ((chunkSize & 1u) != 0) {
-                const std::streamoff paddingEnd = chunkEnd + 1;
-                if (paddingEnd < chunkEnd || paddingEnd > fileSize) {
-                    throw std::runtime_error("WAVE chunk padding is truncated.");
-                }
-                file.seekg(1, std::ios::cur);
-                if (!file) throw std::runtime_error("WAVE chunk padding is unreadable.");
-            }
-        }
-
-        if (!fmtFound || !dataFound) throw std::runtime_error("Required WAV chunks missing.");
-        if (outInfo.numChannels == 0 || outInfo.sampleRate == 0 ||
-            outInfo.numChannels > 256 ||
-            (format != 1 && format != 3) ||
-            (outInfo.bitDepth != 8 && outInfo.bitDepth != 16 &&
-             outInfo.bitDepth != 24 && outInfo.bitDepth != 32)) {
-            throw std::runtime_error("Unsupported WAVE format.");
-        }
-        if (format == 3 && outInfo.bitDepth != 32) {
-            throw std::runtime_error("Only 32-bit float WAVE is supported.");
-        }
-
-        const uint64_t bytesPerSample = outInfo.bitDepth / 8;
-        const uint64_t frameBytes = static_cast<uint64_t>(outInfo.numChannels) * bytesPerSample;
-        const uint64_t expectedByteRate = static_cast<uint64_t>(outInfo.sampleRate) * frameBytes;
-        if (frameBytes == 0 || frameBytes > std::numeric_limits<uint16_t>::max() ||
-            expectedByteRate > std::numeric_limits<uint32_t>::max() ||
-            blockAlign != frameBytes || byteRate != expectedByteRate ||
-            dataSize < frameBytes || dataSize % frameBytes != 0) {
-            throw std::runtime_error("WAVE format metadata is inconsistent.");
-        }
-        // Refuse pathological allocations before constructing one vector per
-        // channel. The RIFF chunk itself is 32-bit, but a malformed file can
-        // still request an impractical multi-channel allocation.
-        constexpr uint64_t kMaximumDecodedBytes = 1ull << 34; // 16 GiB
-        if (static_cast<uint64_t>(dataSize) > kMaximumDecodedBytes) {
-            throw std::runtime_error("WAVE data exceeds the safe decode limit.");
-        }
-        outInfo.numSamples = dataSize / frameBytes;
-        if (outInfo.numSamples > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
-            throw std::runtime_error("WAVE data is too large.");
-        std::vector<std::vector<float>> buffer(outInfo.numChannels, std::vector<float>(outInfo.numSamples));
-        file.seekg(dataOffset, std::ios::beg);
-
-        // Read and interleave-to-deinterleave conversion
-        for (uint64_t s = 0; s < outInfo.numSamples; ++s) {
-            for (uint16_t c = 0; c < outInfo.numChannels; ++c) {
-                if (outInfo.bitDepth == 8) {
-                    uint8_t val = 0;
-                    file.read(reinterpret_cast<char*>(&val), 1);
-                    buffer[c][s] = (static_cast<float>(val) - 128.0f) / 128.0f;
-                } else if (outInfo.bitDepth == 16) {
-                    uint8_t bytes[2]{};
-                    file.read(reinterpret_cast<char*>(bytes), 2);
-                    const int16_t val = static_cast<int16_t>(decodeU16(bytes));
-                    buffer[c][s] = static_cast<float>(val) / 32768.0f;
-                } else if (outInfo.bitDepth == 24) {
-                    unsigned char bytes[3];
-                    file.read(reinterpret_cast<char*>(bytes), 3);
-                    int32_t val = (bytes[0]) | (bytes[1] << 8) | (bytes[2] << 16);
-                    if (val & 0x800000) val |= 0xFF000000; // Sign extend
-                    buffer[c][s] = static_cast<float>(val) / 8388608.0f;
-                } else {
-                    if (format == 3) {
-                        uint8_t bytes[4]{};
-                        file.read(reinterpret_cast<char*>(bytes), 4);
-                        const uint32_t raw = decodeU32(bytes);
-                        float val = 0.0f;
-                        std::memcpy(&val, &raw, sizeof(val));
-                        buffer[c][s] = std::isfinite(val) ? std::clamp(val, -1.0f, 1.0f) : 0.0f;
-                    } else {
-                        uint8_t bytes[4]{};
-                        file.read(reinterpret_cast<char*>(bytes), 4);
-                        const uint32_t raw = decodeU32(bytes);
-                        int32_t val = 0;
-                        std::memcpy(&val, &raw, sizeof(val));
-                        buffer[c][s] = static_cast<float>(val) / 2147483648.0f;
-                    }
-                }
-                if (!file) throw std::runtime_error("WAVE sample data is truncated.");
-            }
-        }
-
-        return buffer;
-    }
-#endif
-        // The legacy implementation above is intentionally excluded; the
-        // compatibility entrypoint returns through load() at the top.
     }
 };
 

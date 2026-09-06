@@ -12,6 +12,180 @@
 
 ## 今回解消した重大項目
 
+### 2026-09-06 バッチ／単体プロフェッショナルレンダーの偽成功を解消
+
+- `BounceCoreOrchestrator` のバッチ／単体APIがタスク数だけ更新して音声を作らない
+  空実装だったため、旧APIは `RendererNotConnected` を明示して成功扱いしないようにした。
+- ネイティブグラフまたは実レンダーを渡す
+  `process_single_professional_export_with_renderer()` を追加し、PCM16 WAVの公開までを
+  既存のトランザクション処理へ集約した。
+
+### 2026-09-06 選択範囲レンダーをネイティブグラフへ接続
+
+- C++オーディオグラフに半開区間のオフラインレンダー範囲を追加。
+- Rustの `AuraCore::bounce_project_range()` から同じトラック／ルーティング／
+  インサート経路を通して選択範囲を書き出せるようにした。
+- 失敗時・完了時に範囲設定を必ず解除し、次回のフルバウンスへ状態が漏れないようにした。
+
+### 2026-09-06 MIDIサイドカー依存の緩和
+
+- ネイティブプロジェクトに保存済みのMIDIノートを正本として扱い、UI用
+  `.midi.json` サイドカーが欠落または破損していてもプロジェクトを開けるようにした。
+- サイドカーは旧プロジェクトの歌詞・アーティキュレーション補助情報としてのみ使い、
+  欠落時にノート全体を消す経路を廃止した。
+
+### 2026-09-05 VST3実処理の実機相当E2E確認
+
+- Installed Surge XT VST3を分離workerへ実際にロードし、共有オーディオブロックを
+  `IAudioProcessor::process` へ渡して音声を返す経路を確認した。
+- インスタンス生成、連続ブロック処理、オーディオ再構成、状態復元、worker障害時の
+  quarantine/recoveryをE2Eテストで確認した。
+- したがって「外部VST3の実処理」は未実装一覧から除外する。未完了なのはネイティブGUI
+  埋め込み、AU/CLAPの実プラグイン網羅、実デバイス認証である。
+
+### 2026-09-06 AU/CLAP実処理のE2E確認
+
+- macOS標準 `AUDynamicsProcessor` をAUホスト検証ツールでロードし、モノ／ステレオ、
+  複数サンプルレート、可変ブロック、パラメータ変更、MIDI、レンダーを確認した。
+- CLAP最小fixtureを分離workerへロードし、連続ブロック処理、クラッシュ隔離、メールボックス
+  overrun後のquarantineと復旧を確認した。
+- したがってAU/CLAPの「実処理経路」は実装済み。未完了なのは第三者製品の網羅的互換性と
+  ネイティブGUI埋め込みである。
+
+### 2026-09-05 監査APIの偽成功を解消
+
+- `MixClashDetectorEngine::audit_clash_detector()` now runs deterministic
+  finite-range and Bark-band probes instead of returning unconditional
+  success.
+- `ForensicAuditor::audit_integrity()` now verifies valid, malformed, and
+  cyclic routing payloads and only reports success when all expected anomaly
+  paths behave correctly.
+
+These are self-diagnostics for stateless services; they do not replace a
+project-specific routing or mix audit.
+
+### 2026-09-05 Foley再現性・入力安全性
+
+- `ProceduralFoleyKernel` now uses a deterministic default seed, with an
+  explicit seed override for intentional variation between takes.
+- Non-finite hardness/friction controls are normalized at the event boundary;
+  the native contract verifies finite, repeatable output for identical events.
+
+### 2026-09-05 素材ブラウザの決定性
+
+- `AudioAssetLibrary::categories()` now sorts the unordered index before
+  exposing it, so browser order and UI snapshots are stable across runs.
+
+### 2026-09-05 標準MIDI書き出し
+
+- Added a control-plane Standard MIDI File writer with format-1 tempo and
+  per-track chunks, sample-to-tick conversion, note validation, deterministic
+  ordering, lyric meta-events, and atomic publication.
+- `AuraCore::export_midi_file()` now exports the canonical scheduled-note model
+  to `.mid` for interchange with other DAWs and hardware sequencers.
+- The stable command contract now exposes `export_midi_file` as an audited
+  external file operation with the same generation and path policy as bounce.
+
+### 2026-09-06 AudioDriverPro CoreAudio接続
+
+- `AudioDriverPro::openStream(Backend::CoreAudio, ...)` now delegates to the
+  existing AUHAL-backed `MacAudioDriverHost`, including requested device,
+  sample-rate, buffer-size, stop, and failure propagation. The legacy facade
+  no longer stops at a diagnostic telling callers to use another class.
+- External backend callbacks remain available for licensed ASIO/WASAPI/AU
+  adapters, and are closed only when the matching backend owns the stream.
+
+### 2026-09-06 SDKなしVST3ファクトリ生成
+
+- SDK無効ビルドでも、VST3モジュールの標準Factory ABIを使ってAudio
+  Module Classを列挙し、`IComponent`を生成する経路を追加。
+- `getControllerClassId`から`IEditController`も生成し、破棄順序をDLL解放前に
+  固定した。DSP処理ブリッジ未接続時は`InstanceCreated`として明示し、
+  `Operational`とは誤認させない。
+
+### 2026-09-06 ネイティブGUIホスト境界の実装
+
+- `NativeEditorHost` のopen/closeライフサイクルをUIスレッド用callbackへ
+  接続できる形にし、Cocoa/Win32等のウィンドウ生成callbackをmutexの外で
+  実行するよう修正。再入callbackでホストがデッドロックしない。
+- Core側はセッションID、埋め込み状態、close処理を管理し、UI側の
+  `open_native_editor` / `close_native_editor`から同じセッションを操作する。
+- SDK有効のVST3経路では`IPlugView::attached`/`removed`まで実行し、
+  WindowsのHWND、macOSのNSView、LinuxのX11埋め込み面を親ハンドルへ接続する。
+  SDKなし／サンドボックス経路は従来どおり明示的にparameter-onlyとする。
+
+### 2026-09-06 Advanced Exportの通常経路接続
+
+- `AdvancedExportEngine`にネイティブWAV file-renderer経路を追加し、
+  `AuraCore`とStable APIから現在のプロジェクトバウンスグラフを呼び出せるようにした。
+- レンダー完了前はactive jobを消費せず、同名衝突・空ファイル・失敗時は公開済みファイルを
+  ロールバックする。UI/CLIがplanning-only queueで停止しない。
+
+### 2026-09-06 ASIO／外部ドライバの音声callback接続
+
+- `AudioDriverPro`にrender/input callback登録と`processBlock`境界を追加し、
+  ASIO SDKのdouble-buffer callbackへ実際の入出力関数を接続。
+- SDKなし環境でも、認証済み外部ドライバがopen/close/process callbackを注入でき、
+  WASAPI等を「開いたことにするだけ」で終わらない。未接続backendは従来どおり失敗する。
+
+### 2026-09-06 ARA外部プロトコル接続点
+
+- ARA2Hostにplugin側のregion bind/unbind、random-access、analysis、note segment
+  callbackを追加。SDKを直接リンクしない構成でも、Melodyne/SpectraLayers等の
+  ARA adapterを実セッションへ接続できる。
+- callbackはホストmutex外で実行し、SDK側の再入・UIスレッド処理でデッドロックしない。
+
+### 2026-09-05 AudioDriverPro false-success path
+
+- `AudioDriverPro::openStream()` no longer reports WASAPI, ALSA, or JACK as
+  opened when the corresponding adapter is not connected. Unsupported
+  requests now fail with a diagnostic, and the native contract verifies that
+  the driver remains closed. CoreAudio now uses the production
+  `MacAudioDriverHost` adapter directly (see the 2026-09-06 entry above).
+- ASIO is also refused unless an explicit `AURA_ENABLE_ASIO_SDK` build is
+  configured; the in-tree buffer simulator is never advertised as hardware.
+
+### 2026-09-05 optional JACK backend
+
+- Replaced the comment-only `JackBridgeDeep` with an opt-in JACK client that
+  registers stereo input/output ports, reads the negotiated sample rate and
+  block size, and invokes a bounded realtime process callback. Builds without
+  `AURA_ENABLE_JACK` fail closed with a diagnostic; both disabled and
+  JACK-enabled header contracts compile successfully.
+- `DriverFactory::API::JACK` now exposes that bridge on non-Apple builds; an
+  unavailable JACK server still returns the explicit Silent fallback.
+
+### 2026-09-05 JACK AudioEngine integration
+
+- When `AURA_ENABLE_JACK` is enabled, `AudioEngine` now owns the JACK host
+  directly instead of stopping at the legacy `DriverFactory` facade. The JACK
+  realtime callback enters the production `AuraUnifiedEngine` graph, and the
+  negotiated sample rate/block size is applied to that graph on startup,
+  device selection, and reconfiguration.
+- JACK remains opt-in and was verified here by compiling the full
+  `audio_engine.hpp` translation unit with the system JACK headers. A running
+  JACK server is still required for runtime playback evidence.
+
+### 2026-09-05 JACK input capture path
+
+- JACK input ports now feed the same bounded SPSC input queue used by the
+  CoreAudio host. `AudioEngine::poll_audio_input()` is platform-neutral, so
+  recording/control-plane clients receive real JACK samples and dropped-block
+  diagnostics instead of an unconditional empty vector. The queue remains
+  bounded and allocation-free on the realtime callback.
+
+### 2026-09-05 stable MIDI boundary ordering
+
+- `MidiBuffer::sort()` now uses an allocation-free stable insertion sort. Events
+  with the same sample offset retain producer order, which makes note-off /
+  note-on and articulation changes deterministic at a shared sample boundary.
+
+### 2026-09-05 preview voice overlap handling
+
+- The built-in preview synth now tracks each same-pitch note-on independently.
+  A note-off releases only the oldest still-held matching voice, preventing a
+  stacked/legato note from cutting every voice at once.
+
 ## 2026-08-11 並列監査の統合結果
 
 Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読み取り専用監査した。今回の監査ではファイル変更を行わず、既存のdirty worktreeも保持した。
@@ -37,7 +211,7 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 - `src/synthesis/aura_sampler_pro.hpp:247-248`: `updateVoiceCC()`が空。CC/MPEをvoice単位へ伝播する必要がある。
 - `aura-ui/ui/aura_studio.slint:66-137`／`aura-ui/src/slint_ui.rs:608-1665`: `automation_point_moved`、`area_select`、`plugin_param_changed`、`set_route`等のcallbackがUIに存在するがRust接続なし。編集操作が見た目だけで終わる。
 - `aura-ui/ui/aura_studio.slint:3128,3541-3546`: 空プロジェクト・削除直後に`tracks[sel_idx]`を直接参照する。空モデル用の安全な選択状態が必要。
-- `aura-ui/src/slint_ui.rs:322-336`／`src/core/aura_unified_engine.cpp:942-968`: 波形初回取得で同期デコードしUIをブロックする。Open後はplaceholderを表示し、デコードとピーク生成を完全にworkerへ移す。
+- `aura-ui/src/slint_ui.rs:322-336`／`src/core/aura_unified_engine.cpp:942-968`: 波形初回取得で同期デコードしUIをブロックする。Open後はplaceholderを表示し、デコードとピーク生成を完全にworkerへ移す。UI側の初回クリップ生成は非同期リクエスト／完了ポーリングへ移行済み。残る範囲はGPU LODキャッシュとの統合。
 
 ### 中優先（P2）
 
@@ -462,7 +636,10 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### まだ残るP0/P1
 
-- 実機オーディオ出力はmacOS CoreAudio経路に限定され、Windows WASAPI/ASIO・Linux PipeWire/JACKは未接続。SilentDriverは起動用フォールバックであり、音声出力の代替実装ではない。
+- 実機オーディオ出力はmacOS CoreAudioが既定。Linux JACKは
+  `AURA_ENABLE_JACK`を有効にしたビルドでAudioEngineへ接続されるが、実行時は
+  JACKサーバーが必要。Windows WASAPI/ASIOとLinux PipeWireは未接続で、
+  SilentDriverは起動用フォールバックであり音声出力の代替実装ではない。
 - VST3/CLAPはエントリポイント解決までで、インスタンス生成、activate/process、パラメータ、GUI埋め込み、子プロセスIPCサンドボックスは未実装。
 - Vulkanは初期化失敗を正しく報告し、Swapchain、CommandBuffer、Submit/Presentまで実装済み。RenderPass／graphics pipeline／実描画は未実装のため、MetalまたはCPUバックエンドを既定にする。
 
@@ -581,3 +758,333 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 - `ChannelStrip`のゲイン／Pan平滑化をブロック単位からサンプル単位へ修正。再生中のフェーダー・Pan操作でブロック境界の段差を作らない。
 - 内蔵プラグイン画面の`set_filter`を選択トラックの実IDとFX 0へ接続し、LimiterパラメータスライダーがUIだけでなく実Processorへ届くようにした。外部VST3/CLAPは引き続き未接続時に明示拒否する。
 - `TempoMap::getEvents()`、CXX bridge、`AuraCore::get_tempo_events()`を追加し、`Z_GlobalTempoEditor`へ複数イベントの一覧・選択・再編集・削除・ドラッグ移動を接続した。停止中も一覧を同期する。テンポ追加・上書き・削除・移動は`UndoTransactionManager`へ接続済み。
+
+### 2026-09-05 スペクトル復元の有限クリップ対応
+
+- `VocalRestorationMaster::restore()`を、固定係数ではなく窓パワーの実測Overlap-Add正規化へ変更した。FFT長未満の短いクリップと、FFT長に揃わない末尾フレームもゼロパディングして処理するため、境界の音量落ちや未処理テールを残さない。
+- `FFTEngine::inverse()`で自然順スペクトルを逆変換する前にビット反転を行うよう修正した。これにより`forward()`→`inverse()`のラウンドトリップが成立し、スペクトル復元で波形が壊れない。
+- `tests/vocal_restoration_contract.cpp`を追加し、17サンプルの短音・257サンプルの非整列ステレオ・同一インスタンスのチャンネル数変更を検証する。ネイティブ契約テストで合格済み。
+
+### 2026-09-05 波形キャッシュのバックグラウンド実行
+
+- `AuraUnifiedEngine`の波形ピークキャッシュ用`AudioTaskStealingScheduler`をエンジン生成時に2ワーカーで起動し、終了時はキャッシュジョブをdrainしてからjoinするようにした。これまで非同期ビルダーが存在してもスケジューラ未起動のため、初回波形要求が常に同期フォールバックになっていた。
+- `FFTEngine`は非ゼロの2のべき乗以外をコンストラクタで拒否する。スペクトル処理が不正サイズを内部状態へ持ち込まない契約をネイティブ回帰テストで固定した。
+
+### 2026-09-05 メディアCLIの入力境界
+
+- `CliMediaProcessor`のFFmpeg/SoX呼び出しで、入力ファイル名をシェル文字列へ直接連結しないようにした。POSIXでは単一引用符、Windowsではcmd.exeの制御文字を拒否する引数化を行う。
+- SoXの出力先を入力文字列の前置きから、元ファイルと同じディレクトリの`<stem>.trimmed<ext>`へ変更し、絶対パスの先頭が壊れる問題と意図しないディレクトリ作成を防止した。
+- `tests/cli_media_processor_contract.cpp`で、シェルメタ文字を含む音声パスが単一引数として渡され、注入コマンドが実行されないことをfake `ffmpeg`で検証する。
+
+### 2026-09-05 外部音声デコーダのハング境界
+
+- `FfmpegAudioDecoder`の子プロセス待機を無期限`waitpid`から120秒の非同期ポーリングへ変更した。タイムアウト時は`SIGTERM`後に必ずreapし、生成途中のWAVも削除するため、壊れた／悪意あるメディアでUIやインポート制御が永久停止しない。
+- FFmpeg変換先を共有テンポラリ直下の予測可能なファイルから、`mkdtemp`で作る0700専用ディレクトリ内へ移した。別プロセスによるシンボリックリンク差し替えを防ぎ、ファイルとディレクトリを同じ所有権境界で回収する。
+- `AudioDecoderManager::importFile()`が外部デコード中に状態・キャッシュmutexを保持し続けていたため、検証とキャッシュ参照後にロックを解放し、デコード完了時だけ結果を再取得するよう変更した。長時間の読み込み中もステータス照会・別インポート・UIポーリングをブロックしない。
+
+### 2026-09-05 スペクトルエディターの大ブロック境界
+
+- `SpectralEditor::process()`で、STFT生成前にOLA出力を取り出していたため、FFT長以上のホストブロックでは生成直後のフレームを同一呼び出しで捨てる経路を修正した。入力を解析してから出力を取り出す順序に統一した。
+- 許容ブロック長（最大4×FFT）に対して解析バッファが2×FFTしかなく、オフラインの大ブロック後半を落としていたため4×FFTへ拡張した。
+- `tests/spectral_editor_contract.cpp`で、FFTラウンドトリップ、4×FFT一括ブロック、非整列ブロックの有限性を検証する。ネイティブ契約テストで合格済み。
+
+### 2026-09-05 WAVローダーの旧実装整理
+
+- `WavLoader::loadLegacy()`が現行`load()`へ委譲した後も、171行の`#if 0`旧RIFFデコーダーを抱えていたため除去した。公開されている互換シンボルは維持し、現行の境界検証・RF64/WAVE64対応・既存契約テストは変更していない。
+
+### 2026-09-05 AudioBufferのraw加算入力境界
+
+- `AudioBuffer::addFrom(float*, float*, ...)`で、デバイス／プラグイン境界からnullチャンネルを受けた場合に参照してしまう経路を拒否した。無効入力時は既存バッファを変更せず、音声スレッドのnull dereferenceを防ぐ。
+- `tests/audio_buffer_contract.cpp`でnull入力の無操作と正常なステレオ加算を検証し、ネイティブ契約スクリプトへ追加した。
+
+### 2026-09-05 mmap音声ヘッダー境界
+
+- `MMapAudioFile`のWAV検証に最大32チャンネル・384kHzの上限を追加し、通常のデコーダーと同じ音声仕様へ揃えた。
+- RIFFチャンクの奇数バイトパディング計算に`size_t`オーバーフロー検査を追加した。
+- `tests/mmap_audio_contract.cpp`で正常なランダムアクセスと異常サンプルレートの拒否を検証する。
+
+### 2026-09-05 ノート単位ピッチ編集の探索コスト
+
+- トラックのVariAudio互換セグメント評価を、サンプルごとの先頭からの線形探索から、正規化済み開始時刻に対する`upper_bound`探索へ変更した。最大4096セグメントでも音声スレッドの探索量を線形から対数へ抑える。
+- `src/core/aura_unified_engine.cpp`の構文コンパイルで、既存のリージョン／ワープ経路との統合を確認した。
+- 重なった不正なノートセグメントでは従来どおり先頭一致を選ぶよう、候補の後方確認を追加した。通常の非重複セグメントは二分探索のまま高速に処理する。
+
+### 2026-09-05 トラック処理のブロック長境界
+
+- `Track::process()`の入口で、要求ブロック長が実`AudioBuffer`容量を超える場合を即時拒否し、利用可能範囲だけをクリアするようにした。これにより凍結音声・リージョン・オートメーション経路が不正なホストブロックでバッファ外へ書き込まない。
+- `tests/timeline_track_render_contract.cpp`で、4サンプルバッファへの8サンプル要求が無音化して安全に戻ることを検証し、統合ターゲットで合格した。
+
+### 2026-09-05 非破壊レンジ編集の入力境界
+
+- `Region::rangeEdits`をスナップショット公開前に最大4096件へ制限し、範囲・ゲイン・フェード長をリージョン長へ正規化した。シリアライズ済みの異常データがリアルタイムのサンプルごと走査を無制限に増やしたり、範囲外のフェード計算へ入ったりしない。
+- `tests/range_edit_contract.cpp`で範囲外終端、NaNゲイン、不正開始位置の除去とフェード長のクランプを検証する。
+- 後から置換する`replaceRegionRangeEdits()`にも同じ検証とフェード長クランプを適用し、凍結音声の無効化も他の編集APIと揃えた。
+- range editを開始位置でソートし、サンプル位置より後ろの編集をリアルタイム走査で早期打ち切りするようにした。重複区間のゲイン積算は維持する。
+
+### 2026-09-05 Direct audio callbackのチャンネル境界
+
+- `AuraUnifiedEngine::processBlockDirect()`で先頭2チャンネルだけでなく、宣言された全チャンネル（最大32）をnull検証してから外部バッファをラップするようにした。不完全なマルチチャンネルコールバックが空のラッパーを経由してDSPへ進まない。
+- エンジン構文コンパイルとネイティブ契約スクリプトで確認済み。実機デバイスのマルチチャンネルコールバックは引き続き実機検証対象。
+- `AudioBuffer::applyGain()`でもNaN/Infゲインを無操作で拒否し、オートメーションや外部制御値から不定値を下流へ拡散させないようにした。
+- CLAP入力イベントの`std::stable_sort`を固定配列の挿入ソートへ置換した。標準ライブラリ実装による一時ヒープ確保を避け、MIDI／パラメータイベントの並び替えを音声スレッドで完全にallocation-freeにした。
+
+### 2026-09-05 CLAP出力イベントの時刻契約
+
+- CLAPプラグインが返す出力MIDIイベントは、プラグイン側の生成順が時刻順とは限らないため、Auraへ取り込んだ直後に安定ソートするようにした。同一サンプル位置のイベント順は維持し、後段のMIDI処理が単調なサンプル時刻を前提にしても破綻しない。
+- `tests/clap_direct_process_contract.cpp`で異なる時刻のMIDI 1.0／MIDI 2.0入力を同時に通し、エコーを含む結果が時刻順になることを固定した。ネイティブプラグイン契約スクリプトで合格済み。
+
+### 2026-09-05 サンプラーのボイス空きリスト
+
+- `SamplerEngine`の空きボイス管理を`std::stack`から64要素固定配列へ置換した。ノートオンと再生終了時のボイス返却で標準コンテナの内部確保に依存せず、最大ポリフォニー境界でも音声スレッドのヒープ経路を排除する。
+- `tests/sampler_engine_contract.cpp`で64ボイスの獲得・終了・再獲得を通し、再利用後に音が出ることと出力が有限であることを検証する。
+
+### 2026-09-05 VST3／AU MIDI境界
+
+- VST3サンドボックスで、ブロック後方のMIDIイベントを最終サンプルへ丸めていた処理を拒否へ変更した。64bitの共有時刻をVST3の`int32`へ変換する前に、現ブロック範囲と型上限を検証する。
+- AUホストで、MIDI 2.0 UMPやSysExを先頭3バイトだけの旧式MIDIとして送らないようにした。ブロック外時刻・`uint32_t`範囲外時刻も送信せず、AUへ渡す形式を従来の3バイトMIDIに限定した。
+
+### 2026-09-05 サンドボックスMIDIのブロック境界
+
+- `PluginSandboxHost`の共有メールボックスへコピーする前に、イベント時刻が現在の音声ブロック内か検証するようにした。ブロック外イベントをVST3／CLAP個別アダプターへ渡して丸め方が変わる経路をなくし、ループ端のノートずれを防ぐ。
+- 拒否数は既存の入力MIDI境界カウンターへ加算し、UI／診断側から無音のドロップとして見えないようにした。
+
+### 2026-09-05 ステム一括書き出しのロールバック
+
+- `AudioExportEngine::bounce()`のステムモードで、途中のトラックが失敗した場合に、それ以前に今回生成したステムを全て削除するようにした。開始前に既存ファイルを拒否する契約と組み合わせ、ユーザーの既存ファイルには触れず、不完全なステム一式だけを残さない。
+
+### 2026-09-05 録音開始のサンプルレート境界
+
+- `RecordingEngine::start()`をデバイス／WAVライターと同じ8kHz〜384kHzへ揃え、極端なレートをストリーム生成後に失敗させず即時拒否するようにした。
+- 録音先の親ディレクトリ作成エラーを無視せず、書き込みスレッドを起動する前に失敗を返す。既存の録音ストレス契約で上下限の拒否も検証する。
+
+### 2026-09-05 プラグイン追加時の全体再走査
+
+- `plugin_catalog::is_admitted_path()`が、1つのプラグインを追加するたびにシステム全体のカタログ走査と全バンドルのSHA-256計算を行っていたため、インストール済みプラグインが多い環境で追加操作が数十秒以上停止する経路を修正した。
+- 追加対象が設定済み検索ルート配下にあること、実体が読めること、隔離ハッシュでないこと、対応ワーカー能力があることだけを対象パスに対して検証する。完全な一覧表示では従来どおり`scan()`を使用する。
+- `scripts/run_clap_fixture_smoke.sh`で、最小CLAPの生成・連続オーディオ・クラッシュ再起動／隔離・メールボックス復旧の4ケースを実行し、全て合格（各テスト0.11〜0.68秒）した。
+
+### 2026-09-05 プレビューWAVの事前サイズ検証
+
+- `PreviewAudioRuntime`はデコード済みフレーム上限を持っていたが、`fs::read()`でコンテナ全体をメモリへ読み込んだ後に上限を確認していた。巨大または細工されたWAVをブラウザプレビューすると、UIプロセスが不要に大きなメモリを確保する可能性があった。
+- ヘッダー検証時に512MiBのコンテナ上限と64,000,000フレーム上限を適用し、`register_file()`／`preload()`の両方で読み込み前に拒否するようにした。
+- `register_file()`ではハッシュ計算より先にこの事前検証を行うようにし、拒否対象の巨大ファイルを全体走査してからエラーにする経路も除去した。
+- 追加契約`rejects_oversized_preview_source_before_reading_contents`を含むプレビュー関連10テストが合格済み。
+
+### 2026-09-05 ソース配布への fixture clone 混入検査
+
+- 作業ツリーには`third_party_synths`の追跡エントリが1,037件残っており、`.gitignore`だけでは既にGit indexへ入ったクローンを除外できない。レビュー用の`.openutau-review`も配布対象へ混入させてはいけない。
+- `scripts/audit_repository_hygiene.sh`に`AURA_STRICT_SOURCE_HYGIENE=1`モードを追加し、これらの追跡クローンを検出して失敗させる。通常のdirty checkout向け既定モードは維持し、release/source reviewでのみfail-closedにする。
+
+### 2026-09-05 プラグイン能力照会の反復起動
+
+- プラグインカタログ走査と実体 admission のたびに`aura-plugin-host-worker --capabilities`を新規プロセスで起動していたため、複数プラグインの追加やブラウザ更新で不要なプロセス起動が発生していた。
+- ワーカー選択環境をキーに能力応答をプロセス内キャッシュし、同一ホストの反復照会を一度に抑えた。ワーカー本体のロード／DSP処理や隔離境界は変更していない。
+- `plugin_catalog`関連13テストが合格済み。CLAP隔離ワークフローは既存のfixture smokeで引き続き検証する。
+
+### 2026-09-05 復旧バックアップの事前サイズ境界
+
+- `PersistenceOrchestrator::recovery_candidates()`が、名前だけ一致する`.bak.N`をサイズ検証前に`read()`していたため、細工された巨大バックアップで復旧一覧のメモリを消費できた。
+- 512MiBの復旧候補上限をディレクトリ走査直後に適用し、`AutoSaveOrchestrator`の検証でも同じ定数を共有するようにした。
+- スパースな上限超過バックアップを作る契約を含む復旧／永続化テスト26件が合格済み。
+
+### 2026-09-05 復旧リストアの耐久性境界
+
+- 復旧先の一時ファイルを固定名で作成する方式をやめ、プロセスIDと時刻を含む隠しファイルを`create_new`で排他的に作成するようにした。同時復旧や残存一時ファイルによる上書きを避ける。
+- 候補内容を一時ファイルへコピーした後に`sync_all()`し、リネーム後はUnix系で親ディレクトリも同期する。電源断時に「書き込み済みだが名前変更が永続化されていない」窓を狭め、復旧成功をディスク上の状態まで確定させる。
+- 復旧契約で候補復元後の内容、dirty状態、`.recovery-*`一時ファイルの残留なしを固定した。
+
+### 2026-09-05 リリース経路のfixture clone fail-closed
+
+- `build_app.sh`と`verify_release_bundle.sh`の`AURA_RELEASE_MODE=1`経路で、`AURA_STRICT_SOURCE_HYGIENE=1`相当の追跡検査を自動実行するようにした。
+- 通常の開発ビルドは既存のdirty checkoutで継続できるが、署名付きリリースは`third_party_synths`や`.openutau-review`をGit indexに残したまま生成できない。クローン混入を「監査を手動で忘れた」だけで通過させない。
+- `.gitattributes`にも`export-ignore`を追加し、作業ツリーが完全整理前でも`git archive`のソース配布からfixtureクローン、ビルド出力、診断ログを除外する。
+
+### 2026-09-05 サンプラー空きボイス台帳の整合性監査
+
+- `SamplerEngineEngine::audit_sampler_engine()`で、空きボイスIDの範囲外・重複・activeボイス混入を拒否し、全inactiveボイスが空き台帳へ存在することも確認するようにした。
+- これまでは音量・再生位置などの有限性だけを確認していたため、空きリストが破損すると後続のノートオンが同じボイスを二重取得したり、範囲外IDを参照したりする可能性があった。
+- `audit_rejects_corrupt_free_voice_ledger`を追加し、重複・範囲外・active混入の3ケースを固定した。サンプラー関連4テストが合格済み。
+
+### 2026-09-05 空のエクスポートキュー監査
+
+- `ExportOrchestrator::audit_export()`が空のジョブキューに対して`all()`の空集合性で成功を返していたため、未実行の書き出し状態を健全と誤認しないよう、少なくとも1件の有効ジョブを必須にした。
+- 有効ジョブ、実行バックエンド未接続、空キューの3状態を`export_audit_rejects_an_empty_queue`で固定した。対象テストは合格済み。
+
+### 2026-09-05 エクスポートサンプルレート契約の統一
+
+- `ExportJob::validate()`だけが8kHz未満を拒否し、キュー追加と監査は1Hzから受け入れていた不一致を修正した。
+- キュー入口・監査を8kHz〜384kHzへ統一し、`rejects_export_jobs_below_audio_sample_rate_floor`で不正ジョブが登録されず監査も失敗することを固定した。
+
+### 2026-09-05 エクスポート形式の早期拒否
+
+- `ExportOrchestrator::add_job()`が、実行経路を持たないMP3/AACやAIFF/FLACの24・32bitをキューへ登録していたため、書き出し開始後まで失敗が遅延していた。
+- キュー入口でWAV／AIFF／FLACのみ、AIFF／FLACは16bitのみを受け付けるようにし、`rejects_queue_codecs_and_depths_without_connected_writers`で登録拒否を固定した。
+
+### 2026-09-05 低レベル書き出しのサンプルレート境界
+
+- キュー以外の直接WAV／Float32／WAVE64書き出しが1Hzを受け入れていたため、`MIN_EXPORT_SAMPLE_RATE`／`MAX_EXPORT_SAMPLE_RATE`を導入し、全ライターとWAVE64読込検証で共有するようにした。
+- `low_level_writers_share_the_same_sample_rate_floor`で、PCMとFloat32の直接APIが1Hzを拒否することを固定した。
+
+### 2026-09-05 録音ストリームのサンプルレート境界
+
+- `StreamingRecordingWriter::create()`だけが1Hzを受け付けていたため、録音開始・書き出し・プレビューでサンプルレート契約が分裂していた。
+- 録音ストリームも8kHz〜384kHzへ統一し、`recording_writer_rejects_sample_rates_below_audio_floor`で一時ファイルを作らず即時拒否することを固定した。
+
+### 2026-09-05 録音ブロックのPCMバイト数オーバーフロー防止
+
+- `StreamingRecordingWriter::append_interleaved()`の` samples.len() * 2`をchecked multiplicationへ変更し、巨大な入力ブロックで予約サイズ計算がwrap／panicしないようにした。
+- フレーム数・データバイト数と同じ`FileTooLarge`エラーへ統一し、有限値・フレーム境界の検証後もメモリ予約境界を越えないようにした。
+
+### 2026-09-05 録音プレビューのサンプルレート境界
+
+- メモリ内`RecordingPreview`だけが正数なら任意のサンプルレートを受け入れていたため、ファイル録音とセッションで契約が分裂していた。
+- プレビュー領域、プレビュー本体、録音セッションの監査を8kHz〜384kHzへ統一し、1Hz構成を拒否する回帰テストを追加した。
+
+### 2026-09-05 メトロノームのサンプルレート境界
+
+- メトロノームだけが正数なら任意のサンプルレートで監査成功し、1Hz設定で再生計算へ進める状態だった。
+- クリック処理と監査を8kHz〜384kHzへ制限し、低レートでは出力バッファを変更せず安全に無音化する回帰テストを追加した。
+
+### 2026-09-05 OpenUtau MIDI取込のサンプルレート境界
+
+- `OpenUtauImportMidi`のコマンド検証だけが0Hz超・384kHz以下を許し、1HzのMIDI取込要求を受理していた。
+- コマンドAPIも8kHz〜384kHzへ統一し、1Hzを拒否し8kHzを受理する世代検証テストを追加した。
+
+### 2026-09-05 Native projectヘッダのサンプルレート境界
+
+- `native_project::inspect()`が0Hzだけを拒否し、1Hzのプロジェクトヘッダを有効として返していた。
+- ネイティブプロジェクト検査も8kHz〜384kHzへ制限し、CRCが正しくても低レートのコンテナを読込前に拒否する契約を追加した。
+
+### 2026-09-05 Project／Freeze／OpenUtau変換のレート境界
+
+- Project本体の`sample_rate`、Freeze artifactの`sample_rate`、OpenUtau UST/USTX→MIDI変換がそれぞれ0Hzだけを拒否していたため、低レートの保存データが後段へ進める不一致を修正した。
+- 3経路を8kHz〜384kHzへ統一し、既存のTempo-aware OpenUtauテストへ1Hz拒否を追加した。
+
+### 2026-09-05 Production timelineの音声レート境界
+
+- Audio・VFX共通の`TimelineRate`が1Hzを有効としていたため、映像同期用のレート検証だけが音声契約と異なっていた。
+- `TimelineRate::validate()`を8kHz〜384kHzへ変更し、低レートの共有タイムラインを拒否するテストを追加した。
+
+### 2026-09-06 外部プラグインのリセット境界
+
+- 外部プラグイン用`ProcessSandboxProcessor`と汎用`ExternalPluginProcessor`の`reset()`が完全なno-opだったため、停止・再開やオフライン境界で前回の障害／quarantine状態が残る可能性があった。
+- リアルタイムコールバックから子プロセスを停止・再起動しないまま、プロセッサ側の失敗ラッチ、連続overrunカウンタ、quarantineをリセットする経路を追加した。実プラグインのDSP状態再初期化は既存のcontrol-plane reconfigure/restartに委譲し、RT安全性を維持する。
+- SDK有効の直接VST3経路には`setProcessing(false/true)`によるコンポーネントリセットも追加し、VST3ホスト側のno-opを解消した。
+- 分離workerにもcontrol-plane専用のresetコマンドを追加し、CLAPはdeactivate/activate、VST3はprocessing再初期化、AUは`AudioUnitReset`をworker内で実行できるようにした。RTの`reset()`と子プロセス操作を分離している。
+- `Track` → `AuraUnifiedEngine` → `AudioEngine` → Rust bridgeまで`reset_sandboxed_plugin(track,index)`を公開し、UI/CLIからcontrol-plane resetを明示的に要求できるようにした。
+- `reset_sandboxed_plugin`をvalidated command APIとexecutorにも追加し、権限・track ID検証を通るUI/CLI操作として実行できるようにした。
+
+### 2026-09-06 Rust統合エンジンの実音声ブリッジ
+
+- 非推奨の`AuraUnifiedOrchestrator::render_block()`は従来メタデータだけを更新していたため、互換呼び出し側が実音声を処理できなかった。
+- `render_block_with_core()`を追加し、`AuraCore::process_audio_block()`（C++本体グラフ）へステレオバッファを渡して有限性検証後に進捗を記録するようにした。Rust側に二重DSPグラフは作らない。
+
+### 2026-09-06 非Appleオフラインcallback境界
+
+- 非Appleの`UnavailableAudioDriver`が`set_process_callback()`を完全なno-opにしていたため、JACK未接続時のオフライン処理だけが実ドライバと別経路になっていた。
+- callbackを保持し、`process_audio_block()`から同じ`process_driver_block`へ明示的にdispatchする経路を追加した。ハードウェアがない状態をrunningとは報告せず、二重レンダーも防止する。
+
+### 2026-09-06 書き出し納品チェックのコマンド化
+
+- 書き出し後の確認がヘッダ検査と音声有無検査に分かれており、UI/CLIから一度に取得できなかった。
+- `inspect_render_output`コマンドを追加し、WAV/WAVE64のデコード診断、サンプルレート・チャンネル数・ビット深度・サンプル数、構造検証、任意の無音拒否を単一の結果として返すようにした。失敗は成功レスポンスに混ぜず、トランザクションエラーとして返す。
+- ネイティブ診断JSONにもサンプルpeak、RMSベースのLUFS近似値、finite/non-finiteサンプル数を追加し、納品前の異常値検出とレポート表示に利用できるようにした。これはEBU R128準拠のゲート付きLUFSではなく、早期検査用の近似値として明示する。
+
+### 2026-09-06 プラグインプリセット検索の公開経路
+
+- `PluginPresetBrowser`の検索ロジックは存在していたが、UI/CLIがvalidated commandとして利用する経路がなかった。
+- `plugin_preset_search`を追加し、プラグインID、検索語、お気に入り、互換性フィルタを共通コマンド境界から利用できるようにした。巨大JSON、NUL、過大な検索条件は入口で拒否する。
+
+### 2026-09-06 オフライン書き出しの一時停止・再開
+
+- 非同期バウンスは進捗取得とキャンセルだけで、長時間の書き出しを一時停止して再開する状態契約がなかった。
+- ブロック境界でのみ一時停止を監視する制御を追加し、音声callbackをブロックせず、最後に完了したブロックを保ったまま`Paused`→`Rendering`へ復帰できるようにした。
+- `AudioEngine`とRust bridgeにpause/resume APIおよび診断JSONを公開し、停止要求は一時停止中にも受理して待機を安全に解除する。
+- Slintの`RenderActions`にもPause/Resumeを追加し、レンダーオーバーレイの状態表示、ボタン、テレメトリを`PAUSED`状態まで接続した。
+
+### 2026-09-06 ネイティブプラグインGUI能力の公開契約
+
+- VST3/AU側にはエディタビュー検出処理が存在していたが、`IProcessor`やTrack/Core APIから公開されておらず、DSPが動くこととGUIを埋め込めることをUIが区別できなかった。
+- `IProcessor::hasNativeEditor()`を共通契約に追加し、SDK有効のVST3/AU実装からTrack、AuraCore、Stable APIまで公開した。ネイティブGUIがない場合も、パラメータUIのみ利用可能な状態として診断JSONで明示する。
+- プラグインウィンドウのPDC表示横に能力ラベルを接続し、ネイティブビュー検出と実際の埋め込みを分離して表示する。現在は`NATIVE EDITOR AVAILABLE · UI HOST PENDING`（検出のみ）または`PARAMETER EDITOR · NATIVE UI UNAVAILABLE`を表示し、埋め込み済みと誤認させない。未選択時も`NO PLUGIN SELECTED`となる。
+- パラメータUIを固定4個からCoreが列挙した全パラメータへ変更し、外部プラグインの後半パラメータもホスト側から編集できるようにした。
+- 多数のパラメータでウィンドウのレイアウトが破綻しないよう、パラメータ列をスクロール可能なビューへ変更した。
+- プラグインウィンドウ内にもバイパス切替を追加し、Coreの状態をテレメトリで同期することで、ミキサーへ戻らず比較試聴できるようにした。
+- 外部プラグインが隔離・クラッシュ状態になった場合に、プラグインウィンドウの`RESET HOST`から既存のcontrol-planeリセットを要求できるようにした。失敗時はUIが成功扱いにせずエラー表示する。
+
+### 2026-09-06 レンダーPause/Resumeの共通Command API
+
+- 非同期レンダーの一時停止・再開はUI callbackとRustメソッドだけで、CLI／AIが使うvalidated command境界からは操作できなかった。
+- `PauseRender`／`ResumeRender`をCommand APIとexecutorへ追加し、操作一覧・説明・権限分類・エラーコードまで共通化した。UI、CLI、AIが同じレンダー状態契約を利用できる。
+- `InspectPluginEditor`も追加し、プラグインのネイティブGUI有無とパラメータUIフォールバックを同じvalidated command境界から問い合わせられるようにした。
+
+### 2026-09-06 プラグインプリセット保存・復元の共通Command API
+
+- プラグイン画面とCoreにはプリセット保存・復元が存在したが、CLI／AIが使うvalidated command境界からは呼び出せなかった。
+- `save_plugin_preset`／`load_plugin_preset`をCommand APIとexecutorへ追加し、track/plugin ID・パス検証、保存の外部副作用分類、復元の可逆編集分類を共通化した。
+- `CoreApiV1`にも`save_plugin_preset_json`、`load_plugin_preset_json`、`reset_sandboxed_plugin_json`を追加し、外部クライアントがUIやCommand APIと同じ診断契約を直接利用できるようにした。
+- `plugin_parameter_snapshot_json`を追加し、外部UI／AIがプラグインの全パラメータ名・ID・正規化値を一括取得できるようにした。取得件数には上限を設け、巨大な第三者プラグイン応答でクライアントを圧迫しない。
+- 同スナップショットへバイパス状態とネイティブエディタ有無も追加し、外部クライアントが編集UIの表示状態を複数APIの競合なしに再構成できるようにした。
+- UIのパラメータポーリングも個別getter列挙からこの一括スナップショットへ切り替え、表示名・値の取得元をStable API／Command APIと統一した。
+- スナップショットが不正／取得失敗の場合に仮のパラメータスライダーを表示し続けないよう、UIを操作不能状態へ切り替え、原因を明示するエラー表示を追加した。
+- スナップショットのJSONパーサーを純粋関数へ分離し、壊れたJSON・非有限値・0..1外の正規化値を操作不能として扱う回帰テストを追加した。
+- `inspect_plugin_parameters`をvalidated Command API／executorへ追加し、外部クライアントが読み取り専用権限で同じスナップショットを取得できるようにした。
+- `plugin_operations`の能力グループにもプリセット、ホストリセット、エディタ能力、パラメータ検査を追加し、実際の操作一覧と能力広告の不一致を解消した。併せて既存の`select_comp_take`広告漏れも修正した。
+- ホストリセットのStable API／Command APIが独自の簡略JSONを返していたため、Core共通診断へ統合し、`retryable`、世代情報、失敗コードを同じ形式で返すようにした。
+- 外部プラグイン挿入のalias／path検証にもNUL拒否を追加し、プリセット経路と同じ不正文字境界を適用した。
+- プリセット保存・復元のパスをCommandのroot policy検査へ追加し、ProjectWrite権限でプロジェクト外へ読み書きできないようにした。Unrestricted以外の外部パス逸脱を回帰テストで固定した。
+
+### 2026-09-06 MixConsoleスナップショットのUI接続
+
+- MixConsoleスナップショットはCore／Command APIには存在したが、デスクトップUIのコマンドパレットから保存・差分確認・呼び出し・適用を実行できなかった。
+- `AuraCore::capture_mix_snapshot_json`を追加し、現行のトラック状態、プラグインパラメータ／バイパス、オーディオルーティングをCore境界で一括収集するようにした。Stable APIにも同じ入口を公開した。
+- UIコマンド`MIX SNAPSHOT CAPTURE <name>`、`APPLY <index>`、`RECALL <index>`、`DIFF <first> <second>`を追加した。適用成功後はトラック表示モデルをネイティブ状態から再同期し、古いフェーダー表示を残さない。
+
+### 2026-09-06 Control Room操作のコマンドパレット接続
+
+- Control RoomのCore APIは存在していたが、UI上部のDIM／TALK／MON以外（出力選択、出力有効状態、Cue、リファレンス再生）はキーボード／AIから直接操作できなかった。
+- `CONTROL ROOM DIM|TALKBACK|OUTPUT|SELECT|CUE|REFERENCE`コマンドを追加し、状態値・ゲイン・IDを入口で検証してからCoreへ渡すようにした。成功後はCoreの実状態を再確認し、拒否時は成功表示を出さない。
+
+### 2026-09-06 MixConsoleスナップショットのライフサイクル管理
+
+- スナップショットは保存・適用・差分だけでは、増えたシーンをUIから管理できなかった。
+- Core／Stable APIに軽量カタログ取得とインデックス削除を追加し、詳細なプラグイン状態を一覧ポーリングへ毎回複製しないようにした。
+- UIコマンドへ`MIX SNAPSHOT LIST`／`REMOVE <index>`を追加し、ヘッドレスStable APIの作成・捕捉・一覧・削除を回帰テストで固定した。
+- `inspect_mix_snapshots`／`remove_mix_snapshot`をvalidated Command API／executorにも追加し、CLI・AI・UIで同じ権限分類と診断レスポンスを使うようにした。
+
+### 2026-09-06 非同期書き出しキュー状態の公開
+
+- 非同期レンダーは開始・一時停止・再開・取消はできたが、外部クライアントが「現在キューにあるか／一時停止か／進捗が不明か」を単一の診断契約で取得できなかった。
+- `render_queue_status_json`をCore／Stable APIへ追加し、ネイティブ状態、有限な進捗、進捗の有効性、active／pausedを返すようにした。進捗不明を0%完了と誤認しない。
+- `inspect_render_queue`をvalidated Command API／executorへ追加し、UIにも`RENDER QUEUE STATUS`を接続した。
+
+### 2026-09-06 MIDI 2.0 UMPの外部公開経路
+
+- MIDI 2.0 UMPの内部デコーダ、SysEx8検証、CLAP／AU変換処理は存在したが、Stable APIとCommand APIから直接利用できなかった。
+- Core／Stable APIにChannel Voice UMPのJSONデコードと可変長UMPの構造検証を追加した。Note、CC、RPN／NRPN、相対コントローラ、Per-Note Pitch Bendをイベント種別として保持する。
+- `inspect_midi2_ump`／`validate_midi2_ump`を読み取り専用Command APIへ追加し、8バイト境界と1..=4ワード境界を入口で検証する。既存のMIDI 2.0 capability広告を実際に呼び出せる経路へ接続した。
+
+### 2026-09-06 MIDI Clock外部同期の公開経路
+
+- C++の外部同期カーネルにはClock tick、tick数、最終timestamp、BPM保持があったが、Rust／Stable APIから確認・注入できなかった。
+- AudioEngine／FFI／AuraCoreへ同期境界を追加し、`midi_clock_tick_json`と`midi_clock_status_json`で状態をJSON化した。BPMは有限かつ1..1000に制限し、timestampを音声スレッド側で生成しない。
+- `midi_clock_tick`／`inspect_midi_clock`をCommand APIへ、`MIDI CLOCK TICK <timestamp> [bpm]`／`MIDI CLOCK STATUS`をUIへ追加した。
+
+### 2026-09-06 外部同期コントローラの接続
+
+- Rust側にはMIDI Clock／MTC／MMC／LTCの外部同期状態機械があったが、Coreのフィールドに接続されず、設定・MMC受信・MTC受信をクライアントから操作できなかった。
+- `ExternalSyncController`をAuraCoreのランタイム状態へ接続し、プロトコル、source、enabled/running、beat、timecodeをStable APIから取得可能にした。
+- `configure_external_sync_json`、`external_sync_mmc_json`、`external_sync_mtc_json`を追加し、UIから`SYNC CONFIG`／`SYNC MMC`／`SYNC STATUS`で操作できるようにした。MIDI Clock tickも同期状態機械へ反映する。
+- `configure_external_sync`／`apply_external_mmc`／`apply_external_mtc`／`inspect_external_sync`をvalidated Command API／executorへ追加し、CLI・AIも同じ外部同期状態機械を操作できるようにした。
+
+### 2026-09-06 波形・MIDI表現・HRTFの残存同期経路解消
+
+- クリップ初回波形のピーク生成をUI構築中の同期デコードから分離し、AudioEngineのリクエストID、ワーカー、完了ポーリング、対象クリップへの反映まで接続した。UIスレッドは大きな音声ファイルのデコードを待たない。
+- MIDIノートのVibrato Rate編集を検証付きのCore操作へ変更し、存在しないノートへの書き込みを拒否するようにした。編集値は`midi_notes_json`へ`vibrato_rate_millihz`として反映され、UI／CLI／AIが同じ状態を参照できる。
+- HRTFは近似パンナーだけでなく、最大128-tapの左右測定IRをトラック単位で制御スレッドから注入・解除できる経路をAudioEngine／CXX／AuraCoreへ追加した。リアルタイム側は固定長カーネルのみを読む。
+- `set_hrtf_kernel_json`／Stable API `set_hrtf_kernel` を追加し、SOFA等の外部データベースアダプタが左右IRをJSON契約で渡せるようにした。入力の有限値・左右長・タップ上限を境界で検証する。
+
+### 2026-09-06 AU Cocoa Viewのネイティブ埋め込み
+
+- AUv2はCocoa UIプロパティの有無だけを検出し、実際のビュー生成はパラメータUIへフォールバックしていた。
+- macOSのUIスレッドからCocoa UI bundleをロードし、`uiViewForAudioUnit:`でビューを生成、親NSViewへ`addSubview:`するライフサイクルを`AUHostProcessor`へ追加した。close時はSuperviewから解除し、factory／bundleも解放する。音声callbackからは呼ばない。

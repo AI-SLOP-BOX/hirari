@@ -1,3 +1,5 @@
+#pragma once
+
 #include "ivoice.hpp"
 #include "../../core/midi_buffer.hpp"
 #include <memory>

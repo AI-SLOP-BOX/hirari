@@ -2,6 +2,21 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+
+struct PreviewDecodeResult {
+    generation: u64,
+    samples: Result<(Vec<f32>, f64), String>,
+}
+
+static PREVIEW_GENERATION: AtomicU64 = AtomicU64::new(0);
+static PREVIEW_RESULTS: OnceLock<Mutex<VecDeque<PreviewDecodeResult>>> = OnceLock::new();
+
+fn preview_results() -> &'static Mutex<VecDeque<PreviewDecodeResult>> {
+    PREVIEW_RESULTS.get_or_init(|| Mutex::new(VecDeque::new()))
+}
 
 #[derive(Clone, Debug)]
 pub struct PreviewAudioAsset {
@@ -31,6 +46,32 @@ impl PreviewAudioRuntime {
             assets: HashMap::new(),
             pads: [None; 16],
         }
+    }
+
+    /// Starts file probing/decoding on a worker thread. The engine itself is
+    /// never moved across threads; only immutable decoded PCM crosses back
+    /// through the bounded completion queue.
+    pub fn queue_decode(path: PathBuf) -> u64 {
+        let generation = PREVIEW_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+        std::thread::spawn(move || {
+            let result = if !path.is_file() {
+                Err("audio file not found".to_owned())
+            } else {
+                decode_wav(&path)
+            };
+            let mut queue = preview_results().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            queue.push_back(PreviewDecodeResult { generation, samples: result });
+            while queue.len() > 4 { queue.pop_front(); }
+        });
+        generation
+    }
+
+    /// Returns the newest completed decode and discards stale selections.
+    pub fn take_completed_decode() -> Option<(u64, Result<(Vec<f32>, f64), String>)> {
+        let mut queue = preview_results().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let newest = queue.pop_back()?;
+        queue.clear();
+        Some((newest.generation, newest.samples))
     }
 
     pub fn scan(&mut self, root: &Path) -> Result<usize, String> {

@@ -65,11 +65,14 @@ public:
 
     bool focusMode() const noexcept { return m_focusMode; }
 
+    void setMixerVisible(bool visible) noexcept { m_mixerVisible = visible; }
+    bool mixerVisible() const noexcept { return m_mixerVisible; }
+
     void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float w, float h) {
         performLayout(w, h);
 
         auto& coreEng = Aura::Core::Engine::AuraUnifiedEngine::getInstance();
-        const auto& tracks = coreEng.getTracks();
+        const auto tracks = coreEng.get_tracks_snapshot();
 
         kernel.drawRect(0, 0, w, h, 0xFF0A0A0C); // Background
 
@@ -91,7 +94,8 @@ public:
         if (!compact && m_editorVisible) {
             float ey = h - m_editorH;
             kernel.drawRect(m_mainX, ey, m_mainW, m_editorH, 0xFF141416);
-            m_pianoRoll.render(kernel, m_mainX, ey, m_mainW, m_editorH);
+            if (m_mixerVisible) m_mixer.render(kernel, m_mainX, ey, m_mainW, m_editorH, tracks);
+            else m_pianoRoll.render(kernel, m_mainX, ey, m_mainW, m_editorH);
         }
 
         // --- 4. CONTROL BAR ---
@@ -132,7 +136,7 @@ public:
         m_lastMouseX = x;
         m_lastMouseY = y;
         auto& engine = ::Aura::Core::Engine::AuraUnifiedEngine::getInstance();
-        const auto& tracks = engine.getTracks();
+        const auto tracks = engine.get_tracks_snapshot();
         if (x < m_mainX || y < m_controlBarH || y >= m_controlBarH + m_mainH) return false;
         return m_arrangement.handleMouseDown(x, y, tracks, m_scrollX);
     }
@@ -141,7 +145,7 @@ public:
         const float dx = x - m_lastMouseX;
         const float dy = y - m_lastMouseY;
         auto& engine = ::Aura::Core::Engine::AuraUnifiedEngine::getInstance();
-        m_arrangement.handleMouseDrag(x, y, dx, dy, engine.getTracks(), m_scrollX);
+        m_arrangement.handleMouseDrag(x, y, dx, dy, engine.get_tracks_snapshot(), m_scrollX);
         m_lastMouseX = x;
         m_lastMouseY = y;
     }
@@ -151,7 +155,12 @@ public:
     bool handleKeyDown(int keyCode) {
         using namespace ::Aura::UI::Main;
         if (keyCode == KeyCodes::Space) {
-            // ::Aura::AuraEngine::getInstance().togglePlayback();
+            auto& engine = ::Aura::Core::Engine::AuraUnifiedEngine::getInstance();
+            engine.set_playing(!engine.is_playing());
+            return true;
+        }
+        if (keyCode == 'm' || keyCode == 'M') {
+            m_mixerVisible = !m_mixerVisible;
             return true;
         }
         return false;
@@ -173,15 +182,14 @@ private:
     UserMode m_userMode = UserMode::Pro;
     bool m_focusMode = false;
     bool m_inspectorVisible = true, m_editorVisible = true, m_libraryVisible = true;
+    bool m_mixerVisible = false;
     float m_scrollX = 0;
     float m_lastMouseX = 0.0f, m_lastMouseY = 0.0f;
 
     ArrangementView m_arrangement;
     ::Aura::UI::Mixer::MixerConsole m_mixer;
     PianoRollView m_pianoRoll;
-    struct DummyInspector {
-        void render(::Aura::Graphics::Platform::IGraphicsKernel&, float, float, float, float, const auto&) {}
-    } m_inspector;
+    ProfessionalInspector m_inspector;
 };
 
 // Compatibility Typedef

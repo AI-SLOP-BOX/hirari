@@ -102,6 +102,18 @@ ProcessStatus process(const Plugin* plugin, const Process* request) {
                 echoed.port_index = inputMidi->port_index;
                 std::memcpy(echoed.data, inputMidi->data, sizeof(echoed.data));
                 outputEvents->try_push(outputEvents, &echoed.header);
+            } else if (header && header->type == kEventMidi2 &&
+                       header->size >= sizeof(EventMidi2)) {
+                const auto* inputMidi2 = reinterpret_cast<const EventMidi2*>(header);
+                EventMidi2 echoed{};
+                echoed.header.size = sizeof(EventMidi2);
+                echoed.header.time = header->time;
+                echoed.header.space_id = kCoreEventSpaceId;
+                echoed.header.type = kEventMidi2;
+                echoed.port_index = inputMidi2->port_index;
+                echoed.reserved = 0;
+                std::memcpy(echoed.data, inputMidi2->data, sizeof(echoed.data));
+                outputEvents->try_push(outputEvents, &echoed.header);
             }
         }
     }

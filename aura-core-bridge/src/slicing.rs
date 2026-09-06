@@ -2,7 +2,13 @@ pub struct SlicingConfig {
     pub sensitivity: f32,
     pub min_slice_len: u32,
 }
-impl SlicingConfig { pub fn validate(&self) -> bool { self.sensitivity.is_finite() && self.sensitivity >= 0.0 && self.min_slice_len > 0 } }
+impl SlicingConfig {
+    pub fn validate(&self) -> bool {
+        self.sensitivity.is_finite()
+            && (0.0..=1.0e12).contains(&self.sensitivity)
+            && self.min_slice_len > 0
+    }
+}
 
 pub struct SlicingOrchestrator;
 
@@ -30,11 +36,17 @@ impl SlicingOrchestrator {
 
         for (window_index, window) in data.windows(512).enumerate().step_by(256) {
             let i = window_index.saturating_mul(256);
-            let energy: f32 = window
+            let energy: f64 = window
                 .iter()
-                .map(|&x| if x.is_finite() { x * x } else { 0.0 })
+                .map(|&x| {
+                    if x.is_finite() {
+                        f64::from(x) * f64::from(x)
+                    } else {
+                        0.0
+                    }
+                })
                 .sum();
-            if energy > config.sensitivity
+            if energy > f64::from(config.sensitivity)
                 && (i as u64).saturating_sub(last_cut) >= config.min_slice_len as u64
             {
                 // INDUSTRIAL: Implementation of forensic zero-crossing alignment.
@@ -49,25 +61,38 @@ impl SlicingOrchestrator {
                         break;
                     }
                 }
-                cuts.push(zero_crossing);
-                last_cut = i as u64;
+                if zero_crossing > last_cut && zero_crossing >= config.min_slice_len as u64 {
+                    cuts.push(zero_crossing);
+                    last_cut = zero_crossing;
+                }
             }
         }
         cuts
     }
 
     pub fn slice_ranges(&self, length: u64, cuts: &[u64]) -> Option<Vec<(u64, u64)>> {
-        if length == 0 || cuts.iter().any(|&cut| cut == 0 || cut >= length) || cuts.windows(2).any(|w| w[0] >= w[1]) { return None; }
+        if length == 0
+            || cuts.iter().any(|&cut| cut == 0 || cut >= length)
+            || cuts.windows(2).any(|w| w[0] >= w[1])
+        {
+            return None;
+        }
         let mut ranges = Vec::with_capacity(cuts.len() + 1);
         let mut start = 0;
-        for &cut in cuts { ranges.push((start, cut - start)); start = cut; }
+        for &cut in cuts {
+            ranges.push((start, cut - start));
+            start = cut;
+        }
         ranges.push((start, length - start));
         Some(ranges)
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide slicing state and region integrity.
     pub fn audit_slicing(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic slicing auditing logic.
-        true
+        let config = SlicingConfig {
+            sensitivity: 0.0,
+            min_slice_len: 1,
+        };
+        self.slice_ranges(16, &[4, 8, 12]).is_some() && config.validate()
     }
 }

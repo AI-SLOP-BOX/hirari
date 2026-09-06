@@ -50,6 +50,9 @@ impl DynamicCompressorEngine {
     }
 
     pub fn set_lookahead(&mut self, ms: f32) {
+        if !ms.is_finite() || ms < 0.0 {
+            return;
+        }
         self.lookahead_samples = (self.sample_rate * ms as f64 * 0.001) as usize;
         if self.lookahead_samples > 4096 {
             self.lookahead_samples = 4096;
@@ -57,11 +60,15 @@ impl DynamicCompressorEngine {
     }
 
     pub fn set_attack(&mut self, ms: f32) {
-        self.attack_alpha = (-(1.0 / (self.sample_rate * ms as f64 * 0.001))).exp() as f32;
+        if ms.is_finite() && (0.01..=2_000.0).contains(&ms) && self.sample_rate.is_finite() {
+            self.attack_alpha = (-(1.0 / (self.sample_rate * ms as f64 * 0.001))).exp() as f32;
+        }
     }
 
     pub fn set_release(&mut self, ms: f32) {
-        self.release_alpha = (-(1.0 / (self.sample_rate * ms as f64 * 0.001))).exp() as f32;
+        if ms.is_finite() && (0.01..=10_000.0).contains(&ms) && self.sample_rate.is_finite() {
+            self.release_alpha = (-(1.0 / (self.sample_rate * ms as f64 * 0.001))).exp() as f32;
+        }
     }
 
     fn calculate_auto_makeup(&self) -> f32 {
@@ -80,8 +87,11 @@ impl DynamicCompressorEngine {
 
     /// INDUSTRIAL: Professional Mastering-Grade Dynamic Range Processor.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32], sidechain: Option<(&[f32], &[f32])>) {
-        let len = l.len();
+        let len = l.len().min(r.len());
         let max_lookahead = self.delay_l.len();
+        if len == 0 || max_lookahead == 0 || !self.audit_compressor() {
+            return;
+        }
 
         let total_makeup_db = self.makeup_db
             + if self.auto_gain {
@@ -93,7 +103,11 @@ impl DynamicCompressorEngine {
         for s in 0..len {
             // 1. Sidechain Key Selection
             let (sc_l, sc_r) = if let Some((s_l, s_r)) = sidechain {
-                (s_l[s], s_r[s])
+                if s >= s_l.len().min(s_r.len()) {
+                    (l[s], r[s])
+                } else {
+                    (s_l[s], s_r[s])
+                }
             } else {
                 (l[s], r[s])
             };
@@ -142,7 +156,58 @@ impl DynamicCompressorEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Compressor state.
     pub fn audit_compressor(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Compressor auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.threshold_db.is_finite()
+            && (-120.0..=0.0).contains(&self.threshold_db)
+            && self.ratio.is_finite()
+            && (1.0..=100.0).contains(&self.ratio)
+            && self.makeup_db.is_finite()
+            && (-48.0..=48.0).contains(&self.makeup_db)
+            && self.knee_db.is_finite()
+            && (0.0..=48.0).contains(&self.knee_db)
+            && self.rms_sum.is_finite()
+            && self.rms_sum >= 0.0
+            && self.attack_alpha.is_finite()
+            && (0.0..=1.0).contains(&self.attack_alpha)
+            && self.release_alpha.is_finite()
+            && (0.0..=1.0).contains(&self.release_alpha)
+            && self.envelope.is_finite()
+            && (0.0..=4.0).contains(&self.envelope)
+            && self.current_gr.is_finite()
+            && (0.0..=16.0).contains(&self.current_gr)
+            && self.delay_l.len() == self.delay_r.len()
+            && !self.delay_l.is_empty()
+            && self.lookahead_samples < self.delay_l.len()
+            && self.write_idx < self.delay_l.len()
+            && self
+                .delay_l
+                .iter()
+                .chain(self.delay_r.iter())
+                .all(|v| v.is_finite())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DynamicCompressorEngine;
+
+    #[test]
+    fn compressor_handles_mismatched_audio_and_sidechain_lengths() {
+        let mut compressor = DynamicCompressorEngine::new(48_000.0);
+        let mut left = vec![0.8_f32; 128];
+        let mut right = vec![0.4_f32; 64];
+        let side_l = vec![0.9_f32; 32];
+        let side_r = vec![0.9_f32; 32];
+        compressor.process(&mut left, &mut right, Some((&side_l, &side_r)));
+        assert!(left[..64].iter().chain(right.iter()).all(|v| v.is_finite()));
+        assert!(compressor.audit_compressor());
+    }
+
+    #[test]
+    fn compressor_audit_rejects_corrupt_state() {
+        let mut compressor = DynamicCompressorEngine::new(48_000.0);
+        compressor.current_gr = f32::NAN;
+        assert!(!compressor.audit_compressor());
     }
 }

@@ -21,6 +21,10 @@ pub struct LoudnessAnalyzerEngine {
     pub latest_metrics: Metrics,
     momentary_sum_f64: f64,
     short_term_sum_f64: f64,
+    previous_l: f32,
+    previous_r: f32,
+    previous2_l: f32,
+    previous2_r: f32,
 }
 
 fn safe_sample_rate(sr: f64) -> f64 {
@@ -60,6 +64,10 @@ impl LoudnessAnalyzerEngine {
             },
             momentary_sum_f64: 0.0,
             short_term_sum_f64: 0.0,
+            previous_l: 0.0,
+            previous_r: 0.0,
+            previous2_l: 0.0,
+            previous2_r: 0.0,
         }
     }
 
@@ -75,6 +83,10 @@ impl LoudnessAnalyzerEngine {
         self.momentary_sum_f64 = 0.0;
         self.short_term_sum_f64 = 0.0;
         self.write_idx = 0;
+        self.previous_l = 0.0;
+        self.previous_r = 0.0;
+        self.previous2_l = 0.0;
+        self.previous2_r = 0.0;
     }
 
     /// INDUSTRIAL: Processes an audio block with sliding windows and true peak estimation.
@@ -106,11 +118,33 @@ impl LoudnessAnalyzerEngine {
             self.energy_buffer[self.write_idx & mask] = energy;
             self.write_idx = self.write_idx.wrapping_add(1);
 
-            // Simple Peak detection (C++ code didn't actually do 4x oversampling, just abs)
+            // 4x Catmull–Rom inter-sample peak estimate. Previous samples
+            // persist across callback blocks so a boundary transition is not missed.
             let tp_l = in_l.abs();
             let tp_r = in_r.abs();
             max_l = max_l.max(tp_l);
             max_r = max_r.max(tp_r);
+            if i > 0 || self.write_idx > 1 {
+                for step in 1..=4 {
+                    let t = step as f32 * 0.2;
+                    let t2 = t * t;
+                    let t3 = t2 * t;
+                    let interpolate = |p0: f32, p1: f32, p2: f32, p3: f32| {
+                        0.5 * (2.0 * p1
+                            + (-p0 + p2) * t
+                            + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                            + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+                    };
+                    max_l =
+                        max_l.max(interpolate(self.previous2_l, self.previous_l, in_l, in_l).abs());
+                    max_r =
+                        max_r.max(interpolate(self.previous2_r, self.previous_r, in_r, in_r).abs());
+                }
+            }
+            self.previous2_l = self.previous_l;
+            self.previous2_r = self.previous_r;
+            self.previous_l = in_l;
+            self.previous_r = in_r;
         }
 
         let fast_log10 = |x: f32| (x + 1e-12).log10();
@@ -150,5 +184,9 @@ impl LoudnessAnalyzerEngine {
             && self.short_term_sum_f64.is_finite()
             && self.latest_metrics.momentary_lufs.is_finite()
             && self.latest_metrics.short_term_lufs.is_finite()
+            && self.previous_l.is_finite()
+            && self.previous_r.is_finite()
+            && self.previous2_l.is_finite()
+            && self.previous2_r.is_finite()
     }
 }

@@ -1,0 +1,28 @@
+name: Dependency and license security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  rust-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+      - name: Install audit tools
+        run: cargo install --locked cargo-audit cargo-deny
+      - name: Vulnerability audit
+        # Vulnerabilities fail. Maintenance warnings remain visible and are
+        # tracked separately in deny.toml when no compatible replacement exists.
+        run: cargo audit
+      - name: License, source, and dependency policy
+        run: cargo deny check

@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub const MAX_RECOVERY_CANDIDATE_BYTES: u64 = 512 * 1024 * 1024;
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct ProjectMetadata {
     pub name: String,

@@ -32,49 +32,111 @@ impl AutomationOrchestrator {
         Self {
             curves: Vec::new(),
             mode: AutomationMode::Read,
-            sample_rate: sr,
+            sample_rate: if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+                sr
+            } else {
+                48_000.0
+            },
         }
     }
-    pub fn set_mode(&mut self, mode: AutomationMode) { self.mode = mode; }
+    pub fn set_mode(&mut self, mode: AutomationMode) {
+        self.mode = mode;
+    }
 
     /// Records a control move according to the active DAW automation mode.
     /// Read mode is immutable; AutoPunch accepts writes only inside the
     /// supplied cycle range. All writes share the validated upsert path.
-    pub fn record_point(&mut self, param_id: u32, tick: u64, value: f32, curvature: f32, punch_range: Option<(u64, u64)>) -> bool {
-        if self.mode == AutomationMode::Read { return false; }
+    pub fn record_point(
+        &mut self,
+        param_id: u32,
+        tick: u64,
+        value: f32,
+        curvature: f32,
+        punch_range: Option<(u64, u64)>,
+    ) -> bool {
+        if self.mode == AutomationMode::Read {
+            return false;
+        }
         if self.mode == AutomationMode::AutoPunch {
-            let Some((start, end)) = punch_range else { return false; };
-            if end <= start || !(start..=end).contains(&tick) { return false; }
+            let Some((start, end)) = punch_range else {
+                return false;
+            };
+            if end <= start || !(start..=end).contains(&tick) {
+                return false;
+            }
         }
         self.upsert_point(param_id, tick, value, curvature)
     }
 
     /// Touch-mode gesture: writes the touched value and restores the value
     /// that was present immediately before the gesture at release.
-    pub fn record_touch(&mut self, param_id: u32, start_tick: u64, end_tick: u64, value: f32, curvature: f32) -> bool {
-        if end_tick <= start_tick || !value.is_finite() { return false; }
+    pub fn record_touch(
+        &mut self,
+        param_id: u32,
+        start_tick: u64,
+        end_tick: u64,
+        value: f32,
+        curvature: f32,
+    ) -> bool {
+        if end_tick <= start_tick || !value.is_finite() {
+            return false;
+        }
         let backup = self.clone();
         let restore = self.resolve_value_at(param_id, start_tick);
-        if !self.upsert_point(param_id, start_tick, value, curvature) { return false; }
-        if self.upsert_point(param_id, end_tick, restore, 0.0) { true } else { *self = backup; false }
+        if !self.upsert_point(param_id, start_tick, value, curvature) {
+            return false;
+        }
+        if self.upsert_point(param_id, end_tick, restore, 0.0) {
+            true
+        } else {
+            *self = backup;
+            false
+        }
     }
 
     /// Inserts or replaces a point while keeping the curve ordered.  This is
     /// the canonical edit path for UI, MIDI learn, and CLI automation writes.
     pub fn upsert_point(&mut self, param_id: u32, tick: u64, value: f32, curvature: f32) -> bool {
-        if param_id == 0 || !value.is_finite() || !curvature.is_finite() {
+        if param_id == 0
+            || !value.is_finite()
+            || !(0.0..=1.0).contains(&value)
+            || !curvature.is_finite()
+        {
             return false;
         }
-        let curve = if let Some(curve) = self.curves.iter_mut().find(|curve| curve.param_id == param_id) {
+        let curve = if let Some(curve) = self
+            .curves
+            .iter_mut()
+            .find(|curve| curve.param_id == param_id)
+        {
             curve
         } else {
-            if self.curves.len() >= 65_536 { return false; }
-            self.curves.push(AutomationCurve { param_id, points: Vec::new() });
+            if self.curves.len() >= 65_536 {
+                return false;
+            }
+            self.curves.push(AutomationCurve {
+                param_id,
+                points: Vec::new(),
+            });
             self.curves.last_mut().expect("curve was just inserted")
         };
-        if curve.points.len() >= 1_000_000 && curve.points.binary_search_by_key(&tick, |existing| existing.tick).is_err() { return false; }
-        let point = AutomationPoint { tick, value, curvature: curvature.clamp(-1.0, 1.0) };
-        match curve.points.binary_search_by_key(&tick, |existing| existing.tick) {
+        if curve.points.len() >= 1_000_000
+            && curve
+                .points
+                .binary_search_by_key(&tick, |existing| existing.tick)
+                .is_err()
+        {
+            return false;
+        }
+        let point = AutomationPoint {
+            tick,
+            value,
+            curvature: curvature.clamp(-1.0, 1.0),
+        };
+        match curve
+            .points
+            .binary_search_by_key(&tick, |existing| existing.tick)
+        {
             Ok(index) => curve.points[index] = point,
             Err(index) => curve.points.insert(index, point),
         }
@@ -82,11 +144,20 @@ impl AutomationOrchestrator {
     }
 
     pub fn remove_point(&mut self, param_id: u32, tick: u64) -> bool {
-        let Some(curve) = self.curves.iter_mut().find(|curve| curve.param_id == param_id) else { return false; };
-        let Ok(index) = curve.points.binary_search_by_key(&tick, |point| point.tick) else { return false; };
+        let Some(curve) = self
+            .curves
+            .iter_mut()
+            .find(|curve| curve.param_id == param_id)
+        else {
+            return false;
+        };
+        let Ok(index) = curve.points.binary_search_by_key(&tick, |point| point.tick) else {
+            return false;
+        };
         curve.points.remove(index);
         if curve.points.is_empty() {
-            self.curves.retain(|candidate| candidate.param_id != param_id);
+            self.curves
+                .retain(|candidate| candidate.param_id != param_id);
         }
         true
     }
@@ -98,12 +169,21 @@ impl AutomationOrchestrator {
     }
 
     pub fn clear_points(&mut self, param_id: u32) -> bool {
-        let Some(index) = self.curves.iter().position(|curve| curve.param_id == param_id) else { return false; };
+        let Some(index) = self
+            .curves
+            .iter()
+            .position(|curve| curve.param_id == param_id)
+        else {
+            return false;
+        };
         !self.curves.remove(index).points.is_empty()
     }
 
     pub fn snapshot_curve(&self, param_id: u32) -> Option<Vec<AutomationPoint>> {
-        self.curves.iter().find(|curve| curve.param_id == param_id).map(|curve| curve.points.clone())
+        self.curves
+            .iter()
+            .find(|curve| curve.param_id == param_id)
+            .map(|curve| curve.points.clone())
     }
 
     pub fn curve_ids(&self) -> Vec<u32> {
@@ -112,22 +192,57 @@ impl AutomationOrchestrator {
         ids
     }
 
-    pub fn transform_curve(&mut self, param_id: u32, scale: f32, offset: f32, invert: bool) -> bool {
-        if !scale.is_finite() || !offset.is_finite() { return false; }
-        let Some(curve) = self.curves.iter_mut().find(|c| c.param_id == param_id) else { return false; };
-        for point in &mut curve.points { let mut value = point.value * scale + offset; if invert { value = 1.0 - value; } point.value = value.clamp(0.0, 1.0); }
+    pub fn transform_curve(
+        &mut self,
+        param_id: u32,
+        scale: f32,
+        offset: f32,
+        invert: bool,
+    ) -> bool {
+        if !scale.is_finite() || !offset.is_finite() {
+            return false;
+        }
+        let Some(curve) = self.curves.iter_mut().find(|c| c.param_id == param_id) else {
+            return false;
+        };
+        for point in &mut curve.points {
+            let mut value = point.value * scale + offset;
+            if invert {
+                value = 1.0 - value;
+            }
+            point.value = value.clamp(0.0, 1.0);
+        }
         true
     }
 
     pub fn trim_curve(&mut self, param_id: u32, start: u64, end: u64) -> bool {
-        if end <= start { return false; }
-        let Some(index) = self.curves.iter().position(|c| c.param_id == param_id) else { return false; };
-        if self.curves[index].points.is_empty() { return false; }
+        if end <= start {
+            return false;
+        }
+        let Some(index) = self.curves.iter().position(|c| c.param_id == param_id) else {
+            return false;
+        };
+        if self.curves[index].points.is_empty() {
+            return false;
+        }
         let start_value = self.resolve_value_at(param_id, start);
         let end_value = self.resolve_value_at(param_id, end);
-        let mut points: Vec<_> = self.curves[index].points.iter().filter(|point| point.tick > start && point.tick < end).cloned().collect();
-        points.push(AutomationPoint { tick: start, value: start_value, curvature: 0.0 });
-        points.push(AutomationPoint { tick: end, value: end_value, curvature: 0.0 });
+        let mut points: Vec<_> = self.curves[index]
+            .points
+            .iter()
+            .filter(|point| point.tick > start && point.tick < end)
+            .cloned()
+            .collect();
+        points.push(AutomationPoint {
+            tick: start,
+            value: start_value,
+            curvature: 0.0,
+        });
+        points.push(AutomationPoint {
+            tick: end,
+            value: end_value,
+            curvature: 0.0,
+        });
         // Boundary points preserve the visible curve shape when the user
         // trims between existing automation nodes.
         points.sort_by_key(|point| point.tick);
@@ -136,10 +251,19 @@ impl AutomationOrchestrator {
     }
 
     pub fn reverse_curve(&mut self, param_id: u32, start: u64, end: u64) -> bool {
-        if end <= start { return false; }
-        let Some(curve) = self.curves.iter_mut().find(|c| c.param_id == param_id) else { return false; };
+        if end <= start {
+            return false;
+        }
+        let Some(curve) = self.curves.iter_mut().find(|c| c.param_id == param_id) else {
+            return false;
+        };
         let mut changed = false;
-        for point in &mut curve.points { if (start..=end).contains(&point.tick) { point.tick = end - (point.tick - start); changed = true; } }
+        for point in &mut curve.points {
+            if (start..=end).contains(&point.tick) {
+                point.tick = end - (point.tick - start);
+                changed = true;
+            }
+        }
         curve.points.sort_by_key(|point| point.tick);
         changed
     }
@@ -150,12 +274,21 @@ impl AutomationOrchestrator {
         if source_id == 0 || destination_id == 0 || source_id == destination_id {
             return false;
         }
-        let Some(source) = self.curves.iter().find(|curve| curve.param_id == source_id) else { return false; };
+        let Some(source) = self.curves.iter().find(|curve| curve.param_id == source_id) else {
+            return false;
+        };
         let points = source.points.clone();
-        if let Some(destination) = self.curves.iter_mut().find(|curve| curve.param_id == destination_id) {
+        if let Some(destination) = self
+            .curves
+            .iter_mut()
+            .find(|curve| curve.param_id == destination_id)
+        {
             destination.points = points;
         } else if self.curves.len() < 65_536 {
-            self.curves.push(AutomationCurve { param_id: destination_id, points });
+            self.curves.push(AutomationCurve {
+                param_id: destination_id,
+                points,
+            });
         } else {
             return false;
         }
@@ -163,20 +296,48 @@ impl AutomationOrchestrator {
     }
 
     pub fn link_group(&mut self, source_id: u32, destinations: &[u32]) -> bool {
-        if source_id == 0 || destinations.is_empty() || destinations.iter().any(|id| *id == 0 || *id == source_id) || destinations.iter().enumerate().any(|(i, id)| destinations[..i].contains(id)) { return false; }
-        let Some(source) = self.curves.iter().find(|curve| curve.param_id == source_id) else { return false; };
+        if source_id == 0
+            || destinations.is_empty()
+            || destinations.iter().any(|id| *id == 0 || *id == source_id)
+            || destinations
+                .iter()
+                .enumerate()
+                .any(|(i, id)| destinations[..i].contains(id))
+        {
+            return false;
+        }
+        let Some(source) = self.curves.iter().find(|curve| curve.param_id == source_id) else {
+            return false;
+        };
         let points = source.points.clone();
-        let new_count = destinations.iter().filter(|id| !self.curves.iter().any(|curve| curve.param_id == **id)).count();
-        if self.curves.len().saturating_add(new_count) > 65_536 { return false; }
+        let new_count = destinations
+            .iter()
+            .filter(|id| !self.curves.iter().any(|curve| curve.param_id == **id))
+            .count();
+        if self.curves.len().saturating_add(new_count) > 65_536 {
+            return false;
+        }
         for id in destinations {
-            if let Some(curve) = self.curves.iter_mut().find(|curve| curve.param_id == *id) { curve.points = points.clone(); }
-            else { self.curves.push(AutomationCurve { param_id: *id, points: points.clone() }); }
+            if let Some(curve) = self.curves.iter_mut().find(|curve| curve.param_id == *id) {
+                curve.points = points.clone();
+            } else {
+                self.curves.push(AutomationCurve {
+                    param_id: *id,
+                    points: points.clone(),
+                });
+            }
         }
         true
     }
 
     /// Resolves a contiguous automation block without allocating per sample.
-    pub fn resolve_block(&self, param_id: u32, start_tick: u64, tick_step: u64, output: &mut [f32]) {
+    pub fn resolve_block(
+        &self,
+        param_id: u32,
+        start_tick: u64,
+        tick_step: u64,
+        output: &mut [f32],
+    ) {
         for (index, value) in output.iter_mut().enumerate() {
             let tick = start_tick.saturating_add(tick_step.saturating_mul(index as u64));
             *value = self.resolve_value_at(param_id, tick);
@@ -266,25 +427,30 @@ impl AutomationOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide automation synchronization graph.
     pub fn audit_automation(&self) -> bool {
-        if !self.sample_rate.is_finite() || self.sample_rate <= 0.0 {
+        if !self.sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&self.sample_rate) {
             return false;
         }
 
-        self.curves.len() <= 65_536 && self.curves.iter().all(|curve| {
-            curve.param_id != 0
-                && curve.points.windows(2).all(|pair| {
-                pair[0].tick < pair[1].tick
-                    && pair[0].value.is_finite()
-                    && pair[0].curvature.is_finite()
-            }) && curve
-                .points
-                .last()
-                .map(|point| point.value.is_finite() && point.curvature.is_finite())
-                .unwrap_or(true)
-                && curve.points.len() <= 1_000_000
-        }) && self.curves.iter().enumerate().all(|(i, curve)| {
-            self.curves[..i].iter().all(|previous| previous.param_id != curve.param_id)
-        })
+        self.curves.len() <= 65_536
+            && self.curves.iter().all(|curve| {
+                curve.param_id != 0
+                    && curve.points.windows(2).all(|pair| {
+                        pair[0].tick < pair[1].tick
+                            && pair[0].value.is_finite()
+                            && pair[0].curvature.is_finite()
+                    })
+                    && curve
+                        .points
+                        .last()
+                        .map(|point| point.value.is_finite() && point.curvature.is_finite())
+                        .unwrap_or(true)
+                    && curve.points.len() <= 1_000_000
+            })
+            && self.curves.iter().enumerate().all(|(i, curve)| {
+                self.curves[..i]
+                    .iter()
+                    .all(|previous| previous.param_id != curve.param_id)
+            })
     }
 
     fn interpolate_bezier(&self, v1: f32, v2: f32, c: f32, t: f32) -> f32 {
@@ -334,7 +500,15 @@ mod tests {
         assert!(automation.record_point(1, 0, 0.0, 0.0, None));
         assert!(automation.record_point(1, 100, 1.0, 0.0, None));
         assert!(automation.trim_curve(1, 25, 75));
-        assert_eq!(automation.snapshot_curve(1).unwrap().iter().map(|point| point.tick).collect::<Vec<_>>(), vec![25, 75]);
+        assert_eq!(
+            automation
+                .snapshot_curve(1)
+                .unwrap()
+                .iter()
+                .map(|point| point.tick)
+                .collect::<Vec<_>>(),
+            vec![25, 75]
+        );
         assert!((automation.resolve_value_at(1, 25) - 0.25).abs() < 1e-6);
         assert!((automation.resolve_value_at(1, 75) - 0.75).abs() < 1e-6);
     }

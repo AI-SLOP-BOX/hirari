@@ -38,6 +38,14 @@ require_tracked ROADMAP.md
 # only reject generated build trees/bundles and transient diagnostics here.
 require_absent_from_index '(^|/)(target|build|build-tools|dist)/|(^|/)Aura DAW\.app/|\.log$|\.tmp$|\.journal$|\.DS_Store$'
 
+# Local fixture clones are useful while developing, but must never be part of
+# a source or release review. Keep the default audit compatible with existing
+# dirty checkouts; strict CI/release jobs opt in and fail closed until the
+# clone is removed from the Git index.
+if [ "${AURA_STRICT_SOURCE_HYGIENE:-0}" = "1" ]; then
+    require_absent_from_index '(^|/)third_party_synths(/|$)|(^|/)\.openutau-review(/|$)'
+fi
+
 if [ "$failures" -ne 0 ]; then
     echo "Repository hygiene failed: $failures policy violation(s)" >&2
     exit 1

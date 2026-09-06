@@ -1,0 +1,15 @@
+# Local fixture clones and review checkouts are development-only material.
+# Keep them out of `git archive` source distributions even if an old checkout
+# still contains tracked entries; strict release hygiene separately rejects
+# those entries from a signed release checkout.
+third_party_synths/** export-ignore
+third_party_synths/ export-ignore
+.openutau-review/** export-ignore
+.openutau-review/ export-ignore
+
+# Build output and local diagnostics are never source-distribution content.
+target/** export-ignore
+build/** export-ignore
+dist/** export-ignore
+artifacts/** export-ignore
+"packaging/Aura DAW.app/" export-ignore

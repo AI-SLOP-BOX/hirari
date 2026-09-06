@@ -503,6 +503,10 @@ pub fn handle_command(
                 .arg(format!("{:.2}", ui.get_openutau_vibrato() * 34.0 + 16.0))
                 .arg(format!("{:.2}", ui.get_openutau_dynamics()))
                 .arg(format!("{:.2}", ui.get_openutau_consonants()))
+                .arg(format!(
+                    "{:.2}",
+                    220.0 - ui.get_openutau_vibrato_rate() * 160.0
+                ))
                 .output();
             if result.as_ref().is_ok_and(|value| value.status.success()) {
                 let _ = core.set_openutau_tuning(

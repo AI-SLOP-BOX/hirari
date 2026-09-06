@@ -15,6 +15,7 @@
 #include "../dsp/effects/tube_saturation.hpp"
 #include "../scae/AuraAISuite.hpp"
 #include "plugins/process_sandbox_processor.hpp"
+#include "plugins/vst3_host_processor.hpp"
 
 namespace Aura::Core::Plugin {
 
@@ -109,6 +110,9 @@ public:
     }
     void reset() noexcept override { m_write = 0; for (auto& channel : m_buffer) channel.fill(0.0f); }
     std::string getName() const override { return "Aura Delay"; }
+    // Eight delay cycles leave the 0.35 feedback path below -60 dB even at
+    // the longest supported tempo-derived delay.
+    uint32_t getTailSamples() const noexcept override { return kSize * 8u; }
     uint32_t getNumParameters() const noexcept override { return 1; }
     void setParameter(uint32_t id, float value) noexcept override { if (id == 0) m_mix = std::clamp(value, 0.0f, 1.0f); }
     float getParameter(uint32_t id) const noexcept override { return id == 0 ? m_mix : 0.0f; }
@@ -122,7 +126,11 @@ private:
 
 class NativeReverb final : public DSP::IProcessor {
 public:
-    void prepareToPlay(double, uint32_t) noexcept override { reset(); }
+    void prepareToPlay(double sr, uint32_t) noexcept override {
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0
+            ? sr : 44'100.0;
+        reset();
+    }
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer&, const DSP::ProcessContext&) noexcept override {
         const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
         for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
@@ -141,6 +149,9 @@ public:
     }
     void reset() noexcept override { m_index = 0; for (auto& line : m_lines) line.fill(0.0f); }
     std::string getName() const override { return "Aura Reverb"; }
+    // The four-line tank feeds back at 0.72; reserving 24 maximum-delay
+    // traversals reaches the practical -60 dB decay point with margin.
+    uint32_t getTailSamples() const noexcept override { return kSize * 24u; }
     uint32_t getNumParameters() const noexcept override { return 1; }
     void setParameter(uint32_t id, float value) noexcept override { if (id == 0) m_mix = std::clamp(value, 0.0f, 1.0f); }
     float getParameter(uint32_t id) const noexcept override { return id == 0 ? m_mix : 0.0f; }
@@ -148,6 +159,7 @@ private:
     static constexpr uint32_t kSize = 8192;
     std::array<std::array<float, kSize>, 4> m_lines{};
     uint32_t m_index = 0;
+    double m_sampleRate = 44'100.0;
     float m_feedback = 0.72f, m_mix = 0.3f;
 };
 
@@ -248,6 +260,18 @@ public:
             m_state = m_internal ? LoadState::Operational : LoadState::Failed;
             if (!m_internal) m_error = "unknown internal plugin: " + m_path;
         } else {
+#if defined(AURA_ENABLE_VST3_SDK)
+            if (m_format == Format::VST3) {
+                m_vst3 = std::make_unique<Plugins::VST3HostProcessor>();
+                if (!m_vst3->loadVst3(m_path)) {
+                    m_state = LoadState::Failed;
+                    m_error = m_vst3->lastError();
+                } else {
+                    m_state = LoadState::Operational;
+                }
+            } else
+#endif
+            {
             // All external formats use the same process boundary.  The
             // worker selects the ABI adapter from the bundle/path, while the
             // host keeps one lifecycle and failure contract for VST3, AU,
@@ -255,6 +279,7 @@ public:
             m_external = std::make_unique<Plugins::ProcessSandboxProcessor>(m_path);
             m_state = m_external ? LoadState::Unloaded : LoadState::Failed;
             if (!m_external) m_error = "failed to allocate external plugin sandbox";
+            }
         }
         // The host-side atomics are the only control/audio exchange for
         // parameters.  Seed them once before the processor becomes visible;
@@ -271,6 +296,9 @@ public:
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
         if (m_internal) m_internal->prepareToPlay(sr, bs);
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) m_vst3->prepareToPlay(sr, bs);
+#endif
         if (m_external) {
             m_external->prepareToPlay(sr, bs);
             if (!m_external->isAlive() && !m_external->start()) {
@@ -283,7 +311,18 @@ public:
 
     uint32_t getLatencySamples() const noexcept override {
         if (m_internal) return m_internal->getLatencySamples();
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) return m_vst3->getLatencySamples();
+#endif
         return m_external ? m_external->getLatencySamples() : 0u;
+    }
+
+    uint32_t getTailSamples() const noexcept override {
+        if (m_internal) return m_internal->getTailSamples();
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) return m_vst3->getTailSamples();
+#endif
+        return m_external ? m_external->getTailSamples() : 0u;
     }
 
     void process(AudioBuffer& b, MidiBuffer& midi, const DSP::ProcessContext& context) noexcept override {
@@ -307,6 +346,15 @@ public:
             return;
         }
 
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) {
+            m_vst3->process(b, midi, context);
+            if (m_vst3->processFailed())
+                m_processFailed.store(true, std::memory_order_release);
+            return;
+        }
+#endif
+
         if (m_external) {
             m_external->process(b, midi, context);
             if (m_external->processFailed()) {
@@ -322,6 +370,9 @@ public:
 
     void reset() noexcept override {
         if (m_internal) m_internal->reset();
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) m_vst3->reset();
+#endif
         // External reset is intentionally a lifecycle no-op: stopping the
         // worker here would make every graph reset an implicit plugin crash.
     }
@@ -338,6 +389,9 @@ public:
             }
             return state;
         }
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) return m_vst3->getState();
+#endif
         return m_external ? m_external->getState() : std::vector<uint8_t>{};
     }
     bool setState(const std::vector<uint8_t>& state) override {
@@ -349,6 +403,9 @@ public:
             }
             return restored;
         }
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) return m_vst3->setState(state);
+#endif
         return m_external && m_external->setState(state);
     }
     bool restoreStateChecked(const std::vector<uint8_t>& state) override {
@@ -362,6 +419,9 @@ public:
             }
             return setState(state);
         }
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) return m_vst3->restoreStateChecked(state);
+#endif
         return m_external && m_external->restoreStateChecked(state);
     }
     
@@ -416,6 +476,29 @@ public:
     }
     const std::string& path() const { return m_path; }
 
+    bool hasNativeEditor() const noexcept override {
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_vst3) return m_vst3->hasNativeEditor();
+#endif
+        return false;
+    }
+    uint64_t openNativeEditor(uintptr_t parent) noexcept override {
+#if defined(AURA_ENABLE_VST3_SDK)
+        return m_vst3 ? m_vst3->openNativeEditor(parent) : 0;
+#else
+        (void)parent;
+        return 0;
+#endif
+    }
+    bool closeNativeEditor(uint64_t session) noexcept override {
+#if defined(AURA_ENABLE_VST3_SDK)
+        return m_vst3 && m_vst3->closeNativeEditor(session);
+#else
+        (void)session;
+        return false;
+#endif
+    }
+
     bool startExternal() {
         if (!m_external) return false;
         const bool started = m_external->start();
@@ -448,6 +531,9 @@ private:
     Format m_format;
     std::unique_ptr<DSP::IProcessor> m_internal;
     std::unique_ptr<Plugins::ProcessSandboxProcessor> m_external;
+#if defined(AURA_ENABLE_VST3_SDK)
+    std::unique_ptr<Plugins::VST3HostProcessor> m_vst3;
+#endif
     LoadState m_state = LoadState::Unloaded;
     std::string m_error;
 

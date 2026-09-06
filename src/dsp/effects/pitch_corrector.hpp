@@ -16,9 +16,7 @@ namespace Aura::DSP::Effects {
  */
 class PitchCorrector {
 public:
-    PitchCorrector(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr > 0.0 ? sr : 44100.0), m_filter(m_sampleRate) {
-        m_filter.setParameters(1000.0f, 0.707f, 0); // Pre-filter for detection
-    }
+    PitchCorrector(double sr = 44100.0) : m_sampleRate(std::isfinite(sr) && sr > 0.0 ? sr : 44100.0) {}
 
     /**
      * @brief ACCURATE CORRECTION: Detects pitch and applies shifting.
@@ -35,8 +33,15 @@ public:
         static thread_local std::array<float, kMaxSamples> filteredBuf;
         std::copy(l, l + processCount, filteredBuf.begin());
 
-        // Low-pass filter at 1000Hz to remove harmonics and extract key fundamental pitch
-        m_filter.processBlockLP(filteredBuf.data(), processCount);
+        // Lightweight one-pole low-pass at 1 kHz for robust fundamental detection.
+        const float alpha = std::exp(-2.0f * static_cast<float>(M_PI) * 1000.0f /
+                                     static_cast<float>(m_sampleRate));
+        float state = m_lpState;
+        for (uint32_t i = 0; i < processCount; ++i) {
+            state = alpha * state + (1.0f - alpha) * filteredBuf[i];
+            filteredBuf[i] = state;
+        }
+        m_lpState = state;
 
         const float detected = estimateFrequency(filteredBuf.data(), processCount);
         if (!std::isfinite(detected) || detected < 40.0f || detected > 2000.0f) {
@@ -80,10 +85,10 @@ private:
     }
 
     double m_sampleRate;
-    Mixing::StateVariableFilter m_filter;
     Utils::PitchShifter m_shifterL;
     Utils::PitchShifter m_shifterR;
     float m_correctionRatio = 1.0f;
+    float m_lpState = 0.0f;
 };
 
 } // namespace Aura::DSP::Effects

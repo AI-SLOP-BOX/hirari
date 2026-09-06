@@ -38,6 +38,17 @@ public:
         m_mpeEnabled.store(enabled, std::memory_order_release);
         m_resetMpe.store(true, std::memory_order_release);
     }
+    /** @brief Clears session-scoped expression, articulation, and SysEx state. */
+    void reset() noexcept {
+        m_mpeEnabled.store(false, std::memory_order_release);
+        m_resetMpe.store(false, std::memory_order_release);
+        m_mpeNotes.fill({});
+        m_artBuffers[0].count = 0;
+        m_artBuffers[1].count = 0;
+        m_activeArtIdx.store(0, std::memory_order_release);
+        std::lock_guard<std::mutex> lock(m_sysExProducerMutex);
+        m_sysExQueue.clear();
+    }
     bool isMPEEnabled() const noexcept {
         return m_mpeEnabled.load(std::memory_order_acquire);
     }

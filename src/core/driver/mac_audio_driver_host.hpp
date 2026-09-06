@@ -72,10 +72,21 @@ public:
         info = slot.info;
         if (!destination || info.channelCount > destinationChannelCapacity ||
             info.frameCount > destinationFrameCapacity) {
+            // A malformed consumer must not pin the queue head forever. Drop
+            // this bounded block and make the loss visible to the caller and
+            // to the next telemetry poll.
+            m_readIndex.store(read + 1, std::memory_order_release);
+            m_droppedBlocks.fetch_add(1, std::memory_order_relaxed);
+            if (droppedBlocks != UINT64_MAX) ++droppedBlocks;
             return false;
         }
         for (uint32_t channel = 0; channel < info.channelCount; ++channel) {
-            if (!destination[channel]) return false;
+            if (!destination[channel]) {
+                m_readIndex.store(read + 1, std::memory_order_release);
+                m_droppedBlocks.fetch_add(1, std::memory_order_relaxed);
+                if (droppedBlocks != UINT64_MAX) ++droppedBlocks;
+                return false;
+            }
             std::copy_n(slot.samples.data() + static_cast<std::size_t>(channel) * kMaxFrames,
                         info.frameCount, destination[channel]);
         }

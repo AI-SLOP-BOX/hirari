@@ -34,12 +34,10 @@ public:
      */
     uint8_t allocateVoice(uint8_t note) {
         if (note > 127) return 0;
-        auto existing = m_noteToChannel.find(note);
-        if (existing != m_noteToChannel.end()) return existing->second;
         for (uint8_t channel = 1; channel < m_voices.size(); ++channel) {
             if (!m_voices[channel].active) {
                 m_voices[channel] = MPEVoice{note, true, 0.0f, 0.0f, 0.0f};
-                m_noteToChannel[note] = channel;
+                m_noteToChannel[note].push_back(channel);
                 return channel;
             }
         }
@@ -52,12 +50,20 @@ public:
      */
     void releaseVoice(uint8_t note) {
         auto it = m_noteToChannel.find(note);
-        if (it == m_noteToChannel.end()) return;
-        m_voices[it->second].active = false;
-        m_voices[it->second].pressure = 0.0f;
-        m_voices[it->second].timbre = 0.0f;
-        m_voices[it->second].pitchBend = 0.0f;
-        m_noteToChannel.erase(it);
+        if (it == m_noteToChannel.end() || it->second.empty()) return;
+        const uint8_t channel = it->second.back();
+        it->second.pop_back();
+        m_voices[channel].active = false;
+        m_voices[channel].pressure = 0.0f;
+        m_voices[channel].timbre = 0.0f;
+        m_voices[channel].pitchBend = 0.0f;
+        if (it->second.empty()) m_noteToChannel.erase(it);
+    }
+
+    /** @brief Clears every active expression voice at transport/project stop. */
+    void reset() noexcept {
+        for (auto& voice : m_voices) voice = MPEVoice{};
+        m_noteToChannel.clear();
     }
 
     /**
@@ -82,7 +88,8 @@ public:
 private:
     MPEManager() { m_voices.resize(16); }
     std::vector<MPEVoice> m_voices;
-    std::unordered_map<uint8_t, uint8_t> m_noteToChannel;
+    // A repeated pitch can legitimately have several simultaneous MPE voices.
+    std::unordered_map<uint8_t, std::vector<uint8_t>> m_noteToChannel;
 };
 
 } // namespace Aura::Core::Engine

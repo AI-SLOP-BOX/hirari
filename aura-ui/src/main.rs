@@ -60,7 +60,7 @@ fn main() {
                 let layout_valid =
                     serde_json::from_str::<serde_json::Value>(&core.get_project_layout_json())
                         .is_ok_and(|value| value.is_array());
-                let resources_present = std::env::current_exe()
+                let packaged_resources_present = std::env::current_exe()
                     .ok()
                     .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
                     .and_then(|macos| macos.parent().map(std::path::Path::to_path_buf))
@@ -68,6 +68,13 @@ fn main() {
                         root.join("Resources").is_dir()
                             && root.join("Resources/aura-resources.manifest").is_file()
                     });
+                // `cargo run` has no .app bundle, so use the checked-in UI
+                // resources during developer/headless smoke runs. Packaged
+                // builds still require the signed manifest above.
+                let dev_resources_present = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("resources/fonts")
+                    .is_dir();
+                let resources_present = packaged_resources_present || dev_resources_present;
                 let health = core.runtime_health_snapshot();
                 let audio_generation = core.audio_config_generation();
                 let sample_rate = core.get_sample_rate();

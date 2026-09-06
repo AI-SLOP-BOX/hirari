@@ -10,10 +10,11 @@ pub struct VocalDoublerEngine {
 
 impl VocalDoublerEngine {
     pub fn new(sr: f64) -> Self {
+        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) { sr } else { 48_000.0 };
         let mut lfo = LfoEngine::new(sr as f32);
         lfo.set_frequency(0.2); // 0.2 Hz
 
-        let max_delay = (sr * 0.1) as u32; // 100ms max
+        let max_delay = (sr * 0.1).round().max(1.0) as u32; // 100ms max
 
         Self {
             sample_rate: sr,
@@ -31,11 +32,12 @@ impl VocalDoublerEngine {
 
     /// INDUSTRIAL: VocalDoubler: Industrial-standard vocal thickening.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        if !self.audit_vocal_doubler() { return; }
+        let len = l.len().min(r.len());
 
         for i in 0..len {
-            let in_l = l[i];
-            let in_r = r[i];
+            let in_l = if l[i].is_finite() { l[i] } else { 0.0 };
+            let in_r = if r[i].is_finite() { r[i] } else { 0.0 };
 
             // 1. GENERATE MODULATION (Micro-detuning)
             let mod_val = self.lfo.process(Waveform::Sine);
@@ -62,14 +64,14 @@ impl VocalDoublerEngine {
             let voice_r = self.delay_r.process(in_r, dr_samps);
 
             // 3. STEREO SUM (Center + Wide Doubles)
-            l[i] = in_l * 0.7 + voice_l * 0.5;
-            r[i] = in_r * 0.7 + voice_r * 0.5;
+            l[i] = (in_l * 0.7 + voice_l * 0.5).clamp(-2.0, 2.0);
+            r[i] = (in_r * 0.7 + voice_r * 0.5).clamp(-2.0, 2.0);
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Vocal Doubler state.
     pub fn audit_vocal_doubler(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Vocal Doubler auditing logic.
-        true
+        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.lfo.phase.is_finite() && self.delay_l.buffer.len() > 1 && self.delay_r.buffer.len() > 1
     }
 }

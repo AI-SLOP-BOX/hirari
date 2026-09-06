@@ -19,13 +19,16 @@ public:
     struct AnalysisResult { float bpm; float confidence; };
 
     static AnalysisResult detectBPM(const float* data, uint64_t len, double sr) {
+        if (!data || len < 4 || !std::isfinite(sr) || sr < 8000.0 || sr > 384000.0) return {120.0f, 0.0f};
         // --- 1. HAAR WAVELET DECOMPOSITION (8 Levels) ---
         // Isolates per-band energy (High-pass filters for transients)
         // [Simplified core logic for implementation]
         std::vector<float> hiBand; 
         hiBand.reserve(len / 2);
         for (uint64_t i = 0; i < len - 1; i += 2) {
-            hiBand.push_back(std::abs(data[i] - data[i+1])); // Haar 'Detail' coefficient
+            const float a = std::isfinite(data[i]) ? data[i] : 0.0f;
+            const float b = std::isfinite(data[i + 1]) ? data[i + 1] : 0.0f;
+            hiBand.push_back(std::fabs(a - b)); // Haar 'Detail' coefficient
         }
 
         // --- 2. ENERGY AUTOCORRELATION ---
@@ -36,15 +39,17 @@ public:
         // FFT-based Autocorrelation would be even better, but 
         // a search-based Comb-Filter on wavelets is more robust for 'feel'.
         for (float bpm = 50.0f; bpm < 200.0f; bpm += 0.5f) {
-            uint64_t lag = static_cast<uint64_t>(sr * 60.0 / bpm / 2.0);
+            uint64_t lag = std::max<uint64_t>(1, static_cast<uint64_t>(sr * 60.0 / bpm / 2.0));
             float corr = 0;
-            for (size_t i = 0; i < hiBand.size() - lag; i += 8) {
+            if (lag >= hiBand.size()) continue;
+            for (size_t i = 0; i + lag < hiBand.size(); i += 8) {
                 corr += hiBand[i] * hiBand[i + lag];
             }
             if (corr > maxCorr) { maxCorr = corr; bestBPM = bpm; }
         }
 
-        return { bestBPM, maxCorr };
+        const float confidence = std::clamp(maxCorr / std::max(1.0f, static_cast<float>(hiBand.size())), 0.0f, 1.0f);
+        return { bestBPM, confidence };
     }
 };
 

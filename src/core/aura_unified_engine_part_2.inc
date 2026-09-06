@@ -182,7 +182,18 @@ float AuraUnifiedEngine::get_latency_ms() const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
     const uint32_t blockSize = get_block_size();
     if (!std::isfinite(sampleRate) || sampleRate <= 0.0 || blockSize == 0) return 0.0f;
-    return static_cast<float>(1000.0 * static_cast<double>(blockSize) / sampleRate);
+    uint32_t masterLatency = blockSize;
+    if (m_masterLimiter) {
+        masterLatency += m_masterLimiter->getLatencySamples();
+    }
+    return static_cast<float>(1000.0 * static_cast<double>(masterLatency) / sampleRate);
+}
+
+float AuraUnifiedEngine::get_master_tail_ms() const noexcept {
+    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
+    if (!std::isfinite(sampleRate) || sampleRate <= 0.0 || !m_masterLimiter) return 0.0f;
+    return static_cast<float>(static_cast<double>(m_masterLimiter->getTailSamples()) *
+                              1000.0 / sampleRate);
 }
 
 float AuraUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
@@ -193,6 +204,19 @@ float AuraUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
         if (track->getId() == tid) {
             return static_cast<float>(
                 static_cast<double>(track->getTotalLatencySamples()) * 1000.0 / sampleRate);
+        }
+    }
+    return 0.0f;
+}
+
+float AuraUnifiedEngine::get_track_tail_ms(uint32_t tid) const noexcept {
+    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
+    if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return 0.0f;
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks) {
+        if (track && track->getId() == tid) {
+            return static_cast<float>(static_cast<double>(track->getTotalTailSamples()) *
+                                      1000.0 / sampleRate);
         }
     }
     return 0.0f;
@@ -429,10 +453,13 @@ void AuraUnifiedEngine::new_project() {
     m_commandQueue.clear();
     set_test_tone(false);
     set_playhead(0);
+    m_midiOrchestrator.reset();
+    MPEManager::getInstance().reset();
     m_undoManager.clear();
     m_pdcManager.resetForProject();
     m_sidechainManager.resetForProject();
     m_routingEngine.resetForProject();
+    m_controlRoom.resetForProject();
     m_tempo.store(120.0f, std::memory_order_release);
     m_masterGain.store(1.0f, std::memory_order_release);
     m_tonalSync.setScale(0, Aura::Core::Engine::TonalSync::ScaleType::Major);
@@ -884,6 +911,20 @@ void AuraUnifiedEngine::set_offline_render_options(bool preFader, bool includeIn
     m_offlineRenderIncludeInserts.store(includeInserts, std::memory_order_release);
 }
 
+bool AuraUnifiedEngine::set_offline_render_range(uint64_t startSample, uint64_t endSample) noexcept {
+    if (startSample >= endSample) return false;
+    m_offlineRenderStartSample.store(startSample, std::memory_order_release);
+    m_offlineRenderEndSample.store(endSample, std::memory_order_release);
+    m_offlineRenderRangeActive.store(true, std::memory_order_release);
+    return true;
+}
+
+void AuraUnifiedEngine::clear_offline_render_range() noexcept {
+    m_offlineRenderRangeActive.store(false, std::memory_order_release);
+    m_offlineRenderStartSample.store(0, std::memory_order_release);
+    m_offlineRenderEndSample.store(0, std::memory_order_release);
+}
+
 void AuraUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
     // A failed device negotiation must not advance the audio configuration
     // generation or partially replace the currently valid preparation state.
@@ -1043,7 +1084,25 @@ bool AuraUnifiedEngine::add_region(uint32_t tid, std::string_view path, double s
             
             region.muted = false;
             region.name = region.path;
+            const auto added = region;
             t->addRegion(region);
+            // Region creation is an editing action: keep the imported audio
+            // alive for redo while removing only this region on undo.
+            m_undoManager.recordAppliedAction(
+                "Add Region",
+                [this, t, rid = added.id]() {
+                    std::lock_guard<std::mutex> undoLock(m_tracksMutex);
+                    t->removeRegion(rid);
+                    std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
+                    m_peakCache.erase(rid);
+                },
+                [this, t, added]() {
+                    std::lock_guard<std::mutex> redoLock(m_tracksMutex);
+                    t->removeRegion(added.id);
+                    t->addRegion(added);
+                    std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
+                    m_peakCache.erase(added.id);
+                });
             return true;
         }
     }

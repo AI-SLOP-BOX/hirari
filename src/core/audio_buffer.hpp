@@ -298,6 +298,10 @@ public:
     }
 
     void addFrom(const float* srcL, const float* srcR, uint32_t numSamples) {
+        // Raw-pointer callers include device/plugin bridges.  A missing
+        // channel must never turn a disconnect or malformed callback into a
+        // null dereference on the realtime thread.
+        if (srcL == nullptr || (m_numChannels > 1 && srcR == nullptr)) return;
         uint32_t n = std::min(numSamples, m_numSamples);
         if (m_numChannels < 1) return;
 
@@ -337,7 +341,10 @@ public:
     }
 
     void applyGain(float gain) {
-        if (gain == 1.0f) return;
+        // Gain values can arrive from automation or an external control
+        // surface. Reject non-finite values at the buffer boundary instead
+        // of spreading NaN/Inf through every downstream processor.
+        if (!std::isfinite(gain) || gain == 1.0f) return;
         for (uint32_t c = 0; c < m_numChannels; ++c) {
             float* p = getWritePointer(c);
             for (uint32_t i = 0; i < m_numSamples; ++i) p[i] *= gain;

@@ -6,8 +6,8 @@
 #pragma once
 #include <cmath>
 #include <algorithm>
-#include "../core/audio_buffer.hpp"
-#include "iprocessor.hpp"
+#include "../../core/audio_buffer.hpp"
+#include "../iprocessor.hpp"
 
 namespace Aura::DSP::Effects {
 
@@ -24,15 +24,17 @@ public:
         uint32_t samples = b.getNumSamples();
         for (uint32_t c = 0; c < b.getNumChannels(); ++c) {
             float* p = b.getWritePointer(c);
+            if (!p) continue;
             for (uint32_t s = 0; s < samples; ++s) {
                 // TIGHT DSP KERNEL: 1-Pole Low-pass + Tanh Saturation
-                m_z[c%2] += (p[s] - m_z[c%2]) * 0.5f;
-                p[s] = std::tanh(m_z[c%2] * 1.2f);
+                const float input = std::isfinite(p[s]) ? p[s] : 0.0f;
+                m_z[c%2] += (input - m_z[c%2]) * 0.5f;
+                p[s] = std::isfinite(m_z[c%2]) ? std::tanh(m_z[c%2] * 1.2f) : 0.0f;
             }
         }
     }
     void reset() noexcept override { m_z.fill(0); }
-    void prepareToPlay(double, uint32_t) noexcept override {}
+    void prepareToPlay(double, uint32_t) noexcept override { reset(); }
 private:
     std::array<float, 2> m_z{0,0};
 };

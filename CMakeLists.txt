@@ -5,6 +5,7 @@ project(AuraDAWBuild NONE)
 # honest CMake entrypoint for IDEs and existing native build automation rather
 # than resurrecting the deleted legacy C++ executable and stale Metal sources.
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
+enable_testing()
 
 set(AURA_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml")
 set(AURA_APP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_app.sh")
@@ -36,6 +37,34 @@ add_custom_target(aura-check
     USES_TERMINAL
     COMMENT "Checking Aura Rust workspace"
 )
+
+# Keep CTest useful for IDEs and CI runners.  The native project is primarily
+# a Rust/Slint workspace, so the stable smoke gate is the workspace check.
+add_test(NAME aura_workspace_check
+    COMMAND "${CARGO_EXECUTABLE}" check --workspace --manifest-path "${AURA_MANIFEST}")
+set_tests_properties(aura_workspace_check PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_test(NAME aura_audio_device_transition
+    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_device_transition_contract.sh")
+set_tests_properties(aura_audio_device_transition PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_test(NAME aura_native_plugin_contract
+    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_native_plugin_compile_contract.sh")
+set_tests_properties(aura_native_plugin_contract PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_test(NAME aura_cli_history_render_e2e
+    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_cli_history_render_e2e.sh")
+set_tests_properties(aura_cli_history_render_e2e PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_test(NAME aura_ui_core_integration
+    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_ui_integration.sh")
+set_tests_properties(aura_ui_core_integration PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    TIMEOUT 900)
 
 add_custom_target(aura-test-native
     COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_native_plugin_compile_contract.sh"

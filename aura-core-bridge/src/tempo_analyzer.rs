@@ -34,12 +34,12 @@ impl TempoAnalyzerEngine {
 
         // 1. SPECTRAL FLUX (Onset Strength)
         let mut i = 0;
-        let mut previous_energy = 0.0f32;
+        let mut previous_energy = 0.0f64;
         while i < len - n_fft {
-            let mut energy = 0.0f32;
+            let mut energy = 0.0f64;
             for k in 0..hop_size {
                 let sample = if data[i + k].is_finite() {
-                    data[i + k]
+                    f64::from(data[i + k])
                 } else {
                     0.0
                 };
@@ -47,7 +47,7 @@ impl TempoAnalyzerEngine {
             }
             // Positive spectral-flux style onset strength: only energy rises
             // contribute, suppressing sustained tones and DC-like beds.
-            flux.push((energy - previous_energy).max(0.0));
+            flux.push((energy - previous_energy).max(0.0) as f32);
             previous_energy = energy;
             i += hop_size;
         }
@@ -91,8 +91,8 @@ impl TempoAnalyzerEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Tempo Analyzer state.
     pub fn audit_tempo_analyzer(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Tempo Analyzer auditing logic.
-        true
+        let analyzer = Self::new();
+        analyzer.detect_bpm(&[0.0; 2048], 48_000.0).validate()
     }
 }
 

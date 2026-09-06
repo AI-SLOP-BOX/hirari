@@ -14,7 +14,7 @@ namespace Aura::IO::Drivers {
  */
 class DriverFactory {
 public:
-    enum class API { Auto, ASIO, CoreAudio, WASAPI, PipeWire, Dummy };
+    enum class API { Auto, ASIO, CoreAudio, WASAPI, PipeWire, JACK, Dummy };
 
     /**
      * @brief Creates the best driver for the current system.
@@ -87,6 +87,7 @@ public:
             case API::CoreAudio: return "CoreAudio";
             case API::WASAPI: return "WASAPI";
             case API::PipeWire: return "PipeWire";
+            case API::JACK: return "JACK";
             case API::Dummy: return "Dummy";
         }
         return "Unknown";
@@ -173,6 +174,83 @@ inline std::unique_ptr<IDriver> DriverFactory::create(API api) {
 
 } // namespace Aura::IO::Drivers
 #else
+#if defined(AURA_ENABLE_JACK)
+#include "../../core/external/jack_bridge_deep.hpp"
+
+namespace Aura::IO::Drivers {
+
+class JackDriverBridge final : public IDriver {
+public:
+    bool initialize(const Config& config) override {
+        if (!std::isfinite(config.sampleRate) || config.sampleRate < 8000.0 ||
+            config.sampleRate > 384000.0 || config.bufferSize == 0 ||
+            config.numInputs == 0 || config.numOutputs == 0) {
+            m_error = "invalid JACK configuration";
+            return false;
+        }
+        m_config = config;
+        if (!::Aura::Core::External::JackBridgeDeep::getInstance().tryInitialize("Aura DAW")) {
+            m_error = ::Aura::Core::External::JackBridgeDeep::getInstance().lastError();
+            return false;
+        }
+        m_config.sampleRate = ::Aura::Core::External::JackBridgeDeep::getInstance().sampleRate();
+        m_config.bufferSize = ::Aura::Core::External::JackBridgeDeep::getInstance().bufferSize();
+        m_initialized = true;
+        return true;
+    }
+
+    bool start(ProcessCallback callback) override {
+        if (!m_initialized || !callback) {
+            m_error = "JACK driver must be initialized with a callback before start";
+            return false;
+        }
+        m_callback = std::move(callback);
+        ::Aura::Core::External::JackBridgeDeep::getInstance().setProcessCallback(&process, this);
+        m_running = true;
+        return true;
+    }
+
+    void stop() override {
+        m_running = false;
+        m_callback = {};
+        ::Aura::Core::External::JackBridgeDeep::getInstance().shutdown();
+        m_initialized = false;
+    }
+
+    std::string getDriverName() const override { return "Aura JACK Driver"; }
+    double getSampleRate() const override { return m_config.sampleRate; }
+    uint32_t getBufferSize() const override { return m_config.bufferSize; }
+    bool isRunning() const override { return m_running; }
+    const std::string& lastError() const override { return m_error; }
+
+private:
+    static void process(const float* const* inputs, float* const* outputs,
+                        uint32_t frames, void* context) noexcept {
+        auto* self = static_cast<JackDriverBridge*>(context);
+        if (!self || !self->m_running || !self->m_callback) return;
+        self->m_callback(inputs, outputs, frames);
+    }
+
+    Config m_config{};
+    ProcessCallback m_callback;
+    std::string m_error;
+    bool m_initialized = false;
+    bool m_running = false;
+};
+
+inline std::unique_ptr<IDriver> DriverFactory::create(API api) {
+    if (api == API::Auto || api == API::JACK) {
+        auto driver = std::make_unique<JackDriverBridge>();
+        IDriver::Config config;
+        if (driver->initialize(config)) return driver;
+        return std::make_unique<SilentDriver>(driver->lastError());
+    }
+    return std::make_unique<SilentDriver>(
+        std::string("requested audio API is unavailable: ") + apiName(api));
+}
+
+} // namespace Aura::IO::Drivers
+#else
 namespace Aura::IO::Drivers {
 inline std::unique_ptr<IDriver> DriverFactory::create(API api) {
     return std::make_unique<SilentDriver>(
@@ -180,3 +258,4 @@ inline std::unique_ptr<IDriver> DriverFactory::create(API api) {
 }
 } // namespace Aura::IO::Drivers
 #endif
+#endif // defined(__APPLE__)

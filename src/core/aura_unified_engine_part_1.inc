@@ -17,6 +17,13 @@ inline uint64_t aura_callback_thread_token() noexcept {
     return token;
 }
 
+// Marks the control worker that is intentionally driving an offline bounce.
+// The token check below protects the realtime callback from seeing the
+// temporary offline graph, while this explicit thread-local gate avoids
+// relying on implementation-specific merging of inline-function TLS across
+// translation units.
+inline thread_local bool aura_offline_render_thread = false;
+
 using ScopedDenormalGuard = ::Aura::Core::Concurrency::ScopedDenormalGuard;
 
 // Singleton Implementation
@@ -51,6 +58,10 @@ void AuraUnifiedEngine::shutdown() {
     m_recoveryWake.notify_all();
     if (m_recoveryThread.joinable()) m_recoveryThread.join();
 
+    // Drain waveform-cache jobs while their captured engine state is still
+    // valid, then release the worker threads before clearing tracks/cache.
+    m_threadPool.stop();
+
     if (wasShutdown) return;
 
     std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -80,6 +91,11 @@ AuraUnifiedEngine::AuraUnifiedEngine()
     m_masterLimiter = std::make_unique<::Aura::DSP::Effects::MasterLimiter>();
     m_scriptManager = std::make_unique<ScriptManager>();
     m_processGraph = std::make_unique<ProcessGraph>();
+    // Waveform peak generation is a control-plane workload. Keep a small
+    // private worker pool alive for it so the first UI request does not fall
+    // back to a synchronous full-file decode on the event thread. The pool
+    // is stopped before tracks/cache state is torn down in shutdown().
+    m_threadPool.start(2);
     startRecoveryOrchestrator();
 }
 
@@ -124,13 +140,15 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
             return;
         }
     sz = std::min(sz, output.getNumSamples() - off);
-    if (m_audioConfigTransition.load(std::memory_order_acquire)) {
+    if (m_audioConfigTransition.load(std::memory_order_acquire) &&
+        !aura_offline_render_thread) {
         output.clear(off, sz);
         return;
     }
         const uint64_t threadToken = aura_callback_thread_token();
         if (m_offlineRenderActive.load(std::memory_order_acquire) &&
-            m_offlineRenderOwner.load(std::memory_order_acquire) != threadToken) {
+            m_offlineRenderOwner.load(std::memory_order_acquire) != threadToken &&
+            !aura_offline_render_thread) {
             output.clear(off, sz);
             return;
         }
@@ -148,7 +166,6 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
             output.clear(off, sz);
             return;
         }
-
         // Hot-swap quiesce: bounded backoff (max 200 x 50µs = 10ms)
         // Tight spin avoided: background daemon clears flag in <5ms by design.
         auto& diagnostics = ::Aura::Core::Diagnostics::DiagnosticsKernel::getInstance();
@@ -174,7 +191,7 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
         }
         const uint64_t callbackGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
         const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
-        if (state.audioConfigGeneration != callbackGeneration) {
+        if (state.audioConfigGeneration != callbackGeneration && !aura_offline_render_thread) {
             // Structural/configuration publication is double-buffered.  Do
             // not process a state prepared for a different device format;
             // the next published state will carry the current generation.
@@ -206,6 +223,18 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
                 default:
                     break;
             }
+        }
+        // Keep the device callback primed while stopped, but do not traverse
+        // the full graph when no preview or offline render owns the path.
+        // Command mutations are deliberately drained first so fader, pan,
+        // mute, and solo edits remain visible immediately while stopped.
+        if (!aura_offline_render_thread &&
+            !m_offlineRenderActive.load(std::memory_order_acquire) &&
+            !m_isPlaying.load(std::memory_order_acquire) &&
+            !m_testTone.load(std::memory_order_relaxed) &&
+            m_previewSample.load(std::memory_order_acquire) == nullptr) {
+            output.clear(off, sz);
+            return;
         }
         output.clear(off, sz);
         m_blockMidi.clear();
@@ -273,10 +302,19 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
                     voice->level = static_cast<float>(event.data[2]) / 127.0f * 0.65f;
                     voice->phase = 0.0;
                     voice->releaseAt = std::numeric_limits<uint64_t>::max();
+                    voice->startedAt = currentPlayhead + i;
                 } else if (status == 0x80 || (status == 0x90 && event.data[2] == 0)) {
+                    // Sustain overlapping same-pitch notes independently:
+                    // one MIDI note-off releases the oldest still-held voice,
+                    // not every voice sharing that pitch.
+                    auto* oldest = static_cast<PreviewVoice*>(nullptr);
                     for (auto& voice : m_previewVoices) {
-                        if (voice.active && voice.pitch == pitch) voice.releaseAt = currentPlayhead + i;
+                        if (!voice.active || voice.pitch != pitch ||
+                            voice.releaseAt != std::numeric_limits<uint64_t>::max()) continue;
+                        if (oldest == nullptr || voice.startedAt < oldest->startedAt)
+                            oldest = &voice;
                     }
+                    if (oldest != nullptr) oldest->releaseAt = currentPlayhead + i;
                 }
             }
             float sample = 0.0f;
@@ -443,8 +481,8 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
                 float* destL = output.getWritePointer(0, off);
                 float* destR = output.getWritePointer(1, off);
                 for (uint32_t sample = 0; sample < sz; ++sample) {
-                    destL[sample] += sourceL[sample];
-                    destR[sample] += sourceR[sample];
+                    destL[sample] += std::isfinite(sourceL[sample]) ? sourceL[sample] : 0.0f;
+                    destR[sample] += std::isfinite(sourceR[sample]) ? sourceR[sample] : 0.0f;
                 }
                 return;
             }
@@ -465,8 +503,10 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
                     float* destL = destBuffer.getWritePointer(0, 0);
                     float* destR = destBuffer.getWritePointer(1, 0);
                     for (uint32_t sample = 0; sample < sz; ++sample) {
-                        destL[sample] += sourceL[sample] * (gain - 1.0f);
-                        destR[sample] += sourceR[sample] * (gain - 1.0f);
+                        const float l = std::isfinite(sourceL[sample]) ? sourceL[sample] : 0.0f;
+                        const float r = std::isfinite(sourceR[sample]) ? sourceR[sample] : 0.0f;
+                        destL[sample] += l * (gain - 1.0f);
+                        destR[sample] += r * (gain - 1.0f);
                     }
                 }
                 routed = true;
@@ -590,24 +630,32 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
         callbackContext.isLooping = m_loopEnabled.load(std::memory_order_acquire);
         callbackContext.cycleStart = cycleStart;
         callbackContext.cycleEnd = cycleEnd;
-        // Offline export applies the dedicated mastering stage in the
-        // renderer; bypass the live look-ahead limiter here so its delay line
-        // cannot swallow a short recording at the end of a bounce.
-        if (m_masterLimiter && !m_offlineRenderActive.load(std::memory_order_acquire))
-            m_masterLimiter->process(output, m_blockMidi, callbackContext);
+        // The master limiter is part of the rendered signal as well as the
+        // live monitor path. Offline bounces now append the configured tail,
+        // so its look-ahead history is flushed instead of being truncated at
+        // the content boundary.
+        if (m_masterLimiter) {
+            // Limit only the active [offset, offset+size) window. Passing the
+            // owning output buffer here would re-process stale samples when
+            // processBlockDirect() renders into a non-zero offset.
+            float* masterChannels[2] = {dest_l, dest_r};
+            AudioBuffer masterView;
+            masterView.wrapChannels(masterChannels, 2, sz);
+            m_masterLimiter->process(masterView, m_blockMidi, callbackContext);
+        }
 
-        // Control Room is a monitor-only stage: apply speaker selection/DIM to
-        // the device-facing buffer after master processing, while leaving the
-        // rendered master and its loudness analysis untouched.
-        m_controlRoom.processMonitor(output.getWritePointer(0, off),
-                                     output.getWritePointer(1, off), sz);
-
-        // The public meter API reads m_analyzer. Feed it the exact post-limiter
-        // signal that reaches the device; otherwise the UI/CLI reports stale
-        // zeros even though the audio graph is producing sound.
+        // The public meter API measures the post-limiter master before
+        // monitor-only speaker trim and DIM are applied.
         if (m_analyzer) {
             m_analyzer->process(output.getReadPointer(0, off),
                                 output.getReadPointer(1, off), sz);
+        }
+
+        // Control Room is strictly device-monitoring. Never bake speaker trim
+        // or DIM into an offline master/stem render.
+        if (!m_offlineRenderActive.load(std::memory_order_acquire)) {
+            m_controlRoom.processMonitor(output.getWritePointer(0, off),
+                                         output.getWritePointer(1, off), sz);
         }
 
 
@@ -685,7 +733,7 @@ void AuraUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChannels
         ~CallbackGuard() { count.fetch_sub(1, std::memory_order_release); }
     } callbackGuard{m_audioCallbacksInFlight};
 
-    const bool validInput = buffers != nullptr && numChannels >= 2 &&
+    const bool validInput = buffers != nullptr && numChannels >= 2 && numChannels <= 32 &&
         numSamples > 0 && numSamples <= AuraUnifiedEngine::kMaxAudioBlockSize &&
         buffers[0] != nullptr && buffers[1] != nullptr;
     if (!validInput) {
@@ -694,6 +742,9 @@ void AuraUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChannels
         // overrun a shorter external buffer.  Fail closed without touching
         // memory whose extent cannot be proven at this boundary.
         return;
+    }
+    for (uint32_t channel = 0; channel < numChannels; ++channel) {
+        if (buffers[channel] == nullptr) return;
     }
     if (m_isShutdown.load(std::memory_order_acquire)) {
         AudioBuffer silence;

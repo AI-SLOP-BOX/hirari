@@ -29,6 +29,9 @@ public:
         m_filterCurve.assign(kFFTSize / 2, 1.0f);
     }
 
+    std::string getName() const override { return "Match EQ"; }
+    uint32_t getLatencySamples() const noexcept override { return 0; }
+
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
         (void)bs;
         if (std::isfinite(sr) && sr > 1000.0) m_sampleRate = sr;
@@ -40,7 +43,7 @@ public:
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
         (void)midi; (void)context;
-        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
+        if (m_bypassed || buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
         double energy = 0.0;
         for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
             const float* p = buffer.getReadPointer(c);

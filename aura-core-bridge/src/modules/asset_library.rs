@@ -89,11 +89,12 @@ impl AssetLibraryEngine {
             let bytes = fs::read(&path).unwrap_or_default();
             let content_hash = stable_content_hash(&bytes);
             let id = stable_asset_id(&content_hash, &mut ids);
-            let (sample_rate, channels, frame_count) = if matches!(&asset_type, AssetType::AudioSample) {
-                probe_wav_metadata(&bytes).unwrap_or((0, 0, 0))
-            } else {
-                (0, 0, 0)
-            };
+            let (sample_rate, channels, frame_count) =
+                if matches!(&asset_type, AssetType::AudioSample) {
+                    probe_wav_metadata(&bytes).unwrap_or((0, 0, 0))
+                } else {
+                    (0, 0, 0)
+                };
             self.registry.insert(
                 id,
                 AssetMetadata {
@@ -192,7 +193,9 @@ fn stable_content_hash(bytes: &[u8]) -> String {
     let mut b = 0x84222325cbf29ceu64;
     for &byte in bytes {
         a = (a ^ byte as u64).wrapping_mul(0x100000001b3);
-        b = (b ^ byte.reverse_bits() as u64).rotate_left(5).wrapping_mul(0x9e3779b185ebca87);
+        b = (b ^ byte.reverse_bits() as u64)
+            .rotate_left(5)
+            .wrapping_mul(0x9e3779b185ebca87);
     }
     format!("{a:016x}{b:016x}")
 }
@@ -202,11 +205,15 @@ fn stable_asset_id(hash: &str, used: &mut HashSet<u64>) -> u64 {
     for byte in hash.as_bytes() {
         id = (id ^ *byte as u64).wrapping_mul(0x100000001b3);
     }
-    if id == 0 { id = 1; }
+    if id == 0 {
+        id = 1;
+    }
     let start = id;
     while !used.insert(id) {
         id = id.wrapping_add(1);
-        if id == start { return 0; }
+        if id == start {
+            return 0;
+        }
     }
     id
 }
@@ -223,12 +230,16 @@ fn probe_wav_metadata(bytes: &[u8]) -> Option<(u32, u16, u64)> {
         let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().ok()?) as usize;
         pos += 8;
         let end = pos.checked_add(len)?;
-        if end > bytes.len() { return None; }
+        if end > bytes.len() {
+            return None;
+        }
         if id == b"fmt " && len >= 16 {
             let channels = u16::from_le_bytes(bytes[pos + 2..pos + 4].try_into().ok()?);
             let rate = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().ok()?);
             let block_align = u16::from_le_bytes(bytes[pos + 12..pos + 14].try_into().ok()?);
-            if channels == 0 || rate == 0 || block_align == 0 { return None; }
+            if channels == 0 || rate == 0 || block_align == 0 {
+                return None;
+            }
             format = Some((rate, channels, block_align));
         } else if id == b"data" {
             data_bytes = Some(len as u64);

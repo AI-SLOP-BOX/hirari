@@ -23,6 +23,8 @@ struct SamplerZone {
 class SamplerMap {
 public:
     void addZone(int minN, int maxN, int minV, int maxV, const std::string& path) {
+        if (minN < 0 || maxN > 127 || minN > maxN ||
+            minV < 0 || maxV > 127 || minV > maxV || path.empty()) return;
         m_zones.push_back({ minN, maxN, minV, maxV, path, 0 });
     }
 
@@ -42,14 +44,14 @@ public:
         if (candidates.empty()) return "";
 
         // Round Robin: Cycle through candidates if multiple variations exist
-        static uint32_t counter = 0;
-        SamplerZone* selected = candidates[counter % candidates.size()];
-        counter++;
+        SamplerZone* selected = candidates[m_roundRobinCounter % candidates.size()];
+        ++m_roundRobinCounter;
         return selected->samplePath;
     }
 
 private:
     std::vector<SamplerZone> m_zones;
+    uint32_t m_roundRobinCounter = 0;
 };
 
 } // namespace Aura::Synthesis

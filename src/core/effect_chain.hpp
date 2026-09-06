@@ -9,6 +9,7 @@
 #include <cmath>
 #include <array>
 #include <chrono>
+#include <limits>
 #include "../dsp/iprocessor.hpp"
 #include "engine/sidechain_manager.hpp"
 
@@ -191,6 +192,30 @@ public:
 
     uint32_t getTotalLatencySamples() const {
         return m_totalLatency.load(std::memory_order_relaxed);
+    }
+
+    // Maximum post-input duration needed for an offline bounce.  Serial
+    // processors accumulate their tails; parallel sends only extend the
+    // longest branch.  This is intentionally a control-thread query so the
+    // renderer can append enough silence without touching the RT list.
+    uint32_t getTotalTailSamples() const noexcept {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        uint64_t serial = 0;
+        uint32_t parallel = 0;
+        for (const auto& entry : m_pendingProcessors) {
+            if (entry.bypassed || !entry.processor) continue;
+            const uint32_t tail = entry.processor->getTailSamples();
+            if (entry.parallel) {
+                parallel = std::max(parallel, tail);
+            } else {
+                serial += tail;
+                if (serial > std::numeric_limits<uint32_t>::max()) {
+                    serial = std::numeric_limits<uint32_t>::max();
+                }
+            }
+        }
+        return static_cast<uint32_t>(std::min<uint64_t>(
+            std::numeric_limits<uint32_t>::max(), serial + parallel));
     }
 
     // Control-thread only: drains processor watchdog edges without touching

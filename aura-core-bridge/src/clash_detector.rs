@@ -100,6 +100,33 @@ impl MixClashDetectorEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Clash Detector state.
     pub fn audit_clash_detector(&self) -> bool {
-        true
+        // The detector is intentionally stateless, so audit a deterministic
+        // probe instead of reporting success unconditionally. This catches
+        // regressions in finite-value handling, Bark-band indexing, and the
+        // advice threshold without requiring a project or audio device.
+        let clean = self.detect(&[0.0, 0.0, 0.0, 0.0], &[0.0, 0.0, 0.0, 0.0], 48_000.0);
+        if !clean.masking_index.is_finite()
+            || !(0.0..=1.0).contains(&clean.masking_index)
+            || !clean.center_freq.is_finite()
+            || clean.center_freq < 0.0
+        {
+            return false;
+        }
+        let masked = self.detect(&[1.0; 128], &[1.0; 128], 48_000.0);
+        masked.masking_index.is_finite()
+            && (0.0..=1.0).contains(&masked.masking_index)
+            && masked.center_freq.is_finite()
+            && masked.center_freq >= 0.0
+            && masked.center_freq <= 24_000.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MixClashDetectorEngine;
+
+    #[test]
+    fn audit_runs_real_deterministic_probes() {
+        assert!(MixClashDetectorEngine::new().audit_clash_detector());
     }
 }

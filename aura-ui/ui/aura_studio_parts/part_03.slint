@@ -3,7 +3,6 @@
                             close => { mx_open = false; } 
                         }
                         if (bot_view == 8 && root.tracks.length > 0) : Z_NotationHubView { notes: root.tracks[selected_row].piano_roll_notes; }
-
                 if (root.tracks.length == 0) : Rectangle {
                     height: 300px;
                     vertical-stretch: 1;
@@ -16,7 +15,6 @@
                         Z_IconButton { width: 160px; icon: "Create Audio Track"; clicked => { ProjectActions.add_track("AUDIO"); } }
                     }
                 }
-
                 // The compact session surface below owns the loaded-project editor.
                 // Keep the legacy bottom-panel tree out of the frame once a real
                 // template is loaded; otherwise both trees are instantiated and
@@ -130,7 +128,6 @@
                                         fx: trk.fx; compact: mx_compact; send_lvl: trk.send_lvl; 
                                         filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
                                         meter_mode: meter_mode; group_id: trk.group_id;
-
                                     }
                                     Rectangle { width: 4px; background: Style.surface-0; } // Divider
                                     for v_trk[v_idx] in vca_tracks : Z_MixerStrip {
@@ -154,13 +151,12 @@
                                     HorizontalLayout { 
                                         spacing: 4px; 
                                         Text { text: "Master Monitoring"; font-size: 9px; font-weight: 600; color: Style.brand; horizontal-stretch: 1; vertical-alignment: center; } 
-                                        Z_IconButton { icon: "DIM"; active: is_dim; clicked => { is_dim = !is_dim; DiagnosticsActions.toggle_dim(); } }
+                                        Z_IconButton { icon: "DIM"; active: is_dim; clicked => { is_dim = !is_dim; DiagnosticsActions.toggle_dim(); } } Z_IconButton { icon: "TALK"; active: is_talkback; clicked => { is_talkback = !is_talkback; DiagnosticsActions.toggle_talkback(); } } Z_IconButton { icon: "MON"; active: is_monitor_enabled; clicked => { is_monitor_enabled = !is_monitor_enabled; DiagnosticsActions.toggle_monitor_output(); } }
                                         Z_IconButton { icon: "EXP"; clicked => { export_open = true; } }
                                     }
 
                                     // Real-time DSP Feedback
                                     Z_Telemetry { cpu: cpu_usage; ram: 0.0; load_his: load_his; }
-                                    
                                     // The expensive multi-layer visualizer is an ADV-only view.
                                     // Production mode keeps the meter and spectrum focused on mix work.
                                     if (!production_mode) : Z_HolographicSpec { fft: fft_data; }
@@ -261,6 +257,8 @@
 
                         if (bot_view == 20) : Z_AudioSettings {
                             ready: root.audio_device_ready;
+                            device-catalog: root.audio_device_catalog;
+                            device-names: root.audio_device_names;
                             sample-rate: root.audio_sample_rate;
                             buffer-size: root.buffer_size;
                             dropped-blocks: root.input_dropped_blocks;
@@ -321,7 +319,7 @@
                             render-path <=> root.openutau_render_path;
                             status: root.openutau_status;
                             scoop <=> root.openutau_scoop;
-                            vibrato <=> root.openutau_vibrato;
+                            vibrato <=> root.openutau_vibrato; vibrato-rate <=> root.openutau_vibrato_rate;
                             dynamics <=> root.openutau_dynamics;
                             consonants <=> root.openutau_consonants;
                             notes: root.openutau_notes;
@@ -351,8 +349,12 @@
                             apply-loop(count) => { if (root.sel_cid >= 0) { EditorActions.loop_clip(root.sel_cid, count); } }
                             duplicate-clip => { if (root.sel_cid >= 0) { EditorActions.duplicate_clip(root.sel_cid); } }
                             remove-clip => { if (root.sel_cid >= 0) { EditorActions.remove_clip(root.sel_cid); } }
+                            repair-waveform => { if (root.sel_cid >= 0) { EditorActions.repair_waveform(root.sel_cid); } } declip-waveform => { if (root.sel_cid >= 0) { EditorActions.declip_waveform(root.sel_cid); } } reduce-noise-waveform => { if (root.sel_cid >= 0) { EditorActions.reduce_noise_waveform(root.sel_cid); } }
+                            normalize-waveform => { if (root.sel_cid >= 0) { EditorActions.normalize_waveform(root.sel_cid); } }
+                            soft-clip-waveform => { if (root.sel_cid >= 0) { EditorActions.soft_clip_waveform(root.sel_cid); } }
+                            declick-waveform => { if (root.sel_cid >= 0) { EditorActions.declick_waveform(root.sel_cid); } } stereo-width-waveform => { if (root.sel_cid >= 0) { EditorActions.stereo_width_waveform(root.sel_cid); } } detect-transients-waveform => { if (root.sel_cid >= 0) { EditorActions.detect_transients_waveform(root.sel_cid); } }
+                            mute-selection => { if (root.sel_cid >= 0) { EditorActions.mute_selection(root.sel_cid); } } normalize-selection-peak => { if (root.sel_cid >= 0) { EditorActions.normalize_selection_peak(root.sel_cid); } } normalize-selection-rms => { if (root.sel_cid >= 0) { EditorActions.normalize_selection_rms(root.sel_cid); } }
                         }
-
                         if (bot_view == 2 && root.tracks.length > 0) : Z_PianoRollView { 
                             trk_id: root.selected_row; 
                             ui_timer: ui_timer;

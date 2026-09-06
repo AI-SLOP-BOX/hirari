@@ -11,24 +11,91 @@ pub struct FadeInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RegionEdit { pub id: u64, pub label: String, pub gain_milli_db: i32 }
+pub struct RegionEdit {
+    pub id: u64,
+    pub label: String,
+    pub gain_milli_db: i32,
+}
 #[derive(Clone, Debug, Default)]
-pub struct RegionEditHistory { edits: Vec<RegionEdit>, redo: Vec<RegionEdit>, next_id: u64 }
+pub struct RegionEditHistory {
+    edits: Vec<RegionEdit>,
+    redo: Vec<RegionEdit>,
+    next_id: u64,
+}
 impl RegionEditHistory {
-    pub fn new() -> Self { Self { edits: Vec::new(), redo: Vec::new(), next_id: 1 } }
-    pub fn record(&mut self, label: &str, gain_db: f32) -> Option<u64> { if label.trim().is_empty() || label.len() > 128 || label.contains('\0') || !gain_db.is_finite() || !(-120.0..=24.0).contains(&gain_db) || self.edits.len() >= 65_536 { return None; } let id=self.next_id; self.next_id=self.next_id.saturating_add(1).max(1); self.edits.push(RegionEdit{id,label:label.trim().into(),gain_milli_db:(gain_db*1000.0).round() as i32}); self.redo.clear(); Some(id) }
-    pub fn undo(&mut self) -> Option<RegionEdit> { let edit = self.edits.pop()?; self.redo.push(edit.clone()); Some(edit) }
-    pub fn redo(&mut self) -> Option<RegionEdit> { let edit = self.redo.pop()?; self.edits.push(edit.clone()); Some(edit) }
-    pub fn entries(&self) -> &[RegionEdit] { &self.edits }
-    pub fn redo_entries(&self) -> &[RegionEdit] { &self.redo }
-    pub fn latest_action(&self) -> Option<&str> { self.edits.last().map(|edit| edit.label.as_str()) }
-    pub fn clear(&mut self) { self.edits.clear(); self.redo.clear(); }
-    pub fn snapshot(&self) -> Vec<RegionEdit> { self.edits.clone() }
+    pub fn new() -> Self {
+        Self {
+            edits: Vec::new(),
+            redo: Vec::new(),
+            next_id: 1,
+        }
+    }
+    pub fn record(&mut self, label: &str, gain_db: f32) -> Option<u64> {
+        if label.trim().is_empty()
+            || label.len() > 128
+            || label.contains('\0')
+            || !gain_db.is_finite()
+            || !(-120.0..=24.0).contains(&gain_db)
+            || self.edits.len() >= 65_536
+        {
+            return None;
+        }
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1).max(1);
+        self.edits.push(RegionEdit {
+            id,
+            label: label.trim().into(),
+            gain_milli_db: (gain_db * 1000.0).round() as i32,
+        });
+        self.redo.clear();
+        Some(id)
+    }
+    pub fn undo(&mut self) -> Option<RegionEdit> {
+        let edit = self.edits.pop()?;
+        self.redo.push(edit.clone());
+        Some(edit)
+    }
+    pub fn redo(&mut self) -> Option<RegionEdit> {
+        let edit = self.redo.pop()?;
+        self.edits.push(edit.clone());
+        Some(edit)
+    }
+    pub fn entries(&self) -> &[RegionEdit] {
+        &self.edits
+    }
+    pub fn redo_entries(&self) -> &[RegionEdit] {
+        &self.redo
+    }
+    pub fn latest_action(&self) -> Option<&str> {
+        self.edits.last().map(|edit| edit.label.as_str())
+    }
+    pub fn clear(&mut self) {
+        self.edits.clear();
+        self.redo.clear();
+    }
+    pub fn snapshot(&self) -> Vec<RegionEdit> {
+        self.edits.clone()
+    }
     pub fn audit(&self) -> bool {
-        if self.edits.len() > 65_536 || self.redo.len() > 65_536 || self.next_id == 0 { return false; }
-        let all = self.edits.iter().chain(self.redo.iter()).collect::<Vec<_>>();
-        all.iter().all(|e| e.id > 0 && e.id < self.next_id && !e.label.trim().is_empty() && e.label.len() <= 128 && !e.label.contains('\0') && (-120_000..=24_000).contains(&e.gain_milli_db))
-            && all.iter().enumerate().all(|(i, e)| all[..i].iter().all(|p| p.id != e.id))
+        if self.edits.len() > 65_536 || self.redo.len() > 65_536 || self.next_id == 0 {
+            return false;
+        }
+        let all = self
+            .edits
+            .iter()
+            .chain(self.redo.iter())
+            .collect::<Vec<_>>();
+        all.iter().all(|e| {
+            e.id > 0
+                && e.id < self.next_id
+                && !e.label.trim().is_empty()
+                && e.label.len() <= 128
+                && !e.label.contains('\0')
+                && (-120_000..=24_000).contains(&e.gain_milli_db)
+        }) && all
+            .iter()
+            .enumerate()
+            .all(|(i, e)| all[..i].iter().all(|p| p.id != e.id))
             && self.edits.windows(2).all(|w| w[0].id < w[1].id)
     }
 }
@@ -101,8 +168,18 @@ impl RegionProcessorOrchestrator {
 
     /// Applies a reversible region operation while recording its metadata in
     /// the event-processing history. Audio is changed only after validation.
-    pub fn process_with_history(&self, buffer: &mut [f32], offset: usize, size: usize, rel_pos: u64, label: &str, history: &mut RegionEditHistory) -> Option<u64> {
-        if !self.audit_signal() || label.trim().is_empty() { return None; }
+    pub fn process_with_history(
+        &self,
+        buffer: &mut [f32],
+        offset: usize,
+        size: usize,
+        rel_pos: u64,
+        label: &str,
+        history: &mut RegionEditHistory,
+    ) -> Option<u64> {
+        if !self.audit_signal() || label.trim().is_empty() {
+            return None;
+        }
         let gain_db = 20.0 * self.gain.max(f32::MIN_POSITIVE).log10();
         let id = history.record(label, gain_db)?;
         self.process_signal(buffer, offset, size, rel_pos);
@@ -110,7 +187,9 @@ impl RegionProcessorOrchestrator {
     }
 
     pub fn set_gain_db(&mut self, gain_db: f32) -> bool {
-        if !gain_db.is_finite() || !(-120.0..=24.0).contains(&gain_db) { return false; }
+        if !gain_db.is_finite() || !(-120.0..=24.0).contains(&gain_db) {
+            return false;
+        }
         self.gain = 10.0f32.powf(gain_db / 20.0).clamp(0.0, 4.0);
         true
     }
@@ -178,9 +257,14 @@ mod tests {
         assert!(processor.set_gain_db(6.0));
         let mut history = RegionEditHistory::new();
         let mut buffer = [1.0; 2];
-        let id = processor.process_with_history(&mut buffer, 0, 2, 0, "clip gain", &mut history).unwrap();
+        let id = processor
+            .process_with_history(&mut buffer, 0, 2, 0, "clip gain", &mut history)
+            .unwrap();
         assert_eq!(id, 1);
-        assert_eq!(history.entries().last().map(|entry| entry.label.as_str()), Some("clip gain"));
+        assert_eq!(
+            history.entries().last().map(|entry| entry.label.as_str()),
+            Some("clip gain")
+        );
         assert!(buffer[0] > 1.0);
     }
 }

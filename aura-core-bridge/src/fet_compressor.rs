@@ -22,6 +22,15 @@ impl SimpleSvf {
     }
 
     pub fn set_parameters(&mut self, cutoff: f32, q: f32, sample_rate: f32) {
+        if !cutoff.is_finite()
+            || !q.is_finite()
+            || !sample_rate.is_finite()
+            || sample_rate < 8_000.0
+            || !(0.01..=0.49).contains(&(cutoff / sample_rate))
+            || q <= 0.0
+        {
+            return;
+        }
         let wd = 2.0 * std::f32::consts::PI * cutoff;
         let t = 1.0 / sample_rate;
         let wa = (2.0 / t) * (wd * t / 2.0).tan();
@@ -95,11 +104,14 @@ impl FetCompressorEngine {
 
     /// INDUSTRIAL: High-speed FET-style feedback compressor (1176 emulation).
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        if !self.audit_fet_compressor() {
+            return;
+        }
+        let len = l.len().min(r.len());
 
         for s in 0..len {
-            let in_l = l[s] * self.input_gain;
-            let in_r = r[s] * self.input_gain;
+            let in_l = (if l[s].is_finite() { l[s] } else { 0.0 }) * self.input_gain;
+            let in_r = (if r[s].is_finite() { r[s] } else { 0.0 }) * self.input_gain;
 
             // 1. Stereo-Linked Sidechain Detection
             let det_l = self.sc_hpf_l.process_hp(in_l);
@@ -135,14 +147,31 @@ impl FetCompressorEngine {
             out_r = out_r.clamp(-1.2, 1.2);
 
             let sat = (1.0 - self.envelope) * 0.15;
-            l[s] = (out_l - (out_l * out_l * out_l) * sat) * self.output_gain;
-            r[s] = (out_r - (out_r * out_r * out_r) * sat) * self.output_gain;
+            l[s] = ((out_l - (out_l * out_l * out_l) * sat) * self.output_gain).clamp(-2.0, 2.0);
+            r[s] = ((out_r - (out_r * out_r * out_r) * sat) * self.output_gain).clamp(-2.0, 2.0);
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide FET Compressor state.
     pub fn audit_fet_compressor(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic FET Compressor auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.input_gain.is_finite()
+            && (0.0..=16.0).contains(&self.input_gain)
+            && self.output_gain.is_finite()
+            && (0.0..=16.0).contains(&self.output_gain)
+            && self.threshold.is_finite()
+            && (-120.0..=6.0).contains(&self.threshold)
+            && self.ratio_flat.is_finite()
+            && (0.0..=1.0).contains(&self.ratio_flat)
+            && self.attack.is_finite()
+            && (0.0..=1.0).contains(&self.attack)
+            && self.release.is_finite()
+            && (0.0..=1.0).contains(&self.release)
+            && self.envelope.is_finite()
+            && (0.0..=2.0).contains(&self.envelope)
+            && [&self.sc_hpf_l, &self.sc_hpf_r]
+                .iter()
+                .all(|f| f.v1.is_finite() && f.v2.is_finite() && f.g.is_finite() && f.k.is_finite())
     }
 }

@@ -6,6 +6,7 @@
 #include <string>
 #include <memory>
 #include <atomic>
+#include <array>
 #include <cstring>
 #include <cmath>
 #ifdef _WIN32
@@ -26,6 +27,7 @@ public:
     enum class LoadState : uint8_t {
         Unloaded,
         LibraryResolved,
+        InstanceCreated,
         Operational,
         Failed,
         Unsupported,
@@ -163,7 +165,15 @@ public:
 #endif
     }
 
-    void reset() noexcept override {}
+    void reset() noexcept override {
+#if defined(AURA_ENABLE_VST3_SDK)
+        if (m_initialized.load(std::memory_order_acquire) && !m_runtime.reset()) {
+            m_processFailed.store(true, std::memory_order_release);
+        }
+#else
+        m_processFailed.store(false, std::memory_order_release);
+#endif
+    }
 
     std::vector<uint8_t> getState() const override {
 #if defined(AURA_ENABLE_VST3_SDK)
@@ -238,8 +248,21 @@ public:
             return false;
         }
 
-        // Resolving the module is not the same as creating a plugin
-        // instance.  Keep processing bypassed until an instance exists.
+        // The Steinberg SDK is optional, but the VST3 factory ABI is stable
+        // enough to perform the control-plane component/controller creation
+        // without pulling the SDK into the host binary.  Processing remains
+        // bypassed until a real SDK or sandbox process bridge is attached.
+        if (instantiateWithoutSdk()) {
+            m_initialized = false;
+            m_state = LoadState::InstanceCreated;
+            m_error = m_controllerObject
+                ? "VST3 component and edit controller instantiated; process bridge is not connected"
+                : "VST3 component instantiated; edit controller is unavailable";
+            return false;
+        }
+
+        // Resolving a module is not the same as creating an instance. Keep
+        // processing bypassed and expose the distinction to diagnostics.
         m_initialized = false;
         m_state = LoadState::NotInstantiated;
         m_error = "VST3 module resolved; plugin instance is not instantiated";
@@ -248,6 +271,35 @@ public:
         // reporting the plugin as loaded. Keep the diagnostic state so the
         // caller can distinguish a missing file from an incomplete host.
         return false;
+    }
+
+    // Reports whether the instantiated controller advertises an editor view.
+    // The actual parent-window attachment remains a UI-thread operation and
+    // must not be inferred from audio processing readiness.
+    bool hasNativeEditor() const noexcept override {
+#if defined(AURA_ENABLE_VST3_SDK)
+        return m_initialized.load(std::memory_order_acquire) && m_runtime.hasEditorView();
+#else
+        return false;
+#endif
+    }
+
+    uint64_t openNativeEditor(uintptr_t parent) noexcept override {
+#if defined(AURA_ENABLE_VST3_SDK)
+        return m_initialized.load(std::memory_order_acquire) ? m_runtime.openEditor(parent) : 0;
+#else
+        (void)parent;
+        return 0;
+#endif
+    }
+
+    bool closeNativeEditor(uint64_t session) noexcept override {
+#if defined(AURA_ENABLE_VST3_SDK)
+        return m_runtime.closeEditor(session);
+#else
+        (void)session;
+        return false;
+#endif
     }
 
     LoadState loadState() const noexcept {
@@ -269,7 +321,7 @@ public:
     bool hasError() const noexcept {
         const auto state = loadState();
         return state == LoadState::Failed || state == LoadState::Unsupported ||
-               state == LoadState::NotInstantiated || processFailed();
+               state == LoadState::NotInstantiated || state == LoadState::InstanceCreated || processFailed();
     }
     const std::string& errorMessage() const noexcept { return m_error; }
     bool processFailed() const noexcept {
@@ -286,7 +338,103 @@ public:
     }
 
 private:
+    using Vst3Result = int32_t;
+    using Vst3Tuid = std::array<uint8_t, 16>;
+    struct Vst3ClassInfo {
+        int32_t cardinality = 0;
+        Vst3Tuid cid{};
+        char category[32]{};
+        char name[64]{};
+    };
+
+    static const Vst3Tuid& componentIid() noexcept {
+        static constexpr Vst3Tuid value = {
+            0xE8, 0x31, 0xFF, 0x31, 0xF2, 0xD5, 0x43, 0x01,
+            0x92, 0x8E, 0xBB, 0xEE, 0x25, 0x69, 0x78, 0x02};
+        return value;
+    }
+
+    static const Vst3Tuid& editControllerIid() noexcept {
+        static constexpr Vst3Tuid value = {
+            0xDC, 0xD7, 0xBB, 0xE3, 0x77, 0x42, 0x44, 0x8D,
+            0xA8, 0x74, 0xAA, 0xCC, 0x97, 0x9C, 0x75, 0x9E};
+        return value;
+    }
+
+    static bool resultOk(Vst3Result result) noexcept { return result == 0; }
+
+    static void releaseVst3Object(void* object) noexcept {
+        if (!object) return;
+        auto*** vtable = reinterpret_cast<void***>(object);
+        if (!vtable || !*vtable || !(*vtable)[2]) return;
+        using Release = uint32_t (*)(void*);
+        (void)reinterpret_cast<Release>((*vtable)[2])(object);
+    }
+
+    bool instantiateWithoutSdk() noexcept {
+#if defined(AURA_ENABLE_VST3_SDK)
+        return false;
+#else
+        if (!m_handle || !m_vst3FactoryProc) return false;
+        void* factory = m_vst3FactoryProc();
+        if (!factory) return false;
+        auto*** factoryVtable = reinterpret_cast<void***>(factory);
+        if (!factoryVtable || !*factoryVtable || !(*factoryVtable)[4] ||
+            !(*factoryVtable)[5] || !(*factoryVtable)[6]) return false;
+        using CountClasses = int32_t (*)(void*);
+        using GetClassInfo = Vst3Result (*)(void*, int32_t, Vst3ClassInfo*);
+        using CreateInstance = Vst3Result (*)(void*, const uint8_t*, const uint8_t*, void**);
+        const auto count = reinterpret_cast<CountClasses>((*factoryVtable)[4])(factory);
+        if (count <= 0 || count > 4096) return false;
+        auto getInfo = reinterpret_cast<GetClassInfo>((*factoryVtable)[5]);
+        auto create = reinterpret_cast<CreateInstance>((*factoryVtable)[6]);
+
+        // Prefer audio module classes, but tolerate older products that leave
+        // the category blank and let IComponent creation be the discriminator.
+        for (int32_t index = 0; index < count; ++index) {
+            Vst3ClassInfo info{};
+            if (!resultOk(getInfo(factory, index, &info))) continue;
+            const bool audioClass = std::strstr(info.category, "Audio Module Class") != nullptr;
+            if (!audioClass && std::strlen(info.category) != 0) continue;
+            void* component = nullptr;
+            if (!resultOk(create(factory, info.cid.data(), componentIid().data(), &component)) || !component)
+                continue;
+            m_componentObject = component;
+
+            // IComponent::getControllerClassId is the first method after the
+            // three FUnknown methods. If a product embeds its controller,
+            // queryInterface below still discovers it without a second class.
+            auto*** componentVtable = reinterpret_cast<void***>(component);
+            if (componentVtable && *componentVtable && (*componentVtable)[3]) {
+                using GetControllerClassId = Vst3Result (*)(void*, uint8_t*);
+                Vst3Tuid controllerCid{};
+                if (resultOk(reinterpret_cast<GetControllerClassId>((*componentVtable)[3])(
+                                 component, controllerCid.data()))) {
+                    void* controller = nullptr;
+                    if (resultOk(create(factory, controllerCid.data(), editControllerIid().data(), &controller)))
+                        m_controllerObject = controller;
+                }
+            }
+            if (!m_controllerObject && componentVtable && *componentVtable && (*componentVtable)[0]) {
+                using QueryInterface = Vst3Result (*)(void*, const uint8_t*, void**);
+                void* controller = nullptr;
+                if (resultOk(reinterpret_cast<QueryInterface>((*componentVtable)[0])(
+                                 component, editControllerIid().data(), &controller)))
+                    m_controllerObject = controller;
+            }
+            return true;
+        }
+        return false;
+#endif
+    }
+
     void unloadLibrary() noexcept {
+#if !defined(AURA_ENABLE_VST3_SDK)
+        releaseVst3Object(m_controllerObject);
+        releaseVst3Object(m_componentObject);
+        m_controllerObject = nullptr;
+        m_componentObject = nullptr;
+#endif
 #if defined(AURA_ENABLE_VST3_SDK)
         m_runtime.unload();
 #endif
@@ -323,6 +471,9 @@ private:
 #if defined(AURA_ENABLE_VST3_SDK)
     SandboxVST3::Runtime m_runtime;
     SandboxProtocol::SharedAudioBlock m_shared;
+#else
+    void* m_componentObject = nullptr;
+    void* m_controllerObject = nullptr;
 #endif
 };
 

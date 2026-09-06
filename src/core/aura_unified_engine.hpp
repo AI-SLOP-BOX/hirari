@@ -27,6 +27,7 @@
 #include "engine/metronome.hpp"
 #include "engine/automation_recorder.hpp"
 #include "engine/midi_orchestrator.hpp"
+#include "engine/mpe_manager.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
 #include "io/audio_decoder.hpp"
@@ -37,10 +38,12 @@
 #include <condition_variable>
 #include <map>
 #include <algorithm>
+#include <iterator>
 #include <cmath>
 #include <cctype>
 #include <fstream>
 #include <filesystem>
+#include <array>
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <unistd.h>
@@ -66,6 +69,7 @@ namespace Aura::Core::Video { class VideoSync; }
 #include "mixing/track_preset_store.hpp"
 #include "engine/automation_lane_group.hpp"
 #include "engine/tap_tempo.hpp"
+#include "engine/audio_quantizer.hpp"
 #include "midi/external_sync.hpp"
 #include "composition/arrangement_edit_model.hpp"
 #include <thread>
@@ -125,6 +129,7 @@ public:
         Completed = 3,
         Failed = 4,
         Cancelled = 5,
+        Paused = 6,
     };
 
     struct AutomationPoint {
@@ -140,6 +145,23 @@ public:
     void apply_config(const EngineConfig& cfg);
     void processBlock(::Aura::Core::AudioBuffer& output, uint32_t offset, uint32_t size);
     void processBlockDirect(float** buffers, uint32_t numChannels, uint32_t numSamples);
+    // Shared-map transient quantization for phase-coherent multi-mic groups.
+    // This is deliberately exposed at the engine boundary so offline editors
+    // and realtime clients use the identical warp implementation.
+    bool quantizeAudioGroup(float* const* buffers, uint32_t channels,
+                            uint64_t length, float bpm, double sampleRate,
+                            float strength = 1.0f, float swing = 0.0f) {
+        if (!buffers || channels == 0 || channels > 32) return false;
+        std::array<const float*, 32> inputs{};
+        std::array<float*, 32> outputs{};
+        for (uint32_t i = 0; i < channels; ++i) {
+            inputs[i] = buffers[i];
+            outputs[i] = buffers[i];
+        }
+        return ::Aura::Core::Engine::AudioQuantizer::quantizeGroup(
+            inputs.data(), outputs.data(), channels, length, bpm, sampleRate,
+            {strength, swing});
+    }
     // Compatibility entry point for older native integrations.  Keep the
     // raw-buffer API routed through the same validated processing path as the
     // packaged application instead of maintaining a second DSP implementation.
@@ -170,7 +192,9 @@ public:
     }
     uint32_t get_block_size() const noexcept;
     float get_latency_ms() const noexcept;
+    float get_master_tail_ms() const noexcept;
     float get_track_latency_ms(uint32_t tid) const noexcept;
+    float get_track_tail_ms(uint32_t tid) const noexcept;
     float get_track_pdc_compensation_ms(uint32_t tid) const noexcept;
     bool set_low_latency_mode(bool active) noexcept;
     bool low_latency_mode() const noexcept;
@@ -204,7 +228,39 @@ public:
     double tapped_tempo() const noexcept { return m_tapTempo.bpm(); }
     void midi_clock_tick(uint64_t timestamp) noexcept { m_externalSync.onClockTick(timestamp); }
     uint64_t midi_clock_ticks() const noexcept { return m_externalSync.tickCount(); }
+    uint64_t midi_clock_last_tick() const noexcept { return m_externalSync.lastTick(); }
+    double midi_clock_rate() const noexcept { return m_externalSync.clockRate(); }
+    void set_midi_clock_rate(double bpm) noexcept { m_externalSync.setClockRate(bpm); }
     bool set_master_gain(float value);
+    bool add_control_room_speaker(std::string_view name, float gain = 1.0f) {
+        return m_controlRoom.addSpeakerSet(std::string(name), gain);
+    }
+    void reset_control_room() { m_controlRoom.resetForProject(); }
+    bool select_control_room_speaker(uint32_t index) noexcept {
+        return m_controlRoom.selectSpeakerSet(index);
+    }
+    bool rename_control_room_speaker(uint32_t index, std::string_view name) {
+        return m_controlRoom.renameSpeakerSet(index, std::string(name));
+    }
+    bool remove_control_room_speaker(uint32_t index) { return m_controlRoom.removeSpeakerSet(index); }
+    bool set_control_room_speaker_gain(uint32_t index, float gain) { return m_controlRoom.setSpeakerGain(index, gain); }
+    bool set_control_room_speaker_enabled(uint32_t index, bool enabled) { return m_controlRoom.setSpeakerEnabled(index, enabled); }
+    bool upsert_control_room_cue(uint32_t id, float gain, bool enabled = true) { return m_controlRoom.upsertCueMix(id, gain, enabled); }
+    bool remove_control_room_cue(uint32_t id) { return m_controlRoom.removeCueMix(id); }
+    bool set_control_room_cue_enabled(uint32_t id, bool enabled) { return m_controlRoom.setCueMixEnabled(id, enabled); }
+    float control_room_cue_gain(uint32_t id) const noexcept { return m_controlRoom.cueGain(id); }
+    void set_control_room_dim(bool enabled) noexcept { m_controlRoom.setDim(enabled); }
+    void set_control_room_talkback(bool enabled, float gain = 1.0f) noexcept {
+        m_controlRoom.setTalkback(enabled, gain);
+    }
+    bool control_room_dimmed() const noexcept { return m_controlRoom.isDimmed(); }
+    bool control_room_talkback_enabled() const noexcept { return m_controlRoom.talkbackEnabled(); }
+    float control_room_monitor_gain() const noexcept { return m_controlRoom.monitorGain(); }
+    bool control_room_validate() const noexcept { return m_controlRoom.validate(); }
+    void process_control_room_monitor(float* left, float* right, const float* talkback,
+                                      uint32_t frames) const noexcept {
+        m_controlRoom.processMonitorWithTalkback(left, right, talkback, frames);
+    }
     bool save_track_preset(std::string_view name, uint32_t track_id);
     bool apply_track_preset(std::string_view name, uint32_t track_id);
     bool remove_track_preset(std::string_view name);
@@ -230,6 +286,8 @@ public:
     void clear_offline_render_target() noexcept;
     void set_offline_render_tail_seconds(float seconds) noexcept;
     void set_offline_render_options(bool pre_fader, bool include_inserts) noexcept;
+    bool set_offline_render_range(uint64_t start_sample, uint64_t end_sample) noexcept;
+    void clear_offline_render_range() noexcept;
     bool set_phase_invert(uint32_t tid, bool inverted);
     bool set_track_delay_samples(uint32_t tid, uint32_t samples);
     uint32_t get_track_delay_samples(uint32_t tid) const;
@@ -310,6 +368,7 @@ public:
     uint32_t maintain_sandboxed_plugins(bool autoRestart);
     bool retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
+    bool reset_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     struct SandboxStatus {
         uint32_t trackId = 0;
         uint32_t pluginIndex = 0;
@@ -341,6 +400,11 @@ public:
                                            uint32_t parameterId, float value);
     float get_plugin_parameter(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId) const;
     uint32_t get_plugin_parameter_count(uint32_t tid, uint32_t pluginIndex) const;
+    bool has_plugin_native_editor(uint32_t tid, uint32_t pluginIndex) const;
+    uint64_t open_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
+                                       uintptr_t parent) const;
+    bool close_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
+                                    uint64_t session) const;
     std::string get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId) const;
     bool save_plugin_preset(uint32_t tid, uint32_t pluginIndex, std::string_view path) const;
     bool load_plugin_preset(uint32_t tid, uint32_t pluginIndex, std::string_view path);
@@ -383,6 +447,10 @@ public:
     void set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
                        uint64_t startSample, uint64_t lengthSamples);
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut);
+    bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
+                               float gain, uint64_t fadeIn, uint64_t fadeOut);
+    bool clear_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end);
+    bool clear_region_range_edits(uint32_t tid, uint32_t rid);
     bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse);
     bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio);
     bool set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones);
@@ -393,6 +461,11 @@ public:
                                       double segmentStartSeconds, double positionSeconds,
                                       double pitchCents, double formantCents);
     bool clear_region_audio_note_segments(uint32_t tid, uint32_t rid);
+    bool warp_region_audio_note_segment(uint32_t tid, uint32_t rid,
+                                        double segmentStartSeconds,
+                                        double newStartSeconds, double newEndSeconds);
+    bool remove_region_audio_note_segment(uint32_t tid, uint32_t rid,
+                                          double segmentStartSeconds);
     bool analyze_region_audio_note_segments(uint32_t tid, uint32_t rid, double sampleRate);
     bool set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count);
     bool set_region_locked(uint32_t tid, uint32_t rid, bool locked);
@@ -411,6 +484,8 @@ public:
     float get_bounce_progress() const noexcept;
     uint32_t get_bounce_state() const noexcept;
     bool cancel_bounce() noexcept;
+    bool pause_bounce() noexcept;
+    bool resume_bounce() noexcept;
     bool generate_drum_fill(uint32_t track_id, uint32_t bar, float complexity);
     void set_show_video(bool s);
     void set_ascended_mode(bool enabled);
@@ -426,6 +501,10 @@ public:
     bool request_video_frame(double seconds);
     bool load_video(std::string_view path);
     rust::Vec<float> get_region_waveform(uint32_t tid, uint32_t rid, uint32_t numPeaks);
+    rust::Vec<float> get_region_audio_samples(uint32_t tid, uint32_t rid, uint32_t maxSamples);
+    rust::Vec<float> get_region_audio_interleaved(uint32_t tid, uint32_t rid, uint32_t maxFrames);
+    double get_region_sample_rate(uint32_t tid, uint32_t rid);
+    uint32_t get_region_channel_count(uint32_t tid, uint32_t rid);
 
     // Automation
     bool set_automation_data(uint32_t tid, uint32_t param_id, const std::vector<AutomationPoint>& points);
@@ -440,6 +519,9 @@ public:
     // Spatial
     void set_spatial_mode(uint32_t tid, uint32_t mode);
     bool set_spatial_position(uint32_t tid, float x, float y, float z);
+    bool set_hrtf_kernel(uint32_t tid, const std::vector<float>& left,
+                         const std::vector<float>& right);
+    bool clear_hrtf_kernel(uint32_t tid);
 
     // Analysis
     struct MeterData {
@@ -597,6 +679,7 @@ private:
         float level = 0.0f;
         double phase = 0.0;
         uint64_t releaseAt = 0;
+        uint64_t startedAt = 0;
     };
     PreviewVoice m_previewVoices[16]{};
     float m_previewFilterState = 0.0f;
@@ -639,10 +722,14 @@ private:
     std::atomic<uint32_t> m_offlineRenderTailMillis{0};
     std::atomic<bool> m_offlineRenderPreFader{false};
     std::atomic<bool> m_offlineRenderIncludeInserts{true};
+    std::atomic<bool> m_offlineRenderRangeActive{false};
+    std::atomic<uint64_t> m_offlineRenderStartSample{0};
+    std::atomic<uint64_t> m_offlineRenderEndSample{0};
     std::atomic<bool> m_bounceRunning{false};
     std::atomic<float> m_bounceProgress{0.0f};
     std::atomic<uint32_t> m_bounceState{static_cast<uint32_t>(BounceState::Idle)};
     std::atomic<bool> m_bounceCancelRequested{false};
+    std::atomic<bool> m_bouncePauseRequested{false};
     // Serializes cancellation with the final temporary-file publish so a
     // cancel cannot race a stale render into the destination path.
     mutable std::mutex m_bouncePublishMutex;

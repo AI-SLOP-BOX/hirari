@@ -112,12 +112,16 @@ impl ZeroCrossingOrchestrator {
         let start = ((target_idx as i64 - half).max(0) as usize).min(len - 1);
         let end = start.saturating_add(window_size as usize).min(len);
 
-        let mut best_idx = target_idx;
-        let mut min_sum = 2.0;
+        let mut best_idx = target_idx.min((len - 1) as u64);
+        let mut min_sum = f32::INFINITY;
 
         for i in start..end {
-            let sum = left[i].abs() + right[i].abs();
-            if sum < min_sum {
+            let sum = if left[i].is_finite() && right[i].is_finite() {
+                left[i].abs() + right[i].abs()
+            } else {
+                f32::INFINITY
+            };
+            if sum.is_finite() && sum < min_sum {
                 min_sum = sum;
                 best_idx = i as u64;
             }
@@ -127,7 +131,27 @@ impl ZeroCrossingOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide waveform alignment state.
     pub fn audit_zerocrossing(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic waveform auditing logic.
-        true
+        // This stateless orchestrator is valid when its public search
+        // contract remains total for empty and oversized windows.
+        self.find_stereo_zero(&[], &[], u64::MAX, u32::MAX) == 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CrossingConfig, ZeroCrossingOrchestrator};
+
+    #[test]
+    fn stereo_zero_crossing_handles_hot_and_nonfinite_audio() {
+        let detector = ZeroCrossingOrchestrator::new();
+        let left = [3.5_f32, 2.5, 2.0];
+        let right = [3.0_f32, 2.0, 1.5];
+        assert_eq!(detector.find_stereo_zero(&left, &right, 1, 3), 2);
+        let left = [f32::NAN, f32::NAN, 0.2];
+        let right = [f32::NAN, f32::NAN, 0.1];
+        assert_eq!(detector.find_stereo_zero(&left, &right, 0, 3), 2);
+        let config = CrossingConfig { window_size: 8, strategy: 0 };
+        assert_eq!(detector.find_nearest(&[], 99, &config), 0);
+        assert!(detector.audit_zerocrossing());
     }
 }

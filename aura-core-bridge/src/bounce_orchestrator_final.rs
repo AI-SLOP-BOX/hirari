@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExportTaskRust {
@@ -11,9 +11,17 @@ pub struct ExportTaskRust {
 
 impl ExportTaskRust {
     pub fn validate(&self) -> bool {
-        self.track_id != 0 && !self.label.trim().is_empty() && self.label.len() <= 256
+        self.track_id != 0
+            && !self.label.trim().is_empty()
+            && self.label.len() <= 256
             && self.metadata.len() <= 256
-            && self.metadata.iter().all(|(k, v)| !k.trim().is_empty() && k.len() <= 128 && v.len() <= 4096 && !k.contains('\0') && !v.contains('\0'))
+            && self.metadata.iter().all(|(k, v)| {
+                !k.trim().is_empty()
+                    && k.len() <= 128
+                    && v.len() <= 4096
+                    && !k.contains('\0')
+                    && !v.contains('\0')
+            })
     }
 }
 

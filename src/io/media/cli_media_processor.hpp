@@ -2,6 +2,8 @@
 #include <string>
 #include <vector>
 #include <cstdlib>
+#include <filesystem>
+#include <cctype>
 
 namespace Aura::IO::Media {
 
@@ -19,13 +21,18 @@ public:
      * @brief 完成したDAWのWAV音源を、FFmpegを使って元の動画ファイル（MP4等）にマージ（結合）する
      */
     static bool muxAudioToVideo(const std::string& audioPath, const std::string& videoPath, const std::string& outputPath) {
-        // ターミナル（WindowsのPowerShell、MacのZsh両対応）でFFmpegを叩くコマンド文字列の自動構築
-        // （映像は無劣化コピー、音声だけを高音質AACで上書きエンコードする神のコマンド）
-        std::string cmd = "ffmpeg -i \"" + videoPath + "\" -i \"" + audioPath + 
-                          "\" -c:v copy -c:a aac -b:a 320k \"" + outputPath + "\" -y -v quiet";
-        
-        // オペレーティングシステムのプロセスを直接叩く（std::system）
-        int result = std::system(cmd.c_str());
+        const std::string video = quoteShellArgument(videoPath);
+        const std::string audio = quoteShellArgument(audioPath);
+        const std::string output = quoteShellArgument(outputPath);
+        if (video.empty() || audio.empty() || output.empty()) return false;
+
+        // Keep the legacy CLI integration, but never interpolate raw user
+        // paths into a shell command.  Quoting is platform-specific and the
+        // Windows path policy fails closed for cmd.exe metacharacters.
+        const std::string cmd = "ffmpeg -nostdin -i " + video + " -i " + audio +
+                                " -c:v copy -c:a aac -b:a 320k " + output +
+                                " -y -v error";
+        const int result = std::system(cmd.c_str());
         return (result == 0); 
     }
 
@@ -35,15 +42,57 @@ public:
     static bool batchTrimSilenceUsingSoX(const std::vector<std::string>& files) {
         bool success = true;
         for (const auto& file : files) {
-            // soXが標準で持つ、「前後の無音部分（Silence）のノイズだけを超高速に切り落とす」コマンド
-            std::string cmd = "sox \"" + file + "\" \"trimmed_" + file + 
-                              "\" silence 1 0.1 1% reverse silence 1 0.1 1% reverse";
-            
-            if (std::system(cmd.c_str()) != 0) {
+            const std::filesystem::path source(file);
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(source, error) || error) {
                 success = false;
+                continue;
             }
+            const auto parent = source.parent_path();
+            const auto stem = source.stem().string();
+            const auto extension = source.extension().string();
+            const auto destination = parent / (stem + ".trimmed" + extension);
+            const std::string input = quoteShellArgument(source.string());
+            const std::string output = quoteShellArgument(destination.string());
+            if (input.empty() || output.empty()) {
+                success = false;
+                continue;
+            }
+
+            const std::string cmd = "sox -V0 " + input + " " + output +
+                                    " silence 1 0.1 1% reverse silence 1 0.1 1% reverse";
+            if (std::system(cmd.c_str()) != 0) success = false;
         }
         return success;
+    }
+
+private:
+    static std::string quoteShellArgument(const std::string& value) {
+        if (value.empty() || value.find('\0') != std::string::npos) return {};
+#if defined(_WIN32)
+        // `std::system` uses cmd.exe on Windows. Reject its control and
+        // expansion characters rather than attempting a partial escaping
+        // scheme that could vary with shell settings.
+        for (const unsigned char c : value) {
+            if (c < 0x20u || c == '"' || c == '&' || c == '|' || c == '<' ||
+                c == '>' || c == '^' || c == '%' || c == '!') {
+                return {};
+            }
+        }
+        return "\"" + value + "\"";
+#else
+        // POSIX shells treat everything inside single quotes literally;
+        // represent an embedded quote as three adjacent quoted segments.
+        std::string quoted;
+        quoted.reserve(value.size() + 2);
+        quoted.push_back('\'');
+        for (const char c : value) {
+            if (c == '\'') quoted += "'\\''";
+            else quoted.push_back(c);
+        }
+        quoted.push_back('\'');
+        return quoted;
+#endif
     }
 };
 

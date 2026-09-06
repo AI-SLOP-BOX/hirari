@@ -18,13 +18,18 @@ impl StereoExpanderEngine {
     }
 
     pub fn set_params(&mut self, width: f32, mid_gain: f32) {
-        self.width = width.clamp(0.0, 2.0);
-        self.mid_gain = mid_gain.clamp(0.0, 2.0);
+        if width.is_finite() && mid_gain.is_finite() {
+            self.width = width.clamp(0.0, 2.0);
+            self.mid_gain = mid_gain.clamp(0.0, 2.0);
+        }
     }
 
     /// INDUSTRIAL: M/S Matrixing and Width expansion.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        if !self.audit_stereo_expander() {
+            return;
+        }
+        let len = l.len().min(r.len());
 
         for s in 0..len {
             let in_l = l[s];
@@ -39,14 +44,16 @@ impl StereoExpanderEngine {
             let side_processed = side * self.width;
 
             // 3. M/S to L/R Matrix (Inverse)
-            l[s] = mid_processed + side_processed;
-            r[s] = mid_processed - side_processed;
+            l[s] = (mid_processed + side_processed).clamp(-4.0, 4.0);
+            r[s] = (mid_processed - side_processed).clamp(-4.0, 4.0);
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Stereo Expander state.
     pub fn audit_stereo_expander(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Stereo Expander auditing logic.
-        true
+        self.width.is_finite()
+            && (0.0..=2.0).contains(&self.width)
+            && self.mid_gain.is_finite()
+            && (0.0..=2.0).contains(&self.mid_gain)
     }
 }

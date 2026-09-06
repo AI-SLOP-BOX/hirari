@@ -21,16 +21,23 @@ impl InterpolationOrchestrator {
         end_val: f32,
         config: &InterpolationConfig,
     ) {
-        // INDUSTRIAL: Implementation of high-performance geometric calculation.
-        // Rust's safe memory management handles large automation streams with
-        // absolute bit-accuracy and zero-latency.
-        let len = buffer.len() as f32;
+        if buffer.is_empty()
+            || !start_val.is_finite()
+            || !end_val.is_finite()
+            || !config.curvature.is_finite()
+            || config.curvature.abs() > 100.0
+        {
+            return;
+        }
+        // Use the last sample as the endpoint, matching automation/fade
+        // semantics in a DAW rather than stopping one sample short.
+        let denominator = buffer.len().saturating_sub(1).max(1) as f32;
         let diff = end_val - start_val;
 
         for (i, val) in buffer.iter_mut().enumerate() {
-            let t = i as f32 / len;
+            let t = i as f32 / denominator;
 
-            *val = match config.curve_type {
+            let output = match config.curve_type {
                 CurveType::Linear => start_val + t * diff,
                 CurveType::Bezier => {
                     // INDUSTRIAL: Cubic Bezier resolution.
@@ -56,12 +63,52 @@ impl InterpolationOrchestrator {
                     start_val + st * diff
                 }
             };
+            *val = if output.is_finite() {
+                output
+            } else {
+                start_val
+            };
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide interpolation synchronization graph.
     pub fn audit_interpolation(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic interpolation auditing logic.
-        true
+        let config = InterpolationConfig {
+            curve_type: CurveType::Linear,
+            curvature: 0.0,
+        };
+        let mut buffer = [0.0f32; 3];
+        self.interpolate_buffer(&mut buffer, 0.0, 1.0, &config);
+        buffer[0] == 0.0 && buffer[2] == 1.0 && buffer.iter().all(|v| v.is_finite())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CurveType, InterpolationConfig, InterpolationOrchestrator};
+
+    #[test]
+    fn interpolation_reaches_exact_endpoints() {
+        let engine = InterpolationOrchestrator;
+        let config = InterpolationConfig {
+            curve_type: CurveType::Linear,
+            curvature: 0.5,
+        };
+        let mut buffer = vec![0.0; 5];
+        engine.interpolate_buffer(&mut buffer, -1.0, 1.0, &config);
+        assert_eq!(buffer.first().copied(), Some(-1.0));
+        assert_eq!(buffer.last().copied(), Some(1.0));
+    }
+
+    #[test]
+    fn interpolation_rejects_non_finite_parameters() {
+        let engine = InterpolationOrchestrator;
+        let config = InterpolationConfig {
+            curve_type: CurveType::Sine,
+            curvature: f32::NAN,
+        };
+        let mut buffer = vec![0.25; 8];
+        engine.interpolate_buffer(&mut buffer, 0.0, 1.0, &config);
+        assert!(buffer.iter().all(|value| *value == 0.25));
     }
 }

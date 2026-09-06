@@ -17,7 +17,11 @@ pub struct AnalogSaturatorEngine {
 impl AnalogSaturatorEngine {
     pub fn new(sr: f64) -> Self {
         Self {
-            sample_rate: sr,
+            sample_rate: if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+                sr
+            } else {
+                44_100.0
+            },
             dc_l: 0.0,
             dc_r: 0.0,
             oversampler_l: OversamplerEngine::new(),
@@ -61,15 +65,20 @@ impl AnalogSaturatorEngine {
         warmth: f32,
         model: SaturationModel,
     ) {
-        let len = l.len();
+        if !self.audit_analog_saturator() || !drive.is_finite() || !warmth.is_finite() {
+            return;
+        }
+        let len = l.len().min(r.len());
+        let drive = drive.clamp(0.0, 1.0);
+        let warmth = warmth.clamp(-1.0, 1.0);
         // dbToLinear equivalent: 10^(db/20)
         let db = drive * 24.0;
         let drive_lin = 10.0f32.powf(db / 20.0);
         let comp = 1.0 / (1.0 + drive * 0.7);
 
         for i in 0..len {
-            let in_l = l[i] * drive_lin;
-            let in_r = r[i] * drive_lin;
+            let in_l = if l[i].is_finite() { l[i] } else { 0.0 } * drive_lin;
+            let in_r = if r[i].is_finite() { r[i] } else { 0.0 } * drive_lin;
 
             let (ly1, ly2) = self.oversampler_l.upsample(in_l);
             let out_l1 = self.apply_model(ly1, warmth, &model);
@@ -82,15 +91,27 @@ impl AnalogSaturatorEngine {
             r[i] = self.oversampler_r.downsample(out_r1, out_r2) * comp;
 
             self.dc_l = 0.999 * self.dc_l + 0.001 * l[i];
-            l[i] -= self.dc_l;
+            l[i] = (l[i] - self.dc_l).clamp(-1.5, 1.5);
             self.dc_r = 0.999 * self.dc_r + 0.001 * r[i];
-            r[i] -= self.dc_r;
+            r[i] = (r[i] - self.dc_r).clamp(-1.5, 1.5);
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Analog Saturator state.
     pub fn audit_analog_saturator(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Analog Saturator auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.dc_l.is_finite()
+            && self.dc_r.is_finite()
+            && [&self.oversampler_l, &self.oversampler_r].iter().all(|o| {
+                o.a1.is_finite()
+                    && o.a2.is_finite()
+                    && (-1.0..=1.0).contains(&o.a1)
+                    && (-1.0..=1.0).contains(&o.a2)
+                    && o.s1_l.is_finite()
+                    && o.s1_r.is_finite()
+                    && o.s2_l.is_finite()
+                    && o.s2_r.is_finite()
+            })
     }
 }

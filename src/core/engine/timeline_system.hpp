@@ -36,7 +36,19 @@ public:
     }
 
     void update() {
-        // Handle timeline events
+        std::lock_guard<std::mutex> lock(m_trackMutex);
+        // Periodic maintenance runs on the control thread: never expose
+        // null/duplicate tracks to renderers and keep marker order stable.
+        std::unordered_set<uint32_t> ids;
+        m_tracks.erase(std::remove_if(m_tracks.begin(), m_tracks.end(), [&](const auto& track) {
+            return !track || track->getId() == 0 || !ids.insert(track->getId()).second;
+        }), m_tracks.end());
+        std::stable_sort(m_markers.begin(), m_markers.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.samplePos < rhs.samplePos;
+        });
+        m_markers.erase(std::unique(m_markers.begin(), m_markers.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.samplePos == rhs.samplePos && lhs.name == rhs.name;
+        }), m_markers.end());
     }
 
     /**
@@ -44,10 +56,19 @@ public:
      * INDUSTRIAL: Delegating marker indexing and retrieval to the Rust 'TimelineOrchestrator'.
      */
     void addMarker(const std::string& name) {
-        if (name.empty()) return;
+        const auto first = name.find_first_not_of(" \t\r\n");
+        const auto last = name.find_last_not_of(" \t\r\n");
+        if (first == std::string::npos || last - first + 1 > 256 || name.find('\0') != std::string::npos) return;
+        const std::string normalized = name.substr(first, last - first + 1);
         std::lock_guard<std::mutex> lock(m_trackMutex);
-        m_markers.push_back(TimelineMarker{getCurrentPos(), name});
-        return;
+        const uint64_t position = getCurrentPos();
+        if (std::any_of(m_markers.begin(), m_markers.end(), [&](const TimelineMarker& marker) {
+                return marker.samplePos == position && marker.name == normalized;
+            })) return;
+        m_markers.push_back(TimelineMarker{position, normalized});
+        std::stable_sort(m_markers.begin(), m_markers.end(), [](const TimelineMarker& lhs, const TimelineMarker& rhs) {
+            return lhs.samplePos < rhs.samplePos;
+        });
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
         // The implementation here is now a shim to Aura::Core::Bridge::TimelineOrchestrator.
         // Rust's memory-safe collections ensure that project markers are perfectly
@@ -163,6 +184,14 @@ public:
         return 0;
     }
 
+    uint32_t getTrackTailSamples(uint32_t trackId) const noexcept {
+        std::lock_guard<std::mutex> lock(m_trackMutex);
+        for (const auto& track : m_tracks) {
+            if (track && track->getId() == trackId) return track->getTotalTailSamples();
+        }
+        return 0;
+    }
+
     bool renderTrackInto(uint32_t trackId, AudioBuffer& output, uint32_t numSamples,
                          uint64_t playhead,
                          Track::OfflineRenderTap tap = Track::OfflineRenderTap::PostFader) const {
@@ -191,8 +220,14 @@ public:
     void setPlayhead(uint64_t pos) { m_currentPos.store(pos, std::memory_order_release); }
 
     void process(uint32_t numSamples) {
-        if (m_playing.load()) {
-            m_currentPos.fetch_add(numSamples, std::memory_order_relaxed);
+        if (!m_playing.load(std::memory_order_acquire) || numSamples == 0) return;
+        uint64_t current = m_currentPos.load(std::memory_order_relaxed);
+        for (;;) {
+            const uint64_t next = current > UINT64_MAX - numSamples
+                ? UINT64_MAX : current + numSamples;
+            if (m_currentPos.compare_exchange_weak(current, next,
+                                                    std::memory_order_relaxed,
+                                                    std::memory_order_relaxed)) break;
         }
     }
 

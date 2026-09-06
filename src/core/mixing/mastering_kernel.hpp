@@ -63,9 +63,14 @@ public:
                 r[i] = static_cast<float>((static_cast<double>(r[i]) - m_dcEstimateR) * gr);
             } else r[i] = 0.0f;
             
-            // Hard Limit to prevent clipping
-            l[i] = std::clamp(l[i], -0.99f, 0.99f);
-            r[i] = std::clamp(r[i], -0.99f, 0.99f);
+            // True-peak guard: check the midpoint between the previous
+            // output sample and this one as well as the sample itself.  The
+            // previous output is retained across blocks so a boundary
+            // transition cannot create an unchecked inter-sample peak.
+            l[i] = limitTruePeak(l[i], m_prevL);
+            r[i] = limitTruePeak(r[i], m_prevR);
+            m_prevL = l[i];
+            m_prevR = r[i];
         }
     }
 
@@ -94,6 +99,17 @@ private:
     double m_dcEstimateL = 0.0;
     double m_dcEstimateR = 0.0;
     static constexpr double m_dcBlockAlpha = 0.0005;
+
+    static float limitTruePeak(float sample, float previous) noexcept {
+        if (!std::isfinite(sample)) return 0.0f;
+        const float midpoint = 0.5f * (previous + sample);
+        const float peak = std::max(std::abs(sample), std::abs(midpoint));
+        if (!std::isfinite(peak) || peak <= 0.99f) return std::clamp(sample, -0.99f, 0.99f);
+        const float gain = 0.99f / peak;
+        return std::clamp(sample * gain, -0.99f, 0.99f);
+    }
+    float m_prevL = 0.0f;
+    float m_prevR = 0.0f;
 };
 
 } // namespace Aura::Core::Mixing

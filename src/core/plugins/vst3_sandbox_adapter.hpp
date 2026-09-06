@@ -27,6 +27,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <limits>
 
 #include "plugin_sandbox_protocol.hpp"
 
@@ -88,6 +89,64 @@ public:
         // not reject that result; keep the same compatibility behavior.
         (void)m_processor->setProcessing(true);
         m_ready = true;
+        return true;
+    }
+
+    bool hasEditorView() const noexcept {
+        if (!m_controller) return false;
+        auto* view = m_controller->createView(Steinberg::Vst::ViewType::kEditor);
+        if (!view) return false;
+        view->release();
+        return true;
+    }
+
+    // Creates and attaches the vendor editor on the UI thread. The returned
+    // view pointer is an opaque session token owned by this runtime; callers
+    // must pass it back to closeEditor before destroying the plugin instance.
+    uint64_t openEditor(uintptr_t parent) noexcept {
+        if (!m_controller || !parent || m_editorView) return 0;
+        auto* view = m_controller->createView(Steinberg::Vst::ViewType::kEditor);
+        if (!view) return 0;
+#if defined(_WIN32)
+        constexpr const char* kPlatform = "HWND";
+#elif defined(__APPLE__)
+        constexpr const char* kPlatform = "NSView";
+#else
+        constexpr const char* kPlatform = "X11EmbedWindowID";
+#endif
+        if (view->attached(reinterpret_cast<void*>(parent), kPlatform) != Steinberg::kResultOk) {
+            view->release();
+            return 0;
+        }
+        m_editorView = view;
+        return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(view));
+    }
+
+    bool closeEditor(uint64_t session) noexcept {
+        if (!m_editorView || session == 0 ||
+            session != static_cast<uint64_t>(reinterpret_cast<uintptr_t>(m_editorView))) return false;
+        m_editorView->removed();
+        m_editorView->release();
+        m_editorView = nullptr;
+        return true;
+    }
+
+    // VST3 has no universal reset() entry point.  Toggling processing at the
+    // component boundary is the portable lifecycle reset used by Steinberg's
+    // hosting examples: it flushes pending note/event state and forces the
+    // processor to re-enter its initialized processing state without
+    // destroying the component/controller pair.
+    bool reset() noexcept {
+        if (!m_ready || !m_processor || !m_component) return false;
+        if (m_processor->setProcessing(false) != Steinberg::kResultOk) {
+            m_error = "VST3 processing reset stop failed";
+            return false;
+        }
+        const auto result = m_processor->setProcessing(true);
+        if (result != Steinberg::kResultOk && result != Steinberg::kNotImplemented) {
+            m_error = "VST3 processing reset start failed";
+            return false;
+        }
         return true;
     }
 
@@ -153,7 +212,13 @@ public:
             shared.midiEvents.load(std::memory_order_acquire), SandboxProtocol::kMaxMidiEvents);
         for (uint32_t index = 0; index < midiCount; ++index) {
             const auto& midi = shared.midi[index];
-            if (midi.size == 0 || midi.size > sizeof(midi.data)) continue;
+            // The shared mailbox uses a wider timestamp than VST3's int32
+            // event offset. Never clamp an event from a later block onto the
+            // final sample: that changes note timing and can create stuck
+            // notes at loop boundaries.
+            if (midi.size == 0 || midi.size > sizeof(midi.data) ||
+                midi.sampleOffset >= frames || midi.sampleOffset >
+                    static_cast<uint64_t>(std::numeric_limits<Steinberg::int32>::max())) continue;
             const uint8_t statusByte = midi.data[0];
             const uint8_t status = statusByte & 0xF0u;
             const uint8_t channel = statusByte & 0x0Fu;
@@ -162,8 +227,7 @@ public:
             if (needsThreeBytes && midi.size < 3) continue;
             Steinberg::Vst::Event event{};
             event.busIndex = 0;
-            event.sampleOffset = static_cast<Steinberg::int32>(
-                std::min<uint64_t>(midi.sampleOffset, frames - 1));
+            event.sampleOffset = static_cast<Steinberg::int32>(midi.sampleOffset);
             event.ppqPosition = 0.0;
             event.flags = Steinberg::Vst::Event::kIsLive;
             if (status == 0x80u || status == 0x90u) {
@@ -391,6 +455,11 @@ public:
 
 private:
     void shutdown() noexcept {
+        if (m_editorView) {
+            m_editorView->removed();
+            m_editorView->release();
+            m_editorView = nullptr;
+        }
         if (m_processor && m_ready) {
             m_processor->setProcessing(false);
             m_component->setActive(false);
@@ -423,6 +492,7 @@ private:
     Steinberg::IPtr<Steinberg::Vst::IComponent> m_component;
     Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> m_processor;
     Steinberg::FUnknownPtr<Steinberg::Vst::IEditController> m_controller;
+    Steinberg::Vst::IPlugView* m_editorView = nullptr;
     Steinberg::Vst::HostProcessData m_processData;
 #if AURA_HAS_VST3_PARAMETER_CHANGES
     Steinberg::Vst::ParameterChanges m_parameterChanges{SandboxProtocol::kMaxParameterChanges};

@@ -30,6 +30,12 @@ public:
         std::lock_guard<std::mutex> lock(m_notesMutex);
         m_notes.push_back(n);
     }
+    bool removeNote(uint32_t index) {
+        std::lock_guard<std::mutex> lock(m_notesMutex);
+        if (index >= m_notes.size()) return false;
+        m_notes.erase(m_notes.begin() + static_cast<std::ptrdiff_t>(index));
+        return true;
+    }
     void removeNotesAt(double beat, int pitch, double tolerance = 0.125) {
         std::lock_guard<std::mutex> lock(m_notesMutex);
         m_notes.erase(std::remove_if(m_notes.begin(), m_notes.end(),
@@ -114,5 +120,7 @@ private:
     std::vector<MIDINote> m_notes;
     mutable std::mutex m_notesMutex;
 };
+
+using MIDIRegion = MidiRegion;
 
 } // namespace Aura::Core

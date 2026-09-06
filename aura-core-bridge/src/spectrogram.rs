@@ -27,8 +27,12 @@ impl SpectrogramOrchestrator {
     pub fn generate_pixels(&self, data: &[f32], output: &mut [u32]) {
         // INDUSTRIAL: Implementation of high-performance color mapping.
         // Rust's SIMD-optimized iteration allows for bit-accurate pixel generation.
-        for (i, &val) in data.iter().enumerate() {
-            let v = val.clamp(0.0, 1.0);
+        for (i, &val) in data.iter().take(output.len()).enumerate() {
+            let v = if val.is_finite() {
+                val.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
 
             // INDUSTRIAL: Professional fire/spectra palette generation.
             let r = (v * 512.0).min(255.0) as u32;
@@ -41,7 +45,10 @@ impl SpectrogramOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide spectral visualization state.
     pub fn audit_spectrogram(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic spectral auditing logic.
-        true
+        self.config.min_freq.is_finite()
+            && self.config.max_freq.is_finite()
+            && self.config.min_freq >= 0.0
+            && self.config.max_freq > self.config.min_freq
+            && self.config.max_freq <= 192_000.0
     }
 }

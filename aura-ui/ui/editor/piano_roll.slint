@@ -3,6 +3,7 @@ import { ScrollView } from "std-widgets.slint";
 import { LineEdit } from "std-widgets.slint";
 import { Z_IconButton } from "../primitives/icon_button.slint";
 import { ZNote } from "../model/midi_model.slint";
+import { CommandActions } from "../actions/command_actions.slint";
 
 export component Z_PianoRoll {
     callback project-changed();
@@ -54,6 +55,7 @@ export component Z_PianoRoll {
                     Z_IconButton { icon: "CHORD"; clicked => { insert-chord(chord-root, ph, chord-quality, chord-length, chord-inversion); project-changed(); } }
                     Z_IconButton { icon: "P" + (progression-preset + 1); clicked => { progression-preset = Math.mod(progression-preset + 1, 3); } }
                     Z_IconButton { icon: "PROG"; clicked => { insert-progression(chord-root, ph, progression-preset, chord-length, chord-inversion); project-changed(); } }
+                    Z_IconButton { icon: "PIANO VIDEO"; compact: true; button-width: 96px; clicked => { CommandActions.palette_exec("PIANO VISUALIZER"); } }
                     Z_IconButton { icon: "DEL"; clicked => { delete-all(); project-changed(); } }
                 }
             }

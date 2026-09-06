@@ -30,6 +30,7 @@ mod batch_export_tests {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExportFormatRust {
     pub codec: CodecRust,
     pub bit_depth: u32,
@@ -50,6 +51,7 @@ impl ExportFormatRust {
 
 pub fn validate_rendered_buffer(samples: &[f32], channels: u16, peak_limit: f32) -> bool { !samples.is_empty() && (1..=32).contains(&channels) && samples.len().is_multiple_of(channels as usize) && peak_limit.is_finite() && samples.iter().all(|s| s.is_finite() && s.abs() <= peak_limit) }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StemJobRust {
     pub track_id: u32,
     pub stem_name: String,
@@ -61,6 +63,7 @@ pub struct ExportOrchestrator {
     completed: Vec<(u32, PathBuf)>,
     failed: Vec<(u32, String)>,
     pub last_error: Option<String>,
+    renderer: Option<Box<dyn FnMut(u32) -> Result<Vec<f32>, String> + Send>>,
 }
 
 impl Default for ExportOrchestrator {
@@ -76,7 +79,22 @@ impl ExportOrchestrator {
             completed: Vec::new(),
             failed: Vec::new(),
             last_error: None,
+            renderer: None,
         }
+    }
+
+    /// Installs the native/offline renderer used by the ordinary queue entry
+    /// point.  The callback is owned by the queue so UI, CLI and automation
+    /// all use the same completion and atomic-publish path.
+    pub fn set_renderer<F>(&mut self, renderer: F)
+    where
+        F: FnMut(u32) -> Result<Vec<f32>, String> + Send + 'static,
+    {
+        self.renderer = Some(Box::new(renderer));
+    }
+
+    pub fn clear_renderer(&mut self) {
+        self.renderer = None;
     }
 
     /// Adds one stem to the delivery queue.  Queue insertion is validated and
@@ -118,6 +136,16 @@ impl ExportOrchestrator {
         if self.active_jobs.is_empty() {
             self.last_error = Some("no export jobs are queued".to_owned());
             eprintln!("advanced export failed: no export jobs are queued");
+            return;
+        }
+
+        if let Some(mut renderer) = self.renderer.take() {
+            let output = Path::new(&output_dir).to_path_buf();
+            let result = self.execute_export_with_renderer(&output, 2, |track_id| renderer(track_id));
+            self.renderer = Some(renderer);
+            if let Err(error) = result {
+                self.last_error = Some(format!("{error:?}"));
+            }
             return;
         }
 
@@ -287,6 +315,75 @@ impl ExportOrchestrator {
         Ok(completed)
     }
 
+    /// Connects the queue to a renderer that publishes a native WAV file per
+    /// track. This is the bridge used by the loaded-project UI/CLI path: the
+    /// engine owns the graph render, while this queue owns naming, collision
+    /// checks, publication, and job state transitions.
+    pub fn execute_export_with_file_renderer<F>(
+        &mut self,
+        output_dir: &Path,
+        mut render: F,
+    ) -> Result<usize, WavExportError>
+    where
+        F: FnMut(u32, &Path) -> Result<(), String>,
+    {
+        if !output_dir.is_dir() || self.active_jobs.is_empty() {
+            return Err(WavExportError::InvalidPath);
+        }
+        let mut destinations = Vec::with_capacity(self.active_jobs.len());
+        for job in &self.active_jobs {
+            if !job.format.validate() || job.format.codec != CodecRust::Wav {
+                return Err(WavExportError::UnsupportedFormat);
+            }
+            let path = output_dir.join(format!(
+                "{id:04}_{}.wav",
+                safe_filename(&job.stem_name),
+                id = job.track_id
+            ));
+            if path.exists() || destinations.iter().any(|candidate| candidate == &path) {
+                return Err(WavExportError::InvalidTask);
+            }
+            destinations.push(path);
+        }
+
+        let mut temporary = Vec::with_capacity(self.active_jobs.len());
+        let mut published = Vec::with_capacity(self.active_jobs.len());
+        for (job, destination) in self.active_jobs.iter().zip(&destinations) {
+            let temp = output_dir.join(format!(
+                ".aura-render-{}-{}.tmp.wav",
+                std::process::id(),
+                job.track_id
+            ));
+            let _ = std::fs::remove_file(&temp);
+            if let Err(reason) = render(job.track_id, &temp) {
+                let _ = std::fs::remove_file(&temp);
+                for path in &temporary { let _ = std::fs::remove_file(path); }
+                for path in &published { let _ = std::fs::remove_file(path); }
+                self.last_error = Some(reason);
+                return Err(WavExportError::InvalidTask);
+            }
+            let valid = std::fs::metadata(&temp).map(|meta| meta.is_file() && meta.len() > 44).unwrap_or(false);
+            if !valid || std::fs::rename(&temp, destination).is_err() {
+                let _ = std::fs::remove_file(&temp);
+                for path in &temporary { let _ = std::fs::remove_file(path); }
+                for path in &published { let _ = std::fs::remove_file(path); }
+                self.last_error = Some("native renderer produced an invalid WAV".to_owned());
+                return Err(WavExportError::Io("native renderer publication failed".to_owned()));
+            }
+            temporary.push(temp);
+            published.push(destination.clone());
+        }
+
+        let completed_ids: Vec<u32> = self.active_jobs.iter().map(|job| job.track_id).collect();
+        let completed_count = completed_ids.len();
+        for (track_id, path) in completed_ids.into_iter().zip(published) {
+            self.completed.push((track_id, path));
+            self.active_jobs.retain(|job| job.track_id != track_id);
+        }
+        self.last_error = None;
+        Ok(completed_count)
+    }
+
     pub fn completed_output(&self, track_id: u32) -> Option<&Path> {
         self.completed
             .iter()
@@ -406,6 +503,27 @@ mod tests {
 
         assert_eq!(orchestrator.active_jobs.len(), 1);
         assert!(!orchestrator.audit_advanced_export_engine());
+    }
+
+    #[test]
+    fn native_file_renderer_consumes_queue_only_after_publication() {
+        let dir = std::env::temp_dir().join(format!("aura-native-file-render-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut orchestrator = ExportOrchestrator::new();
+        orchestrator.active_jobs.push(StemJobRust {
+            track_id: 7,
+            stem_name: "Main Mix".into(),
+            format: ExportFormatRust { codec: CodecRust::Wav, bit_depth: 16, sample_rate: 48_000, normalize: false },
+        });
+        let rendered = orchestrator.execute_export_with_file_renderer(&dir, |_track, path| {
+            write_wav_pcm(path, &[0.0, 0.25, -0.25, 0.0], 48_000, 2, 16)
+                .map_err(|error| format!("{error:?}"))
+        }).unwrap();
+        assert_eq!(rendered, 1);
+        assert!(orchestrator.active_jobs.is_empty());
+        assert_eq!(orchestrator.completed_output(7).unwrap().file_name().unwrap(), "0007_Main_Mix.wav");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

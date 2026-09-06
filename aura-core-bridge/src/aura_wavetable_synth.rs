@@ -76,7 +76,9 @@ impl AuraWavetableSynthEngine {
     }
 
     pub fn note_on(&mut self, freq: f64, vel: f32) {
-        if !freq.is_finite() || !(1.0..=20_000.0).contains(&freq) || !vel.is_finite() { return; }
+        if !freq.is_finite() || !(1.0..=20_000.0).contains(&freq) || !vel.is_finite() {
+            return;
+        }
         self.osc.set_frequency(freq);
         self.velocity = vel.clamp(0.0, 1.0);
         self.aeg.trigger();
@@ -85,7 +87,12 @@ impl AuraWavetableSynthEngine {
 
     /// INDUSTRIAL: Processes an audio block with feedback routing and WaveShaping.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        if l.len() != r.len() || !self.sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&self.sample_rate) { return; }
+        if l.len() != r.len()
+            || !self.sample_rate.is_finite()
+            || !(8_000.0..=384_000.0).contains(&self.sample_rate)
+        {
+            return;
+        }
         let n = l.len();
         let sr = self.sample_rate as f32;
 
@@ -129,8 +136,29 @@ impl AuraWavetableSynthEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Aura Wavetable Synth state.
     pub fn audit_aura_wavetable_synth(&self) -> bool {
-        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
-            && [self.morph_pos, self.cutoff1, self.res1, self.cutoff2, self.res2, self.drive, self.feedback, self.velocity, self.f1_z1, self.f2_z1, self.hpf_z1, self.last_in, self.last_f2_out].iter().all(|v| v.is_finite())
-            && (0.0..=1.0).contains(&self.morph_pos) && (0.0..=1.0).contains(&self.res1) && (0.0..=1.0).contains(&self.res2) && (0.0..=1.0).contains(&self.feedback) && self.drive >= 0.0
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && [
+                self.morph_pos,
+                self.cutoff1,
+                self.res1,
+                self.cutoff2,
+                self.res2,
+                self.drive,
+                self.feedback,
+                self.velocity,
+                self.f1_z1,
+                self.f2_z1,
+                self.hpf_z1,
+                self.last_in,
+                self.last_f2_out,
+            ]
+            .iter()
+            .all(|v| v.is_finite())
+            && (0.0..=1.0).contains(&self.morph_pos)
+            && (0.0..=1.0).contains(&self.res1)
+            && (0.0..=1.0).contains(&self.res2)
+            && (0.0..=1.0).contains(&self.feedback)
+            && self.drive >= 0.0
     }
 }

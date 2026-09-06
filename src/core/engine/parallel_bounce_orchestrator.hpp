@@ -6,6 +6,7 @@
 #include <mutex>
 #include <functional>
 #include <algorithm>
+#include <unordered_set>
 #include "../audio_buffer.hpp"
 #include "../concurrency/thread_pool.hpp"
 
@@ -39,7 +40,12 @@ public:
     }
 
     bool renderProjectStems(const std::vector<uint32_t>& trackIds, const RenderStemProc& renderer) {
-        if (!renderer || trackIds.empty()) return false;
+        if (!renderer || trackIds.empty() || trackIds.size() > 4096) return false;
+        std::unordered_set<uint32_t> uniqueIds;
+        uniqueIds.reserve(trackIds.size());
+        for (const uint32_t id : trackIds) {
+            if (id == 0 || !uniqueIds.insert(id).second) return false;
+        }
         std::vector<std::future<bool>> jobs;
         jobs.reserve(trackIds.size());
         for (uint32_t id : trackIds) {

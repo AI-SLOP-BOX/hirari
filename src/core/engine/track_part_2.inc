@@ -337,6 +337,15 @@
         // quarantined plugin and reset the bounded automatic-restart budget.
         return sandbox && sandbox->restart(true);
     }
+    bool resetSandboxedPlugin(size_t sandboxIndex) {
+        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
+        const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
+        auto processor = m_effectChain.getProcessor(index);
+        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        if (!sandbox) return false;
+        sandbox->reset();
+        return sandbox->resetPluginControlPlane();
+    }
     bool retrySandboxedPlugin(size_t sandboxIndex) {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
         const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
@@ -415,6 +424,18 @@
     virtual uint32_t getPluginParameterCount(uint32_t pluginIndex) const noexcept {
         const auto processor = m_effectChain.getProcessor(pluginIndex);
         return processor ? processor->getNumParameters() : 0;
+    }
+    bool hasPluginNativeEditor(uint32_t pluginIndex) const noexcept {
+        const auto processor = m_effectChain.getProcessor(pluginIndex);
+        return processor && processor->hasNativeEditor();
+    }
+    uint64_t openPluginNativeEditor(uint32_t pluginIndex, uintptr_t parent) noexcept {
+        const auto processor = m_effectChain.getProcessor(pluginIndex);
+        return processor ? processor->openNativeEditor(parent) : 0;
+    }
+    bool closePluginNativeEditor(uint32_t pluginIndex, uint64_t session) noexcept {
+        const auto processor = m_effectChain.getProcessor(pluginIndex);
+        return processor && processor->closeNativeEditor(session);
     }
     std::string getPluginParameterName(uint32_t pluginIndex, uint32_t parameterId) const {
         const auto processor = m_effectChain.getProcessor(pluginIndex);

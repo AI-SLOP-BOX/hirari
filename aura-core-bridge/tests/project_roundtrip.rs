@@ -59,6 +59,43 @@ fn project_layout_round_trips_through_public_core_api() {
 }
 
 #[test]
+fn control_room_state_round_trips_through_project_document_api() {
+    let _guard = native_engine_test_guard();
+    let core = AuraCore::new().expect("core must initialize");
+    assert!(core.add_control_room_output("Nearfield"));
+    assert!(core.select_control_room_output(1));
+    assert!(core.set_control_room_speaker_gain(1, 0.8));
+    assert!(core.set_control_room_speaker_enabled(1, false));
+    core.set_control_room_dim(true);
+    assert!(core.upsert_control_room_cue(7, 0.75, true));
+    assert!(core.set_control_room_reference_track(Some("reference.wav".into())));
+    let path = std::env::temp_dir().join(format!(
+        "aura-control-room-roundtrip-{}-{}.aura",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path_text = path.to_str().unwrap().to_owned();
+    core.save_project_v2(&path_text, "Control Room", 120.0)
+        .unwrap();
+    let restored = AuraCore::new().expect("restored core must initialize");
+    restored.load_project_v2(&path_text).unwrap();
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&restored.control_room_monitor_snapshot_json()).unwrap();
+    assert_eq!(snapshot["active_output"], "Nearfield");
+    assert!((snapshot["active_output_gain"].as_f64().unwrap() - 0.8).abs() < 1e-6);
+    assert_eq!(snapshot["active_output_enabled"], false);
+    assert_eq!(snapshot["dim"], true);
+    assert_eq!(snapshot["reference_track"], "reference.wav");
+    let state: serde_json::Value = serde_json::from_str(&restored.control_room_json()).unwrap();
+    assert_eq!(state["cues"][0]["id"], 7);
+    assert_eq!(state["cues"][0]["gain"], 0.75);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn reload_reseeds_track_allocator_without_reusing_persisted_ids() {
     let _guard = native_engine_test_guard();
     let core = AuraCore::new().expect("core must initialize");

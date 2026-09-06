@@ -108,6 +108,7 @@ pub fn install(
                         })
                     };
                     let Some(target_row) = target_row else {
+                        ui.set_is_rec(false);
                         ui.set_last_action(
                             ui_error_message(
                                 UiErrorKind::AudioDevice,
@@ -118,6 +119,7 @@ pub fn install(
                         return;
                     };
                     let Some(track) = tracks.row_data(target_row) else {
+                        ui.set_is_rec(false);
                         ui.set_last_action(
                             ui_error_message(
                                 UiErrorKind::AudioDevice,
@@ -154,6 +156,11 @@ pub fn install(
                             );
                         }
                         Err(error) => {
+                            // A failed commit (for example an empty input
+                            // take) still terminates the capture session.
+                            // Keep the UI transport and settings controls from
+                            // remaining latched in recording mode.
+                            ui.set_is_rec(false);
                             sync_recording_status(&ui, &core);
                             ui.set_last_action(
                                 ui_error_message(

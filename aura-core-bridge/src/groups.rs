@@ -53,12 +53,23 @@ impl GroupOrchestrator {
             }
         }
 
-        let mut result: Vec<_> = targets.into_iter().collect(); result.sort_unstable(); result
+        let mut result: Vec<_> = targets.into_iter().collect();
+        result.sort_unstable();
+        result
     }
 
     pub fn create_mix_group(&mut self, name: &str, flags: u32) -> u32 {
-        if name.trim().is_empty() || name.len() > 128 || self.mix_groups.len() >= u32::MAX as usize { return 0; }
-        let id = self.mix_groups.keys().copied().max().unwrap_or(0).saturating_add(1);
+        if name.trim().is_empty() || name.len() > 128 || self.mix_groups.len() >= u32::MAX as usize
+        {
+            return 0;
+        }
+        let id = self
+            .mix_groups
+            .keys()
+            .copied()
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         self.mix_groups.insert(
             id,
             MixGroupMetadata {
@@ -74,6 +85,13 @@ impl GroupOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide group synchronization graph.
     pub fn audit_groups(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic group auditing logic.
-        self.mix_groups.len() <= 65_536 && self.mix_groups.iter().all(|(id, group)| *id == group.id && group.id != 0 && !group.name.trim().is_empty() && group.name.len() <= 128 && group.track_ids.iter().all(|track| *track != 0))
+        self.mix_groups.len() <= 65_536
+            && self.mix_groups.iter().all(|(id, group)| {
+                *id == group.id
+                    && group.id != 0
+                    && !group.name.trim().is_empty()
+                    && group.name.len() <= 128
+                    && group.track_ids.iter().all(|track| *track != 0)
+            })
     }
 }

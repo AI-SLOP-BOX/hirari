@@ -25,6 +25,13 @@ The remaining bullets below require additional hardware or external fixtures.
 - Complete the OpenUtau edit/render/re-import round trip with timing, lyric,
   pitch, and rendered-audio evidence.
 
+## Post-publication priority
+
+- Add the licensed ARA2 SDK adapter and validate document, region, random-access,
+  analysis, and note-segment exchange with a real partner plug-in.
+- Expand Windows ASIO and third-party AU/CLAP compatibility matrices on native
+  hardware; do not advertise those results from source-only CI.
+
 ## Release gate
 
 - Test Apple Silicon, Intel, and universal app artifacts.

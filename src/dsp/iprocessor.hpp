@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 #include "../core/audio_buffer.hpp"
@@ -70,23 +71,49 @@ public:
     virtual uint32_t getTailSamples() const noexcept { return 0; }
     
     // State Persistence (SBF-v5 Binary Snapshots)
-    virtual std::vector<uint8_t> getState() const { return {}; }
+    virtual std::vector<uint8_t> getState() const {
+        // Every processor gets a small, versioned host-state envelope even if
+        // it has no plugin-specific parameters. This preserves mix/bypass and
+        // routing state across project reloads instead of silently resetting
+        // legacy effects to defaults.
+        constexpr uint32_t kMagic = 0x41555241u; // "AURA"
+        constexpr uint16_t kVersion = 1;
+        std::vector<uint8_t> state(16, 0);
+        std::memcpy(state.data(), &kMagic, sizeof(kMagic));
+        std::memcpy(state.data() + 4, &kVersion, sizeof(kVersion));
+        const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
+        std::memcpy(state.data() + 6, &flags, sizeof(flags));
+        std::memcpy(state.data() + 8, &m_mix, sizeof(m_mix));
+        std::memcpy(state.data() + 12, &m_sidechainBusId, sizeof(m_sidechainBusId));
+        return state;
+    }
     /// Restore a persisted state blob on the control thread.  Returning the
     /// result is intentional: a checksum-valid blob can still be rejected by
     /// a plugin or fail during decoding, and callers must not confuse that
     /// with a successful restore.  Existing callers may ignore the result.
-    virtual bool setState(const std::vector<uint8_t>& /*data*/) { return false; }
+    virtual bool setState(const std::vector<uint8_t>& data) {
+        if (data.size() != 16) return false;
+        uint32_t magic = 0; uint16_t version = 0; uint16_t flags = 0;
+        float mix = 0.0f; uint32_t sidechain = 0;
+        std::memcpy(&magic, data.data(), sizeof(magic));
+        std::memcpy(&version, data.data() + 4, sizeof(version));
+        std::memcpy(&flags, data.data() + 6, sizeof(flags));
+        std::memcpy(&mix, data.data() + 8, sizeof(mix));
+        std::memcpy(&sidechain, data.data() + 12, sizeof(sidechain));
+        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 ||
+            !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
+        m_bypassed = (flags & 1u) != 0;
+        m_mix = mix;
+        m_sidechainBusId = sidechain;
+        return true;
+    }
     // GUI state is control-plane data owned by the plugin.  Keep empty
     // defaults so existing processors remain source-compatible while the
     // host can persist editor/window state when a plugin provides it.
     virtual std::vector<uint8_t> saveGuiState() const { return {}; }
     virtual bool loadGuiState(const std::vector<uint8_t>& /*data*/) { return true; }
     virtual bool restoreStateChecked(const std::vector<uint8_t>& data) {
-        (void)data;
-        // A processor that has not explicitly implemented state restore must
-        // never report success. Otherwise project load can silently continue
-        // with a default processor state.
-        return false;
+        return setState(data);
     }
 
     // Parameter Interface
@@ -105,6 +132,13 @@ public:
     // Unsupported parameters are not automated. Concrete processors must
     // opt in explicitly once they expose a real automation lane.
     virtual bool isParameterAutomated(uint32_t /*id*/) const noexcept { return false; }
+
+    // Native editor availability is separate from audio processing readiness.
+    virtual bool hasNativeEditor() const noexcept { return false; }
+    // UI-thread native editor lifecycle. The parent handle is platform-owned
+    // (HWND/NSView/X11 surface); audio processing must never call these.
+    virtual uint64_t openNativeEditor(uintptr_t /*parent*/) noexcept { return 0; }
+    virtual bool closeNativeEditor(uint64_t /*session*/) noexcept { return false; }
 
     // Control-thread diagnostic hook. Real-time processors publish edge-triggered
     // fault events atomically; consumers drain them outside the audio callback.

@@ -21,7 +21,11 @@ pub struct VocalPitchCorrectorEngine {
 impl VocalPitchCorrectorEngine {
     pub fn new(sr: f64) -> Self {
         Self {
-            sample_rate: sr,
+            sample_rate: if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+                sr
+            } else {
+                44_100.0
+            },
             buffer: vec![0.0; 8192],
             input_pos: 0,
             detected_freq: 440.0,
@@ -41,9 +45,20 @@ impl VocalPitchCorrectorEngine {
         self.input_pos = 0;
     }
 
+    pub fn set_sample_rate(&mut self, sr: f64) {
+        if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            self.sample_rate = sr;
+            self.reset();
+        }
+    }
+
     pub fn set_params(&mut self, amount: f32, speed: f32, scale: VocalScale) {
-        self.amount = amount;
-        self.speed = speed;
+        if amount.is_finite() {
+            self.amount = amount.clamp(0.0, 1.0);
+        }
+        if speed.is_finite() {
+            self.speed = speed.clamp(0.0, 1.0);
+        }
         self.scale = scale;
     }
 
@@ -68,7 +83,10 @@ impl VocalPitchCorrectorEngine {
     fn detect_pitch(&self) -> f32 {
         let len = self.buffer.len();
         let size = 512; // Window size for correlation
-        if len <= size + 2 || !self.sample_rate.is_finite() || self.sample_rate <= 100.0 {
+        if len <= size + 2
+            || !self.sample_rate.is_finite()
+            || !(8_000.0..=384_000.0).contains(&self.sample_rate)
+        {
             return self.detected_freq;
         }
 
@@ -86,12 +104,23 @@ impl VocalPitchCorrectorEngine {
         // 1. Calculate autocorrelation for each lag
         for tau in min_lag..=max_lag {
             let mut sum = 0.0f32;
+            let mut energy_a = 0.0f32;
+            let mut energy_b = 0.0f32;
             for n in 0..size {
                 let idx1 = (self.input_pos + len - size - max_lag + n) % len;
                 let idx2 = (idx1 + tau) % len;
-                sum += self.buffer[idx1] * self.buffer[idx2];
+                let a = self.buffer[idx1];
+                let b = self.buffer[idx2];
+                sum += a * b;
+                energy_a += a * a;
+                energy_b += b * b;
             }
-            r[tau] = sum;
+            let denominator = (energy_a * energy_b).sqrt();
+            r[tau] = if denominator.is_finite() && denominator > f32::EPSILON {
+                sum / denominator
+            } else {
+                0.0
+            };
         }
 
         // 2. Find the highest local peak inside our lag range
@@ -106,11 +135,36 @@ impl VocalPitchCorrectorEngine {
             }
         }
 
+        // Prefer the earliest strong periodic peak. Autocorrelation often
+        // rates a subharmonic (e.g. 110 Hz for a 440 Hz tone) slightly higher;
+        // selecting the first peak within 92% of the global maximum preserves
+        // the fundamental while retaining robustness for breathy voices.
+        if best_lag > 0 && max_val.is_finite() {
+            let threshold = max_val * 0.92;
+            for tau in min_lag..=max_lag {
+                if r[tau] >= threshold && (tau == min_lag || r[tau] >= r[tau - 1]) {
+                    best_lag = tau;
+                    break;
+                }
+            }
+        }
+
         if best_lag == 0 {
             return self.detected_freq; // Fallback to previous
         }
 
-        let freq = self.sample_rate as f32 / best_lag as f32;
+        let mut refined_lag = best_lag as f32;
+        if best_lag > min_lag && best_lag < max_lag {
+            let ym = r[best_lag - 1];
+            let y0 = r[best_lag];
+            let yp = r[best_lag + 1];
+            let denominator = ym - 2.0 * y0 + yp;
+            if denominator.is_finite() && denominator.abs() > f32::EPSILON {
+                refined_lag += 0.5 * (ym - yp) / denominator;
+            }
+        }
+        let refined_lag = refined_lag.clamp(min_lag as f32, max_lag as f32);
+        let freq = self.sample_rate as f32 / refined_lag;
         if (60.0..=1200.0).contains(&freq) {
             freq
         } else {
@@ -162,7 +216,10 @@ impl VocalPitchCorrectorEngine {
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
         let len = l.len().min(r.len());
         let buffer_len = self.buffer.len();
-        if len == 0 || buffer_len == 0 || !self.sample_rate.is_finite() || self.sample_rate <= 100.0
+        if len == 0
+            || buffer_len == 0
+            || !self.sample_rate.is_finite()
+            || !(8_000.0..=384_000.0).contains(&self.sample_rate)
         {
             return;
         }
@@ -200,10 +257,11 @@ impl VocalPitchCorrectorEngine {
 
             // 3. Compare to scale snapped target frequency
             let nearest_freq = self.get_nearest_scale_freq(self.detected_freq);
-            let ratio = nearest_freq / (self.detected_freq + 1e-9);
+            let ratio = (nearest_freq / (self.detected_freq + 1e-9)).clamp(0.25, 4.0);
 
             // 4. Smooth Ratio (Auto-Tune speed)
-            self.target_ratio = (1.0 - self.speed) * self.target_ratio + self.speed * ratio;
+            self.target_ratio =
+                ((1.0 - self.speed) * self.target_ratio + self.speed * ratio).clamp(0.25, 4.0);
 
             // 5. Dual-tap delay-line pitch shifting with cosine window crossfading
             self.phase += (self.target_ratio - 1.0) as f64;
@@ -236,7 +294,7 @@ impl VocalPitchCorrectorEngine {
 
     pub fn audit_vocal_tuner(&self) -> bool {
         self.sample_rate.is_finite()
-            && self.sample_rate > 100.0
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
             && !self.buffer.is_empty()
             && self.input_pos < self.buffer.len()
             && self.detected_freq.is_finite()
@@ -246,5 +304,58 @@ impl VocalPitchCorrectorEngine {
             && (0.0..=1.0).contains(&self.amount)
             && self.speed.is_finite()
             && (0.0..=1.0).contains(&self.speed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{VocalPitchCorrectorEngine, VocalScale};
+
+    #[test]
+    fn vocal_tuner_keeps_ratio_bounded_and_handles_short_stereo_buffers() {
+        let mut tuner = VocalPitchCorrectorEngine::new(48_000.0);
+        tuner.set_params(1.0, 1.0, VocalScale::Chromatic);
+        let mut left = vec![0.5_f32; 2_048];
+        let mut right = vec![0.25_f32; 1_024];
+        tuner.process(&mut left, &mut right);
+        assert!(left[..1_024]
+            .iter()
+            .chain(right.iter())
+            .all(|sample| sample.is_finite() && sample.abs() <= 4.0));
+        assert!(tuner.audit_vocal_tuner());
+        assert!((0.25..=4.0).contains(&tuner.target_ratio));
+    }
+
+    #[test]
+    fn tuner_rejects_nonfinite_parameter_updates() {
+        let mut tuner = VocalPitchCorrectorEngine::new(f64::NAN);
+        assert!(tuner.audit_vocal_tuner());
+        tuner.set_params(f32::NAN, f32::INFINITY, VocalScale::Major);
+        assert!(tuner.audit_vocal_tuner());
+        tuner.set_params(4.0, -2.0, VocalScale::NaturalMinor);
+        assert_eq!(tuner.amount, 1.0);
+        assert_eq!(tuner.speed, 0.0);
+        tuner.set_sample_rate(96_000.0);
+        assert_eq!(tuner.sample_rate, 96_000.0);
+        tuner.set_sample_rate(f64::INFINITY);
+        assert_eq!(tuner.sample_rate, 96_000.0);
+    }
+
+    #[test]
+    fn detector_tracks_fractional_period() {
+        let mut tuner = VocalPitchCorrectorEngine::new(48_000.0);
+        tuner.set_params(0.0, 1.0, VocalScale::Chromatic);
+        let mut left = vec![0.0_f32; 4096];
+        let mut right = vec![0.0_f32; 4096];
+        for (index, sample) in left.iter_mut().enumerate() {
+            *sample = (2.0 * std::f32::consts::PI * 440.0 * index as f32 / 48_000.0).sin();
+        }
+        right.copy_from_slice(&left);
+        tuner.process(&mut left, &mut right);
+        assert!(
+            (tuner.detected_freq - 440.0).abs() < 12.0,
+            "detected {}",
+            tuner.detected_freq
+        );
     }
 }

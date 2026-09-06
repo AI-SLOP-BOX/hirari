@@ -8,6 +8,12 @@ pub struct WavetableOscillatorEngine {
 
 impl WavetableOscillatorEngine {
     pub fn new(sample_rate: f64) -> Self {
+        let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate)
+        {
+            sample_rate
+        } else {
+            48_000.0
+        };
         let k_table_size = 2048;
         let k_num_mip_maps = 10;
 
@@ -46,15 +52,20 @@ impl WavetableOscillatorEngine {
     }
 
     pub fn set_frequency(&mut self, freq: f64) {
-        self.phase_inc = freq / self.sample_rate;
+        if freq.is_finite() && self.sample_rate.is_finite() {
+            self.phase_inc = (freq.clamp(-self.sample_rate * 0.49, self.sample_rate * 0.49)
+                / self.sample_rate)
+                .clamp(-0.49, 0.49);
+        }
     }
 
     /// INDUSTRIAL: RENDER: Morphing with Cubic Hermite Spline Interpolation.
     pub fn process(&mut self, morph_pos: f32) -> f32 {
-        self.phase += self.phase_inc;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
+        if !self.audit_wavetable_oscillator() || !morph_pos.is_finite() {
+            return 0.0;
         }
+        self.phase += self.phase_inc;
+        self.phase = self.phase.rem_euclid(1.0);
 
         let freq = (self.phase_inc * self.sample_rate) as f32;
         let mip_idx = (freq / 20.0).log2();
@@ -86,12 +97,45 @@ impl WavetableOscillatorEngine {
         let val_b = interpolate(&self.saw_tables[m1]) * (1.0 - m_mix)
             + interpolate(&self.saw_tables[m2]) * m_mix;
 
-        val_a * (1.0 - morph_pos) + val_b * morph_pos
+        (val_a * (1.0 - morph_pos.clamp(0.0, 1.0)) + val_b * morph_pos.clamp(0.0, 1.0))
+            .clamp(-1.0, 1.0)
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Wavetable state.
     pub fn audit_wavetable_oscillator(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Wavetable auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.phase.is_finite()
+            && self.phase >= 0.0
+            && self.phase < 1.0
+            && self.phase_inc.is_finite()
+            && self.phase_inc.abs() <= 0.5
+            && self.sine_tables.len() == 10
+            && self.saw_tables.len() == 10
+            && self.sine_tables.iter().chain(self.saw_tables.iter()).all(|table| {
+                table.len() == 2048 && table.iter().all(|sample| sample.is_finite() && sample.abs() <= 2.0)
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WavetableOscillatorEngine;
+
+    #[test]
+    fn wavetable_oscillator_bounds_frequency_and_morph() {
+        let mut oscillator = WavetableOscillatorEngine::new(48_000.0);
+        oscillator.set_frequency(200_000.0);
+        let value = oscillator.process(2.0);
+        assert!(value.is_finite() && value.abs() <= 1.0);
+        oscillator.set_frequency(f64::NAN);
+        assert!(oscillator.audit_wavetable_oscillator());
+    }
+
+    #[test]
+    fn invalid_sample_rate_uses_safe_default() {
+        let oscillator = WavetableOscillatorEngine::new(f64::NAN);
+        assert_eq!(oscillator.sample_rate, 48_000.0);
+        assert!(oscillator.audit_wavetable_oscillator());
     }
 }

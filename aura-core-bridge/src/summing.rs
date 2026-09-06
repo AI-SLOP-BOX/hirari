@@ -35,7 +35,7 @@ impl SummingOrchestrator {
      * INDUSTRIAL: Using double-precision (f64) internally for absolute sonic transparency.
      */
     pub fn mix_buses_boutique(&self, target_l: &mut [f32], target_r: &mut [f32]) {
-        let len = target_l.len();
+        let len = target_l.len().min(target_r.len());
         // INDUSTRIAL: Sovereign 64-bit accumulation buffers.
         let mut acc_l = vec![0.0f64; len];
         let mut acc_r = vec![0.0f64; len];
@@ -80,6 +80,7 @@ impl SummingOrchestrator {
             } else {
                 0.0
             };
+            buffer[i] = sample;
             let abs_sample = sample.abs();
             if abs_sample > max_peak {
                 max_peak = abs_sample;
@@ -88,7 +89,7 @@ impl SummingOrchestrator {
             // INDUSTRIAL: Look-ahead attenuation logic.
             if abs_sample > limit {
                 let attenuation = limit / abs_sample;
-                buffer[i] *= attenuation;
+                buffer[i] = (sample * attenuation).clamp(-limit, limit);
             }
         }
         max_peak
@@ -131,5 +132,19 @@ mod tests {
         engine.mix_buses_boutique(&mut left, &mut right);
         assert_eq!(left, [0.0, 0.0]);
         assert!(!engine.audit_summing());
+    }
+
+    #[test]
+    fn limiter_replaces_nonfinite_samples_before_clamping() {
+        let mut engine = SummingOrchestrator::new();
+        let config = super::SummingConfig {
+            buffer_size: 2,
+            headroom_db: -1.0,
+        };
+        let mut buffer = [f32::NAN, 2.0];
+        engine.process_limiter(&mut buffer, &config);
+        assert!(buffer
+            .iter()
+            .all(|sample| sample.is_finite() && sample.abs() <= 1.0));
     }
 }

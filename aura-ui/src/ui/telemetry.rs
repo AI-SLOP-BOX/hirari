@@ -9,6 +9,7 @@ pub(crate) enum BounceState {
     Complete = 3,
     Failed = 4,
     Cancelled = 5,
+    Paused = 6,
     Unknown = u32::MAX,
 }
 
@@ -21,6 +22,7 @@ impl From<u32> for BounceState {
             3 => Self::Complete,
             4 => Self::Failed,
             5 => Self::Cancelled,
+            6 => Self::Paused,
             _ => Self::Unknown,
         }
     }
@@ -34,6 +36,7 @@ pub(crate) fn bounce_state_label(state: u32) -> &'static str {
         BounceState::Complete => "COMPLETE",
         BounceState::Failed => "FAILED",
         BounceState::Cancelled => "CANCELLED",
+        BounceState::Paused => "PAUSED",
         BounceState::Unknown => "ENGINE_STATUS_UNKNOWN",
     }
 }
@@ -44,9 +47,20 @@ pub(crate) fn render_progress_status(
     progress: f32,
     elapsed_seconds: u64,
 ) -> String {
-    if BounceState::from(state) == BounceState::Rendering {
+    if matches!(
+        BounceState::from(state),
+        BounceState::Rendering | BounceState::Paused
+    ) {
         if progress_available && progress.is_finite() {
-            return format!("RENDERING · {:.0}%", progress.clamp(0.0, 1.0) * 100.0);
+            let label = if BounceState::from(state) == BounceState::Paused {
+                "PAUSED"
+            } else {
+                "RENDERING"
+            };
+            return format!("{label} · {:.0}%", progress.clamp(0.0, 1.0) * 100.0);
+        }
+        if BounceState::from(state) == BounceState::Paused {
+            return "PAUSED · render checkpoint retained".to_owned();
         }
         return format!(
             "RENDERING · {}s elapsed · progress pending",

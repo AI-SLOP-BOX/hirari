@@ -23,7 +23,13 @@ impl TakeOrchestrator {
 
     /// INDUSTRIAL: Adds a new recording as a take with memory-safe Rust collections and version control.
     pub fn add_take(&mut self, track_id: u32, path: &str, start: f64) -> bool {
-        if track_id == 0 || path.trim().is_empty() || path.len() > 4096 || path.contains('\0') || !start.is_finite() || start < 0.0 {
+        if track_id == 0
+            || path.trim().is_empty()
+            || path.len() > 4096
+            || path.contains('\0')
+            || !start.is_finite()
+            || start < 0.0
+        {
             return false;
         }
 
@@ -42,12 +48,15 @@ impl TakeOrchestrator {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide take synchronization graph.
     pub fn audit_takes(&self) -> bool {
         self.takes_by_track.iter().all(|(track_id, takes)| {
-            if *track_id == 0 || takes.len() > 65_536 { return false; }
+            if *track_id == 0 || takes.len() > 65_536 {
+                return false;
+            }
             let mut ids = std::collections::HashSet::with_capacity(takes.len());
             takes.iter().all(|take| {
                 ids.insert(take.id)
                     && !take.file_path.trim().is_empty()
-                    && take.file_path.len() <= 4096 && !take.file_path.contains('\0')
+                    && take.file_path.len() <= 4096
+                    && !take.file_path.contains('\0')
                     && take.start_samples.is_finite()
                     && take.start_samples >= 0.0
             })

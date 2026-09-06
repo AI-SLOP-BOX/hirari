@@ -1521,6 +1521,17 @@ impl AuraCore {
             e.get_region_waveform(tid, rid).into_iter().collect()
         })
     }
+    pub fn queue_region_waveform(&self, tid: u32, rid: u32) -> u64 {
+        self.engine.as_ref().map_or(0, |e| e.queue_region_waveform(tid, rid))
+    }
+    pub fn poll_region_waveform(&self, request: u64) -> Vec<f32> {
+        self.engine.as_ref().map_or_else(Vec::new, |e| {
+            e.poll_region_waveform(request).into_iter().collect()
+        })
+    }
+    pub fn region_waveform_pending(&self, request: u64) -> bool {
+        self.engine.as_ref().is_some_and(|e| e.region_waveform_pending(request))
+    }
     pub fn get_track_correlation(&self, tid: u32) -> f32 {
         self.engine
             .as_ref()

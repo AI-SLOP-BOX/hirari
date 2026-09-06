@@ -128,7 +128,9 @@ mod tests {
 
     fn native_engine_test_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let guard = LOCK.get_or_init(|| Mutex::new(())).lock()
+        let guard = LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // Unit tests exercise the native graph and FFI contract, not the
         // machine's physical CoreAudio device. Keep them on the same
@@ -337,7 +339,10 @@ mod tests {
             .unwrap();
         let document = crate::ProjectDocument::load(project.to_str().unwrap()).unwrap();
         assert_eq!(document.openutau_vocals.len(), 1);
-        assert_eq!(document.openutau_vocals[0].source_path, source.to_str().unwrap());
+        assert_eq!(
+            document.openutau_vocals[0].source_path,
+            source.to_str().unwrap()
+        );
         assert_eq!(
             document.openutau_vocals[0].rendered_audio_path,
             render.to_str().unwrap()
@@ -376,7 +381,10 @@ mod tests {
         assert!(bytes_per_frame > 0);
         let frames = data_size / bytes_per_frame;
         assert!(frames >= 44_100 * 8);
-        assert!(frames < 44_100 * 10, "MIDI-only bounce retained the 30s fallback tail");
+        assert!(
+            frames < 44_100 * 10,
+            "MIDI-only bounce retained the 30s fallback tail"
+        );
 
         let _ = std::fs::remove_file(path);
     }
@@ -423,24 +431,73 @@ mod tests {
     }
 
     #[test]
+    fn midi_vibrato_rate_edit_requires_note_and_is_visible_to_clients() {
+        let _guard = native_engine_test_guard();
+        let core = crate::AuraCore::new().expect("core must initialize");
+        core.clear_midi_notes();
+        core.set_midi_note(2, 64, 100, 960, 480);
+        assert!(!core.set_midi_note_vibrato_rate_without_undo(2, 64, 1_920, 7_500));
+        assert!(core.set_midi_note_vibrato_rate_without_undo(2, 64, 960, 7_500));
+        let notes: serde_json::Value = serde_json::from_str(&core.midi_notes_json())
+            .expect("MIDI authoring JSON must be valid");
+        assert_eq!(notes[0]["vibrato_rate_millihz"], 7_500);
+    }
+
+    #[test]
+    fn measured_hrtf_provider_payload_is_validated_and_installed() {
+        let _guard = native_engine_test_guard();
+        let core = crate::AuraCore::new().expect("core must initialize");
+        let track = core.add_track(0);
+        assert_ne!(track, 0);
+        let payload = r#"{"left":[1.0,0.25,0.0],"right":[0.5,0.0,-0.1]}"#;
+        let result: serde_json::Value = serde_json::from_str(&core.set_hrtf_kernel_json(track, payload))
+            .expect("HRTF response must be JSON");
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["taps"], 3);
+        assert!(core.clear_hrtf_kernel(track));
+        assert_eq!(core.set_hrtf_kernel_json(track, "{\"left\":[NaN]}")[..].contains("invalid_hrtf"), true);
+    }
+
+    #[test]
     fn chord_track_roundtrips_through_json_and_undo_redo() {
         let core = crate::AuraCore::new().expect("core must initialize");
-        assert!(core.add_chord_event(960, 60, vec![0, 4, 7], "C").then_some(()).is_some());
+        assert!(core
+            .add_chord_event(960, 60, vec![0, 4, 7], "C")
+            .then_some(())
+            .is_some());
         assert!(core.add_chord_event(0, 62, vec![0, 3, 7], "Dm"));
-        let before_undo: serde_json::Value = serde_json::from_str(&core.chord_track_json()).unwrap();
+        let before_undo: serde_json::Value =
+            serde_json::from_str(&core.chord_track_json()).unwrap();
         assert_eq!(before_undo.as_array().unwrap().len(), 2);
         assert_eq!(before_undo[0]["name"], "Dm");
         core.undo();
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&core.chord_track_json()).unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&core.chord_track_json())
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         core.redo();
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&core.chord_track_json()).unwrap().as_array().unwrap().len(), 2);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&core.chord_track_json())
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
     fn generated_arpeggio_is_deterministic_and_respects_pattern() {
         let core = crate::AuraCore::new().expect("core must initialize");
         let notes = core.generate_arpeggio(vec![60, 64, 67], vec![100, 90, 80], 0, 1, 5);
-        assert_eq!(notes, vec![(60, 100), (64, 90), (67, 80), (60, 100), (64, 90)]);
+        assert_eq!(
+            notes,
+            vec![(60, 100), (64, 90), (67, 80), (60, 100), (64, 90)]
+        );
         let down = core.generate_arpeggio(vec![60, 64, 67], vec![100, 90, 80], 1, 1, 3);
         assert_eq!(down, vec![(67, 80), (64, 90), (60, 100)]);
     }
@@ -618,10 +675,7 @@ mod tests {
         assert!(engine_ref.set_plugin_bypass(track_id, 0, true));
         assert!(engine_ref.set_plugin_bypass(track_id, 0, false));
         assert!(!engine_ref.add_sandboxed_plugin(track_id, ""));
-        assert!(!engine_ref.add_sandboxed_plugin(
-            track_id,
-            "/definitely/missing/aura-plugin.clap"
-        ));
+        assert!(!engine_ref.add_sandboxed_plugin(track_id, "/definitely/missing/aura-plugin.clap"));
         let _ = engine_ref.get_sandbox_statuses();
         let _ = engine_ref.get_sandbox_plugin_paths();
     }
@@ -770,10 +824,9 @@ mod tests {
         let audio_id = core.add_track(0);
         let bus_id = core.add_track(3);
 
-        let catalog: serde_json::Value = serde_json::from_str(
-            &core.render_target_catalog_diagnostic_json(),
-        )
-        .expect("render target catalog must be JSON");
+        let catalog: serde_json::Value =
+            serde_json::from_str(&core.render_target_catalog_diagnostic_json())
+                .expect("render target catalog must be JSON");
         let targets = catalog
             .get("targets")
             .and_then(serde_json::Value::as_array)
@@ -781,8 +834,9 @@ mod tests {
         let target_for = |id: u32| {
             targets
                 .iter()
-                .find(|target| target.get("source_id").and_then(serde_json::Value::as_u64)
-                    == Some(id as u64))
+                .find(|target| {
+                    target.get("source_id").and_then(serde_json::Value::as_u64) == Some(id as u64)
+                })
                 .and_then(|target| target.get("kind"))
                 .and_then(serde_json::Value::as_str)
         };
@@ -857,10 +911,9 @@ mod tests {
         assert!(!engine_ref.load_project(invalid_path));
         assert!(!engine_ref.bounce_project("", 0));
         assert!(!engine_ref.bounce_project("/tmp/aura-output.aiff", 0));
-        let diagnostic: serde_json::Value = serde_json::from_str(
-            &engine_ref.bounce_project_diagnostic_json("", 0),
-        )
-        .expect("bounce diagnostics must be JSON");
+        let diagnostic: serde_json::Value =
+            serde_json::from_str(&engine_ref.bounce_project_diagnostic_json("", 0))
+                .expect("bounce diagnostics must be JSON");
         assert_eq!(diagnostic["code"], "invalid_render_path");
         assert_eq!(diagnostic["retryable"], false);
         let unsupported_format: serde_json::Value = serde_json::from_str(
@@ -870,32 +923,33 @@ mod tests {
         assert_eq!(unsupported_format["code"], "unsupported_render_format");
 
         let core = crate::AuraCore::new().expect("core must initialize");
-        let region_add: serde_json::Value = serde_json::from_str(
-            &core.add_region_diagnostic_json(tid, "/missing/audio.wav", f64::NAN),
-        ).expect("region add diagnostics must be JSON");
+        let region_add: serde_json::Value = serde_json::from_str(&core.add_region_diagnostic_json(
+            tid,
+            "/missing/audio.wav",
+            f64::NAN,
+        ))
+        .expect("region add diagnostics must be JSON");
         assert_eq!(region_add["code"], "invalid_region_input");
         let region_replace: serde_json::Value = serde_json::from_str(
             &core.replace_region_audio_diagnostic_json(tid, 1, "/missing/audio.wav"),
-        ).expect("region replacement diagnostics must be JSON");
-        assert_eq!(region_replace["code"], "region_audio_not_found");
-        let empty_plugin: serde_json::Value = serde_json::from_str(
-            &core.add_sandboxed_plugin_diagnostic_json(tid, ""),
         )
-        .expect("plugin diagnostics must be JSON");
+        .expect("region replacement diagnostics must be JSON");
+        assert_eq!(region_replace["code"], "region_audio_not_found");
+        let empty_plugin: serde_json::Value =
+            serde_json::from_str(&core.add_sandboxed_plugin_diagnostic_json(tid, ""))
+                .expect("plugin diagnostics must be JSON");
         assert_eq!(empty_plugin["code"], "invalid_plugin_path");
         assert_eq!(empty_plugin["retryable"], false);
-        let missing_plugin: serde_json::Value = serde_json::from_str(
-            &core.add_sandboxed_plugin_diagnostic_json(
+        let missing_plugin: serde_json::Value =
+            serde_json::from_str(&core.add_sandboxed_plugin_diagnostic_json(
                 tid,
                 "/aura-core-bridge/path-that-does-not-exist.clap",
-            ),
-        )
-        .expect("plugin diagnostics must be JSON");
+            ))
+            .expect("plugin diagnostics must be JSON");
         assert_eq!(missing_plugin["code"], "plugin_not_found");
-        let recovery: serde_json::Value = serde_json::from_str(
-            &core.recover_sandboxed_plugin_diagnostic_json(tid, 0, false),
-        )
-        .expect("sandbox recovery diagnostics must be JSON");
+        let recovery: serde_json::Value =
+            serde_json::from_str(&core.recover_sandboxed_plugin_diagnostic_json(tid, 0, false))
+                .expect("sandbox recovery diagnostics must be JSON");
         assert_eq!(recovery["ok"], false);
         assert_eq!(recovery["code"], "sandbox_not_found");
         assert_eq!(recovery["track_id"], tid);
@@ -1014,12 +1068,14 @@ mod tests {
         assert_eq!(engine_ref.get_vca_track_gain(track_id), 1.0);
         assert!(engine_ref.set_vca_group_gain(group_id, 0.5));
         assert_eq!(engine_ref.get_vca_track_gain(track_id), 0.5);
-        let snapshot: serde_json::Value = serde_json::from_str(
-            engine_ref.get_vca_snapshot_json().as_str(),
-        ).expect("VCA snapshot must be JSON");
-        assert!(snapshot.as_array().unwrap().iter().any(|group| {
-            group["id"] == group_id && group["gain"] == 0.5
-        }));
+        let snapshot: serde_json::Value =
+            serde_json::from_str(engine_ref.get_vca_snapshot_json().as_str())
+                .expect("VCA snapshot must be JSON");
+        assert!(snapshot
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|group| { group["id"] == group_id && group["gain"] == 0.5 }));
         assert!(!engine_ref.add_vca_group(group_id, f32::NAN));
     }
 
@@ -1044,12 +1100,17 @@ mod tests {
             .expect("VCA project save must succeed");
         core.clear_vca_groups();
         let load_result = core.load_project_v2(path.to_str().unwrap());
-        assert!(load_result.is_ok(), "VCA project load failed: {load_result:?}");
+        assert!(
+            load_result.is_ok(),
+            "VCA project load failed: {load_result:?}"
+        );
         let snapshot: serde_json::Value =
             serde_json::from_str(&core.get_vca_snapshot_json()).expect("VCA snapshot must be JSON");
-        assert!(snapshot.as_array().unwrap().iter().any(|group| {
-            group["id"] == group_id && group["gain"] == 0.75
-        }));
+        assert!(snapshot
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|group| { group["id"] == group_id && group["gain"] == 0.75 }));
         let _ = std::fs::remove_file(path);
     }
 
@@ -1155,9 +1216,9 @@ mod tests {
     fn project_diagnostic_api_preserves_structured_error_codes() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let empty: serde_json::Value = serde_json::from_str(
-            &core.save_project_diagnostic_json(" "),
-        ).expect("empty path diagnostic must be JSON");
+        let empty: serde_json::Value =
+            serde_json::from_str(&core.save_project_diagnostic_json(" "))
+                .expect("empty path diagnostic must be JSON");
         assert_eq!(empty["code"], "invalid_path");
 
         let missing = std::env::temp_dir().join(format!(
@@ -1168,9 +1229,9 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let missing_json: serde_json::Value = serde_json::from_str(
-            &core.load_project_diagnostic_json(missing.to_str().unwrap()),
-        ).expect("missing path diagnostic must be JSON");
+        let missing_json: serde_json::Value =
+            serde_json::from_str(&core.load_project_diagnostic_json(missing.to_str().unwrap()))
+                .expect("missing path diagnostic must be JSON");
         assert_eq!(missing_json["code"], "project_not_found");
 
         let saved = std::env::temp_dir().join(format!(
@@ -1181,9 +1242,9 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let saved_json: serde_json::Value = serde_json::from_str(
-            &core.save_project_diagnostic_json(saved.to_str().unwrap()),
-        ).expect("successful save diagnostic must be JSON");
+        let saved_json: serde_json::Value =
+            serde_json::from_str(&core.save_project_diagnostic_json(saved.to_str().unwrap()))
+                .expect("successful save diagnostic must be JSON");
         assert_eq!(saved_json["ok"], true);
         assert_eq!(saved_json["path"], saved.to_string_lossy().as_ref());
         assert!(saved_json["generation"].as_u64().is_some());
@@ -1197,29 +1258,25 @@ mod tests {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
 
-        let take: serde_json::Value = serde_json::from_str(
-            &core.select_recording_take_diagnostic_json(4),
-        )
-        .expect("recording diagnostic must be JSON");
+        let take: serde_json::Value =
+            serde_json::from_str(&core.select_recording_take_diagnostic_json(4))
+                .expect("recording diagnostic must be JSON");
         assert_eq!(take["code"], "recording_session_inactive");
 
-        let swing: serde_json::Value = serde_json::from_str(
-            &core.apply_midi_swing_diagnostic_json(f32::NAN, 2.0),
-        )
-        .expect("swing diagnostic must be JSON");
+        let swing: serde_json::Value =
+            serde_json::from_str(&core.apply_midi_swing_diagnostic_json(f32::NAN, 2.0))
+                .expect("swing diagnostic must be JSON");
         assert_eq!(swing["code"], "invalid_midi_swing");
         assert_eq!(swing["retryable"], false);
 
-        let humanize: serde_json::Value = serde_json::from_str(
-            &core.humanize_midi_diagnostic_json(9.0, 127, 42),
-        )
-        .expect("humanize diagnostic must be JSON");
+        let humanize: serde_json::Value =
+            serde_json::from_str(&core.humanize_midi_diagnostic_json(9.0, 127, 42))
+                .expect("humanize diagnostic must be JSON");
         assert_eq!(humanize["code"], "invalid_midi_humanize");
 
-        let malformed: serde_json::Value = serde_json::from_str(
-            &core.set_midi_events_diagnostic_json("not-json"),
-        )
-        .expect("MIDI snapshot diagnostic must be JSON");
+        let malformed: serde_json::Value =
+            serde_json::from_str(&core.set_midi_events_diagnostic_json("not-json"))
+                .expect("MIDI snapshot diagnostic must be JSON");
         assert_eq!(malformed["code"], "invalid_midi_snapshot");
 
         let invalid_event: serde_json::Value = serde_json::from_str(
@@ -1230,16 +1287,14 @@ mod tests {
         .expect("invalid MIDI event diagnostic must be JSON");
         assert_eq!(invalid_event["code"], "invalid_midi_event");
 
-        let invalid_move: serde_json::Value = serde_json::from_str(
-            &core.move_midi_notes_range_diagnostic_json(0, 0, 100, -1),
-        )
-        .expect("MIDI move diagnostic must be JSON");
+        let invalid_move: serde_json::Value =
+            serde_json::from_str(&core.move_midi_notes_range_diagnostic_json(0, 0, 100, -1))
+                .expect("MIDI move diagnostic must be JSON");
         assert_eq!(invalid_move["code"], "invalid_midi_move_range");
 
-        let invalid_transpose: serde_json::Value = serde_json::from_str(
-            &core.transpose_midi_notes_range_diagnostic_json(0, 0, 100, 1),
-        )
-        .expect("MIDI transpose diagnostic must be JSON");
+        let invalid_transpose: serde_json::Value =
+            serde_json::from_str(&core.transpose_midi_notes_range_diagnostic_json(0, 0, 100, 1))
+                .expect("MIDI transpose diagnostic must be JSON");
         assert_eq!(invalid_transpose["code"], "invalid_midi_transpose");
     }
 
@@ -1248,22 +1303,19 @@ mod tests {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
 
-        let malformed: serde_json::Value = serde_json::from_str(
-            &core.set_comp_segments_diagnostic_json("not-json"),
-        )
-        .expect("comping segment diagnostic must be JSON");
+        let malformed: serde_json::Value =
+            serde_json::from_str(&core.set_comp_segments_diagnostic_json("not-json"))
+                .expect("comping segment diagnostic must be JSON");
         assert_eq!(malformed["code"], "invalid_comp_segments_json");
 
-        let empty: serde_json::Value = serde_json::from_str(
-            &core.set_comp_segments_diagnostic_json("[]"),
-        )
-        .expect("empty segment diagnostic must be JSON");
+        let empty: serde_json::Value =
+            serde_json::from_str(&core.set_comp_segments_diagnostic_json("[]"))
+                .expect("empty segment diagnostic must be JSON");
         assert_eq!(empty["ok"], true);
 
-        let snapshot: serde_json::Value = serde_json::from_str(
-            &core.restore_comping_snapshot_diagnostic_json("{}"),
-        )
-        .expect("comping snapshot diagnostic must be JSON");
+        let snapshot: serde_json::Value =
+            serde_json::from_str(&core.restore_comping_snapshot_diagnostic_json("{}"))
+                .expect("comping snapshot diagnostic must be JSON");
         assert_eq!(snapshot["code"], "invalid_comping_snapshot_json");
     }
 
@@ -1271,14 +1323,14 @@ mod tests {
     fn track_scalar_diagnostics_reject_invalid_and_stale_targets() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let invalid: serde_json::Value = serde_json::from_str(
-            &core.set_volume_diagnostic_json(1, f32::NAN),
-        ).expect("invalid scalar diagnostic must be JSON");
+        let invalid: serde_json::Value =
+            serde_json::from_str(&core.set_volume_diagnostic_json(1, f32::NAN))
+                .expect("invalid scalar diagnostic must be JSON");
         assert_eq!(invalid["code"], "invalid_parameter");
 
-        let stale: serde_json::Value = serde_json::from_str(
-            &core.set_pan_diagnostic_json(999_999, 0.25),
-        ).expect("stale track diagnostic must be JSON");
+        let stale: serde_json::Value =
+            serde_json::from_str(&core.set_pan_diagnostic_json(999_999, 0.25))
+                .expect("stale track diagnostic must be JSON");
         assert_eq!(stale["code"], "track_not_found_or_rejected");
         assert_eq!(stale["affected_object"], "track:999999");
         assert!(stale["generation"].as_u64().is_some());
@@ -1288,60 +1340,60 @@ mod tests {
     fn track_toggle_and_lifecycle_diagnostics_are_structured() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let created: serde_json::Value = serde_json::from_str(
-            &core.add_track_diagnostic_json(0),
-        ).expect("track creation diagnostic must be JSON");
+        let created: serde_json::Value = serde_json::from_str(&core.add_track_diagnostic_json(0))
+            .expect("track creation diagnostic must be JSON");
         let track_id = created["track_id"].as_u64().expect("created track id");
         assert_eq!(created["ok"], true);
 
         let renamed: serde_json::Value = serde_json::from_str(
             &core.set_track_name_diagnostic_json(track_id as u32, "Lead Vocal"),
-        ).expect("track rename diagnostic must be JSON");
+        )
+        .expect("track rename diagnostic must be JSON");
         assert_eq!(renamed["ok"], true);
 
-        let duplicate: serde_json::Value = serde_json::from_str(
-            &core.duplicate_track_diagnostic_json(track_id as u32),
-        ).expect("track duplicate diagnostic must be JSON");
+        let duplicate: serde_json::Value =
+            serde_json::from_str(&core.duplicate_track_diagnostic_json(track_id as u32))
+                .expect("track duplicate diagnostic must be JSON");
         assert_eq!(duplicate["ok"], true);
         assert_ne!(duplicate["track_id"], track_id);
 
-        let mixing: serde_json::Value = serde_json::from_str(
-            &core.execute_auto_mixing_diagnostic_json(),
-        ).expect("auto mixing diagnostic must be JSON");
+        let mixing: serde_json::Value =
+            serde_json::from_str(&core.execute_auto_mixing_diagnostic_json())
+                .expect("auto mixing diagnostic must be JSON");
         assert_eq!(mixing["ok"], true);
 
-        let arrangement: serde_json::Value = serde_json::from_str(
-            &core.execute_auto_arrangement_diagnostic_json(),
-        ).expect("auto arrangement diagnostic must be JSON");
+        let arrangement: serde_json::Value =
+            serde_json::from_str(&core.execute_auto_arrangement_diagnostic_json())
+                .expect("auto arrangement diagnostic must be JSON");
         assert_eq!(arrangement["ok"], true);
 
-        let scale: serde_json::Value = serde_json::from_str(
-            &core.set_project_scale_diagnostic_json(0, 0),
-        ).expect("project scale diagnostic must be JSON");
+        let scale: serde_json::Value =
+            serde_json::from_str(&core.set_project_scale_diagnostic_json(0, 0))
+                .expect("project scale diagnostic must be JSON");
         assert_eq!(scale["ok"], true);
-        let invalid_scale: serde_json::Value = serde_json::from_str(
-            &core.set_project_scale_diagnostic_json(12, 0),
-        ).expect("invalid project scale diagnostic must be JSON");
+        let invalid_scale: serde_json::Value =
+            serde_json::from_str(&core.set_project_scale_diagnostic_json(12, 0))
+                .expect("invalid project scale diagnostic must be JSON");
         assert_eq!(invalid_scale["code"], "invalid_project_scale");
 
-        let muted: serde_json::Value = serde_json::from_str(
-            &core.set_mute_diagnostic_json(track_id as u32, true),
-        ).expect("mute diagnostic must be JSON");
+        let muted: serde_json::Value =
+            serde_json::from_str(&core.set_mute_diagnostic_json(track_id as u32, true))
+                .expect("mute diagnostic must be JSON");
         assert_eq!(muted["ok"], true);
 
-        let removed: serde_json::Value = serde_json::from_str(
-            &core.remove_track_diagnostic_json(track_id as u32),
-        ).expect("remove diagnostic must be JSON");
+        let removed: serde_json::Value =
+            serde_json::from_str(&core.remove_track_diagnostic_json(track_id as u32))
+                .expect("remove diagnostic must be JSON");
         assert_eq!(removed["ok"], true);
 
-        let missing: serde_json::Value = serde_json::from_str(
-            &core.set_solo_diagnostic_json(track_id as u32, true),
-        ).expect("missing toggle diagnostic must be JSON");
+        let missing: serde_json::Value =
+            serde_json::from_str(&core.set_solo_diagnostic_json(track_id as u32, true))
+                .expect("missing toggle diagnostic must be JSON");
         assert_eq!(missing["code"], "track_not_found_or_rejected");
 
-        let invalid_name: serde_json::Value = serde_json::from_str(
-            &core.set_track_name_diagnostic_json(0, "  "),
-        ).expect("invalid name diagnostic must be JSON");
+        let invalid_name: serde_json::Value =
+            serde_json::from_str(&core.set_track_name_diagnostic_json(0, "  "))
+                .expect("invalid name diagnostic must be JSON");
         assert_eq!(invalid_name["code"], "invalid_track_name");
     }
 
@@ -1350,45 +1402,48 @@ mod tests {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
         let track_id = core.add_track(0);
-        let added: serde_json::Value = serde_json::from_str(
-            &core.add_plugin_diagnostic_json(track_id, 0),
-        ).expect("plugin add diagnostic must be JSON");
+        let added: serde_json::Value =
+            serde_json::from_str(&core.add_plugin_diagnostic_json(track_id, 0))
+                .expect("plugin add diagnostic must be JSON");
         assert_eq!(added["ok"], true);
 
-        let bypassed: serde_json::Value = serde_json::from_str(
-            &core.set_plugin_bypass_diagnostic_json(track_id, 0, true),
-        ).expect("plugin bypass diagnostic must be JSON");
+        let bypassed: serde_json::Value =
+            serde_json::from_str(&core.set_plugin_bypass_diagnostic_json(track_id, 0, true))
+                .expect("plugin bypass diagnostic must be JSON");
         assert_eq!(bypassed["ok"], true);
 
-        let removed: serde_json::Value = serde_json::from_str(
-            &core.remove_plugin_diagnostic_json(track_id, 0),
-        ).expect("plugin remove diagnostic must be JSON");
+        let removed: serde_json::Value =
+            serde_json::from_str(&core.remove_plugin_diagnostic_json(track_id, 0))
+                .expect("plugin remove diagnostic must be JSON");
         assert_eq!(removed["ok"], true);
 
-        let missing: serde_json::Value = serde_json::from_str(
-            &core.remove_plugin_diagnostic_json(track_id, 0),
-        ).expect("missing plugin diagnostic must be JSON");
+        let missing: serde_json::Value =
+            serde_json::from_str(&core.remove_plugin_diagnostic_json(track_id, 0))
+                .expect("missing plugin diagnostic must be JSON");
         assert_eq!(missing["code"], "plugin_not_found_or_rejected");
-        assert_eq!(missing["affected_object"], format!("track:{track_id}/plugin:0"));
+        assert_eq!(
+            missing["affected_object"],
+            format!("track:{track_id}/plugin:0")
+        );
     }
 
     #[test]
     fn routing_diagnostics_reject_invalid_graph_inputs_explicitly() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let self_loop: serde_json::Value = serde_json::from_str(
-            &core.set_route_diagnostic_json(4, 4, true),
-        ).expect("route diagnostic must be JSON");
+        let self_loop: serde_json::Value =
+            serde_json::from_str(&core.set_route_diagnostic_json(4, 4, true))
+                .expect("route diagnostic must be JSON");
         assert_eq!(self_loop["code"], "route_self_loop");
 
-        let bad_gain: serde_json::Value = serde_json::from_str(
-            &core.set_feedback_route_diagnostic_json(1, 2, f32::NAN, true),
-        ).expect("feedback diagnostic must be JSON");
+        let bad_gain: serde_json::Value =
+            serde_json::from_str(&core.set_feedback_route_diagnostic_json(1, 2, f32::NAN, true))
+                .expect("feedback diagnostic must be JSON");
         assert_eq!(bad_gain["code"], "invalid_route_gain");
 
-        let bad_tap: serde_json::Value = serde_json::from_str(
-            &core.set_sidechain_link_diagnostic_json(1, 2, 0, 99, true),
-        ).expect("sidechain diagnostic must be JSON");
+        let bad_tap: serde_json::Value =
+            serde_json::from_str(&core.set_sidechain_link_diagnostic_json(1, 2, 0, 99, true))
+                .expect("sidechain diagnostic must be JSON");
         assert_eq!(bad_tap["code"], "invalid_sidechain_tap");
     }
 
@@ -1396,19 +1451,19 @@ mod tests {
     fn audio_device_diagnostics_preserve_configuration_boundaries() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let bad_rate: serde_json::Value = serde_json::from_str(
-            &core.apply_audio_config_diagnostic_json(22_050, 128),
-        ).expect("audio config diagnostic must be JSON");
+        let bad_rate: serde_json::Value =
+            serde_json::from_str(&core.apply_audio_config_diagnostic_json(22_050, 128))
+                .expect("audio config diagnostic must be JSON");
         assert_eq!(bad_rate["code"], "unsupported_sample_rate");
 
-        let bad_buffer: serde_json::Value = serde_json::from_str(
-            &core.apply_audio_config_diagnostic_json(48_000, 127),
-        ).expect("audio config diagnostic must be JSON");
+        let bad_buffer: serde_json::Value =
+            serde_json::from_str(&core.apply_audio_config_diagnostic_json(48_000, 127))
+                .expect("audio config diagnostic must be JSON");
         assert_eq!(bad_buffer["code"], "unsupported_buffer_size");
 
-        let reconnect: serde_json::Value = serde_json::from_str(
-            &core.try_reconnect_audio_device_diagnostic_json(),
-        ).expect("reconnect diagnostic must be JSON");
+        let reconnect: serde_json::Value =
+            serde_json::from_str(&core.try_reconnect_audio_device_diagnostic_json())
+                .expect("reconnect diagnostic must be JSON");
         assert!(reconnect["status"].is_string());
         assert!(reconnect["audio_generation"].as_u64().is_some());
     }
@@ -1417,19 +1472,20 @@ mod tests {
     fn automation_diagnostics_reject_malformed_points_and_nonfinite_values() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let odd: serde_json::Value = serde_json::from_str(
-            &core.set_automation_data_diagnostic_json(1, 2, vec![0.0, 0.5]),
-        ).expect("automation diagnostic must be JSON");
+        let odd: serde_json::Value =
+            serde_json::from_str(&core.set_automation_data_diagnostic_json(1, 2, vec![0.0, 0.5]))
+                .expect("automation diagnostic must be JSON");
         assert_eq!(odd["code"], "invalid_automation_points");
 
         let nan: serde_json::Value = serde_json::from_str(
             &core.set_automation_data_diagnostic_json(1, 2, vec![0.0, f64::NAN, 0.0]),
-        ).expect("automation diagnostic must be JSON");
+        )
+        .expect("automation diagnostic must be JSON");
         assert_eq!(nan["code"], "non_finite_automation_points");
 
-        let parameter: serde_json::Value = serde_json::from_str(
-            &core.set_plugin_parameter_diagnostic_json(1, 0, 2, f32::NAN),
-        ).expect("parameter diagnostic must be JSON");
+        let parameter: serde_json::Value =
+            serde_json::from_str(&core.set_plugin_parameter_diagnostic_json(1, 0, 2, f32::NAN))
+                .expect("parameter diagnostic must be JSON");
         assert_eq!(parameter["code"], "non_finite_parameter");
     }
 
@@ -1437,49 +1493,50 @@ mod tests {
     fn tempo_diagnostics_reject_invalid_control_values() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let bpm: serde_json::Value = serde_json::from_str(
-            &core.set_tempo_diagnostic_json(f32::NAN),
-        ).expect("tempo diagnostic must be JSON");
+        let bpm: serde_json::Value =
+            serde_json::from_str(&core.set_tempo_diagnostic_json(f32::NAN))
+                .expect("tempo diagnostic must be JSON");
         assert_eq!(bpm["code"], "non_finite_tempo");
 
-        let event: serde_json::Value = serde_json::from_str(
-            &core.set_tempo_event_diagnostic_json(-1.0, 120.0, false),
-        ).expect("tempo event diagnostic must be JSON");
+        let event: serde_json::Value =
+            serde_json::from_str(&core.set_tempo_event_diagnostic_json(-1.0, 120.0, false))
+                .expect("tempo event diagnostic must be JSON");
         assert_eq!(event["code"], "tempo_event_out_of_range");
 
-        let missing: serde_json::Value = serde_json::from_str(
-            &core.remove_tempo_event_diagnostic_json(999.0),
-        ).expect("tempo removal diagnostic must be JSON");
+        let missing: serde_json::Value =
+            serde_json::from_str(&core.remove_tempo_event_diagnostic_json(999.0))
+                .expect("tempo removal diagnostic must be JSON");
         assert_eq!(missing["code"], "tempo_event_not_found");
 
-        let macro_value: serde_json::Value = serde_json::from_str(
-            &core.set_macro_value_diagnostic_json(128, 0.5),
-        ).expect("macro diagnostic must be JSON");
+        let macro_value: serde_json::Value =
+            serde_json::from_str(&core.set_macro_value_diagnostic_json(128, 0.5))
+                .expect("macro diagnostic must be JSON");
         assert_eq!(macro_value["code"], "invalid_macro_value");
 
-        let synth: serde_json::Value = serde_json::from_str(
-            &core.set_preview_synth_engine_diagnostic_json(3),
-        ).expect("preview synth diagnostic must be JSON");
+        let synth: serde_json::Value =
+            serde_json::from_str(&core.set_preview_synth_engine_diagnostic_json(3))
+                .expect("preview synth diagnostic must be JSON");
         assert_eq!(synth["code"], "unsupported_preview_synth");
 
-        let pad: serde_json::Value = serde_json::from_str(
-            &core.assign_preview_drum_pad_diagnostic_json(16, None),
-        ).expect("preview pad diagnostic must be JSON");
+        let pad: serde_json::Value =
+            serde_json::from_str(&core.assign_preview_drum_pad_diagnostic_json(16, None))
+                .expect("preview pad diagnostic must be JSON");
         assert_eq!(pad["code"], "invalid_preview_pad");
 
         let scan: serde_json::Value = serde_json::from_str(
             &core.scan_preview_audio_diagnostic_json("/definitely/missing-preview-directory"),
-        ).expect("preview scan diagnostic must be JSON");
+        )
+        .expect("preview scan diagnostic must be JSON");
         assert_eq!(scan["code"], "preview_directory_not_found");
 
-        let preload: serde_json::Value = serde_json::from_str(
-            &core.preload_preview_audio_diagnostic_json(99_999),
-        ).expect("preview preload diagnostic must be JSON");
+        let preload: serde_json::Value =
+            serde_json::from_str(&core.preload_preview_audio_diagnostic_json(99_999))
+                .expect("preview preload diagnostic must be JSON");
         assert_eq!(preload["code"], "preview_asset_not_found");
 
-        let trigger: serde_json::Value = serde_json::from_str(
-            &core.trigger_preview_drum_pad_diagnostic_json(0),
-        ).expect("preview trigger diagnostic must be JSON");
+        let trigger: serde_json::Value =
+            serde_json::from_str(&core.trigger_preview_drum_pad_diagnostic_json(0))
+                .expect("preview trigger diagnostic must be JSON");
         assert_eq!(trigger["code"], "preview_pad_unavailable");
     }
 
@@ -1487,70 +1544,76 @@ mod tests {
     fn region_and_video_diagnostics_reject_invalid_control_values() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let bad_target: serde_json::Value = serde_json::from_str(
-            &core.move_region_diagnostic_json(0, 0, 1.0),
-        ).expect("region diagnostic must be JSON");
+        let bad_target: serde_json::Value =
+            serde_json::from_str(&core.move_region_diagnostic_json(0, 0, 1.0))
+                .expect("region diagnostic must be JSON");
         assert_eq!(bad_target["code"], "invalid_region_target");
 
-        let bad_value: serde_json::Value = serde_json::from_str(
-            &core.set_region_gain_diagnostic_json(1, 1, f32::NAN),
-        ).expect("region diagnostic must be JSON");
+        let bad_value: serde_json::Value =
+            serde_json::from_str(&core.set_region_gain_diagnostic_json(1, 1, f32::NAN))
+                .expect("region diagnostic must be JSON");
         assert_eq!(bad_value["code"], "invalid_region_value");
 
-        let stale: serde_json::Value = serde_json::from_str(
-            &core.set_region_trim_diagnostic_json(999_999, 999_999, 0.0, 1.0),
-        ).expect("region diagnostic must be JSON");
+        let stale: serde_json::Value =
+            serde_json::from_str(&core.set_region_trim_diagnostic_json(999_999, 999_999, 0.0, 1.0))
+                .expect("region diagnostic must be JSON");
         assert_eq!(stale["code"], "region_not_found_or_rejected");
         assert_eq!(stale["affected_object"], "track:999999/region:999999");
 
-        let bad_position: serde_json::Value = serde_json::from_str(
-            &core.request_video_frame_diagnostic_json(f64::NAN),
-        ).expect("video diagnostic must be JSON");
+        let bad_position: serde_json::Value =
+            serde_json::from_str(&core.request_video_frame_diagnostic_json(f64::NAN))
+                .expect("video diagnostic must be JSON");
         assert_eq!(bad_position["code"], "invalid_video_position");
 
         let missing: serde_json::Value = serde_json::from_str(
             &core.load_video_diagnostic_json("/definitely/missing/aura-video.mov"),
-        ).expect("video diagnostic must be JSON");
+        )
+        .expect("video diagnostic must be JSON");
         assert_eq!(missing["code"], "video_not_found");
 
-        let render: serde_json::Value = serde_json::from_str(
-            &core.start_render_diagnostic_json("/tmp/aura-output.mp3"),
-        ).expect("render diagnostic must be JSON");
+        let render: serde_json::Value =
+            serde_json::from_str(&core.start_render_diagnostic_json("/tmp/aura-output.mp3"))
+                .expect("render diagnostic must be JSON");
         assert_eq!(render["code"], "invalid_render_path");
 
-        let spatial: serde_json::Value = serde_json::from_str(
-            &core.set_spatial_position_diagnostic_json(1, f32::NAN, 0.0, 0.0),
-        ).expect("spatial diagnostic must be JSON");
+        let spatial: serde_json::Value =
+            serde_json::from_str(&core.set_spatial_position_diagnostic_json(1, f32::NAN, 0.0, 0.0))
+                .expect("spatial diagnostic must be JSON");
         assert_eq!(spatial["code"], "invalid_track_command");
 
-        let phase: serde_json::Value = serde_json::from_str(
-            &core.set_phase_invert_diagnostic_json(999_999, true),
-        ).expect("phase diagnostic must be JSON");
+        let phase: serde_json::Value =
+            serde_json::from_str(&core.set_phase_invert_diagnostic_json(999_999, true))
+                .expect("phase diagnostic must be JSON");
         assert_eq!(phase["code"], "track_not_found_or_rejected");
 
-        let eq: serde_json::Value = serde_json::from_str(
-            &core.set_track_eq_diagnostic_json(1, f32::INFINITY, 0.0, 0.0, 1.0),
-        ).expect("EQ diagnostic must be JSON");
+        let eq: serde_json::Value = serde_json::from_str(&core.set_track_eq_diagnostic_json(
+            1,
+            f32::INFINITY,
+            0.0,
+            0.0,
+            1.0,
+        ))
+        .expect("EQ diagnostic must be JSON");
         assert_eq!(eq["code"], "invalid_track_command");
 
-        let missing_eq: serde_json::Value = serde_json::from_str(
-            &core.set_track_eq_diagnostic_json(999_999, 0.0, 0.0, 0.0, 1.0),
-        ).expect("missing EQ target diagnostic must be JSON");
+        let missing_eq: serde_json::Value =
+            serde_json::from_str(&core.set_track_eq_diagnostic_json(999_999, 0.0, 0.0, 0.0, 1.0))
+                .expect("missing EQ target diagnostic must be JSON");
         assert_eq!(missing_eq["code"], "track_not_found_or_rejected");
 
-        let reverse: serde_json::Value = serde_json::from_str(
-            &core.set_region_reverse_diagnostic_json(0, 1, true),
-        ).expect("reverse diagnostic must be JSON");
+        let reverse: serde_json::Value =
+            serde_json::from_str(&core.set_region_reverse_diagnostic_json(0, 1, true))
+                .expect("reverse diagnostic must be JSON");
         assert_eq!(reverse["code"], "invalid_region_target");
 
-        let vocal: serde_json::Value = serde_json::from_str(
-            &core.execute_vocal_remover_diagnostic_json(999_999),
-        ).expect("vocal remover diagnostic must be JSON");
+        let vocal: serde_json::Value =
+            serde_json::from_str(&core.execute_vocal_remover_diagnostic_json(999_999))
+                .expect("vocal remover diagnostic must be JSON");
         assert_eq!(vocal["code"], "track_not_found_or_rejected");
 
-        let articulation: serde_json::Value = serde_json::from_str(
-            &core.set_articulation_map_diagnostic_json(999_999, "legato"),
-        ).expect("articulation diagnostic must be JSON");
+        let articulation: serde_json::Value =
+            serde_json::from_str(&core.set_articulation_map_diagnostic_json(999_999, "legato"))
+                .expect("articulation diagnostic must be JSON");
         assert_eq!(articulation["code"], "track_not_found_or_rejected");
     }
 
@@ -1567,11 +1630,8 @@ mod tests {
     fn sandbox_state_diagnostic_rejects_oversize_payload_without_touching_native() {
         let _guard = native_engine_test_guard();
         let core = crate::AuraCore::new().expect("core must initialize");
-        let diagnostic = core.sandbox_plugin_state_diagnostic(
-            1,
-            0,
-            &vec![0u8; 4 * 1024 * 1024 + 1],
-        );
+        let diagnostic =
+            core.sandbox_plugin_state_diagnostic(1, 0, &vec![0u8; 4 * 1024 * 1024 + 1]);
         assert!(!diagnostic.ok);
         assert_eq!(diagnostic.code, 1);
         assert_eq!(diagnostic.message, "state-oversize");
@@ -1609,21 +1669,21 @@ mod tests {
     #[test]
     fn mixing_advice_diagnostic_rejects_empty_title() {
         let core = crate::AuraCore::new().expect("core must initialize");
-        let value: serde_json::Value = serde_json::from_str(
-            &core.execute_mixing_advice_diagnostic_json("  ".to_owned()),
-        ).expect("diagnostic JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(&core.execute_mixing_advice_diagnostic_json("  ".to_owned()))
+                .expect("diagnostic JSON");
         assert_eq!(value["code"], "invalid_mixing_advice_title");
     }
 
     #[test]
     fn render_validation_diagnostic_preserves_read_errors() {
         let core = crate::AuraCore::new().expect("core must initialize");
-        let value: serde_json::Value = serde_json::from_str(
-            &core.validate_render_output_diagnostic_json(
+        let value: serde_json::Value =
+            serde_json::from_str(&core.validate_render_output_diagnostic_json(
                 "/tmp/aura-missing-validation-output.wav",
                 false,
-            ),
-        ).expect("diagnostic JSON");
+            ))
+            .expect("diagnostic JSON");
         assert_eq!(value["code"], "render_output_unreadable");
         assert_eq!(value["retryable"], true);
     }
@@ -1632,23 +1692,23 @@ mod tests {
     fn native_wav_diagnostic_preserves_missing_file_reason() {
         let core = crate::AuraCore::new().expect("core must initialize");
         let value: serde_json::Value = serde_json::from_str(
-            &core.read_wav_diagnostic_json(
-                "/tmp/aura-missing-native-wave64.w64",
-                1,
-            ),
-        ).expect("diagnostic JSON");
+            &core.read_wav_diagnostic_json("/tmp/aura-missing-native-wave64.w64", 1),
+        )
+        .expect("diagnostic JSON");
         assert_eq!(value["ok"], false);
         assert_eq!(value["format"], "WAVE64");
-        assert!(value["error"].as_str().is_some_and(|error| error.contains("not found")));
+        assert!(value["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("not found")));
     }
 
     #[test]
     fn undo_and_redo_diagnostics_report_empty_history() {
         let core = crate::AuraCore::new().expect("core must initialize");
-        let undo: serde_json::Value = serde_json::from_str(&core.undo_diagnostic_json())
-            .expect("undo diagnostic JSON");
-        let redo: serde_json::Value = serde_json::from_str(&core.redo_diagnostic_json())
-            .expect("redo diagnostic JSON");
+        let undo: serde_json::Value =
+            serde_json::from_str(&core.undo_diagnostic_json()).expect("undo diagnostic JSON");
+        let redo: serde_json::Value =
+            serde_json::from_str(&core.redo_diagnostic_json()).expect("redo diagnostic JSON");
         assert_eq!(undo["code"], "undo_history_empty");
         assert_eq!(redo["code"], "redo_history_empty");
     }
@@ -1676,14 +1736,14 @@ mod tests {
     #[test]
     fn transport_diagnostics_report_applied_state() {
         let core = crate::AuraCore::new().expect("core must initialize");
-        let playhead: serde_json::Value = serde_json::from_str(
-            &core.set_playhead_diagnostic_json(1234),
-        ).expect("playhead diagnostic JSON");
+        let playhead: serde_json::Value =
+            serde_json::from_str(&core.set_playhead_diagnostic_json(1234))
+                .expect("playhead diagnostic JSON");
         assert_eq!(playhead["ok"], true);
         assert_eq!(playhead["playhead"], 1234);
-        let playing: serde_json::Value = serde_json::from_str(
-            &core.set_playing_diagnostic_json(false),
-        ).expect("playing diagnostic JSON");
+        let playing: serde_json::Value =
+            serde_json::from_str(&core.set_playing_diagnostic_json(false))
+                .expect("playing diagnostic JSON");
         assert_eq!(playing["ok"], true);
         assert_eq!(playing["playing"], false);
     }
@@ -1696,28 +1756,54 @@ mod tests {
             core.set_test_tone_diagnostic_json(false),
             core.clear_midi_notes_diagnostic_json(),
         ] {
-            let json: serde_json::Value = serde_json::from_str(&value)
-                .expect("diagnostic JSON");
+            let json: serde_json::Value = serde_json::from_str(&value).expect("diagnostic JSON");
             assert_eq!(json["ok"], true);
         }
-        let invalid: serde_json::Value = serde_json::from_str(
-            &core.set_midi_note_diagnostic_json(0, 128, 128, 0, 0),
-        ).expect("MIDI note diagnostic JSON");
+        let invalid: serde_json::Value =
+            serde_json::from_str(&core.set_midi_note_diagnostic_json(0, 128, 128, 0, 0))
+                .expect("MIDI note diagnostic JSON");
         assert_eq!(invalid["code"], "invalid_midi_note");
-        let preset: serde_json::Value = serde_json::from_str(
-            &core.load_plugin_preset_diagnostic_json(0, 0, ""),
-        ).expect("preset diagnostic JSON");
+        let preset: serde_json::Value =
+            serde_json::from_str(&core.load_plugin_preset_diagnostic_json(0, 0, ""))
+                .expect("preset diagnostic JSON");
         assert_eq!(preset["code"], "invalid_plugin_preset_target");
     }
 
     #[test]
     fn project_v2_hydration_diagnostic_is_structured_for_invalid_input() {
         let core = crate::AuraCore::new().expect("core must initialize");
-        let value: serde_json::Value = serde_json::from_str(
-            &core.load_project_v2_diagnostic_json(""),
-        ).expect("project hydration diagnostic JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(&core.load_project_v2_diagnostic_json(""))
+                .expect("project hydration diagnostic JSON");
         assert_eq!(value["ok"], false);
         assert_eq!(value["error"]["code"], "project_hydration_failed");
         assert!(value["error"]["generation"].as_u64().is_some());
+    }
+
+    #[test]
+    fn external_sync_ui_boundary_updates_real_transport_state() {
+        let core = crate::AuraCore::new().expect("core must initialize");
+        let configured: serde_json::Value =
+            serde_json::from_str(&core.configure_external_sync_json("mtc", "midi:1", true))
+                .expect("sync configuration JSON");
+        assert_eq!(configured["ok"], true);
+        assert_eq!(configured["enabled"], true);
+
+        let disabled_mmc: serde_json::Value = serde_json::from_str(
+            &crate::AuraCore::new()
+                .expect("second core")
+                .external_sync_mmc_json(&[0xf0, 0x7f, 0x00, 0x06, 0x02, 0xf7]),
+        )
+        .expect("MMC diagnostic JSON");
+        assert_eq!(disabled_mmc["ok"], false);
+
+        let mtc: serde_json::Value =
+            serde_json::from_str(&core.external_sync_mtc_json(1, 2, 3, 4, 25))
+                .expect("MTC diagnostic JSON");
+        assert_eq!(mtc["ok"], true);
+        assert_eq!(mtc["timecode"]["fps"], 25);
+        let status: serde_json::Value =
+            serde_json::from_str(&core.external_sync_status_json()).expect("sync status JSON");
+        assert_eq!(status["running"], true);
     }
 }

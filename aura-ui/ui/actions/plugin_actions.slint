@@ -6,6 +6,10 @@ export global PluginActions {
     callback run_extension(string, string, string);
     callback toggle_extension(string, bool);
     callback plugin_param_changed(int, int, int, float);
+    callback set_plugin_bypass(int, int, bool);
+    callback reset_sandboxed_plugin(int, int);
+    callback open_native_editor(int, int);
+    callback close_native_editor(int, int);
     callback apply_dynamics_suggestion(int, int);
     callback set_filter(int, string, float);
     callback macro_changed(int, float);

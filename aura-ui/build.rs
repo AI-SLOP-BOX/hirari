@@ -74,12 +74,14 @@ fn main() {
     }
 
     let generated = Path::new("ui/.aura_studio.generated.slint");
-    let temporary = Path::new("ui/.aura_studio.generated.slint.tmp");
-    let _ = fs::remove_file(temporary);
+    let temporary_name = format!("ui/.aura_studio.generated.slint.tmp.{}", std::process::id());
+    let temporary = Path::new(&temporary_name);
     fs::write(temporary, source)
         .unwrap_or_else(|error| build_failure("write-generated-source", error));
-    fs::rename(temporary, generated)
-        .unwrap_or_else(|error| build_failure("publish-generated-source", error));
+    if let Err(error) = fs::rename(temporary, generated) {
+        let _ = fs::remove_file(temporary);
+        build_failure("publish-generated-source", error);
+    }
     let generated_path = generated
         .to_str()
         .unwrap_or_else(|| build_failure("compile-slint", "generated path is not UTF-8"));

@@ -1389,6 +1389,9 @@ impl AuraCore {
         if let Ok(mut notes) = self.scheduled_midi_notes.lock() {
             notes.clear();
         }
+        if let Ok(mut rates) = self.midi_vibrato_rates.lock() {
+            rates.clear();
+        }
     }
 
     /// Canonical authoring view for piano-roll and vocal editors. Unlike the
@@ -1401,12 +1404,25 @@ impl AuraCore {
             .map(|notes| notes.clone())
             .unwrap_or_default();
         notes.sort_by_key(|note| (note.track_id, note.start_sample, note.pitch));
+        let vibrato_rates = self
+            .midi_vibrato_rates
+            .lock()
+            .map(|rates| rates.clone())
+            .unwrap_or_default();
         let enriched = notes
             .into_iter()
             .map(|note| {
+                let vibrato_rate = vibrato_rates
+                    .get(&(note.track_id, note.pitch, note.start_sample))
+                    .copied()
+                    .unwrap_or(5_000);
                 let mut value =
                     serde_json::to_value(&note).unwrap_or_else(|_| serde_json::json!({}));
                 if let Some(object) = value.as_object_mut() {
+                    object.insert(
+                        "vibrato_rate_millihz".to_owned(),
+                        serde_json::Value::from(vibrato_rate),
+                    );
                     object.insert(
                         "drum_lane".to_owned(),
                         serde_json::Value::String(
@@ -1423,6 +1439,54 @@ impl AuraCore {
         self.engine
             .as_ref()
             .is_some_and(|e| e.set_spatial_position(tid, x, y, z))
+    }
+
+    /// Installs a bounded measured HRTF impulse-response pair on one track.
+    /// The copy happens on the control plane; the realtime panner only reads
+    /// its fixed-size kernel. Empty/mismatched/non-finite data is rejected by
+    /// the native kernel contract.
+    pub fn set_hrtf_kernel(&self, tid: u32, left: Vec<f32>, right: Vec<f32>) -> bool {
+        if left.is_empty() || left.len() != right.len() || left.len() > 128
+            || left.iter().chain(right.iter()).any(|sample| !sample.is_finite())
+        {
+            return false;
+        }
+        self.engine
+            .as_ref()
+            .is_some_and(|e| e.set_hrtf_kernel(tid, left, right))
+    }
+
+    pub fn clear_hrtf_kernel(&self, tid: u32) -> bool {
+        self.engine
+            .as_ref()
+            .is_some_and(|e| e.clear_hrtf_kernel(tid))
+    }
+
+    /// Loads one measured HRTF pair from a provider payload. The payload is
+    /// intentionally simple (`{"left":[...],"right":[...]}`) so an app can
+    /// adapt SOFA/database lookups without coupling the core to a file format.
+    pub fn set_hrtf_kernel_json(&self, tid: u32, payload: &str) -> String {
+        let value = match serde_json::from_str::<serde_json::Value>(payload) {
+            Ok(value) => value,
+            Err(_) => return r#"{"ok":false,"code":"invalid_hrtf_payload","retryable":false}"#.into(),
+        };
+        let to_samples = |name: &str| -> Option<Vec<f32>> {
+            value.get(name)?.as_array()?.iter().map(|sample| {
+                let value = sample.as_f64()? as f32;
+                value.is_finite().then_some(value)
+            }).collect()
+        };
+        let Some(left) = to_samples("left") else {
+            return r#"{"ok":false,"code":"invalid_hrtf_left","retryable":false}"#.into();
+        };
+        let Some(right) = to_samples("right") else {
+            return r#"{"ok":false,"code":"invalid_hrtf_right","retryable":false}"#.into();
+        };
+        if self.set_hrtf_kernel(tid, left.clone(), right.clone()) {
+            serde_json::json!({"ok":true,"track":tid,"taps":left.len()}).to_string()
+        } else {
+            r#"{"ok":false,"code":"hrtf_kernel_rejected","retryable":false}"#.into()
+        }
     }
     pub fn set_track_armed(&self, tid: u32, armed: bool) -> bool {
         self.engine

@@ -14,6 +14,11 @@ pub struct AutoFilterEngine {
 
 impl AutoFilterEngine {
     pub fn new(sr: f64) -> Self {
+        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sr
+        } else {
+            48_000.0
+        };
         let mut engine = Self {
             sample_rate: sr,
             cutoff_base: 0.2,
@@ -53,11 +58,11 @@ impl AutoFilterEngine {
         // A non-positive or non-finite sample rate cannot produce meaningful
         // filter coefficients.  Leave the input untouched rather than
         // allowing NaNs/Infs to enter the state variables.
-        if !self.sample_rate.is_finite() || self.sample_rate <= 0.0 {
+        if !self.audit_auto_filter() {
             return;
         }
 
-        let len = l.len();
+        let len = l.len().min(r.len());
 
         for s in 0..len {
             let in_l = l[s];
@@ -147,9 +152,17 @@ impl AutoFilterEngine {
                 self.s2[c] = self.g * bp + lp;
 
                 if c == 0 {
-                    l[s] = lp;
+                    l[s] = if lp.is_finite() {
+                        lp.clamp(-4.0, 4.0)
+                    } else {
+                        0.0
+                    };
                 } else {
-                    r[s] = lp;
+                    r[s] = if lp.is_finite() {
+                        lp.clamp(-4.0, 4.0)
+                    } else {
+                        0.0
+                    };
                 }
             }
         }
@@ -157,7 +170,23 @@ impl AutoFilterEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Auto Filter state.
     pub fn audit_auto_filter(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Auto Filter auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && self.cutoff_base.is_finite()
+            && (0.0..=1.0).contains(&self.cutoff_base)
+            && self.res.is_finite()
+            && (0.0..=1.0).contains(&self.res)
+            && self.sens.is_finite()
+            && (0.0..=1.0).contains(&self.sens)
+            && self.env.is_finite()
+            && self.env >= 0.0
+            && self.attack.is_finite()
+            && (0.0..=1.0).contains(&self.attack)
+            && self.release.is_finite()
+            && (0.0..=1.0).contains(&self.release)
+            && self.g.is_finite()
+            && self.g >= 0.0
+            && self.k.is_finite()
+            && self.s1.iter().chain(self.s2.iter()).all(|v| v.is_finite())
     }
 }

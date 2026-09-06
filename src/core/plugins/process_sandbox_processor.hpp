@@ -72,6 +72,9 @@ public:
         }
         return restarted && !m_failed.load(std::memory_order_acquire);
     }
+    bool resetPluginControlPlane() noexcept {
+        return m_host.requestPluginReset();
+    }
     bool setGenerationContext(PluginSandboxHost::GenerationContext context) noexcept {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
         return m_host.setGenerationContext(context);
@@ -193,7 +196,34 @@ public:
             1ULL << (parameterId % 64), std::memory_order_release);
         return m_host.enqueueParameterChange(parameterId, value, sampleOffset);
     }
-    void reset() noexcept override {}
+    // EffectChain and UI automation use the base IProcessor parameter
+    // contract.  Previously a sandboxed third-party plugin inherited the
+    // no-op implementation, so parameter edits appeared to succeed in the
+    // host while never reaching the isolated worker. Keep the normalized
+    // snapshot even when the bounded realtime queue is temporarily full;
+    // lifecycle recovery replays it before audio resumes.
+    void setParameter(uint32_t parameterId, float value) noexcept override {
+        (void)enqueueParameterChange(parameterId, static_cast<double>(value), 0);
+    }
+    float getParameter(uint32_t parameterId) const noexcept override {
+        if (parameterId >= kMaxParameters) return 0.0f;
+        const uint64_t valid = m_parameterSnapshotValid[parameterId / 64].load(
+            std::memory_order_acquire);
+        if ((valid & (1ULL << (parameterId % 64))) == 0) return 0.0f;
+        const double value = m_parameterSnapshot[parameterId].load(std::memory_order_acquire);
+        return std::isfinite(value) ? static_cast<float>(std::clamp(value, 0.0, 1.0)) : 0.0f;
+    }
+    void reset() noexcept override {
+        // Reset is part of the realtime processor contract, so it must not
+        // stop/restart the child process or take the lifecycle mutex.  Clear
+        // the processor-side recovery state and quarantine latch here; the
+        // worker's DSP state is reset at the next control-plane reconfigure
+        // (or explicit restart), while the audio callback immediately starts
+        // from a clean, non-quarantined boundary.
+        m_failed.store(false, std::memory_order_release);
+        m_consecutiveOverruns.store(0, std::memory_order_release);
+        m_host.clearQuarantine();
+    }
     uint32_t getLatencySamples() const noexcept override {
         return m_latencySamples.load(std::memory_order_acquire);
     }

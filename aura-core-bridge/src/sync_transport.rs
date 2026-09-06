@@ -207,7 +207,7 @@ impl ExternalSyncController {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct Timecode {
     pub hours: u8,
     pub minutes: u8,

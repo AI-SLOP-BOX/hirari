@@ -3,7 +3,8 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 REQUIRE_VST3=${AURA_REQUIRE_VST3:-0}
-if [ -z "${AURA_VST3_SDK:-}" ]; then
+PREBUILT_WORKER=${AURA_PLUGIN_HOST_BIN:-}
+if [ -z "${AURA_VST3_SDK:-}" ] && [ -z "$PREBUILT_WORKER" ]; then
     for candidate in \
         "$ROOT_DIR/third_party/vst3sdk" \
         "/tmp/aura-vst3-sdk-new" \
@@ -15,7 +16,7 @@ if [ -z "${AURA_VST3_SDK:-}" ]; then
         fi
     done
 fi
-if [ -z "${AURA_VST3_SDK:-}" ]; then
+if [ -z "${AURA_VST3_SDK:-}" ] && [ -z "$PREBUILT_WORKER" ]; then
     if [ "$REQUIRE_VST3" = "1" ] || [ "${AURA_RELEASE_MODE:-0}" = "1" ]; then
         echo "AURA_VST3_SDK must point to the official Steinberg VST3 SDK" >&2
         exit 1
@@ -47,8 +48,17 @@ fi
 
 test -e "$AURA_VST3_FIXTURE"
 export AURA_VST3_FIXTURE
-AURA_PLUGIN_WORKER_OUTPUT="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
-    "$ROOT_DIR/scripts/build_plugin_worker_with_vst3.sh"
+if [ -n "$PREBUILT_WORKER" ]; then
+    if [ ! -x "$PREBUILT_WORKER" ]; then
+        echo "AURA_PLUGIN_HOST_BIN is not executable: $PREBUILT_WORKER" >&2
+        exit 2
+    fi
+    WORKER_BIN=$PREBUILT_WORKER
+else
+    AURA_PLUGIN_WORKER_OUTPUT="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
+        "$ROOT_DIR/scripts/build_plugin_worker_with_vst3.sh"
+    WORKER_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3"
+fi
 
 PLUGIN_TEST_BIN=${AURA_PLUGIN_TEST_BIN:-}
 if [ -z "$PLUGIN_TEST_BIN" ]; then
@@ -73,33 +83,33 @@ run_plugin_test() {
 
 run_plugin_test \
     official_vst3_fixture_instantiates_and_processes_in_the_isolated_worker \
-    AURA_PLUGIN_HOST_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
+    AURA_PLUGIN_HOST_BIN="$WORKER_BIN" \
     AURA_VST3_FIXTURE="$AURA_VST3_FIXTURE"
 
 run_plugin_test \
     isolated_plugin_worker_survives_audio_reconfiguration \
-    AURA_PLUGIN_HOST_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
+    AURA_PLUGIN_HOST_BIN="$WORKER_BIN" \
     AURA_VST3_FIXTURE="$AURA_VST3_FIXTURE"
 
 # Real instrument evidence: state restore must still produce finite note audio,
 # not merely acknowledge a state blob or survive a worker restart.
 run_plugin_test \
     real_instrument_state_restore_keeps_note_audio_finite \
-    AURA_PLUGIN_HOST_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
+    AURA_PLUGIN_HOST_BIN="$WORKER_BIN" \
     AURA_INSTRUMENT_FIXTURE="$AURA_VST3_FIXTURE"
 
 run_plugin_test \
     real_plugin_worker_fault_is_quarantined_without_nonfinite_audio \
     AURA_PLUGIN_TEST_FAULTS=1 \
     AURA_PLUGIN_WORKER_CRASH_AFTER_BLOCKS=2 \
-    AURA_PLUGIN_HOST_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
+    AURA_PLUGIN_HOST_BIN="$WORKER_BIN" \
     AURA_VST3_FIXTURE="$AURA_VST3_FIXTURE"
 
 run_plugin_test \
     real_plugin_overruns_quarantine_then_recover_audio_and_midi \
     AURA_PLUGIN_TEST_FAULTS=1 \
     AURA_PLUGIN_WORKER_DELAY_MS=50 \
-    AURA_PLUGIN_HOST_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
+    AURA_PLUGIN_HOST_BIN="$WORKER_BIN" \
     AURA_VST3_FIXTURE="$AURA_VST3_FIXTURE"
 
 echo "VST3 isolated-worker E2E smoke passed"

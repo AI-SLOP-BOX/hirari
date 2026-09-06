@@ -180,7 +180,30 @@ impl ForensicAuditor {
     }
 
     pub fn audit_integrity(&self) -> bool {
-        true
+        // Keep this self-check independent of project state. It verifies that
+        // malformed payloads are rejected, a valid acyclic graph is accepted,
+        // and a cycle is surfaced as a critical anomaly.
+        let valid = [1u32, 2, 2, 3]
+            .into_iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>();
+        if !self.detect_anomalies(&valid).is_empty() {
+            return false;
+        }
+        let malformed = self.detect_anomalies(&[1, 2, 3]);
+        if !malformed
+            .iter()
+            .any(|issue| issue.severity == AuditSeverity::Critical)
+        {
+            return false;
+        }
+        let cyclic = [1u32, 2, 2, 1]
+            .into_iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect::<Vec<_>>();
+        self.detect_anomalies(&cyclic)
+            .iter()
+            .any(|issue| issue.severity == AuditSeverity::Critical)
     }
 }
 
@@ -207,5 +230,10 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.severity == AuditSeverity::Critical));
+    }
+
+    #[test]
+    fn integrity_audit_checks_normal_and_failure_paths() {
+        assert!(ForensicAuditor.audit_integrity());
     }
 }

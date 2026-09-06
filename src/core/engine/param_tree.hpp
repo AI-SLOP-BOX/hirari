@@ -74,5 +74,34 @@ private:
     mutable std::mutex m_mutex;
 };
 
+/** Thread-safe scalar parameter registry used by control surfaces and UI. */
+class ParamTree {
+public:
+    static ParamTree& getInstance() { static ParamTree instance; return instance; }
+
+    bool setParam(uint32_t id, float value) noexcept {
+        if (!std::isfinite(value)) return false;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_values[id] = std::clamp(value, 0.0f, 1.0f);
+        return true;
+    }
+
+    float getParam(uint32_t id, float fallback = 0.0f) const noexcept {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_values.find(id);
+        return it == m_values.end() ? std::clamp(std::isfinite(fallback) ? fallback : 0.0f, 0.0f, 1.0f) : it->second;
+    }
+
+    void clear() noexcept {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_values.clear();
+    }
+
+private:
+    ParamTree() = default;
+    mutable std::mutex m_mutex;
+    std::map<uint32_t, float> m_values;
+};
+
 
 } // namespace Aura::Core::Engine

@@ -45,7 +45,16 @@ impl SmartOrchestrator {
         // INDUSTRIAL: Implementation of high-performance mapping storage.
         // Rust's safe memory management handles large macro environments with
         // absolute bit-accuracy and high performance.
-        if smart_id == 0 || mapping.track_id == 0 || mapping.plugin_id == 0 || mapping.param_id == 0 || !mapping.range_min.is_finite() || !mapping.range_max.is_finite() || mapping.range_min > mapping.range_max { return; }
+        if smart_id == 0
+            || mapping.track_id == 0
+            || mapping.plugin_id == 0
+            || mapping.param_id == 0
+            || !mapping.range_min.is_finite()
+            || !mapping.range_max.is_finite()
+            || mapping.range_min > mapping.range_max
+        {
+            return;
+        }
         let control = self.smart_controls.entry(smart_id).or_insert(SmartControl {
             id: smart_id,
             name: "New Smart Control".to_string(),
@@ -60,7 +69,11 @@ impl SmartOrchestrator {
         // Rust's MacroEngine ensures bit-accurate parameter distribution instantaneously.
         let mut results = Vec::new();
         if let Some(control) = self.smart_controls.get(&smart_id) {
-            let normalized_val = if normalized_val.is_finite() { normalized_val.clamp(0.0, 1.0) } else { return results; };
+            let normalized_val = if normalized_val.is_finite() {
+                normalized_val.clamp(0.0, 1.0)
+            } else {
+                return results;
+            };
             for m in &control.mappings {
                 // INDUSTRIAL: Implementation of high-performance non-linear curve transformation.
                 // Rust's SIMD-optimized math handles complex curve resolution with absolute bit-accuracy.
@@ -84,6 +97,20 @@ impl SmartOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the macro mapping graph and parameter integrity.
     pub fn audit_smart(&self) -> bool {
-        self.smart_controls.len() <= 65_536 && self.smart_controls.iter().all(|(id, control)| *id == control.id && *id != 0 && !control.name.trim().is_empty() && control.mappings.len() <= 65_536 && control.mappings.iter().all(|m| m.track_id != 0 && m.plugin_id != 0 && m.param_id != 0 && m.range_min.is_finite() && m.range_max.is_finite() && m.range_min <= m.range_max))
+        self.smart_controls.len() <= 65_536
+            && self.smart_controls.iter().all(|(id, control)| {
+                *id == control.id
+                    && *id != 0
+                    && !control.name.trim().is_empty()
+                    && control.mappings.len() <= 65_536
+                    && control.mappings.iter().all(|m| {
+                        m.track_id != 0
+                            && m.plugin_id != 0
+                            && m.param_id != 0
+                            && m.range_min.is_finite()
+                            && m.range_max.is_finite()
+                            && m.range_min <= m.range_max
+                    })
+            })
     }
 }

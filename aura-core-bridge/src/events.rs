@@ -18,7 +18,9 @@ pub struct EventOrchestrator {
 }
 
 impl AuraEvent {
-    pub fn validate(&self) -> bool { self.value.is_finite() && self.message.len() <= 4096 && !self.message.contains('\0') }
+    pub fn validate(&self) -> bool {
+        self.value.is_finite() && self.message.len() <= 4096 && !self.message.contains('\0')
+    }
 }
 
 impl Default for EventOrchestrator {
@@ -37,15 +39,29 @@ impl EventOrchestrator {
 
     /// INDUSTRIAL: Pushes an event into the appropriate priority queue.
     pub fn push_event(&mut self, event: AuraEvent) -> bool {
-        if !event.validate() { return false; }
+        if !event.validate() {
+            return false;
+        }
         match event.event_type {
-            AuraEventType::SystemError => { if self.high_priority.len() >= 65_536 { return false; } self.high_priority.push(event); }
-            _ => { if self.low_priority.len() >= 1_000_000 { return false; } self.low_priority.push(event); }
+            AuraEventType::SystemError => {
+                if self.high_priority.len() >= 65_536 {
+                    return false;
+                }
+                self.high_priority.push(event);
+            }
+            _ => {
+                if self.low_priority.len() >= 1_000_000 {
+                    return false;
+                }
+                self.low_priority.push(event);
+            }
         }
         true
     }
 
-    pub fn pending_counts(&self) -> (usize, usize) { (self.high_priority.len(), self.low_priority.len()) }
+    pub fn pending_counts(&self) -> (usize, usize) {
+        (self.high_priority.len(), self.low_priority.len())
+    }
 
     /// INDUSTRIAL: Polls events, prioritizing high-priority messages.
     pub fn poll_events(&mut self) -> Vec<AuraEvent> {

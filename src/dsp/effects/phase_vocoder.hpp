@@ -76,6 +76,18 @@ public:
      */
     void process(const float* input, float* output, uint32_t len, float ratio) {
         if (!input || !output || len == 0) return;
+        // Render arbitrarily long blocks in bounded FFT frames. The previous
+        // implementation silently zeroed every sample after the first FFT
+        // window, which truncated long regions during offline bounce.
+        if (len > m_fftSize) {
+            uint32_t offset = 0;
+            while (offset < len) {
+                const uint32_t frame = std::min<uint32_t>(m_fftSize, len - offset);
+                process(input + offset, output + offset, frame, ratio);
+                offset += frame;
+            }
+            return;
+        }
         if (!std::isfinite(ratio) || ratio < 0.1f || ratio > 10.0f) {
             copyFinite(input, output, len);
             return;

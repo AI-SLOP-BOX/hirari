@@ -17,6 +17,20 @@ int main() {
     Aura::Core::MidiBuffer::Iterator iterator(midi);
     assert(iterator.getNextEvent(offset, data, size));
     assert(offset == UINT32_MAX && size == 3 && data[1] == 60);
+
+    // Same-sample events retain producer order (note-off/on and articulation
+    // boundaries rely on this being deterministic).
+    midi.clear();
+    const uint8_t first[3] = {0x90, 60, 100};
+    const uint8_t second[3] = {0x80, 60, 0};
+    const uint8_t third[3] = {0x90, 61, 100};
+    midi.addEvent(8, first, 3);
+    midi.addEvent(2, second, 3);
+    midi.addEvent(8, third, 3);
+    midi.sort();
+    assert(midi.getEvents()[0].sampleOffset == 2 && midi.getEvents()[0].data[0] == 0x80);
+    assert(midi.getEvents()[1].sampleOffset == 8 && midi.getEvents()[1].data[1] == 60);
+    assert(midi.getEvents()[2].sampleOffset == 8 && midi.getEvents()[2].data[1] == 61);
     midi.clear();
     assert(midi.size() == 0 && !midi.overflowed() && midi.droppedEvents() == 0);
 

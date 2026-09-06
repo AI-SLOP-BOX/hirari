@@ -5,6 +5,7 @@
 #include <cmath>
 #include <algorithm>
 #include <span>
+#include <stdexcept>
 
 namespace Aura::DSP::Analysis {
 
@@ -15,10 +16,11 @@ namespace Aura::DSP::Analysis {
  */
 class FFTEngine {
 public:
-    FFTEngine(uint32_t n) : m_n(n), m_log2n(static_cast<uint32_t>(std::log2(n))) {
+    FFTEngine(uint32_t n)
+        : m_n(validateSize(n)), m_log2n(static_cast<uint32_t>(std::log2(m_n))) {
         prepareBitReversal();
         prepareTwiddles();
-        m_complexScratch.resize(n);
+        m_complexScratch.resize(m_n);
     }
 
     /**
@@ -33,15 +35,27 @@ public:
      * @brief INVERSE FFT: Frequency-domain -> Time-domain.
      */
     void inverse(std::span<const std::complex<float>> complexIn, std::span<float> realOut) {
-        // We reuse complexOut as a temporary if provided, 
-        // but for absolute sovereignty we use a local complex scratch in spectral editor.
-        // For FFT core, we need a mutable complex buffer.
-        m_complexScratch.assign(complexIn.begin(), complexIn.end());
+        // The iterative butterfly expects bit-reversed input.  `forward()`
+        // performs that permutation before its first stage, so the inverse
+        // must do the same when it receives a natural-order spectrum.  Missing
+        // this step produces plausible-looking but non-invertible waveforms,
+        // which is especially damaging in restoration and mastering paths.
+        m_complexScratch.resize(m_n);
+        for (uint32_t i = 0; i < m_n; ++i) {
+            m_complexScratch[i] = complexIn[m_bitRev[i]];
+        }
         compute(m_complexScratch, true);
         for (uint32_t i = 0; i < m_n; ++i) realOut[i] = m_complexScratch[i].real() / (float)m_n;
     }
 
 private:
+    static uint32_t validateSize(uint32_t n) {
+        if (n < 2 || (n & (n - 1u)) != 0) {
+            throw std::invalid_argument("FFTEngine requires a power-of-two size >= 2");
+        }
+        return n;
+    }
+
     void compute(std::span<std::complex<float>> data, bool inverse) {
         for (uint32_t s = 1; s <= m_log2n; ++s) {
             uint32_t m = 1 << s;

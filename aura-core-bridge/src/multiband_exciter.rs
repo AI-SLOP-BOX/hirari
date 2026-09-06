@@ -49,6 +49,11 @@ pub struct MultibandExciterEngine {
 
 impl MultibandExciterEngine {
     pub fn new(sr: f64) -> Self {
+        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sr
+        } else {
+            48_000.0
+        };
         let mut engine = Self {
             sample_rate: sr,
             low_pass: SimpleSVF::new(),
@@ -88,11 +93,14 @@ impl MultibandExciterEngine {
 
     /// INDUSTRIAL: Top-tier frequency-specific saturation.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        if !self.audit_multiband_exciter() {
+            return;
+        }
+        let len = l.len().min(r.len());
 
         for i in 0..len {
-            let in_l = l[i];
-            let in_r = r[i];
+            let in_l = if l[i].is_finite() { l[i] } else { 0.0 };
+            let in_r = if r[i].is_finite() { r[i] } else { 0.0 };
 
             // 1. FREQUENCY SPLITTING (LR-4 style approximation)
             let low_l = self.low_pass.process_sample_lp(in_l, 0);
@@ -121,14 +129,21 @@ impl MultibandExciterEngine {
             let high_r_sat = self.apply_tape(high_r * 1.4);
 
             // 3. RECOMBINE
-            l[i] = low_l_sat + mid_l_sat + high_l_sat;
-            r[i] = low_r_sat + mid_r_sat + high_r_sat;
+            l[i] = (low_l_sat + mid_l_sat + high_l_sat).clamp(-4.0, 4.0);
+            r[i] = (low_r_sat + mid_r_sat + high_r_sat).clamp(-4.0, 4.0);
         }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Multiband Exciter state.
     pub fn audit_multiband_exciter(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Multiband Exciter auditing logic.
-        true
+        self.sample_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && [&self.low_pass, &self.mid_low_pass].iter().all(|f| {
+                f.g.is_finite()
+                    && f.k.is_finite()
+                    && f.g >= 0.0
+                    && (0.0..=2.0).contains(&f.k)
+                    && f.s1.iter().chain(f.s2.iter()).all(|v| v.is_finite())
+            })
     }
 }

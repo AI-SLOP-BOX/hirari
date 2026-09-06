@@ -5,7 +5,7 @@ import wave
 from array import array
 
 SR = 44100
-BPM = 100
+BPM = int(os.environ.get("AURA_SONG_BPM", "100"))
 BEAT = 60.0 / BPM
 BARS = 32
 DURATION = BARS * 4 * BEAT

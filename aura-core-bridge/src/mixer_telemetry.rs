@@ -12,8 +12,18 @@ pub struct TelemetryDataRust {
 }
 
 impl TelemetryDataRust {
-    pub fn headroom_dbfs(&self) -> f32 { let peak=self.peak_l.abs().max(self.peak_r.abs()); if !peak.is_finite() || peak <= 0.0 { 120.0 } else { (-20.0 * peak.log10()).clamp(-120.0, 120.0) } }
-    pub fn clipping(&self) -> bool { let peak=self.peak_l.abs().max(self.peak_r.abs()); peak.is_finite() && peak > 1.0 }
+    pub fn headroom_dbfs(&self) -> f32 {
+        let peak = self.peak_l.abs().max(self.peak_r.abs());
+        if !peak.is_finite() || peak <= 0.0 {
+            120.0
+        } else {
+            (-20.0 * peak.log10()).clamp(-120.0, 120.0)
+        }
+    }
+    pub fn clipping(&self) -> bool {
+        let peak = self.peak_l.abs().max(self.peak_r.abs());
+        peak.is_finite() && peak > 1.0
+    }
 }
 
 pub struct TelemetryOrchestrator {
@@ -87,7 +97,9 @@ impl TelemetryOrchestrator {
                 peak_r = peak_r.max(magnitude);
                 sum_sq_r += f64::from(sample_r) * f64::from(sample_r);
                 sum_r += f64::from(sample_r);
-                if sample_l.is_finite() { cross += f64::from(sample_l) * f64::from(sample_r); }
+                if sample_l.is_finite() {
+                    cross += f64::from(sample_l) * f64::from(sample_r);
+                }
                 valid_r += 1;
                 if magnitude > 1.0 {
                     clipping_count = clipping_count.saturating_add(1);
@@ -119,15 +131,25 @@ impl TelemetryOrchestrator {
         };
         target.clipping_count = clipping_count;
         let denom = (sum_sq_l * sum_sq_r).sqrt();
-        target.phase_correlation = if denom > 1.0e-12 { (cross / denom).clamp(-1.0, 1.0) as f32 } else { 0.0 };
-        let mean_square = ((sum_sq_l + sum_sq_r) / (valid_l.max(valid_r).max(1) as f64 * 2.0)).max(1.0e-12);
+        target.phase_correlation = if denom > 1.0e-12 {
+            (cross / denom).clamp(-1.0, 1.0) as f32
+        } else {
+            0.0
+        };
+        let mean_square =
+            ((sum_sq_l + sum_sq_r) / (valid_l.max(valid_r).max(1) as f64 * 2.0)).max(1.0e-12);
         target.loudness_lufs = (10.0 * mean_square.log10() - 0.691).max(-120.0) as f32;
         // Eight coarse energy bands are inexpensive and deterministic; the UI
         // can render a spectrum without allocating an FFT on the audio path.
         for (index, (&a, &b)) in l.iter().zip(r.iter()).enumerate().take(frame_count) {
-            if a.is_finite() && b.is_finite() { band_energy[index * 8 / frame_count.max(1)] += ((a as f64 * a as f64) + (b as f64 * b as f64)) * 0.5; }
+            if a.is_finite() && b.is_finite() {
+                band_energy[index * 8 / frame_count.max(1)] +=
+                    ((a as f64 * a as f64) + (b as f64 * b as f64)) * 0.5;
+            }
         }
-        for (index, energy) in band_energy.into_iter().enumerate() { target.spectrum_rms[index] = (energy / frame_count.max(1) as f64).sqrt() as f32; }
+        for (index, energy) in band_energy.into_iter().enumerate() {
+            target.spectrum_rms[index] = (energy / frame_count.max(1) as f64).sqrt() as f32;
+        }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide diagnostic state.

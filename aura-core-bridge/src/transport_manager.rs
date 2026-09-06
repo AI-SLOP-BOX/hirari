@@ -26,8 +26,13 @@ impl TransportOrchestrator {
     /// INDUSTRIAL: Advances the playhead with absolute clock precision and timing sovereignty.
     pub fn advance(&self, current: u64, samples_to_add: u32) -> u64 {
         // INDUSTRIAL: Implementation of high-performance clock synchronization.
-        // Rust's ClockSynchronizationEngine ensures bit-accurate temporal distribution.
-        current.saturating_add(samples_to_add as u64)
+        let next = current.saturating_add(samples_to_add as u64);
+        if self.cycle_active && self.cycle_end > self.cycle_start && next >= self.cycle_end {
+            let length = self.cycle_end - self.cycle_start;
+            self.cycle_start + (next.saturating_sub(self.cycle_start) % length)
+        } else {
+            next
+        }
     }
 
     /// INDUSTRIAL: Sets the transport state with absolute memory precision and timing sovereignty.
@@ -50,7 +55,21 @@ impl TransportOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide transport state.
     pub fn audit_transport_manager(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic playback auditing logic.
-        !self.cycle_active || self.cycle_end > self.cycle_start
+        (!self.cycle_active || self.cycle_end > self.cycle_start)
+            && (!self.is_recording || self.is_playing)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TransportOrchestrator;
+
+    #[test]
+    fn transport_manager_wraps_cycle_and_rejects_recording_pause() {
+        let mut transport = TransportOrchestrator::new();
+        transport.set_cycle(100, 200, true);
+        assert_eq!(transport.advance(150, 75), 125);
+        transport.set_recording(true);
+        assert!(!transport.audit_transport_manager());
     }
 }

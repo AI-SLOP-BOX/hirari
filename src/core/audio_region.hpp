@@ -32,8 +32,32 @@ public:
     virtual float getSample(uint32_t channel, uint64_t sampleIdx) const = 0;
     
     virtual void getSample(double pos, float& l, float& r) const {
-        l = getSample(0, static_cast<uint64_t>(pos));
-        r = (getNumChannels() > 1) ? getSample(1, static_cast<uint64_t>(pos)) : l;
+        l = r = 0.0f;
+        const uint64_t count = getNumSamples();
+        if (count == 0 || !std::isfinite(pos) || pos < 0.0) return;
+        const double bounded = std::min(pos, static_cast<double>(count - 1));
+        const uint64_t base = static_cast<uint64_t>(bounded);
+        const float t = static_cast<float>(bounded - static_cast<double>(base));
+        auto sample = [&](uint32_t channel, int64_t index) {
+            const uint64_t clamped = static_cast<uint64_t>(std::clamp<int64_t>(
+                index, 0, static_cast<int64_t>(count - 1)));
+            const float value = getSample(channel, clamped);
+            return std::isfinite(value) ? value : 0.0f;
+        };
+        auto hermite = [&](uint32_t channel) {
+            const float y0 = sample(channel, static_cast<int64_t>(base) - 1);
+            const float y1 = sample(channel, static_cast<int64_t>(base));
+            const float y2 = sample(channel, static_cast<int64_t>(base) + 1);
+            const float y3 = sample(channel, static_cast<int64_t>(base) + 2);
+            const float c0 = y1;
+            const float c1 = 0.5f * (y2 - y0);
+            const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+            const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+            const float value = ((c3 * t + c2) * t + c1) * t + c0;
+            return std::isfinite(value) ? value : 0.0f;
+        };
+        l = hermite(0);
+        r = getNumChannels() > 1 ? hermite(1) : l;
     }
 
     virtual uint64_t getNumSamples() const = 0;
@@ -86,6 +110,8 @@ private:
 
 class AudioRegion {
 public:
+    struct GainRange { uint64_t start; uint64_t end; float gain; };
+    struct FadeRange { uint64_t start; uint64_t end; uint64_t fadeIn; uint64_t fadeOut; };
     struct Meta {
         uint32_t id;
         std::string name;
@@ -119,6 +145,7 @@ public:
             std::isfinite(projectBPM) && projectBPM > 10.0f) {
             m_warpRatio = (double)m_meta.sourceBPM / projectBPM; 
         }
+        publishAudioNoteSnapshot();
     }
 
     void render(float* outL, float* outR, uint64_t timelineStart, uint32_t len) const {
@@ -132,6 +159,26 @@ public:
             uint64_t rIdx = rStart + s;
             if (rIdx >= m_meta.sampleLength) break;
 
+            const bool rangeMuted = std::any_of(
+                m_mutedRanges.begin(), m_mutedRanges.end(),
+                [rIdx](const auto& range) { return rIdx >= range.first && rIdx < range.second; });
+            if (rangeMuted) continue;
+            float rangeGain = 1.0f;
+            for (const auto& range : m_gainRanges) {
+                if (rIdx >= range.start && rIdx < range.end) rangeGain *= range.gain;
+            }
+            for (const auto& range : m_fadeRanges) {
+                if (rIdx >= range.start && rIdx < range.end) {
+                    const auto length = static_cast<float>(range.end - range.start);
+                    const auto offset = static_cast<float>(rIdx - range.start);
+                    const float inGain = range.fadeIn == 0 ? 1.0f :
+                        std::clamp((offset + 1.0f) / static_cast<float>(range.fadeIn), 0.0f, 1.0f);
+                    const float outGain = range.fadeOut == 0 ? 1.0f :
+                        std::clamp((length - offset) / static_cast<float>(range.fadeOut), 0.0f, 1.0f);
+                    rangeGain *= inGain * outGain;
+                }
+            }
+
             float fade = 1.0f;
             if (m_meta.fadeInSamples > 0 && rIdx < m_meta.fadeInSamples) {
                 fade = (float)rIdx / (float)m_meta.fadeInSamples;
@@ -143,11 +190,16 @@ public:
             }
 
             double pitchRatio = 1.0;
+            double formantCents = 0.0;
             const double relativeSeconds = static_cast<double>(rIdx) / getSampleRate();
-            for (const auto& segment : m_audioNoteSegments) {
+            const auto noteSnapshot = std::atomic_load_explicit(&m_audioNoteSnapshot,
+                                                                std::memory_order_acquire);
+            for (const auto& segment : noteSnapshot ? *noteSnapshot : m_audioNoteSegments) {
                 if (relativeSeconds >= segment.startSeconds && relativeSeconds <= segment.endSeconds) {
                     const double cents = segment.pitchAt(relativeSeconds);
+                    const double formant = segment.formantAt(relativeSeconds);
                     if (std::isfinite(cents)) pitchRatio = std::pow(2.0, std::clamp(cents, -4800.0, 4800.0) / 1200.0);
+                    if (std::isfinite(formant)) formantCents = std::clamp(formant, -2400.0, 2400.0);
                     break;
                 }
             }
@@ -163,10 +215,82 @@ public:
                  m_stretcher.process(m_source.get(), finalSourcePos, m_warpRatio, sL, sR);
             }
 
-            outL[s] += sL * m_meta.clipGain * fade;
-            outR[s] += sR * m_meta.clipGain * fade;
+            const float tilt = static_cast<float>(formantCents / 2400.0) * 0.5f;
+            const float nextL = getInterpolatedSample(0, finalSourcePos + 1.0);
+            const float nextR = getInterpolatedSample(1, finalSourcePos + 1.0);
+            sL = std::clamp(sL + (nextL - sL) * tilt, -2.0f, 2.0f);
+            sR = std::clamp(sR + (nextR - sR) * tilt, -2.0f, 2.0f);
+            outL[s] += sL * m_meta.clipGain * fade * rangeGain;
+            outR[s] += sR * m_meta.clipGain * fade * rangeGain;
         }
     }
+
+    /// Add a non-destructive mute range in source samples. Ranges are clipped
+    /// to the region and merged on render without touching the source file.
+    bool muteRange(uint64_t start, uint64_t end) {
+        if (start >= end || start >= m_meta.sampleLength || m_mutedRanges.size() >= 4096) return false;
+        end = std::min(end, m_meta.sampleLength);
+        m_mutedRanges.emplace_back(start, end);
+        std::sort(m_mutedRanges.begin(), m_mutedRanges.end());
+        std::vector<std::pair<uint64_t, uint64_t>> merged;
+        for (const auto& range : m_mutedRanges) {
+            if (!merged.empty() && range.first <= merged.back().second) {
+                merged.back().second = std::max(merged.back().second, range.second);
+            } else {
+                merged.push_back(range);
+            }
+        }
+        m_mutedRanges = std::move(merged);
+        return true;
+    }
+
+    void clearMutedRanges() { m_mutedRanges.clear(); }
+
+    const std::vector<std::pair<uint64_t, uint64_t>>& getMutedRanges() const noexcept {
+        return m_mutedRanges;
+    }
+
+    bool applyGainRange(uint64_t start, uint64_t end, float gain) {
+        if (start >= end || start >= m_meta.sampleLength || !std::isfinite(gain) ||
+            gain < 0.0f || gain > 16.0f) return false;
+        end = std::min(end, m_meta.sampleLength);
+        for (auto& range : m_gainRanges) {
+            if (std::abs(range.gain - gain) < 1.0e-6f &&
+                range.end >= start && end >= range.start) {
+                range.start = std::min(range.start, start);
+                range.end = std::max(range.end, end);
+                return true;
+            }
+        }
+        if (m_gainRanges.size() >= 4096) return false;
+        m_gainRanges.push_back({start, end, gain});
+        std::sort(m_gainRanges.begin(), m_gainRanges.end(),
+                  [](const GainRange& a, const GainRange& b) {
+                      if (a.start != b.start) return a.start < b.start;
+                      return a.end < b.end;
+                  });
+        return true;
+    }
+
+    void clearGainRanges() { m_gainRanges.clear(); }
+
+    const std::vector<GainRange>& getGainRanges() const noexcept { return m_gainRanges; }
+
+    bool applyFadeRange(uint64_t start, uint64_t end, uint64_t fadeIn, uint64_t fadeOut) {
+        if (start >= end || start >= m_meta.sampleLength || m_fadeRanges.size() >= 4096) return false;
+        m_fadeRanges.push_back({start, std::min(end, m_meta.sampleLength),
+                                std::min(fadeIn, end - start), std::min(fadeOut, end - start)});
+        std::sort(m_fadeRanges.begin(), m_fadeRanges.end(),
+                  [](const FadeRange& a, const FadeRange& b) {
+                      if (a.start != b.start) return a.start < b.start;
+                      return a.end < b.end;
+                  });
+        return true;
+    }
+
+    void clearFadeRanges() { m_fadeRanges.clear(); }
+
+    const std::vector<FadeRange>& getFadeRanges() const noexcept { return m_fadeRanges; }
 
     float getInterpolatedSample(uint32_t chan, double pos) const {
         if (!m_source) return 0.0f;
@@ -235,6 +359,12 @@ public:
     // follow trims, duplication and project saves without rewriting source.
     bool upsertAudioNoteSegment(::aura::editing::AudioNoteSegment segment) {
         if (!segment.valid()) return false;
+        for (const auto& current : m_audioNoteSegments) {
+            const bool sameStart = std::abs(current.startSeconds - segment.startSeconds) < 1e-9;
+            const bool overlaps = segment.startSeconds < current.endSeconds &&
+                                  current.startSeconds < segment.endSeconds;
+            if (overlaps && !sameStart) return false;
+        }
         auto it = std::find_if(m_audioNoteSegments.begin(), m_audioNoteSegments.end(),
             [&](const ::aura::editing::AudioNoteSegment& current) {
                 return std::abs(current.startSeconds - segment.startSeconds) < 1e-9;
@@ -243,11 +373,19 @@ public:
         else *it = std::move(segment);
         std::sort(m_audioNoteSegments.begin(), m_audioNoteSegments.end(),
             [](const auto& a, const auto& b) { return a.startSeconds < b.startSeconds; });
+        publishAudioNoteSnapshot();
         return true;
     }
 
+    void clearAudioNoteSegments() { m_audioNoteSegments.clear(); publishAudioNoteSnapshot(); }
+
     const std::vector<::aura::editing::AudioNoteSegment>& getAudioNoteSegments() const noexcept {
         return m_audioNoteSegments;
+    }
+    std::vector<::aura::editing::AudioNoteSegment> getAudioNoteSegmentsSnapshot() const {
+        const auto snapshot = std::atomic_load_explicit(&m_audioNoteSnapshot,
+                                                         std::memory_order_acquire);
+        return snapshot ? *snapshot : std::vector<::aura::editing::AudioNoteSegment>{};
     }
 
     // Run analysis off the audio callback and replace only the analysis layer;
@@ -255,10 +393,15 @@ public:
     bool analyzeAudioNotes(const float* monoSamples, std::size_t sampleCount,
                            double sampleRate,
                            ::aura::editing::AudioPitchAnalyzer::Config config) {
+        if ((sampleCount > 0 && monoSamples == nullptr) ||
+            sampleCount > 16'000'000 || !std::isfinite(sampleRate) ||
+            sampleRate < 8'000.0 || sampleRate > 384'000.0) {
+            return false;
+        }
         auto detected = ::aura::editing::AudioPitchAnalyzer::analyze(
             monoSamples, sampleCount, sampleRate, config);
-        if (sampleCount > 0 && monoSamples == nullptr) return false;
         m_audioNoteSegments = std::move(detected);
+        publishAudioNoteSnapshot();
         return true;
     }
 
@@ -269,12 +412,20 @@ public:
     }
 
 private:
+    void publishAudioNoteSnapshot() const {
+        auto snapshot = std::make_shared<const std::vector<::aura::editing::AudioNoteSegment>>(m_audioNoteSegments);
+        std::atomic_store_explicit(&m_audioNoteSnapshot, std::move(snapshot), std::memory_order_release);
+    }
     std::shared_ptr<IAudioSource> m_source;
     Meta m_meta;
     double m_warpRatio = 1.0;
     mutable ::Aura::DSP::Analysis::SovereignTimeStretcher m_stretcher;
     std::shared_ptr<Rendering::WaveformOverview> m_waveOverview;
     std::vector<::aura::editing::AudioNoteSegment> m_audioNoteSegments;
+    mutable std::shared_ptr<const std::vector<::aura::editing::AudioNoteSegment>> m_audioNoteSnapshot;
+    std::vector<std::pair<uint64_t, uint64_t>> m_mutedRanges;
+    std::vector<GainRange> m_gainRanges;
+    std::vector<FadeRange> m_fadeRanges;
 };
 
 } // namespace Aura::Core

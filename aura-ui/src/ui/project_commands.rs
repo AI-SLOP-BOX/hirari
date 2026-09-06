@@ -1,5 +1,5 @@
 use aura_core_bridge::AuraCore;
-use slint::{Model, VecModel};
+use slint::{ComponentHandle, Model, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -247,6 +247,13 @@ pub fn handle_command(
                     "Recovered backup · Auto-save Ready".into()
                 } else {
                     "Restored · Auto-save Ready".into()
+                });
+                let weak = ui.as_weak();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_show_genesis(false);
+                        ui.set_workspace_preset("arrange".into());
+                    }
                 });
             }
             ui.set_last_action(if ok {

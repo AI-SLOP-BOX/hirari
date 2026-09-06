@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <algorithm>
 #include <vector>
 
 namespace Aura::DSP::Instruments {
@@ -16,10 +17,18 @@ class VirtualAnalogOscillator {
 public:
     enum class Waveform { Sawtooth, Square, Triangle };
 
-    VirtualAnalogOscillator(double sr = 44100.0) : m_sampleRate(sr) {}
+    VirtualAnalogOscillator(double sr = 44100.0)
+        : m_sampleRate(std::isfinite(sr) && sr >= 8000.0 ? sr : 44100.0) {}
 
     void setFrequency(float freq) {
-        m_phaseIncrement = freq / m_sampleRate;
+        if (!std::isfinite(freq)) {
+            m_phaseIncrement = 0.0f;
+            return;
+        }
+        // Keep the BLEP transition width valid and prevent alias-dominated
+        // frequencies from destabilising the phase accumulator.
+        const float limited = std::clamp(freq, 0.0f, static_cast<float>(m_sampleRate * 0.49));
+        m_phaseIncrement = limited / static_cast<float>(m_sampleRate);
     }
 
     void setWaveform(Waveform type) { m_waveform = type; }

@@ -64,32 +64,61 @@ impl AutomationCurveOrchestrator {
 
     /// Non-destructive automation transforms used by the lane editor.
     pub fn trim(&mut self, start: f64, end: f64) -> bool {
-        if !start.is_finite() || !end.is_finite() || end <= start { return false; }
-        self.points.retain(|point| point.time >= start && point.time <= end);
-        for point in &mut self.points { point.time -= start; }
-        self.last_idx = 0; true
+        if !start.is_finite() || !end.is_finite() || end <= start {
+            return false;
+        }
+        self.points
+            .retain(|point| point.time >= start && point.time <= end);
+        for point in &mut self.points {
+            point.time -= start;
+        }
+        self.last_idx = 0;
+        true
     }
 
     pub fn scale_time(&mut self, factor: f64) -> bool {
-        if !factor.is_finite() || factor <= 0.0 { return false; }
-        for point in &mut self.points { point.time *= factor; }
-        self.last_idx = 0; true
+        if !factor.is_finite() || factor <= 0.0 {
+            return false;
+        }
+        for point in &mut self.points {
+            point.time *= factor;
+        }
+        self.last_idx = 0;
+        true
     }
 
     pub fn scale_values(&mut self, factor: f32, offset: f32) -> bool {
-        if !factor.is_finite() || !offset.is_finite() { return false; }
-        for point in &mut self.points { point.value = point.value * factor + offset; }
+        if !factor.is_finite() || !offset.is_finite() {
+            return false;
+        }
+        for point in &mut self.points {
+            point.value = point.value * factor + offset;
+        }
         true
     }
 
     pub fn invert_values(&mut self, center: f32) -> bool {
-        if !center.is_finite() { return false; }
-        for point in &mut self.points { point.value = center * 2.0 - point.value; }
+        if !center.is_finite() {
+            return false;
+        }
+        for point in &mut self.points {
+            point.value = center * 2.0 - point.value;
+        }
         true
     }
     pub fn reverse_time(&mut self, duration: f64) -> bool {
-        if !duration.is_finite() || duration < 0.0 || self.points.iter().any(|p| p.time < 0.0 || p.time > duration) { return false; }
-        for point in &mut self.points { point.time = duration - point.time; }
+        if !duration.is_finite()
+            || duration < 0.0
+            || self
+                .points
+                .iter()
+                .any(|p| p.time < 0.0 || p.time > duration)
+        {
+            return false;
+        }
+        for point in &mut self.points {
+            point.time = duration - point.time;
+        }
         self.points.sort_by(|a, b| a.time.total_cmp(&b.time));
         self.last_idx = 0;
         true
@@ -97,10 +126,33 @@ impl AutomationCurveOrchestrator {
 
     /// Applies one edit atomically to a linked lane set; all lanes are
     /// validated before mutation so a malformed request cannot partially edit.
-    pub fn apply_linked_transform(lanes: &mut [&mut Self], start: f64, end: f64, time_scale: f64, value_scale: f32, offset: f32) -> bool {
-        if lanes.is_empty() || !start.is_finite() || !end.is_finite() || end <= start || !time_scale.is_finite() || time_scale <= 0.0 || !value_scale.is_finite() || !offset.is_finite() { return false; }
-        if !lanes.iter().all(|lane| lane.audit_automation_curve()) { return false; }
-        for lane in lanes { lane.trim(start, end); lane.scale_time(time_scale); lane.scale_values(value_scale, offset); }
+    pub fn apply_linked_transform(
+        lanes: &mut [&mut Self],
+        start: f64,
+        end: f64,
+        time_scale: f64,
+        value_scale: f32,
+        offset: f32,
+    ) -> bool {
+        if lanes.is_empty()
+            || !start.is_finite()
+            || !end.is_finite()
+            || end <= start
+            || !time_scale.is_finite()
+            || time_scale <= 0.0
+            || !value_scale.is_finite()
+            || !offset.is_finite()
+        {
+            return false;
+        }
+        if !lanes.iter().all(|lane| lane.audit_automation_curve()) {
+            return false;
+        }
+        for lane in lanes {
+            lane.trim(start, end);
+            lane.scale_time(time_scale);
+            lane.scale_values(value_scale, offset);
+        }
         true
     }
 

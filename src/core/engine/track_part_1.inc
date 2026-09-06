@@ -89,8 +89,34 @@ public:
             std::sort(segment.anchors.begin(), segment.anchors.end(),
                       [](const auto& a, const auto& b) {
                           return a.positionSeconds < b.positionSeconds;
-                      });
+                  });
         }
+        // Range edits are also serialized project data. Bound and normalize
+        // them before the immutable snapshot reaches the realtime loop so a
+        // malformed project cannot create an unbounded per-sample scan or
+        // invalid fade arithmetic.
+        if (normalized.rangeEdits.size() > 4096) {
+            normalized.rangeEdits.resize(4096);
+        }
+        normalized.rangeEdits.erase(
+            std::remove_if(normalized.rangeEdits.begin(), normalized.rangeEdits.end(),
+                           [&normalized](const Region::RangeEdit& edit) {
+                               return edit.start >= edit.end ||
+                                      edit.start >= normalized.len ||
+                                      !std::isfinite(edit.gain) || edit.gain < 0.0f ||
+                                      edit.gain > 16.0f;
+                           }),
+            normalized.rangeEdits.end());
+        for (auto& edit : normalized.rangeEdits) {
+            edit.end = std::min(edit.end, normalized.len);
+            const uint64_t length = edit.end - edit.start;
+            edit.fadeIn = std::min(edit.fadeIn, length);
+            edit.fadeOut = std::min(edit.fadeOut, length);
+        }
+        std::sort(normalized.rangeEdits.begin(), normalized.rangeEdits.end(),
+                  [](const Region::RangeEdit& a, const Region::RangeEdit& b) {
+                      return a.start < b.start;
+                  });
         std::sort(normalized.audioNoteSegments.begin(),
                   normalized.audioNoteSegments.end(),
                   [](const auto& a, const auto& b) {
@@ -256,6 +282,14 @@ private:
             buffer.clear(std::min(sz, buffer.getNumSamples()));
             return;
         }
+        // The caller-provided frame count is untrusted at device/plugin
+        // boundaries.  Every destination pointer below is only valid for the
+        // buffer's actual sample capacity; fail closed before the frozen,
+        // region, or automation paths can index past it.
+        if (sz == 0 || buffer.getNumSamples() < sz) {
+            buffer.clear(std::min(sz, buffer.getNumSamples()));
+            return;
+        }
         
         if (m_muted.load(std::memory_order_relaxed)) {
             buffer.clear(sz);
@@ -345,21 +379,73 @@ private:
                     fade = std::min(fade, static_cast<float>(timelineLength - relative) /
                                            static_cast<float>(region.crossfadeOutSamples));
                 }
-                const float gain = region.clipGain * std::clamp(fade, 0.0f, 1.0f);
+                // Non-destructive waveform range edits are evaluated in the
+                // region's local timeline.  Invalid entries are ignored so a
+                // hand-edited project can never destabilize the RT loop.
+                float rangeGain = 1.0f;
+                float rangeFade = 1.0f;
+                bool rangeMuted = false;
+                for (const auto& edit : region.rangeEdits) {
+                    // Range edits are authored against one clip iteration,
+                    // so looping a region repeats the same edit pattern.
+                    if (edit.start > loopRelative) break;
+                    if (edit.start >= edit.end || loopRelative < edit.start || loopRelative >= edit.end) continue;
+                    if (!std::isfinite(edit.gain) || edit.gain < 0.0f || edit.gain > 16.0f) continue;
+                    rangeGain = std::min(rangeGain * edit.gain, 16.0f);
+                    if (!std::isfinite(rangeGain)) rangeGain = 16.0f;
+                    const uint64_t length = edit.end - edit.start;
+                    if (edit.fadeIn > 0 && edit.fadeIn <= length && loopRelative - edit.start < edit.fadeIn) {
+                        rangeFade = std::min(rangeFade, static_cast<float>(loopRelative - edit.start) /
+                                                       static_cast<float>(edit.fadeIn));
+                    }
+                    if (edit.fadeOut > 0 && edit.fadeOut <= length && loopRelative - edit.start >= length - edit.fadeOut) {
+                        rangeFade = std::min(rangeFade, static_cast<float>(edit.end - loopRelative) /
+                                                       static_cast<float>(edit.fadeOut));
+                    }
+                    if (edit.gain == 0.0f) rangeMuted = true;
+                }
+                if (rangeMuted) continue;
+                if (!std::isfinite(rangeFade)) rangeFade = 1.0f;
+                const float gain = region.clipGain * std::clamp(fade * rangeFade * rangeGain, 0.0f, 16.0f);
                 double notePitchRatio = 1.0;
+                double noteFormantCents = 0.0;
                 if (!region.audioNoteSegments.empty()) {
                     const double noteSeconds = static_cast<double>(loopRelative) /
                         std::max(1.0, m_sampleRate);
-                    for (const auto& segment : region.audioNoteSegments) {
-                        if (noteSeconds < segment.startSeconds) break;
-                        if (noteSeconds <= segment.endSeconds) {
-                            const double cents = segment.pitchAt(noteSeconds);
-                            if (std::isfinite(cents)) {
-                                notePitchRatio = std::pow(2.0,
-                                    std::clamp(cents, -4800.0, 4800.0) / 1200.0);
-                            }
-                            break;
+                    // Segments are normalized and sorted by addRegion(). A
+                    // linear scan here made every audio sample revisit up to
+                    // 4096 segments; use the ordered start times to keep the
+                    // VariAudio path logarithmic without allocating on RT.
+                    auto it = std::upper_bound(
+                        region.audioNoteSegments.begin(), region.audioNoteSegments.end(),
+                        noteSeconds,
+                        [](double time, const auto& segment) {
+                            return time < segment.startSeconds;
+                        });
+                    const aura::editing::AudioNoteSegment* matchedSegment = nullptr;
+                    // Preserve the historical first-match rule for malformed
+                    // overlapping segments while keeping normal (disjoint)
+                    // projects logarithmic. Only segments whose end still
+                    // reaches the query time can overlap the candidate.
+                    while (it != region.audioNoteSegments.begin()) {
+                        const auto candidateIt = std::prev(it);
+                        const auto& candidate = *candidateIt;
+                        if (candidate.endSeconds < noteSeconds) break;
+                        if (noteSeconds >= candidate.startSeconds &&
+                            noteSeconds <= candidate.endSeconds) {
+                            matchedSegment = &candidate;
                         }
+                        it = candidateIt;
+                    }
+                    if (matchedSegment != nullptr) {
+                        const auto& segment = *matchedSegment;
+                        const double cents = segment.pitchAt(noteSeconds);
+                        const double formant = segment.formantAt(noteSeconds);
+                        if (std::isfinite(cents)) {
+                            notePitchRatio = std::pow(2.0,
+                                std::clamp(cents, -4800.0, 4800.0) / 1200.0);
+                        }
+                        if (std::isfinite(formant)) noteFormantCents = std::clamp(formant, -2400.0, 2400.0);
                     }
                 }
                 if (!std::isfinite(notePitchRatio) || notePitchRatio <= 0.0) continue;
@@ -386,8 +472,15 @@ private:
                 const float currentR = sourceR[absoluteIndex];
                 const float nextL = sourceL[nextAbsoluteIndex];
                 const float nextR = sourceR[nextAbsoluteIndex];
-                const float sampleL = currentL + (nextL - currentL) * fraction;
-                const float sampleR = currentR + (nextR - currentR) * fraction;
+                float sampleL = currentL + (nextL - currentL) * fraction;
+                float sampleR = currentR + (nextR - currentR) * fraction;
+                // Lightweight formant tilt: positive offsets emphasize the
+                // local high-frequency slope, negative offsets soften it.
+                // It is bounded and sample-local, keeping the RT path free of
+                // allocations while making the stored formant curve audible.
+                const float formantTilt = static_cast<float>(noteFormantCents / 2400.0);
+                sampleL = std::clamp(sampleL + (nextL - currentL) * formantTilt * 0.5f, -2.0f, 2.0f);
+                sampleR = std::clamp(sampleR + (nextR - currentR) * formantTilt * 0.5f, -2.0f, 2.0f);
                 if (!std::isfinite(sampleL) || !std::isfinite(sampleR)) continue;
                 destL[i] += sampleL * gain;
                 destR[i] += sampleR * gain;
@@ -412,10 +505,40 @@ private:
         const auto* panAutomation = m_panAutomation.load(std::memory_order_acquire);
         const double automationTime = static_cast<double>(playhead);
         if (volumeAutomation && !volumeAutomation->empty()) {
-            m_strip.setGain(evaluateAutomation(*volumeAutomation, automationTime, m_volumeAutomationHint));
+            // Evaluate volume automation at sample resolution.  Updating the
+            // channel-strip target once per block makes fast ramps zipper at
+            // block boundaries and is observably different from Cubase's
+            // sample-accurate automation.  Keep the strip at unity here and
+            // apply the bounded curve directly to the pre-fader signal.
+            m_strip.setGain(1.0f);
+            float* left = buffer.getWritePointer(0);
+            float* right = buffer.getWritePointer(1);
+            for (uint32_t sample = 0; sample < sz; ++sample) {
+                const float gain = std::clamp(
+                    evaluateAutomation(*volumeAutomation,
+                        automationTime + static_cast<double>(sample),
+                        m_volumeAutomationHint), 0.0f, 2.0f);
+                left[sample] *= gain;
+                right[sample] *= gain;
+            }
         }
         if (panAutomation && !panAutomation->empty()) {
-            m_strip.setPan(evaluateAutomation(*panAutomation, automationTime, m_panAutomationHint));
+            // Pan automation follows the same sample-accurate path.  The
+            // equal-power coefficients mirror ChannelStrip's law while
+            // avoiding a block-rate control discontinuity.
+            m_strip.setPan(0.0f);
+            float* left = buffer.getWritePointer(0);
+            float* right = buffer.getWritePointer(1);
+            for (uint32_t sample = 0; sample < sz; ++sample) {
+                const float pan = std::clamp(
+                    evaluateAutomation(*panAutomation,
+                        automationTime + static_cast<double>(sample),
+                        m_panAutomationHint), -1.0f, 1.0f);
+                constexpr float kPi = 3.14159265358979323846f;
+                const float angle = (pan + 1.0f) * 0.25f * kPi;
+                left[sample] *= std::cos(angle) * 1.41421356237f;
+                right[sample] *= std::sin(angle) * 1.41421356237f;
+            }
         }
         const auto* trackDelayAutomation = m_trackDelayAutomation.load(std::memory_order_acquire);
         if (trackDelayAutomation && !trackDelayAutomation->empty()) {
@@ -531,6 +654,9 @@ public:
     void setRecordArmed(bool armed) noexcept { m_recordArmed.store(armed, std::memory_order_release); }
     virtual uint32_t getTotalLatencySamples() const noexcept {
         return m_effectChain.getTotalLatencySamples();
+    }
+    uint32_t getTotalTailSamples() const noexcept {
+        return m_effectChain.getTotalTailSamples();
     }
     uint32_t getPdcCompensationSamples() const noexcept {
         return m_pdcRequested.load(std::memory_order_acquire);

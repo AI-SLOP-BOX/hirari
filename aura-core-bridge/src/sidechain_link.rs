@@ -28,12 +28,14 @@ impl SidechainLinkEngine {
             return;
         }
 
-        let mut rms = 0.0;
+        let mut rms = 0.0f64;
         for &sample in buffer {
-            rms += sample * sample;
+            if sample.is_finite() {
+                rms += f64::from(sample) * f64::from(sample);
+            }
         }
 
-        let rms_val = (rms / len as f32).sqrt();
+        let rms_val = (rms / len as f64).sqrt().min(16.0) as f32;
         self.level.store(rms_val.to_bits(), Ordering::SeqCst);
     }
 
@@ -43,7 +45,7 @@ impl SidechainLinkEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Sidechain Link state.
     pub fn audit_sidechain_link(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Sidechain Link auditing logic.
-        true
+        f32::from_bits(self.level.load(Ordering::Relaxed)).is_finite()
+            && f32::from_bits(self.level.load(Ordering::Relaxed)) >= 0.0
     }
 }

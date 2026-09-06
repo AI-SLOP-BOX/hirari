@@ -1,3 +1,4 @@
+#pragma once
 #include <cmath>
 #include <algorithm>
 #include <array>
@@ -19,15 +20,16 @@ public:
     }
 
     void prepareToPlay(double sr, uint32_t /*blockSize*/) noexcept override {
-        m_sampleRate = sr;
-        m_formantFilterL.setSampleRate(sr);
-        m_formantFilterR.setSampleRate(sr);
+        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0;
+        m_formantFilterL.setSampleRate(m_sampleRate);
+        m_formantFilterR.setSampleRate(m_sampleRate);
+        reset();
     }
 
     std::string getName() const override { return "Virtuoso Vocal"; }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
-        if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
+        if (m_bypassed || buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
 
         const uint32_t numSamples = buffer.getNumSamples();
         const bool isStereo = buffer.getNumChannels() >= 2;
@@ -99,11 +101,13 @@ public:
     }
     std::string getName() const override { return "DeEsser"; }
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
+        if (m_bypassed || buffer.getNumChannels() < 2 || buffer.getNumSamples() == 0) return;
+        float* l = buffer.getWritePointer(0);
+        float* r = buffer.getWritePointer(1);
+        if (!l || !r) return;
         m_filterL.updateCoefficients(6000.0f, 0.707f, Utils::ZDFFilter::Type::HighPass);
         m_filterR.updateCoefficients(6000.0f, 0.707f, Utils::ZDFFilter::Type::HighPass);
 
-        float* l = buffer.getWritePointer(0);
-        float* r = buffer.getWritePointer(1);
         for (uint32_t s = 0; s < buffer.getNumSamples(); ++s) {
             float sibL = std::abs(m_filterL.process(l[s]));
             float sibR = std::abs(m_filterR.process(r[s]));

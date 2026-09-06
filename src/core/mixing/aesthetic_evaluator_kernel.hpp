@@ -41,15 +41,15 @@ public:
      * @brief Performs actual signal analysis for aesthetic metrics.
      */
     AestheticFeatures analyze(const float* l, const float* r, uint32_t numSamples) {
-        if (numSamples == 0) return {0.5f, 0.5f, 0.5f, 0.0f, 1.0f};
+        if (!l || !r || numSamples == 0) return {0.5f, 0.5f, 0.5f, 0.0f, 1.0f};
 
         float sumSqL = 0.0f, sumSqR = 0.0f;
         float peakL = 0.0f, peakR = 0.0f;
         float dotProduct = 0.0f;
 
         for (uint32_t i = 0; i < numSamples; ++i) {
-            float sl = l[i];
-            float sr = r[i];
+            const float sl = std::isfinite(l[i]) ? std::clamp(l[i], -4.0f, 4.0f) : 0.0f;
+            const float sr = std::isfinite(r[i]) ? std::clamp(r[i], -4.0f, 4.0f) : 0.0f;
             
             sumSqL += sl * sl;
             sumSqR += sr * sr;
@@ -64,13 +64,14 @@ public:
         float avgPeak = (peakL + peakR) * 0.5f;
 
         AestheticFeatures f;
-        f.spectralBalance = std::abs(rmsL - rmsR) / (avgRMS + 1e-6f); // Symmetry measure
-        f.dynamicComplexity = (avgPeak / (avgRMS + 1e-6f)) / 10.0f; // Crest factor approximation
+        f.spectralBalance = std::clamp(std::abs(rmsL - rmsR) / (avgRMS + 1e-6f), 0.0f, 1.0f); // Symmetry measure
+        f.dynamicComplexity = std::clamp((avgPeak / (avgRMS + 1e-6f)) / 10.0f, 0.0f, 1.0f); // Crest factor approximation
         f.transientClarity = std::clamp(f.dynamicComplexity * 1.5f, 0.0f, 1.0f);
-        f.stereoWidth = std::abs(rmsL - rmsR) / (avgRMS + 1e-6f);
+        f.stereoWidth = std::clamp(1.0f - std::abs(dotProduct) /
+            (std::sqrt(sumSqL * sumSqR) + 1e-6f), 0.0f, 1.0f);
         
         // Stereo Correlation (-1 to 1)
-        f.phaseCoherence = dotProduct / (std::sqrt(sumSqL * sumSqR) + 1e-6f);
+        f.phaseCoherence = std::clamp(dotProduct / (std::sqrt(sumSqL * sumSqR) + 1e-6f), -1.0f, 1.0f);
         
         return f;
     }

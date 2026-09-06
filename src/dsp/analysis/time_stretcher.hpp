@@ -22,6 +22,7 @@ public:
  
     SovereignTimeStretcher() {
         m_hanningWindow.resize(kWindowSize);
+        std::fill(std::begin(m_overlapBuffer), std::end(m_overlapBuffer), 0.0f);
         for(uint32_t i=0; i<kWindowSize; ++i) {
             m_hanningWindow[i] = 0.5f * (1.0f - std::cos(2.0f * M_PI * i / (kWindowSize - 1)));
         }
@@ -70,7 +71,8 @@ public:
                 const uint32_t checkPos = static_cast<uint32_t>(candidate);
                 foundCandidate = true;
                 for (uint32_t i = 0; i < kHopSize; ++i) {
-                    corr += input[checkPos + i] * m_overlapBuffer[i];
+                    const float sample = std::isfinite(input[checkPos + i]) ? input[checkPos + i] : 0.0f;
+                    corr += sample * m_overlapBuffer[i];
                 }
                 if (corr > maxCorr) {
                     maxCorr = corr;
@@ -95,8 +97,32 @@ public:
  
             // Update overlap buffer for next correlation check
             for (uint32_t i = 0; i < kHopSize; ++i) {
-                m_overlapBuffer[i] = input[sourceBase + kHopSize + i];
+                const float sample = input[sourceBase + kHopSize + i];
+                m_overlapBuffer[i] = std::isfinite(sample) ? sample : 0.0f;
             }
+        }
+
+        // Flush the partial final grain instead of returning an unexplained
+        // silent tail.  The steady-state grains above remain WSOLA aligned;
+        // this bounded Hermite tail preserves continuity at the render edge.
+        for (uint32_t i = outPos; i < outputLen; ++i) {
+            const double source = std::min(static_cast<double>(inputLen - 1),
+                                           static_cast<double>(i) * ratio);
+            const uint32_t index = static_cast<uint32_t>(source);
+            const float frac = static_cast<float>(source - static_cast<double>(index));
+            auto interpolate = [input, inputLen, index](int offset) {
+                const int64_t raw = static_cast<int64_t>(index) + offset;
+                const uint32_t p = static_cast<uint32_t>(std::clamp<int64_t>(
+                    raw, 0, static_cast<int64_t>(inputLen - 1)));
+                return std::isfinite(input[p]) ? input[p] : 0.0f;
+            };
+            const float y0 = interpolate(-1), y1 = interpolate(0);
+            const float y2 = interpolate(1), y3 = interpolate(2);
+            const float c1 = 0.5f * (y2 - y0);
+            const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+            const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+            const float value = ((c3 * frac + c2) * frac + c1) * frac + y1;
+            output[i] = std::isfinite(value) ? value : 0.0f;
         }
     }
  

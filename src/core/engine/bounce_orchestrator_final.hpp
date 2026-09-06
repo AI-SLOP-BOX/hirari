@@ -8,6 +8,7 @@
 #include <map>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <unordered_set>
 #include <cctype>
 #include "../audio_buffer.hpp"
@@ -59,14 +60,31 @@ public:
             if (task.trackId == 0) continue;
             std::string stem = safeLabel(task.label);
             if (stem.empty()) stem = "track";
-            std::string filename = stem + ".wav";
+            const char* extension = format == BouncingEngine::OutputFormat::WAVE64 ? ".w64" : ".wav";
+            std::string filename = stem + extension;
             uint32_t suffix = 1;
             while (!usedNames.insert(filename).second) {
-                filename = stem + "-" + std::to_string(suffix++) + ".wav";
+                filename = stem + "-" + std::to_string(suffix++) + extension;
             }
             const auto destination = outputDirectory / filename;
-            futures.push_back(BouncingEngine::getInstance().bounceInPlace(
-                timeline, task.trackId, destination.string(), format));
+            const auto sidecar = std::filesystem::path(destination.string() + ".json");
+            if (!task.metadata.empty()) {
+                writeMetadataSidecar(destination, task.metadata);
+            } else {
+                std::error_code ec;
+                std::filesystem::remove(sidecar, ec);
+            }
+            auto render = BouncingEngine::getInstance().bounceInPlace(
+                timeline, task.trackId, destination.string(), format);
+            futures.push_back(std::async(std::launch::async,
+                [render = std::move(render), sidecar, hasMetadata = !task.metadata.empty()]() mutable {
+                    const bool success = render.get();
+                    if (!success && hasMetadata) {
+                        std::error_code ec;
+                        std::filesystem::remove(sidecar, ec);
+                    }
+                    return success;
+                }));
         }
         return futures;
     }
@@ -83,6 +101,67 @@ public:
 
 
 private:
+    // Sidecars intentionally use a tiny, deterministic object schema so batch
+    // consumers can ingest metadata without depending on a DAW project file.
+    static void writeMetadataSidecar(const std::filesystem::path& audioPath,
+                                     const std::map<std::string, std::string>& metadata) {
+        const auto sidecar = std::filesystem::path(audioPath.string() + ".json");
+        if (metadata.size() > 256) {
+            std::error_code ec;
+            std::filesystem::remove(sidecar, ec);
+            return;
+        }
+        for (const auto& [key, value] : metadata)
+            if (key.size() > 256 || value.size() > 4096) {
+                std::error_code ec;
+                std::filesystem::remove(sidecar, ec);
+                return;
+            }
+        const auto temporary = std::filesystem::path(sidecar.string() + ".tmp");
+        std::ofstream file(temporary, std::ios::trunc);
+        if (!file) return;
+        file << "{\n  \"schema\": \"aura.export-metadata.v1\"";
+        for (const auto& [key, value] : metadata) {
+            auto escape = [](const std::string& input) {
+                std::string out;
+                out.reserve(input.size() + 8);
+                for (const char c : input) {
+                    if (c == '\\' || c == '"') out.push_back('\\');
+                    if (c == '\n') { out += "\\n"; continue; }
+                    if (c == '\r') { out += "\\r"; continue; }
+                    out.push_back(c);
+                }
+                return out;
+            };
+            file << ",\n  \"" << escape(key) << "\": \"" << escape(value) << "\"";
+        }
+        file << "\n}\n";
+        file.flush();
+        if (!file) {
+            file.close();
+            std::error_code cleanup;
+            std::filesystem::remove(temporary, cleanup);
+            return;
+        }
+        file.close();
+        if (file.fail()) {
+            std::error_code cleanup;
+            std::filesystem::remove(temporary, cleanup);
+            return;
+        }
+        std::error_code ec;
+        std::filesystem::rename(temporary, sidecar, ec);
+        if (ec) {
+            // Windows does not replace an existing destination on rename.
+            // Remove only this exact sidecar, then publish the complete file.
+            ec.clear();
+            std::filesystem::remove(sidecar, ec);
+            ec.clear();
+            std::filesystem::rename(temporary, sidecar, ec);
+            if (ec) std::filesystem::remove(temporary, ec);
+        }
+    }
+
     static std::string safeLabel(const std::string& label) {
         std::string result;
         result.reserve(std::min<size_t>(label.size(), 80));
@@ -95,10 +174,6 @@ private:
             if (result.size() >= 80) break;
         }
         return result;
-    }
-
-    void processExportFinal(const ExportTask& task) {
-        (void)task;
     }
 
     std::mutex m_mutex;

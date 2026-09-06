@@ -18,7 +18,7 @@ pub struct TimelineRate {
 impl TimelineRate {
     pub fn validate(self) -> bool {
         self.sample_rate.is_finite()
-            && (1.0..=384_000.0).contains(&self.sample_rate)
+            && (8_000.0..=384_000.0).contains(&self.sample_rate)
             && self.frame_rate.is_finite()
             && (1.0..=240.0).contains(&self.frame_rate)
     }
@@ -190,6 +190,20 @@ mod tests {
         assert_eq!(clock.frame(24.0), Some(126));
         assert!((clock.subframe(24.0).unwrap() - 0.0).abs() < 1e-9);
         assert_eq!(clock.smpte(24.0).unwrap().seconds, 5);
+    }
+
+    #[test]
+    fn timeline_rate_rejects_non_audio_sample_rates() {
+        assert!(!TimelineRate {
+            sample_rate: 1.0,
+            frame_rate: 24.0,
+        }
+        .validate());
+        assert!(TimelineRate {
+            sample_rate: 48_000.0,
+            frame_rate: 24.0,
+        }
+        .validate());
     }
 
     #[test]

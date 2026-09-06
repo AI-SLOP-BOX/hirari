@@ -19,9 +19,11 @@ pub mod production_events;
 pub mod production_session;
 pub mod production_timeline;
 pub mod regions;
+pub mod spatial_orchestrator;
 pub mod stable_api;
 pub mod vfx_bindings;
 pub mod vfx_timeline_bridge;
+pub mod vocal_quality;
 use anyhow::Context;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -402,6 +404,8 @@ pub mod ffi {
             length_samples: u64,
         );
         fn set_spatial_position(self: &AudioEngine, tid: u32, x: f32, y: f32, z: f32) -> bool;
+        fn set_hrtf_kernel(self: &AudioEngine, tid: u32, left: Vec<f32>, right: Vec<f32>) -> bool;
+        fn clear_hrtf_kernel(self: &AudioEngine, tid: u32) -> bool;
         fn set_track_armed(self: &AudioEngine, tid: u32, armed: bool) -> bool;
         fn set_automation_data(
             self: &AudioEngine,
@@ -492,6 +496,17 @@ pub mod ffi {
         fn get_bounce_progress(self: &AudioEngine) -> f32;
         fn get_bounce_state(self: &AudioEngine) -> u32;
         fn cancel_bounce(self: &AudioEngine) -> bool;
+        fn pause_bounce(self: &AudioEngine) -> bool;
+        fn resume_bounce(self: &AudioEngine) -> bool;
+        fn has_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
+        fn plugin_native_editor_embedded(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
+        fn open_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32, parent: u64) -> u64;
+        fn close_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
+        fn midi_clock_tick(self: &AudioEngine, timestamp: u64);
+        fn midi_clock_ticks(self: &AudioEngine) -> u64;
+        fn midi_clock_last_tick(self: &AudioEngine) -> u64;
+        fn midi_clock_rate(self: &AudioEngine) -> f64;
+        fn set_midi_clock_rate(self: &AudioEngine, bpm: f64);
         fn execute_auto_mixing(self: &AudioEngine) -> bool;
         fn execute_auto_arrangement(self: &AudioEngine) -> bool;
         fn set_project_scale(self: &AudioEngine, root: i32, scale_type: i32) -> bool;
@@ -548,6 +563,9 @@ pub mod ffi {
         ) -> bool;
 
         fn get_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> Vec<f32>;
+        fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
+        fn poll_region_waveform(self: &AudioEngine, request: u64) -> Vec<f32>;
+        fn region_waveform_pending(self: &AudioEngine, request: u64) -> bool;
         fn get_mixer_levels_v(self: &AnalysisHub) -> Vec<f32>;
         fn get_spectral_data_v(self: &AnalysisHub) -> Vec<f32>;
         fn get_spectral_partials_v(self: &AnalysisHub) -> Vec<f32>;

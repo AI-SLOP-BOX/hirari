@@ -61,6 +61,41 @@ impl AuraUnifiedOrchestrator {
             .fetch_add(num_samples as u64, Ordering::AcqRel);
     }
 
+    /// Runs a real stereo block through the canonical native graph while
+    /// retaining the transport diagnostics exposed by this compatibility
+    /// shim. This is the migration-safe entry point for callers that still
+    /// own an `AuraUnifiedOrchestrator`; it never creates a second Rust DSP
+    /// graph or reports success without processing audio.
+    pub fn render_block_with_core(
+        &self,
+        core: &crate::AuraCore,
+        left: &mut [f32],
+        right: &mut [f32],
+        ctx: &EngineContext,
+    ) -> bool {
+        if left.is_empty()
+            || left.len() != right.len()
+            || left.len() > 16_384
+            || !self.is_active
+            || ctx.block_size == 0
+            || ctx.block_size as usize != left.len()
+            || !ctx.sample_rate.is_finite()
+            || ctx.sample_rate <= 0.0
+        {
+            return false;
+        }
+        let processed = core.process_audio_block(left, right);
+        if processed {
+            self.last_sample_rate_bits
+                .store(ctx.sample_rate.to_bits(), Ordering::Release);
+            self.last_block_size
+                .store(ctx.block_size, Ordering::Release);
+            self.rendered_samples
+                .fetch_add(left.len() as u64, Ordering::AcqRel);
+        }
+        processed
+    }
+
     /// INDUSTRIAL: Performs a forensic audit of the project-wide master rendering state.
     pub fn audit_unified_engine(&self) -> bool {
         self.is_active
