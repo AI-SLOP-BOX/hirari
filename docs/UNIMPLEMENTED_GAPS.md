@@ -277,7 +277,7 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 - `src/dsp/effects/console_dsp.hpp`の空processを実装。入力／サイドチェイン検出、VCA型attack/release、threshold/ratio、drive付きtanh飽和、有限値保護を追加。
 - `src/dsp/effects/pitch_corrector.hpp`の空processを実装。ブロック内ゼロクロス推定、最近傍半音スナップ、補正量平滑化、既存PitchShifter接続、未検出時の安全なパススルーを追加。
 - `src/core/engine/scale_system.hpp`のscale／chordスタブを実装。Major／Minor等の正しい12音マスク、rootを考慮した最近傍量子化、入力検証付きコード履歴を追加。
-- `aura-core-bridge/src/group_manager.rs`と`vca_manager.rs`の空管理処理を実装。グループ双方向所属、属性伝播、整合性監査、VCAゲインの有限値検証、トラック割当、階層ゲイン解決を追加。
+- `aura-core-bridge/src/track_group_orchestrator.rs`と`vca_gain_orchestrator.rs`の空管理処理を実装。グループ双方向所属、属性伝播、整合性監査、VCAゲインの有限値検証、トラック割当、階層ゲイン解決を追加。
 - C++の`GroupManager`／`VCAManager`／`VCAControlSystem`にも所属管理、属性同期、VCAゲイン解決を実装し、Rust側だけに処理が閉じる状態を解消。
 - Trackのブロック処理からC++ `VCAManager`の解決済みゲインをO(1) atomic lookupで参照し、エフェクトチェーン後のTrack信号へ適用。
 

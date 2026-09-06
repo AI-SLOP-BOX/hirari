@@ -105,7 +105,7 @@
   - mappingを参照せず値を適用しない。
 - [sidechain_manager.rs:29-34](../aura-core-bridge/src/sidechain_manager.rs:29)
   - link解決を行わない。
-- [marker_system.rs:49-54](../aura-core-bridge/src/marker_system.rs:49)
+- [marker_types.rs:49-54](../aura-core-bridge/src/marker_types.rs:49)
   - tempo同期位置が更新されない。
 - [mixer_telemetry.rs:33-37](../aura-core-bridge/src/mixer_telemetry.rs:33)
   - meter値が更新されない。

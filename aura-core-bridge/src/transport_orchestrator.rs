@@ -54,7 +54,7 @@ impl TransportOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide transport state.
-    pub fn audit_transport_manager(&self) -> bool {
+    pub fn audit_transport_orchestrator(&self) -> bool {
         (!self.cycle_active || self.cycle_end > self.cycle_start)
             && (!self.is_recording || self.is_playing)
     }
@@ -70,6 +70,6 @@ mod tests {
         transport.set_cycle(100, 200, true);
         assert_eq!(transport.advance(150, 75), 125);
         transport.set_recording(true);
-        assert!(!transport.audit_transport_manager());
+        assert!(!transport.audit_transport_orchestrator());
     }
 }

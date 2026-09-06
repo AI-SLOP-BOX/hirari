@@ -113,7 +113,7 @@ impl GridOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide temporal mapping state.
-    pub fn audit_grid_system(&self) -> bool {
+    pub fn audit_timeline_grid(&self) -> bool {
         self.bpm.is_finite()
             && (20.0..=999.0).contains(&self.bpm)
             && self.numerator > 0

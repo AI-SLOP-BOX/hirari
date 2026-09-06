@@ -93,7 +93,7 @@ impl GroupOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide group state.
-    pub fn audit_group_manager(&self) -> bool {
+    pub fn audit_track_group_orchestrator(&self) -> bool {
         self.groups.iter().all(|(group_id, tracks)| {
             self.group_configs.contains_key(group_id)
                 && tracks.iter().all(|track_id| {

@@ -96,7 +96,7 @@ impl MetronomeOrchestrator {
         }
     }
 
-    pub fn audit_metronome_engine(&self) -> bool {
+    pub fn audit_metronome_clock(&self) -> bool {
         self.sample_rate.is_finite()
             && self.sample_rate > 0.0
             && self.bpm.is_finite()

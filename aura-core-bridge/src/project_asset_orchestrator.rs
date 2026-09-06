@@ -126,7 +126,7 @@ impl ProjectOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide asset state.
-    pub fn audit_project_manager(&self) -> bool {
+    pub fn audit_project_asset_orchestrator(&self) -> bool {
         !self.project_dir.is_empty() && self.assets.audit_assets()
     }
 }
@@ -320,7 +320,7 @@ mod tests {
             vec![source.to_string_lossy().into_owned()],
         ));
         assert_eq!(manager.asset_paths.len(), 1);
-        assert!(manager.audit_project_manager());
+        assert!(manager.audit_project_asset_orchestrator());
         fs::remove_dir_all(project).unwrap();
     }
 

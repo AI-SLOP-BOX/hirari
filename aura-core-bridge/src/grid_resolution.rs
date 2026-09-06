@@ -51,7 +51,7 @@ impl SnapOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide rhythmic alignment state.
-    pub fn audit_grid_snap_manager(&self) -> bool {
+    pub fn audit_grid_resolution(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic rhythmic auditing logic.
         true
     }

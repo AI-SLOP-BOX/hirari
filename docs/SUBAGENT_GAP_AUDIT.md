@@ -187,7 +187,7 @@ P0/P1の止血後に以下を処理する。
 
 ## 追加の一括実装
 
-- `transport.rs` / `transport_manager.rs`: サンプル位置のsaturating加算、無効BPM/SR拒否、cycle範囲検証、録音状態の整合化
+- `transport_state.rs` / `transport_orchestrator.rs`: サンプル位置のsaturating加算、無効BPM/SR拒否、cycle範囲検証、録音状態の整合化
 - `automation_recorder.rs`: flush後の間引き結果保持と状態監査
 - `zero_crossing_engine.rs`: target位置のクランプ、NaNサンプルの安全化
 - `automation_curve.rs`: NaN/Inf点拒否、重複時間の安全化、指数補間、実状態監査

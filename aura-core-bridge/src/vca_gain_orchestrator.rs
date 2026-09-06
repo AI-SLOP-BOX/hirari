@@ -23,7 +23,7 @@ mod tests {
         assert!((vca.resolved_track_gains[4] - 0.5).abs() < 1e-6);
         assert!(vca.unassign_track_from_group(4, 1));
         assert!(vca.group_members(1).is_empty());
-        assert!(vca.audit_vca_manager());
+        assert!(vca.audit_vca_gain_orchestrator());
     }
 
     #[test]
@@ -149,7 +149,7 @@ impl VcaOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide VCA state.
-    pub fn audit_vca_manager(&self) -> bool {
+    pub fn audit_vca_gain_orchestrator(&self) -> bool {
         self.vca_groups.iter().all(|(id, group)| {
             *id == group.id && group.gain.is_finite() && (0.0..=8.0).contains(&group.gain)
         }) && self.track_to_groups.iter().all(|(track, groups)| {

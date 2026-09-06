@@ -40,7 +40,7 @@ impl UndoOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide history state.
-    pub fn audit_undo_manager(&self) -> bool {
+    pub fn audit_undo_snapshot_history(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic data auditing logic.
         true
     }

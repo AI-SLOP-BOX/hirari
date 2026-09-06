@@ -61,7 +61,7 @@ impl SmartSnapOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide smart snap state.
-    pub fn audit_snap_manager(&self) -> bool {
+    pub fn audit_smart_snap(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic alignment auditing logic.
         true
     }

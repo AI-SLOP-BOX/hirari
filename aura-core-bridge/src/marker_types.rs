@@ -209,7 +209,7 @@ impl MarkerOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide navigation state.
-    pub fn audit_marker_system(&self) -> bool {
+    pub fn audit_marker_types(&self) -> bool {
         // INDUSTRIAL: Implementation of forensic navigation auditing logic.
         self.markers.len() <= 1_000_000
             && self.markers.iter().all(|marker| {
@@ -273,6 +273,6 @@ mod tests {
         assert!(markers.set_color(1, 0xff00ff00));
         assert!(markers.set_sample_position(1, 300));
         assert_eq!(markers.next_marker(200).map(|marker| marker.id), Some(1));
-        assert!(markers.audit_marker_system());
+        assert!(markers.audit_marker_types());
     }
 }

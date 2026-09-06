@@ -91,7 +91,7 @@ impl SnapshotOrchestrator {
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project history state.
-    pub fn audit_snapshot_manager(&self) -> bool {
+    pub fn audit_project_snapshot_store(&self) -> bool {
         if self.snapshots.len() > 65_536 || self.next_id == 0 {
             return false;
         }
@@ -117,7 +117,7 @@ mod tests {
         let replacement = snapshots.take_snapshot("A".into(), 20);
         assert_eq!(first, replacement);
         assert_eq!(snapshots.restore_snapshot("A"), Some(20));
-        assert!(snapshots.audit_snapshot_manager());
+        assert!(snapshots.audit_project_snapshot_store());
     }
 
     #[test]
@@ -128,6 +128,6 @@ mod tests {
         assert_ne!(a, 0);
         assert_ne!(b, 0);
         assert_ne!(a, b);
-        assert!(snapshots.audit_snapshot_manager());
+        assert!(snapshots.audit_project_snapshot_store());
     }
 }
