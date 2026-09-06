@@ -137,9 +137,12 @@ pub fn capabilities() -> serde_json::Value {
         },
         "integration_capabilities": {
             "ara2": {
-                "status": "scaffold",
+                "status": "protocol_contract",
                 "timeline_random_access": true,
-                "plugin_protocol_bridge": false,
+                "plugin_protocol_bridge": true,
+                "document_lifecycle": true,
+                "analysis_lifecycle": true,
+                "note_segment_sync": true,
                 "external_sdk_required": true,
                 "verified": false
             },
@@ -4458,7 +4461,7 @@ mod tests {
             .get("integration_capabilities")
             .expect("integration capability matrix must be public");
         assert_eq!(integrations["ara2"]["verified"], false);
-        assert_eq!(integrations["ara2"]["plugin_protocol_bridge"], false);
+        assert_eq!(integrations["ara2"]["plugin_protocol_bridge"], true);
         assert_eq!(
             integrations["hardware_controllers"]["device_driver_integration"],
             false

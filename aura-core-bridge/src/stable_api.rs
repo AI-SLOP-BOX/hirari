@@ -91,6 +91,40 @@ pub struct CoreApiV1 {
 }
 
 impl CoreApiV1 {
+    /// SDK-neutral ARA2 document lifecycle. The external provider still owns
+    /// the official ARA2 ABI; this stable contract is what adapters bind to.
+    pub fn ara2_bind_document_json(
+        &self,
+        plugin_id: &str,
+        region_id: &str,
+        sample_rate: f64,
+        channels: u32,
+        sample_count: u64,
+    ) -> String {
+        self.core
+            .ara2_bind_document_json(plugin_id, region_id, sample_rate, channels, sample_count)
+    }
+
+    pub fn ara2_unbind_document_json(&self) -> String {
+        self.core.ara2_unbind_document_json()
+    }
+
+    pub fn ara2_request_analysis_json(&self, request_json: &str) -> String {
+        self.core.ara2_request_analysis_json(request_json)
+    }
+
+    pub fn ara2_set_analysis_state_json(&self, id: &str, state_json: &str) -> String {
+        self.core.ara2_set_analysis_state_json(id, state_json)
+    }
+
+    pub fn ara2_set_note_segments_json(&self, segments_json: &str) -> String {
+        self.core.ara2_set_note_segments_json(segments_json)
+    }
+
+    pub fn ara2_document_snapshot_json(&self) -> String {
+        self.core.ara2_document_snapshot_json()
+    }
+
     /// Score a rendered UTAU/vocal take against its intended note plan.
     /// Returns per-note issues suitable for the editor's red/yellow/green UI.
     pub fn analyze_vocal_quality_json(
@@ -262,7 +296,10 @@ impl CoreApiV1 {
 
     /// Executes the shared queue through the native bounce graph and returns
     /// the published output paths.
-    pub fn execute_export_queue(&self, output_dir: impl AsRef<Path>) -> Result<Vec<PathBuf>, BridgeError> {
+    pub fn execute_export_queue(
+        &self,
+        output_dir: impl AsRef<Path>,
+    ) -> Result<Vec<PathBuf>, BridgeError> {
         let output = valid_path(output_dir.as_ref(), "invalid_export_directory")?;
         let value = require_ok(
             self.core.execute_export_queue_json(output),
@@ -271,7 +308,9 @@ impl CoreApiV1 {
         let paths = value
             .get("completed")
             .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| BridgeError::new("invalid_export_response", "completed outputs missing"))?
+            .ok_or_else(|| {
+                BridgeError::new("invalid_export_response", "completed outputs missing")
+            })?
             .iter()
             .filter_map(serde_json::Value::as_str)
             .map(PathBuf::from)
@@ -290,12 +329,17 @@ impl CoreApiV1 {
             .get("queued")
             .and_then(serde_json::Value::as_u64)
             .map(|count| count as usize)
-            .ok_or_else(|| BridgeError::new("invalid_advanced_export_response", "queued count missing"))
+            .ok_or_else(|| {
+                BridgeError::new("invalid_advanced_export_response", "queued count missing")
+            })
     }
 
     /// Executes advanced queued stems through the same native bounce graph as
     /// the normal loaded-project render command.
-    pub fn execute_advanced_export(&self, output_dir: impl AsRef<Path>) -> Result<usize, BridgeError> {
+    pub fn execute_advanced_export(
+        &self,
+        output_dir: impl AsRef<Path>,
+    ) -> Result<usize, BridgeError> {
         let output = valid_path(output_dir.as_ref(), "invalid_export_directory")?;
         let value = require_ok(
             self.core.execute_advanced_export_json(output),
@@ -305,7 +349,12 @@ impl CoreApiV1 {
             .get("completed")
             .and_then(serde_json::Value::as_u64)
             .map(|count| count as usize)
-            .ok_or_else(|| BridgeError::new("invalid_advanced_export_response", "completed count missing"))
+            .ok_or_else(|| {
+                BridgeError::new(
+                    "invalid_advanced_export_response",
+                    "completed count missing",
+                )
+            })
     }
 
     /// Installs a measured HRTF pair supplied by the host's SOFA/database
@@ -326,7 +375,10 @@ impl CoreApiV1 {
         if self.core.clear_hrtf_kernel(track_id) {
             Ok(())
         } else {
-            Err(BridgeError::new("hrtf_kernel_clear_rejected", "track or HRTF kernel not available"))
+            Err(BridgeError::new(
+                "hrtf_kernel_clear_rejected",
+                "track or HRTF kernel not available",
+            ))
         }
     }
 

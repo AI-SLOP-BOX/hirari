@@ -9,6 +9,7 @@
 // resolves the Mach-O image inside the bundle before loading it.
 
 include!("module_exports.rs");
+pub mod ara2_protocol;
 pub mod bridge_error;
 pub mod command_api;
 pub mod command_executor;
@@ -499,9 +500,19 @@ pub mod ffi {
         fn pause_bounce(self: &AudioEngine) -> bool;
         fn resume_bounce(self: &AudioEngine) -> bool;
         fn has_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
-        fn plugin_native_editor_embedded(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
-        fn open_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32, parent: u64) -> u64;
-        fn close_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
+        fn plugin_native_editor_embedded(
+            self: &AudioEngine,
+            track_id: u32,
+            plugin_index: u32,
+        ) -> bool;
+        fn open_plugin_native_editor(
+            self: &AudioEngine,
+            track_id: u32,
+            plugin_index: u32,
+            parent: u64,
+        ) -> u64;
+        fn close_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32)
+            -> bool;
         fn midi_clock_tick(self: &AudioEngine, timestamp: u64);
         fn midi_clock_ticks(self: &AudioEngine) -> u64;
         fn midi_clock_last_tick(self: &AudioEngine) -> u64;

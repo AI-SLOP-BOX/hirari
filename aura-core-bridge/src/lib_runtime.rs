@@ -238,6 +238,9 @@ pub struct AuraCore {
     /// Advanced stem queue wired to the same native project bounce graph as
     /// the ordinary UI/CLI render path.
     pub(crate) advanced_export: std::sync::Mutex<crate::advanced_export_engine::ExportOrchestrator>,
+    /// SDK-neutral ARA2 document lifecycle. An external ARA2 adapter can bind
+    /// its callbacks here without coupling the Core to a proprietary SDK.
+    pub(crate) ara2_protocol: std::sync::Mutex<crate::ara2_protocol::Ara2ProtocolEndpoint>,
 }
 
 #[derive(Clone)]
@@ -1373,6 +1376,7 @@ impl AuraCore {
             ),
             export_queue: std::sync::Mutex::new(crate::export::ExportOrchestrator::new()),
             advanced_export: std::sync::Mutex::new(crate::advanced_export_engine::ExportOrchestrator::new()),
+            ara2_protocol: std::sync::Mutex::new(crate::ara2_protocol::Ara2ProtocolEndpoint::default()),
         })
     }
 
@@ -1821,6 +1825,7 @@ include!("aura_core_methods_1.rs");
 include!("aura_core_methods_2.rs");
 include!("aura_core_methods_3.rs");
 include!("aura_core_methods_4.rs");
+include!("aura_core_methods_5.rs");
 include!("ui_core_compat.rs");
 
 #[cfg(test)]
