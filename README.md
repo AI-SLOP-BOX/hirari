@@ -193,6 +193,12 @@ scripts/run_openutau_roundtrip.sh
 
 ### Feature status and known limitations
 
+Status labels in this document are deliberately strict: **implemented** means
+the source path and automated tests exist; **environment-dependent** means a
+host/vendor SDK or physical device is still required; **verified** is reserved
+for a completed external integration run. A source-only build is never called
+hardware or partner-plugin verification.
+
 The current preview includes project persistence, MIDI/chord-track data,
 warp-marker metadata, routed offline rendering, loudness telemetry, and
 isolated worker lifecycle checks. The engine also includes SDK-disabled VST3
