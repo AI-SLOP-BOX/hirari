@@ -18,7 +18,9 @@ if git ls-files | grep -E "$forbidden_re"; then
   exit 1
 fi
 
-if git ls-files -z | xargs -0 -r file --mime-type | awk -F': *' '$2 ~ /^(application\/(x-dosexec|zip)|audio\/|video\/)/ {print; found=1} END {exit !found}'; then
+forbidden_media=$(git ls-files -z | xargs -0 -r file --mime-type | awk -F': *' '$2 ~ /^(application\/(x-dosexec|zip)|audio\/|video\/)/ && $1 !~ /^examples\/reference\/aura_codex_original\.wav$/ {print}')
+if [[ -n "$forbidden_media" ]]; then
+  printf '%s\n' "$forbidden_media"
   echo "GENERATED_BINARY_OR_MEDIA_TRACKED" >&2
   exit 1
 fi

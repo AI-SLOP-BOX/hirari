@@ -22,7 +22,12 @@ known gaps.
 Linux is supported for portable Rust/native contract checks. The production
 GUI, CoreAudio, Audio Units, signing, and application bundle are macOS-only.
 
-![Aura Cinematic Suite Mockup](https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&q=80&w=1200)
+## Reference audio
+
+This repository includes one short, wholly original reference render made with
+Aura/Codex. It is not a bundled voicebank, plugin, or third-party sample:
+
+[Listen to `aura_codex_original.wav`](./examples/reference/aura_codex_original.wav)
 
 ## Current capabilities
 
