@@ -125,6 +125,18 @@ impl CoreApiV1 {
         self.core.ara2_document_snapshot_json()
     }
 
+    pub fn ara2_read_region_audio_json(
+        &self,
+        track_id: u32,
+        region_id: u32,
+        start_frame: u64,
+        frames: u32,
+        channels: u32,
+    ) -> String {
+        self.core
+            .ara2_read_region_audio_json(track_id, region_id, start_frame, frames, channels)
+    }
+
     /// Score a rendered UTAU/vocal take against its intended note plan.
     /// Returns per-note issues suitable for the editor's red/yellow/green UI.
     pub fn analyze_vocal_quality_json(

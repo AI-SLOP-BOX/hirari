@@ -577,6 +577,7 @@ pub mod ffi {
         fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
         fn poll_region_waveform(self: &AudioEngine, request: u64) -> Vec<f32>;
         fn region_waveform_pending(self: &AudioEngine, request: u64) -> bool;
+        fn get_region_audio_interleaved(self: &AudioEngine, tid: u32, rid: u32) -> Vec<f32>;
         fn get_mixer_levels_v(self: &AnalysisHub) -> Vec<f32>;
         fn get_spectral_data_v(self: &AnalysisHub) -> Vec<f32>;
         fn get_spectral_partials_v(self: &AnalysisHub) -> Vec<f32>;

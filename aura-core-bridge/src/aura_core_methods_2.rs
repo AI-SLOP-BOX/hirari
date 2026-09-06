@@ -2468,7 +2468,7 @@ impl AuraCore {
                 {"id":"measured_hrtf_kernel","status":"integration_required","apis":["set_hrtf_kernel_json","set_hrtf_kernel","clear_hrtf_kernel"]},
                 {"id":"native_plugin_editor_host","status":"host_bind_required","apis":["plugin_editor_capability_diagnostic_json","open_plugin_native_editor_json","close_plugin_native_editor_json"]},
                 {"id":"vst3_clap_native_gui","status":"sdk_or_host_bind_required"},
-                {"id":"ara2_protocol_endpoint","status":"implemented","apis":["ara2_bind_document_json","ara2_request_analysis_json","ara2_set_analysis_state_json","ara2_set_note_segments_json","ara2_document_snapshot_json"]},
+                {"id":"ara2_protocol_endpoint","status":"implemented","apis":["ara2_bind_document_json","ara2_request_analysis_json","ara2_set_analysis_state_json","ara2_set_note_segments_json","ara2_document_snapshot_json","ara2_read_region_audio_json"]},
                 {"id":"ara2_partner_integration","status":"provider_bind_required"},
                 {"id":"windows_asio_hardware","status":"sdk_or_backend_bind_required"}
             ]
