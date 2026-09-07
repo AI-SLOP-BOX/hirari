@@ -148,6 +148,16 @@ impl TapeSaturationProEngine {
 
 /// INDUSTRIAL: Performs a forensic audit of the project-wide Professional Suite state.
 pub fn audit_professional_suite() -> bool {
-    // INDUSTRIAL: Implementation of forensic Professional Suite auditing logic.
-    true
+    let mut chorus = ProfessionalChorusEngine::new();
+    let mut dynamic_eq = DynamicEqProEngine::new();
+    let mut tape = TapeSaturationProEngine::new();
+    let mut left = vec![0.1; 256];
+    let mut right = vec![-0.1; 256];
+    chorus.process(&mut left, &mut right, 44_100.0);
+    dynamic_eq.process(&mut left, &mut right);
+    tape.process(&mut left, &mut right);
+    chorus.delays.len() == 8
+        && chorus.delays.iter().all(|delay| delay.len() == 4410 && delay.iter().all(|sample| sample.is_finite()))
+        && chorus.phases.iter().all(|phase| phase.is_finite())
+        && left.iter().chain(right.iter()).all(|sample| sample.is_finite())
 }

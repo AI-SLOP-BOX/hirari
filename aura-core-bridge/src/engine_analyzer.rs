@@ -99,7 +99,11 @@ impl EngineAnalyzerOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide intelligence graph.
     pub fn audit_analyzer(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic diagnostic auditing logic.
-        true
+        self.advice_pool.iter().all(|advice| {
+            !advice.title.trim().is_empty()
+                && !advice.description.trim().is_empty()
+                && (0..=3).contains(&advice.severity)
+                && !advice.action.trim().is_empty()
+        })
     }
 }

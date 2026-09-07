@@ -209,6 +209,18 @@ impl AnalogClonerEngine {
 
 /// INDUSTRIAL: Performs a forensic audit of the project-wide Cinematic Suite state.
 pub fn audit_cinematic_suite() -> bool {
-    // INDUSTRIAL: Implementation of forensic Cinematic Suite auditing logic.
-    true
+    let mut reverb = DivineReverbEngine::new();
+    let mut limiter = MasterLimitProEngine::new();
+    let mut saturator = AnalogClonerEngine::new();
+    let mut left = vec![0.0; 128];
+    let mut right = vec![0.0; 128];
+    left[0] = 1.0;
+    right[0] = 1.0;
+    reverb.process(&mut left, &mut right);
+    limiter.process(&mut left, &mut right);
+    saturator.process(&mut left, &mut right);
+    reverb.delays.iter().all(|delay| delay.iter().all(|sample| sample.is_finite()))
+        && left.iter().chain(right.iter()).all(|sample| sample.is_finite() && sample.abs() <= 1.0)
+        && limiter.ptr < limiter.buffer.len()
+        && saturator.drive.is_finite() && saturator.drive >= 0.0
 }
