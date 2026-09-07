@@ -110,7 +110,28 @@ void AlchemySamplerCore::processGranular(::Aura::Core::AudioBuffer& buffer) {
         m_grainTimer = 0;
         for (auto& g : m_grainPool) {
             if (!g.active.load(std::memory_order_relaxed)) {
-                const auto& z = m_zones[0]; // Stochastic: pick first zone for now
+                // Choose from every usable zone instead of silently biasing the
+                // granular engine toward the first loaded sample.
+                uint32_t usableZones = 0;
+                for (uint32_t i = 0; i < m_zoneCount; ++i) {
+                    if (m_zones[i].data != nullptr && m_zones[i].sampleCount >= 2) {
+                        ++usableZones;
+                    }
+                }
+                if (usableZones == 0) break;
+                std::uniform_int_distribution<uint32_t> zoneDist(0, usableZones - 1);
+                const uint32_t selected = zoneDist(m_rng);
+                uint32_t seen = 0;
+                const SampleZone* selectedZone = nullptr;
+                for (uint32_t i = 0; i < m_zoneCount; ++i) {
+                    if (m_zones[i].data != nullptr && m_zones[i].sampleCount >= 2
+                        && seen++ == selected) {
+                        selectedZone = &m_zones[i];
+                        break;
+                    }
+                }
+                if (!selectedZone) break;
+                const auto& z = *selectedZone;
                 if (z.data == nullptr || z.sampleCount < 2) break;
                 std::uniform_int_distribution<uint64_t> posDist(0, z.sampleCount - 1);
                 g.data = z.data;
