@@ -69,8 +69,14 @@ impl MidiFxOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide MIDI synchronization graph.
     pub fn audit_midi_fx(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic MIDI auditing logic.
-        true
+        let input = [MidiEvent { timestamp: 100, data: [0x90, 60, 100] }];
+        let config = ChordTriggerConfig { intervals: vec![0, 4, 7], strum_ms: 1.0, velocity_scaling: 0.1 };
+        let output = self.process_chord_trigger(&input, &config, 48_000.0);
+        output.len() == 3
+            && output[0].timestamp == 100
+            && output[1].timestamp == 148
+            && output[2].data[1] == 67
+            && self.process_chord_trigger(&input, &ChordTriggerConfig { intervals: vec![0], strum_ms: f32::NAN, velocity_scaling: 0.0 }, 48_000.0) == input
     }
 }
 

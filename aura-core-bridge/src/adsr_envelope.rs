@@ -104,7 +104,22 @@ impl AdsrEnvelopeEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide ADSR state.
     pub fn audit_adsr_envelope(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic ADSR auditing logic.
-        true
+        if !self.sample_rate.is_finite() || self.sample_rate <= 0.0 {
+            return false;
+        }
+        let mut envelope = Self::new(self.sample_rate);
+        envelope.trigger_on();
+        let mut peak = 0.0f32;
+        for _ in 0..(self.sample_rate as usize / 10).max(1) {
+            let value = envelope.get_next();
+            if !value.is_finite() { return false; }
+            peak = peak.max(value);
+        }
+        envelope.trigger_off();
+        for _ in 0..(self.sample_rate as usize).max(1) {
+            if !envelope.get_next().is_finite() { return false; }
+            if matches!(envelope.state, AdsrState::Off) { break; }
+        }
+        peak > 0.0 && matches!(envelope.state, AdsrState::Off)
     }
 }

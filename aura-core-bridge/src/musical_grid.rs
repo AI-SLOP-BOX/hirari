@@ -35,7 +35,9 @@ impl GridOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide grid synchronization graph.
     pub fn audit_grid(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic grid auditing logic.
-        true
+        let grid = Self::new();
+        let snapped = grid.get_snapped_samples(7_000.0, 0.25, 48_000.0);
+        let beat = grid.beats_to_samples(4.0, 48_000.0);
+        snapped.is_finite() && (snapped - 6_000.0).abs() < 1.0e-6 && (beat - 96_000.0).abs() < 1.0e-6
     }
 }

@@ -37,7 +37,9 @@ impl SubblockOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide temporal jitter state.
     pub fn audit_subblock_processor(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic jitter auditing logic.
-        true
+        let mut processor = Self { current_sample: 0, num_samples: 512 };
+        let first = processor.calculate_next_subblock(128);
+        let second = processor.calculate_next_subblock(700);
+        first == 128 && second == 384 && processor.current_sample == 512
     }
 }
