@@ -48,24 +48,47 @@ public:
             std::set<int> pitchClasses;
             for (int n : activeNotes) pitchClasses.insert(n % 12);
 
-            int root = activeNotes[0] % 12; // Simple assumption for now
-            uint32_t mask = 0;
-            for (int p : pitchClasses) {
-                int interval = (p - root + 12) % 12;
-                mask |= (1 << interval);
+            // Try every present pitch class as a candidate root. This avoids
+            // treating the lowest/first MIDI event as the chord root when the
+            // voicing is inverted or notes arrive out of order.
+            int root = *pitchClasses.begin();
+            ChordType detected = ChordType::Unknown;
+            int bestScore = -1;
+            for (int candidate : pitchClasses) {
+                uint32_t candidateMask = 0;
+                for (int p : pitchClasses) {
+                    int interval = (p - candidate + 12) % 12;
+                    candidateMask |= (1u << interval);
+                }
+                ChordType type = ChordType::Unknown;
+                int score = 0;
+                if ((candidateMask & 0b10010001u) == 0b10010001u && (candidateMask & (1u << 10))) {
+                    type = ChordType::Dominant7; score = 7;
+                } else if ((candidateMask & 0b10010001u) == 0b10010001u && (candidateMask & (1u << 11))) {
+                    type = ChordType::Major7; score = 6;
+                } else if ((candidateMask & 0b10001001u) == 0b10001001u && (candidateMask & (1u << 10))) {
+                    type = ChordType::Minor7; score = 5;
+                } else if ((candidateMask & 0b10010001u) == 0b10010001u) {
+                    type = ChordType::Major; score = 4;
+                } else if ((candidateMask & 0b10001001u) == 0b10001001u) {
+                    type = ChordType::Minor; score = 4;
+                } else if ((candidateMask & 0b1001001u) == 0b1001001u) {
+                    type = ChordType::Diminished; score = 3;
+                } else if ((candidateMask & 0b100010001u) == 0b100010001u) {
+                    type = ChordType::Augmented; score = 3;
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    root = candidate;
+                    detected = type;
+                }
             }
 
             newState->rootNote = root;
             newState->activeNotes = activeNotes;
             newState->noteDensity = static_cast<float>(activeNotes.size()) / 12.0f;
 
-            // Pattern matching (Interval Mask)
-            if ((mask & 0b10010001) == 0b10010001) { // 0, 4, 7
-                newState->chordType = ChordType::Major;
-                if (mask & 0b10000000000) newState->chordType = ChordType::Dominant7; // 10
-            } else if ((mask & 0b10001001) == 0b10001001) { // 0, 3, 7
-                newState->chordType = ChordType::Minor;
-            }
+            newState->chordType = detected;
         }
 
         std::lock_guard<std::mutex> lock(m_mutex);
