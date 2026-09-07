@@ -72,7 +72,10 @@ impl VirtuosoTapeEngine {
 
     /// INDUSTRIAL: Magnetic saturation and tape velocity modulation.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        let len = l.len().min(r.len());
+        if len == 0 || !self.sample_rate.is_finite() || self.sample_rate <= 0.0 {
+            return;
+        }
         let drive = 10.0f32.powf(self.drive_db / 20.0);
         let mask = Self::BUFFER_SIZE - 1;
 
@@ -83,7 +86,7 @@ impl VirtuosoTapeEngine {
                 + (self.flutter_phase.sin() as f32 * self.flutter_depth);
 
             let mut process_channel = |data: &mut [f32], ch_idx: usize| {
-                let in_val = data[s];
+                let in_val = if data[s].is_finite() { data[s] } else { 0.0 };
 
                 // Write to delay buffer for flutter
                 self.delay_buffers[ch_idx][self.write_idx] = in_val;

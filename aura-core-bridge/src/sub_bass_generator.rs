@@ -61,11 +61,16 @@ impl SubBassGeneratorEngine {
 
     /// INDUSTRIAL: Professional Sub-frequency Synthesis for Hip-Hop/EDM.
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        let len = l.len();
+        let len = l.len().min(r.len());
+        if len == 0 || !self.sample_rate.is_finite() || self.sample_rate <= 0.0 {
+            return;
+        }
         let sr = self.sample_rate as f32;
 
         for s in 0..len {
-            let mid = (l[s] + r[s]) * 0.5;
+            let left = if l[s].is_finite() { l[s] } else { 0.0 };
+            let right = if r[s].is_finite() { r[s] } else { 0.0 };
+            let mid = (left + right) * 0.5;
 
             // 1. INPUT PRE-FILTER (LPF + DC Block for stable tracking)
             self.lpf_state += (1.0 - self.lpf_coeff) * (mid - self.lpf_state);
@@ -111,8 +116,8 @@ impl SubBassGeneratorEngine {
             let sub = (std::f64::consts::TAU * self.phase).sin() as f32 * self.env * self.mix;
 
             // 5. SUM
-            l[s] += sub;
-            r[s] += sub;
+            l[s] = left + sub;
+            r[s] = right + sub;
         }
     }
 
