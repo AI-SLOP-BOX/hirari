@@ -30,7 +30,6 @@ impl ForensicAuditor {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide integrity synchronization graph.
     pub fn audit_integrity(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic integrity auditing logic.
-        true
+        self.perform_audit().is_empty()
     }
 }

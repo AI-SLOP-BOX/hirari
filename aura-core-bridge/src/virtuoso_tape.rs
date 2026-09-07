@@ -138,7 +138,19 @@ impl VirtuosoTapeEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Virtuoso Tape state.
     pub fn audit_virtuoso_tape(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Virtuoso Tape auditing logic.
-        true
+        self.sample_rate.is_finite() && self.sample_rate > 0.0
+            && self.delay_buffers.iter().all(|buffer| {
+                buffer.len() == Self::BUFFER_SIZE && buffer.iter().all(|sample| sample.is_finite())
+            })
+            && self.write_idx < Self::BUFFER_SIZE
+            && self.lp_state.iter().all(|value| value.is_finite())
+            && self.delay_offset.is_finite() && self.delay_offset >= 0.0
+            && self.drive_db.is_finite()
+            && self.mix.is_finite() && (0.0..=1.0).contains(&self.mix)
+            && self.bias.is_finite() && self.hiss_level.is_finite() && self.hiss_level >= 0.0
+            && self.wow_depth.is_finite() && self.flutter_depth.is_finite()
+            && self.wow_phase.is_finite() && self.flutter_phase.is_finite()
+            && self.z1.iter().all(|value| value.is_finite())
+            && self.rng_state != 0
     }
 }

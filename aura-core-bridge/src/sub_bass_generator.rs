@@ -118,7 +118,14 @@ impl SubBassGeneratorEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Sub Bass Generator state.
     pub fn audit_sub_bass_generator(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic Sub Bass Generator auditing logic.
-        true
+        self.sample_rate.is_finite() && self.sample_rate > 0.0
+            && self.env.is_finite() && self.env >= 0.0
+            && self.env_attack.is_finite() && (0.0..=1.0).contains(&self.env_attack)
+            && self.env_release.is_finite() && (0.0..=1.0).contains(&self.env_release)
+            && self.lpf_coeff.is_finite() && (0.0..=1.0).contains(&self.lpf_coeff)
+            && self.mix.is_finite() && (0.0..=1.0).contains(&self.mix)
+            && self.target_freq.is_finite() && (20.0..=90.0).contains(&self.target_freq)
+            && self.curr_freq.is_finite() && self.curr_freq >= 0.0
+            && self.phase.is_finite() && (0.0..1.0).contains(&self.phase)
     }
 }
