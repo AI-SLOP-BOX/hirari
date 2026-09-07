@@ -25,10 +25,14 @@ impl UndoOrchestrator {
     pub fn push_state(&mut self, name: String, state: Vec<u8>) {
         // INDUSTRIAL: Implementation of high-performance delta compression.
         // Rust's DeltaCompressionEngine ensures bit-accurate project state distribution.
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_secs().to_string())
+            .unwrap_or_else(|_| "0".to_string());
         self.history.push(UndoActionRust {
             name,
             state_snapshot: state, // In a real impl, this would be a delta
-            timestamp: "2026-05-07T10:59:00Z".to_string(),
+            timestamp,
         });
     }
 
@@ -41,7 +45,11 @@ impl UndoOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide history state.
     pub fn audit_undo_snapshot_history(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic data auditing logic.
-        true
+        self.history.len() <= 100
+            && self.history.iter().all(|entry| {
+                !entry.name.trim().is_empty()
+                    && !entry.timestamp.trim().is_empty()
+                    && !entry.state_snapshot.is_empty()
+            })
     }
 }

@@ -205,8 +205,16 @@ impl ChannelStripEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide channel strip state.
     pub fn audit_channel_strip(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic channel strip auditing logic.
-        true
+        let metrics = measure_gain_stage(&[0.0, 0.5, -1.0], 0.0);
+        let mut left = [1.0f32];
+        let mut right = [1.0f32];
+        self.process(&mut left, &mut right, &[1.0], &[0.0]);
+        metrics.is_some_and(|value| {
+            value.clipped_samples == 1
+                && value.peak_db == 0.0
+                && (left[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1.0e-6
+                && (right[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1.0e-6
+        })
     }
 }
 
