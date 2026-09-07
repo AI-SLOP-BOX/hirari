@@ -79,8 +79,14 @@ impl UndoOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide history integrity graph.
     pub fn audit_history(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic history auditing logic.
-        true
+        self.max_history > 0
+            && self.undo_stack.len() <= self.max_history
+            && self.redo_stack.len() <= self.max_history
+            && self.undo_stack.iter().chain(self.redo_stack.iter()).all(|action| {
+                !action.name.trim().is_empty()
+                    && action.timestamp > 0
+                    && self.calculate_hash(&action.delta) == action.state_hash
+            })
     }
 
     fn calculate_hash(&self, data: &[u8]) -> u64 {

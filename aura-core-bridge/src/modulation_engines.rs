@@ -143,7 +143,11 @@ impl EnvelopeEngineOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide modulation graph state.
     pub fn audit_modulation_engines(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic synthesis auditing logic.
-        true
+        self.sr.is_finite() && self.sr > 0.0
+            && self.value.is_finite() && (0.0..=1.1).contains(&self.value)
+            && self.a_coeff.is_finite() && (0.0..=1.0).contains(&self.a_coeff)
+            && self.d_coeff.is_finite() && (0.0..=1.0).contains(&self.d_coeff)
+            && self.r_coeff.is_finite() && (0.0..=1.0).contains(&self.r_coeff)
+            && self.s_level.is_finite() && (0.0..=1.0).contains(&self.s_level)
     }
 }
