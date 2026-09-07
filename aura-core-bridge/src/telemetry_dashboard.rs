@@ -54,7 +54,13 @@ impl TelemetryOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide health state.
     pub fn audit_telemetry_dashboard(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic health auditing logic.
-        true
+        self.history.len() <= 1000
+            && self.cpu_usage.is_finite()
+            && (0.0..=100.0).contains(&self.cpu_usage)
+            && self.history.iter().all(|event| {
+                !event.module_name.trim().is_empty()
+                    && event.execution_time_ms.is_finite()
+                    && event.execution_time_ms >= 0.0
+            })
     }
 }

@@ -52,7 +52,9 @@ impl ConfigOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide configuration state.
     pub fn audit_unified_config(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic config auditing logic.
-        true
+        let valid_buffer = matches!(self.get_config("audio.buffer_size"), Some(ConfigValueRust::Int(value)) if (16..=8192).contains(&value));
+        let valid_rate = matches!(self.get_config("audio.sample_rate"), Some(ConfigValueRust::Float(value)) if value.is_finite() && (8_000.0..=384_000.0).contains(&value));
+        let valid_fft = matches!(self.get_config("spectral.fft_size"), Some(ConfigValueRust::Int(value)) if value > 0 && (value as u32).is_power_of_two() && (256..=32_768).contains(&value));
+        valid_buffer && valid_rate && valid_fft
     }
 }

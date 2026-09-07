@@ -30,7 +30,12 @@ impl BounceOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide export state.
     pub fn audit_parallel_bounce(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic export auditing logic.
-        true
+        self.active_tasks.len() <= 256
+            && self.active_tasks.iter().all(|task| {
+                task.track_id != 0
+                    && !task.target_path.trim().is_empty()
+                    && !task.target_path.contains('\0')
+            })
+            && self.active_tasks.windows(2).all(|pair| pair[0].track_id != pair[1].track_id)
     }
 }
