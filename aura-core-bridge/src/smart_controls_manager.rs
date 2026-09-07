@@ -82,7 +82,47 @@ impl SmartOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide control state.
     pub fn audit_smart_controls_manager(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic control auditing logic.
-        true
+        let mut controls = Self::new();
+        controls.add_mapping(
+            7,
+            ControlMappingRust {
+                track_id: 1,
+                plugin_id: 2,
+                param_id: 3,
+                range_min: -12.0,
+                range_max: 12.0,
+                inverted: false,
+            },
+        );
+        let normal = controls.set_smart_value(7, 0.75);
+        let inverted = {
+            controls.add_mapping(
+                8,
+                ControlMappingRust {
+                    track_id: 1,
+                    plugin_id: 2,
+                    param_id: 4,
+                    range_min: 0.0,
+                    range_max: 1.0,
+                    inverted: true,
+                },
+            );
+            controls.set_smart_value(8, 0.25)
+        };
+        normal.len() == 1
+            && normal[0].3 == 6.0
+            && inverted.len() == 1
+            && (inverted[0].3 - 0.75).abs() < f32::EPSILON
+            && controls.set_smart_value(999, 0.5).is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SmartOrchestrator;
+
+    #[test]
+    fn smart_control_audit_checks_normal_inverted_and_unknown_paths() {
+        assert!(SmartOrchestrator::new().audit_smart_controls_manager());
     }
 }
