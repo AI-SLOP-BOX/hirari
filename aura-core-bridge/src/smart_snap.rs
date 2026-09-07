@@ -62,7 +62,32 @@ impl SmartSnapOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide smart snap state.
     pub fn audit_smart_snap(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic alignment auditing logic.
-        true
+        let grid = 480u32;
+        let reference = [960u64, 2_400u64];
+        let grid_snap = self.get_snapped_position(721, grid, &[]);
+        let event_snap = self.get_snapped_position(935, grid, &reference);
+        let relative_snap = self.snap_with_mode(1_401, grid, &[], SnapMode::Relative, 1_000);
+        let off_snap = self.snap_with_mode(1_401, grid, &[], SnapMode::Off, 1_000);
+        grid_snap == 960
+            && event_snap == 960
+            && relative_snap == 1_480
+            && off_snap == 1_401
+            && self.get_snapped_position(123, 0, &reference) == 123
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SmartSnapOrchestrator, SnapMode};
+
+    #[test]
+    fn audit_exercises_grid_event_relative_and_disabled_modes() {
+        assert!(SmartSnapOrchestrator::new().audit_smart_snap());
+    }
+
+    #[test]
+    fn relative_snap_keeps_the_origin_out_of_grid_rounding() {
+        let snap = SmartSnapOrchestrator::new();
+        assert_eq!(snap.snap_with_mode(1_401, 480, &[], SnapMode::Relative, 1_000), 1_480);
     }
 }
