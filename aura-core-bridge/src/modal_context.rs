@@ -54,7 +54,27 @@ impl ModalContextOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide third dimension state.
     pub fn audit_modal_context(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic metadata auditing logic.
-        true
+        !self.entries.is_empty()
+            && self.entries.iter().enumerate().all(|(index, entry)| {
+                entry.id == index as u32
+                    && matches!(entry.entry_type.as_str(), "Note" | "Lyric" | "Image" | "Reference")
+                    && !entry.content.trim().is_empty()
+            })
+            && self.next_id == self.entries.len() as u32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModalContextOrchestrator;
+
+    #[test]
+    fn audit_checks_modal_entries() {
+        let mut context = ModalContextOrchestrator::new();
+        context.add_note(100, "keep take".into());
+        context.add_lyric(200, "hello".into());
+        assert!(context.audit_modal_context());
+        context.entries[1].content.clear();
+        assert!(!context.audit_modal_context());
     }
 }

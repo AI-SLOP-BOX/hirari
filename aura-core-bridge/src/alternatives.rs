@@ -78,7 +78,28 @@ impl AlternativeOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide arrangement synchronization graph.
     pub fn audit_alternatives(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic arrangement auditing logic.
-        true
+        self.track_alts.iter().all(|(track_id, alternatives)| {
+            !alternatives.is_empty()
+                && self.active_indices.get(track_id).map_or(true, |index| *index < alternatives.len())
+                && alternatives.iter().all(|alternative| !alternative.name.trim().is_empty())
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AlternativeOrchestrator, AutomationSnapshot, PlaylistEntry};
+
+    #[test]
+    fn audit_accepts_valid_alternative_set_and_rejects_bad_active_index() {
+        let mut orchestrator = AlternativeOrchestrator::new();
+        orchestrator.create_alternative(3, "Verse");
+        let source = orchestrator.track_alts.get_mut(&3).unwrap().first_mut().unwrap();
+        source.playlist.push(PlaylistEntry { region_id: 9, timeline_pos: 120 });
+        source.automation_snapshots.push(AutomationSnapshot { param_id: 2, data: vec![0.5] });
+        orchestrator.duplicate_active(3, "Verse copy");
+        assert!(orchestrator.audit_alternatives());
+        orchestrator.active_indices.insert(3, 99);
+        assert!(!orchestrator.audit_alternatives());
     }
 }

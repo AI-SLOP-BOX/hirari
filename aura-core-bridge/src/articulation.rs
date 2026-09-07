@@ -52,7 +52,14 @@ impl ArticulationOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide performance synchronization graph.
     pub fn audit_performance(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic performance auditing logic.
-        true
+        !self.track_sets.is_empty()
+            && self.track_sets.values().all(|set| {
+                !set.articulations.is_empty()
+                    && set.articulations.iter().all(|(id, articulation)| {
+                        *id == articulation.id
+                            && !articulation.name.trim().is_empty()
+                            && articulation.triggers.iter().all(|event| event.status & 0x80 != 0)
+                    })
+            })
     }
 }

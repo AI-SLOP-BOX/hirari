@@ -86,7 +86,11 @@ impl ScriptOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide scripting synchronization graph.
     pub fn audit_scripts(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic scripting auditing logic.
-        true
+        !self.scripts.is_empty()
+            && self.scripts.iter().all(|script| {
+                self.validate_source(&script.source)
+                    && script.source.is_ascii()
+                    && script.source.lines().all(|line| !line.contains("unsafe"))
+            })
     }
 }

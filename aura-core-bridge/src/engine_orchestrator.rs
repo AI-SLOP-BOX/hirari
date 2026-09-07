@@ -23,7 +23,19 @@ impl AutonomicOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide engine state.
     pub fn audit_engine_orchestrator(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic maintenance auditing logic.
-        true
+        self.heartbeat_count > 0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AutonomicOrchestrator;
+
+    #[test]
+    fn audit_requires_a_heartbeat() {
+        let mut engine = AutonomicOrchestrator::new();
+        assert!(!engine.audit_engine_orchestrator());
+        engine.heartbeat();
+        assert!(engine.audit_engine_orchestrator());
     }
 }

@@ -24,7 +24,20 @@ impl TrackIconOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide visual synchronization graph.
     pub fn audit_visuals(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic visual auditing logic.
-        true
+        let Some((track_id, icon_id)) = self.mapping.iter().next() else { return false };
+        !icon_id.trim().is_empty() && self.get_track_icon(*track_id) == *icon_id
+            && self.get_track_icon(u32::MAX) == "Generic"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TrackIconOrchestrator;
+
+    #[test]
+    fn audit_checks_known_and_fallback_icons() {
+        let mut icons = TrackIconOrchestrator::new();
+        icons.mapping.insert(7, "Piano".into());
+        assert!(icons.audit_visuals());
     }
 }

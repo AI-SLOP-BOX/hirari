@@ -54,7 +54,27 @@ impl MultiLaneOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide vertical orchestration graph.
     pub fn audit_multi_lane(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic lane auditing logic.
-        true
+        !self.lanes.is_empty()
+            && self.lanes.iter().all(|lane| !lane.name.trim().is_empty())
+            && self.resolve_active_lanes().iter().all(|id| {
+                self.lanes.iter().any(|lane| lane.id == *id && lane.visible && !lane.muted)
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MultiLaneOrchestrator;
+
+    #[test]
+    fn audit_tracks_visible_and_muted_lanes() {
+        let mut lanes = MultiLaneOrchestrator::new();
+        lanes.add_lane(1, "Lead".into(), true, false);
+        lanes.add_lane(2, "Take 2".into(), true, true);
+        lanes.add_lane(3, "Hidden".into(), false, false);
+        assert_eq!(lanes.resolve_active_lanes(), vec![1]);
+        assert!(lanes.audit_multi_lane());
+        lanes.set_lane_muted(1, true);
+        assert!(lanes.resolve_active_lanes().is_empty());
     }
 }

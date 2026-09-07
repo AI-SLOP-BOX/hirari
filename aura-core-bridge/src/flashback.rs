@@ -56,7 +56,10 @@ impl FlashbackOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide shadow synchronization graph.
     pub fn audit_flashback(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic performance auditing logic.
-        true
+        self.num_channels > 0
+            && self.max_samples > 0
+            && self.buffer.len() == self.num_channels * self.max_samples
+            && self.write_pos < self.max_samples
+            && self.buffer.iter().all(|sample| sample.is_finite())
     }
 }

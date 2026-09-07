@@ -91,7 +91,10 @@ impl LiveOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide performance synchronization graph.
     pub fn audit_live(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic performance auditing logic.
-        true
+        !self.grid.is_empty()
+            && self.grid.iter().all(|row| {
+                !row.is_empty()
+                    && row.iter().all(|cell| cell.length_ticks > 0 && !(cell.is_queued && cell.is_playing))
+            })
     }
 }

@@ -41,18 +41,39 @@ impl SignalAnalyzerOrchestrator {
 
         // --- SIMD METERING ---
         let mut max_p = [0.0f32; 2];
+        let mut cross = 0.0f64;
+        let mut left_power = 0.0f64;
+        let mut right_power = 0.0f64;
+        let mut power_sum = 0.0f64;
         for (i, &s) in left.iter().enumerate() {
             max_p[0] = max_p[0].max(s.abs());
             if i < target.samples.len() {
                 target.samples[i] = s;
             }
+            power_sum += f64::from(s) * f64::from(s);
         }
-        for &s in right {
+        for (i, &s) in right.iter().enumerate() {
             max_p[1] = max_p[1].max(s.abs());
+            if i < left.len() {
+                let l = f64::from(left[i]);
+                let r = f64::from(s);
+                cross += l * r;
+                left_power += l * l;
+                right_power += r * r;
+            }
+            if i >= left.len() {
+                power_sum += f64::from(s) * f64::from(s);
+            }
         }
 
         target.peak = max_p;
-        // Correlation and LUFS logic would be implemented here in full industrial-grade.
+        target.correlation = if left_power > 0.0 && right_power > 0.0 {
+            (cross / (left_power.sqrt() * right_power.sqrt())) as f32
+        } else { 0.0 };
+        let sample_count = left.len() + right.len();
+        target.lufs_integrated = if sample_count > 0 && power_sum > 0.0 {
+            (-0.691 + 10.0 * (power_sum / sample_count as f64).log10()) as f32
+        } else { f32::NEG_INFINITY };
 
         self.latest_idx = self.write_idx;
         self.write_idx = next_idx;
@@ -60,7 +81,29 @@ impl SignalAnalyzerOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide signal state.
     pub fn audit_signal_analyzer(&self) -> bool {
-        // INDUSTRIAL: Implementation of forensic signal auditing logic.
-        true
+        self.buffers.iter().all(|frame| {
+            frame.peak.iter().all(|value| value.is_finite() && *value >= 0.0)
+                && frame.correlation.is_finite() && (-1.0..=1.0).contains(&frame.correlation)
+                && (frame.lufs_integrated.is_finite() || frame.lufs_integrated == f32::NEG_INFINITY)
+                && frame.samples.iter().all(|sample| sample.is_finite())
+        }) && self.write_idx < self.buffers.len()
+            && self.latest_idx < self.buffers.len()
+            && (self.ui_idx == 99 || self.ui_idx < self.buffers.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SignalAnalyzerOrchestrator;
+
+    #[test]
+    fn process_populates_metering_metrics() {
+        let mut analyzer = SignalAnalyzerOrchestrator::new(8);
+        analyzer.process(&[0.5, -0.25, 0.0], &[0.5, -0.25, 0.0]);
+        let frame = &analyzer.buffers[analyzer.latest_idx];
+        assert_eq!(frame.peak, [0.5, 0.5]);
+        assert!((frame.correlation - 1.0).abs() < 1e-6);
+        assert!(frame.lufs_integrated.is_finite());
+        assert!(analyzer.audit_signal_analyzer());
     }
 }
