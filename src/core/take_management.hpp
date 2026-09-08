@@ -2,6 +2,9 @@
 #include <vector>
 #include <memory>
 #include <string>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include "audio_region.hpp"
 
 namespace Aura::Core {
@@ -105,6 +108,8 @@ public:
     }
 
     const std::vector<std::shared_ptr<Take>>& getTakes() const { return m_takes; }
+    const std::vector<uint32_t>& getActiveCompIndices() const { return m_activeCompIndices; }
+    void clearComp() { m_activeCompIndices.clear(); }
 
 private:
     std::vector<std::shared_ptr<Take>> m_takes;

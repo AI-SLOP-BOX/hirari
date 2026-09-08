@@ -3,6 +3,8 @@
 #include <array>
 #include <memory>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include "../audio_region.hpp"
 
 namespace Aura::Core::Editing {
@@ -44,7 +46,7 @@ public:
      * @brief ユーザーが「このテイクのこの部分を使う！」とスワイプ（選択）した際の処理
      */
     void swipeTakeRegion(size_t takeIndex, uint64_t start, uint64_t end) {
-        if (takeIndex >= m_takes.size()) return;
+        if (takeIndex >= m_takes.size() || start >= end || !m_takes[takeIndex]) return;
 
         // 【アルゴリズム的解決】
         // 既存のコンピング（選択）領域と時間が被っている場合、
@@ -86,58 +88,41 @@ public:
     void renderComposite(float* outBuffer, uint64_t renderStart, uint32_t numSamples) {
         if (outBuffer == nullptr || numSamples == 0) return;
 
-        // Clear output buffer first
         std::fill(outBuffer, outBuffer + numSamples, 0.0f);
 
         constexpr uint32_t kMaxSamples = 4096;
-        const uint32_t processCount = std::min(numSamples, kMaxSamples);
-
         static thread_local std::array<float, kMaxSamples> tempL;
         static thread_local std::array<float, kMaxSamples> tempR;
-
-        for (const auto& reg : m_activeRegions) {
-            if (!reg.sourceTake) continue;
-
-            // Check intersection between comped region and rendering window
-            const uint64_t windowEnd = renderStart > UINT64_MAX - processCount
-                ? UINT64_MAX : renderStart + processCount;
-            if (reg.endSample <= renderStart || reg.startSample >= windowEnd) {
-                continue;
-            }
-
-            uint64_t start = std::max(renderStart, reg.startSample);
-            uint64_t end = std::min(renderStart + processCount, reg.endSample);
-            uint32_t copyLen = static_cast<uint32_t>(end - start);
-            if (copyLen == 0) continue;
-
-            uint32_t offset = static_cast<uint32_t>(start - renderStart);
-
-            // Reset local buffers for additive mixing
-            std::fill(tempL.begin(), tempL.begin() + copyLen, 0.0f);
-            std::fill(tempR.begin(), tempR.begin() + copyLen, 0.0f);
-
-            // Fetch take audio
-            reg.sourceTake->render(tempL.data(), tempR.data(), start, copyLen);
-
-            // Apply crossfades at slice boundaries
-            const float xfadeSamples = static_cast<float>(reg.crossfadeSamples);
-            for (uint32_t s = 0; s < copyLen; ++s) {
-                uint64_t currentTimelinePos = start + s;
-                float fade = 1.0f;
-
-                if (reg.crossfadeSamples > 0 &&
-                    currentTimelinePos - reg.startSample < reg.crossfadeSamples) {
-                    float ratio = static_cast<float>(currentTimelinePos - reg.startSample) / xfadeSamples;
-                    fade = std::sin(1.57079632679f * ratio);
-                } else if (reg.crossfadeSamples > 0 &&
-                           reg.endSample - currentTimelinePos < reg.crossfadeSamples) {
-                    float ratio = static_cast<float>(reg.endSample - currentTimelinePos) / xfadeSamples;
-                    fade = std::sin(1.57079632679f * ratio);
+        for (uint32_t base = 0; base < numSamples;) {
+            const uint32_t processCount = std::min(kMaxSamples, numSamples - base);
+            const uint64_t chunkStart = renderStart > UINT64_MAX - base
+                ? UINT64_MAX : renderStart + base;
+            const uint64_t chunkEnd = chunkStart > UINT64_MAX - processCount
+                ? UINT64_MAX : chunkStart + processCount;
+            for (const auto& reg : m_activeRegions) {
+                if (!reg.sourceTake || reg.endSample <= chunkStart || reg.startSample >= chunkEnd) continue;
+                const uint64_t start = std::max(chunkStart, reg.startSample);
+                const uint64_t end = std::min(chunkEnd, reg.endSample);
+                const uint32_t copyLen = static_cast<uint32_t>(end - start);
+                if (copyLen == 0) continue;
+                const uint32_t offset = base + static_cast<uint32_t>(start - chunkStart);
+                std::fill(tempL.begin(), tempL.begin() + copyLen, 0.0f);
+                std::fill(tempR.begin(), tempR.begin() + copyLen, 0.0f);
+                reg.sourceTake->render(tempL.data(), tempR.data(), start, copyLen);
+                const float xfadeSamples = static_cast<float>(reg.crossfadeSamples);
+                for (uint32_t s = 0; s < copyLen; ++s) {
+                    const uint64_t position = start + s;
+                    float fade = 1.0f;
+                    if (reg.crossfadeSamples > 0 && position - reg.startSample < reg.crossfadeSamples) {
+                        fade = std::sin(1.57079632679f * static_cast<float>(position - reg.startSample) / xfadeSamples);
+                    } else if (reg.crossfadeSamples > 0 && reg.endSample - position < reg.crossfadeSamples) {
+                        fade = std::sin(1.57079632679f * static_cast<float>(reg.endSample - position) / xfadeSamples);
+                    }
+                    outBuffer[offset + s] += tempL[s] * fade;
                 }
-
-                // Sum left channel to output (comping is mono or split mono per track)
-                outBuffer[offset + s] += tempL[s] * fade;
             }
+            if (processCount == numSamples - base) break;
+            base += processCount;
         }
     }
 
@@ -147,39 +132,47 @@ public:
     void renderCompositeStereo(float* outLeft, float* outRight,
                                uint64_t renderStart, uint32_t numSamples) {
         if (!outLeft || !outRight || numSamples == 0) return;
-        const uint32_t processCount = std::min(numSamples, kMaxRenderSamples);
         std::fill(outLeft, outLeft + numSamples, 0.0f);
         std::fill(outRight, outRight + numSamples, 0.0f);
         static thread_local std::array<float, kMaxRenderSamples> tempLeft{};
         static thread_local std::array<float, kMaxRenderSamples> tempRight{};
-        const uint64_t windowEnd = renderStart > UINT64_MAX - processCount
-            ? UINT64_MAX : renderStart + processCount;
-        for (const auto& reg : m_activeRegions) {
-            if (!reg.sourceTake || reg.endSample <= renderStart ||
-                reg.startSample >= windowEnd) continue;
-            const uint64_t start = std::max(renderStart, reg.startSample);
-            const uint64_t end = std::min(windowEnd, reg.endSample);
-            const uint32_t count = static_cast<uint32_t>(end - start);
-            if (count == 0) continue;
-            const uint32_t offset = static_cast<uint32_t>(start - renderStart);
-            std::fill(tempLeft.begin(), tempLeft.begin() + count, 0.0f);
-            std::fill(tempRight.begin(), tempRight.begin() + count, 0.0f);
-            reg.sourceTake->render(tempLeft.data(), tempRight.data(), start, count);
-            for (uint32_t s = 0; s < count; ++s) {
-                const uint64_t position = start + s;
-                float fade = 1.0f;
-                if (reg.crossfadeSamples > 0 && position - reg.startSample < reg.crossfadeSamples) {
-                    fade = std::sin(1.57079632679f * static_cast<float>(position - reg.startSample) /
-                                    static_cast<float>(reg.crossfadeSamples));
-                } else if (reg.crossfadeSamples > 0 && reg.endSample - position < reg.crossfadeSamples) {
-                    fade = std::sin(1.57079632679f * static_cast<float>(reg.endSample - position) /
-                                    static_cast<float>(reg.crossfadeSamples));
+        for (uint32_t base = 0; base < numSamples;) {
+            const uint32_t processCount = std::min(kMaxRenderSamples, numSamples - base);
+            const uint64_t chunkStart = renderStart > UINT64_MAX - base
+                ? UINT64_MAX : renderStart + base;
+            const uint64_t windowEnd = chunkStart > UINT64_MAX - processCount
+                ? UINT64_MAX : chunkStart + processCount;
+            for (const auto& reg : m_activeRegions) {
+                if (!reg.sourceTake || reg.endSample <= chunkStart || reg.startSample >= windowEnd) continue;
+                const uint64_t start = std::max(chunkStart, reg.startSample);
+                const uint64_t end = std::min(windowEnd, reg.endSample);
+                const uint32_t count = static_cast<uint32_t>(end - start);
+                if (count == 0) continue;
+                const uint32_t offset = base + static_cast<uint32_t>(start - chunkStart);
+                std::fill(tempLeft.begin(), tempLeft.begin() + count, 0.0f);
+                std::fill(tempRight.begin(), tempRight.begin() + count, 0.0f);
+                reg.sourceTake->render(tempLeft.data(), tempRight.data(), start, count);
+                for (uint32_t s = 0; s < count; ++s) {
+                    const uint64_t position = start + s;
+                    float fade = 1.0f;
+                    if (reg.crossfadeSamples > 0 && position - reg.startSample < reg.crossfadeSamples) {
+                        fade = std::sin(1.57079632679f * static_cast<float>(position - reg.startSample) /
+                                        static_cast<float>(reg.crossfadeSamples));
+                    } else if (reg.crossfadeSamples > 0 && reg.endSample - position < reg.crossfadeSamples) {
+                        fade = std::sin(1.57079632679f * static_cast<float>(reg.endSample - position) /
+                                        static_cast<float>(reg.crossfadeSamples));
+                    }
+                    outLeft[offset + s] += tempLeft[s] * fade;
+                    outRight[offset + s] += tempRight[s] * fade;
                 }
-                outLeft[offset + s] += tempLeft[s] * fade;
-                outRight[offset + s] += tempRight[s] * fade;
             }
+            if (processCount == numSamples - base) break;
+            base += processCount;
         }
     }
+
+    const std::vector<CompRegion>& getActiveRegions() const { return m_activeRegions; }
+    void clearComp() { m_activeRegions.clear(); }
 
 private:
     static constexpr uint32_t kMaxRenderSamples = 4096;
