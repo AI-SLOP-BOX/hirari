@@ -238,7 +238,7 @@
                                                     Rectangle { width: am_trk_h.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border_radius: 2px; }
                                                     TouchArea { mouse-cursor: ew-resize; moved => { if (self.pressed) { MixerActions.fader_changed(am_trk_h.id, (self.mouse_x / parent.width).clamp(0, 1)); } } }
                                                 }
-                                                Z_Knob { compact: true; show-value: true; value: am_trk_h.pan; bipolar: true; display-value: am_trk_h.pan == 0.5 ? "C" : (am_trk_h.pan < 0.5 ? "L" + Math.round((0.5 - am_trk_h.pan) * 128.0) : "R" + Math.round((am_trk_h.pan - 0.5) * 127.0)); accent-col: Style.ok; changed(v) => { MixerActions.pan_changed(am_trk_h.id, v); } }
+                                                Z_Knob { compact: true; show-value: true; value: (am_trk_h.pan + 1.0) / 2.0; bipolar: true; display-value: am_trk_h.pan == 0.0 ? "C" : (am_trk_h.pan < 0.0 ? "L" + Math.round(-am_trk_h.pan * 128.0) : "R" + Math.round(am_trk_h.pan * 127.0)); accent-col: Style.ok; changed(v) => { MixerActions.pan_changed(am_trk_h.id, v * 2.0 - 1.0); } }
                                             }
                                         }
                                         

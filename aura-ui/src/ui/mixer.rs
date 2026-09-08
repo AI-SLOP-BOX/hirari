@@ -115,8 +115,8 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
                     continue;
                 };
                 if track.id == id {
-                    track.pan = bounded;
                     core.set_track_pan(id as u32, bounded);
+                    track.pan = bounded;
                     replace_track(&tracks, i, track);
                     break;
                 }

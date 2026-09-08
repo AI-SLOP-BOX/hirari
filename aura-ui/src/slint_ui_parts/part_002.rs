@@ -50,24 +50,6 @@ pub(crate) fn save_ui_midi_notes(project_path: &str, tracks: &slint::VecModel<Z_
         })
         .collect();
 
-    // Never erase a previously loaded arrangement just because the UI model
-    // has not finished hydrating yet (this can happen after plugin scan,
-    // device recovery, or a fast save immediately after launch).  An empty
-    // in-memory snapshot is ambiguous; an existing non-empty sidecar is not.
-    let current_note_count: usize = persisted.iter().map(|track| track.notes.len()).sum();
-    if current_note_count == 0 {
-        let existing_path = midi_notes_path(project_path);
-        if let Ok(existing_data) = fs::read(&existing_path) {
-            if let Ok(existing) = serde_json::from_slice::<Vec<PersistedTrackNotes>>(&existing_data)
-            {
-                let existing_note_count: usize =
-                    existing.iter().map(|track| track.notes.len()).sum();
-                if existing_note_count > 0 {
-                    return true;
-                }
-            }
-        }
-    }
     let Ok(data) = serde_json::to_vec_pretty(&persisted) else {
         return false;
     };
