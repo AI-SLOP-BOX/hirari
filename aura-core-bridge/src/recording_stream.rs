@@ -5,7 +5,7 @@
 //! conversion, header finalization, and atomic publication of the take.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,14 +54,42 @@ pub fn recoverable_spools(directory: impl AsRef<Path>) -> Vec<PathBuf> {
                 })
         })
         .filter(|path| {
-            let Ok(bytes) = fs::read(path) else {
+            let Ok(mut file) = File::open(path) else {
                 return false;
             };
-            recording_wav_metadata(&bytes).is_some_and(|(_, data_bytes)| data_bytes > 0)
+            let Ok(file_size) = file.metadata().map(|metadata| metadata.len()) else {
+                return false;
+            };
+            let mut header = [0u8; 80];
+            if file.read_exact(&mut header).is_err() {
+                return false;
+            }
+            recoverable_header_metadata(&header, file_size)
+                .is_some_and(|(_, data_bytes)| data_bytes > 0)
         })
         .collect::<Vec<_>>();
     candidates.sort();
     candidates
+}
+
+fn recoverable_header_metadata(header: &[u8; 80], file_size: u64) -> Option<(u16, u64)> {
+    if &header[8..12] != b"WAVE" || (&header[0..4] != b"RIFF" && &header[0..4] != b"RF64")
+        || &header[48..52] != b"fmt " || &header[72..76] != b"data"
+    {
+        return None;
+    }
+    let channels = u16::from_le_bytes(header[58..60].try_into().ok()?);
+    let block_align = u16::from_le_bytes(header[68..70].try_into().ok()?);
+    if channels == 0 || block_align == 0 || u16::from_le_bytes(header[70..72].try_into().ok()?) != 16 {
+        return None;
+    }
+    let data_bytes = if &header[0..4] == b"RF64" {
+        u64::from_le_bytes(header[28..36].try_into().ok()?)
+    } else {
+        u32::from_le_bytes(header[76..80].try_into().ok()?) as u64
+    };
+    (data_bytes > 0 && file_size >= 80 + data_bytes && data_bytes % u64::from(block_align) == 0)
+        .then_some((channels, data_bytes))
 }
 
 /// Returns the PCM channel count and data payload size for a RIFF/RF64 WAV.
