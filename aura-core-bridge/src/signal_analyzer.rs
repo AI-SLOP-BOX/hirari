@@ -50,6 +50,22 @@ impl SignalAnalyzerOrchestrator {
         }
     }
 
+    /// Clears cross-block metering state when switching projects or sources.
+    pub fn reset(&mut self) {
+        self.loudness_blocks.clear();
+        self.k_weight_state = [[0.0; 8]; 2];
+        self.previous_samples = [0.0; 2];
+        self.write_idx = 0;
+        self.latest_idx = 0;
+        for frame in &mut self.buffers {
+            frame.peak = [0.0; 2];
+            frame.true_peak = [0.0; 2];
+            frame.correlation = 0.0;
+            frame.lufs_integrated = f32::NEG_INFINITY;
+            frame.samples.fill(0.0);
+        }
+    }
+
     fn k_weighted_sample(&mut self, channel: usize, sample: f64) -> f64 {
         // BS.1770 reference coefficients.  Do not apply 48 kHz coefficients
         // to another rate: that produces a plausible-looking but incorrect
@@ -224,5 +240,16 @@ mod tests {
         let frame = &analyzer.buffers[analyzer.latest_idx];
         assert!(frame.lufs_integrated.is_finite());
         assert!(analyzer.audit_signal_analyzer());
+    }
+
+    #[test]
+    fn reset_discards_cross_project_loudness_state() {
+        let mut analyzer = SignalAnalyzerOrchestrator::new(8);
+        analyzer.process(&[0.5; 8], &[0.5; 8]);
+        assert!(analyzer.buffers[analyzer.latest_idx].lufs_integrated.is_finite());
+        analyzer.reset();
+        assert_eq!(analyzer.buffers[analyzer.latest_idx].lufs_integrated, f32::NEG_INFINITY);
+        analyzer.process(&[0.0; 8], &[0.0; 8]);
+        assert_eq!(analyzer.buffers[analyzer.latest_idx].lufs_integrated, f32::NEG_INFINITY);
     }
 }
