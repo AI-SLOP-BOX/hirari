@@ -531,7 +531,8 @@
         if (bot_view == 0 && root.tracks.length >= 4) : Rectangle {
         x: ins_open ? Style.inspector-w : 0px; y: 205px;
         width: parent.width - (ins_open ? Style.inspector-w : 0px);
-        height: 192px; clip: true; background: transparent;
+        height: 192px; clip: true; background: transparent; ScrollView { width: 100%; height: 100%;
+        Rectangle { width: 100%; height: root.tracks.length * 48px;
         for trk[idx] in root.tracks : Rectangle {
             property <Z_Track> track: trk;
             x: 0px; y: idx * 48px; width: 100%; height: 47px; clip: true;
@@ -566,8 +567,7 @@
                     }
                 }
             }
-        }
-        }
+        } } } }
         if (bot_view == 2 && root.tracks.length > 0) : Rectangle {
             x: 0px; y: 34px; width: 100%; height: 520px; z: 5; background: Style.surface-1; border-width: 1px; border-color: Style.border; clip: true;
             Text { text: "Piano Roll  |  Track " + (root.sel_idx + 1); x: 12px; y: 8px; font-size: 11px; color: Style.text; font-weight: 700; }
