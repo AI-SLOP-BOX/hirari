@@ -12,10 +12,16 @@ pub struct SignalAnalyzerOrchestrator {
     pub ui_idx: usize,
     integrated_energy: f64,
     integrated_blocks: u64,
+    sample_rate: f32,
+    k_weight_state: [[f64; 8]; 2],
 }
 
 impl SignalAnalyzerOrchestrator {
     pub fn new(fft_size: usize) -> Self {
+        Self::new_with_sample_rate(fft_size, 48_000.0)
+    }
+
+    pub fn new_with_sample_rate(fft_size: usize, sample_rate: f32) -> Self {
         let buffers = [(); 3].map(|_| AnalysisFrame {
             peak: [0.0; 2],
             correlation: 0.0,
@@ -29,7 +35,40 @@ impl SignalAnalyzerOrchestrator {
             ui_idx: 99,
             integrated_energy: 0.0,
             integrated_blocks: 0,
+            sample_rate: if sample_rate.is_finite() && sample_rate > 0.0 {
+                sample_rate
+            } else {
+                48_000.0
+            },
+            k_weight_state: [[0.0; 8]; 2],
         }
+    }
+
+    fn k_weighted_sample(&mut self, channel: usize, sample: f64) -> f64 {
+        // BS.1770's reference coefficients for 48 kHz.  Other rates retain
+        // the previous unweighted behavior until rate-specific coefficients
+        // are supplied, rather than silently applying the wrong filter.
+        if (self.sample_rate - 48_000.0).abs() > 1.0 {
+            return sample;
+        }
+        const PRE_B: [f64; 3] = [1.53512485958697, -2.69169618940638, 1.19839281085285];
+        const PRE_A: [f64; 2] = [-1.69065929318241, 0.73248077421585];
+        const RLB_B: [f64; 3] = [1.0, -2.0, 1.0];
+        const RLB_A: [f64; 2] = [-1.99004745483398, 0.99007225036662];
+        let state = &mut self.k_weight_state[channel];
+        let pre = PRE_B[0] * sample + PRE_B[1] * state[0] + PRE_B[2] * state[1]
+            - PRE_A[0] * state[2] - PRE_A[1] * state[3];
+        state[1] = state[0];
+        state[0] = sample;
+        state[3] = state[2];
+        state[2] = pre;
+        let rlb = RLB_B[0] * pre + RLB_B[1] * state[4] + RLB_B[2] * state[5]
+            - RLB_A[0] * state[6] - RLB_A[1] * state[7];
+        state[5] = state[4];
+        state[4] = pre;
+        state[7] = state[6];
+        state[6] = rlb;
+        rlb
     }
 
     /// INDUSTRIAL: Processes an audio block with SIMD-accelerated precision.
@@ -66,17 +105,26 @@ impl SignalAnalyzerOrchestrator {
         }
 
         let sample_count = left.len() + right.len();
+        let mut weighted_power = 0.0f64;
+        for (channel, input) in [left, right].iter().enumerate() {
+            for &sample in input.iter() {
+                let clean = if sample.is_finite() { f64::from(sample) } else { 0.0 };
+                let weighted = self.k_weighted_sample(channel, clean);
+                weighted_power += weighted * weighted;
+            }
+        }
         let block_lufs = if sample_count > 0 && power_sum > 0.0 {
-            (-0.691 + 10.0 * (power_sum / sample_count as f64).log10()) as f32
+            (-0.691 + 10.0 * (weighted_power / sample_count as f64).log10()) as f32
         } else { f32::NEG_INFINITY };
         if block_lufs.is_finite() && block_lufs > -70.0 {
-            self.integrated_energy += power_sum / sample_count as f64;
+            self.integrated_energy += weighted_power / sample_count as f64;
             self.integrated_blocks = self.integrated_blocks.saturating_add(1);
         }
         let integrated_lufs = if self.integrated_blocks > 0 {
             (-0.691 + 10.0 * (self.integrated_energy / self.integrated_blocks as f64).log10()) as f32
         } else { f32::NEG_INFINITY };
         let target = &mut self.buffers[self.write_idx];
+        target.samples.fill(0.0);
         for (index, &sample) in left.iter().enumerate().take(target.samples.len()) {
             target.samples[index] = if sample.is_finite() { sample } else { 0.0 };
         }
