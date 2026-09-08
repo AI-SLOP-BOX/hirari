@@ -119,8 +119,8 @@
                                 HorizontalLayout {
                                     padding: 10px; spacing: 2px;
                                     for trk[idx] in root.tracks : Z_MixerStrip {
-                                        property <float> safe_peak: pks.length > 0 ? pks[Math.mod(idx, pks.length)] : 0.0;
-                                        property <float> safe_hold: pks_h.length > 0 ? pks_h[Math.mod(idx, pks_h.length)] : 0.0;
+                                        property <float> safe_peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
+                                        property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
                                         name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan; 
                                         peak: safe_peak; pk_h: safe_hold; tid: trk.id; 
                                         is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; 
@@ -172,7 +172,7 @@
                                         spacing: 12px;
                                         Z_MixerStrip { 
                                             name: "MAIN"; color: Style.brand; volume: root.master_output_gain; pan: 0.5; 
-                                            peak: pks.length > tracks.length ? pks[tracks.length] : 0.0; pk_h: pks_h.length > tracks.length ? pks_h[tracks.length] : 0.0; tid: 999; 
+                                            peak: pks.length > 0 ? pks[0] : 0.0; pk_h: pks_h.length > 0 ? pks_h[0] : 0.0; tid: 999;
                                             is_mute: false; is_solo: false; is_phase: false; fx: []; compact: true; 
                                             send_lvl: 0; filter_lp: 1.0; filter_hp: 0.0; track_idx: 99; is_master: true; meter_mode: meter_mode; 
                                         }
@@ -180,7 +180,7 @@
                                             spacing: 6px; alignment: end; horizontal-stretch: 1;
                                             Rectangle { height: 1px; background: Style.border; }
                                             Text { text: root.lufs_integrated > -120.0 ? "LUFS: " + (Math.round(root.lufs_integrated * 10.0) / 10.0) : "LUFS: N/A"; font-size: 8px; color: root.lufs_integrated > -120.0 ? Style.ok : Style.text-secondary; font-weight: 600; }
-                                            Text { text: "Peak: " + (Math.floor(((pks.length > tracks.length ? pks[tracks.length] : 0.0) - 1.0) * 10.0)) + " dBFS"; font-size: 8px; color: Style.text-secondary; }
+                                            Text { text: "Peak: " + (Math.floor(((pks.length > 0 ? pks[0] : 0.0) - 1.0) * 10.0)) + " dBFS"; font-size: 8px; color: Style.text-secondary; }
                                             Rectangle { vertical-stretch: 1; }
                                             Text { text: root.audio_sample_rate > 0.0 ? "Engine Ready | " + (Math.round(root.audio_sample_rate / 100.0) / 10.0) + " kHz" : "Audio Engine Offline"; font-size: Style.font-xxs; color: Style.text-tertiary; }
                                         }
@@ -385,8 +385,8 @@
                                     HorizontalLayout {
                                         spacing: 8px;
                                     for trk[idx] in root.tracks : Z_MixerStrip {
-                                        property <float> safe_peak: pks.length > 0 ? pks[Math.mod(idx, pks.length)] : 0.0;
-                                        property <float> safe_hold: pks_h.length > 0 ? pks_h[Math.mod(idx, pks_h.length)] : 0.0;
+                                        property <float> safe_peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
+                                        property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
                                         name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan; 
                                         peak: safe_peak; pk_h: safe_hold; tid: trk.id; 
                                             is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; 

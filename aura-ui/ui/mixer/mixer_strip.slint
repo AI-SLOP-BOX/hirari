@@ -133,7 +133,7 @@ export component Z_MixerStrip {
                 // Peak Numeric Readout (Pro Parity)
                 Rectangle {
                     height: 14px; background: Style.lcd-bg; border_radius: 1px;
-                    Text { text: peak <= 0.000001 ? "-∞ dB" : (peak > 1.0 ? "+" : "") + (Math.floor(20.0 * Math.log(10.0, peak) * 10.0) / 10.0) + " dB"; font-size: Style.font-xxs; color: peak > 1.0 ? Style.record : Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; font-weight: 700; }
+                    Text { text: peak <= 0.000001 ? "-∞ dB" : (peak > 1.0 ? "+" : "") + (Math.floor(20.0 * Math.log(peak, 10.0) * 10.0) / 10.0) + " dB"; font-size: Style.font-xxs; color: peak > 1.0 ? Style.record : Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; font-weight: 700; }
                 }
                 Rectangle {
                     height: compact ? 160px : 220px; background: Style.surface-0; width: compact ? 26px : 32px; border_radius: 3px; border_width: 1px; border_color: Style.border;

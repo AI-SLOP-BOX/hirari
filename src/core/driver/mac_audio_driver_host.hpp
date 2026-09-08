@@ -123,6 +123,7 @@ class MacAudioDriverHost {
 public:
     using InputCaptureSink = MacAudioDriver::InputCaptureSink;
     using InputBlockInfo = MacAudioInputBlockQueue::BlockInfo;
+    using ProcessCallback = void (*)(const float* const*, float* const*, uint32_t, void*) noexcept;
 
     MacAudioDriverHost();
     ~MacAudioDriverHost();
@@ -137,6 +138,7 @@ public:
     bool reconfigure(double sampleRate, uint32_t bufferSize);
     std::string list_devices_json() const;
     bool select_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize);
+    void set_process_callback(ProcessCallback callback, void* context) noexcept;
     float output_peak() const;
     uint64_t callback_count() const;
 
@@ -148,6 +150,9 @@ public:
                           uint32_t destinationFrameCapacity,
                           InputBlockInfo& info,
                           uint64_t& droppedBlocks) noexcept;
+    void capture_input(const float* const* channels,
+                       uint32_t channelCount,
+                       uint32_t frameCount) noexcept;
     uint64_t dropped_input_blocks() const noexcept;
 
     // The sink must outlive unregister_input_capture_sink(). Its callback is

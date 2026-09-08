@@ -167,6 +167,18 @@ impl ControlRoomState {
         }
         true
     }
+    pub fn remove_cue(&mut self, id: u32) -> bool {
+        let original_len = self.cues.len();
+        self.cues.retain(|cue| cue.id != id);
+        self.cues.len() != original_len
+    }
+    pub fn set_cue_enabled(&mut self, id: u32, enabled: bool) -> bool {
+        self.cues
+            .iter_mut()
+            .find(|cue| cue.id == id)
+            .map(|cue| cue.enabled = enabled)
+            .is_some()
+    }
     pub fn set_reference_track(&mut self, path: Option<String>) -> bool {
         if path
             .as_ref()

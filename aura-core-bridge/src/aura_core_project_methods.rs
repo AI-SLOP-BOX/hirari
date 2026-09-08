@@ -767,8 +767,35 @@ impl AuraCore {
             .map_err(|_| anyhow::anyhow!("control room lock poisoned"))?
             .clone();
         let control_room_json = serde_json::to_vec_pretty(&control_room)?;
-        std::fs::write(control_room_path, control_room_json)
-            .context("failed to persist control room state")
+        let control_room_path = std::path::PathBuf::from(control_room_path);
+        let control_room_tmp = std::path::PathBuf::from(format!(
+            "{}.tmp-{}-{}",
+            control_room_path.display(),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or_default()
+        ));
+        let write_result = (|| -> anyhow::Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&control_room_tmp)
+                .context("failed to create control room temporary file")?;
+            use std::io::Write;
+            file.write_all(&control_room_json)
+                .context("failed to write control room state")?;
+            file.sync_all()
+                .context("failed to flush control room state")?;
+            std::fs::rename(&control_room_tmp, &control_room_path)
+                .context("failed to replace control room state")?;
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = std::fs::remove_file(&control_room_tmp);
+        }
+        write_result
     }
 
     pub fn load_project_v2(&self, path: &str) -> anyhow::Result<()> {
@@ -781,6 +808,22 @@ impl AuraCore {
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."));
         let mut document = document;
+        // Validate the sidecar before mutating native state. A malformed
+        // monitor graph must never leave the currently loaded project
+        // partially hydrated or make rollback impossible.
+        let control_room_path = format!("{path}.control-room.json");
+        let persisted_control_room = match std::fs::read(&control_room_path) {
+            Ok(bytes) => {
+                let state: crate::control_room::ControlRoomState = serde_json::from_slice(&bytes)
+                    .map_err(|error| anyhow::anyhow!("invalid control room state: {error}"))?;
+                if !state.validate() {
+                    return Err(anyhow::anyhow!("invalid control room state"));
+                }
+                Some(state)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(anyhow::anyhow!("failed to read control room state: {error}")),
+        };
         // A plugin binary is part of the cache identity.  Never hydrate a
         // state blob captured from a different binary: keep the project
         // editable, but let the plugin start from its defaults and acquire a
@@ -1477,15 +1520,7 @@ impl AuraCore {
         if let Ok(mut redo) = self.chord_redo_history.lock() {
             redo.clear();
         }
-        let _ = std::fs::remove_file(&rollback_path);
-        let control_room_path = format!("{path}.control-room.json");
-        if let Ok(bytes) = std::fs::read(control_room_path) {
-            let state: crate::control_room::ControlRoomState =
-                serde_json::from_slice(&bytes)
-                    .map_err(|error| anyhow::anyhow!("invalid control room state: {error}"))?;
-            if !state.validate() {
-                return Err(anyhow::anyhow!("invalid control room state"));
-            }
+        if let Some(state) = persisted_control_room {
             // Rehydrate both the Rust control-plane snapshot and the native
             // realtime monitor graph. Keeping only the Rust copy would make
             // the UI look correct while the audio callback still used the
@@ -1493,20 +1528,20 @@ impl AuraCore {
             engine.reset_control_room();
             for (index, name) in state.monitor_outputs.iter().enumerate() {
                 if index > 0 && !engine.add_control_room_speaker(name, state.monitor_output_gains[index]) {
-                    return Err(anyhow::anyhow!("failed to restore control room output"));
+                    return Err(rollback_error(anyhow::anyhow!("failed to restore control room output")));
                 }
                 if !engine.set_control_room_speaker_gain(index as u32, state.monitor_output_gains[index])
                     || !engine.set_control_room_speaker_enabled(index as u32, state.monitor_output_enabled[index])
                 {
-                    return Err(anyhow::anyhow!("failed to restore control room output settings"));
+                    return Err(rollback_error(anyhow::anyhow!("failed to restore control room output settings")));
                 }
             }
             if !engine.select_control_room_speaker(state.active_output as u32) {
-                return Err(anyhow::anyhow!("failed to restore active control room output"));
+                return Err(rollback_error(anyhow::anyhow!("failed to restore active control room output")));
             }
             for cue in &state.cues {
                 if !engine.upsert_control_room_cue(cue.id, cue.gain, cue.enabled) {
-                    return Err(anyhow::anyhow!("failed to restore control room cue"));
+                    return Err(rollback_error(anyhow::anyhow!("failed to restore control room cue")));
                 }
             }
             engine.set_control_room_dim(state.dim);
@@ -1516,6 +1551,7 @@ impl AuraCore {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("control room lock poisoned"))? = state;
         }
+        let _ = std::fs::remove_file(&rollback_path);
         Ok(())
     }
 

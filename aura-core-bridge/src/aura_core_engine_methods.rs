@@ -1594,9 +1594,13 @@ impl AuraCore {
         native && model
     }
     pub fn remove_control_room_speaker(&self, index: u32) -> bool {
-        self.engine
+        let native = self.engine
             .as_ref()
-            .is_some_and(|engine| engine.remove_control_room_speaker(index))
+            .is_some_and(|engine| engine.remove_control_room_speaker(index));
+        let model = self.control_room.lock()
+            .map(|mut state| state.remove_monitor_output(index as usize))
+            .unwrap_or(false);
+        native && model
     }
     pub fn set_control_room_speaker_gain(&self, index: u32, gain: f32) -> bool {
         gain.is_finite()
@@ -1625,18 +1629,24 @@ impl AuraCore {
             && self.control_room.lock().map(|mut state| state.upsert_cue(id, gain, enabled)).unwrap_or(false)
     }
     pub fn remove_control_room_cue(&self, id: u32) -> bool {
-        id != 0
-            && self
+        let native = id != 0 && self
                 .engine
                 .as_ref()
-                .is_some_and(|engine| engine.remove_control_room_cue(id))
+                .is_some_and(|engine| engine.remove_control_room_cue(id));
+        let model = id != 0 && self.control_room.lock()
+            .map(|mut state| state.remove_cue(id))
+            .unwrap_or(false);
+        native && model
     }
     pub fn set_control_room_cue_enabled(&self, id: u32, enabled: bool) -> bool {
-        id != 0
-            && self
+        let native = id != 0 && self
                 .engine
                 .as_ref()
-                .is_some_and(|engine| engine.set_control_room_cue_enabled(id, enabled))
+                .is_some_and(|engine| engine.set_control_room_cue_enabled(id, enabled));
+        let model = id != 0 && self.control_room.lock()
+            .map(|mut state| state.set_cue_enabled(id, enabled))
+            .unwrap_or(false);
+        native && model
     }
     pub fn control_room_cue_gain(&self, id: u32) -> f32 {
         self.engine
@@ -1656,8 +1666,13 @@ impl AuraCore {
     }
     pub fn set_control_room_talkback(&self, enabled: bool, gain: f32) {
         if gain.is_finite() {
+            let gain = gain.clamp(0.0, 4.0);
             if let Some(engine) = self.engine.as_ref() {
-                engine.set_control_room_talkback(enabled, gain.clamp(0.0, 4.0));
+                engine.set_control_room_talkback(enabled, gain);
+            }
+            if let Ok(mut state) = self.control_room.lock() {
+                state.talkback = enabled;
+                state.talkback_gain = gain;
             }
         }
     }

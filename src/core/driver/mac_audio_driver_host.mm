@@ -125,6 +125,8 @@ struct MacAudioDriverHost::Impl {
     std::unique_ptr<MacAudioDriver> driver;
     AudioDeviceID selectedDevice = kAudioObjectUnknown;
     std::shared_ptr<CallbackState> callbackState = std::make_shared<CallbackState>();
+    ProcessCallback processCallback;
+    void* processContext = nullptr;
     MacAudioInputBlockQueue inputQueue;
     InputCaptureSink queueSink{&captureInput, this};
     std::atomic<const MacAudioDriver::InputCaptureSink*> inputSink{nullptr};
@@ -151,6 +153,13 @@ MacAudioDriverHost::MacAudioDriverHost() {
     m_impl->defaultDeviceListenerInstalled =
         AudioObjectAddPropertyListener(kAudioObjectSystemObject, &address,
                                        defaultDeviceListener, m_impl.get()) == noErr;
+}
+
+void MacAudioDriverHost::set_process_callback(ProcessCallback callback, void* context) noexcept {
+    if (!m_impl) return;
+    std::lock_guard<std::mutex> lock(m_impl->lifecycleMutex);
+    m_impl->processCallback = std::move(callback);
+    m_impl->processContext = context;
 }
 
 MacAudioDriverHost::~MacAudioDriverHost() {
@@ -189,9 +198,16 @@ bool MacAudioDriverHost::start_locked(double sampleRate, uint32_t bufferSize) {
     }
     {
         const auto callbackState = m_impl->callbackState;
-        m_impl->driver = std::make_unique<MacAudioDriver>([callbackState](float* l, float* r, uint32_t len) {
+        const auto processCallback = m_impl->processCallback;
+        void* const processContext = m_impl->processContext;
+        m_impl->driver = std::make_unique<MacAudioDriver>([callbackState, processCallback, processContext](float* l, float* r, uint32_t len) {
             float* channels[2] = { l, r };
-            ::Aura::Core::Engine::AuraUnifiedEngine::getInstance().processBlockDirect(channels, 2, len);
+            if (processCallback) {
+                processCallback(nullptr, channels, len, processContext);
+            } else {
+                std::fill_n(l, len, 0.0f);
+                std::fill_n(r, len, 0.0f);
+            }
             float peak = 0.0f;
             for (uint32_t i = 0; i < len; ++i) {
                 peak = std::max(peak, std::max(std::fabs(l[i]), std::fabs(r[i])));
@@ -201,9 +217,6 @@ bool MacAudioDriverHost::start_locked(double sampleRate, uint32_t bufferSize) {
         });
         m_impl->driver->register_input_capture_sink(&m_impl->queueSink);
         m_impl->state.store(1, std::memory_order_release);
-        ::Aura::Core::Engine::AuraUnifiedEngine::getInstance().prepareToPlay(
-            sampleRate, bufferSize);
-
         // Keep the driver and Engine on the exact requested configuration.
         if (!m_impl->driver->start(sampleRate, bufferSize, m_impl->selectedDevice)) {
             const int32_t errorCode = static_cast<int32_t>(m_impl->driver->last_error_code());
@@ -321,7 +334,6 @@ void MacAudioDriverHost::stop_locked() {
     // Device loss is a transport boundary. Stop the graph before tearing down
     // the callback so a callback-free interval cannot leave the engine marked
     // as playing and accidentally resume against a new device configuration.
-    ::Aura::Core::Engine::AuraUnifiedEngine::getInstance().set_playing(false);
     if (!m_impl->driver) {
         if (m_impl->state.load(std::memory_order_acquire) == 2) {
             m_impl->state.store(4, std::memory_order_release);
@@ -387,6 +399,12 @@ bool MacAudioDriverHost::poll_input_block(float* const* destination,
 
 uint64_t MacAudioDriverHost::dropped_input_blocks() const noexcept {
     return m_impl ? m_impl->inputQueue.dropped_blocks() : 0;
+}
+
+void MacAudioDriverHost::capture_input(const float* const* channels,
+                                       uint32_t channelCount,
+                                       uint32_t frameCount) noexcept {
+    if (m_impl) (void)m_impl->inputQueue.push_planar(channels, channelCount, frameCount);
 }
 
 bool MacAudioDriverHost::register_input_capture_sink(const InputCaptureSink* sink) noexcept {

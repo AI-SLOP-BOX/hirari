@@ -27,8 +27,8 @@ export component Z_FullMixer {
             HorizontalLayout {
                 spacing: 2px; padding: 4px;
                 for trk[idx] in tracks : Z_MixerStrip {
-                    property <float> safe_peak: pks.length > idx ? pks[idx] : 0.0;
-                    property <float> safe_hold: pks_h.length > idx ? pks_h[idx] : 0.0;
+                    property <float> safe_peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
+                    property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
                     name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan;
                     peak: safe_peak; pk_h: safe_hold; tid: trk.id;
                     is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert;

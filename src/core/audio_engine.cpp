@@ -12,12 +12,10 @@ AudioEngine::AudioEngine() : AudioEngine(true) {}
 AudioEngine::AudioEngine(bool startDevice)
         : m_engine(std::make_shared<::Aura::Core::Engine::AuraUnifiedEngine>()) {
         m_driver = std::make_unique<AudioDriverHost>();
-#if !defined(__APPLE__)
         // The optional JACK host and the offline fallback both use this same
         // callback boundary. The fallback stores the callback and dispatches
         // it from process_audio_block without claiming hardware availability.
         m_driver->set_process_callback(&AudioEngine::process_driver_block, this);
-#endif
         if (!startDevice) return;
         // Control-plane clients (CLI, offline render, project inspection and
         // isolated tests) must be able to construct an engine without taking

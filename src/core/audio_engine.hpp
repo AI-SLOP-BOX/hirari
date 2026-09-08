@@ -1270,16 +1270,18 @@ private:
         m_engine->apply_config(cfg);
 #endif
     }
+#endif
     static void process_driver_block(const float* const* inputs, float* const* outputs,
                                      uint32_t frames, void* context) noexcept {
         auto* self = static_cast<AudioEngine*>(context);
         if (!self || !self->m_engine || !outputs || !outputs[0] || !outputs[1] || frames == 0 ||
             frames > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize) return;
-#if defined(AURA_ENABLE_JACK)
+#if defined(__APPLE__) || defined(AURA_ENABLE_JACK)
         if (self->m_driver && inputs && inputs[0] && inputs[1])
             self->m_driver->capture_input(inputs, 2, frames);
 #endif
-        self->m_engine->publish_input_monitor_block(inputs, 2, frames);
+        if (inputs && inputs[0] && inputs[1])
+            self->m_engine->publish_input_monitor_block(inputs, 2, frames);
         float* channels[2] = {outputs[0], outputs[1]};
         self->m_engine->processBlockDirect(channels, 2, frames);
 #if defined(AURA_ENABLE_JACK)
@@ -1290,7 +1292,6 @@ private:
         if (self->m_driver) self->m_driver->record_callback(frames, std::isfinite(peak) ? peak : 0.0f);
 #endif
     }
-#endif
     // Session-owned graph. AnalysisHub receives a shared reference to this
     // same graph, while separate FFI handles receive separate project state.
     std::shared_ptr<::Aura::Core::Engine::AuraUnifiedEngine> m_engine;
