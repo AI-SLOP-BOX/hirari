@@ -137,7 +137,7 @@ void AlchemySamplerCore::processGranular(::Aura::Core::AudioBuffer& buffer) {
                 g.data = z.data;
                 g.sampleCount = z.sampleCount;
                 g.pos = (double)posDist(m_rng);
-                g.duration = 4410.0f; // 100ms @ 44.1k
+                g.duration = static_cast<float>(m_sampleRate * 0.1); // 100ms at the active rate
                 g.currentSample = 0;
                 g.velocity = 0.5f;
                 g.active.store(true, std::memory_order_release);
@@ -220,6 +220,7 @@ void AlchemySamplerCore::processAdditive(::Aura::Core::AudioBuffer& buffer) {
 
 void AlchemySamplerCore::prepareToPlay(double sr, uint32_t /*sz*/) noexcept {
     double sampleRate = sr > 0.0 ? sr : 44100.0;
+    m_sampleRate = sampleRate;
     float baseFreq = 110.0f; // A2 pitch base
     for (uint32_t i = 0; i < 1024; ++i) {
         auto& osc = m_oscBank[i];
