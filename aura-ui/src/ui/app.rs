@@ -224,7 +224,9 @@ pub fn run() {
             group_id: 1,
             input: "IN 1/2".into(),
             output: "ORCHESTRA".into(),
-            monitor: true,
+            // Input monitoring starts disabled until the user selects a
+            // concrete hardware input and monitor track in the mixer.
+            monitor: false,
             piano_roll_notes: slint::ModelRc::default(),
             fx: gen_fx(),
             clips: slint::ModelRc::new(slint::VecModel::from(vec![Z_Clip {
