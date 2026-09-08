@@ -227,6 +227,15 @@ impl AuraCore {
     pub fn select_control_room_output(&self, index: u32) -> bool {
         self.select_control_room_speaker(index)
     }
+    pub fn add_control_room_output(&self, name: &str) -> bool {
+        self.add_control_room_speaker(name, 1.0)
+    }
+    pub fn set_control_room_reference_track(&self, path: Option<String>) -> bool {
+        self.control_room
+            .lock()
+            .map(|mut state| state.set_reference_track(path))
+            .unwrap_or(false)
+    }
     pub fn set_control_room_reference_enabled(&self, enabled: bool) -> bool {
         self.control_room
             .lock()

@@ -91,7 +91,10 @@ impl AuraCore {
             .map(|s| {
                 serde_json::json!({
                     "active_output": s.monitor_outputs.get(s.active_output).cloned(),
+                    "active_output_gain": s.monitor_output_gains.get(s.active_output).copied().unwrap_or(1.0),
+                    "active_output_enabled": s.monitor_output_enabled.get(s.active_output).copied().unwrap_or(true),
                     "monitor_gain": s.effective_monitor_gain(),
+                    "dim": s.dim,
                     "talkback_gain": s.effective_talkback_gain(),
                     "cue_gain": s.effective_cue_gain(),
                     "reference_track": s.reference_track,
@@ -1575,15 +1578,20 @@ impl AuraCore {
             && name.len() <= 128
             && gain.is_finite()
             && (0.0..=4.0).contains(&gain)
-            && self
-                .engine
-                .as_ref()
-                .is_some_and(|engine| engine.add_control_room_speaker(name, gain))
+            && self.engine.as_ref().is_some_and(|engine| engine.add_control_room_speaker(name, gain))
+            && self.control_room.lock().map(|mut state| {
+                let added = state.add_monitor_output(name);
+                let index = state.monitor_outputs.len().saturating_sub(1);
+                if added { let _ = state.set_output_gain(index, gain); }
+                added
+            }).unwrap_or(false)
     }
     pub fn select_control_room_speaker(&self, index: u32) -> bool {
-        self.engine
+        let native = self.engine
             .as_ref()
-            .is_some_and(|engine| engine.select_control_room_speaker(index))
+            .is_some_and(|engine| engine.select_control_room_speaker(index));
+        let model = self.control_room.lock().map(|mut state| state.select_output(index as usize)).unwrap_or(false);
+        native && model
     }
     pub fn remove_control_room_speaker(&self, index: u32) -> bool {
         self.engine
@@ -1597,11 +1605,14 @@ impl AuraCore {
                 .engine
                 .as_ref()
                 .is_some_and(|engine| engine.set_control_room_speaker_gain(index, gain))
+            && self.control_room.lock().map(|mut state| state.set_output_gain(index as usize, gain)).unwrap_or(false)
     }
     pub fn set_control_room_speaker_enabled(&self, index: u32, enabled: bool) -> bool {
-        self.engine
+        let native = self.engine
             .as_ref()
-            .is_some_and(|engine| engine.set_control_room_speaker_enabled(index, enabled))
+            .is_some_and(|engine| engine.set_control_room_speaker_enabled(index, enabled));
+        let model = self.control_room.lock().map(|mut state| state.set_output_enabled(index as usize, enabled)).unwrap_or(false);
+        native && model
     }
     pub fn upsert_control_room_cue(&self, id: u32, gain: f32, enabled: bool) -> bool {
         id != 0
@@ -1611,6 +1622,7 @@ impl AuraCore {
                 .engine
                 .as_ref()
                 .is_some_and(|engine| engine.upsert_control_room_cue(id, gain, enabled))
+            && self.control_room.lock().map(|mut state| state.upsert_cue(id, gain, enabled)).unwrap_or(false)
     }
     pub fn remove_control_room_cue(&self, id: u32) -> bool {
         id != 0
@@ -1640,6 +1652,7 @@ impl AuraCore {
         if let Some(engine) = self.engine.as_ref() {
             engine.set_control_room_dim(enabled);
         }
+        if let Ok(mut state) = self.control_room.lock() { state.dim = enabled; }
     }
     pub fn set_control_room_talkback(&self, enabled: bool, gain: f32) {
         if gain.is_finite() {

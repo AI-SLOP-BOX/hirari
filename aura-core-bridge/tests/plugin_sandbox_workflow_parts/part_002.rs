@@ -1,3 +1,5 @@
+#[test]
+#[ignore = "requires the repository CLAP fixture and sandbox worker"]
 fn minimal_clap_fixture_keeps_multiple_instances_isolated() {
     let _guard = native_engine_test_guard();
     let fixture = std::env::var("AURA_CLAP_FIXTURE").expect("fixture path must be configured");
@@ -139,7 +141,6 @@ fn two_independent_sandbox_hosts_interleave_without_cross_talk() {
         .into_iter()
         .all(|snapshot| snapshot.alive));
 }
-
 #[test]
 #[ignore = "requires the repository CLAP fixture and sandbox worker"]
 fn minimal_clap_fixture_state_survives_project_v2_reload() {
@@ -477,6 +478,3 @@ fn generic_worker_fault_injection_quarantines_clap() {
     std::env::remove_var("AURA_PLUGIN_WORKER_CRASH_AFTER_BLOCKS");
     assert!(quarantined, "generic worker fault must end in quarantine");
 }
-
-#[test]
-#[ignore = "requires the repository CLAP fixture and sandbox worker"]

@@ -1,6 +1,6 @@
 use aura_core_bridge::AuraCore;
 mod support {
-    include!("recording_support.rs");
+    include!("../recording_support.rs");
 }
 use support::native_engine_test_guard;
 
@@ -283,7 +283,6 @@ fn minimal_clap_fixture_instantiates_in_the_isolated_worker() {
         assert_eq!(core.maintain_sandboxes(false), 0);
     }
 }
-
 #[test]
 #[ignore = "requires the repository CLAP fixture and sandbox worker"]
 fn minimal_clap_fixture_reconfigures_worker_without_stale_audio_format() {
@@ -471,6 +470,3 @@ fn minimal_clap_fixture_processes_continuous_audio_blocks_without_stale_output()
         .into_iter()
         .all(|snapshot| snapshot.alive));
 }
-
-#[test]
-#[ignore = "requires the repository CLAP fixture and sandbox worker"]

@@ -1,3 +1,5 @@
+#[test]
+#[ignore = "requires a real instrument fixture and isolated sandbox worker"]
 fn real_instrument_state_restore_keeps_note_audio_finite() {
     let _guard = native_engine_test_guard();
     let Ok(fixture) = std::env::var("AURA_INSTRUMENT_FIXTURE") else {

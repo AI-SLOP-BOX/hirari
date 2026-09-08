@@ -1,3 +1,4 @@
+#[test]
 fn async_render_failure_returns_to_failed_and_can_be_retried() {
     let _guard = native_engine_test_guard();
     let core = AuraCore::new().expect("core must initialize");

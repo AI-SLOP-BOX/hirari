@@ -755,7 +755,20 @@ impl AuraCore {
                 "project changed while it was being serialized; save was rejected"
             ));
         }
-        document.save_atomic(path)
+        document.save_atomic(path)?;
+        // Control Room is a session-scoped monitor graph rather than part of
+        // the native track layout. Persist it beside the project document so
+        // save/load cannot silently reset monitor selection, cues, or the
+        // reference track.
+        let control_room_path = format!("{path}.control-room.json");
+        let control_room = self
+            .control_room
+            .lock()
+            .map_err(|_| anyhow::anyhow!("control room lock poisoned"))?
+            .clone();
+        let control_room_json = serde_json::to_vec_pretty(&control_room)?;
+        std::fs::write(control_room_path, control_room_json)
+            .context("failed to persist control room state")
     }
 
     pub fn load_project_v2(&self, path: &str) -> anyhow::Result<()> {
@@ -1465,6 +1478,19 @@ impl AuraCore {
             redo.clear();
         }
         let _ = std::fs::remove_file(&rollback_path);
+        let control_room_path = format!("{path}.control-room.json");
+        if let Ok(bytes) = std::fs::read(control_room_path) {
+            let state: crate::control_room::ControlRoomState =
+                serde_json::from_slice(&bytes)
+                    .map_err(|error| anyhow::anyhow!("invalid control room state: {error}"))?;
+            if !state.validate() {
+                return Err(anyhow::anyhow!("invalid control room state"));
+            }
+            *self
+                .control_room
+                .lock()
+                .map_err(|_| anyhow::anyhow!("control room lock poisoned"))? = state;
+        }
         Ok(())
     }
 

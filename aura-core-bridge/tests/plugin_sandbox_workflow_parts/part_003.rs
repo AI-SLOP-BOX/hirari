@@ -1,3 +1,5 @@
+#[test]
+#[ignore = "requires the repository CLAP fixture and sandbox worker"]
 fn state_timeout_kills_worker_without_publishing_invalid_audio() {
     let _guard = native_engine_test_guard();
     let fixture = std::env::var("AURA_CLAP_FIXTURE").expect("fixture path must be configured");
@@ -481,6 +483,3 @@ fn third_party_fixture_compatibility_smoke() {
         .expect("third-party status must remain available");
     assert!(status.alive && !status.is_quarantined());
 }
-
-#[test]
-#[ignore = "requires a real instrument fixture and isolated sandbox worker"]

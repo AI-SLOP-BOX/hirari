@@ -1,8 +1,19 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ControlRoomCueState {
+    pub id: u32,
+    pub gain: f32,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ControlRoomState {
     pub monitor_outputs: Vec<String>,
+    #[serde(default = "default_monitor_output_gains")]
+    pub monitor_output_gains: Vec<f32>,
+    #[serde(default = "default_monitor_output_enabled")]
+    pub monitor_output_enabled: Vec<bool>,
     pub active_output: usize,
     pub dim: bool,
     pub dim_db: f32,
@@ -11,11 +22,15 @@ pub struct ControlRoomState {
     pub cue_gain_db: f32,
     pub reference_track: Option<String>,
     pub reference_enabled: bool,
+    #[serde(default)]
+    pub cues: Vec<ControlRoomCueState>,
 }
 impl Default for ControlRoomState {
     fn default() -> Self {
         Self {
             monitor_outputs: vec!["Main".into()],
+            monitor_output_gains: vec![1.0],
+            monitor_output_enabled: vec![true],
             active_output: 0,
             dim: false,
             dim_db: -20.0,
@@ -24,13 +39,19 @@ impl Default for ControlRoomState {
             cue_gain_db: 0.0,
             reference_track: None,
             reference_enabled: false,
+            cues: Vec::new(),
         }
     }
 }
+fn default_monitor_output_gains() -> Vec<f32> { vec![1.0] }
+fn default_monitor_output_enabled() -> Vec<bool> { vec![true] }
 impl ControlRoomState {
     pub fn validate(&self) -> bool {
         !self.monitor_outputs.is_empty()
             && self.monitor_outputs.len() <= 16
+            && self.monitor_output_gains.len() == self.monitor_outputs.len()
+            && self.monitor_output_enabled.len() == self.monitor_outputs.len()
+            && self.monitor_output_gains.iter().all(|gain| gain.is_finite() && (0.0..=4.0).contains(gain))
             && self
                 .monitor_outputs
                 .iter()
@@ -97,6 +118,8 @@ impl ControlRoomState {
             return false;
         }
         self.monitor_outputs.push(name.to_owned());
+        self.monitor_output_gains.push(1.0);
+        self.monitor_output_enabled.push(true);
         true
     }
     pub fn rename_monitor_output(&mut self, index: usize, name: &str) -> bool {
@@ -121,8 +144,26 @@ impl ControlRoomState {
             return false;
         }
         self.monitor_outputs.remove(index);
+        self.monitor_output_gains.remove(index);
+        self.monitor_output_enabled.remove(index);
         if self.active_output >= self.monitor_outputs.len() {
             self.active_output = self.monitor_outputs.len() - 1;
+        }
+        true
+    }
+    pub fn set_output_gain(&mut self, index: usize, gain: f32) -> bool {
+        if !gain.is_finite() || !(0.0..=4.0).contains(&gain) { return false; }
+        self.monitor_output_gains.get_mut(index).map(|value| *value = gain).is_some()
+    }
+    pub fn set_output_enabled(&mut self, index: usize, enabled: bool) -> bool {
+        self.monitor_output_enabled.get_mut(index).map(|value| *value = enabled).is_some()
+    }
+    pub fn upsert_cue(&mut self, id: u32, gain: f32, enabled: bool) -> bool {
+        if id == 0 || !gain.is_finite() || !(0.0..=4.0).contains(&gain) { return false; }
+        if let Some(cue) = self.cues.iter_mut().find(|cue| cue.id == id) {
+            cue.gain = gain; cue.enabled = enabled;
+        } else {
+            self.cues.push(ControlRoomCueState { id, gain, enabled });
         }
         true
     }

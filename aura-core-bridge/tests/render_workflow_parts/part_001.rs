@@ -1,7 +1,7 @@
 use aura_core_bridge::AuraCore;
 
 mod support {
-    include!("recording_support.rs");
+    include!("../recording_support.rs");
 }
 use support::*;
 
@@ -90,7 +90,6 @@ fn audio_rate_and_buffer_variants_publish_matching_wav_headers() {
         remove_test_file(output);
     }
 }
-
 #[test]
 fn repeated_save_reload_render_cycles_keep_project_audio_valid() {
     let _guard = native_engine_test_guard();
@@ -459,5 +458,3 @@ fn async_render_cancellation_does_not_publish_a_partial_output() {
     assert!(output.exists(), "a cancelled destination must be reusable");
     remove_test_file(output);
 }
-
-#[test]
