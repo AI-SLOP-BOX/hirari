@@ -125,24 +125,46 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
     });
     ui.global::<MixerActions>().on_toggle_monitor({
         let weak = ui.as_weak();
+        let core = core.clone();
         let tracks = tracks.clone();
         move |id| {
+            let Some(target_row) = (0..tracks.row_count())
+                .find(|row| tracks.row_data(*row).is_some_and(|track| track.id == id))
+            else {
+                return;
+            };
+            let currently_enabled = tracks
+                .row_data(target_row)
+                .is_some_and(|track| track.monitor);
+            let enabled = !currently_enabled;
+            if !core.set_track_input_monitor(id as u32, enabled) {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_last_action(
+                        ui_error_message(
+                            UiErrorKind::Engine,
+                            &format!("Track {} input monitor could not be changed", id),
+                        )
+                        .into(),
+                    );
+                }
+                return;
+            }
+            // The engine has one physical input monitor focus. Reflect that
+            // exclusivity in the model when enabling a different track.
             for row in 0..tracks.row_count() {
                 let Some(mut track) = tracks.row_data(row) else {
                     continue;
                 };
-                if track.id != id {
-                    continue;
+                let next = enabled && track.id == id;
+                if track.monitor != next {
+                    track.monitor = next;
+                    replace_track(&tracks, row, track);
                 }
-                track.monitor = !track.monitor;
-                let enabled = track.monitor;
-                replace_track(&tracks, row, track);
-                if let Some(ui) = weak.upgrade() {
-                    ui.set_last_action(
-                        format!("MONITOR {}: {}", id, if enabled { "ON" } else { "OFF" }).into(),
-                    );
-                }
-                break;
+            }
+            if let Some(ui) = weak.upgrade() {
+                ui.set_last_action(
+                    format!("MONITOR {}: {}", id, if enabled { "ON" } else { "OFF" }).into(),
+                );
             }
         }
     });

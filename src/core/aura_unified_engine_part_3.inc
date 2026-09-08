@@ -728,6 +728,24 @@ bool AuraUnifiedEngine::set_track_armed(uint32_t tid, bool armed) {
         [apply, armed] { apply(armed); });
     return true;
 }
+
+bool AuraUnifiedEngine::set_track_input_monitor(uint32_t tid, bool enabled) {
+    if (!enabled) {
+        if (m_inputMonitorTrackId.load(std::memory_order_acquire) == tid) {
+            m_inputMonitorTrackId.store(kNoInputMonitorTrack, std::memory_order_release);
+        }
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    const bool exists = std::any_of(m_tracks.begin(), m_tracks.end(),
+        [tid](const auto& track) { return track && track->getId() == tid; });
+    if (!exists) return false;
+    // One physical input is monitored at a time. Enabling another track
+    // atomically moves the monitor focus without touching record-arm state.
+    m_inputMonitorTrackId.store(tid, std::memory_order_release);
+    return true;
+}
+
 void AuraUnifiedEngine::set_macro_value(uint32_t macroIndex, float value) {
     if (!std::isfinite(value)) return;
     m_macroControlManager.setMacroValue(macroIndex, value);

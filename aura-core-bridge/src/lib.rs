@@ -408,6 +408,7 @@ pub mod ffi {
         fn set_hrtf_kernel(self: &AudioEngine, tid: u32, left: Vec<f32>, right: Vec<f32>) -> bool;
         fn clear_hrtf_kernel(self: &AudioEngine, tid: u32) -> bool;
         fn set_track_armed(self: &AudioEngine, tid: u32, armed: bool) -> bool;
+        fn set_track_input_monitor(self: &AudioEngine, tid: u32, enabled: bool) -> bool;
         fn set_automation_data(
             self: &AudioEngine,
             tid: u32,

@@ -344,6 +344,9 @@ public:
     bool set_track_armed(uint32_t tid, bool armed) const {
         return m_engine && m_engine->set_track_armed(tid, armed);
     }
+    bool set_track_input_monitor(uint32_t tid, bool enabled) const {
+        return m_engine && m_engine->set_track_input_monitor(tid, enabled);
+    }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = m_driver && m_driver->is_running();
@@ -1276,6 +1279,7 @@ private:
         if (self->m_driver && inputs && inputs[0] && inputs[1])
             self->m_driver->capture_input(inputs, 2, frames);
 #endif
+        self->m_engine->publish_input_monitor_block(inputs, 2, frames);
         float* channels[2] = {outputs[0], outputs[1]};
         self->m_engine->processBlockDirect(channels, 2, frames);
 #if defined(AURA_ENABLE_JACK)

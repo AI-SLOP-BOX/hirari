@@ -36,6 +36,27 @@ AuraUnifiedEngine::~AuraUnifiedEngine() {
     shutdown();
 }
 
+void AuraUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
+                                                    uint32_t numChannels,
+                                                    uint32_t numSamples) noexcept {
+    const uint32_t monitorTrack = m_inputMonitorTrackId.load(std::memory_order_acquire);
+    if (!inputs || numChannels < 2 || !inputs[0] || !inputs[1] ||
+        monitorTrack == kNoInputMonitorTrack || numSamples == 0 ||
+        numSamples > kMaxAudioBlockSize) {
+        m_inputMonitorBlockPublished.store(false, std::memory_order_release);
+        m_inputMonitorBlockFrames.store(0, std::memory_order_release);
+        return;
+    }
+    for (uint32_t i = 0; i < numSamples; ++i) {
+        const float left = inputs[0][i];
+        const float right = inputs[1][i];
+        m_inputMonitorLeft[i] = std::isfinite(left) ? left : 0.0f;
+        m_inputMonitorRight[i] = std::isfinite(right) ? right : 0.0f;
+    }
+    m_inputMonitorBlockFrames.store(numSamples, std::memory_order_release);
+    m_inputMonitorBlockPublished.store(true, std::memory_order_release);
+}
+
 void AuraUnifiedEngine::apply_config(const EngineConfig& cfg) {
     m_tempo.store(cfg.tempo);
     prepareToPlay(cfg.sampleRate, cfg.blockSize);
@@ -466,6 +487,29 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
                                    work.getWritePointer(1), sz);
         }
 
+        // Feed the live driver input into the selected monitor track before
+        // graph processing. The fixed planar buffers were copied by the
+        // driver callback, so this path performs no allocation or locking.
+        if (m_inputMonitorBlockPublished.load(std::memory_order_acquire)) {
+            const uint32_t monitorTrackId =
+                m_inputMonitorTrackId.load(std::memory_order_acquire);
+            const uint32_t publishedFrames =
+                m_inputMonitorBlockFrames.load(std::memory_order_acquire);
+            const uint32_t inputOffset = m_inputMonitorBlockOffset;
+            if (monitorTrackId != kNoInputMonitorTrack && inputOffset < publishedFrames &&
+                publishedFrames - inputOffset >= sz) {
+                float* inputChannels[2] = {
+                    m_inputMonitorLeft.data() + inputOffset,
+                    m_inputMonitorRight.data() + inputOffset};
+                AudioBuffer input;
+                input.wrapChannels(inputChannels, 2, sz);
+                if (Track* monitorTrack = findTrack(monitorTrackId);
+                    monitorTrack && monitorTrack->canProcess(sz)) {
+                    monitorTrack->addInput(input, sz);
+                }
+            }
+        }
+
         auto routeToNextStages = [&](Track* source) {
             if (!source || !source->canProcess(sz)) return;
             auto& sourceBuffer = source->getWorkBuffer(sz);
@@ -785,7 +829,9 @@ void AuraUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChannels
             }
         }
         if (chunk == 0) continue;
+        m_inputMonitorBlockOffset = offset;
         processBlock(wrap, offset, chunk);
         offset += chunk;
     }
+    m_inputMonitorBlockPublished.store(false, std::memory_order_release);
 }

@@ -1494,6 +1494,12 @@ impl AuraCore {
             .is_some_and(|e| e.set_track_armed(tid, armed))
     }
 
+    pub fn set_track_input_monitor(&self, tid: u32, enabled: bool) -> bool {
+        self.engine
+            .as_ref()
+            .is_some_and(|e| e.set_track_input_monitor(tid, enabled))
+    }
+
     pub fn set_mute(&self, tid: u32, m: bool) {
         if let Some(engine) = self.engine.as_ref() {
             let _ = engine.set_track_mute(tid, m);

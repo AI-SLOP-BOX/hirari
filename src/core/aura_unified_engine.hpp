@@ -145,6 +145,12 @@ public:
     void apply_config(const EngineConfig& cfg);
     void processBlock(::Aura::Core::AudioBuffer& output, uint32_t offset, uint32_t size);
     void processBlockDirect(float** buffers, uint32_t numChannels, uint32_t numSamples);
+    // Publishes the hardware input block for the realtime input-monitor path.
+    // The caller owns the input buffers; this method copies into fixed storage
+    // so the graph never retains driver pointers beyond the callback.
+    void publish_input_monitor_block(const float* const* inputs,
+                                     uint32_t numChannels,
+                                     uint32_t numSamples) noexcept;
     // Shared-map transient quantization for phase-coherent multi-mic groups.
     // This is deliberately exposed at the engine boundary so offline editors
     // and realtime clients use the identical warp implementation.
@@ -292,6 +298,7 @@ public:
     bool set_track_delay_samples(uint32_t tid, uint32_t samples);
     uint32_t get_track_delay_samples(uint32_t tid) const;
     bool set_track_armed(uint32_t tid, bool armed);
+    bool set_track_input_monitor(uint32_t tid, bool enabled);
     double get_sample_rate() const { return m_sampleRate.load(std::memory_order_relaxed); }
     uint64_t get_audio_config_generation() const noexcept {
         return m_audioConfigGeneration.load(std::memory_order_acquire);
@@ -621,6 +628,13 @@ private:
     // callback can still be in flight while stop/reconnect is being handled.
     std::atomic<uint32_t> m_audioCallbacksInFlight{0};
     std::atomic<bool> m_testTone{false};
+    static constexpr uint32_t kNoInputMonitorTrack = std::numeric_limits<uint32_t>::max();
+    std::atomic<uint32_t> m_inputMonitorTrackId{kNoInputMonitorTrack};
+    std::array<float, kMaxAudioBlockSize> m_inputMonitorLeft{};
+    std::array<float, kMaxAudioBlockSize> m_inputMonitorRight{};
+    std::atomic<uint32_t> m_inputMonitorBlockFrames{0};
+    std::atomic<bool> m_inputMonitorBlockPublished{false};
+    uint32_t m_inputMonitorBlockOffset = 0;
     std::atomic<uint64_t> m_playhead{0};
     // Sticky diagnostic: a saturated sample position or invalid callback
     // range was observed. It is intentionally lock-free so the control/UI
