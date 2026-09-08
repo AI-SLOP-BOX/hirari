@@ -1,3 +1,7 @@
+use std::collections::VecDeque;
+
+const MAX_LOUDNESS_BLOCKS: usize = 8192;
+
 pub struct AnalysisFrame {
     pub peak: [f32; 2],
     pub correlation: f32,
@@ -10,8 +14,7 @@ pub struct SignalAnalyzerOrchestrator {
     pub write_idx: usize,
     pub latest_idx: usize,
     pub ui_idx: usize,
-    integrated_energy: f64,
-    integrated_blocks: u64,
+    loudness_blocks: VecDeque<f64>,
     sample_rate: f32,
     k_weight_state: [[f64; 8]; 2],
 }
@@ -33,8 +36,7 @@ impl SignalAnalyzerOrchestrator {
             write_idx: 0,
             latest_idx: 0,
             ui_idx: 99,
-            integrated_energy: 0.0,
-            integrated_blocks: 0,
+            loudness_blocks: VecDeque::with_capacity(MAX_LOUDNESS_BLOCKS),
             sample_rate: if sample_rate.is_finite() && sample_rate > 0.0 {
                 sample_rate
             } else {
@@ -91,16 +93,13 @@ impl SignalAnalyzerOrchestrator {
         let mut cross = 0.0f64;
         let mut left_power = 0.0f64;
         let mut right_power = 0.0f64;
-        let mut power_sum = 0.0f64;
         for &s in left {
             let clean = if s.is_finite() { s } else { 0.0 };
             max_p[0] = max_p[0].max(clean.abs());
-            power_sum += f64::from(clean) * f64::from(clean);
         }
         for (i, &s) in right.iter().enumerate() {
             let clean = if s.is_finite() { s } else { 0.0 };
             max_p[1] = max_p[1].max(clean.abs());
-            power_sum += f64::from(clean) * f64::from(clean);
             if i < left.len() {
                 let l = f64::from(if left[i].is_finite() { left[i] } else { 0.0 });
                 let r = f64::from(clean);
@@ -119,16 +118,13 @@ impl SignalAnalyzerOrchestrator {
                 weighted_power += weighted * weighted;
             }
         }
-        let block_lufs = if sample_count > 0 && power_sum > 0.0 {
-            (-0.691 + 10.0 * (weighted_power / sample_count as f64).log10()) as f32
-        } else { f32::NEG_INFINITY };
-        if block_lufs.is_finite() && block_lufs > -70.0 {
-            self.integrated_energy += weighted_power / sample_count as f64;
-            self.integrated_blocks = self.integrated_blocks.saturating_add(1);
+        if sample_count > 0 {
+            if self.loudness_blocks.len() == MAX_LOUDNESS_BLOCKS {
+                self.loudness_blocks.pop_front();
+            }
+            self.loudness_blocks.push_back(weighted_power / sample_count as f64);
         }
-        let integrated_lufs = if self.integrated_blocks > 0 {
-            (-0.691 + 10.0 * (self.integrated_energy / self.integrated_blocks as f64).log10()) as f32
-        } else { f32::NEG_INFINITY };
+        let integrated_lufs = self.integrated_loudness();
         let target = &mut self.buffers[self.write_idx];
         target.samples.fill(0.0);
         for (index, &sample) in left.iter().enumerate().take(target.samples.len()) {
@@ -142,6 +138,34 @@ impl SignalAnalyzerOrchestrator {
 
         self.latest_idx = self.write_idx;
         self.write_idx = next_idx;
+    }
+
+    fn integrated_loudness(&self) -> f32 {
+        let absolute_gate = 10.0f64.powf((-70.0 + 0.691) / 10.0);
+        let absolute_sum = self.loudness_blocks.iter()
+            .copied()
+            .filter(|energy| energy.is_finite() && *energy > absolute_gate)
+            .sum::<f64>();
+        let absolute_count = self.loudness_blocks.iter()
+            .filter(|energy| energy.is_finite() && **energy > absolute_gate)
+            .count();
+        if absolute_count == 0 {
+            return f32::NEG_INFINITY;
+        }
+        let absolute_mean = absolute_sum / absolute_count as f64;
+        let relative_gate = absolute_mean * 0.1;
+        let gated_mean = self.loudness_blocks.iter()
+            .copied()
+            .filter(|energy| energy.is_finite() && *energy >= relative_gate)
+            .sum::<f64>();
+        let gated_count = self.loudness_blocks.iter()
+            .filter(|energy| energy.is_finite() && **energy >= relative_gate)
+            .count();
+        if gated_count == 0 || gated_mean <= 0.0 {
+            f32::NEG_INFINITY
+        } else {
+            (-0.691 + 10.0 * (gated_mean / gated_count as f64).log10()) as f32
+        }
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide signal state.
