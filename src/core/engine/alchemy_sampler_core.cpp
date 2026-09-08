@@ -72,8 +72,10 @@ void AlchemySamplerCore::processClassic(::Aura::Core::AudioBuffer& buffer, ::Aur
             if (!z || !z->data) continue;
             float delta = 1.0f;
             if (ctx.sampleRate > 0) {
-                delta = std::pow(2.0f, (static_cast<float>(v.note) - 69.0f) / 12.0f);
-                delta *= (44100.0 / ctx.sampleRate);
+                const double sourceRate = (std::isfinite(z->sampleRate) && z->sampleRate > 0.0)
+                    ? z->sampleRate : 44100.0;
+                const double semitones = static_cast<double>(v.note) - static_cast<double>(z->rootKey);
+                delta = static_cast<float>(std::pow(2.0, semitones / 12.0) * sourceRate / ctx.sampleRate);
             }
             uint64_t idx = static_cast<uint64_t>(v.pos);
             if (idx + 1 >= z->sampleCount) {
@@ -130,6 +132,9 @@ void AlchemySamplerCore::processGranular(::Aura::Core::AudioBuffer& buffer) {
                 g.data = z.data;
                 g.sampleCount = z.sampleCount;
                 g.pos = (double)posDist(m_rng);
+                const double sourceRate = (std::isfinite(z.sampleRate) && z.sampleRate > 0.0)
+                    ? z.sampleRate : 44100.0;
+                g.step = sourceRate / m_sampleRate;
                 g.duration = static_cast<float>(m_sampleRate * 0.1); // 100ms at the active rate
                 g.currentSample = 0;
                 g.velocity = 0.5f;
@@ -168,7 +173,7 @@ void AlchemySamplerCore::processGranular(::Aura::Core::AudioBuffer& buffer) {
             outL[s] += val;
             outR[s] += val;
 
-            g.pos += 1.0;
+            g.pos += g.step;
             g.currentSample++;
         }
 

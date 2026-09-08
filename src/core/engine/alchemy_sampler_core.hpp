@@ -21,6 +21,8 @@ struct SampleZone {
     uint8_t lowVel, highVel;
     const float* data;
     uint64_t sampleCount;
+    uint8_t rootKey = 60;
+    double sampleRate = 44100.0;
 };
 
 /**
@@ -70,6 +72,7 @@ public:
         const float* data = nullptr;
         uint64_t sampleCount = 0;
         double pos = 0.0;
+        double step = 1.0;
         float duration = 0.0f;
         float pan = 0.5f;
         float velocity = 1.0f;
