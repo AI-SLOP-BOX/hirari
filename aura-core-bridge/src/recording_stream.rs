@@ -32,6 +32,7 @@ pub struct StreamingRecordingWriter {
     channels: u16,
     frames: u64,
     finalized: bool,
+    preserve_spool_on_drop: bool,
     pcm_scratch: Vec<u8>,
 }
 
@@ -198,6 +199,7 @@ impl StreamingRecordingWriter {
             channels,
             frames: 0,
             finalized: false,
+            preserve_spool_on_drop: false,
             pcm_scratch: Vec::new(),
         })
     }
@@ -242,6 +244,9 @@ impl StreamingRecordingWriter {
     }
 
     pub fn finalize(mut self) -> Result<PathBuf, RecordingStreamError> {
+        // Once finalization has started, retain the spool if publication fails
+        // so a caller can retry or recover the recorded audio.
+        self.preserve_spool_on_drop = true;
         // Never let a late recording worker overwrite a newer take that was
         // published to the same destination after cancellation/retry.
         if self.final_path.exists() {
@@ -298,7 +303,7 @@ fn sync_parent_directory(_path: &Path) -> io::Result<()> {
 
 impl Drop for StreamingRecordingWriter {
     fn drop(&mut self) {
-        if !self.finalized {
+        if !self.finalized && !self.preserve_spool_on_drop {
             let _ = fs::remove_file(&self.temp_path);
         }
     }
@@ -415,7 +420,10 @@ mod tests {
             matches!(error, RecordingStreamError::Io(message) if message.contains("already exists"))
         );
         assert_eq!(std::fs::read(&path).unwrap(), b"newer take");
-        assert!(!path.with_extension("wav.part").exists());
+        // A failed publication keeps the spool available for retry/recovery.
+        let spool = path.with_extension("wav.part");
+        assert!(spool.exists());
+        let _ = std::fs::remove_file(spool);
         let _ = std::fs::remove_file(path);
     }
 

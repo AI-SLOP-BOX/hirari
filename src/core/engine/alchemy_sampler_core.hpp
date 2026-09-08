@@ -56,6 +56,7 @@ public:
         const SampleZone* zone = nullptr;
         double pos = 0.0;
         uint8_t note = 0;
+        uint8_t channel = 0;
         float velocity = 0.0f;
         std::atomic<bool> active{false};
     };

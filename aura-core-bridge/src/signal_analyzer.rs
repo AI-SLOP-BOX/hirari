@@ -53,16 +53,15 @@ impl SignalAnalyzerOrchestrator {
             power_sum += f64::from(s) * f64::from(s);
         }
         for (i, &s) in right.iter().enumerate() {
-            max_p[1] = max_p[1].max(s.abs());
+            let clean = if s.is_finite() { s } else { 0.0 };
+            max_p[1] = max_p[1].max(clean.abs());
+            power_sum += f64::from(clean) * f64::from(clean);
             if i < left.len() {
-                let l = f64::from(left[i]);
-                let r = f64::from(s);
+                let l = f64::from(if left[i].is_finite() { left[i] } else { 0.0 });
+                let r = f64::from(clean);
                 cross += l * r;
                 left_power += l * l;
                 right_power += r * r;
-            }
-            if i >= left.len() {
-                power_sum += f64::from(s) * f64::from(s);
             }
         }
 

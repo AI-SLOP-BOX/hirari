@@ -26,66 +26,60 @@ void AlchemySamplerCore::process(::Aura::Core::AudioBuffer& buffer, ::Aura::Core
 }
 
 void AlchemySamplerCore::processClassic(::Aura::Core::AudioBuffer& buffer, ::Aura::Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& ctx) {
-    // 1. MIDI Handling: Voice Triggering
+    // Events are timestamped relative to this block. Sorting here preserves
+    // sample-accurate ordering even when producers enqueue out of order.
+    midi.sort();
     const ::Aura::Core::MidiEvent* events = midi.getEvents();
-    for (size_t i = 0; i < midi.size(); ++i) {
-        const auto& ev = events[i];
-        uint8_t status = ev.data[0] & 0xF0;
-        uint8_t note = ev.data[1];
-        uint8_t vel = ev.data[2];
-
-        if (status == 0x90 && vel > 0) { // Note On
-            for (auto& v : m_voices) {
-                if (!v.active.load(std::memory_order_relaxed)) {
-                    // Find matching zone
+    uint32_t numSamples = buffer.getNumSamples();
+    float* outL = buffer.getWritePointer(0);
+    float* outR = buffer.getWritePointer(1);
+    size_t eventIndex = 0;
+    for (uint32_t s = 0; s < numSamples; ++s) {
+        while (eventIndex < midi.size() && events[eventIndex].sampleOffset <= s) {
+            const auto& ev = events[eventIndex++];
+            const uint8_t status = ev.data[0] & 0xF0;
+            const uint8_t channel = ev.data[0] & 0x0F;
+            const uint8_t note = ev.data[1];
+            const uint8_t vel = ev.data[2];
+            if (status == 0x90 && vel > 0) {
+                for (auto& v : m_voices) {
+                    if (v.active.load(std::memory_order_relaxed)) continue;
                     for (uint32_t j = 0; j < m_zoneCount; ++j) {
                         const auto& z = m_zones[j];
                         if (note >= z.lowKey && note <= z.highKey && vel >= z.lowVel && vel <= z.highVel) {
                             v.zone = &z;
                             v.pos = 0.0;
                             v.note = note;
+                            v.channel = channel;
                             v.velocity = vel / 127.0f;
                             v.active.store(true, std::memory_order_release);
                             break;
                         }
                     }
-                    break;
+                    if (v.active.load(std::memory_order_relaxed)) break;
                 }
-            }
-        } else if (status == 0x80 || (status == 0x90 && vel == 0)) { // Note Off
-            for (auto& v : m_voices) {
-                if (v.active.load(std::memory_order_relaxed) && v.note == note) {
-                    v.active.store(false, std::memory_order_release);
+            } else if (status == 0x80 || (status == 0x90 && vel == 0)) {
+                for (auto& v : m_voices) {
+                    if (v.active.load(std::memory_order_relaxed) && v.note == note && v.channel == channel)
+                        v.active.store(false, std::memory_order_release);
                 }
             }
         }
-    }
 
-    // 2. Synthesis: Voice Rendering (SIMD-accelerated linear interpolation)
-    uint32_t numSamples = buffer.getNumSamples();
-    float* outL = buffer.getWritePointer(0);
-    float* outR = buffer.getWritePointer(1);
-
-    for (auto& v : m_voices) {
-        if (!v.active.load(std::memory_order_acquire)) continue;
-
-        const SampleZone* z = v.zone;
-        if (!z || !z->data) continue;
-
-        float delta = 1.0f; 
-        if (ctx.sampleRate > 0) {
-            // Industrial Pitch calculation (44100 as reference)
-            delta = (440.0f * std::pow(2.0f, (v.note - 69) / 12.0f)) / 440.0f;
-            delta *= (44100.0 / ctx.sampleRate); 
-        }
-
-        for (uint32_t s = 0; s < numSamples; ++s) {
+        for (auto& v : m_voices) {
+            if (!v.active.load(std::memory_order_acquire)) continue;
+            const SampleZone* z = v.zone;
+            if (!z || !z->data) continue;
+            float delta = 1.0f;
+            if (ctx.sampleRate > 0) {
+                delta = std::pow(2.0f, (static_cast<float>(v.note) - 69.0f) / 12.0f);
+                delta *= (44100.0 / ctx.sampleRate);
+            }
             uint64_t idx = static_cast<uint64_t>(v.pos);
             if (idx + 1 >= z->sampleCount) {
                 v.active.store(false, std::memory_order_release);
-                break;
+                continue;
             }
-
             float frac = static_cast<float>(v.pos - idx);
             float s0 = z->data[idx];
             float s1 = z->data[idx + 1];
@@ -93,7 +87,6 @@ void AlchemySamplerCore::processClassic(::Aura::Core::AudioBuffer& buffer, ::Aur
 
             outL[s] += val;
             outR[s] += val;
-
             v.pos += delta;
         }
     }
