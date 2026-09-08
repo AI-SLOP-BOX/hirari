@@ -1486,6 +1486,31 @@ impl AuraCore {
             if !state.validate() {
                 return Err(anyhow::anyhow!("invalid control room state"));
             }
+            // Rehydrate both the Rust control-plane snapshot and the native
+            // realtime monitor graph. Keeping only the Rust copy would make
+            // the UI look correct while the audio callback still used the
+            // default speaker set after reopening a project.
+            engine.reset_control_room();
+            for (index, name) in state.monitor_outputs.iter().enumerate() {
+                if index > 0 && !engine.add_control_room_speaker(name, state.monitor_output_gains[index]) {
+                    return Err(anyhow::anyhow!("failed to restore control room output"));
+                }
+                if !engine.set_control_room_speaker_gain(index as u32, state.monitor_output_gains[index])
+                    || !engine.set_control_room_speaker_enabled(index as u32, state.monitor_output_enabled[index])
+                {
+                    return Err(anyhow::anyhow!("failed to restore control room output settings"));
+                }
+            }
+            if !engine.select_control_room_speaker(state.active_output as u32) {
+                return Err(anyhow::anyhow!("failed to restore active control room output"));
+            }
+            for cue in &state.cues {
+                if !engine.upsert_control_room_cue(cue.id, cue.gain, cue.enabled) {
+                    return Err(anyhow::anyhow!("failed to restore control room cue"));
+                }
+            }
+            engine.set_control_room_dim(state.dim);
+            engine.set_control_room_talkback(state.talkback, state.talkback_gain);
             *self
                 .control_room
                 .lock()

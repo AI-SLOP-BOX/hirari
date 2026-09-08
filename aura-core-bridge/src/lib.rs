@@ -139,6 +139,7 @@ pub mod ffi {
         fn set_tempo(self: &AudioEngine, bpm: f32) -> bool;
         fn set_master_gain(self: &AudioEngine, value: f32) -> bool;
         fn add_control_room_speaker(self: &AudioEngine, name: &str, gain: f32) -> bool;
+        fn reset_control_room(self: &AudioEngine);
         fn select_control_room_speaker(self: &AudioEngine, index: u32) -> bool;
         fn remove_control_room_speaker(self: &AudioEngine, index: u32) -> bool;
         fn set_control_room_speaker_gain(self: &AudioEngine, index: u32, gain: f32) -> bool;
