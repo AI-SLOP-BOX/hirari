@@ -68,8 +68,11 @@ namespace Aura::Core::BridgeFFI {
     rust::Vec<float> AnalysisHub::get_mixer_levels_v() const {
         rust::Vec<float> result;
         if (!m_engine) return result;
-        auto l = m_engine->get_track_peaks_l();
-        auto r = m_engine->get_track_peaks_r();
+        // Copy through the seqlock-protected bridge helpers. Returning a
+        // borrowed slice here lets the audio callback overwrite the inactive
+        // telemetry buffer while this analysis thread is still iterating.
+        auto l = ::Aura::Core::Bridge::get_track_peaks_l_owned(*m_engine);
+        auto r = ::Aura::Core::Bridge::get_track_peaks_r_owned(*m_engine);
         
         const size_t count = std::min(l.size(), r.size());
         result.reserve(count * 2);
