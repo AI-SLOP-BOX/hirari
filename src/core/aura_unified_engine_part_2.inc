@@ -450,6 +450,10 @@ void AuraUnifiedEngine::clear_vca_groups() {
 void AuraUnifiedEngine::new_project() {
     set_playing(false);
     waitForAudioCallbacks();
+    // Input monitoring is a live device assignment, not project data. Clear
+    // it before reusing any track IDs in the new project.
+    m_inputMonitorTrackId.store(kNoInputMonitorTrack, std::memory_order_release);
+    m_inputMonitorBlockPublished.store(false, std::memory_order_release);
     m_commandQueue.clear();
     set_test_tone(false);
     set_playhead(0);

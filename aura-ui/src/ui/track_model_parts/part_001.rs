@@ -1,6 +1,6 @@
 // Track model hydration and MIDI synchronization.
 
-use crate::slint_ui::{ZNote, Z_AutomationLane, Z_AutomationPoint, Z_Clip, Z_Track};
+use crate::slint_ui::{ZNote, Z_AutomationLane, Z_AutomationPoint, Z_Clip, Z_Fx, Z_Track};
 use crate::ui::sync::replace_track;
 use aura_core_bridge::AuraCore;
 use slint::Model;

@@ -70,6 +70,16 @@ fn sync_tracks_from_engine_with_empty_policy(
         volume: f32,
         pan: f32,
         mute: bool,
+        #[serde(default)]
+        solo: bool,
+        #[serde(default)]
+        record_armed: bool,
+        #[serde(default)]
+        phase_invert: bool,
+        #[serde(default)]
+        plugin_types: Vec<u32>,
+        #[serde(default)]
+        plugin_bypass: Vec<bool>,
         #[serde(default, alias = "trackDelaySamples")]
         track_delay_samples: u32,
         #[serde(default)]
@@ -238,6 +248,16 @@ fn sync_tracks_from_engine_with_empty_policy(
             let volume_points = automation_points(layout.volume_automation);
             let pan_points = automation_points(layout.pan_automation);
             let delay_points = automation_points(layout.track_delay_automation);
+            let fx = layout
+                .plugin_types
+                .iter()
+                .enumerate()
+                .map(|(index, _)| Z_Fx {
+                    name: format!("Plugin {}", index + 1).into(),
+                    active: !layout.plugin_bypass.get(index).copied().unwrap_or(false),
+                    has_ui: false,
+                })
+                .collect::<Vec<_>>();
             let auto_lanes = slint::ModelRc::new(slint::VecModel::from(vec![
                 Z_AutomationLane {
                     name: "Volume".into(),
@@ -265,14 +285,14 @@ fn sync_tracks_from_engine_with_empty_policy(
                 color,
                 volume: layout.volume,
                 pan: ((layout.pan + 1.0) / 2.0).clamp(0.0, 1.0) * 2.0 - 1.0,
-                solo: false,
+                solo: layout.solo,
                 mute: layout.mute,
-                armed: false,
+                armed: layout.record_armed,
                 expanded: true,
                 show_automation: false,
                 send_lvl: 0.0,
                 is_stereo: true,
-                phase_invert: false,
+                phase_invert: layout.phase_invert,
                 auto_rw: 0,
                 notes: "".into(),
                 width: 1.0,
@@ -295,7 +315,7 @@ fn sync_tracks_from_engine_with_empty_policy(
                     .get(&(layout.id as i32))
                     .cloned()
                     .unwrap_or_default(),
-                fx: slint::ModelRc::default(),
+                fx: slint::ModelRc::new(slint::VecModel::from(fx)),
                 clips: slint::ModelRc::new(slint::VecModel::from(clips)),
                 auto_lanes,
                 is_folder,
