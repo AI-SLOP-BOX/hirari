@@ -532,37 +532,37 @@
         x: ins_open ? Style.inspector-w : 0px; y: 205px;
         width: parent.width - (ins_open ? Style.inspector-w : 0px);
         height: 192px; clip: true; background: transparent;
-        for idx in [0, 1, 2, 3] : Rectangle {
-            property <Z_Track> trk: root.tracks[idx];
+        for trk[idx] in root.tracks : Rectangle {
+            property <Z_Track> track: trk;
             x: 0px; y: idx * 48px; width: 100%; height: 47px; clip: true;
             background: root.sel_idx == idx ? Style.selection : (Math.mod(idx, 2) == 0 ? Style.panel : Style.base);
-            Rectangle { x: 0px; width: 4px; height: 100%; background: trk.color; }
+            Rectangle { x: 0px; width: 4px; height: 100%; background: track.color; }
             HorizontalLayout {
                 padding-left: 10px; padding-right: 8px; spacing: 6px;
-                Text { text: (idx < 9 ? "0" : "") + (idx + 1) + " | " + trk.name; width: 150px; font-size: 11px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; overflow: elide;
-                    TouchArea { clicked => { root.sel_idx = idx; ProjectActions.select_track(trk.id); } }
+                Text { text: (idx < 9 ? "0" : "") + (idx + 1) + " | " + track.name; width: 150px; font-size: 11px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; overflow: elide;
+                    TouchArea { clicked => { root.sel_idx = idx; ProjectActions.select_track(track.id); } }
                 }
                 HorizontalLayout { spacing: 2px; alignment: center;
-                    Z_IconButton { width: 20px; height: 20px; icon: "M"; compact: true; active: trk.mute; active-col: Style.brand; clicked => { MixerActions.toggle_mute(trk.id); } }
-                    Z_IconButton { width: 20px; height: 20px; icon: "S"; compact: true; active: trk.solo; active-col: Style.solo; clicked => { MixerActions.toggle_solo(trk.id); } }
-                    Z_IconButton { width: 20px; height: 20px; icon: "R"; compact: true; active: trk.armed; active-col: Style.record; clicked => { ProjectActions.toggle_arm(trk.id); } }
+                    Z_IconButton { width: 20px; height: 20px; icon: "M"; compact: true; active: track.mute; active-col: Style.brand; clicked => { MixerActions.toggle_mute(track.id); } }
+                    Z_IconButton { width: 20px; height: 20px; icon: "S"; compact: true; active: track.solo; active-col: Style.solo; clicked => { MixerActions.toggle_solo(track.id); } }
+                    Z_IconButton { width: 20px; height: 20px; icon: "R"; compact: true; active: track.armed; active-col: Style.record; clicked => { ProjectActions.toggle_arm(track.id); } }
                 }
                 Rectangle { width: 86px; height: 18px;
                     VerticalLayout { alignment: center; spacing: 2px;
                         Rectangle { width: 86px; height: 4px; background: Style.surface-0; border-radius: 2px;
-                            Rectangle { width: trk.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border-radius: 2px; }
-                            TouchArea { mouse-cursor: ew-resize; moved => { if (self.pressed) { MixerActions.fader_changed(trk.id, (self.mouse_x / parent.width).clamp(0, 1)); } } }
+                            Rectangle { width: track.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border-radius: 2px; }
+                            TouchArea { mouse-cursor: ew-resize; moved => { if (self.pressed) { MixerActions.fader_changed(track.id, (self.mouse_x / parent.width).clamp(0, 1)); } } }
                         }
-                        Text { text: trk.pan == 0.5 ? "C" : (trk.pan < 0.5 ? "L" + Math.round((0.5 - trk.pan) * 128.0) : "R" + Math.round((trk.pan - 0.5) * 127.0)); width: 86px; height: 10px; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
+                        Text { text: track.pan == 0.5 ? "C" : (track.pan < 0.5 ? "L" + Math.round((0.5 - track.pan) * 128.0) : "R" + Math.round((track.pan - 0.5) * 127.0)); width: 86px; height: 10px; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; height: 100%; clip: true;
-                    for clip_data in trk.clips : Rectangle {
+                    for clip_data in track.clips : Rectangle {
                         x: clip_data.start_beat * Style.grid-step * root.z_lvl; y: 6px;
                         width: Math.max(28px, clip_data.length_beats * Style.grid-step * root.z_lvl - 2px); height: 35px;
                         background: clip_data.color.with-alpha(clip_data.selected ? 0.58 : 0.28); border-width: clip_data.selected ? 2px : 1px; border-color: clip_data.selected ? Style.text-primary : clip_data.color; border-radius: 3px;
                         Text { text: clip_data.name; x: 6px; width: parent.width - 12px; height: 12px; font-size: Style.font-xxs; color: Style.text-primary; vertical-alignment: center; overflow: elide; }
-                    TouchArea { clicked => { root.sel_idx = idx; root.sel_cid = clip_data.id; ProjectActions.select_track(trk.id); } }
+                    TouchArea { clicked => { root.sel_idx = idx; root.sel_cid = clip_data.id; ProjectActions.select_track(track.id); } }
                     }
                 }
             }
