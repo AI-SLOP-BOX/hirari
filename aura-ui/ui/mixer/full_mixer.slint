@@ -3,6 +3,7 @@ import { Style } from "../style.slint";
 import { Z_IconButton } from "../primitives/icon_button.slint";
 import { Z_MixerStrip } from "./mixer_strip.slint";
 import { Z_Track } from "../model/track_model.slint";
+import { MixerActions } from "../actions/mixer_actions.slint";
 
 export component Z_FullMixer {
     in property <[Z_Track]> tracks;
@@ -26,13 +27,24 @@ export component Z_FullMixer {
             HorizontalLayout {
                 spacing: 2px; padding: 4px;
                 for trk[idx] in tracks : Z_MixerStrip {
+                    property <float> safe_peak: pks.length > idx ? pks[idx] : 0.0;
+                    property <float> safe_hold: pks_h.length > idx ? pks_h[idx] : 0.0;
                     name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan;
-                    peak: pks[Math.mod(idx, pks.length)]; pk_h: pks_h[Math.mod(idx, pks_h.length)]; tid: trk.id;
+                    peak: safe_peak; pk_h: safe_hold; tid: trk.id;
                     is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert;
                     fx: trk.fx; compact: false; send_lvl: trk.send_lvl;
                     filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
                     meter_mode: meter_mode; group_id: trk.group_id;
                     saturate_active: trk.saturate_active; correlation: trk.correlation;
+                    fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
+                    pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
+                    mute-toggled(a) => { MixerActions.toggle_mute(a); }
+                    solo-toggled(a) => { MixerActions.toggle_solo(a); }
+                    phase-toggled(a) => { MixerActions.toggle_phase(a); }
+                    fx-toggled(a, b) => { MixerActions.toggle_fx(a, b); }
+                    delay-changed(a, b) => { MixerActions.delay_changed(a, b); }
+                    eq-changed(a, b, c, d, e) => { MixerActions.eq_changed(a, b, c, d, e); }
+                    peaks-reset => { MixerActions.reset_peaks(); }
                 }
             }
         }

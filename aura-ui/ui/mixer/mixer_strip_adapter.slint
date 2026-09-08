@@ -34,5 +34,6 @@ export component Z_MixerStrip {
         peaks-reset => { MixerActions.reset_peaks(); }
         fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
         delay-changed(a, b) => { MixerActions.delay_changed(a, b); }
+        pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
     }
 }

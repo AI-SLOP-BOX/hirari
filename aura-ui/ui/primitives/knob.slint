@@ -41,6 +41,9 @@ export component Z_Knob {
                 transform-rotation: (value - (bipolar ? 0.5 : 0.0)) * 270deg;
             }
             ta := TouchArea {
+                property <bool> dragging: false;
+                property <float> drag-value: 0.5;
+                property <float> drag-y: 0.0;
                 // Keep the visual control compact, but give it the full
                 // knob-sized hit target so precision does not depend on the
                 // pointer landing on the arc itself.
@@ -49,8 +52,15 @@ export component Z_Knob {
                 mouse-cursor: ns-resize;
                 moved => {
                     if (self.pressed) {
-                        let delta = ((self.mouse_y - self.pressed_y) / -100.0) / 1px;
-                        root.changed((root.value + delta).clamp(0.0, 1.0));
+                        if (!self.dragging) {
+                            self.drag-value = root.value;
+                            self.drag-y = self.mouse_y / 1px;
+                            self.dragging = true;
+                        }
+                        let delta = (self.drag-y - self.mouse_y / 1px) / -100.0;
+                        root.changed((self.drag-value + delta).clamp(0.0, 1.0));
+                    } else {
+                        self.dragging = false;
                     }
                 }
             }

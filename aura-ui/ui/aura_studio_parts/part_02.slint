@@ -129,13 +129,13 @@
                                             x: loop_st * Style.grid-step * root.z_lvl; width: 10px; height: 16px;
                                             Rectangle { width: 2px; height: 100%; background: Style.brand; x: 0; }
                                             Rectangle { width: 6px; height: 2px; background: Style.brand; y: 0; }
-                                            TouchArea { moved => { if (self.pressed) { loop_st = (self.mouse_x + parent.x - 5px) / (Style.grid-step / 1px * root.z_lvl * 1px); } } } 
+                                            TouchArea { moved => { if (self.pressed) { loop_st = Math.max(0.0, (self.mouse_x + parent.x - 5px) / (Style.grid-step / 1px * root.z_lvl * 1px)); TransportActions.loop_changed(loop_st, loop_ed); } } }
                                         }
                                         Rectangle {
                                             x: loop_ed * Style.grid-step * root.z_lvl - 10px; width: 10px; height: 16px;
                                             Rectangle { width: 2px; height: 100%; background: Style.brand; x: 8px; }
                                             Rectangle { width: 6px; height: 2px; background: Style.brand; y: 0; x: 4px; }
-                                            TouchArea { moved => { if (self.pressed) { loop_ed = (self.mouse_x + parent.x - 5px) / (Style.grid-step / 1px * root.z_lvl * 1px); } } }
+                                            TouchArea { moved => { if (self.pressed) { loop_ed = Math.max(loop_st + 0.25, (self.mouse_x + parent.x - 5px) / (Style.grid-step / 1px * root.z_lvl * 1px)); TransportActions.loop_changed(loop_st, loop_ed); } } }
                                         }
                                     }
 

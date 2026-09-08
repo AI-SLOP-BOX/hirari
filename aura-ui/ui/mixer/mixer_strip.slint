@@ -24,6 +24,7 @@ export component Z_MixerStrip {
     callback peaks-reset();
     callback fader-changed(int, float);
     callback delay-changed(int, float);
+    callback pan-changed(int, float);
     Rectangle {
         min-height: 480px; 
         background: Style.surface-1; border_radius: 2px; border_width: 1px; border_color: Style.border;
@@ -115,8 +116,9 @@ export component Z_MixerStrip {
                 Z_IconButton { icon: "≈"; active: saturate_active; active-col: Style.record; clicked => { root.cloner-toggled(tid); } }
                 Rectangle { height: 1px; background: Style.border; width: 100%; }
                 Z_Knob {
-                    value: pan; bipolar: true; compact: true; show-value: true; accent-col: Style.ok;
-                    display-value: pan == 0.5 ? "C" : (pan < 0.5 ? "L" + Math.round((0.5 - pan) * 128.0) : "R" + Math.round((pan - 0.5) * 127.0));
+                    value: (pan + 1.0) / 2.0; bipolar: true; compact: true; show-value: true; accent-col: Style.ok;
+                    display-value: pan == 0.0 ? "C" : (pan < 0.0 ? "L" + Math.round(-pan * 128.0) : "R" + Math.round(pan * 127.0));
+                    changed(v) => { root.pan-changed(tid, v * 2.0 - 1.0); }
                 }
                 Z_Knob {
                     value: (delay_ms / 200.0).clamp(0.0, 1.0); compact: true; show-value: true; accent-col: Style.brand;
