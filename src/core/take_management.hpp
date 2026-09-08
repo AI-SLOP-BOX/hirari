@@ -38,20 +38,40 @@ public:
      * PERFORMANCE FIX: Scans and scores segments using the spectral analysis engine.
      */
     void autoComp(uint64_t start, uint64_t end) {
-        DSP::Analysis::AnalysisEngine analyzer(44100.0);
-        
-        for (auto& take : m_takes) {
-            float totalScore = 0.0f;
-            uint32_t segments = 0;
-            
-            // Analyze energy and 'Air' (High-freq clarity)
-            // [...]
-            take->setScore(totalScore); 
+        m_activeCompIndices.clear();
+        if (m_takes.empty() || start >= end) return;
+
+        // Score the part of each take that actually covers the requested
+        // range. A take with no source, muted metadata, or no overlap cannot
+        // become the active comp. The score is deterministic and leaves room
+        // for spectral quality metrics when the analysis worker is available.
+        float bestScore = -1.0f;
+        uint32_t bestIndex = 0;
+        for (uint32_t index = 0; index < m_takes.size(); ++index) {
+            const auto& take = m_takes[index];
+            if (!take || !take->getRegion()) continue;
+            const auto& meta = take->getRegion()->getMeta();
+            const uint64_t takeStart = meta.samplePosition;
+            const uint64_t takeEnd = takeStart > UINT64_MAX - meta.sampleLength
+                ? UINT64_MAX : takeStart + meta.sampleLength;
+            const uint64_t overlapStart = std::max(start, takeStart);
+            const uint64_t overlapEnd = std::min(end, takeEnd);
+            if (meta.isMuted || overlapStart >= overlapEnd || meta.sampleLength == 0) {
+                take->setScore(0.0f);
+                continue;
+            }
+            const float coverage = static_cast<float>(overlapEnd - overlapStart)
+                / static_cast<float>(end - start);
+            const float gainQuality = std::clamp(meta.clipGain, 0.0f, 1.0f);
+            const float score = coverage * (0.75f + 0.25f * gainQuality);
+            take->setScore(score);
+            if (score > bestScore) {
+                bestScore = score;
+                bestIndex = index;
+            }
         }
 
-        // Logic to build a 'Comp' region from the highest-scoring segments
-        m_activeCompIndices.clear();
-        m_activeCompIndices.push_back(0); // Default to first for now
+        if (bestScore >= 0.0f) m_activeCompIndices.push_back(bestIndex);
     }
 
     const std::vector<std::shared_ptr<Take>>& getTakes() const { return m_takes; }
