@@ -45,25 +45,31 @@ impl SignalAnalyzerOrchestrator {
     }
 
     fn k_weighted_sample(&mut self, channel: usize, sample: f64) -> f64 {
-        // BS.1770's reference coefficients for 48 kHz.  Other rates retain
-        // the previous unweighted behavior until rate-specific coefficients
-        // are supplied, rather than silently applying the wrong filter.
-        if (self.sample_rate - 48_000.0).abs() > 1.0 {
-            return sample;
-        }
-        const PRE_B: [f64; 3] = [1.53512485958697, -2.69169618940638, 1.19839281085285];
-        const PRE_A: [f64; 2] = [-1.69065929318241, 0.73248077421585];
+        // BS.1770 reference coefficients.  Do not apply 48 kHz coefficients
+        // to another rate: that produces a plausible-looking but incorrect
+        // loudness number.
+        let (pre_b, pre_a, rlb_a): ([f64; 3], [f64; 2], [f64; 2]) =
+            if (self.sample_rate - 48_000.0).abs() <= 1.0 {
+                ([1.53512485958697, -2.69169618940638, 1.19839281085285],
+                 [-1.69065929318241, 0.73248077421585],
+                 [-1.99004745483398, 0.99007225036662])
+            } else if (self.sample_rate - 44_100.0).abs() <= 1.0 {
+                ([1.53084123005035, -2.65097999515473, 1.16907907992134],
+                 [-1.66365511325602, 0.712595428073225],
+                 [-1.98916967362980, 0.989199035787039])
+            } else {
+                return sample;
+            };
         const RLB_B: [f64; 3] = [1.0, -2.0, 1.0];
-        const RLB_A: [f64; 2] = [-1.99004745483398, 0.99007225036662];
         let state = &mut self.k_weight_state[channel];
-        let pre = PRE_B[0] * sample + PRE_B[1] * state[0] + PRE_B[2] * state[1]
-            - PRE_A[0] * state[2] - PRE_A[1] * state[3];
+        let pre = pre_b[0] * sample + pre_b[1] * state[0] + pre_b[2] * state[1]
+            - pre_a[0] * state[2] - pre_a[1] * state[3];
         state[1] = state[0];
         state[0] = sample;
         state[3] = state[2];
         state[2] = pre;
         let rlb = RLB_B[0] * pre + RLB_B[1] * state[4] + RLB_B[2] * state[5]
-            - RLB_A[0] * state[6] - RLB_A[1] * state[7];
+            - rlb_a[0] * state[6] - rlb_a[1] * state[7];
         state[5] = state[4];
         state[4] = pre;
         state[7] = state[6];
@@ -162,6 +168,15 @@ mod tests {
         let frame = &analyzer.buffers[analyzer.latest_idx];
         assert_eq!(frame.peak, [0.5, 0.5]);
         assert!((frame.correlation - 1.0).abs() < 1e-6);
+        assert!(frame.lufs_integrated.is_finite());
+        assert!(analyzer.audit_signal_analyzer());
+    }
+
+    #[test]
+    fn forty_four_point_one_kilohertz_uses_weighted_metering() {
+        let mut analyzer = SignalAnalyzerOrchestrator::new_with_sample_rate(8, 44_100.0);
+        analyzer.process(&[0.25; 8], &[0.25; 8]);
+        let frame = &analyzer.buffers[analyzer.latest_idx];
         assert!(frame.lufs_integrated.is_finite());
         assert!(analyzer.audit_signal_analyzer());
     }
