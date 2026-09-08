@@ -4,6 +4,7 @@ const MAX_LOUDNESS_BLOCKS: usize = 8192;
 
 pub struct AnalysisFrame {
     pub peak: [f32; 2],
+    pub true_peak: [f32; 2],
     pub correlation: f32,
     pub lufs_integrated: f32,
     pub samples: Vec<f32>,
@@ -17,6 +18,7 @@ pub struct SignalAnalyzerOrchestrator {
     loudness_blocks: VecDeque<f64>,
     sample_rate: f32,
     k_weight_state: [[f64; 8]; 2],
+    previous_samples: [f32; 2],
 }
 
 impl SignalAnalyzerOrchestrator {
@@ -27,6 +29,7 @@ impl SignalAnalyzerOrchestrator {
     pub fn new_with_sample_rate(fft_size: usize, sample_rate: f32) -> Self {
         let buffers = [(); 3].map(|_| AnalysisFrame {
             peak: [0.0; 2],
+            true_peak: [0.0; 2],
             correlation: 0.0,
             lufs_integrated: 0.0,
             samples: vec![0.0; fft_size],
@@ -43,6 +46,7 @@ impl SignalAnalyzerOrchestrator {
                 48_000.0
             },
             k_weight_state: [[0.0; 8]; 2],
+            previous_samples: [0.0; 2],
         }
     }
 
@@ -90,19 +94,33 @@ impl SignalAnalyzerOrchestrator {
 
         // --- SIMD METERING ---
         let mut max_p = [0.0f32; 2];
+        let mut max_true_p = [0.0f32; 2];
         let mut cross = 0.0f64;
         let mut left_power = 0.0f64;
         let mut right_power = 0.0f64;
-        for &s in left {
-            let clean = if s.is_finite() { s } else { 0.0 };
-            max_p[0] = max_p[0].max(clean.abs());
+        for (channel, input) in [left, right].iter().enumerate() {
+            let mut previous = self.previous_samples[channel];
+            for &s in input.iter() {
+                let clean = if s.is_finite() { s } else { 0.0 };
+                max_p[channel] = max_p[channel].max(clean.abs());
+                max_true_p[channel] = max_true_p[channel].max(clean.abs());
+                for step in 1..=3 {
+                    let fraction = step as f32 * 0.25;
+                    let interpolated = previous + (clean - previous) * fraction;
+                    max_true_p[channel] = max_true_p[channel].max(interpolated.abs());
+                }
+                previous = clean;
+            }
+            self.previous_samples[channel] = previous;
         }
+        /*
+         * Keep the correlation calculation separate from peak scanning so
+         * mismatched channel lengths remain well-defined.
+         */
         for (i, &s) in right.iter().enumerate() {
-            let clean = if s.is_finite() { s } else { 0.0 };
-            max_p[1] = max_p[1].max(clean.abs());
             if i < left.len() {
                 let l = f64::from(if left[i].is_finite() { left[i] } else { 0.0 });
-                let r = f64::from(clean);
+                let r = f64::from(if s.is_finite() { s } else { 0.0 });
                 cross += l * r;
                 left_power += l * l;
                 right_power += r * r;
@@ -131,6 +149,7 @@ impl SignalAnalyzerOrchestrator {
             target.samples[index] = if sample.is_finite() { sample } else { 0.0 };
         }
         target.peak = max_p;
+        target.true_peak = max_true_p;
         target.correlation = if left_power > 0.0 && right_power > 0.0 {
             (cross / (left_power.sqrt() * right_power.sqrt())) as f32
         } else { 0.0 };
@@ -172,6 +191,7 @@ impl SignalAnalyzerOrchestrator {
     pub fn audit_signal_analyzer(&self) -> bool {
         self.buffers.iter().all(|frame| {
             frame.peak.iter().all(|value| value.is_finite() && *value >= 0.0)
+                && frame.true_peak.iter().all(|value| value.is_finite() && *value >= 0.0)
                 && frame.correlation.is_finite() && (-1.0..=1.0).contains(&frame.correlation)
                 && (frame.lufs_integrated.is_finite() || frame.lufs_integrated == f32::NEG_INFINITY)
                 && frame.samples.iter().all(|sample| sample.is_finite())
@@ -191,6 +211,7 @@ mod tests {
         analyzer.process(&[0.5, -0.25, 0.0], &[0.5, -0.25, 0.0]);
         let frame = &analyzer.buffers[analyzer.latest_idx];
         assert_eq!(frame.peak, [0.5, 0.5]);
+        assert!(frame.true_peak[0] >= frame.peak[0]);
         assert!((frame.correlation - 1.0).abs() < 1e-6);
         assert!(frame.lufs_integrated.is_finite());
         assert!(analyzer.audit_signal_analyzer());
