@@ -302,6 +302,8 @@ pub fn run() {
     let last_saved_project_path: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(
         startup_project.or_else(load_saved_project_path),
     ));
+    let recording_target: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(None));
+    let peak_reset_generation = Rc::new(std::cell::Cell::new(0u64));
     crate::ui::project::install(
         &ui,
         core.clone(),
@@ -319,6 +321,7 @@ pub fn run() {
         core.clone(),
         tracks_vec.clone(),
         last_saved_project_path.clone(),
+        recording_target.clone(),
     );
     crate::ui::render::install(
         &ui,
@@ -328,7 +331,12 @@ pub fn run() {
         operation_gate.clone(),
         render_lease.clone(),
     );
-    crate::ui::mixer::install(&ui, core.clone(), tracks_vec.clone());
+    crate::ui::mixer::install(
+        &ui,
+        core.clone(),
+        tracks_vec.clone(),
+        peak_reset_generation.clone(),
+    );
     crate::ui::stack::install(&ui, core.clone());
     crate::ui::plugin::install(&ui, core.clone(), tracks_vec.clone());
     crate::ui::arrange::install(&ui, core.clone(), tracks_vec.clone());
@@ -368,6 +376,8 @@ pub fn run() {
         render_started_ms.clone(),
         render_output_path.clone(),
         render_lease.clone(),
+        recording_target,
+        peak_reset_generation,
     );
 
     // Opt-in main-thread smoke path for the real Slint -> Core callback.

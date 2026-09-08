@@ -412,13 +412,13 @@
                                             VerticalLayout {
                                                 alignment: center; spacing: 4px;
                                                 Text { text: "LUFS"; font-size: Style.font-xxs; color: Style.text-tertiary; }
-                                                Rectangle { height: 80px; width: 30px; background: Style.surface; Rectangle { y: (1.0 - 0.7) * parent.height; height: 0.7 * parent.height; width: 100%; background: Style.ok; } }
+                                                Rectangle { property <float> lufs_fill: ((root.lufs_integrated + 60.0) / 60.0).clamp(0.0, 1.0); height: 80px; width: 30px; background: Style.surface; Rectangle { y: (1.0 - lufs_fill) * parent.height; height: lufs_fill * parent.height; width: 100%; background: Style.ok; } }
                                                 Text { text: Math.round(root.lufs_integrated * 10.0) / 10.0 + " LUFS"; font-size: Style.font-xxs; color: Style.ok; font-weight: 700; horizontal-alignment: center; }
                                             }
                                             VerticalLayout {
                                                 alignment: center; spacing: 4px;
                                                 Text { text: "Peak L/R"; font-size: Style.font-xxs; color: Style.text-tertiary; }
-                                                HorizontalLayout { spacing: 2px; for i in 2 : Rectangle { property <float> safe_peak: pks.length > i ? pks[i] : 0.0; height: 80px; width: 8px; background: Style.surface; Rectangle { y: (1.0 - safe_peak) * parent.height; height: safe_peak * parent.height; width: 100%; background: @linear-gradient(180deg, Style.record 0%, Style.solo 100%); } } }
+                                                HorizontalLayout { spacing: 2px; for peak_db in [root.master_true_peak_l, root.master_true_peak_r] : Rectangle { property <float> safe_peak: Math.pow(10.0, peak_db / 20.0).clamp(0.0, 1.2); height: 80px; width: 8px; background: Style.surface; Rectangle { y: (1.0 - (safe_peak / 1.2)) * parent.height; height: (safe_peak / 1.2) * parent.height; width: 100%; background: @linear-gradient(180deg, Style.record 0%, Style.solo 100%); } } }
                                                 Text { text: Math.round(root.master_true_peak_l * 10.0) / 10.0 + " / " + Math.round(root.master_true_peak_r * 10.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: Style.text-primary; horizontal-alignment: center; }
                                             }
                                             VerticalLayout {

@@ -628,6 +628,42 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
                                     work.getReadPointer(1), sz);
         }
 
+        // Publish per-track post-FX peaks through the lock-free telemetry
+        // double buffer.  The UI expects linear amplitudes and adds the
+        // master channel separately from the master meter, so keep this
+        // payload strictly aligned with the active track order.
+        {
+            const uint32_t activeTelemetry =
+                m_activeTelemetryIdx.load(std::memory_order_relaxed);
+            const uint32_t nextTelemetry = activeTelemetry ^ 1u;
+            auto& telemetry = m_telemetryBuffers[nextTelemetry];
+            telemetry.count = std::min(state.trackCount, kMaxTracks);
+            for (uint32_t i = 0; i < telemetry.count; ++i) {
+                Track* track = state.activeTracks[i];
+                float peakL = 0.0f;
+                float peakR = 0.0f;
+                if (track && track->canProcess(sz)) {
+                    const auto& work = track->getWorkBuffer(sz);
+                    const uint32_t samples = std::min(sz, work.getNumSamples());
+                    const float* left = work.getReadPointer(0);
+                    const float* right = work.getReadPointer(
+                        work.getNumChannels() > 1 ? 1u : 0u);
+                    for (uint32_t sample = 0; sample < samples; ++sample) {
+                        if (std::isfinite(left[sample])) {
+                            peakL = std::max(peakL, std::abs(left[sample]));
+                        }
+                        if (std::isfinite(right[sample])) {
+                            peakR = std::max(peakR, std::abs(right[sample]));
+                        }
+                    }
+                }
+                telemetry.peaksL[i] = peakL;
+                telemetry.peaksR[i] = peakR;
+            }
+            telemetry.version++;
+            m_activeTelemetryIdx.store(nextTelemetry, std::memory_order_release);
+        }
+
         // The metronome is part of the rendered monitor signal, not a track
         // node.  Inject it after graph/routing processing so it remains
         // sample-accurate even when tracks are muted or an offline target is

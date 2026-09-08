@@ -1,5 +1,6 @@
 use aura_core_bridge::AuraCore;
 use slint::{ComponentHandle, Model, VecModel};
+use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::slint_ui::{ui_error_message, AppWindow, MixerActions, UiErrorKind, Z_Fx, Z_Track};
@@ -7,7 +8,12 @@ use crate::ui::sync::replace_track;
 
 /// Channel-strip mutations. All mixer actions update the engine first where
 /// required, then publish the accepted value to the Slint model.
-pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>) {
+pub fn install(
+    ui: &AppWindow,
+    core: Rc<AuraCore>,
+    tracks: Rc<VecModel<Z_Track>>,
+    peak_reset_generation: Rc<Cell<u64>>,
+) {
     let weak = ui.as_weak();
     ui.global::<MixerActions>().on_toggle_fx({
         let weak = weak.clone();
@@ -60,7 +66,9 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
     });
     ui.global::<MixerActions>().on_reset_peaks({
         let weak = ui.as_weak();
+        let peak_reset_generation = peak_reset_generation.clone();
         move || {
+            peak_reset_generation.set(peak_reset_generation.get().wrapping_add(1));
             if let Some(ui) = weak.upgrade() {
                 let peak_count = ui.get_pks().row_count();
                 ui.set_pks(slint::ModelRc::new(VecModel::from(vec![0.0; peak_count])));

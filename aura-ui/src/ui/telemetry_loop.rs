@@ -4,10 +4,23 @@ use crate::slint_ui::*;
 use crate::ui::recovery::summarize_candidates;
 use aura_core_bridge::AuraCore;
 use slint::{Model, SharedString};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+fn recording_target_row(
+    tracks: &slint::VecModel<Z_Track>,
+    target_id: Option<u32>,
+) -> Option<usize> {
+    target_id.and_then(|id| {
+        (0..tracks.row_count()).find(|&row| {
+            tracks
+                .row_data(row)
+                .is_some_and(|track| track.id.max(0) as u32 == id)
+        })
+    })
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn install_telemetry_loop(
@@ -20,6 +33,8 @@ pub(crate) fn install_telemetry_loop(
     render_started_ms: Arc<AtomicU64>,
     render_output_path: Arc<Mutex<std::path::PathBuf>>,
     render_lease: Arc<Mutex<Option<crate::ui::operation_gate::OperationLease>>>,
+    recording_target: Rc<RefCell<Option<u32>>>,
+    peak_reset_generation: Rc<Cell<u64>>,
 ) {
     let ui_timer_val = Arc::new(AtomicU64::new(0));
     // --- 4. ENGINE TELEMETRY LOOP ---
@@ -28,11 +43,13 @@ pub(crate) fn install_telemetry_loop(
     let core_tele = core.clone();
     let tracks_tele = tracks.clone();
     let last_saved_path_tele = last_saved_path.clone();
+    let recording_target_tele = recording_target.clone();
     let tone_test_started_ms_tele = tone_test_started_ms.clone();
     let tone_test_baseline_callbacks_tele = tone_test_baseline_callbacks.clone();
     let render_started_ms_tele = render_started_ms.clone();
     let render_output_path_tele = render_output_path.clone();
     let mut peak_holds: Vec<f32> = vec![0.0; 10];
+    let mut last_peak_reset_generation = peak_reset_generation.get();
     let mut last_video_revision = 0u64;
     let mut ui_timer = 0;
     let mut analysis_elapsed_ms: u32 = 0;
@@ -204,22 +221,8 @@ pub(crate) fn install_telemetry_loop(
                 }
                 if ui.get_is_rec() {
                     if let Err(error) = core_tele.poll_recording_capture() {
-                        let selected =
-                            clamp_selection_index(ui.get_sel_idx(), tracks_tele.row_count());
-                        let target_row = if tracks_tele
-                            .row_data(selected)
-                            .map(|track| track.armed)
-                            .unwrap_or(false)
-                        {
-                            Some(selected)
-                        } else {
-                            (0..tracks_tele.row_count()).find(|&row| {
-                                tracks_tele
-                                    .row_data(row)
-                                    .map(|track| track.armed)
-                                    .unwrap_or(false)
-                            })
-                        };
+                        let target_row =
+                            recording_target_row(&tracks_tele, *recording_target_tele.borrow());
                         let recovered = target_row
                             .and_then(|row| tracks_tele.row_data(row))
                             .and_then(|track| {
@@ -232,6 +235,7 @@ pub(crate) fn install_telemetry_loop(
                                     .map(|frames| (track.name, frames))
                             });
                         ui.set_is_rec(false);
+                        *recording_target_tele.borrow_mut() = None;
                         ui.set_last_action(if let Some((track, frames)) = recovered {
                             format!(
                                 "RECORD INPUT ERROR: {error}; recovered {frames} frames on {track}"
@@ -249,22 +253,8 @@ pub(crate) fn install_telemetry_loop(
                         }
                     }
                     if core_tele.recording_capture_auto_stop_requested() {
-                        let selected =
-                            clamp_selection_index(ui.get_sel_idx(), tracks_tele.row_count());
-                        let target_row = if tracks_tele
-                            .row_data(selected)
-                            .map(|track| track.armed)
-                            .unwrap_or(false)
-                        {
-                            Some(selected)
-                        } else {
-                            (0..tracks_tele.row_count()).find(|&row| {
-                                tracks_tele
-                                    .row_data(row)
-                                    .map(|track| track.armed)
-                                    .unwrap_or(false)
-                            })
-                        };
+                        let target_row =
+                            recording_target_row(&tracks_tele, *recording_target_tele.borrow());
                         let committed = target_row
                             .and_then(|row| tracks_tele.row_data(row))
                             .and_then(|track| {
@@ -277,6 +267,7 @@ pub(crate) fn install_telemetry_loop(
                                     .map(|frames| (track.name, frames))
                             });
                         ui.set_is_rec(false);
+                        *recording_target_tele.borrow_mut() = None;
                         if let Some((track, frames)) = committed {
                             sync_tracks_from_engine(&tracks_tele, &core_tele);
                             ui.set_last_action(
@@ -362,21 +353,8 @@ pub(crate) fn install_telemetry_loop(
                     // take in the temporary spool directory.
                     ui.set_is_rec(false);
                     let _ = core_tele.poll_recording_capture();
-                    let selected = clamp_selection_index(ui.get_sel_idx(), tracks_tele.row_count());
-                    let target_row = if tracks_tele
-                        .row_data(selected)
-                        .map(|track| track.armed)
-                        .unwrap_or(false)
-                    {
-                        Some(selected)
-                    } else {
-                        (0..tracks_tele.row_count()).find(|&row| {
-                            tracks_tele
-                                .row_data(row)
-                                .map(|track| track.armed)
-                                .unwrap_or(false)
-                        })
-                    };
+                    let target_row =
+                        recording_target_row(&tracks_tele, *recording_target_tele.borrow());
                     let recovered = target_row
                         .and_then(|row| tracks_tele.row_data(row))
                         .and_then(|track| {
@@ -391,6 +369,7 @@ pub(crate) fn install_telemetry_loop(
                     if recovered.is_some() {
                         sync_tracks_from_engine(&tracks_tele, &core_tele);
                     }
+                    *recording_target_tele.borrow_mut() = None;
                     ui.set_last_action(if let Some((track, frames)) = recovered {
                         format!(
                             "AUDIO DEVICE OFFLINE: RECOVERED {} frames on {}",
@@ -471,23 +450,35 @@ pub(crate) fn install_telemetry_loop(
                     &mut last_video_revision,
                 );
 
+                // Read the master meter once and expose it as slot zero. Track
+                // peaks follow in model order so mixer strips and the master
+                // strip no longer compete for the same telemetry slot.
+                let loudness = core_tele.get_master_loudness();
                 let count = tracks_tele.row_count() + 1;
+                let reset_generation = peak_reset_generation.get();
+                if reset_generation != last_peak_reset_generation {
+                    peak_holds.fill(0.0);
+                    last_peak_reset_generation = reset_generation;
+                }
                 if peak_holds.len() < count {
                     peak_holds.resize(count, 0.0);
                 }
 
-                let mut lp = vec![0.0f32; count];
-                let mut rp = vec![0.0f32; count];
+                let track_count = count.saturating_sub(1);
+                let mut lp = vec![0.0f32; track_count];
+                let mut rp = vec![0.0f32; track_count];
                 core_tele.get_all_peaks_l(&mut lp);
                 core_tele.get_all_peaks_r(&mut rp);
-                let combined: Vec<f32> = (0..count)
-                    .map(|i| {
-                        lp.get(i)
-                            .copied()
-                            .unwrap_or(0.0)
-                            .max(rp.get(i).copied().unwrap_or(0.0))
-                    })
-                    .collect();
+                let master_peak_l = 10.0f32.powf(loudness.true_peak_l / 20.0).clamp(0.0, 2.0);
+                let master_peak_r = 10.0f32.powf(loudness.true_peak_r / 20.0).clamp(0.0, 2.0);
+                let mut combined = Vec::with_capacity(count);
+                combined.push(master_peak_l.max(master_peak_r));
+                combined.extend((0..track_count).map(|i| {
+                    lp.get(i)
+                        .copied()
+                        .unwrap_or(0.0)
+                        .max(rp.get(i).copied().unwrap_or(0.0))
+                }));
 
                 for i in 0..count {
                     if combined[i] > peak_holds[i] {
@@ -502,7 +493,6 @@ pub(crate) fn install_telemetry_loop(
                 )));
 
                 // 2. Master Precision Telemetry (High Frequency)
-                let loudness = core_tele.get_master_loudness();
                 ui.set_lufs_integrated(loudness.integrated);
                 ui.set_lufs_short_term(loudness.short_term);
                 ui.set_master_true_peak_l(loudness.true_peak_l);

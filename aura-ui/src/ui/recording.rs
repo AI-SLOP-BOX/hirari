@@ -21,6 +21,7 @@ pub fn install(
     core: Rc<AuraCore>,
     tracks: Rc<VecModel<Z_Track>>,
     last_saved_path: Rc<RefCell<Option<String>>>,
+    recording_target: Rc<RefCell<Option<u32>>>,
 ) {
     let weak = ui.as_weak();
     ui.global::<RecordingActions>().on_select_recording_take({
@@ -89,24 +90,18 @@ pub fn install(
     });
     ui.global::<TransportActions>().on_toggle_record({
         let weak = weak.clone();
+        let recording_target = recording_target.clone();
         move || {
             if let Some(ui) = weak.upgrade() {
                 if ui.get_is_rec() {
-                    let selected = clamp_selection_index(ui.get_sel_idx(), tracks.row_count());
-                    let target_row = if tracks
-                        .row_data(selected)
-                        .map(|track| track.armed)
-                        .unwrap_or(false)
-                    {
-                        Some(selected)
-                    } else {
+                    let target_id = *recording_target.borrow();
+                    let target_row = target_id.and_then(|id| {
                         (0..tracks.row_count()).find(|&row| {
                             tracks
                                 .row_data(row)
-                                .map(|track| track.armed)
-                                .unwrap_or(false)
+                                .is_some_and(|track| track.id.max(0) as u32 == id)
                         })
-                    };
+                    });
                     let Some(target_row) = target_row else {
                         ui.set_is_rec(false);
                         ui.set_last_action(
@@ -136,6 +131,7 @@ pub fn install(
                     ) {
                         Ok(frame_count) => {
                             ui.set_is_rec(false);
+                            *recording_target.borrow_mut() = None;
                             sync_recording_status(&ui, &core);
                             // Promote every committed capture into the Core
                             // comping registry.  The Arrange view can now use
@@ -161,6 +157,7 @@ pub fn install(
                             // Keep the UI transport and settings controls from
                             // remaining latched in recording mode.
                             ui.set_is_rec(false);
+                            *recording_target.borrow_mut() = None;
                             sync_recording_status(&ui, &core);
                             ui.set_last_action(
                                 ui_error_message(
@@ -241,6 +238,13 @@ pub fn install(
                 });
                 match capture_result {
                     Ok(()) => {
+                        let selected = clamp_selection_index(ui.get_sel_idx(), tracks.row_count());
+                        let target_id = (0..tracks.row_count())
+                            .filter_map(|row| tracks.row_data(row))
+                            .find(|track| track.armed)
+                            .or_else(|| tracks.row_data(selected))
+                            .map(|track| track.id.max(0) as u32);
+                        *recording_target.borrow_mut() = target_id;
                         ui.set_is_rec(true);
                         sync_recording_status(&ui, &core);
                         ui.set_last_action("RECORDING".into());
