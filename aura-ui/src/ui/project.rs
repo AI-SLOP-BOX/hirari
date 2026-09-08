@@ -354,13 +354,19 @@ pub(crate) fn install(
         let weak = weak.clone();
         let orchestrator = orchestrator.clone();
         let tracks = tracks.clone();
+        let markers = markers.clone();
         move || {
             let result = orchestrator.dispatch_result(UIAction::Undo);
             if result.is_ok() {
                 sync_tracks_from_engine(&tracks, &orchestrator.core());
                 sync_midi_notes_from_core(&tracks, &orchestrator.core());
+                sync_markers_from_core(&markers, &orchestrator.core());
             }
             if let Some(ui) = weak.upgrade() {
+                if result.is_ok() {
+                    ui.set_master_output_gain(orchestrator.core().master_gain());
+                    reset_project_scoped_ui(&ui);
+                }
                 ui.set_last_action(match result {
                     Ok(_) => "UNDO APPLIED".into(),
                     Err(error) => ui_error_message(UiErrorKind::Project, &error.to_string()).into(),
@@ -372,13 +378,19 @@ pub(crate) fn install(
         let weak = weak.clone();
         let orchestrator = orchestrator.clone();
         let tracks = tracks.clone();
+        let markers = markers.clone();
         move || {
             let result = orchestrator.dispatch_result(UIAction::Redo);
             if result.is_ok() {
                 sync_tracks_from_engine(&tracks, &orchestrator.core());
                 sync_midi_notes_from_core(&tracks, &orchestrator.core());
+                sync_markers_from_core(&markers, &orchestrator.core());
             }
             if let Some(ui) = weak.upgrade() {
+                if result.is_ok() {
+                    ui.set_master_output_gain(orchestrator.core().master_gain());
+                    reset_project_scoped_ui(&ui);
+                }
                 ui.set_last_action(match result {
                     Ok(_) => "REDO APPLIED".into(),
                     Err(error) => ui_error_message(UiErrorKind::Project, &error.to_string()).into(),

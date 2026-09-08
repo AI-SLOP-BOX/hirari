@@ -17,6 +17,14 @@ fn reset_project_scoped_ui(ui: &AppWindow) {
     ui.set_sidechain_tap_point(0);
     ui.set_plugin_pdc_status("CALCULATING".into());
     ui.set_plugin_pdc_compensation_ms(0.0);
+    ui.set_sel_idx(0);
+    ui.set_sel_cid(-1);
+    ui.set_selected_clip_reversed(false);
+    ui.set_selected_clip_trim_start(0.0);
+    ui.set_selected_clip_trim_end(1.0);
+    ui.set_selected_clip_warp_ratio(1.0);
+    ui.set_selected_clip_pitch_semitones(0.0);
+    ui.set_selected_clip_loop_count(1);
 }
 
 pub fn handle_command(
@@ -146,6 +154,7 @@ pub fn handle_command(
             let ok = loaded && hydrate_project_models(&path, tracks, core);
             if ok {
                 reset_project_scoped_ui(ui);
+                ui.set_master_output_gain(core.master_gain());
                 *last_saved_path.borrow_mut() = Some(path.clone());
                 store_project_path(&path);
                 ui.set_project_path(path.clone().into());
