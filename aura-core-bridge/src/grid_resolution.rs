@@ -29,18 +29,21 @@ impl SnapOrchestrator {
         ticks: u64,
         res: ResolutionRust,
         numerator: u32,
-        _denominator: u32,
+        denominator: u32,
     ) -> u64 {
         let beat = 960u64;
         let step = match res {
-            ResolutionRust::Measure => beat.saturating_mul(numerator.max(1) as u64),
+            ResolutionRust::Measure => beat
+                .saturating_mul(numerator.max(1) as u64)
+                .saturating_mul(4)
+                / u64::from(denominator.max(1)),
             ResolutionRust::Beat => beat,
-            ResolutionRust::Half => beat / 2,
-            ResolutionRust::Quarter => beat / 4,
-            ResolutionRust::Eighth => beat / 8,
-            ResolutionRust::Sixteenth => beat / 16,
-            ResolutionRust::ThirtySecond => beat / 32,
-            ResolutionRust::EighthTriplet => beat / 3,
+            ResolutionRust::Half => beat * 2,
+            ResolutionRust::Quarter => beat,
+            ResolutionRust::Eighth => beat / 2,
+            ResolutionRust::Sixteenth => beat / 4,
+            ResolutionRust::ThirtySecond => beat / 8,
+            ResolutionRust::EighthTriplet => beat * 2 / 3,
             ResolutionRust::SixteenthDotted => beat * 3 / 8,
         }.max(1);
         let lower = ticks / step * step;
@@ -76,6 +79,9 @@ mod tests {
     fn snaps_to_nearest_musical_grid() {
         let snap = SnapOrchestrator::new();
         assert_eq!(snap.snap_absolute(481, ResolutionRust::Beat, 4, 4), 960);
+        assert_eq!(snap.snap_absolute(960, ResolutionRust::Quarter, 4, 4), 960);
+        assert_eq!(snap.snap_absolute(1_920, ResolutionRust::Half, 4, 4), 1_920);
+        assert_eq!(snap.snap_absolute(1_919, ResolutionRust::Measure, 4, 4), 0);
         assert!(snap.audit_grid_resolution());
     }
 }
