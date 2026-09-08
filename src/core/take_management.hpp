@@ -3,7 +3,6 @@
 #include <memory>
 #include <string>
 #include "audio_region.hpp"
-#include "../dsp/analysis/analysis_engine.hpp"
 
 namespace Aura::Core {
 
@@ -43,8 +42,8 @@ public:
 
         // Score the part of each take that actually covers the requested
         // range. A take with no source, muted metadata, or no overlap cannot
-        // become the active comp. The score is deterministic and leaves room
-        // for spectral quality metrics when the analysis worker is available.
+        // become the active comp. The bounded waveform pass penalizes silence
+        // and clipping while rewarding usable headroom and transient activity.
         float bestScore = -1.0f;
         uint32_t bestIndex = 0;
         for (uint32_t index = 0; index < m_takes.size(); ++index) {
@@ -63,7 +62,38 @@ public:
             const float coverage = static_cast<float>(overlapEnd - overlapStart)
                 / static_cast<float>(end - start);
             const float gainQuality = std::clamp(meta.clipGain, 0.0f, 1.0f);
-            const float score = coverage * (0.75f + 0.25f * gainQuality);
+            const uint64_t analysisLength = overlapEnd - overlapStart;
+            const uint64_t stride = std::max<uint64_t>(1, analysisLength / 4096);
+            double energy = 0.0;
+            float peak = 0.0f;
+            uint32_t samples = 0;
+            uint32_t clipped = 0;
+            uint32_t crossings = 0;
+            float previous = 0.0f;
+            for (uint64_t offset = 0; offset < analysisLength; offset += stride) {
+                const float left = take->getRegion()->getInterpolatedSample(
+                    0, static_cast<double>(overlapStart - takeStart + offset));
+                const float right = take->getRegion()->getInterpolatedSample(
+                    1, static_cast<double>(overlapStart - takeStart + offset));
+                const float sample = std::isfinite(left) && std::isfinite(right)
+                    ? (left + right) * 0.5f : 0.0f;
+                energy += static_cast<double>(sample) * sample;
+                peak = std::max(peak, std::abs(sample));
+                if (std::abs(sample) >= 0.99f) ++clipped;
+                if (samples > 0 && ((previous < 0.0f) != (sample < 0.0f))) ++crossings;
+                previous = sample;
+                ++samples;
+            }
+            const float rms = samples == 0 ? 0.0f
+                : static_cast<float>(std::sqrt(energy / samples));
+            const float activity = std::clamp(rms / 0.1f, 0.0f, 1.0f);
+            const float headroom = samples == 0 ? 0.0f
+                : 1.0f - static_cast<float>(clipped) / samples;
+            const float transientActivity = samples < 2 ? 0.0f
+                : std::clamp(static_cast<float>(crossings) / samples * 4.0f, 0.0f, 1.0f);
+            const float score = coverage * (0.45f * activity + 0.25f * headroom
+                + 0.15f * transientActivity + 0.15f * gainQuality)
+                * std::clamp(peak, 0.0f, 1.0f);
             take->setScore(score);
             if (score > bestScore) {
                 bestScore = score;
