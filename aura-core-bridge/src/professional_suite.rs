@@ -44,7 +44,9 @@ impl ProfessionalChorusEngine {
         let buf_len = 4410;
 
         for s in 0..len {
-            let in_val = (l[s] + r[s]) * 0.5;
+            let left = if l[s].is_finite() { l[s] } else { 0.0 };
+            let right = if r[s].is_finite() { r[s] } else { 0.0 };
+            let in_val = (left + right) * 0.5;
 
             // Write to delay buffers
             for i in 0..8 {
@@ -81,6 +83,7 @@ impl ProfessionalChorusEngine {
 
             let dry_l = if l[s].is_finite() { l[s] } else { 0.0 };
             let dry_r = if r[s].is_finite() { r[s] } else { 0.0 };
+            let wet = if wet.is_finite() { wet } else { 0.0 };
             l[s] = dry_l + wet * 0.1;
             r[s] = dry_r + wet * 0.1;
 

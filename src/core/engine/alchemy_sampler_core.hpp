@@ -42,7 +42,20 @@ public:
     void setEngine(EngineType type) { m_engine = type; }
     void process(::Aura::Core::AudioBuffer& buffer, ::Aura::Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& ctx) noexcept override;
     void prepareToPlay(double sr, uint32_t sz) noexcept override;
-    void reset() noexcept override { m_grainSampleAccumulator = 0; }
+    void reset() noexcept override {
+        m_grainSampleAccumulator = 0;
+        for (auto& voice : m_voices) {
+            voice.active.store(false, std::memory_order_release);
+            voice.zone = nullptr;
+            voice.pos = 0.0;
+        }
+        for (auto& grain : m_grainPool) {
+            grain.active.store(false, std::memory_order_release);
+            grain.data = nullptr;
+            grain.pos = 0.0;
+            grain.currentSample = 0;
+        }
+    }
 
     // --- MODULATION MATRIX ---
     struct ModulationSource {
