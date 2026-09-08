@@ -42,7 +42,7 @@ public:
     void setEngine(EngineType type) { m_engine = type; }
     void process(::Aura::Core::AudioBuffer& buffer, ::Aura::Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& ctx) noexcept override;
     void prepareToPlay(double sr, uint32_t sz) noexcept override;
-    void reset() noexcept override { m_grainTimer = 0; }
+    void reset() noexcept override { m_grainSampleAccumulator = 0; }
 
     // --- MODULATION MATRIX ---
     struct ModulationSource {
@@ -98,7 +98,7 @@ public:
     Oscillator m_oscBank[1024]; // High-density additive bank
     std::array<float, 128> m_modMatrix;
     std::mt19937 m_rng;
-    uint32_t m_grainTimer = 0;
+    uint64_t m_grainSampleAccumulator = 0;
     double m_sampleRate = 44100.0;
     
     // Pre-allocated workspace to guarantee zero dynamic allocations in spectral mode

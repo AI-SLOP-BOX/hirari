@@ -99,10 +99,12 @@ void AlchemySamplerCore::processGranular(::Aura::Core::AudioBuffer& buffer) {
     float* outL = buffer.getWritePointer(0);
     float* outR = buffer.getWritePointer(1);
 
-    // 1. Grain Spawning (Industrial-grade stochastic trigger)
-    // (In a real implementation, this would be driven by a rate parameter)
-    if (m_grainTimer++ > 100 && m_zoneCount > 0) {
-        m_grainTimer = 0;
+    // 1. Grain spawning is measured in audio samples, so host buffer size
+    // changes do not change the perceived grain density.
+    m_grainSampleAccumulator += numSamples;
+    const uint64_t spawnInterval = std::max<uint64_t>(1, static_cast<uint64_t>(m_sampleRate * 0.05));
+    if (m_grainSampleAccumulator >= spawnInterval && m_zoneCount > 0) {
+        m_grainSampleAccumulator %= spawnInterval;
         for (auto& g : m_grainPool) {
             if (!g.active.load(std::memory_order_relaxed)) {
                 // Choose from every usable zone instead of silently biasing the
