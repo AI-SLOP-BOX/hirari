@@ -596,6 +596,7 @@ public:
 
     uint32_t get_active_telemetry_idx() const { return m_activeTelemetryIdx.load(std::memory_order_acquire); }
     const TelemetryData& get_telemetry(uint32_t idx) const { return m_telemetryBuffers[idx]; }
+    uint64_t get_telemetry_sequence() const { return m_telemetrySequence.load(std::memory_order_acquire); }
     
     void push_event(const ::Aura::Core::EngineEvent& e);
     bool pop_event(::Aura::Core::EngineEvent& e) const;
@@ -723,6 +724,10 @@ private:
 
     TelemetryData m_telemetryBuffers[2];
     std::atomic<uint32_t> m_activeTelemetryIdx{0};
+    // Even values are stable snapshots; audio publication brackets writes
+    // with odd/even values so control-rate readers can retry instead of
+    // observing a buffer while the next audio block is overwriting it.
+    std::atomic<uint64_t> m_telemetrySequence{0};
     
     std::atomic<bool> m_isShutdown{false};
     // Project hydration mutates tracks, routing and several process-wide

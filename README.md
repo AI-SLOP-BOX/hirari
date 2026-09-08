@@ -1,6 +1,6 @@
-# Aura DAW
+# Tinja DAW
 
-Aura is an open-source, programmable macOS DAW engine and early technical
+Tinja is an open-source, programmable macOS DAW built on the Aura engine and early technical
 preview. It combines a Rust control/UI layer, a C++ audio engine, isolated
 plugin workers, project persistence, offline rendering and a JSON command
 boundary intended for CLI and automation clients.
@@ -102,7 +102,7 @@ governed by [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 scripts/setup_dev.sh
 cargo test --workspace --locked
 scripts/build_app.sh
-open "packaging/Aura DAW.app"
+open "packaging/Tinja DAW.app"
 ```
 
 Create an audio track, import a WAV, press Play, adjust the track fader, then
@@ -262,4 +262,4 @@ commercial distribution, run `scripts/sign_and_notarize_release.sh` with
 `AURA_NOTARY_PROFILE` to require notarization, stapling, and validation.
 
 ---
-Copyright (c) 2024-2026 Aura DAW Project.
+Copyright (c) 2024-2026 Tinja DAW Project.

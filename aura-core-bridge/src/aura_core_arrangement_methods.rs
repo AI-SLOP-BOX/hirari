@@ -2130,18 +2130,18 @@ impl AuraCore {
     pub fn get_all_peaks_l(&self, out: &mut Vec<f32>) {
         if let Some(e) = self.engine.as_ref() {
             let core = ffi::get_unified_engine(e);
-            let pks = ffi::get_track_peaks_l(core);
+            let pks = ffi::get_track_peaks_l_owned(core);
             out.clear();
-            out.extend_from_slice(pks);
+            out.extend(pks);
         }
     }
 
     pub fn get_all_peaks_r(&self, out: &mut Vec<f32>) {
         if let Some(e) = self.engine.as_ref() {
             let core = ffi::get_unified_engine(e);
-            let pks = ffi::get_track_peaks_r(core);
+            let pks = ffi::get_track_peaks_r_owned(core);
             out.clear();
-            out.extend_from_slice(pks);
+            out.extend(pks);
         }
     }
 

@@ -578,7 +578,7 @@ int main(int argc, char** argv) {
         }
         const auto* descriptor = factory->get_plugin_descriptor(factory, descriptorIndex);
         Aura::Core::Plugins::ClapAbi::Host host{
-            {1, 0, 0}, "aura-sandbox", "Aura Studio", "Aura", "", "1",
+            {1, 0, 0}, "tinja-sandbox", "Tinja", "Tinja", "", "1",
             &noopRestart, &noopProcess, &noopCallback, &noExtension};
         clapPlugin = descriptor ? factory->create_plugin(factory, &host, descriptor->id) : nullptr;
         debugLog("plugin instance created");

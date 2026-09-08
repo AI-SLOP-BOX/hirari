@@ -29,18 +29,30 @@ namespace Aura::Core::Bridge {
     }
 
     rust::Vec<float> get_track_peaks_l_owned(const Engine::AuraUnifiedEngine& engine) {
-        const auto peaks = engine.get_track_peaks_l();
         rust::Vec<float> result;
-        result.reserve(peaks.size());
-        for (size_t i = 0; i < peaks.size(); ++i) result.push_back(peaks.data()[i]);
+        for (int attempt = 0; attempt < 4; ++attempt) {
+            const uint64_t before = engine.get_telemetry_sequence();
+            if (before & 1u) continue;
+            const auto peaks = engine.get_track_peaks_l();
+            result.clear();
+            result.reserve(peaks.size());
+            for (size_t i = 0; i < peaks.size(); ++i) result.push_back(peaks.data()[i]);
+            if (before == engine.get_telemetry_sequence()) return result;
+        }
         return result;
     }
 
     rust::Vec<float> get_track_peaks_r_owned(const Engine::AuraUnifiedEngine& engine) {
-        const auto peaks = engine.get_track_peaks_r();
         rust::Vec<float> result;
-        result.reserve(peaks.size());
-        for (size_t i = 0; i < peaks.size(); ++i) result.push_back(peaks.data()[i]);
+        for (int attempt = 0; attempt < 4; ++attempt) {
+            const uint64_t before = engine.get_telemetry_sequence();
+            if (before & 1u) continue;
+            const auto peaks = engine.get_track_peaks_r();
+            result.clear();
+            result.reserve(peaks.size());
+            for (size_t i = 0; i < peaks.size(); ++i) result.push_back(peaks.data()[i]);
+            if (before == engine.get_telemetry_sequence()) return result;
+        }
         return result;
     }
 

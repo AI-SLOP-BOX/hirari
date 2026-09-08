@@ -37,7 +37,7 @@
                                              styleMask:style
                                                backing:NSBackingStoreBuffered
                                                  defer:NO];
-    [_window setTitle:@"Aura Studio Pro Ultimate"];
+    [_window setTitle:@"Tinja"];
     [_window setDelegate:self];
     [_window setBackgroundColor:[NSColor blackColor]];
     
@@ -65,11 +65,11 @@
     });
     const bool audioReady = audioDriver->start(sampleRate, blockSize);
     if (!audioReady) {
-        [_window setTitle:@"Aura Studio Pro — Audio Device Unavailable"];
+    [_window setTitle:@"Tinja — Audio Device Unavailable"];
         NSAlert *alert = [[NSAlert alloc] init];
         [alert setAlertStyle:NSAlertStyleWarning];
         [alert setMessageText:@"Audio device unavailable"];
-        [alert setInformativeText:@"Aura Studio opened without audio I/O. Check the selected device and try again."];
+    [alert setInformativeText:@"Tinja opened without audio I/O. Check the selected device and try again."];
         [alert addButtonWithTitle:@"OK"];
         [alert runModal];
     } else {

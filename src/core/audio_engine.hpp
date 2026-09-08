@@ -40,7 +40,7 @@ public:
 
     bool start() {
         auto& jack = ::Aura::Core::External::JackBridgeDeep::getInstance();
-        if (!jack.tryInitialize("Aura DAW")) {
+        if (!jack.tryInitialize("Tinja")) {
             m_status = "start-failed";
             m_error = jack.lastError();
             return false;

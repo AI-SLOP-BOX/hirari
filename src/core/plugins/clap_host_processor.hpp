@@ -490,7 +490,7 @@ private:
     bool m_entryInitialized = false;
     bool m_processing = false;
     ClapAbi::Host m_host{
-        {1, 0, 0}, "aura-direct", "Aura DAW", "Aura", "", "1",
+        {1, 0, 0}, "tinja-direct", "Tinja", "Tinja", "", "1",
         &requestRestart, &requestProcess, &requestCallback, &noExtension};
     std::array<float*, kMaxChannels> m_channelPointers{};
     std::array<InputEvent, Core::MidiBuffer::kMaxEventsPerBlock> m_inputEvents{};

@@ -228,7 +228,7 @@ fn store_ui_settings(settings_path: &Path, settings: &UiSettings) {
 
 pub(crate) fn choose_project_file() -> Option<String> {
     rfd::FileDialog::new()
-        .add_filter("Aura Project", &["aura", "json"])
+        .add_filter("Tinja Project", &["aura", "json"])
         .pick_file()
         .map(|path| path.to_string_lossy().into_owned())
 }
@@ -290,7 +290,7 @@ pub(crate) fn choose_audio_library_directory() -> Option<String> {
 
 pub(crate) fn choose_project_save_file() -> Option<String> {
     rfd::FileDialog::new()
-        .add_filter("Aura Project", &["aura"])
+        .add_filter("Tinja Project", &["aura"])
         .set_file_name("untitled.aura")
         .save_file()
         .and_then(|mut path| {

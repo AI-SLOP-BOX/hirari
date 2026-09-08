@@ -633,6 +633,7 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
         // master channel separately from the master meter, so keep this
         // payload strictly aligned with the active track order.
         {
+            m_telemetrySequence.fetch_add(1, std::memory_order_acq_rel);
             const uint32_t activeTelemetry =
                 m_activeTelemetryIdx.load(std::memory_order_relaxed);
             const uint32_t nextTelemetry = activeTelemetry ^ 1u;
@@ -662,6 +663,7 @@ void AuraUnifiedEngine::startRecoveryOrchestrator() {
             }
             telemetry.version++;
             m_activeTelemetryIdx.store(nextTelemetry, std::memory_order_release);
+            m_telemetrySequence.fetch_add(1, std::memory_order_release);
         }
 
         // The metronome is part of the rendered monitor signal, not a track
