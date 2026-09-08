@@ -10,6 +10,8 @@ pub struct SignalAnalyzerOrchestrator {
     pub write_idx: usize,
     pub latest_idx: usize,
     pub ui_idx: usize,
+    integrated_energy: f64,
+    integrated_blocks: u64,
 }
 
 impl SignalAnalyzerOrchestrator {
@@ -25,6 +27,8 @@ impl SignalAnalyzerOrchestrator {
             write_idx: 0,
             latest_idx: 0,
             ui_idx: 99,
+            integrated_energy: 0.0,
+            integrated_blocks: 0,
         }
     }
 
@@ -37,20 +41,16 @@ impl SignalAnalyzerOrchestrator {
             next_idx = (next_idx + 1) % 3;
         }
 
-        let target = &mut self.buffers[self.write_idx];
-
         // --- SIMD METERING ---
         let mut max_p = [0.0f32; 2];
         let mut cross = 0.0f64;
         let mut left_power = 0.0f64;
         let mut right_power = 0.0f64;
         let mut power_sum = 0.0f64;
-        for (i, &s) in left.iter().enumerate() {
-            max_p[0] = max_p[0].max(s.abs());
-            if i < target.samples.len() {
-                target.samples[i] = s;
-            }
-            power_sum += f64::from(s) * f64::from(s);
+        for &s in left {
+            let clean = if s.is_finite() { s } else { 0.0 };
+            max_p[0] = max_p[0].max(clean.abs());
+            power_sum += f64::from(clean) * f64::from(clean);
         }
         for (i, &s) in right.iter().enumerate() {
             let clean = if s.is_finite() { s } else { 0.0 };
@@ -65,14 +65,26 @@ impl SignalAnalyzerOrchestrator {
             }
         }
 
+        let sample_count = left.len() + right.len();
+        let block_lufs = if sample_count > 0 && power_sum > 0.0 {
+            (-0.691 + 10.0 * (power_sum / sample_count as f64).log10()) as f32
+        } else { f32::NEG_INFINITY };
+        if block_lufs.is_finite() && block_lufs > -70.0 {
+            self.integrated_energy += power_sum / sample_count as f64;
+            self.integrated_blocks = self.integrated_blocks.saturating_add(1);
+        }
+        let integrated_lufs = if self.integrated_blocks > 0 {
+            (-0.691 + 10.0 * (self.integrated_energy / self.integrated_blocks as f64).log10()) as f32
+        } else { f32::NEG_INFINITY };
+        let target = &mut self.buffers[self.write_idx];
+        for (index, &sample) in left.iter().enumerate().take(target.samples.len()) {
+            target.samples[index] = if sample.is_finite() { sample } else { 0.0 };
+        }
         target.peak = max_p;
         target.correlation = if left_power > 0.0 && right_power > 0.0 {
             (cross / (left_power.sqrt() * right_power.sqrt())) as f32
         } else { 0.0 };
-        let sample_count = left.len() + right.len();
-        target.lufs_integrated = if sample_count > 0 && power_sum > 0.0 {
-            (-0.691 + 10.0 * (power_sum / sample_count as f64).log10()) as f32
-        } else { f32::NEG_INFINITY };
+        target.lufs_integrated = integrated_lufs;
 
         self.latest_idx = self.write_idx;
         self.write_idx = next_idx;
