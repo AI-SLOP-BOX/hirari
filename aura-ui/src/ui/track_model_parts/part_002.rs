@@ -328,6 +328,10 @@ fn sync_tracks_from_engine_with_empty_policy(
                 saturate_active: false,
                 artic_map: "".into(),
                 correlation: 0.0,
+                eq_low_band: 0.0,
+                eq_low_cut: 0.0,
+                eq_high_band: 0.0,
+                eq_high_cut: 0.0,
                 frozen: layout.frozen,
                 frozen_sample_rate: layout.frozen_sample_rate.min(i32::MAX as u32) as i32,
             });
@@ -418,6 +422,10 @@ pub(crate) fn fallback_template_tracks(template_tracks: &[(&str, u32)]) -> Vec<Z
                 saturate_active: false,
                 artic_map: "".into(),
                 correlation: 0.0,
+                eq_low_band: 0.0,
+                eq_low_cut: 0.0,
+                eq_high_band: 0.0,
+                eq_high_cut: 0.0,
                 frozen: false,
                 frozen_sample_rate: 0,
             }

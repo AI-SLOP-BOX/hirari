@@ -84,8 +84,24 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
     });
     ui.global::<MixerActions>().on_eq_changed({
         let core = core.clone();
+        let tracks = tracks.clone();
         move |id, low_band, low_cut, high_band, high_cut| {
-            core.set_track_eq(id as u32, low_band, low_cut, high_band, high_cut);
+            if !core.set_track_eq(id as u32, low_band, low_cut, high_band, high_cut) {
+                return;
+            }
+            for row in 0..tracks.row_count() {
+                let Some(mut track) = tracks.row_data(row) else {
+                    continue;
+                };
+                if track.id == id {
+                    track.eq_low_band = low_band;
+                    track.eq_low_cut = low_cut;
+                    track.eq_high_band = high_band;
+                    track.eq_high_cut = high_cut;
+                    replace_track(&tracks, row, track);
+                    break;
+                }
+            }
         }
     });
     ui.global::<BrowserActions>().on_import_sample({

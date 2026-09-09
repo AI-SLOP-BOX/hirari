@@ -7,6 +7,7 @@ import { Z_MixerStrip as Z_MixerStripCore } from "./mixer_strip.slint";
 // isolated strip directly; keeping this boundary prevents action wiring from
 // leaking back into the visual mixer implementation.
 export component Z_MixerStrip {
+    callback fader-changed(int, float);
     in property <string> name; in property <color> color; in property <float> volume; in property <float> pan;
     in property <float> peak; in property <float> pk_h; in property <int> tid;
     in property <bool> is_mute; in property <bool> is_solo; in property <bool> is_phase; in property <[Z_Fx]> fx;
@@ -32,7 +33,7 @@ export component Z_MixerStrip {
         mute-toggled(a) => { MixerActions.toggle_mute(a); }
         cloner-toggled(a) => { DiagnosticsActions.toggle_cloner(a); }
         peaks-reset => { MixerActions.reset_peaks(); }
-        fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
+        fader-changed(a, b) => { MixerActions.fader_changed(a, b); root.fader-changed(a, b); }
         delay-changed(a, b) => { MixerActions.delay_changed(a, b); }
         pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
     }

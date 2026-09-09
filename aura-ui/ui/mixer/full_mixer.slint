@@ -36,6 +36,7 @@ export component Z_FullMixer {
                     filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
                     meter_mode: meter_mode; group_id: trk.group_id;
                     saturate_active: trk.saturate_active; correlation: trk.correlation;
+                    low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
                     fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
                     pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
                     mute-toggled(a) => { MixerActions.toggle_mute(a); }

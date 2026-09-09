@@ -123,7 +123,7 @@
                                         property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
                                         name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan; 
                                         peak: safe_peak; pk_h: safe_hold; tid: trk.id; 
-                                        is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; 
+                                        is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
                                         delay_ms: trk.delay_ms;
                                         fx: trk.fx; compact: mx_compact; send_lvl: trk.send_lvl; 
                                         filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
@@ -166,14 +166,14 @@
                                     
                                     // Phase & Correlation (Fixed)
                                     Z_PhaseMeter { correlation: root.phase_correlation; }
-                                    
                                     // Final Output Bus
                                     HorizontalLayout {
                                         spacing: 12px;
                                         Z_MixerStrip { 
                                             name: "MAIN"; color: Style.brand; volume: root.master_output_gain; pan: 0.5; 
                                             peak: pks.length > 0 ? pks[0] : 0.0; pk_h: pks_h.length > 0 ? pks_h[0] : 0.0; tid: 999;
-                                            is_mute: false; is_solo: false; is_phase: false; fx: []; compact: true; 
+                                            is_mute: false; is_solo: false; is_phase: false; fx: []; compact: true;
+                                            fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
                                             send_lvl: 0; filter_lp: 1.0; filter_hp: 0.0; track_idx: 99; is_master: true; meter_mode: meter_mode; 
                                         }
                                         VerticalLayout {
@@ -389,7 +389,7 @@
                                         property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
                                         name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan; 
                                         peak: safe_peak; pk_h: safe_hold; tid: trk.id; 
-                                            is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; 
+                                            is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
                                             delay_ms: trk.delay_ms;
                                             fx: trk.fx; compact: false; send_lvl: trk.send_lvl; 
                                             filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
