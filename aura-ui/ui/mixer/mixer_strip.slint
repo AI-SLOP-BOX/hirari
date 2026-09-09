@@ -188,12 +188,12 @@ export component Z_MixerStrip {
                 }
             }
             
-            // RMS / Gain Reduction Track
+            // Peak meter. Gain reduction is not exposed by the current
+            // channel telemetry contract, so do not present a fabricated GR.
             if (!compact) : VerticalLayout {
                 spacing: 2px;
-                Z_Meter { val: peak * 0.7; width: 4px; height: 100%; mode: 1; reset-peaks => { root.peaks-reset(); } }
-                Text { text: "GR"; font-size: Style.font-xxs; color: Style.record; horizontal-alignment: center; font-weight: 600; }
-                Rectangle { height: (peak * 0.3) * 60px; width: 4px; background: Style.record; opacity: 0.6; }
+                Z_Meter { val: peak; width: 4px; height: 100%; mode: 1; reset-peaks => { root.peaks-reset(); } }
+                Text { text: "PEAK"; font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: center; font-weight: 600; }
             }
         }
 

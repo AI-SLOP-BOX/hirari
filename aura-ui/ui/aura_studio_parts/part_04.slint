@@ -554,7 +554,7 @@
                             Rectangle { width: track.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border-radius: 2px; }
                             TouchArea { mouse-cursor: ew-resize; moved => { if (self.pressed) { MixerActions.fader_changed(track.id, (self.mouse_x / parent.width).clamp(0, 1)); } } }
                         }
-                        Text { text: track.pan == 0.5 ? "C" : (track.pan < 0.5 ? "L" + Math.round((0.5 - track.pan) * 128.0) : "R" + Math.round((track.pan - 0.5) * 127.0)); width: 86px; height: 10px; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
+                        Text { text: track.pan == 0.0 ? "C" : (track.pan < 0.0 ? "L" + Math.round(-track.pan * 128.0) : "R" + Math.round(track.pan * 127.0)); width: 86px; height: 10px; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; height: 100%; clip: true;
@@ -576,7 +576,7 @@
                 x: 60px; y: 32px; width: parent.width - 60px; height: 470px; background: Style.surface-0; clip: true;
                 TouchArea {
                     clicked => {
-                        let beat = (self.mouse_x / (Style.grid-step / 1px * root.z_lvl * 1px)).max(0.0);
+                        let raw_beat = self.mouse_x / (Style.grid-step / 1px * root.z_lvl * 1px); let snap = 4.0 / root.snap_division.max(1.0); let beat = ((raw_beat / snap).round() * snap).max(0.0);
                         let pitch = (83 - Math.floor(self.mouse_y / 20px)).clamp(0, 127);
                         MidiActions.add_note(root.tracks[root.sel_idx].id, pitch, beat, 1.0, 100);
                     }

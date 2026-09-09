@@ -1,4 +1,3 @@
-import { LineEdit } from "std-widgets.slint";
 import { Style } from "../style.slint";
 import { Z_IconButton } from "../primitives/icon_button.slint";
 
@@ -36,7 +35,7 @@ export component Z_ExportDialog {
             VerticalLayout {
                 spacing: 12px;
                 Text { text: "Metadata"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
-                HorizontalLayout { spacing: 12px; LineEdit { placeholder-text: "Artist name"; horizontal-stretch: 1; } LineEdit { placeholder-text: "ISRC (optional)"; width: 140px; } }
+                Text { text: "Metadata follows the current project settings."; font-size: Style.font-xxs; color: Style.text-secondary; }
             }
             Rectangle { vertical-stretch: 1; }
             HorizontalLayout {
