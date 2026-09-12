@@ -101,29 +101,6 @@ export component Z_FullMixer {
                     }
                 }
             }
-            // Fallback channel rail: keeps the primary mix controls visible
-            // even when a platform layout engine collapses nested panels.
-            Rectangle {
-                x: 0px; y: 0px; width: 1000px; height: 100%; z: 20;
-                background: Style.surface-0;
-                HorizontalLayout {
-                    padding: 8px; spacing: 6px;
-                    for trk[idx] in tracks : Z_MixerStrip {
-                        width: 144px; height: 100%;
-                        name: trk.name; icon: trk.icon; color: trk.color; volume: trk.volume; pan: trk.pan;
-                        peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
-                        pk_h: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
-                        tid: trk.id; is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert;
-                        fx: trk.fx; compact: false; send_lvl: trk.send_lvl; filter_lp: trk.filter_lp; filter_hp: trk.filter_hp;
-                        track_idx: idx; delay_ms: trk.delay_ms; meter_mode: meter_mode; group_id: trk.group_id;
-                        low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
-                        fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
-                        pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
-                        mute-toggled(a) => { MixerActions.toggle_mute(a); }
-                        solo-toggled(a) => { MixerActions.toggle_solo(a); }
-                    }
-                }
-            }
         }
     }
 }

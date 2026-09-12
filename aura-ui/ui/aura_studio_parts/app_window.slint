@@ -551,7 +551,7 @@ export component AppWindow inherits Window {
             // This legacy tree is only valid for the Arrange surface.  Keep it
             // out of diagnostics, editors, settings, and workflow pages so
             // their content cannot accumulate with stale track fragments.
-            visible: !show_arrange_surface && !mx_open && !pr_open;
+            visible: false;
             horizontal-stretch: 1;
             vertical-stretch: 1;
             height: 100%;

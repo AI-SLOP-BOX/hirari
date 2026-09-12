@@ -93,25 +93,39 @@ pub(crate) fn install_telemetry_loop(
     let mut ui_timer = 0;
     let mut analysis_elapsed_ms: u32 = 0;
     let mut waveform_elapsed_ms: u32 = 0;
+    let mut tempo_elapsed_ms: u32 = 0;
     let mut plugin_elapsed_ms: u32 = 0;
     let mut pdc_elapsed_ms: u32 = 0;
     let mut last_plugin_context = (-1_i32, -1_i32);
     let mut last_pdc_context = (-1_i32, -1_i32);
     let mut last_plugin_values: Vec<f32> = Vec::new();
     let mut watchdog_total: u32 = 0;
+    let mut last_piano_row: i32 = -1;
+    let mut last_tempo_beats: Vec<f32> = Vec::new();
+    let mut last_tempo_bpms: Vec<f32> = Vec::new();
     let mut ev_buffer = Vec::with_capacity(128);
     let timer = slint::Timer::default();
 
     timer.start(
         slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(16),
+        // UI telemetry is intentionally capped at 30 Hz. Audio processing
+        // remains real-time on its own thread; polling the entire project,
+        // plugins and meters at 60 Hz made switching views needlessly costly.
+        std::time::Duration::from_millis(32),
         move || {
             if let Some(ui) = ui_sync.upgrade() {
-                ui_timer += 16;
-                analysis_elapsed_ms = analysis_elapsed_ms.saturating_add(16);
-                waveform_elapsed_ms = waveform_elapsed_ms.saturating_add(16);
-                plugin_elapsed_ms = plugin_elapsed_ms.saturating_add(16);
-                pdc_elapsed_ms = pdc_elapsed_ms.saturating_add(16);
+                ui_timer += 32;
+                // A blank project has no meter, transport or analysis state
+                // to publish. Avoid touching Slint properties in that state:
+                // every property write schedules a full scene redraw.
+                if tracks_tele.row_count() == 0 {
+                    return;
+                }
+                analysis_elapsed_ms = analysis_elapsed_ms.saturating_add(32);
+                waveform_elapsed_ms = waveform_elapsed_ms.saturating_add(32);
+                tempo_elapsed_ms = tempo_elapsed_ms.saturating_add(32);
+                plugin_elapsed_ms = plugin_elapsed_ms.saturating_add(32);
+                pdc_elapsed_ms = pdc_elapsed_ms.saturating_add(32);
                 let analysis_due = if analysis_elapsed_ms >= 64 {
                     analysis_elapsed_ms -= 64;
                     true
@@ -125,7 +139,9 @@ pub(crate) fn install_telemetry_loop(
                     false
                 };
                 ui_timer_val.store(ui_timer, Ordering::SeqCst);
-                ui.set_ui_timer(ui_timer as f32);
+                if ui.get_is_ply() || ui.get_show_video() || ui.get_bot_view() == 5 {
+                    ui.set_ui_timer(ui_timer as f32);
+                }
                 ui.set_undo_depth(core_tele.undo_depth() as i32);
                 ui.set_redo_depth(core_tele.redo_depth() as i32);
                 if let Ok(Some(generation)) = core_tele.poll_preview_audio_decode() {
@@ -143,7 +159,7 @@ pub(crate) fn install_telemetry_loop(
                     &mut last_plugin_values,
                 );
 
-                if ui_timer % 1000 < 16 {
+                if ui_timer % 1000 < 32 {
                     let recovery_summary = last_saved_path_tele
                         .borrow()
                         .as_deref()
@@ -183,7 +199,7 @@ pub(crate) fn install_telemetry_loop(
                 // snapshot immediately after it completes so the UI does not
                 // spend one extra second advertising a stale offline state.
                 let was_audio_ready = health.audio_device_ready;
-                if !was_audio_ready && ui_timer % 1000 < 16 {
+                if !was_audio_ready && ui_timer % 1000 < 32 {
                     core_tele.try_reconnect_audio_device();
                     health = core_tele.runtime_health_snapshot();
                     if health.audio_device_ready {
@@ -192,18 +208,18 @@ pub(crate) fn install_telemetry_loop(
                 }
                 let audio_ready = health.audio_device_ready;
                 let output_peak = health.peak_left.max(health.peak_right);
-                if ui_timer % 1000 < 16 && health.audio_driver_status != "running" {
+                if ui_timer % 1000 < 32 && health.audio_driver_status != "running" {
                     ui.set_audio_diagnostic(health.status_text().into());
                 }
                 if matches!(
                     health.state(),
                     aura_core_bridge::RuntimeHealthState::Fault
                         | aura_core_bridge::RuntimeHealthState::Degraded
-                ) && ui_timer % 1000 < 16
+                ) && ui_timer % 1000 < 32
                 {
                     ui.set_audio_diagnostic(health.status_text().into());
                 }
-                if health.sandbox_failures > 0 && ui_timer % 1000 < 16 {
+                if health.sandbox_failures > 0 && ui_timer % 1000 < 32 {
                     let selected = clamp_selection_index(ui.get_sel_idx(), tracks_tele.row_count());
                     let detail = tracks_tele
                         .row_data(selected)
@@ -223,7 +239,7 @@ pub(crate) fn install_telemetry_loop(
                     );
                     high_priority_diagnostic = true;
                 }
-                if ui_timer % 1000 < 16 {
+                if ui_timer % 1000 < 32 {
                     let sandbox_snapshots = core_tele.sandbox_snapshots();
                     let mailbox_overruns: u32 = sandbox_snapshots
                         .iter()
@@ -232,7 +248,7 @@ pub(crate) fn install_telemetry_loop(
                     ui.set_diagnostic_overruns(mailbox_overruns.min(i32::MAX as u32) as i32);
                     ui.set_diagnostic_pdc(ui.get_plugin_pdc_status());
                 }
-                if !high_priority_diagnostic && ui_timer % 1000 < 16 {
+                if !high_priority_diagnostic && ui_timer % 1000 < 32 {
                     let sandbox_snapshots = core_tele.sandbox_snapshots();
                     let quarantined = sandbox_snapshots
                         .iter()
@@ -442,42 +458,58 @@ pub(crate) fn install_telemetry_loop(
                     ui.set_is_ply(engine_playing);
                 }
 
-                // Tempo-map inspection is useful while stopped as well as
-                // during playback, so keep this control-rate snapshot outside
-                // the transport branch.
-                let tempo_events = core_tele.get_tempo_events();
-                let mut tempo_beats = Vec::with_capacity(tempo_events.len() / 3);
-                let mut tempo_bpms = Vec::with_capacity(tempo_events.len() / 3);
-                for chunk in tempo_events.as_chunks::<3>().0 {
-                    if chunk[0].is_finite() && chunk[1].is_finite() {
-                        tempo_beats.push(chunk[0] as f32);
-                        tempo_bpms.push(chunk[1] as f32);
+                // Tempo and MIDI note models are control-rate data. Replacing
+                // Slint models at audio-frame cadence causes a full reactive
+                // invalidation even when nothing changed.
+                if tempo_elapsed_ms >= 256 {
+                    tempo_elapsed_ms -= 256;
+                    let tempo_events = core_tele.get_tempo_events();
+                    let mut tempo_beats = Vec::with_capacity(tempo_events.len() / 3);
+                    let mut tempo_bpms = Vec::with_capacity(tempo_events.len() / 3);
+                    for chunk in tempo_events.as_chunks::<3>().0 {
+                        if chunk[0].is_finite() && chunk[1].is_finite() {
+                            tempo_beats.push(chunk[0] as f32);
+                            tempo_bpms.push(chunk[1] as f32);
+                        }
+                    }
+                    if tempo_beats != last_tempo_beats {
+                        ui.set_tempo_event_beats(slint::ModelRc::new(slint::VecModel::from(
+                            tempo_beats.clone(),
+                        )));
+                        last_tempo_beats = tempo_beats;
+                    }
+                    if tempo_bpms != last_tempo_bpms {
+                        ui.set_tempo_event_bpms(slint::ModelRc::new(slint::VecModel::from(
+                            tempo_bpms.clone(),
+                        )));
+                        last_tempo_bpms = tempo_bpms;
                     }
                 }
-                ui.set_tempo_event_beats(slint::ModelRc::new(slint::VecModel::from(tempo_beats)));
-                ui.set_tempo_event_bpms(slint::ModelRc::new(slint::VecModel::from(tempo_bpms)));
 
                 // Keep the GPU piano-roll texture driven by the selected track's
                 // actual MIDI notes, rather than an analyzer-shaped placeholder.
                 let selected_row = ui.get_selected_row();
-                if let Some(track) = tracks_tele.row_data(selected_row as usize) {
-                    let notes: Vec<_> = track.piano_roll_notes.iter().collect();
-                    let max_end = notes
-                        .iter()
-                        .map(|note| note.start_beat + note.length_beats)
-                        .fold(1.0_f32, f32::max);
-                    let normalized: Vec<[f32; 4]> = notes
-                        .iter()
-                        .map(|note| {
-                            [
-                                (note.start_beat / max_end).clamp(0.0, 1.0),
-                                (note.length_beats / max_end).clamp(0.002, 1.0),
-                                (note.pitch as f32 / 127.0).clamp(0.0, 1.0),
-                                (note.velocity as f32 / 127.0).clamp(0.0, 1.0),
-                            ]
-                        })
-                        .collect();
-                    gpu_plot_store_tele.publish_piano_notes(&normalized);
+                if selected_row != last_piano_row {
+                    last_piano_row = selected_row;
+                    if let Some(track) = tracks_tele.row_data(selected_row as usize) {
+                        let notes: Vec<_> = track.piano_roll_notes.iter().collect();
+                        let max_end = notes
+                            .iter()
+                            .map(|note| note.start_beat + note.length_beats)
+                            .fold(1.0_f32, f32::max);
+                        let normalized: Vec<[f32; 4]> = notes
+                            .iter()
+                            .map(|note| {
+                                [
+                                    (note.start_beat / max_end).clamp(0.0, 1.0),
+                                    (note.length_beats / max_end).clamp(0.002, 1.0),
+                                    (note.pitch as f32 / 127.0).clamp(0.0, 1.0),
+                                    (note.velocity as f32 / 127.0).clamp(0.0, 1.0),
+                                ]
+                            })
+                            .collect();
+                        gpu_plot_store_tele.publish_piano_notes(&normalized);
+                    }
                 }
 
                 if engine_playing {
