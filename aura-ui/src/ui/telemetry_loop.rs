@@ -94,6 +94,7 @@ pub(crate) fn install_telemetry_loop(
     let mut analysis_elapsed_ms: u32 = 0;
     let mut waveform_elapsed_ms: u32 = 0;
     let mut tempo_elapsed_ms: u32 = 0;
+    let mut environment_elapsed_ms: u32 = 0;
     let mut plugin_elapsed_ms: u32 = 0;
     let mut pdc_elapsed_ms: u32 = 0;
     let mut last_plugin_context = (-1_i32, -1_i32);
@@ -103,6 +104,10 @@ pub(crate) fn install_telemetry_loop(
     let mut last_piano_row: i32 = -1;
     let mut last_tempo_beats: Vec<f32> = Vec::new();
     let mut last_tempo_bpms: Vec<f32> = Vec::new();
+    let mut last_route_matrix: Vec<bool> = Vec::new();
+    let mut last_device_catalog = String::new();
+    let mut last_pks: Vec<f32> = Vec::new();
+    let mut last_peak_holds: Vec<f32> = Vec::new();
     let mut ev_buffer = Vec::with_capacity(128);
     let timer = slint::Timer::default();
 
@@ -124,6 +129,7 @@ pub(crate) fn install_telemetry_loop(
                 analysis_elapsed_ms = analysis_elapsed_ms.saturating_add(32);
                 waveform_elapsed_ms = waveform_elapsed_ms.saturating_add(32);
                 tempo_elapsed_ms = tempo_elapsed_ms.saturating_add(32);
+                environment_elapsed_ms = environment_elapsed_ms.saturating_add(32);
                 plugin_elapsed_ms = plugin_elapsed_ms.saturating_add(32);
                 pdc_elapsed_ms = pdc_elapsed_ms.saturating_add(32);
                 let analysis_due = if analysis_elapsed_ms >= 64 {
@@ -335,28 +341,42 @@ pub(crate) fn install_telemetry_loop(
                     }
                 }
                 ui.set_audio_device_ready(audio_ready);
-                ui.set_active_route_matrix(slint::ModelRc::new(slint::VecModel::from(
-                    active_route_matrix(&core_tele, &tracks_tele),
-                )));
-                // Keep the native CoreAudio catalog visible to the settings
-                // surface so device identity and I/O capabilities are
-                // inspectable during a live session.
-                let device_catalog = core_tele.list_audio_devices_json();
-                ui.set_audio_device_catalog(device_catalog.clone().into());
-                if let Ok(devices) = serde_json::from_str::<serde_json::Value>(&device_catalog) {
-                    let names = devices
-                        .as_array()
-                        .map(|entries| {
-                            entries
-                                .iter()
-                                .filter_map(|entry| {
-                                    entry.get("name").and_then(|name| name.as_str())
+                // Routing and device catalogs are configuration data, not
+                // meters. Polling and replacing their models every frame was
+                // needlessly invalidating the entire settings surface.
+                if environment_elapsed_ms >= 256 {
+                    environment_elapsed_ms -= 256;
+                    let route_matrix = active_route_matrix(&core_tele, &tracks_tele);
+                    if route_matrix != last_route_matrix {
+                        ui.set_active_route_matrix(slint::ModelRc::new(slint::VecModel::from(
+                            route_matrix.clone(),
+                        )));
+                        last_route_matrix = route_matrix;
+                    }
+                    let device_catalog = core_tele.list_audio_devices_json();
+                    if device_catalog != last_device_catalog {
+                        ui.set_audio_device_catalog(device_catalog.clone().into());
+                        if let Ok(devices) =
+                            serde_json::from_str::<serde_json::Value>(&device_catalog)
+                        {
+                            let names = devices
+                                .as_array()
+                                .map(|entries| {
+                                    entries
+                                        .iter()
+                                        .filter_map(|entry| {
+                                            entry.get("name").and_then(|name| name.as_str())
+                                        })
+                                        .map(SharedString::from)
+                                        .collect::<Vec<_>>()
                                 })
-                                .map(SharedString::from)
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    ui.set_audio_device_names(slint::ModelRc::new(slint::VecModel::from(names)));
+                                .unwrap_or_default();
+                            ui.set_audio_device_names(slint::ModelRc::new(slint::VecModel::from(
+                                names,
+                            )));
+                        }
+                        last_device_catalog = device_catalog;
+                    }
                 }
                 let sample_rate = core_tele.get_sample_rate();
                 ui.set_audio_sample_rate(if sample_rate.is_finite() {
@@ -586,11 +606,17 @@ pub(crate) fn install_telemetry_loop(
                         peak_holds[i] = (peak_holds[i] - 0.01).max(0.0);
                     }
                 }
-                ui.set_pks(slint::ModelRc::new(slint::VecModel::from(combined)));
-                gpu_plot_store_tele.publish_meters(&peak_holds);
-                ui.set_pks_h(slint::ModelRc::new(slint::VecModel::from(
-                    peak_holds.clone(),
-                )));
+                if combined != last_pks {
+                    ui.set_pks(slint::ModelRc::new(slint::VecModel::from(combined.clone())));
+                    last_pks = combined;
+                }
+                if peak_holds != last_peak_holds {
+                    gpu_plot_store_tele.publish_meters(&peak_holds);
+                    ui.set_pks_h(slint::ModelRc::new(slint::VecModel::from(
+                        peak_holds.clone(),
+                    )));
+                    last_peak_holds = peak_holds.clone();
+                }
 
                 // 2. Master Precision Telemetry (High Frequency)
                 ui.set_lufs_integrated(loudness.integrated);
