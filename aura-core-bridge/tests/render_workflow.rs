@@ -1,2 +1,2 @@
-include!("render_workflow_parts/part_001.rs");
-include!("render_workflow_parts/part_002.rs");
+include!("render_workflow_parts/project_render.rs");
+include!("render_workflow_parts/asset_paths.rs");

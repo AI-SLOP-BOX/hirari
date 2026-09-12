@@ -9,7 +9,7 @@
 namespace Aura::IO::Drivers {
 
 /**
- * @brief DriverFactory: Platform-aware factory for audio drivers.
+ * @brief Canonical platform-aware factory for audio drivers.
  * Provides a Null-ptr safe mechanism to retrieve the best available audio API.
  */
 class DriverFactory {
@@ -189,7 +189,7 @@ public:
             return false;
         }
         m_config = config;
-        if (!::Aura::Core::External::JackBridgeDeep::getInstance().tryInitialize("Aura DAW")) {
+        if (!::Aura::Core::External::JackBridgeDeep::getInstance().tryInitialize("Aura")) {
             m_error = ::Aura::Core::External::JackBridgeDeep::getInstance().lastError();
             return false;
         }

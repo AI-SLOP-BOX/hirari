@@ -587,7 +587,6 @@ mod tests {
             .iter()
             .all(|sample| *sample == 0.0));
     }
-
     #[test]
     fn crossfade_is_equal_power_and_bounded() {
         let a = vec![1.0; 8];

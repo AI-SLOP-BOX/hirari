@@ -132,6 +132,8 @@ public:
     bool start();
     void stop();
     bool is_running() const;
+    double sample_rate() const noexcept;
+    uint32_t buffer_size() const noexcept;
     const char* status() const noexcept;
     int32_t last_error_code() const noexcept;
     void try_reconnect();

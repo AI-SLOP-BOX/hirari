@@ -6,6 +6,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <mutex>
 
 namespace Aura::Core::Engine {
 
@@ -22,13 +23,14 @@ public:
 
     bool append(const std::vector<uint8_t>& data, Revision* out = nullptr) {
         if (data.empty()) return false;
+        std::lock_guard<std::mutex> lock(m_mutex);
         std::error_code ec;
         std::filesystem::create_directories(m_directory, ec);
         if (ec) return false;
-        const auto revisions = list();
+        const auto revisions = list_unlocked();
         const uint64_t id = revisions.empty() ? 1 : revisions.back().id + 1;
         const auto target = m_directory / ("revision-" + std::to_string(id) + ".aura");
-        const auto temp = target.string() + ".tmp";
+        const auto temp = target.string() + ".tmp-" + std::to_string(m_tempSequence++);
         { std::ofstream f(temp, std::ios::binary | std::ios::trunc); if (!f) return false;
           f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
           f.flush(); if (!f) return false; }
@@ -39,6 +41,12 @@ public:
     }
 
     std::vector<Revision> list() const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return list_unlocked();
+    }
+
+private:
+    std::vector<Revision> list_unlocked() const {
         std::vector<Revision> result; std::error_code ec;
         if (!std::filesystem::is_directory(m_directory, ec)) return result;
         for (const auto& e : std::filesystem::directory_iterator(m_directory, ec)) {
@@ -51,6 +59,8 @@ public:
         std::sort(result.begin(), result.end(), [](const Revision& a, const Revision& b){ return a.id < b.id; });
         return result;
     }
+
+public:
 
     bool load(uint64_t id, std::vector<uint8_t>& data) const {
         const auto path = m_directory / ("revision-" + std::to_string(id) + ".aura");
@@ -71,6 +81,9 @@ public:
         close(common); if (b.size() > a.size()) summary.added = b.size() - a.size(); else summary.removed = a.size() - b.size(); return summary;
     }
 
-private: std::filesystem::path m_directory;
+private:
+    std::filesystem::path m_directory;
+    mutable std::mutex m_mutex;
+    uint64_t m_tempSequence = 0;
 };
 }

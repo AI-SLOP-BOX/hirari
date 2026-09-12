@@ -1,0 +1,85 @@
+import { ScrollView, LineEdit } from "std-widgets.slint";
+import { Style } from "style.slint";
+import { Z_IconButton } from "primitives/icon_button.slint";
+
+// Desktop-first start page. It intentionally uses a wide workspace instead
+// of imitating a phone layout; the same cards collapse only through scrolling
+// when the window is genuinely narrow.
+export component Z_HomePage inherits Rectangle {
+    callback template-selected(string);
+    callback tutorial-requested();
+    callback project-requested(string);
+    in-out property <int> active-tab: 0;
+    in-out property <string> query: "";
+    background: Style.surface-0;
+
+    VerticalLayout {
+        spacing: 0px;
+        // Home is a full-screen surface, so it owns the same global toolbar
+        // that remains visible above Arrange, Mixer and Mastering.
+        Rectangle { height: 48px; background: Style.surface-0; border_width: 1px; border_color: Style.border;
+            HorizontalLayout { padding-left: 16px; padding-right: 16px; spacing: 8px;
+                Image { source: @image-url("assets/aura-mark.svg"); width: 28px; height: 28px; }
+                Text { text: "Hirari"; width: 64px; color: Style.text-primary; font-size: 16px; font-weight: 700; vertical-alignment: center; }
+                for menu in ["File", "Edit", "View", "Transport", "Track", "Mix", "Window", "Help"] : Text { text: menu; width: 44px; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
+                Rectangle { width: 1px; height: 24px; background: Style.border; }
+                Z_IconButton { icon: "|<"; compact: true; button-width: 30px; }
+                Z_IconButton { icon: "▶"; compact: true; button-width: 34px; active-col: Style.ok; }
+                Z_IconButton { icon: "●"; compact: true; button-width: 30px; active-col: Style.record; }
+                Rectangle { width: 100px; height: 30px; background: Style.surface-2; border_width: 1px; border_color: Style.border; border_radius: 5px; Text { text: "00:00:00:00"; width: 100%; height: 100%; color: Style.text-primary; font-family: Style.numeric-font; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { width: 84px; height: 30px; background: Style.surface-2; border_width: 1px; border_color: Style.border; border_radius: 5px; Text { text: "120.00  4/4"; width: 100%; height: 100%; color: Style.brand; font-family: Style.numeric-font; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "▂▅▇▆▃▅▇"; color: Style.brand; font-size: 12px; vertical-alignment: center; }
+                Z_IconButton { icon: "⚙"; compact: true; button-width: 32px; }
+            }
+        }
+        HorizontalLayout {
+        padding: 18px; spacing: 18px; vertical-stretch: 1;
+        Rectangle {
+            width: 218px; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 9px;
+            VerticalLayout {
+                padding: 16px; spacing: 6px;
+                HorizontalLayout { height: 34px; spacing: 8px; Image { source: @image-url("assets/aura-mark.svg"); width: 28px; height: 28px; } Text { text: "Hirari"; font-size: 19px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; } }
+                Text { text: "Studio workspace"; font-size: 9px; color: Style.text-tertiary; }
+                Rectangle { height: 18px; }
+                for item[idx] in ["Home", "Projects", "Templates", "Sounds", "Plugins", "Samples", "Cloud", "Settings"] : Rectangle {
+                    height: 36px; border_radius: 5px; background: root.active-tab == idx ? Style.selection : transparent;
+                    Text { text: item; x: 12px; font-size: 10px; color: root.active-tab == idx ? Style.text-primary : Style.text-dim; vertical-alignment: center; }
+                    TouchArea { clicked => { root.active-tab = idx; } }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: "Hirari Studio"; font-size: 10px; color: Style.text-tertiary; }
+                Text { text: "Desktop edition"; font-size: 9px; color: Style.text-muted; }
+                HorizontalLayout { spacing: 8px; Z_IconButton { icon: "Documentation"; compact: true; button-width: 104px; } Z_IconButton { icon: "Feedback"; compact: true; button-width: 78px; } }
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1; spacing: 14px;
+            HorizontalLayout {
+                height: 78px; spacing: 12px;
+                VerticalLayout { spacing: 3px; Text { text: "Sound, made visible."; font-size: 30px; color: Style.text-primary; font-weight: 700; } Text { text: "From first idea to final master, everything starts here."; font-size: 11px; color: Style.text-secondary; } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "MUSIC FOR A BRIGHTER TOMORROW"; font-size: 9px; color: Style.brand; vertical-alignment: center; }
+                LineEdit { width: 260px; height: 32px; placeholder-text: "Search projects, sounds, plugins..."; text <=> root.query; }
+                Z_IconButton { icon: "⌘K"; compact: true; button-width: 42px; }
+                Z_IconButton { icon: "?"; compact: true; clicked => { root.tutorial-requested(); } }
+            }
+            ScrollView { vertical-stretch: 1;
+                VerticalLayout { spacing: 16px;
+                    HorizontalLayout { height: 184px; spacing: 12px;
+                        Rectangle { horizontal-stretch: 1; background: #2457C5.with-alpha(0.62); border_width: 1px; border_color: #4C8DFF; border_radius: 10px; Rectangle { x: parent.width - 82px; y: 18px; width: 58px; height: 58px; border_radius: 29px; background: #63A0FF.with-alpha(0.65); Text { text: "+"; width: 100%; height: 100%; color: #FFFFFF; font-size: 32px; horizontal-alignment: center; vertical-alignment: center; } } Rectangle { x: 0px; y: parent.height - 4px; width: 100%; height: 4px; background: #63A0FF; } VerticalLayout { padding: 18px; spacing: 8px; Text { text: "New project"; font-size: 22px; color: Style.text-primary; font-weight: 700; } Text { text: "Start with an empty canvas and build a track from zero."; font-size: 10px; color: Style.text-secondary; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Z_IconButton { icon: "+  CREATE PROJECT"; button-width: 142px; active-col: #4C8DFF; clicked => { root.template-selected("ELECTRONIC"); } } } }
+                        Rectangle { horizontal-stretch: 1; background: #4C1FA8.with-alpha(0.68); border_width: 1px; border_color: #9C6CFF; border_radius: 10px; Rectangle { x: parent.width - 82px; y: 18px; width: 58px; height: 58px; border_radius: 29px; background: #B28CFF.with-alpha(0.65); Text { text: "✦"; width: 100%; height: 100%; color: #FFFFFF; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; } } Rectangle { x: 0px; y: parent.height - 4px; width: 100%; height: 4px; background: #B28CFF; } VerticalLayout { padding: 18px; spacing: 8px; Text { text: "Start from a template"; font-size: 22px; color: Style.text-primary; font-weight: 700; } Text { text: "Choose a genre-ready session with instruments and routing."; font-size: 10px; color: Style.text-secondary; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Z_IconButton { icon: "BROWSE TEMPLATES"; button-width: 148px; active-col: #9C6CFF; clicked => { root.template-selected("CINEMATIC SCORE"); } } } }
+                        Rectangle { horizontal-stretch: 1; background: #087A86.with-alpha(0.68); border_width: 1px; border_color: #3BC6C8; border_radius: 10px; Rectangle { x: parent.width - 82px; y: 18px; width: 58px; height: 58px; border_radius: 29px; background: #60E3E2.with-alpha(0.65); Text { text: "↗"; width: 100%; height: 100%; color: #FFFFFF; font-size: 26px; horizontal-alignment: center; vertical-alignment: center; } } Rectangle { x: 0px; y: parent.height - 4px; width: 100%; height: 4px; background: #60E3E2; } VerticalLayout { padding: 18px; spacing: 8px; Text { text: "Open recent project"; font-size: 22px; color: Style.text-primary; font-weight: 700; } Text { text: "Return to the latest session without leaving the workspace."; font-size: 10px; color: Style.text-secondary; wrap: word-wrap; } Rectangle { vertical-stretch: 1; } Z_IconButton { icon: "OPEN PROJECT"; button-width: 126px; active-col: #3BC6C8; clicked => { root.project-requested("Midnight Drive"); } } } }
+                    }
+                    HorizontalLayout { height: 26px; Text { text: "Templates"; font-size: 15px; color: Style.text-primary; font-weight: 650; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "View all"; font-size: 9px; color: Style.brand; vertical-alignment: center; } }
+                    HorizontalLayout { height: 150px; spacing: 10px; for template in ["CINEMATIC SCORE", "ELECTRONIC", "VOICE-OVER PRO", "ATMOS MASTERING"] : Rectangle { horizontal-stretch: 1; background: Style.surface; border_width: 1px; border_color: Style.border; border_radius: 7px; VerticalLayout { padding: 10px; spacing: 7px; if (template == "CINEMATIC SCORE") : Image { source: @image-url("assets/synth.svg"); height: 76px; width: 100%; } if (template == "ELECTRONIC") : Image { source: @image-url("assets/waveform.svg"); height: 76px; width: 100%; } if (template == "VOICE-OVER PRO") : Image { source: @image-url("assets/mixer.svg"); height: 76px; width: 100%; } if (template == "ATMOS MASTERING") : Image { source: @image-url("assets/mastering.svg"); height: 76px; width: 100%; } Text { text: template; font-size: 10px; color: Style.text-primary; horizontal-alignment: center; overflow: elide; } Text { text: "Aura template"; font-size: 8px; color: Style.text-tertiary; horizontal-alignment: center; } } TouchArea { clicked => { root.template-selected(template); } } } }
+                    HorizontalLayout { height: 26px; Text { text: "Recent projects"; font-size: 15px; color: Style.text-primary; font-weight: 650; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "View all"; font-size: 9px; color: Style.brand; vertical-alignment: center; } }
+                    HorizontalLayout { height: 76px; spacing: 10px; for project in ["Midnight Drive", "Neon Rooms", "Idea_0325"] : Rectangle { horizontal-stretch: 1; background: Style.surface; border_width: 1px; border_color: Style.border; border_radius: 6px; HorizontalLayout { padding: 10px; spacing: 10px; Rectangle { width: 48px; height: 48px; border_radius: 5px; background: Style.brand-glow; Image { source: @image-url("assets/mastering.svg"); width: 44px; height: 40px; } } VerticalLayout { alignment: center; Text { text: project; font-size: 10px; color: Style.text-primary; } Text { text: "Aura project  ·  recently edited"; font-size: 8px; color: Style.text-tertiary; } } Rectangle { horizontal-stretch: 1; } Text { text: "⋯"; font-size: 15px; color: Style.text-dim; vertical-alignment: center; } } TouchArea { clicked => { root.project-requested(project); } } } }
+                    HorizontalLayout { height: 26px; Text { text: "Plug-ins"; font-size: 15px; color: Style.text-primary; font-weight: 650; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "Browse all"; font-size: 9px; color: Style.brand; vertical-alignment: center; } }
+                    HorizontalLayout { height: 112px; spacing: 10px; for plugin in ["Aura Synth", "Analog Drums", "Pure Piano", "VoxOne", "Tape Verb"] : Rectangle { horizontal-stretch: 1; background: Style.surface; border_width: 1px; border_color: Style.border; border_radius: 6px; VerticalLayout { padding: 8px; spacing: 6px; Image { source: @image-url("assets/synth.svg"); width: 100%; height: 50px; } Text { text: plugin; font-size: 9px; color: Style.text-primary; horizontal-alignment: center; } Text { text: "Instrument"; font-size: 8px; color: Style.text-tertiary; horizontal-alignment: center; } } } }
+                }
+            }
+        }
+        }
+    }
+}

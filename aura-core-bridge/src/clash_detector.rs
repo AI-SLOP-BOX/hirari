@@ -123,10 +123,21 @@ impl MixClashDetectorEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::MixClashDetectorEngine;
+    use super::{AdviceCode, MixClashDetectorEngine};
 
     #[test]
-    fn audit_runs_real_deterministic_probes() {
-        assert!(MixClashDetectorEngine::new().audit_clash_detector());
+    fn detector_handles_empty_mismatched_and_masked_spectra() {
+        let detector = MixClashDetectorEngine::new();
+        let empty = detector.detect(&[], &[], 48_000.0);
+        assert_eq!(empty.advice, AdviceCode::None);
+        assert_eq!(empty.masking_index, 0.0);
+
+        let mismatched = detector.detect(&[1.0], &[1.0, 0.0], 48_000.0);
+        assert_eq!(mismatched.advice, AdviceCode::None);
+
+        let masked = detector.detect(&[1.0; 128], &[1.0; 128], 48_000.0);
+        assert!((0.0..=1.0).contains(&masked.masking_index));
+        assert!(masked.center_freq.is_finite() && masked.center_freq <= 24_000.0);
+        assert!(matches!(masked.advice, AdviceCode::SidechainKickBass | AdviceCode::NotchTrackB));
     }
 }

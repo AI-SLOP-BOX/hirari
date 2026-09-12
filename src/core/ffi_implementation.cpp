@@ -31,13 +31,12 @@ namespace Aura::Core::Bridge {
     rust::Vec<float> get_track_peaks_l_owned(const Engine::AuraUnifiedEngine& engine) {
         rust::Vec<float> result;
         for (int attempt = 0; attempt < 4; ++attempt) {
-            const uint64_t before = engine.get_telemetry_sequence();
-            if (before & 1u) continue;
-            const auto peaks = engine.get_track_peaks_l();
+            Engine::AuraUnifiedEngine::TelemetryData snapshot{};
+            if (!engine.copy_telemetry(engine.get_active_telemetry_idx(), snapshot)) continue;
             result.clear();
-            result.reserve(peaks.size());
-            for (size_t i = 0; i < peaks.size(); ++i) result.push_back(peaks.data()[i]);
-            if (before == engine.get_telemetry_sequence()) return result;
+            result.reserve(snapshot.count);
+            for (uint32_t i = 0; i < snapshot.count; ++i) result.push_back(snapshot.peaksL[i]);
+            return result;
         }
         return result;
     }
@@ -45,13 +44,12 @@ namespace Aura::Core::Bridge {
     rust::Vec<float> get_track_peaks_r_owned(const Engine::AuraUnifiedEngine& engine) {
         rust::Vec<float> result;
         for (int attempt = 0; attempt < 4; ++attempt) {
-            const uint64_t before = engine.get_telemetry_sequence();
-            if (before & 1u) continue;
-            const auto peaks = engine.get_track_peaks_r();
+            Engine::AuraUnifiedEngine::TelemetryData snapshot{};
+            if (!engine.copy_telemetry(engine.get_active_telemetry_idx(), snapshot)) continue;
             result.clear();
-            result.reserve(peaks.size());
-            for (size_t i = 0; i < peaks.size(); ++i) result.push_back(peaks.data()[i]);
-            if (before == engine.get_telemetry_sequence()) return result;
+            result.reserve(snapshot.count);
+            for (uint32_t i = 0; i < snapshot.count; ++i) result.push_back(snapshot.peaksR[i]);
+            return result;
         }
         return result;
     }

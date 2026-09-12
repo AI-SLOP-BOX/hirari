@@ -81,13 +81,12 @@ mod tests {
     use super::{SmartSnapOrchestrator, SnapMode};
 
     #[test]
-    fn audit_exercises_grid_event_relative_and_disabled_modes() {
-        assert!(SmartSnapOrchestrator::new().audit_smart_snap());
-    }
-
-    #[test]
-    fn relative_snap_keeps_the_origin_out_of_grid_rounding() {
+    fn snap_modes_cover_grid_events_relative_off_and_zero_grid() {
         let snap = SmartSnapOrchestrator::new();
+        assert_eq!(snap.snap_with_mode(721, 480, &[], SnapMode::Grid, 0), 960);
+        assert_eq!(snap.snap_with_mode(935, 480, &[960, 2_400], SnapMode::Events, 0), 960);
         assert_eq!(snap.snap_with_mode(1_401, 480, &[], SnapMode::Relative, 1_000), 1_480);
+        assert_eq!(snap.snap_with_mode(1_401, 480, &[], SnapMode::Off, 1_000), 1_401);
+        assert_eq!(snap.get_snapped_position(123, 0, &[960]), 123);
     }
 }

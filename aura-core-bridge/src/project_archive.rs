@@ -426,6 +426,7 @@ mod tests {
             markers: vec![],
             vca_groups: vec![],
             hardware_inserts: vec![],
+            control_room: None,
         }
     }
 

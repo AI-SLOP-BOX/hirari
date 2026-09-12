@@ -38,16 +38,35 @@ export component Z_SampleEditor {
     in-out property <float> pitch_semitones: 0.0;
     in-out property <int> loop_count: 1;
     in-out property <float> editor_ph: 0.4; // simulated playhead position
+    in property <image> gpu-waveform-image;
+    in property <image> gpu-spectrum-image;
 
     Rectangle {
         background: Style.surface; border_width: 1.5px; border_color: Style.border;
-        VerticalLayout {
+        HorizontalLayout {
+            spacing: 8px;
+            // Clip/take browser mirrors the reference editor's left rail.
+            Rectangle { width: 184px; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 5px;
+                VerticalLayout { spacing: 0px;
+                    Rectangle { height: 38px; background: Style.surface-2; HorizontalLayout { padding: 10px; Text { text: "Clips"; color: Style.text-primary; font-size: 11px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: "Takes"; color: Style.text-tertiary; font-size: 9px; } } }
+                    Rectangle { height: 34px; x: 8px; width: parent.width - 16px; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 4px; Text { text: "Search clips, takes..."; x: 8px; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; } }
+                    for clip[idx] in ["Vocal_Main_01", "Vocal_Main_02", "Vocal_Harmony", "Guitar_Acoustic", "Guitar_Solo", "Vocal_Double", "Room_Take"] : Rectangle { height: 48px; x: 8px; width: parent.width - 16px; background: idx == 0 ? Style.selection : transparent; border_radius: 4px; HorizontalLayout { padding: 6px; spacing: 7px; Rectangle { width: 34px; height: 30px; background: [Style.brand, #4C8DFF, #3BC6C8, #D39A3A, #56C88A, #A76CFF, #718093][idx]; border_radius: 3px; } VerticalLayout { alignment: center; Text { text: clip; color: Style.text-primary; font-size: 9px; } Text { text: Math.mod(idx, 2) == 0 ? "Vocals  ·  4:12" : "Audio  ·  2:36"; color: Style.text-tertiary; font-size: 8px; } } } }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+            VerticalLayout {
+            horizontal-stretch: 1;
             padding: 12px; spacing: 10px;
             
             // Header controls
             HorizontalLayout {
                 spacing: 12px;
-                Text { text: "Audio Editor"; font-size: 10px; color: Style.brand; font-weight: 950; vertical-alignment: center; }
+                Text { text: "Waveform Editor"; font-size: 14px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; }
+                for tab in ["Waveform", "Pitch", "Warp", "Gain"] : Rectangle {
+                    width: 58px; height: 24px; border_radius: 4px;
+                    background: tab == "Waveform" ? Style.brand-glow : transparent;
+                    Text { text: tab; font-size: 9px; color: tab == "Waveform" ? Style.brand : Style.text-dim; horizontal-alignment: center; vertical-alignment: center; }
+                }
                 Rectangle { horizontal-stretch: 1; }
                 
                 Z_IconButton { 
@@ -103,6 +122,12 @@ export component Z_SampleEditor {
             // Waveform Canvas
             Rectangle {
                 background: #020202; border_width: 1px; border_color: Style.surface; height: 180px; clip: true;
+
+                if (gpu-waveform-image.width > 0) : Image {
+                    source: gpu-waveform-image; x: 10px; y: 10px;
+                    width: parent.width - 20px; height: parent.height - 20px;
+                    image-fit: fill; opacity: 0.92;
+                }
                 
                 // Trim region selection background shading
                 Rectangle {
@@ -113,7 +138,7 @@ export component Z_SampleEditor {
                 }
                 
                 // Bipolar Waveform rendering
-                HorizontalLayout {
+                if (gpu-waveform-image.width <= 0) : HorizontalLayout {
                     spacing: 2px; padding-left: 10px; padding-right: 10px; padding-top: 10px; padding-bottom: 10px;
                     for s[idx] in samples : VerticalLayout {
                         alignment: center;
@@ -204,6 +229,12 @@ export component Z_SampleEditor {
                     }
                 }
             }
+
+            if (gpu-spectrum-image.width > 0) : Rectangle {
+                height: 54px; background: #050812; border_width: 1px; border_color: Style.border;
+                Image { source: gpu-spectrum-image; x: 8px; y: 4px; width: parent.width - 16px; height: parent.height - 8px; image-fit: fill; }
+                Text { text: "GPU SPECTRUM"; x: 12px; y: 6px; font-size: 8px; color: Style.text-tertiary; }
+            }
             
             // Time Ruler labels
             HorizontalLayout {
@@ -212,6 +243,14 @@ export component Z_SampleEditor {
                 Text { text: "Active: " + Math.floor((trim_end - trim_start) * 165) + ".0 ms"; font-size: Style.font-xxs; color: Style.brand; font-weight: 600; }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: "End: " + Math.floor(trim_end * 165) + ".0 ms"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+            }
+            }
+            // Context inspector mirrors Clip / Regions / Markers in the reference.
+            Rectangle { width: 220px; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 5px;
+                VerticalLayout { spacing: 0px;
+                    Rectangle { height: 38px; background: Style.surface-2; HorizontalLayout { padding: 10px; Text { text: "Clip"; color: Style.text-primary; font-size: 11px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: "Regions"; color: Style.text-tertiary; font-size: 9px; } Text { text: "Markers"; color: Style.text-tertiary; font-size: 9px; } } }
+                    VerticalLayout { padding: 12px; spacing: 9px; Text { text: "Vocal_Main_01"; color: Style.text-primary; font-size: 13px; font-weight: 700; } Text { text: "Audio Clip"; color: Style.text-tertiary; font-size: 9px; } Text { text: "START"; color: Style.text-tertiary; font-size: 8px; } Rectangle { height: 26px; background: Style.panel; border_radius: 4px; Text { text: "17.1.1"; x: 9px; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; } } Text { text: "END"; color: Style.text-tertiary; font-size: 8px; } Rectangle { height: 26px; background: Style.panel; border_radius: 4px; Text { text: "20.1.1"; x: 9px; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; } } Text { text: "Pitch Shift"; color: Style.text-tertiary; font-size: 8px; } Rectangle { height: 26px; background: Style.panel; border_radius: 4px; Text { text: "0 st"; x: 9px; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; } } Text { text: "Warp Mode  ·  Pro (Universal)"; color: Style.text-secondary; font-size: 9px; } Text { text: "Gain  +0.0 dB"; color: Style.text-secondary; font-size: 9px; } Rectangle { vertical-stretch: 1; } Text { text: "Preserve Formants     ●"; color: Style.ok; font-size: 9px; } Text { text: "Source: Recording"; color: Style.text-tertiary; font-size: 8px; } }
+                }
             }
         }
     }

@@ -55,8 +55,15 @@ mod tests {
     use super::QuantumOrchestrator;
 
     #[test]
-    fn quantum_audit_checks_clock_advance_and_cluster_sync() {
-        assert!(QuantumOrchestrator::new(48_000.0).audit_quantum());
+    fn clock_advance_and_cluster_sync_handle_valid_and_invalid_rates() {
+        let mut clock = QuantumOrchestrator::new(48_000.0);
+        clock.advance(480, 0.0);
+        assert_eq!(clock.sample_pos, 480);
+        assert!(clock.effective_position.is_finite());
+
+        clock.sync_cluster(960, 12);
+        assert_eq!(clock.sample_pos, 972);
+        assert!(clock.effective_position.is_finite());
         assert!(!QuantumOrchestrator::new(0.0).audit_quantum());
     }
 }

@@ -20,6 +20,7 @@ slint = { version = "1.17.1", default-features = false, features = [
     "renderer-femtovg",
     "renderer-software",
     "compat-1-2",
+    "unstable-wgpu-29",
 ] }
 slint-build = "1.17.1"
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }

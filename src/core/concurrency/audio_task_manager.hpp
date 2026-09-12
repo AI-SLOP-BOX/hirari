@@ -21,6 +21,7 @@
 #include <new>
 #include <functional>
 #include <mutex>
+#include <chrono>
 
 inline thread_local bool g_is_rt_thread = false;
 
@@ -421,8 +422,12 @@ private:
                 }
                 
                 if (!stole) {
+                    // The scheduler is also alive while Aura is idle. A long
+                    // busy-spin here used to pin two cores at ~100% each even
+                    // with an empty project. Keep a short handoff window for
+                    // realtime work, then yield to the OS until a task arrives.
                     uint32_t spin = 0;
-                    while (spin++ < 4096 && m_running.load(std::memory_order_relaxed)) {
+                    while (spin++ < 64 && m_running.load(std::memory_order_relaxed)) {
                         #if defined(__x86_64__) || defined(_M_X64)
                             _mm_pause();
                         #elif defined(__arm64__) || defined(__aarch64__)
@@ -433,7 +438,9 @@ private:
                             break;
                         }
                     }
-                    std::this_thread::yield();
+                    if (m_running.load(std::memory_order_relaxed)) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
                 }
             }
         }

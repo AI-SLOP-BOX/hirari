@@ -1,6 +1,6 @@
-# Tinja DAW
+# Aura DAW
 
-Tinja is an open-source, programmable macOS DAW built on the Aura engine and early technical
+Aura is an open-source, programmable macOS DAW built on the Aura engine and early technical
 preview. It combines a Rust control/UI layer, a C++ audio engine, isolated
 plugin workers, project persistence, offline rendering and a JSON command
 boundary intended for CLI and automation clients.
@@ -13,8 +13,9 @@ known gaps.
 ## System requirements
 
 - macOS 14 or newer (Apple Silicon or Intel 64-bit)
-- Xcode Command Line Tools, Rustup, CMake 3.20+, and approximately 10 GB of
-  free disk space for a clean checkout plus build artifacts
+- Xcode Command Line Tools, Rustup, CMake 3.20+, and approximately 20 GB of
+  free disk space for a clean checkout plus build artifacts. A full Cargo
+  rebuild can temporarily grow substantially beyond that.
 - A clean workspace typically builds in 5–15 minutes on a current Mac; a
   first build may take longer while Cargo downloads dependencies
 - FFmpeg is optional and only needed for the extended MP3/FLAC checks
@@ -29,30 +30,42 @@ Aura/Codex. It is not a bundled voicebank, plugin, or third-party sample:
 
 [Listen to `aura_codex_original.wav`](./examples/reference/aura_codex_original.wav)
 
-## Current capabilities
+## What this checkout actually provides
 
-*   **Programmable control surface**: CLI/JSON commands with generations,
-    permissions, transactions, history and dry-run-oriented inspection.
-*   **Isolated plugin workers**: CLAP and macOS AU paths are exercised through
-    the native worker. VST3 is enabled only in SDK-configured builds.
-*   **Audio engine**: Recording, project persistence and recovery, offline
-    rendering, routing, PDC, sidechain snapshots and bounded diagnostics.
-*   **Open integration boundaries**: OpenUtau import/render integration and
-    project-local extension commands without hard-coding a vendor UI. Trusted
-    extensions can opt into a bounded JSON process protocol; discovery remains
-    safe and sandboxed manifests are never auto-executed.
-*   **Modular architecture**: A Rust control layer, C++ DSP/native boundary,
-    Slint UI and testable command contracts.
+Aura is a technical preview, not a finished commercial DAW. The parts that are
+implemented in-tree are:
 
-### Adding third-party plugins
+* **Control and project foundation**: a Rust command/JSON boundary, project
+  persistence, generation checks, history, routing metadata, MIDI/chord data,
+  and offline render contracts.
+* **Native audio foundation**: a C++ engine with CoreAudio-facing plumbing,
+  bounded worker processes, and an offline WAV render path. These paths are
+  testable, but the result is not a promise of universal device or plugin
+  compatibility.
+* **UI preview**: a Slint desktop client covering the main project, arrange,
+  piano-roll, mixer, browser, and diagnostics surfaces. Several advanced edit
+  operations and production workflows are still incomplete.
+  The default desktop backend is Slint WGPU 29; dense waveform, spectrum,
+  meter, and piano-roll imagery is uploaded through the shared GPU notifier,
+  while Slint remains the layout and accessibility shell.
+* **Integration boundaries**: AU/CLAP/VST3 and OpenUtau adapters exist as
+  capability-specific boundaries. A host-path test or installed fixture does
+  not prove that every third-party plugin, native editor, voicebank, or device
+  works.
 
-Aura scans the standard CLAP, VST3 and Audio Unit locations. Portable or
-project-local plugin folders can be added without changing the source by
-setting `AURA_PLUGIN_PATHS` to a native path list before launching Aura. Each
-entry may be either a plugin folder or a concrete `.clap`, `.vst3`, or
-`.component` bundle. The catalog records the format, worker capability and a
-SHA-256 binary fingerprint; insertion still goes through the same admission
-and permission checks as standard locations.
+The following are explicitly **not** complete product features: VariAudio-style
+note/formant editing, phase-coherent multitrack warp, ARA2 partner exchange,
+Windows ASIO certification, universal VST3/AU/CLAP compatibility, native plugin
+GUI embedding for every vendor, Dolby Atmos object workflows, and long-running
+commercial stability. See [release readiness](./docs/RELEASE_READINESS.md) and
+[unimplemented gaps](./docs/UNIMPLEMENTED_GAPS.md) for the evidence boundary.
+
+### Adding third-party plugins (experimental)
+
+Aura can scan standard CLAP, VST3 and Audio Unit locations. Portable or
+project-local plugin folders can be added with `AURA_PLUGIN_PATHS`, but this is
+an experimental host boundary, not a compatibility guarantee. Some formats
+require a vendor SDK, a matching architecture, or an installed fixture.
 
 For example, on macOS:
 
@@ -96,18 +109,19 @@ Planned quality gates are listed in [ROADMAP.md](./ROADMAP.md), and user-visible
 changes are recorded in [CHANGELOG.md](./CHANGELOG.md). Participation is
 governed by [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
-### Five-minute first run
+### First run (technical preview)
 
 ```sh
 scripts/setup_dev.sh
 cargo test --workspace --locked
 scripts/build_app.sh
-open "packaging/Tinja DAW.app"
+open "packaging/Aura DAW.app"
 ```
 
 Create an audio track, import a WAV, press Play, adjust the track fader, then
-use Save and reopen the project to verify the persistence path. For the exact
-hardware, plugin, OpenUtau, and release checks, follow
+use Save and reopen the project to exercise the preview path. This is not a
+commercial acceptance test. For the exact hardware, plugin, OpenUtau, and
+release checks, follow
 [INSTALL.md](./INSTALL.md) and [release readiness](./docs/RELEASE_READINESS.md).
 The device- and display-dependent acceptance steps are listed in the
 [manual E2E checklist](./docs/MANUAL_E2E_CHECKLIST.md).
@@ -204,18 +218,17 @@ host/vendor SDK or physical device is still required; **verified** is reserved
 for a completed external integration run. A source-only build is never called
 hardware or partner-plugin verification.
 
-The current preview includes project persistence, MIDI/chord-track data,
-warp-marker metadata, routed offline rendering, loudness telemetry, and
-isolated worker lifecycle checks. The engine also includes SDK-disabled VST3
-component/controller creation, macOS AU/VST3 native-editor attach/detach,
-asynchronous waveform decoding, measured-HRTF injection, Vibrato Rate
-editing, and native-renderer-backed export queues. Hardware, vendor SDK, and
-long-running stability claims remain capability-specific. The next major
-integration target is formal ARA2 partner-host exchange; VariAudio-style
-note-level pitch/formant editing, phase-coherent multitrack warp, Windows
-ASIO certification, Dolby Atmos object metadata, and physical-controller
-certification remain future work. See [UNIMPLEMENTED_GAPS.md](./docs/UNIMPLEMENTED_GAPS.md)
-and [release readiness](./docs/RELEASE_READINESS.md) for evidence and exact
+The source tree contains project persistence, MIDI/chord-track data,
+warp-marker metadata, routed offline-render contracts, loudness telemetry,
+worker lifecycle checks, and several experimental host/analysis adapters.
+Those are source-level capabilities, not finished feature guarantees: many
+still require a matching SDK, third-party fixture, physical device, or UI
+integration before they can be called production-ready. Formal ARA2 partner
+exchange, VariAudio-style note-level pitch/formant editing, phase-coherent
+multitrack warp, Windows ASIO certification, Dolby Atmos object metadata, and
+physical-controller certification remain future work. See
+[UNIMPLEMENTED_GAPS.md](./docs/UNIMPLEMENTED_GAPS.md) and
+[release readiness](./docs/RELEASE_READINESS.md) for evidence and exact
 boundaries.
 
 ## ⚖️ Licensing
@@ -262,4 +275,4 @@ commercial distribution, run `scripts/sign_and_notarize_release.sh` with
 `AURA_NOTARY_PROFILE` to require notarization, stapling, and validation.
 
 ---
-Copyright (c) 2024-2026 Tinja DAW Project.
+Copyright (c) 2024-2026 Aura DAW Project.

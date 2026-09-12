@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Tinja</string>
+	<string>Hirari</string>
 	<key>CFBundleExecutable</key>
-	<string>Tinja DAW</string>
+	<string>Aura DAW</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.aura-daw.studio</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Tinja</string>
+	<string>Hirari</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -25,9 +25,9 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Tinja needs microphone access for audio recording.</string>
+	<string>Hirari needs microphone access for audio recording.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Tinja needs audio input access for recording and monitoring.</string>
+	<string>Hirari needs audio input access for recording and monitoring.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

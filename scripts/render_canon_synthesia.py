@@ -82,7 +82,7 @@ def render_video(events, audio, output):
             x = (pitch - lo) * key_w; y2 = 570 - (start - now) * 70; y1 = y2 - max(10, length * 70)
             color = (70, 220, 255) if role == "arp" else (255, 190, 75) if role == "melody" else (180, 110, 255)
             d.rounded_rectangle((x + 2, y1, x + key_w - 3, y2), radius=5, fill=color, outline=(235, 250, 255))
-        d.text((36, 34), "CANON / AURA", fill=(230, 240, 255)); d.text((38, 76), "original synth arrangement · no vocal", fill=(145, 170, 205))
+        d.text((36, 34), "CANON / AURA", fill=(230, 240, 255)); d.text((38, 76), "original canon arrangement · tuned OpenUtau vocal", fill=(145, 170, 205))
         im.save(frames / f"frame_{frame:05d}.jpg", quality=86, optimize=True)
     subprocess.run(["ffmpeg", "-y", "-framerate", str(FPS), "-i", str(frames / "frame_%05d.jpg"), "-i", str(audio), "-t", str(DURATION), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(output)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

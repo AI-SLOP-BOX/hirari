@@ -19,7 +19,7 @@ fn configure_plugin_worker() -> bool {
     ));
     if let Some(worker) = candidates
         .into_iter()
-        .find(|path| is_executable_worker(path))
+        .find(|path| is_usable_plugin_worker(path))
     {
         // Prefer the helper shipped beside the running app.  This avoids a
         // stale developer-shell variable silently selecting an older worker
@@ -46,6 +46,36 @@ fn is_executable_worker(path: &std::path::Path) -> bool {
     {
         true
     }
+}
+
+fn is_usable_plugin_worker(path: &std::path::Path) -> bool {
+    if !is_executable_worker(path) {
+        return false;
+    }
+    let Ok(output) = std::process::Command::new(path)
+        .arg("--capabilities")
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
+        return false;
+    };
+    value
+        .get("clap")
+        .and_then(serde_json::Value::as_bool)
+        .is_some()
+        || value
+            .get("au")
+            .and_then(serde_json::Value::as_bool)
+            .is_some()
+        || value
+            .get("vst3")
+            .and_then(serde_json::Value::as_bool)
+            .is_some()
 }
 
 fn main() {

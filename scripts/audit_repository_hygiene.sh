@@ -36,7 +36,7 @@ require_tracked ROADMAP.md
 
 # Third-party fixture repositories may legitimately contain reference audio;
 # only reject generated build trees/bundles and transient diagnostics here.
-require_absent_from_index '(^|/)(target|build|build-tools|dist)/|(^|/)Aura DAW\.app/|\.log$|\.tmp$|\.journal$|\.DS_Store$'
+require_absent_from_index '(^|/)(target|build|build-tools|dist)/|(^|/)(Aura|Aura) DAW\.app/|\.log$|\.tmp$|\.journal$|\.DS_Store$'
 
 # Local fixture clones are useful while developing, but must never be part of
 # a source or release review. Keep the default audit compatible with existing

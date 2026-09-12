@@ -254,7 +254,18 @@ bool MacAudioDriverHost::select_device(uint32_t deviceId, double sampleRate, uin
     // failure, so the caller never leaves the session without its last-known
     // working device merely because a transient switch failed.
     m_impl->selectedDevice = previousDevice;
-    return start_locked(sampleRate, bufferSize);
+    (void)start_locked(sampleRate, bufferSize);
+    // The requested device was not opened.  Recovery is best-effort and must
+    // not be reported as a successful device switch to the engine/UI.
+    return false;
+}
+
+double MacAudioDriverHost::sample_rate() const noexcept {
+    return m_impl && m_impl->driver ? m_impl->driver->sample_rate() : kFallbackSampleRate;
+}
+
+uint32_t MacAudioDriverHost::buffer_size() const noexcept {
+    return m_impl && m_impl->driver ? m_impl->driver->buffer_size() : kFallbackBufferSize;
 }
 
 void MacAudioDriverHost::try_reconnect() {

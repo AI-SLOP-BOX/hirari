@@ -12,7 +12,9 @@ for path in "${required[@]}"; do
   [[ -f "$path" ]] || { echo "MISSING_REQUIRED_FILE $path" >&2; exit 1; }
 done
 
-forbidden_re='(^|/)(target|build|dist|packaging|build-tools|\.openutau-review)(/|$)'
+# `packaging/macos/Info.plist` is tracked source metadata; only generated
+# bundles under packaging are forbidden from a source publication.
+forbidden_re='(^|/)(target|build|dist|build-tools|\.openutau-review)(/|$)|^packaging/Aura DAW\.app(/|$)'
 if git ls-files | grep -E "$forbidden_re"; then
   echo "FORBIDDEN_TRACKED_PATH" >&2
   exit 1

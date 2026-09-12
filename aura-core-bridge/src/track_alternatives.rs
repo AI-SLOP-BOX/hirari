@@ -140,8 +140,26 @@ mod tests {
     fn duplicate_rejects_empty_name() {
         let mut alternatives = AlternativeOrchestrator::new();
         alternatives.create_alternative(7, "Original".into());
+        alternatives.set_playlist(
+            7,
+            "Original",
+            vec![PlaylistEntryRust {
+                region_id: 9,
+                timeline_pos: 480,
+            }],
+        );
         alternatives.duplicate_current(7, "  ".into());
+        alternatives.duplicate_current(7, "Original".into());
+        alternatives.duplicate_current(7, "bad\0name".into());
+        alternatives.duplicate_current(7, "x".repeat(129));
         assert_eq!(alternatives.alts_by_track.get(&7).unwrap().len(), 1);
+        assert_eq!(
+            alternatives.playlist(7, "Original").unwrap(),
+            &[PlaylistEntryRust {
+                region_id: 9,
+                timeline_pos: 480,
+            }]
+        );
     }
 
     #[test]

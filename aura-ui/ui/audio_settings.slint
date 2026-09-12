@@ -11,48 +11,53 @@ export component Z_AudioSettings inherits Rectangle {
     in property <int> dropped-blocks: 0;
     in property <string> diagnostic: "";
     in property <bool> busy: false;
-    background: Style.surface-1;
-    border-width: 1px;
-    border-color: Style.line-subtle;
-    VerticalLayout {
-        padding: 18px;
-        spacing: 12px;
-        Text { text: "Audio Settings"; color: Style.text-primary; font-size: 16px; font-weight: 700; }
-        Text { text: root.ready ? "Device connected" : "Device offline"; color: root.ready ? Style.ok : Style.record; font-size: 12px; }
-        Text { text: root.dropped-blocks > 0 ? "Input drops: " + root.dropped-blocks : "Input stream: stable"; color: root.dropped-blocks > 0 ? Style.record : Style.ok; font-size: 11px; }
-        Text { text: "Devices: " + root.device-catalog; color: Style.text-tertiary; font-size: 10px; overflow: elide; }
-        HorizontalLayout {
-            spacing: 6px;
-            for device[idx] in root.device-names : Z_IconButton {
-                icon: device; compact: true; enabled: !root.busy; button-width: 180px;
-                clicked => { AudioSettingsActions.select_device(idx); }
+    background: Style.surface-1; border-width: 1px; border-color: Style.line-subtle;
+    HorizontalLayout {
+        padding: 18px; spacing: 18px;
+        Rectangle {
+            width: 196px; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 8px;
+            VerticalLayout {
+                padding: 14px; spacing: 6px;
+                Text { text: "Aura"; font-size: 20px; color: Style.text-primary; font-weight: 700; }
+                Text { text: "Settings"; font-size: 10px; color: Style.text-tertiary; }
+                Rectangle { height: 16px; }
+                for item[idx] in ["General", "Audio", "MIDI", "Plugins", "Appearance", "Shortcuts", "Project"] : Rectangle {
+                    height: 34px; border_radius: 5px; background: item == "Audio" ? Style.selection : transparent;
+                    Text { text: ["⚙", "◖", "⌁", "▦", "◐", "⌨", "▣"][idx]; x: 12px; font-size: 12px; color: item == "Audio" ? Style.brand : Style.text-tertiary; vertical-alignment: center; }
+                    Text { text: item; x: 36px; font-size: 10px; color: item == "Audio" ? Style.text-primary : Style.text-dim; vertical-alignment: center; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: "Aura Studio"; font-size: 10px; color: Style.text-tertiary; }
+                Text { text: "Audio engine settings"; font-size: 9px; color: Style.text-muted; }
             }
         }
-        Text { text: root.busy ? "Stop playback or recording before changing audio format." : "Audio format changes are safe while stopped."; color: root.busy ? Style.record : Style.text-tertiary; font-size: 11px; }
-        HorizontalLayout {
-            spacing: 10px;
-            Text { text: "Sample rate"; color: Style.text-secondary; vertical-alignment: center; }
-            Z_IconButton { icon: "44.1 kHz"; compact: true; enabled: !root.busy; button-width: 86px; clicked => { AudioSettingsActions.apply_config(44100, root.buffer-size > 0 ? root.buffer-size : 256); } }
-            Z_IconButton { icon: "48 kHz"; compact: true; enabled: !root.busy; button-width: 76px; clicked => { AudioSettingsActions.apply_config(48000, root.buffer-size > 0 ? root.buffer-size : 256); } }
-            Z_IconButton { icon: "88.2 kHz"; compact: true; enabled: !root.busy; button-width: 86px; clicked => { AudioSettingsActions.apply_config(88200, root.buffer-size > 0 ? root.buffer-size : 256); } }
-            Z_IconButton { icon: "96 kHz"; compact: true; enabled: !root.busy; button-width: 76px; clicked => { AudioSettingsActions.apply_config(96000, root.buffer-size > 0 ? root.buffer-size : 256); } }
-            Z_IconButton { icon: "192 kHz"; compact: true; enabled: !root.busy; button-width: 82px; clicked => { AudioSettingsActions.apply_config(192000, root.buffer-size > 0 ? root.buffer-size : 256); } }
+        VerticalLayout {
+            spacing: 12px;
+            HorizontalLayout { height: 44px; Text { text: "Audio"; font-size: 24px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Rectangle { width: 220px; height: 30px; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 5px; Text { text: "⌕  Search settings"; x: 10px; width: parent.width - 20px; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; } } Text { text: root.ready ? "● Device connected" : "● Device offline"; font-size: 10px; color: root.ready ? Style.ok : Style.record; vertical-alignment: center; } }
+            Text { text: "Configure the audio device, sample rate and realtime buffer used by the engine."; font-size: 10px; color: Style.text-secondary; }
+            HorizontalLayout {
+                spacing: 12px; vertical-stretch: 1;
+                Rectangle { horizontal-stretch: 1; background: Style.surface; border_width: 1px; border_color: Style.border; border_radius: 8px; VerticalLayout { padding: 14px; spacing: 10px;
+                    Text { text: "Audio device"; font-size: 15px; color: Style.text-primary; font-weight: 650; }
+                    Text { text: root.dropped-blocks > 0 ? "Input drops: " + root.dropped-blocks : "Input stream stable"; font-size: 10px; color: root.dropped-blocks > 0 ? Style.record : Style.ok; }
+                    Text { text: "Available devices"; font-size: 10px; color: Style.text-tertiary; }
+                    for device[idx] in root.device-names : Z_IconButton { icon: device; compact: false; enabled: !root.busy; button-width: 220px; clicked => { AudioSettingsActions.select_device(idx); } }
+                    Text { text: "Devices: " + root.device-catalog; font-size: 9px; color: Style.text-muted; overflow: elide; }
+                    Rectangle { vertical-stretch: 1; }
+                    Z_IconButton { icon: "Reconnect audio"; button-width: 150px; active-col: Style.record; clicked => { AudioSettingsActions.reconnect(); } }
+                } }
+                Rectangle { horizontal-stretch: 1; background: Style.surface; border_width: 1px; border_color: Style.border; border_radius: 8px; VerticalLayout { padding: 14px; spacing: 10px;
+                    Text { text: "Realtime performance"; font-size: 15px; color: Style.text-primary; font-weight: 650; }
+                    Text { text: root.busy ? "Stop playback or recording before changing format." : "Changes apply when the transport is stopped."; font-size: 10px; color: root.busy ? Style.record : Style.text-secondary; }
+                    Text { text: "Sample rate"; font-size: 10px; color: Style.text-tertiary; }
+                    HorizontalLayout { spacing: 5px; for rate in ["44.1 kHz", "48 kHz", "88.2 kHz", "96 kHz"] : Z_IconButton { icon: rate; compact: true; enabled: !root.busy; button-width: 76px; clicked => { AudioSettingsActions.apply_config(rate == "44.1 kHz" ? 44100 : (rate == "48 kHz" ? 48000 : (rate == "88.2 kHz" ? 88200 : 96000)), root.buffer-size > 0 ? root.buffer-size : 256); } } }
+                    Text { text: "Buffer size"; font-size: 10px; color: Style.text-tertiary; }
+                    HorizontalLayout { spacing: 5px; for size in [32, 64, 128, 256, 512] : Z_IconButton { icon: size + " samples"; compact: true; enabled: !root.busy; button-width: 78px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, size); } } }
+                    Rectangle { height: 1px; background: Style.border; }
+                    Text { text: "Current  " + (root.sample-rate > 0 ? Math.round(root.sample-rate) + " Hz" : "--") + "  ·  " + (root.buffer-size > 0 ? root.buffer-size + " samples" : "--"); font-size: 11px; color: Style.brand; }
+                    Text { text: root.diagnostic; font-size: 9px; color: Style.text-tertiary; overflow: elide; }
+                } }
+            }
         }
-        HorizontalLayout {
-            spacing: 10px;
-            Text { text: "Buffer"; color: Style.text-secondary; vertical-alignment: center; }
-            Z_IconButton { icon: "32"; compact: true; enabled: !root.busy; button-width: 58px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 32); } }
-            Z_IconButton { icon: "64"; compact: true; enabled: !root.busy; button-width: 58px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 64); } }
-            Z_IconButton { icon: "128"; compact: true; enabled: !root.busy; button-width: 64px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 128); } }
-            Z_IconButton { icon: "256"; compact: true; enabled: !root.busy; button-width: 64px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 256); } }
-            Z_IconButton { icon: "512"; compact: true; enabled: !root.busy; button-width: 64px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 512); } }
-            Z_IconButton { icon: "1024"; compact: true; enabled: !root.busy; button-width: 68px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 1024); } }
-            Z_IconButton { icon: "2048"; compact: true; enabled: !root.busy; button-width: 68px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, 2048); } }
-        }
-        Text { text: "Current: " + (root.sample-rate > 0 ? Math.round(root.sample-rate) + " Hz" : "--") + " · " + (root.buffer-size > 0 ? root.buffer-size + " samples" : "--"); color: Style.text-tertiary; font-size: 12px; }
-        Text { text: root.diagnostic; color: Style.text-secondary; font-size: 11px; overflow: elide; }
-        Z_IconButton { icon: "Reconnect Audio"; button-width: 140px; active-col: Style.record; clicked => { AudioSettingsActions.reconnect(); } }
-        Z_IconButton { icon: "Use first listed device"; button-width: 180px; enabled: !root.busy; clicked => { AudioSettingsActions.select_default_device(); } }
-        Rectangle { vertical-stretch: 1; }
     }
 }

@@ -1,2 +1,2 @@
-include!("track_model_parts/part_001.rs");
-include!("track_model_parts/part_002.rs");
+include!("track_model_parts/track_model_core.rs");
+include!("track_model_parts/track_model_sync.rs");

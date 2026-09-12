@@ -2,19 +2,21 @@ use aura_core_bridge::command_api::{
     audit_log_json, capabilities, diff, validate, validate_request_envelope, CommandAction,
     CommandDocument, Permission, ProtocolRequest, PROTOCOL_VERSION,
 };
-use aura_core_bridge::piano_visualizer::{PianoNote, PianoVisualizer, PianoVisualizerConfig};
-use aura_core_bridge::production_session::{ProductionRevision, ProductionSession};
 use aura_core_bridge::project::ProjectDocument;
 use aura_core_bridge::stable_api::{CoreApiV1, MixRenderRequest, WaveContainer};
 use std::io::{self, Read};
 
-fn read_pcm16_wav(path: &str) -> Result<Vec<f32>, String> {
+mod cli_piano;
+mod cli_project;
+mod cli_render;
+fn read_pcm_wav(path: &str) -> Result<Vec<f32>, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return Err("expected RIFF/WAVE".into());
     }
     let mut offset = 12usize;
     let mut channels = 0u16;
+    let mut bits_per_sample = 0u16;
     let mut data = None;
     while offset + 8 <= bytes.len() {
         let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
@@ -29,9 +31,10 @@ fn read_pcm16_wav(path: &str) -> Result<Vec<f32>, String> {
             b"fmt " if size >= 16 => {
                 let format = u16::from_le_bytes(bytes[offset + 8..offset + 10].try_into().unwrap());
                 channels = u16::from_le_bytes(bytes[offset + 10..offset + 12].try_into().unwrap());
-                let bits = u16::from_le_bytes(bytes[offset + 22..offset + 24].try_into().unwrap());
-                if format != 1 || channels == 0 || bits != 16 {
-                    return Err("only PCM16 WAV is supported".into());
+                bits_per_sample =
+                    u16::from_le_bytes(bytes[offset + 22..offset + 24].try_into().unwrap());
+                if format != 1 || channels == 0 || !matches!(bits_per_sample, 16 | 24 | 32) {
+                    return Err("only PCM16/24/32 WAV is supported".into());
                 }
             }
             b"data" => data = Some((offset + 8, size)),
@@ -40,13 +43,33 @@ fn read_pcm16_wav(path: &str) -> Result<Vec<f32>, String> {
         offset = end + (size & 1);
     }
     let (start, size) = data.ok_or("WAV data chunk is missing")?;
-    if channels == 0 || size % (channels as usize * 2) != 0 {
+    let bytes_per_sample = usize::from(bits_per_sample / 8);
+    if channels == 0 || bytes_per_sample == 0 || size % (channels as usize * bytes_per_sample) != 0
+    {
         return Err("invalid WAV frame alignment".into());
     }
-    Ok(bytes[start..start + size]
-        .chunks_exact(channels as usize * 2)
-        .map(|frame| i16::from_le_bytes([frame[0], frame[1]]) as f32 / 32_768.0)
-        .collect())
+    let frame_width = channels as usize * bytes_per_sample;
+    let mut samples = Vec::with_capacity(size / bytes_per_sample);
+    for frame in bytes[start..start + size].chunks_exact(frame_width) {
+        for sample in frame.chunks_exact(bytes_per_sample) {
+            let value = match bits_per_sample {
+                16 => i16::from_le_bytes([sample[0], sample[1]]) as f32 / 32_768.0,
+                24 => {
+                    let raw = i32::from_le_bytes([
+                        sample[0],
+                        sample[1],
+                        sample[2],
+                        if sample[2] & 0x80 != 0 { 0xff } else { 0 },
+                    ]);
+                    raw as f32 / 8_388_608.0
+                }
+                32 => i32::from_le_bytes(sample.try_into().unwrap()) as f32 / 2_147_483_648.0,
+                _ => unreachable!(),
+            };
+            samples.push(value);
+        }
+    }
+    Ok(samples)
 }
 
 fn render_project_stems(
@@ -77,7 +100,7 @@ fn render_project_stems(
         let mut buffer = vec![0.0f32; end];
         for region in regions {
             let source = base.join(&region.path);
-            let samples = read_pcm16_wav(source.to_str().ok_or("invalid audio path")?)?;
+            let samples = read_pcm_wav(source.to_str().ok_or("invalid audio path")?)?;
             let offset = region.source_offset as usize;
             let available = samples.len().saturating_sub(offset);
             let count = available
@@ -108,303 +131,14 @@ fn main() {
     // while probing alternatives, so dispatching these read/write operations
     // here keeps `project inspect` and `project manifest` deterministic.
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
-    if raw_args.first().map(String::as_str) == Some("render")
-        && raw_args.get(1).map(String::as_str) == Some("piano")
-    {
-        if !(5..=7).contains(&raw_args.len()) {
-            usage();
-        }
-        let notes_text = match std::fs::read_to_string(&raw_args[2]) {
-            Ok(text) => text,
-            Err(error) => {
-                eprintln!(
-                    "{{\"ok\":false,\"error\":{}}}",
-                    serde_json::to_string(&error.to_string()).unwrap()
-                );
-                std::process::exit(1);
-            }
-        };
-        let notes: Vec<PianoNote> = match serde_json::from_str(&notes_text) {
-            Ok(notes) => notes,
-            Err(error) => {
-                eprintln!(
-                    "{{\"ok\":false,\"error\":{}}}",
-                    serde_json::to_string(&format!("invalid notes JSON: {error}")).unwrap()
-                );
-                std::process::exit(1);
-            }
-        };
-        let audio = match read_pcm16_wav(&raw_args[3]) {
-            Ok(audio) => audio,
-            Err(error) => {
-                eprintln!(
-                    "{{\"ok\":false,\"error\":{}}}",
-                    serde_json::to_string(&error).unwrap()
-                );
-                std::process::exit(1);
-            }
-        };
-        let sample_rate = raw_args
-            .get(5)
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(48_000);
-        let channels = raw_args
-            .get(6)
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(2);
-        let config = PianoVisualizerConfig::default();
-        match PianoVisualizer::render_to_mp4(
-            &notes,
-            &audio,
-            sample_rate,
-            channels,
-            &config,
-            std::path::Path::new(&raw_args[4]),
-        ) {
-            Ok(()) => println!(
-                "{{\"ok\":true,\"operation\":\"piano_visualizer\",\"output_path\":{}}}",
-                serde_json::to_string(&raw_args[4]).unwrap()
-            ),
-            Err(error) => {
-                eprintln!(
-                    "{{\"ok\":false,\"error\":{}}}",
-                    serde_json::to_string(&error.to_string()).unwrap()
-                );
-                std::process::exit(1);
-            }
-        }
+    if cli_piano::try_handle(&raw_args) {
         return;
     }
-    if raw_args.first().map(String::as_str) == Some("project") {
-        match raw_args.get(1).map(String::as_str) {
-            Some("production") if raw_args.get(2).map(String::as_str) == Some("revision") => {
-                let Some(path) = raw_args.get(3) else {
-                    usage();
-                };
-                let Some(message) = raw_args.get(4) else {
-                    usage();
-                };
-                if message.trim().is_empty() || message.len() > 512 || raw_args.len() > 10 {
-                    usage();
-                }
-                let author = raw_args.get(5).cloned().unwrap_or_else(|| "unknown".into());
-                if author.trim().is_empty() || author.len() > 256 {
-                    usage();
-                }
-                let mut audio_snapshot = None;
-                let mut visual_snapshot = None;
-                let mut option_index = 6;
-                while option_index < raw_args.len() {
-                    let Some(value) = raw_args.get(option_index + 1) else {
-                        usage();
-                    };
-                    if value.is_empty() || value.len() > 256 {
-                        usage();
-                    }
-                    match raw_args[option_index].as_str() {
-                        "--audio-hash" if audio_snapshot.is_none() => {
-                            audio_snapshot = Some(value.clone())
-                        }
-                        "--vfx-hash" if visual_snapshot.is_none() => {
-                            visual_snapshot = Some(value.clone())
-                        }
-                        _ => usage(),
-                    }
-                    option_index += 2;
-                }
-                let mut session = match ProductionSession::load_sidecar(path) {
-                    Ok(Some(session)) => session,
-                    Ok(None) => {
-                        eprintln!("{{\"ok\":false,\"error\":\"production_session_missing\"}}");
-                        std::process::exit(1);
-                    }
-                    Err(error) => {
-                        eprintln!(
-                            "{{\"ok\":false,\"error\":{}}}",
-                            serde_json::to_string(&error.to_string()).unwrap()
-                        );
-                        std::process::exit(1);
-                    }
-                };
-                let revision = session
-                    .revisions
-                    .last()
-                    .map(|item| item.revision.saturating_add(1))
-                    .unwrap_or(1);
-                session.revisions.push(ProductionRevision {
-                    revision,
-                    message: message.clone(),
-                    author,
-                    timestamp_unix: chrono_unix_seconds(),
-                    audio_snapshot,
-                    visual_snapshot,
-                });
-                match session.save_sidecar(path) {
-                    Ok(sidecar) => println!("{{\"ok\":true,\"operation\":\"project.production.revision\",\"revision\":{},\"sidecar\":{}}}", revision, serde_json::to_string(sidecar.to_string_lossy().as_ref()).unwrap()),
-                    Err(error) => { eprintln!("{{\"ok\":false,\"error\":{}}}", serde_json::to_string(&error.to_string()).unwrap()); std::process::exit(1); }
-                }
-                return;
-            }
-            Some("production")
-                if matches!(
-                    raw_args.get(2).map(String::as_str),
-                    Some("inspect") | Some("init")
-                ) =>
-            {
-                let Some(path) = raw_args.get(3) else {
-                    usage();
-                };
-                if raw_args[2] == "inspect" {
-                    if raw_args.len() != 4 {
-                        usage();
-                    }
-                    match ProductionSession::load_sidecar(path) {
-                        Ok(Some(session)) => {
-                            println!("{}", serde_json::to_string_pretty(&session).unwrap())
-                        }
-                        Ok(None) => println!(
-                            "{{\"ok\":true,\"production_session\":null,\"project\":{}}}",
-                            serde_json::to_string(path).unwrap()
-                        ),
-                        Err(error) => {
-                            eprintln!(
-                                "{{\"ok\":false,\"error\":{}}}",
-                                serde_json::to_string(&error.to_string()).unwrap()
-                            );
-                            std::process::exit(1);
-                        }
-                    }
-                } else {
-                    if raw_args.len() > 5 {
-                        usage();
-                    }
-                    let fps = raw_args
-                        .get(4)
-                        .and_then(|value| value.parse::<f64>().ok())
-                        .unwrap_or(24.0);
-                    if !fps.is_finite() || !(1.0..=240.0).contains(&fps) {
-                        usage();
-                    }
-                    let project = match ProjectDocument::load(path) {
-                        Ok(project) => project,
-                        Err(error) => {
-                            eprintln!(
-                                "{{\"ok\":false,\"error\":{}}}",
-                                serde_json::to_string(&error.to_string()).unwrap()
-                            );
-                            std::process::exit(1);
-                        }
-                    };
-                    let Some(session) = ProductionSession::new(
-                        &project.project_id,
-                        aura_core_bridge::production_timeline::TimelineRate {
-                            sample_rate: project.sample_rate,
-                            frame_rate: fps,
-                        },
-                        f64::from(project.metadata.bpm),
-                    ) else {
-                        usage();
-                    };
-                    match session.save_sidecar(path) {
-                        Ok(sidecar) => println!("{{\"ok\":true,\"operation\":\"project.production.init\",\"sidecar\":{}}}", serde_json::to_string(sidecar.to_string_lossy().as_ref()).unwrap()),
-                        Err(error) => { eprintln!("{{\"ok\":false,\"error\":{}}}", serde_json::to_string(&error.to_string()).unwrap()); std::process::exit(1); }
-                    }
-                }
-                return;
-            }
-            Some("inspect") | Some("manifest") | Some("load") => {
-                let Some(path) = raw_args.get(2) else {
-                    usage();
-                };
-                if raw_args.len() != 3 {
-                    usage();
-                }
-                let result = ProjectDocument::load(path).and_then(|project| {
-                    if raw_args[1] == "inspect" {
-                        Ok(serde_json::json!({
-                            "ok": true,
-                            "operation": "project.inspect",
-                            "project_id": project.project_id,
-                            "schema_version": project.schema_version,
-                            "contract_version": project.contract_version,
-                            "sample_rate": project.sample_rate,
-                            "track_count": project.tracks.len(),
-                            "region_count": project.regions.len(),
-                            "plugin_count": project.plugin_instances.len(),
-                            "midi_note_count": project.midi_notes.len(),
-                            "midi_event_count": project.midi_events.len(),
-                            "render_target_count": project.render_targets.len(),
-                        }))
-                    } else if raw_args[1] == "manifest" {
-                        project.reproducibility_manifest()
-                    } else {
-                        Ok(serde_json::json!({
-                            "ok": true,
-                            "operation": "project.load",
-                            "path": path,
-                            "track_count": project.tracks.len(),
-                            "region_count": project.regions.len(),
-                        }))
-                    }
-                });
-                match result {
-                    Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
-                    Err(error) => {
-                        eprintln!(
-                            "{{\"ok\":false,\"error\":{}}}",
-                            serde_json::to_string(&error.to_string()).unwrap()
-                        );
-                        std::process::exit(1);
-                    }
-                }
-                return;
-            }
-            _ => {}
-        }
+    if cli_project::try_handle(&raw_args) {
+        return;
     }
-    if raw_args.first().map(String::as_str) == Some("track") {
-        match raw_args.get(1).map(String::as_str) {
-            Some("rename") | Some("delete") => {
-                let (Some(path), Some(id_text)) = (raw_args.get(2), raw_args.get(3)) else {
-                    usage();
-                };
-                let Some(track_id) = id_text.parse::<u32>().ok() else {
-                    usage();
-                };
-                let result = if raw_args[1] == "rename" {
-                    if raw_args.len() != 5 {
-                        usage();
-                    }
-                    ProjectDocument::load(path).and_then(|mut project| {
-                        project.set_track_name(track_id, raw_args[4].clone())?;
-                        project.save_atomic(path)
-                    })
-                } else {
-                    if raw_args.len() != 4 {
-                        usage();
-                    }
-                    ProjectDocument::load(path).and_then(|mut project| {
-                        project.remove_track(track_id)?;
-                        project.save_atomic(path)
-                    })
-                };
-                match result {
-                    Ok(()) => println!(
-                        "{{\"ok\":true,\"operation\":\"track.{}\",\"track_id\":{track_id}}}",
-                        raw_args[1]
-                    ),
-                    Err(error) => {
-                        eprintln!(
-                            "{{\"ok\":false,\"error\":{}}}",
-                            serde_json::to_string(&error.to_string()).unwrap()
-                        );
-                        std::process::exit(1);
-                    }
-                }
-                return;
-            }
-            _ => {}
-        }
+    if cli_render::try_handle(&raw_args) {
+        return;
     }
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
@@ -634,8 +368,8 @@ fn main() {
             if args.next().is_some() {
                 usage();
             }
-            match read_pcm16_wav(&left_path)
-                .and_then(|left| read_pcm16_wav(&right_path).map(|right| (left, right)))
+            match read_pcm_wav(&left_path)
+                .and_then(|left| read_pcm_wav(&right_path).map(|right| (left, right)))
             {
                 Ok((left, right)) => println!(
                     "{}",
@@ -801,7 +535,7 @@ fn main() {
             if args.next().is_some() {
                 usage();
             }
-            match read_pcm16_wav(&path)
+            match read_pcm_wav(&path)
                 .map_err(|e| e.to_string())
                 .and_then(|samples| {
                     aura_core_bridge::ci_audio_verify::verify(&samples, max_peak, min_rms)
@@ -885,11 +619,4 @@ fn main() {
         }
         _ => usage(),
     }
-}
-
-fn chrono_unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
-        .unwrap_or(0)
 }

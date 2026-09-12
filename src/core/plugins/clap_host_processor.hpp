@@ -106,8 +106,12 @@ public:
             // event envelope (header/port metadata). Compare against the
             // payload width so MIDI 2.0 input is not misclassified and
             // rejected as an invalid legacy message.
-            const bool midi2 = event.size == sizeof(ClapAbi::EventMidi2::data);
-            const bool sysex = !midi2 && event.size >= 2 && event.data[0] == 0xf0;
+            // A fragmented/short SysEx payload can occupy the same 16-byte
+            // slot as a MIDI 2.0 UMP.  Classify the explicit SysEx start byte
+            // first; otherwise a 16-byte SysEx packet is handed to CLAP as a
+            // malformed UMP and disappears at the plugin boundary.
+            const bool sysex = event.size >= 2 && event.data[0] == 0xf0;
+            const bool midi2 = !sysex && event.size == sizeof(ClapAbi::EventMidi2::data);
             if (midi2) {
                 converted.midi2.header = {sizeof(ClapAbi::EventMidi2),
                                           static_cast<uint32_t>(event.sampleOffset),
@@ -490,7 +494,7 @@ private:
     bool m_entryInitialized = false;
     bool m_processing = false;
     ClapAbi::Host m_host{
-        {1, 0, 0}, "tinja-direct", "Tinja", "Tinja", "", "1",
+        {1, 0, 0}, "aura-direct", "Aura", "Aura", "", "1",
         &requestRestart, &requestProcess, &requestCallback, &noExtension};
     std::array<float*, kMaxChannels> m_channelPointers{};
     std::array<InputEvent, Core::MidiBuffer::kMaxEventsPerBlock> m_inputEvents{};

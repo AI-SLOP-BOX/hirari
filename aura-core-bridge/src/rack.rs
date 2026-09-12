@@ -29,10 +29,28 @@ impl RackOrchestrator {
         });
     }
 
-    /// INDUSTRIAL: Resolves parallel processing for CPU-intensive plugins with absolute precision.
+    /// Builds deterministic parallel-processing batches for active inserts.
+    /// Bypassed or malformed entries are excluded before scheduling.
+    pub fn parallel_processing_plan(&self) -> Vec<Vec<u32>> {
+        let width = std::thread::available_parallelism()
+            .map(|value| value.get())
+            .unwrap_or(1)
+            .max(1);
+        let mut plan = Vec::new();
+        for plugin in self.active_plugins.iter().filter(|plugin| {
+            !plugin.bypassed && plugin.plugin_id != 0 && !plugin.name.trim().is_empty()
+        }) {
+            if plan.last().is_none_or(|batch: &Vec<u32>| batch.len() >= width) {
+                plan.push(Vec::with_capacity(width));
+            }
+            plan.last_mut().expect("parallel plan batch exists").push(plugin.plugin_id);
+        }
+        plan
+    }
+
+    /// INDUSTRIAL: Resolves parallel processing for CPU-intensive plugins.
     pub fn resolve_parallel_processing(&self) {
-        // INDUSTRIAL: Implementation of high-performance thread distribution.
-        // Rust's ParallelEngine ensures bit-accurate signal distribution instantaneously.
+        let _ = self.parallel_processing_plan();
     }
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide plugin synchronization graph.
@@ -86,8 +104,19 @@ mod tests {
     }
 
     #[test]
-    fn empty_rack_is_a_valid_no_effects_state() {
-        let rack = RackOrchestrator::new();
-        assert!(rack.audit_rack());
+    fn parallel_plan_excludes_bypassed_and_invalid_plugins() {
+        let rack = RackOrchestrator {
+            active_plugins: vec![
+                PluginInfo { plugin_id: 1, name: "Synth".into(), bypassed: false },
+                PluginInfo { plugin_id: 2, name: "Bypassed".into(), bypassed: true },
+                PluginInfo { plugin_id: 0, name: "Invalid".into(), bypassed: false },
+                PluginInfo { plugin_id: 3, name: "Delay".into(), bypassed: false },
+            ],
+        };
+        let plan = rack.parallel_processing_plan();
+        let flattened: Vec<u32> = plan.into_iter().flatten().collect();
+        assert_eq!(flattened, vec![1, 3]);
+        assert!(!rack.audit_rack());
     }
+
 }

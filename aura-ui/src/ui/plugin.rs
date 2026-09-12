@@ -1,2 +1,2 @@
-include!("plugin_parts/part_001.rs");
-include!("plugin_parts/part_002.rs");
+include!("plugin_parts/plugin_catalog.rs");
+include!("plugin_parts/plugin_actions.rs");

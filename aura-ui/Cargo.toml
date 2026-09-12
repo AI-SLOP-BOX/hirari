@@ -25,5 +25,31 @@ log.workspace = true
 rfd.workspace = true
 rand = { version = "0.8.6", default-features = false, features = ["std", "std_rng"] }
 
+[features]
+default = ["slint-wgpu"]
+slint-wgpu = ["slint/unstable-wgpu-29"]
+# High-rate waveform/spectrum surfaces are opt-in so the normal Slint build
+# stays small. The feature uses wgpu's native Metal/DX12/Vulkan backends.
+gpu-canvas = ["dep:wgpu", "dep:bytemuck"]
+egui-canvas = ["dep:egui", "dep:egui-wgpu"]
+
+[dependencies.wgpu]
+version = "0.20"
+optional = true
+default-features = false
+features = ["metal", "dx12", "vulkan-portability", "wgsl"]
+
+[dependencies.bytemuck]
+version = "1.25"
+optional = true
+
+[dependencies.egui]
+version = "0.36.2"
+optional = true
+
+[dependencies.egui-wgpu]
+version = "0.36.2"
+optional = true
+
 [build-dependencies]
 slint-build.workspace = true

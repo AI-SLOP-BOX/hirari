@@ -67,9 +67,11 @@ struct Region {
  * HONEST FIX: Optimized region lookup using sorted-list binary search.
  */
 class Track {
-    #include "track_part_1.inc"
+    #include "track_part_1a.inc"
+    #include "track_part_1b.inc"
     #include "track_part_2.inc"
-    #include "track_part_3.inc"
+    #include "track_part_3a.inc"
+    #include "track_part_3b.inc"
     #include "track_part_4.inc"
 
 } // namespace Aura::Core::Engine

@@ -51,7 +51,36 @@ fn core_markers(core: &AuraCore) -> Vec<Z_Marker> {
 }
 
 pub fn run() {
-    let ui = AppWindow::new().unwrap();
+    #[cfg(feature = "slint-wgpu")]
+    {
+        let inspect_renderer = std::env::var("AURA_UI_RENDERER").ok();
+        let result = if inspect_renderer.as_deref() == Some("femtovg") {
+            slint::BackendSelector::new()
+                .renderer_name("femtovg".into())
+                .select()
+        } else {
+            slint::BackendSelector::new()
+                .require_wgpu_29(slint::wgpu_29::WGPUConfiguration::default())
+                .select()
+        };
+        if let Err(error) = result {
+            // Keep the application inspectable on machines where the native
+            // WGPU adapter is unavailable. Production builds still prefer
+            // WGPU; FemtoVG is an explicit UI inspection escape hatch.
+            eprintln!("Aura renderer initialization failed: {error}; trying Slint fallback");
+            if let Err(fallback) = slint::BackendSelector::new().select() {
+                eprintln!("Aura Slint fallback initialization failed: {fallback}");
+                return;
+            }
+        }
+    }
+    let ui = match AppWindow::new() {
+        Ok(ui) => ui,
+        Err(error) => {
+            eprintln!("Aura UI initialization failed: {error}");
+            return;
+        }
+    };
     // Persist the focused beginner surface versus the full advanced surface.
     // The existing production_mode property is the shared presentation gate.
     ui.set_production_mode(load_beginner_mode());
@@ -106,7 +135,9 @@ pub fn run() {
                 )
                 .into(),
             );
-            ui.run().unwrap();
+            if let Err(error) = ui.run() {
+                eprintln!("Aura UI could not enter its event loop: {error}");
+            }
             return;
         }
     };
@@ -374,6 +405,13 @@ pub fn run() {
         render_started_ms.clone(),
     );
 
+    let gpu_plot_store = crate::ui::gpu_canvas::shared_store();
+    #[cfg(feature = "slint-wgpu")]
+    if std::env::var("AURA_DISABLE_GPU_CANVAS").as_deref() != Ok("1") {
+        if let Err(error) = crate::ui::slint_wgpu::install(&ui, gpu_plot_store.clone()) {
+            ui.set_last_action(format!("GPU canvas unavailable: {error}").into());
+        }
+    }
     crate::ui::telemetry_loop::install_telemetry_loop(
         &ui,
         core.clone(),
@@ -386,6 +424,7 @@ pub fn run() {
         render_lease.clone(),
         recording_target,
         peak_reset_generation,
+        gpu_plot_store,
     );
 
     // Opt-in main-thread smoke path for the real Slint -> Core callback.
@@ -502,5 +541,7 @@ pub fn run() {
         return;
     }
 
-    ui.run().unwrap();
+    if let Err(error) = ui.run() {
+        eprintln!("Aura UI event loop failed: {error}");
+    }
 }

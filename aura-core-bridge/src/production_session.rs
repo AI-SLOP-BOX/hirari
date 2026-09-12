@@ -9,7 +9,7 @@ use crate::vfx_bindings::VfxBindingGraph;
 use crate::vfx_timeline_bridge::VfxCue;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const PRODUCTION_SESSION_VERSION: u32 = 1;
@@ -98,11 +98,42 @@ impl ProductionSession {
     pub fn save_sidecar(&self, project_path: impl AsRef<Path>) -> Result<PathBuf> {
         self.validate()?;
         let path = Self::sidecar_path(project_path);
-        let temp = path.with_extension("production.json.tmp");
-        std::fs::write(&temp, serde_json::to_vec_pretty(self)?)
-            .with_context(|| format!("write production sidecar {}", temp.display()))?;
-        std::fs::rename(&temp, &path)
-            .with_context(|| format!("publish production sidecar {}", path.display()))?;
+        let bytes = serde_json::to_vec_pretty(self)?;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or_default();
+        let temp = path.with_file_name(format!(
+            ".{}.tmp-{}-{}",
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("production"),
+            std::process::id(),
+            nonce
+        ));
+        let write_result = (|| -> Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .with_context(|| format!("write production sidecar {}", temp.display()))?;
+            file.write_all(&bytes)
+                .with_context(|| format!("write production sidecar {}", temp.display()))?;
+            file.sync_all()
+                .with_context(|| format!("flush production sidecar {}", temp.display()))?;
+            std::fs::rename(&temp, &path)
+                .with_context(|| format!("publish production sidecar {}", path.display()))?;
+            if let Some(parent) = path.parent() {
+                if let Ok(directory) = std::fs::File::open(parent) {
+                    directory.sync_all().ok();
+                }
+            }
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        write_result?;
         Ok(path)
     }
 

@@ -1,0 +1,597 @@
+import { Slider, Button, ScrollView, CheckBox, LineEdit, ComboBox, TextEdit } from "std-widgets.slint";
+import { Style } from "style.slint";
+export { RenderActions } from "./actions/render_actions.slint";
+export { PluginActions } from "./actions/plugin_actions.slint";
+export { TransportActions } from "./actions/transport_actions.slint";
+export { EditorActions } from "./actions/editor_actions.slint";
+export { MixerActions } from "./actions/mixer_actions.slint";
+export { RecordingActions } from "./actions/recording_actions.slint";
+export { CompingActions } from "./actions/comping_actions.slint";
+export { SpatialActions } from "./actions/spatial_actions.slint";
+export { TimelineActions } from "./actions/timeline_actions.slint";
+export { ProjectActions } from "./actions/project_actions.slint";
+export { MidiActions } from "./actions/midi_actions.slint";
+export { StepActions } from "./actions/step_actions.slint";
+export { StackActions } from "./actions/stack_actions.slint";
+export { AutomationActions } from "./actions/automation_actions.slint";
+export { BrowserActions } from "./actions/browser_actions.slint";
+export { DiagnosticsActions } from "./actions/diagnostics_actions.slint";
+export { AudioSettingsActions } from "./actions/audio_settings_actions.slint";
+export { CommandActions } from "./actions/command_actions.slint";
+import { RenderActions } from "./actions/render_actions.slint";
+import { PluginActions } from "./actions/plugin_actions.slint";
+import { TransportActions } from "./actions/transport_actions.slint";
+import { EditorActions } from "./actions/editor_actions.slint";
+import { MixerActions } from "./actions/mixer_actions.slint";
+import { RecordingActions } from "./actions/recording_actions.slint";
+import { CompingActions } from "./actions/comping_actions.slint";
+import { SpatialActions } from "./actions/spatial_actions.slint";
+import { TimelineActions } from "./actions/timeline_actions.slint";
+import { ProjectActions } from "./actions/project_actions.slint";
+import { MidiActions } from "./actions/midi_actions.slint";
+import { StepActions } from "./actions/step_actions.slint";
+import { StackActions } from "./actions/stack_actions.slint";
+import { AutomationActions } from "./actions/automation_actions.slint";
+import { BrowserActions } from "./actions/browser_actions.slint";
+import { DiagnosticsActions } from "./actions/diagnostics_actions.slint";
+import { AudioSettingsActions } from "./actions/audio_settings_actions.slint";
+import { CommandActions } from "./actions/command_actions.slint";
+import { Z_Knob } from "./primitives/knob.slint";
+import { Z_IconButton } from "./primitives/icon_button.slint";
+import { Z_LogicLCD } from "./primitives/logic_lcd.slint";
+import { Z_SegmentButton } from "./primitives/segment_button.slint";
+import { Z_ExportDialog } from "./dialogs/export_dialog.slint";
+import { Z_Telemetry } from "./diagnostics/telemetry.slint";
+import { Z_ProjectSharding } from "./diagnostics/project_sharding.slint";
+import { Z_SpectralMaskingMap, Z_LargeVU, Z_PhaseMeter } from "./diagnostics/analysis_meters.slint";
+import { Z_DiagnosticsPage } from "./diagnostics/diagnostics_page.slint";
+import { Z_EmpathyMeter, Z_ConsciousnessHub, Z_UniversalMetronome, Z_SilenceForensic, Z_DreamGenerator } from "./diagnostics/ambient_status.slint";
+import { Z_ImmersivePanner } from "./spatial/immersive_panner.slint";
+import { Z_Spotlight } from "./navigation/spotlight.slint";
+import { Z_VideoMonitor } from "./media/video_monitor.slint";
+import { Z_ProjectRecovery } from "./project_recovery.slint";
+import { Z_OpenUtauEditor } from "./editor/openutau_editor.slint";
+import { Z_ExtensionBrowser } from "extensions/extension_browser.slint";
+import { Z_ArrangeDock } from "./arrange_dock.slint";
+
+// Stable view identifiers shared by menus, bottom navigation, and rendered
+// panels. Keep numeric values compatible with the Rust bridge.
+export global ViewModes {
+    in property<int> mixer: 0;
+    in property<int> audio_editor: 1;
+    in property<int> piano_roll: 2;
+    in property<int> console: 9;
+    in property<int> smart_controls: 10;
+    in property<int> loops: 11;
+    in property<int> drums: 12;
+    in property<int> automation: 13;
+    in property<int> project: 14;
+    in property<int> setup: 15;
+    in property<int> browser: 16;
+    in property<int> midi: 17;
+    in property<int> export: 18;
+    in property<int> diagnostics: 19;
+    in property<int> preferences: 20;
+    in property<int> flex: 21;
+    in property<int> comp: 22;
+    in property<int> stacks: 23;
+    in property<int> global: 24;
+    in property<int> steps: 25;
+    in property<int> openutau: 26;
+}
+import { Z_WorkflowPage, Z_StepSequencerPage, Z_TrackStackPage } from "./pages/workflow_pages.slint";
+import { Z_MasteringPage } from "./pages/mastering_page.slint";
+import { Z_Meter } from "./primitives/meter.slint";
+import { Z_MixerStrip } from "./mixer/mixer_strip_adapter.slint";
+import { Z_FullMixer } from "./mixer/full_mixer.slint";
+import { Z_SmartControls } from "./mixer/smart_controls.slint";
+import { Z_AkashicRecord, Z_Oracle } from "./diagnostics/history_and_analysis.slint";
+import { Z_SampleEditorAdapter } from "./editor/sample_editor_adapter.slint";
+import { Z_AuraSynth } from "./editor/synth_panel.slint";
+import { Z_PianoRoll as Z_PianoRollView } from "./editor/piano_roll.slint";
+import { Z_GlobalTempoEditor as Z_GlobalTempoEditorView } from "./editor/global_tempo_editor.slint";
+import { Z_AdvancedAutomation as Z_AdvancedAutomationView } from "./editor/advanced_automation.slint";
+import { Z_NotationHub as Z_NotationHubView } from "./editor/notation_hub.slint";
+import { Z_GlobalMarkers as Z_GlobalMarkersView } from "./timeline/global_markers.slint";
+import { Z_StageView as Z_StageViewCore } from "./spatial/stage_view.slint";
+import { Z_SphereTelemetry as Z_SphereTelemetryView } from "./spatial/sphere_telemetry.slint";
+import { Z_CloudBridge as Z_CloudBridgeView } from "./collaboration/cloud_bridge.slint";
+import { Z_VRSandbox as Z_VRSandboxView } from "./spatial/vr_sandbox.slint";
+import { Z_NeuralTrainer as Z_NeuralTrainerView } from "./assistant/neural_trainer.slint";
+import { Z_EcosystemPulse as Z_EcosystemPulseView } from "./system/ecosystem_pulse.slint";
+import { Z_AtomicClock as Z_AtomicClockView } from "./system/atomic_clock.slint";
+import { Z_Shield as Z_ShieldView } from "./system/shield.slint";
+import { Z_NetworkMap as Z_NetworkMapView } from "./collaboration/network_map.slint";
+import { Z_ZeroPointMeter as Z_ZeroPointMeterView } from "./diagnostics/zero_point_meter.slint";
+import { Z_SentinelRing as Z_SentinelRingView } from "./diagnostics/sentinel_ring.slint";
+import { Z_PluginWnd } from "./plugins/plugin_window.slint";
+import { Z_AudioEngineStatus } from "panels.slint";
+import { Z_AudioSettings } from "./audio_settings.slint";
+import { Z_LogicFeaturePage, Z_StepCell, Z_QuickHelp } from "./feature_page.slint";
+import { Z_LibraryPage } from "./library_page.slint";
+import { Z_HomePage } from "./home_page.slint";
+import { Z_Spectrum, Z_HolographicSpec, Z_DNAMap, Z_NeuralVoice, Z_SentinelDashboard, Z_MarkerList } from "./analysis/spectrum.slint";
+import { Z_AutomationPoint, Z_AutomationLane } from "model/automation_model.slint";
+import { Z_Clip } from "model/clip_model.slint";
+import { ZNote } from "model/midi_model.slint";
+import { Z_Fx } from "model/plugin_model.slint";
+import { Z_Track } from "model/track_model.slint";
+import { Z_Marker, Z_ChatMessage, Z_Bus, Z_Sample_Entry, Z_Plugin_Entry, Z_Extension_Entry } from "model/models.slint";
+
+// Bridges the editor's non-destructive controls to the selected region while
+// keeping the editor view independent from the global FFI action contract.
+export component AppWindow inherits Window {
+    callback experience-mode-changed(bool);
+    callback onboarding-progress-changed(bool, int);
+    callback focus-mode-changed(bool);
+    callback workspace-preset-changed(string);
+    callback plugin-favorite-changed(string, bool);
+    title: "HIRARI v1.0"; preferred-width: 1600px; preferred-height: 1000px; min-width: 1080px; min-height: 680px; background: Style.base;
+    in-out property <bool> is_ply; in-out property <bool> is_rec; in property <bool> is_counting: false; in property <int> count_val: 0;
+    in-out property <image> gpu-waveform-image;
+    in-out property <image> gpu-spectrum-image;
+    in-out property <image> gpu-meter-image;
+    in-out property <image> gpu-piano-image;
+    in-out property <bool> tm_beats: true; in-out property <float> ph; in property <[float]> pks; in property <[float]> pks_h;
+    in property <[float]> tempo_event_beats: [];
+    in property <[float]> tempo_event_bpms: [];
+    in-out property <float> z_lvl: 1.0; in-out property <float> v_z_lvl: 1.0;
+    in-out property <float> master_output_gain: 1.0;
+    in-out property <float> clip_drag_last_delta: 0.0;
+    in-out property <int> sel_idx: 0; in-out property <int> sel_cid: -1; in-out property <bool> selected_clip_reversed: false;
+    in-out property <float> selected_clip_trim_start: 0.0; in-out property <float> selected_clip_trim_end: 1.0; in-out property <float> selected_clip_warp_ratio: 1.0; in-out property <float> selected_clip_pitch_semitones: 0.0; in-out property <int> selected_clip_loop_count: 1; in-out property <string> adv: "OK";
+    in-out property <float> snap_division: 16.0;
+    in-out property <[Z_Track]> tracks: [];
+    // Keep the externally visible selection row valid whenever the engine
+    // replaces the track model (including a blank project).
+    in-out property <int> selected_row: tracks.length > 0 ? Math.min(Math.max(sel_idx, 0), tracks.length - 1) : 0;
+    // Testable readiness contract for the primary editor surface. This is
+    // intentionally derived from the same conditions that gate the visible
+    // arrangement layer, so a future pixel/screenshot harness has one stable
+    // signal to assert before sampling the window.
+    in property <bool> project_surface_ready: tracks.length > 0 && !show_genesis;
+    property <bool> show_arrange_surface: tracks.length > 0 && workspace_preset == "arrange" && !mx_open && !pr_open && !show_genesis;
+    in-out property <bool> mx_open: false; in-out property <int> bot_view: 0; // 0: MIXER, 1: AUDIO_EDITOR, 2: PIANO_ROLL
+    // Production mode keeps the primary DAW workflow focused. Experimental
+    // consoles remain available through the ADV toggle when needed.
+    in-out property <bool> production_mode: true;
+    in-out property <bool> focus_mode: false;
+    // A saved workspace is intentionally a small semantic preset rather
+    // than a pixel layout. It gives beginners a clear path while advanced
+    // users can switch the editor surface without losing project state.
+    in-out property <string> workspace_preset: "arrange";
+    // Keep the bottom editor navigation quiet by default. Advanced pages stay
+    // available without competing with the primary arrange/mix workflow.
+    in-out property <bool> more_views_open: false;
+    in-out property <string> openutau_score_path: "";
+    in-out property <string> openutau_render_path: "";
+    in-out property <string> openutau_status: "OPENUTAU READY";
+    in-out property <[string]> openutau_notes: [];
+    in-out property <[Z_Plugin_Entry]> plugin_catalog: [];
+    in-out property <[Z_Extension_Entry]> extension_catalog: [];
+    in-out property <string> extension_catalog_status: "EXTENSIONS NOT SCANNED";
+    in-out property <string> plugin_catalog_status: "PLUGIN CATALOG NOT SCANNED";
+    in-out property <string> plugin_catalog_query: "";
+    in-out property <float> openutau_scoop: 0.35;
+    in-out property <float> openutau_vibrato: 0.45;
+    in-out property <float> openutau_vibrato_rate: 0.45;
+    in-out property <float> openutau_dynamics: 0.60;
+    in-out property <float> openutau_consonants: 0.50;
+    in-out property <bool> pr_open: false;
+    in-out property <float> loop_st: 0.0; in-out property <float> loop_ed: 32.0; in-out property <int> active_tool: 0;
+    in-out property <bool> fx_open: false; in-out property <string> fx_name: "NONE"; in-out property <bool> mx_compact: false;
+    in-out property <bool> sidechain-result: false;
+    in-out property <int> sidechain-source-id: -1;
+    in-out property <int> sidechain-tap-point: 0;
+    in-out property <string> sidechain-source-name: "";
+    in property <[bool]> active-route-matrix: [];
+    // Selected ordinary audio route for the routing inspector.
+    in-out property <int> route-source-id: -1;
+    in-out property <int> route-destination-id: -1;
+    in-out property <float> route-gain: 1.0;
+    in-out property <bool> route-enabled: false;
+    in-out property <[string]> plugin-parameter-names: [];
+    in-out property <[float]> plugin-parameter-values: [];
+    in-out property <string> project-path: "";
+    in-out property <int> recovery-backup-count: 0;
+    in-out property <string> recovery-backup-summary: "";
+    in-out property <[int]> recovery-backup-generations: [];
+    in-out property <string> plugin-preset-path: "";
+    in-out property <float> plugin-track-latency-ms: 0.0;
+    in-out property <float> plugin-pdc-compensation-ms: 0.0;
+    in-out property <string> plugin-pdc-status: "UNAVAILABLE";
+    in-out property <bool> plugin-parameter-error: false;
+    in-out property <string> plugin-editor-capability: "NO PLUGIN SELECTED";
+    in-out property <bool> plugin-bypassed: false;
+    // The browser starts empty and is populated by the real preview runtime
+    // after the user chooses a library directory. Never present fake assets.
+    in property <[Z_Sample_Entry]> sample_entries: [];
+    in property <[float]> fft_data: [];
+    in property <[float]> suggested_eq: [];
+    in property <float> cpu_usage: 0.0; in property <int> undo_depth: 0; in property <int> redo_depth: 0; in property <string> last_action: "WAITING FOR ENGINE";
+    in property <int> sandbox_failures: 0;
+    in-out property <string> auto_save_status: "Auto-save: New Project";
+    in property <bool> audio_device_ready: false;
+    in property <string> audio_device_catalog: "[]";
+    in property <[string]> audio_device_names: [];
+    in property <float> audio_sample_rate: 0.0;
+    in property <string> audio_diagnostic: "AUDIO DEVICE NOT CONNECTED";
+    in property <int> input_dropped_blocks: 0;
+    in property <string> diagnostic_state: "ENGINE IDLE";
+    in property <float> diagnostic_load: 0.0;
+    in property <int> diagnostic_overruns: 0;
+    in property <int> diagnostic_watchdogs: 0;
+    in property <int> diagnostic_sandbox_failures: 0;
+    in property <string> diagnostic_pdc: "UNAVAILABLE";
+    in property <bool> diagnostic_range_overflow: false;
+    in property <[float]> band_corr: [];
+    in property <[float]> mask_heatmap: [];
+    in-out property <float> sel_st_x; in-out property <float> sel_st_y;
+    in-out property <float> sel_cur_x; in-out property <float> sel_cur_y;
+    in-out property <bool> is_selecting: false;
+    in-out property <float> punch_in: 4.0; in-out property <float> punch_out: 12.0; in-out property <bool> punch_enabled: false;
+    in property <[float]> load_his: [];
+    in property <[Z_Bus]> vca_tracks: [];
+    in property <[Z_Marker]> markers: [];
+    in-out property <[float]> track_macros: [];
+    in property <[float]> stem_progress: [];
+    in property <[Z_ChatMessage]> ai_chat_his: [];
+    in property <float> brain_pulse: 0.0;
+    in property <int> meter_mode: 0; // 0: PEAK, 1: RMS, 2: K-20
+    in property <[float]> sc_fft_data: [];
+    in property <string> real_time: "--:--:--";
+    in-out property <bool> pal_open: false; in-out property <string> pal_query: "";
+    in-out property <bool> snap_open: false; in-out property <string> snap_val: "1/16";
+    in-out property <bool> ins_open: false; in-out property <int> ins_tab: 0; // 0: TRACK, 1: CLIP, 2: FX, 3: IO
+    in-out property <int> side_tab: 0; // 0: INSPECTOR, 1: LIBRARY, 2: PROJECT
+    in-out property <int> fx_active_id: -1;
+    in property <[Z_Fx]> available_fx: [];
+    in property <[string]> action_history: [];
+    in property <[string]> ai_advice: [];
+    in property <color> synesthesia_color: #000;
+    in property <string> ai_advice_detail: "NO ANALYSIS AVAILABLE";
+    in-out property <float> ui_timer: 0.0;
+    in property <float> motion_energy: 0.0;
+    in property <[float]> heatmap_data: [];
+    in property <[float]> partials_data;
+    in-out property <bool> spotlight_active: false;
+    // IMMERSIVE BUS ROUTING
+    in property <[string]> immersive_buses: [];
+    in-out property <image> video_frame;
+    in-out property <length> main_scroll_x; in-out property <length> track_scroll_y;
+    in-out property <bool> is_locked: false;
+    in-out property <bool> demo_seeded: false;
+    in-out property <bool> show_genesis: true;
+    in-out property <bool> show_video: false;
+    in-out property <bool> loop_active: true; in property <bool> disk_active: false;
+    in property <float> phase_correlation: 0.0; in-out property <float> master_tune: 440.0;
+    in property <float> lufs_integrated: -120.0;
+    in property <float> lufs_short_term: -120.0;
+    in property <float> master_true_peak_l: -120.0;
+    in property <float> master_true_peak_r: -120.0;
+    in property <float> master_gain_reduction: 0.0;
+    in property <float> latency_ms: 0.0;
+    in property <int> buffer_size: 0;
+    in property <[float]> cpu_history: [];
+    in-out property <bool> is_dim: false;
+    in-out property <bool> is_talkback: false;
+    in-out property <bool> is_monitor_enabled: true;
+    in property <string> time_sig: "4/4";
+    in property <string> record_format: "WAV 24b";
+    in property <string> clock_source: "INT";
+    in-out property <float> click_vol: 0.8;
+    in property <float> project_len: 0.0;
+    in-out property <bool> show_markers: true;
+    in-out property <bool> ai_enabled: true;
+    in-out property <bool> is_rendering: false;
+    in-out property <[float]> recording_waveform: [];
+    in-out property <int> recording_take_count: 0;
+    in-out property <int> active_recording_take: 0;
+    in-out property <string> recording_lifecycle: "Idle";
+    in-out property <float> render_progress: 0.0;
+    in-out property <bool> render_progress_available: false;
+    in-out property <bool> render_progress_indeterminate: false;
+    in-out property <int> render_elapsed_seconds: 0;
+    in-out property <string> render_state: "IDLE";
+    in-out property <string> render_error: "";
+    in-out property <string> render_summary: "No render yet";
+    in-out property <bool> show_sentinel: false;
+    in-out property <bool> is_void_mode: false;
+    in-out property <bool> show_divine_console: false;
+    in-out property <bool> is_null_horizon: false;
+    in-out property <bool> export_open: false;
+    in-out property <bool> quick_help_open: false;
+    in-out property <bool> beginner_guide_open: false;
+    in-out property <int> beginner_guide_step: 0;
+
+    forward-focus: fc; 
+    fc := FocusScope { 
+        key-pressed(e) => { 
+            if (e.text == " ") { if (!is_locked) { TransportActions.toggle_play(); } return accept; } 
+            if (e.text == "l") { if (!is_locked) { loop_active = !loop_active; } return accept; }
+            if (e.text == "z") { if (e.modifiers.control || e.modifiers.meta) { ProjectActions.undo(); } return accept; }
+            if (e.text == "y") { if (e.modifiers.control || e.modifiers.meta) { ProjectActions.redo(); } return accept; }
+            if (e.text == "o") { if (e.modifiers.control || e.modifiers.meta) { CommandActions.palette_exec("OPEN PROJECT"); } return accept; }
+            if (e.text == "s" && (e.modifiers.control || e.modifiers.meta)) { CommandActions.palette_exec("SAVE PROJECT"); return accept; }
+            if (e.text == "a" && (e.modifiers.control || e.modifiers.meta)) { EditorActions.select_all_clips(); return accept; }
+            if (e.text == "c" && (e.modifiers.control || e.modifiers.meta)) { EditorActions.copy_selected_clips(); return accept; }
+            if (e.text == "v" && (e.modifiers.control || e.modifiers.meta)) { EditorActions.paste_clips(ph); return accept; }
+            if (e.text == "Escape") { EditorActions.clear_clip_selection(); return accept; }
+            if (e.text == "d" && (e.modifiers.control || e.modifiers.meta)) { if (!is_locked && sel_cid >= 0) { EditorActions.duplicate_clip(sel_cid); } return accept; }
+            if (e.text == "s" && e.modifiers.shift && !(e.modifiers.control || e.modifiers.meta)) { if (!is_locked && sel_cid >= 0) { EditorActions.split_clip_with_crossfade(sel_cid, ph, 0.08); } return accept; }
+            if (e.text == "d" && e.modifiers.shift && !(e.modifiers.control || e.modifiers.meta)) { if (!is_locked && sel_cid >= 0) { EditorActions.split_clip_at_silence(sel_cid, 0.001, 256); } return accept; }
+            if (e.text == "s" && !(e.modifiers.control || e.modifiers.meta || e.modifiers.shift)) { if (!is_locked && sel_cid >= 0) { EditorActions.split_clip(sel_cid, ph); } return accept; }
+            if (e.text == "Backspace" || e.text == "Delete") {
+                if (!is_locked && fx_active_id >= 0) { CommandActions.palette_exec("REMOVE ACTIVE PLUGIN"); }
+                else if (!is_locked && sel_cid >= 0) { EditorActions.remove_clip(sel_cid); }
+                return accept;
+            }
+            if (e.text == "k" && (e.modifiers.control || e.modifiers.meta)) { pal_open = !pal_open; return accept; }
+            if (e.text == "i" && !(e.modifiers.control || e.modifiers.meta)) { ins_open = !ins_open; return accept; }
+            if (e.text == "?") { quick_help_open = !quick_help_open; return accept; }
+            accept 
+    }
+}
+
+    if (quick_help_open) : Z_QuickHelp {
+        z: 260;
+        x: parent.width - self.width - 18px;
+        y: 106px;
+        context: root.tracks.length > 0 ? "Track controls and editor views are available from the Control Bar." : "Open or create a project to enable track controls.";
+    }
+
+    if (show_genesis) : Rectangle {
+        z: 9000; x: 0px; y: 0px; width: 100%; height: 100%;
+        Z_HomePage {
+            template-selected(template) => { show_genesis = false; CommandActions.palette_exec("INIT_" + template); }
+            tutorial-requested => { show_genesis = false; beginner_guide_open = true; }
+            project-requested(project) => { show_genesis = false; CommandActions.palette_exec("OPEN PROJECT " + project); }
+        }
+    }
+
+    if (is_rendering || render_state == "COMPLETE") : Rectangle {
+        z: 300; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.94);
+        VerticalLayout {
+            alignment: center; spacing: 40px;
+            Text { text: "Rendering"; font-size: 18px; color: Style.brand; font-weight: 700; horizontal-alignment: center; }
+            
+            // Render Telemetry
+            Rectangle {
+                width: 600px; height: 120px; background: Style.surface; border_radius: 2px; border_width: 1.5px; border_color: Style.border;
+                VerticalLayout {
+                    padding: 16px; spacing: 12px;
+                    HorizontalLayout {
+                        Text { text: "PCM16 · Current engine rate · Master"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-stretch: 1; }
+                        Text { text: render_progress_available ? Math.floor(render_progress * 100) + "%" : render_state; font-size: 12px; color: Style.brand; font-weight: 700; }
+                    }
+                    // Progress Bar (Industrial)
+                    Rectangle { 
+                        height: 8px; background: Style.surface; border_radius: 1px; 
+                        Rectangle { width: render_progress_available ? render_progress * parent.width : (render_progress_indeterminate ? (render_elapsed_seconds * 0.18 - Math.floor(render_elapsed_seconds * 0.18 / 0.72) * 0.72 + 0.14) * parent.width : 0px); height: 100%; background: Style.brand; } 
+                    }
+                    // High-Speed Spectral Ticker
+                    HorizontalLayout {
+                        spacing: 2px; height: 40px;
+                        for i in 60 : Rectangle {
+                            width: 8px; height: 15px;
+                            background: Style.brand; opacity: 0.6; border_radius: 1px;
+                        }
+                    }
+                    Text { text: render_progress_available ? (render_state == "COMPLETE" ? "Export complete" : "Rendering…") : (render_state == "RENDERING" ? "Rendering · " + render_elapsed_seconds + "s" : render_state); font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: right; }
+                    Text { text: render_error; font-size: Style.font-xxs; color: Style.alert; horizontal-alignment: right; }
+                }
+            }
+            if (is_rendering) : HorizontalLayout {
+                alignment: center; spacing: 10px;
+                if (render_state == "PAUSED") : Z_IconButton { icon: "▶ RESUME RENDER"; clicked => { RenderActions.resume_render(); } }
+                if (render_state != "PAUSED") : Z_IconButton { icon: "Ⅱ PAUSE RENDER"; clicked => { RenderActions.pause_render(); } }
+                Z_IconButton { icon: "✕ CANCEL RENDER"; clicked => { RenderActions.cancel_render(); } }
+            }
+        }
+    }
+
+    if (is_counting) : Rectangle {
+        z: 200; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.65);
+        VerticalLayout { alignment: center; Text { text: count_val == 0 ? "Recording…" : "Preroll: " + count_val; font-size: 72px; font-weight: 700; color: Style.record; horizontal-alignment: center; } }
+    }
+
+    if (fx_active_id != -1) : Rectangle {
+        z: 210; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.88);
+        TouchArea { clicked => { fx_active_id = -1; } }
+        Rectangle {
+            width: 600px; height: 440px; background: Style.surface; border_width: 2px; border_color: Style.brand; border_radius: 2px;
+            VerticalLayout {
+                padding: 16px; spacing: 14px;
+                HorizontalLayout {
+                    VerticalLayout {
+                        Text { text: "Plugin Sandbox"; font-size: 10px; color: Style.brand; font-weight: 700; }
+                        Text { text: "Sandbox · " + (audio_sample_rate > 0.0 ? Math.round(audio_sample_rate) + " Hz" : "Audio offline"); font-size: Style.font-xxs; color: Style.text-tertiary; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Z_IconButton { icon: "✕"; clicked => { fx_active_id = -1; } }
+                }
+                Rectangle { height: 1px; background: Style.border; }
+                
+                // Plugin parameter lists are unbounded by the generic host
+                // contract. Keep the panel compact, but let Vital and other
+                // large instruments expose every discovered parameter.
+                ScrollView {
+                    viewport-height: 270px;
+                    VerticalLayout {
+                        for name[i] in plugin-parameter-names : Rectangle {
+                            height: 52px;
+                            opacity: 1.0;
+                            background: Style.surface; border_width: 1px; border_color: Style.surface;
+                            HorizontalLayout {
+                                padding: 8px; spacing: 12px;
+                                VerticalLayout { alignment: center; width: 100px;
+                                    Text { text: name; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                    Text { text: "Value: " + Math.floor(sl_p.value * 10) / 10; font-size: Style.font-xxs; color: Style.ok; }
+                                }
+                                sl_p := Slider {
+                                    value: plugin-parameter-values.length > i ? plugin-parameter-values[i] * 100.0 : 60.0;
+                                    horizontal-stretch: 1;
+                                    changed(v) => { if (tracks.length > 0 && selected_row < tracks.length) { PluginActions.plugin_param_changed(tracks[selected_row].id, fx_active_id, i, v); } }
+                                }
+                                Rectangle { width: 38px; height: 24px; background: Style.surface-0; border_radius: 1px; border_width: 1px; border_color: Style.border; Text { text: "Ext"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; vertical-alignment: center; } }
+                            }
+                        }
+                    }
+                }
+                
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 8px; alignment: end;
+                    Z_IconButton { icon: "Bypass"; clicked => { if (tracks.length > 0 && selected_row < tracks.length) { MixerActions.toggle_fx(tracks[selected_row].id, fx_active_id); } } }
+                    Z_IconButton { icon: "REMOVE PLUGIN"; clicked => { CommandActions.palette_exec("REMOVE ACTIVE PLUGIN"); } }
+                    Z_IconButton { icon: "Close"; clicked => { fx_active_id = -1; } }
+                }
+            }
+        }
+    }
+
+    // --- INDUSTRIAL GLOBAL MENU BAR ---
+        Rectangle {
+        y: 0; height: 42px; background: Style.surface-0; border_width: 1px; border_color: Style.border;
+        HorizontalLayout {
+            padding-left: 14px; padding-right: 10px; spacing: 5px;
+            Rectangle {
+                width: 28px; height: 28px; border_radius: 7px; background: Style.brand-glow;
+                Image { source: @image-url("assets/aura-mark.svg"); width: 26px; height: 26px; }
+            }
+            Text { text: "Hirari"; width: 62px; font-size: 15px; color: Style.text; font-weight: 700; vertical-alignment: center; }
+            for m in ["File", "Edit", "Track", "Mix", "Plugin", "Window", "Help"] : Rectangle {
+                width: 50px; height: 30px; border-radius: 5px;
+                background: menu_area.has-hover ? Style.panel-h : transparent;
+                Text { text: m; width: 100%; height: 100%; font-size: 9px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
+                menu_area := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if (m == "File") { bot_view = 14; mx_open = true; pr_open = false; }
+                        if (m == "Edit") { bot_view = 13; mx_open = true; pr_open = false; }
+                        if (m == "Track") { bot_view = 23; mx_open = true; pr_open = false; }
+                        if (m == "Mix") { bot_view = 0; mx_open = true; pr_open = false; }
+                        if (m == "Plugin") { CommandActions.palette_exec("SCAN PLUGINS"); bot_view = 16; mx_open = true; pr_open = false; }
+                        if (m == "Window") { bot_view = 20; mx_open = true; pr_open = false; }
+                        if (m == "Help") { bot_view = 19; mx_open = true; pr_open = false; }
+                    }
+                }
+            }
+            // Plugin scanning remains available from the Plugin menu and the
+            // editor toolbar. On compact windows it must not consume the
+            // transport's fixed width or overlap the clock.
+            if (parent.width > 1280px) : Z_IconButton { icon: "Scan Plugins"; compact: true; button-width: 92px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); } }
+            Rectangle {
+                width: 218px; height: 32px; border-radius: 6px;
+                background: Style.surface-2; border_width: 1px; border_color: Style.border;
+                HorizontalLayout {
+                    padding-left: 5px; padding-right: 5px; spacing: 3px;
+                    Z_IconButton { icon: "|<"; compact: true; button-width: 30px; }
+                    Z_IconButton { icon: "STOP"; compact: true; button-width: 30px; clicked => { if (is_ply) { TransportActions.toggle_play(); } } }
+                    Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: true; button-width: 34px; active: is_ply; clicked => { TransportActions.toggle_play(); } }
+                    Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: true; button-width: 34px; active: is_rec; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
+                    Rectangle { width: 1px; height: 20px; background: Style.border; }
+                        Text { text: real_time == "--:--:--" ? "00:00:00:00" : real_time; width: 76px; font-size: 11px; color: Style.text-primary; font-family: Style.numeric-font; vertical-alignment: center; horizontal-alignment: center; }
+                }
+            }
+            Rectangle {
+                width: 100px; height: 32px; border-radius: 6px;
+                background: Style.surface-2; border_width: 1px; border_color: Style.border;
+                HorizontalLayout {
+                    padding-left: 9px; padding-right: 9px; spacing: 4px;
+                    Text { text: "BPM"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+                    Text { text: Math.floor(Style.bpm * 100) / 100 + ""; font-size: 13px; color: Style.brand; font-family: Style.numeric-font; font-weight: 700; vertical-alignment: center; }
+                    Text { text: "4/4"; font-size: 10px; color: Style.text-dim; vertical-alignment: center; }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Z_IconButton { icon: "LOCK"; compact: true; active: is_locked; clicked => { is_locked = !is_locked; } }
+            Z_ShieldView { active: root.ai_enabled; time: root.ui_timer; }
+        }
+    }
+
+    // Stable primary arrangement layer anchored to the window.
+    // Legacy editor surface kept for migration reference.  The final visible
+    if (root.tracks.length == 0) : Rectangle {
+        x: ins_open ? Style.inspector-w : 0px; y: 60px;
+        width: parent.width - (ins_open ? Style.inspector-w : 0px);
+        height: parent.height - 102px; z: 1000; clip: true; background: Style.base;
+        VerticalLayout {
+            alignment: center; spacing: 12px; padding: 24px;
+            Text {
+                text: "No tracks yet";
+                font-size: 16px; color: Style.text-primary; font-weight: 600; horizontal-alignment: center;
+            }
+            Text {
+                text: "Create a track to start arranging.";
+                font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center;
+            }
+            Z_IconButton {
+                icon: "Add Audio Track";
+                button-width: 132px;
+                clicked => { ProjectActions.add_track("AUDIO"); }
+            }
+        }
+    }
+
+    if (show_arrange_surface) : Z_ArrangeDock {
+        z: 1200; x: 0px; y: 42px; width: parent.width; height: parent.height - 42px;
+        gpu-waveform-image: root.gpu-waveform-image;
+        gpu-spectrum-image: root.gpu-spectrum-image;
+        gpu-meter-image: root.gpu-meter-image;
+        gpu-piano-image: root.gpu-piano-image;
+    }
+    if (mx_open && bot_view == 0) : Z_FullMixer {
+        x: 0px; y: 42px; width: parent.width; height: parent.height - 42px; horizontal-stretch: 1; vertical-stretch: 1; z: 3000;
+        tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode;
+        gpu-meter-image: root.gpu-meter-image; gpu-spectrum-image: root.gpu-spectrum-image;
+        close => { mx_open = false; }
+    }
+        VerticalLayout {
+            // This legacy tree is only valid for the Arrange surface.  Keep it
+            // out of diagnostics, editors, settings, and workflow pages so
+            // their content cannot accumulate with stale track fragments.
+            visible: !show_arrange_surface && !mx_open && !pr_open;
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            height: 100%;
+            // High-Density Snap & Tool Header
+            Rectangle {
+                height: 38px; background: Style.surface; border_width: 1px; border_color: Style.border;
+                HorizontalLayout {
+                    padding: 4px; spacing: 12px;
+                    // Snap & Grid Section
+                    HorizontalLayout {
+                        spacing: 4px; alignment: start;
+                        Z_IconButton { icon: "SNAP"; active: true; }
+                        Rectangle {
+                            width: 60px; height: 100%; background: #000; border_radius: 2px;
+                            Text { text: snap_val; font-size: 10px; color: Style.brand; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { snap_open = !snap_open; } }
+                        }
+                    }
+                    // Tool Selection
+                    HorizontalLayout {
+                        spacing: 2px;
+                        for tool[idx] in ["Selection", "Slice", "Draw", "Mute"] : Z_IconButton { 
+                                            icon: idx == 0 ? "↖" : (idx == 1 ? "CUT" : (idx == 2 ? "DRAW" : "M")); 
+                            active: active_tool == idx;
+                            clicked => { active_tool = idx; }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    // Time Visibility Toggles
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Z_IconButton { icon: "⌚ BEATS"; active: tm_beats; clicked => { tm_beats = !tm_beats; } }
+                    }
+                }
+                
+                // Snap Popup Overlay (Industrial Grid Settings)
+                if snap_open : Rectangle {
+                    x: 42px; y: 40px; width: 110px; height: 180px; background: Style.surface; border_width: 1.5px; border_color: #333; z: 100; clip: true;
+                    VerticalLayout {
+                        padding: 4px; spacing: 1px;
+                        Text { text: "GRID RESOLUTION"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; horizontal-alignment: center; }
+                        for v in ["1/1", "1/4", "1/8", "1/16", "1/32", "1/64", "Adaptive"] : Rectangle {
+                            height: 22px; background: area_sn.has_hover ? Style.border : #000;

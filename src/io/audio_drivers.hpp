@@ -114,7 +114,11 @@ private:
 };
 
 /**
- * @brief DriverFactory: Singleton factory for platform-specific hardware drivers.
+ * @brief Legacy compatibility facade for the canonical drivers::DriverFactory.
+ *
+ * New code must use `src/io/drivers/audio_driver_factory.hpp`. This older
+ * interface is retained only for source compatibility and deliberately
+ * returns the silent fallback; it must not be used to claim hardware I/O.
  */
 class DriverFactory {
 public:

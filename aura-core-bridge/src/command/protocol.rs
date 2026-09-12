@@ -79,7 +79,7 @@ pub fn snapshot_generation(bytes: &[u8]) -> u64 {
 }
 
 pub fn capabilities() -> serde_json::Value {
-    serde_json::json!({
+    let mut advertised = serde_json::json!({
         "protocol": PROTOCOL_VERSION,
         "schema_versions": [1],
         "command_versions": [1],
@@ -87,6 +87,8 @@ pub fn capabilities() -> serde_json::Value {
         "permissions": ["read_only", "project_write", "system_write"],
         "privileged_permissions": [{"name": "unrestricted", "requires": "explicit_cli_flag_and_trusted_client", "audit_required": true}],
         "operations": ["project.init", "project.inspect", "project.search", "control.inspect", "analyze_dynamics", "analyze_mix", "analyze_silence", "apply_dynamics_suggestion", "generate_chord", "describe_drum_lane", "inspect_chord_track", "add_chord_event", "place_generated_chord", "remove_chord_events_range", "clear_chord_track", "suggest_next_chords", "generate_arpeggio", "place_arpeggio", "preview_vocal_pitch_correction", "extension.catalog", "extension.validate", "extension.invoke", "extension.set_enabled", "project.load", "add_track", "add_aux_track", "duplicate_track", "remove_track", "add_plugin", "remove_plugin", "move_plugin", "insert_named_plugin", "insert_plugin_path", "set_plugin_parameter", "set_plugin_bypass", "set_plugin_favorite", "plugin_search", "freeze_track", "freeze_track_to_project_end", "unfreeze_track", "track_freeze_status", "set_macro_value", "add_macro_mapping", "remove_macro_mapping", "add_midi_learn_mapping", "remove_midi_learn_mapping", "humanize_midi", "apply_midi_swing", "quantize_midi", "apply_midi_logical_rule", "open_utau_import", "open_utau_notes", "open_utau_import_midi", "add_audio_region", "replace_region_audio", "set_volume", "set_master_gain", "set_track_delay", "set_track_delay_automation", "set_track_stack", "delete_track_stack", "set_track_stack_gain", "set_track_stack_collapsed", "add_vca_group", "assign_track_to_vca", "set_vca_group_gain", "upsert_marker", "delete_marker", "set_pan", "set_mute", "set_solo", "set_track_armed", "set_phase_invert", "set_automation", "set_route", "set_route_gain", "set_feedback_route", "set_sidechain_link", "set_midi_note", "clear_midi_notes", "remove_midi_notes_range", "transpose_midi_notes_range", "move_midi_notes_range", "move_region", "split_region", "duplicate_region", "remove_region", "set_region_warp", "warp_region_audio_note_segment", "remove_region_audio_note_segment", "set_region_gain", "set_region_pitch", "set_track_name", "set_time_signature", "select_recording_take", "register_comp_take", "select_comp_take", "remove_comp_take", "set_comp_segments", "split_region_with_crossfade", "transport_play", "transport_pause", "transport_stop", "set_playhead", "set_loop", "set_cycle_range", "set_metronome", "set_tempo", "record_arm", "record_start", "record_stop", "record_commit", "save_project", "bounce_project", "bounce_stems", "render_target_catalog", "undo", "redo", "project_inspect", "plugin_catalog", "history.status", "history.log", "history.diff", "history.commit", "history.branch", "history.checkout", "history.tag", "history.revert", "history.cherry_pick"],
+        "history_operations_scope": "project_history_cli",
+        "command_action_operations_scope": "validated_project_actions",
         "mix_assistant_operations": ["analyze_dynamics", "apply_gain_staging", "analyze_mix"],
         "standard_effect_operations": ["set_eq"],
         "dynamics_effect_operations": ["add_plugin", "Aura/Limiter", "Aura/Compressor", "Aura/Gate", "Aura/Saturation", "Aura/Transient", "Aura/DeEsser", "Aura/Delay", "Aura/Reverb", "Aura/DynamicEQ", "Aura/MidSide", "Aura/Width"],
@@ -192,7 +194,21 @@ pub fn capabilities() -> serde_json::Value {
             "unknown_operations_rejected": true,
             "computer_use_may_bypass_project_root_only_with_unrestricted": true
         }
-    })
+    });
+    // History is exposed by ProjectHistoryStore/CLI, not by CommandAction.
+    // Keep it discoverable without claiming it can be submitted through the
+    // validated project-mutation transaction envelope.
+    if let Some(operations) = advertised["operations"].as_array_mut() {
+        operations.retain(|operation| {
+            !operation
+                .as_str()
+                .is_some_and(|name| name.starts_with("history."))
+        });
+    }
+    advertised["history_operations"] = serde_json::json!([
+        "history.status", "history.log", "history.diff", "history.commit",
+        "history.branch", "history.checkout", "history.tag", "history.revert",
+        "history.cherry_pick"
+    ]);
+    advertised
 }
-
-

@@ -4,7 +4,9 @@ use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;
 
-use crate::slint_ui::{fallback_template_tracks, midi_notes_path, AppWindow, Z_Track};
+use crate::slint_ui::{
+    fallback_template_tracks, midi_notes_path, store_onboarding_progress, AppWindow, Z_Track,
+};
 
 pub fn handle_command(
     command: &str,
@@ -88,6 +90,8 @@ pub fn handle_command(
     ui.set_spotlight_active(false);
     ui.set_show_sentinel(false);
     ui.set_quick_help_open(false);
+    ui.set_beginner_guide_open(false);
+    store_onboarding_progress(true, 6);
     ui.set_auto_save_status("Auto-save: New Project".into());
     ui.set_last_action(
         format!("TEMPLATE READY: {template} ({} TRACKS)", tracks.row_count()).into(),

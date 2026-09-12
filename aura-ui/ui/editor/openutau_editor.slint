@@ -42,7 +42,7 @@ export component Z_OpenUtauEditor inherits Rectangle {
             LineEdit { text <=> render-path; horizontal-stretch: 1; placeholder-text: "Rendered WAV/AIFF"; }
         }
         Rectangle { height: 1px; background: Style.border; }
-        Text { text: "Aura調教"; color: Style.text-primary; font-size: 13px; font-weight: 600; }
+            Text { text: "Aura調教"; color: Style.text-primary; font-size: 13px; font-weight: 600; }
         HorizontalLayout {
             spacing: 12px;
             VerticalLayout { horizontal-stretch: 1; Text { text: "しゃくり"; color: Style.text-tertiary; font-size: 10px; } Slider { value <=> scoop; } }

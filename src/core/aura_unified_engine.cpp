@@ -110,11 +110,17 @@ public:
 // This is deliberately not used for security or cryptography; its purpose is
 // to make generated fills vary without touching the audio callback or libc
 // rand() state, while retaining reproducibility within a process.
-#include "aura_unified_engine_part_1.inc"
-#include "aura_unified_engine_part_2.inc"
-#include "aura_unified_engine_part_3.inc"
-#include "aura_unified_engine_part_4.inc"
-#include "aura_unified_engine_part_5.inc"
-#include "aura_unified_engine_part_6.inc"
+#include "aura_unified_engine_part_1a.inc"
+#include "aura_unified_engine_part_1b.inc"
+#include "aura_unified_engine_part_2a.inc"
+#include "aura_unified_engine_part_2b.inc"
+#include "aura_unified_engine_part_3a.inc"
+#include "aura_unified_engine_part_3b.inc"
+#include "aura_unified_engine_part_4a.inc"
+#include "aura_unified_engine_part_4b.inc"
+#include "aura_unified_engine_part_5a.inc"
+#include "aura_unified_engine_part_5b.inc"
+#include "aura_unified_engine_part_6a.inc"
+#include "aura_unified_engine_part_6b.inc"
 #include "aura_unified_engine_part_7.inc"
 } // namespace Aura::Core::Engine

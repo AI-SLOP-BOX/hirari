@@ -43,7 +43,19 @@ mod tests {
     use super::NeuralGenesisKernel;
 
     #[test]
-    fn default_patch_is_a_valid_normalized_patch() {
-        assert!(NeuralGenesisKernel::new().audit_genesis());
+    fn prompt_mapping_preserves_shape_and_applies_style_overrides() {
+        let kernel = NeuralGenesisKernel::new();
+        let neutral = kernel.map_prompt_to_patch("");
+        assert_eq!(neutral.len(), 16);
+        assert!(neutral.iter().all(|value| (0.0..=1.0).contains(value)));
+        assert!(neutral.iter().all(|value| (*value - 0.5).abs() < f32::EPSILON));
+
+        let dark = kernel.map_prompt_to_patch("Dark cinematic bed");
+        assert_eq!(&dark[0..3], &[0.8, 0.2, 0.7]);
+        assert_eq!(dark[4], 0.5, "dark style must not alter lead detune");
+
+        let lead = kernel.map_prompt_to_patch("Bright Lead");
+        assert_eq!(&lead[0..2], &[0.2, 0.9]);
+        assert_eq!(lead[4], 0.8);
     }
 }

@@ -9,6 +9,7 @@ export component Z_WorkflowPage inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
     in property <string> status: "READY";
+    in property <image> analysis-image;
     width: 100%;
     height: 300px;
     background: Style.surface; border-width: 1px; border-color: Style.border;
@@ -29,6 +30,9 @@ export component Z_WorkflowPage inherits Rectangle {
                     Rectangle { height: 3px; background: Style.border; Rectangle { width: 42%; height: 100%; background: Style.brand; } }
                 }
             }
+        }
+        if (analysis-image.width > 0) : Image {
+            source: analysis-image; height: 56px; width: 100%; image-fit: fill;
         }
         Rectangle { vertical-stretch: 1; }
         Text { text: "Select a track or project item to begin editing."; font-size: 10px; color: Style.text-muted; }

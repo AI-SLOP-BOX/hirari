@@ -5,9 +5,9 @@ independent Slint modules; the order is an explicit build contract.
 
 ## Dependency direction
 
-`part_01` owns imports, exported action globals, model types, and `AppWindow`.
-`part_02` and `part_03` contain primary workflow layout and view composition.
-`part_04` contains telemetry/status layout and closing window structure.
+`app_window` owns imports, exported action globals, model types, and `AppWindow`.
+`automation_view` and `editor_views` contain primary workflow layout and view composition.
+`dialogs_and_tools` contains telemetry/status layout and closing window structure.
 Parts may consume `AppWindow` properties and action globals, but may not define
 another root component or import experimental views.
 

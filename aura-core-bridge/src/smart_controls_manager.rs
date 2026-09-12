@@ -119,10 +119,50 @@ impl SmartOrchestrator {
 
 #[cfg(test)]
 mod tests {
-    use super::SmartOrchestrator;
+    use super::{ControlMappingRust, SmartOrchestrator};
 
     #[test]
-    fn smart_control_audit_checks_normal_inverted_and_unknown_paths() {
-        assert!(SmartOrchestrator::new().audit_smart_controls_manager());
+    fn smart_control_mapping_clamps_inverts_and_rejects_invalid_ranges() {
+        let mut controls = SmartOrchestrator::new();
+        controls.add_mapping(
+            7,
+            ControlMappingRust {
+                track_id: 1,
+                plugin_id: 2,
+                param_id: 3,
+                range_min: -12.0,
+                range_max: 12.0,
+                inverted: false,
+            },
+        );
+        controls.add_mapping(
+            7,
+            ControlMappingRust {
+                track_id: 1,
+                plugin_id: 2,
+                param_id: 4,
+                range_min: 0.0,
+                range_max: 1.0,
+                inverted: true,
+            },
+        );
+        controls.add_mapping(
+            7,
+            ControlMappingRust {
+                track_id: 9,
+                plugin_id: 9,
+                param_id: 9,
+                range_min: 2.0,
+                range_max: 1.0,
+                inverted: false,
+            },
+        );
+
+        let mapped = controls.set_smart_value(7, 1.5);
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0], (1, 2, 3, 12.0));
+        assert!((mapped[1].3 - 0.0).abs() < f32::EPSILON);
+        assert!(controls.set_smart_value(7, f32::NAN).is_empty());
+        assert!(controls.set_smart_value(999, 0.5).is_empty());
     }
 }

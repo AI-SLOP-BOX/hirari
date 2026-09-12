@@ -47,7 +47,7 @@ impl ConsoleModelEngine {
     }
 
     pub fn reset(&mut self) {
-        // No state to reset in the current simple implementation
+        *self = Self::new();
     }
 
     /// INDUSTRIAL: Industrial-Grade Analogue Console Emulation (Divine Series).
@@ -74,5 +74,24 @@ impl ConsoleModelEngine {
                 band.f.is_finite() && band.g.is_finite() && band.q.is_finite() && band.q > 0.0
             })
             && self.threshold.is_finite()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConsoleModelEngine;
+
+    #[test]
+    fn reset_restores_console_parameters_and_processing_defaults() {
+        let mut console = ConsoleModelEngine::new();
+        console.drive = 3.0;
+        console.bands[0].g = 9.0;
+        console.threshold = -2.0;
+        console.reset();
+
+        assert_eq!(console.drive, 1.2);
+        assert_eq!(console.bands[0].g, 0.0);
+        assert_eq!(console.threshold, -20.0);
+        assert!(console.audit_console_model());
     }
 }

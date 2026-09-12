@@ -16,10 +16,17 @@ impl From<std::io::Error> for PianoVisualizerError { fn from(e: std::io::Error) 
 pub struct PianoVisualizer;
 impl PianoVisualizer {
     pub fn render_to_mp4(notes: &[PianoNote], audio: &[f32], sample_rate: u32, channels: u16, config: &PianoVisualizerConfig, output: &Path) -> Result<(), PianoVisualizerError> {
-        if notes.iter().any(|n| !n.start_seconds.is_finite() || !n.duration_seconds.is_finite() || n.pitch > 127) { return Err(PianoVisualizerError::InvalidInput("invalid piano note".into())); }
-        let temp = std::env::temp_dir().join(format!("aura-piano-{}.wav", std::process::id()));
+        validate_notes_and_config(notes, config, output)?;
+        if sample_rate == 0 || channels == 0 || channels > 32 || audio.is_empty()
+            || audio.len() % usize::from(channels) != 0
+            || audio.iter().any(|sample| !sample.is_finite())
+        {
+            return Err(PianoVisualizerError::InvalidInput("invalid piano visualizer audio buffer".into()));
+        }
+        let nonce = temp_nonce();
+        let temp = std::env::temp_dir().join(format!("aura-piano-{nonce}.wav"));
         write_wav(&temp, audio, sample_rate, channels)?;
-        let notes_path = std::env::temp_dir().join(format!("aura-piano-notes-{}.json", std::process::id()));
+        let notes_path = std::env::temp_dir().join(format!("aura-piano-notes-{nonce}.json"));
         std::fs::write(&notes_path, serde_json::to_vec(notes).map_err(|e| PianoVisualizerError::Encoder(e.to_string()))?)?;
         let result = render_with_script(&notes_path, &temp, config, output);
         let _ = std::fs::remove_file(&notes_path);
@@ -27,11 +34,98 @@ impl PianoVisualizer {
         result
     }
     pub fn render_to_mp4_from_wav<P: AsRef<Path>>(notes: &[PianoNote], wav: P, config: &PianoVisualizerConfig, output: &Path) -> Result<(), PianoVisualizerError> {
-        let notes_path = std::env::temp_dir().join(format!("aura-piano-notes-{}.json", std::process::id()));
+        validate_notes_and_config(notes, config, output)?;
+        let notes_path = std::env::temp_dir().join(format!("aura-piano-notes-{}.json", temp_nonce()));
         std::fs::write(&notes_path, serde_json::to_vec(notes).map_err(|e| PianoVisualizerError::Encoder(e.to_string()))?)?;
         let result = render_with_script(&notes_path, wav.as_ref(), config, output);
         let _ = std::fs::remove_file(notes_path);
         result
+    }
+}
+
+fn validate_notes_and_config(notes: &[PianoNote], config: &PianoVisualizerConfig, output: &Path) -> Result<(), PianoVisualizerError> {
+    if output.as_os_str().is_empty()
+        || config.width == 0 || config.height == 0 || config.fps == 0
+        || notes.iter().any(|n| {
+            !n.start_seconds.is_finite() || n.start_seconds < 0.0
+                || !n.duration_seconds.is_finite() || n.duration_seconds <= 0.0
+                || n.pitch > 127
+        })
+    {
+        return Err(PianoVisualizerError::InvalidInput("invalid piano visualizer input".into()));
+    }
+    Ok(())
+}
+
+fn temp_nonce() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_else(|_| u128::from(std::process::id()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_invalid_notes_and_render_dimensions_before_writing_files() {
+        let config = PianoVisualizerConfig { width: 0, ..Default::default() };
+        let result = PianoVisualizer::render_to_mp4(
+            &[PianoNote {
+                start_seconds: 0.0,
+                duration_seconds: 0.0,
+                pitch: 60,
+                velocity: 100,
+                channel: 0,
+            }],
+            &[],
+            48_000,
+            2,
+            &config,
+            Path::new("unused.mp4"),
+        );
+        assert!(matches!(result, Err(PianoVisualizerError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn accepts_valid_note_shape_without_running_encoder() {
+        let note = PianoNote {
+            start_seconds: 0.25,
+            duration_seconds: 0.5,
+            pitch: 60,
+            velocity: 100,
+            channel: 0,
+        };
+        assert!(note.start_seconds.is_finite());
+        assert!(note.duration_seconds > 0.0);
+        assert!(note.pitch <= 127);
+    }
+
+    #[test]
+    fn rejects_audio_that_cannot_form_complete_interleaved_frames() {
+        let result = PianoVisualizer::render_to_mp4(
+            &[],
+            &[0.0, 0.25, 0.5],
+            48_000,
+            2,
+            &PianoVisualizerConfig::default(),
+            Path::new("unused.mp4"),
+        );
+        assert!(matches!(result, Err(PianoVisualizerError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn rejects_non_finite_audio_before_writing_a_wav() {
+        let result = PianoVisualizer::render_to_mp4(
+            &[],
+            &[0.0, f32::NAN],
+            48_000,
+            2,
+            &PianoVisualizerConfig::default(),
+            Path::new("unused.mp4"),
+        );
+        assert!(matches!(result, Err(PianoVisualizerError::InvalidInput(_))));
     }
 }
 fn render_with_script(notes: &Path, wav: &Path, config: &PianoVisualizerConfig, output: &Path) -> Result<(), PianoVisualizerError> {
@@ -40,6 +134,9 @@ fn render_with_script(notes: &Path, wav: &Path, config: &PianoVisualizerConfig, 
     if status.success() { Ok(()) } else { Err(PianoVisualizerError::Encoder("piano visualizer renderer failed".into())) }
 }
 fn write_wav(path: &Path, samples: &[f32], sample_rate: u32, channels: u16) -> Result<(), PianoVisualizerError> {
+    if channels == 0 || samples.len() % usize::from(channels) != 0 || samples.iter().any(|sample| !sample.is_finite()) {
+        return Err(PianoVisualizerError::InvalidInput("audio buffer does not match channel layout".into()));
+    }
     let mut data = Vec::with_capacity(samples.len() * 2);
     for sample in samples { data.extend_from_slice(&((sample.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()); }
     let len = data.len() as u32; let rate = sample_rate * u32::from(channels) * 2;

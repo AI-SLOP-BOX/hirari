@@ -147,14 +147,33 @@ pub fn import_musicxml(xml: &str) -> Option<Vec<ScoreEvent>> {
 mod tests {
     use super::*;
     #[test]
-    fn accepts_ordered_notation() {
-        let e = ScoreEvent {
+    fn score_validation_and_lead_sheet_reject_bad_order_or_empty_text() {
+        let chord = ScoreEvent {
             kind: ScoreEventKind::Chord,
             tick: 0,
             text: "Cmaj7".into(),
             voice: 0,
         };
-        assert!(validate_score(&[e]));
+        let lyric = ScoreEvent {
+            kind: ScoreEventKind::Lyric,
+            tick: 12,
+            text: "hello".into(),
+            voice: 1,
+        };
+        assert!(validate_score(&[chord.clone(), lyric.clone()]));
+        assert_eq!(
+            events_for_voice(&[chord.clone(), lyric.clone()], 1),
+            vec![lyric.clone()]
+        );
+        assert!(render_lead_sheet(&[chord.clone(), lyric]).is_some());
+
+        let empty_text = ScoreEvent { text: "  ".into(), ..chord.clone() };
+        assert!(!validate_score(&[empty_text]));
+        assert!(!validate_score(&[
+            ScoreEvent { tick: 12, ..chord.clone() },
+            ScoreEvent { tick: 0, ..chord }
+        ]));
+        assert!(render_lead_sheet(&[]).is_some());
     }
     #[test]
     fn musicxml_roundtrip() {

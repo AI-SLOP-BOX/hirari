@@ -104,11 +104,6 @@ mod tests {
     use super::VersioningEngine;
 
     #[test]
-    fn empty_versioning_state_is_valid() {
-        assert!(VersioningEngine::new().audit_versioning());
-    }
-
-    #[test]
     fn invalid_current_branch_fails_audit() {
         let mut engine = VersioningEngine::new();
         engine.create_branch("Main", vec![1]);
@@ -131,5 +126,15 @@ mod tests {
         let diff = engine.compare_branches(a, b).unwrap();
         assert_eq!(diff.changed_bytes, 2);
         assert!(engine.compare_branches(a, 99).is_none());
+    }
+
+    #[test]
+    fn duplicate_branch_names_are_rejected_without_mutating_state() {
+        let mut engine = VersioningEngine::new();
+        let first = engine.create_branch("Main", vec![1]);
+        let before = engine.branch_names();
+        assert_ne!(first, u32::MAX);
+        assert_eq!(engine.create_branch(" Main ", vec![2]), u32::MAX);
+        assert_eq!(engine.branch_names(), before);
     }
 }

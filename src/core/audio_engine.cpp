@@ -123,7 +123,8 @@ bool AudioEngine::start_audio_device() const {
         rust::Vec<float> result;
         if (!m_engine) return result;
         const auto index = m_engine->get_active_telemetry_idx();
-        const auto& telemetry = m_engine->get_telemetry(index);
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(index, telemetry)) return result;
         float peakL = 0.0f;
         float peakR = 0.0f;
         const uint32_t count = std::min<uint32_t>(telemetry.count, 256u);

@@ -1,0 +1,57 @@
+import { Style } from "../style.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { RenderActions } from "../actions/render_actions.slint";
+
+export component Z_MasteringPage inherits Rectangle {
+    in property <image> gpu-waveform-image;
+    in property <image> gpu-spectrum-image;
+    in property <float> lufs-integrated: -120.0;
+    in property <float> true-peak-l: -120.0;
+    in property <float> true-peak-r: -120.0;
+    in property <bool> rendering: false;
+    in property <string> status: "READY TO EXPORT";
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 16px; spacing: 10px;
+        HorizontalLayout { height: 34px;
+            VerticalLayout { spacing: 2px; Text { text: "Mastering"; font-size: 18px; color: Style.text-primary; font-weight: 700; } Text { text: "Final loudness, spectrum and delivery"; font-size: 9px; color: Style.text-tertiary; } }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: rendering ? "RENDERING" : status; font-size: 9px; color: rendering ? Style.brand : Style.ok; vertical-alignment: center; }
+            Z_IconButton { icon: "START RENDER"; active-col: Style.brand; clicked => { RenderActions.start_render(""); } }
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        Rectangle { height: 134px; background: Style.surface-0; border-width: 1px; border-color: Style.border; border-radius: 5px;
+            if (gpu-waveform-image.width > 0) : Image { source: gpu-waveform-image; x: 8px; y: 8px; width: parent.width - 16px; height: parent.height - 16px; image-fit: fill; }
+            if (gpu-waveform-image.width <= 0) : Path { x: 8px; y: 24px; width: parent.width - 16px; height: 84px; stroke: Style.brand; stroke-width: 2px; MoveTo { x: 0; y: 44; } LineTo { x: 30; y: 34; } LineTo { x: 60; y: 52; } LineTo { x: 90; y: 20; } LineTo { x: 120; y: 42; } LineTo { x: 150; y: 28; } LineTo { x: 180; y: 58; } LineTo { x: 210; y: 36; } LineTo { x: 240; y: 48; } LineTo { x: 270; y: 22; } LineTo { x: 300; y: 45; } }
+            Text { text: "FINAL MASTER"; x: 12px; y: 10px; font-size: 8px; color: Style.text-tertiary; }
+        }
+        HorizontalLayout { spacing: 10px; vertical-stretch: 1;
+            Rectangle { horizontal-stretch: 1; background: Style.panel; border-width: 1px; border-color: Style.border; border-radius: 5px;
+                VerticalLayout { padding: 10px; spacing: 7px;
+                    Text { text: "Spectrum"; font-size: 11px; color: Style.text-primary; font-weight: 650; }
+                    if (gpu-spectrum-image.width > 0) : Image { source: gpu-spectrum-image; height: 104px; width: 100%; image-fit: fill; }
+                    if (gpu-spectrum-image.width <= 0) : HorizontalLayout { height: 104px; spacing: 3px; alignment: end; for level in [0.28, 0.5, 0.42, 0.75, 0.62, 0.88, 0.55, 0.36, 0.68, 0.48, 0.3, 0.2] : Rectangle { horizontal-stretch: 1; height: level * 104px; background: Style.brand.with-alpha(0.7); } }
+                    Text { text: "20 Hz                         1 kHz                    20 kHz"; font-size: 8px; color: Style.text-tertiary; }
+                }
+            }
+            Rectangle { width: 220px; background: Style.panel; border-width: 1px; border-color: Style.border; border-radius: 5px;
+                VerticalLayout { padding: 10px; spacing: 7px;
+                    Text { text: "Loudness"; font-size: 11px; color: Style.text-primary; font-weight: 650; }
+                    Text { text: "Integrated LUFS"; font-size: 8px; color: Style.text-tertiary; }
+                    Text { text: lufs-integrated > -120.0 ? Math.round(lufs-integrated * 10.0) / 10.0 + " LUFS" : "-- LUFS"; font-size: 22px; color: Style.brand; font-family: Style.numeric-font; }
+                    Text { text: "True Peak"; font-size: 8px; color: Style.text-tertiary; }
+                    Text { text: "L " + Math.round(true-peak-l * 10.0) / 10.0 + " dBTP   R " + Math.round(true-peak-r * 10.0) / 10.0 + " dBTP"; font-size: 10px; color: Style.text-secondary; font-family: Style.numeric-font; }
+                    Rectangle { vertical-stretch: 1; }
+                    Text { text: "Target  -14 LUFS / -1 dBTP"; font-size: 8px; color: Style.ok; }
+                }
+            }
+        }
+        HorizontalLayout { height: 72px; spacing: 8px;
+            for module in ["Linear EQ", "Multiband Glue", "Stereo Width", "Exciter", "Transparent Limiter"] : Rectangle {
+                horizontal-stretch: 1; background: Style.surface-2; border-width: 1px; border-color: Style.border; border-radius: 4px;
+                VerticalLayout { padding: 8px; spacing: 5px; Text { text: module; font-size: 9px; color: Style.text-secondary; font-weight: 600; } Rectangle { height: 24px; background: Style.surface-0; border-radius: 3px; Rectangle { x: 8px; y: 11px; width: 58%; height: 2px; background: Style.brand; } } Text { text: "ACTIVE"; font-size: 7px; color: Style.ok; } }
+            }
+        }
+        HorizontalLayout { height: 28px; Text { text: "Render Queue  ·  Master WAV  ·  Stems  ·  Metadata"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: rendering ? "Processing…" : "Queue idle"; font-size: 9px; color: rendering ? Style.brand : Style.text-secondary; vertical-alignment: center; } }
+    }
+}

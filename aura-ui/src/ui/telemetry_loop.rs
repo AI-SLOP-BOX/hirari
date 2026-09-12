@@ -22,6 +22,43 @@ fn recording_target_row(
     })
 }
 
+fn active_route_matrix(core: &AuraCore, tracks: &slint::VecModel<Z_Track>) -> Vec<bool> {
+    let mut matrix = vec![false; 100];
+    let Ok(routes) = serde_json::from_str::<serde_json::Value>(&core.audio_routes_json()) else {
+        return matrix;
+    };
+    let Some(routes) = routes.as_array() else {
+        return matrix;
+    };
+    for route in routes {
+        let Some(source) = route.get("source_id").and_then(serde_json::Value::as_u64) else {
+            continue;
+        };
+        let Some(destination) = route
+            .get("destination_id")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue;
+        };
+        let source_row = (0..tracks.row_count()).find(|&row| {
+            tracks
+                .row_data(row)
+                .is_some_and(|track| track.id.max(0) as u64 == source)
+        });
+        let destination_row = (0..tracks.row_count()).find(|&row| {
+            tracks
+                .row_data(row)
+                .is_some_and(|track| track.id.max(0) as u64 == destination)
+        });
+        if let (Some(source_row), Some(destination_row)) = (source_row, destination_row) {
+            if source_row < 10 && destination_row < 10 {
+                matrix[source_row * 10 + destination_row] = true;
+            }
+        }
+    }
+    matrix
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn install_telemetry_loop(
     ui: &AppWindow,
@@ -35,6 +72,7 @@ pub(crate) fn install_telemetry_loop(
     render_lease: Arc<Mutex<Option<crate::ui::operation_gate::OperationLease>>>,
     recording_target: Rc<RefCell<Option<u32>>>,
     peak_reset_generation: Rc<Cell<u64>>,
+    gpu_plot_store: crate::ui::gpu_canvas::PlotFrameStore,
 ) {
     let ui_timer_val = Arc::new(AtomicU64::new(0));
     // --- 4. ENGINE TELEMETRY LOOP ---
@@ -48,6 +86,7 @@ pub(crate) fn install_telemetry_loop(
     let tone_test_baseline_callbacks_tele = tone_test_baseline_callbacks.clone();
     let render_started_ms_tele = render_started_ms.clone();
     let render_output_path_tele = render_output_path.clone();
+    let gpu_plot_store_tele = gpu_plot_store.clone();
     let mut peak_holds: Vec<f32> = vec![0.0; 10];
     let mut last_peak_reset_generation = peak_reset_generation.get();
     let mut last_video_revision = 0u64;
@@ -247,6 +286,7 @@ pub(crate) fn install_telemetry_loop(
                     } else if waveform_due {
                         let waveform = core_tele.recording_capture_waveform(96);
                         if !waveform.is_empty() {
+                            gpu_plot_store_tele.publish_waveform(&waveform, 512);
                             ui.set_recording_waveform(slint::ModelRc::new(slint::VecModel::from(
                                 waveform,
                             )));
@@ -279,6 +319,9 @@ pub(crate) fn install_telemetry_loop(
                     }
                 }
                 ui.set_audio_device_ready(audio_ready);
+                ui.set_active_route_matrix(slint::ModelRc::new(slint::VecModel::from(
+                    active_route_matrix(&core_tele, &tracks_tele),
+                )));
                 // Keep the native CoreAudio catalog visible to the settings
                 // surface so device identity and I/O capabilities are
                 // inspectable during a live session.
@@ -414,6 +457,29 @@ pub(crate) fn install_telemetry_loop(
                 ui.set_tempo_event_beats(slint::ModelRc::new(slint::VecModel::from(tempo_beats)));
                 ui.set_tempo_event_bpms(slint::ModelRc::new(slint::VecModel::from(tempo_bpms)));
 
+                // Keep the GPU piano-roll texture driven by the selected track's
+                // actual MIDI notes, rather than an analyzer-shaped placeholder.
+                let selected_row = ui.get_selected_row();
+                if let Some(track) = tracks_tele.row_data(selected_row as usize) {
+                    let notes: Vec<_> = track.piano_roll_notes.iter().collect();
+                    let max_end = notes
+                        .iter()
+                        .map(|note| note.start_beat + note.length_beats)
+                        .fold(1.0_f32, f32::max);
+                    let normalized: Vec<[f32; 4]> = notes
+                        .iter()
+                        .map(|note| {
+                            [
+                                (note.start_beat / max_end).clamp(0.0, 1.0),
+                                (note.length_beats / max_end).clamp(0.002, 1.0),
+                                (note.pitch as f32 / 127.0).clamp(0.0, 1.0),
+                                (note.velocity as f32 / 127.0).clamp(0.0, 1.0),
+                            ]
+                        })
+                        .collect();
+                    gpu_plot_store_tele.publish_piano_notes(&normalized);
+                }
+
                 if engine_playing {
                     let ph = core_tele.samples_to_beats(core_tele.get_playhead());
                     if ph.is_finite() {
@@ -423,6 +489,7 @@ pub(crate) fn install_telemetry_loop(
                     if analysis_due {
                         let fft = core_tele.get_fft_bands();
                         if !fft.is_empty() {
+                            gpu_plot_store_tele.publish_spectrum(&fft);
                             ui.set_fft_data(slint::ModelRc::new(slint::VecModel::from(fft)));
                         }
 
@@ -488,6 +555,7 @@ pub(crate) fn install_telemetry_loop(
                     }
                 }
                 ui.set_pks(slint::ModelRc::new(slint::VecModel::from(combined)));
+                gpu_plot_store_tele.publish_meters(&peak_holds);
                 ui.set_pks_h(slint::ModelRc::new(slint::VecModel::from(
                     peak_holds.clone(),
                 )));
@@ -514,4 +582,33 @@ pub(crate) fn install_telemetry_loop(
     // lifetime of the process; otherwise render completion and device/watchdog
     // transitions remain stuck at their initial UI values.
     std::mem::forget(timer);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn route_matrix_is_empty_until_core_reports_connections() {
+        let core = AuraCore::new().expect("core must initialize");
+        let tracks = slint::VecModel::<Z_Track>::from(Vec::new());
+        assert_eq!(active_route_matrix(&core, &tracks), vec![false; 100]);
+    }
+
+    #[test]
+    fn route_matrix_reflects_a_core_connection_by_track_row() {
+        let core = AuraCore::new().expect("core must initialize");
+        let source_id = core.add_track(0);
+        let destination_id = core.add_track(0);
+        assert_ne!(source_id, 0);
+        assert_ne!(destination_id, 0);
+        assert!(core.set_route(source_id, destination_id, true));
+
+        let tracks = slint::VecModel::<Z_Track>::from(Vec::new());
+        crate::ui::track_model::sync_tracks_from_engine_allow_empty(&tracks, &core);
+        let matrix = active_route_matrix(&core, &tracks);
+        assert_eq!(matrix.len(), 100);
+        assert!(matrix[1]);
+        assert!(!matrix[0]);
+    }
 }

@@ -8,7 +8,7 @@ impl HarmonicReconstructorEngine {
     }
 
     pub fn reset(&mut self) {
-        // No state to reset in the current simple implementation
+        self.sample_rate = 48_000.0;
     }
 
     /// INDUSTRIAL: High-frequency 'Air' restoration using non-linear projection.
@@ -46,6 +46,12 @@ impl HarmonicReconstructorEngine {
 mod tests {
     use super::HarmonicReconstructorEngine;
 
+    #[test]
+    fn reset_restores_the_default_processing_rate() {
+        let mut engine = HarmonicReconstructorEngine::new(96_000.0);
+        engine.reset();
+        assert_eq!(engine.sample_rate, 48_000.0);
+    }
     #[test]
     fn harmonic_reconstructor_sanitizes_nonfinite_and_bounds_output() {
         let mut engine = HarmonicReconstructorEngine::new(48_000.0);

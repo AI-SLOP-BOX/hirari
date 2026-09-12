@@ -99,9 +99,7 @@ pub fn install(
             let result = selected
                 .as_deref()
                 .ok_or_else(|| "audio file selection cancelled".to_owned())
-                .and_then(|path| {
-                    Ok(core.preview_audio_file_async(path))
-                });
+                .and_then(|path| Ok(core.preview_audio_file_async(path)));
             if result.is_ok() {
                 if let Some(path) = selected_for_catalog {
                     let path_ref = std::path::Path::new(&path);
@@ -141,7 +139,12 @@ pub fn install(
             }
             if let Some(ui) = weak.upgrade() {
                 ui.set_last_action(match result {
-                    Ok(generation) => format!("PREVIEW QUEUED · generation {} · {}", generation, selected.unwrap_or_default()).into(),
+                    Ok(generation) => format!(
+                        "PREVIEW QUEUED · generation {} · {}",
+                        generation,
+                        selected.unwrap_or_default()
+                    )
+                    .into(),
                     Err(error) => {
                         ui_error_message(UiErrorKind::Project, &format!("preview failed: {error}"))
                             .into()

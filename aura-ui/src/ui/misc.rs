@@ -86,7 +86,14 @@ pub fn install(ui: &AppWindow, core: Rc<AuraCore>, tracks: Rc<VecModel<Z_Track>>
         let core = core.clone();
         let tracks = tracks.clone();
         move |id, low_band, low_cut, high_band, high_cut| {
-            if !core.set_track_eq(id as u32, low_band, low_cut, high_band, high_cut) {
+            let accepted =
+                serde_json::from_str::<serde_json::Value>(&core.set_track_eq_diagnostic_json(
+                    id as u32, low_band, low_cut, high_band, high_cut,
+                ))
+                .ok()
+                .and_then(|value| value.get("ok").and_then(serde_json::Value::as_bool))
+                .unwrap_or(false);
+            if !accepted {
                 return;
             }
             for row in 0..tracks.row_count() {

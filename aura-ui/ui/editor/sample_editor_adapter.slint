@@ -12,6 +12,8 @@ export component Z_SampleEditorAdapter {
     in property <float> flex-ratio: 1.0;
     in property <float> pitch-semitones: 0.0;
     in property <int> loop-count: 1;
+    in property <image> gpu-waveform-image;
+    in property <image> gpu-spectrum-image;
     callback apply-gain(float);
     callback apply-fades(float, float);
     callback apply-reverse(bool);
@@ -42,6 +44,8 @@ export component Z_SampleEditorAdapter {
         flex_ratio: root.flex-ratio;
         pitch_semitones: root.pitch-semitones;
         loop_count: root.loop-count;
+        gpu-waveform-image: root.gpu-waveform-image;
+        gpu-spectrum-image: root.gpu-spectrum-image;
         apply-gain(value) => { root.apply-gain(value); }
         apply-fades(fade-in, fade-out) => { root.apply-fades(fade-in, fade-out); }
         apply-reverse(value) => { root.apply-reverse(value); }

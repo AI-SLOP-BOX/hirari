@@ -122,7 +122,21 @@ mod tests {
     use super::DynamicsOrchestrator;
 
     #[test]
-    fn dynamics_audit_checks_default_recommendation() {
-        assert!(DynamicsOrchestrator.audit_dynamics());
+    fn compressor_and_gate_recommendations_cover_empty_and_signal_paths() {
+        let orchestrator = DynamicsOrchestrator;
+        let empty = orchestrator.suggest_parameters(&[]);
+        assert_eq!(empty.threshold_db, -18.0);
+        assert_eq!(empty.ratio, 2.0);
+        assert_eq!(empty.attack_ms, 10.0);
+        assert_eq!(empty.release_ms, 80.0);
+        assert_eq!(orchestrator.suggest_gate_threshold(&[]), -60.0);
+
+        let sustained = orchestrator.suggest_parameters(&[0.25; 128]);
+        assert!(sustained.ratio >= 1.0);
+        assert!(sustained.attack_ms > 0.0 && sustained.release_ms > 0.0);
+
+        let gate = orchestrator.suggest_gate_threshold(&[0.001, 0.01, 0.1, f32::NAN]);
+        assert!(gate.is_finite());
+        assert!(gate < 0.0);
     }
 }

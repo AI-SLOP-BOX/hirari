@@ -27,7 +27,12 @@ pub(crate) fn update_analysis_telemetry(
     // track/clip only after the worker has published a complete peak vector.
     let completed_requests: Vec<(u64, u32, u32)> = waveform_requests()
         .lock()
-        .map(|requests| requests.iter().map(|(id, &(track, clip))| (*id, track, clip)).collect())
+        .map(|requests| {
+            requests
+                .iter()
+                .map(|(id, &(track, clip))| (*id, track, clip))
+                .collect()
+        })
         .unwrap_or_default();
     for (request, track_id, clip_id) in completed_requests {
         if core.region_waveform_pending(request) {
@@ -36,8 +41,12 @@ pub(crate) fn update_analysis_telemetry(
         let waveform = core.poll_region_waveform(request);
         if !waveform.is_empty() {
             for index in 0..tracks.row_count() {
-                let Some(mut track) = tracks.row_data(index) else { continue; };
-                if track.id as u32 != track_id { continue; }
+                let Some(mut track) = tracks.row_data(index) else {
+                    continue;
+                };
+                if track.id as u32 != track_id {
+                    continue;
+                }
                 let mut clips: Vec<Z_Clip> = track.clips.iter().collect();
                 if let Some(clip) = clips.iter_mut().find(|clip| clip.id as u32 == clip_id) {
                     clip.points = slint::ModelRc::new(slint::VecModel::from(waveform.clone()));
@@ -60,13 +69,20 @@ pub(crate) fn update_analysis_telemetry(
                 continue;
             };
             for clip in track.clips.iter() {
-                if clip.points.row_count() != 0 { continue; }
+                if clip.points.row_count() != 0 {
+                    continue;
+                }
                 let already_queued = waveform_requests()
                     .lock()
-                    .map(|requests| requests.values().any(|&(track_id, clip_id)|
-                        track_id == track.id as u32 && clip_id == clip.id as u32))
+                    .map(|requests| {
+                        requests.values().any(|&(track_id, clip_id)| {
+                            track_id == track.id as u32 && clip_id == clip.id as u32
+                        })
+                    })
                     .unwrap_or(true);
-                if already_queued { continue; }
+                if already_queued {
+                    continue;
+                }
                 let request = core.queue_region_waveform(track.id as u32, clip.id as u32);
                 if request != 0 {
                     if let Ok(mut requests) = waveform_requests().lock() {

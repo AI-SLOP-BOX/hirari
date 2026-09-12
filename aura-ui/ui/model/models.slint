@@ -41,3 +41,8 @@ export struct Z_Extension_Entry {
     enabled: bool,
     visible: bool
 }
+
+// Canonical native routing connection used by the UI matrix. A connection is
+// enabled when it is present in the engine snapshot; gain is retained for
+// future route-level metering and display.
+export struct Z_Route { source_id: int, destination_id: int, gain: float }

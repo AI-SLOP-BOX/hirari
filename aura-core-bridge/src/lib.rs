@@ -311,6 +311,17 @@ pub mod ffi {
         fn remove_region(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn duplicate_region(self: &AudioEngine, tid: u32, rid: u32, start_sample: u64) -> u32;
         fn set_region_gain(self: &AudioEngine, tid: u32, rid: u32, gain: f32) -> bool;
+        fn set_region_range_edit(
+            self: &AudioEngine,
+            tid: u32,
+            rid: u32,
+            start: u64,
+            end: u64,
+            gain: f32,
+            fade_in: u64,
+            fade_out: u64,
+        ) -> bool;
+        fn clear_region_range_edits(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn set_region_muted(self: &AudioEngine, tid: u32, rid: u32, muted: bool) -> bool;
         fn set_region_fades(
             self: &AudioEngine,

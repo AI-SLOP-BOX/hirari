@@ -1,2 +1,2 @@
-include!("slint_ui_parts/part_001.rs");
-include!("slint_ui_parts/part_002.rs");
+include!("slint_ui_parts/app_state.rs");
+include!("slint_ui_parts/project_persistence.rs");

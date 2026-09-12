@@ -57,10 +57,15 @@ impl AccessibilityState {
 mod tests {
     use super::*;
     #[test]
-    fn focus_is_bounded() {
+    fn focus_trims_valid_ids_and_rejects_invalid_boundaries() {
         let mut s = AccessibilityState::default();
-        assert!(s.set_focus(Some("mixer")));
+        assert!(s.set_focus(Some("  mixer  ")));
+        assert_eq!(s.focused_id.as_deref(), Some("mixer"));
         assert!(s.validate());
+        assert!(!s.set_focus(Some("   ")));
+        assert!(!s.set_focus(Some("bad\0id")));
+        assert!(!s.set_focus(Some(&"x".repeat(257))));
+        assert_eq!(s.focused_id.as_deref(), Some("mixer"));
     }
     #[test]
     fn screen_reader_announcements_are_queued_only_when_enabled() {

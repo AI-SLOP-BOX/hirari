@@ -26,6 +26,7 @@ export component Z_PianoRoll {
     in-out property <[float]> cc11: [];
     in-out property <[float]> cc64: [];
     in property <float> ph;
+    in property <image> gpu-piano-image;
     in property <int> active_tool;
     // Switches the keyboard lane into a General MIDI drum-lane view.
     in-out property <bool> drum-mode: false;
@@ -79,6 +80,10 @@ export component Z_PianoRoll {
                     viewport-height: 84 * 14px;
                     Rectangle {
                         background: Style.surface;
+                        if (gpu-piano-image.width > 0) : Image {
+                            source: gpu-piano-image; x: 0; y: 0; width: parent.width; height: parent.height;
+                            image-fit: fill; opacity: 0.24;
+                        }
                         TouchArea { clicked => {
                             let beat = self.mouse_x / (Style.grid-step / 1px * zoom_lvl * 1px);
                             let snap = 4.0 / snap_division.max(1.0);

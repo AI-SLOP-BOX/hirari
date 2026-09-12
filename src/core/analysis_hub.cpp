@@ -46,7 +46,8 @@ namespace Aura::Core::BridgeFFI {
         rust::Vec<float> result;
         if (!m_engine) return result;
         result.reserve(512);
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return result;
         
         const double sampleRate = std::clamp(m_engine->get_sample_rate(), 8000.0, 384000.0);
         const double nyquist = sampleRate * 0.5;
@@ -132,7 +133,8 @@ namespace Aura::Core::BridgeFFI {
         rust::Vec<float> result;
         if (!m_engine) return result;
         result.reserve(128);
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return result;
         for (size_t i = 0; i < 128; ++i) {
             const size_t bin = std::min<size_t>(i * 4, 511);
             const float current = telemetry.spectrum[bin];
@@ -164,7 +166,8 @@ namespace Aura::Core::BridgeFFI {
         // advice packet in its lock-free queue; expensive analysis stays off the
         // caller's (potentially audio) thread.
         const auto meter = m_engine->getMasterMeterData();
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return;
         const float truePeak = std::max(static_cast<float>(meter.truePeakL),
                                         static_cast<float>(meter.truePeakR));
         ::Aura::Core::AI::NeuralBridge::getInstance().evaluateSignal(
@@ -201,7 +204,8 @@ namespace Aura::Core::BridgeFFI {
         rust::Vec<float> result;
         if (!m_engine) return result;
         result.reserve(128);
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return result;
         for (size_t i = 1; i + 1 < 512; ++i) {
             const float value = telemetry.spectrum[i];
             if (value >= telemetry.spectrum[i - 1] && value >= telemetry.spectrum[i + 1] && value > 0.01f) {
@@ -226,7 +230,8 @@ namespace Aura::Core::BridgeFFI {
         rust::Vec<float> result;
         if (!m_engine) return result;
         result.reserve(128);
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return result;
         for (size_t band = 0; band < 128; ++band) {
             const float center = static_cast<float>(band) / 127.0f * 511.0f;
             const float width = std::max(1.0f, 511.0f / 127.0f);
@@ -252,7 +257,8 @@ namespace Aura::Core::BridgeFFI {
     rust::Vec<float> AnalysisHub::get_motion_vectors_v() const {
         rust::Vec<float> result;
         if (!m_engine) return result;
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return result;
         result.reserve(128 * 2);
         // Encode spectral motion as a compact vector field: x is signed local
         // spectral slope, y is positive onset/energy movement. This keeps the
@@ -272,7 +278,8 @@ namespace Aura::Core::BridgeFFI {
 
     float AnalysisHub::get_motion_energy() const {
         if (!m_engine) return 0.0f;
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return 0.0f;
         float energy = 0.0f;
         for (size_t i = 1; i < 512; ++i) energy += std::fabs(telemetry.spectrum[i] - telemetry.spectrum[i - 1]);
         return energy / 511.0f;
@@ -281,7 +288,8 @@ namespace Aura::Core::BridgeFFI {
     rust::Vec<float> AnalysisHub::get_synesthesia_colors_v() const {
         rust::Vec<float> result;
         if (!m_engine) return result;
-        const auto& telemetry = m_engine->get_telemetry(m_engine->get_active_telemetry_idx());
+        ::Aura::Core::Engine::AuraUnifiedEngine::TelemetryData telemetry{};
+        if (!m_engine->copy_telemetry(m_engine->get_active_telemetry_idx(), telemetry)) return result;
         result.reserve(128 * 3);
         // Map each spectral band to a stable RGB triplet. Hue follows pitch
         // class while brightness follows measured band energy.

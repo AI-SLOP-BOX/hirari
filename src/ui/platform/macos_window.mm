@@ -37,7 +37,7 @@
                                              styleMask:style
                                                backing:NSBackingStoreBuffered
                                                  defer:NO];
-    [_window setTitle:@"Tinja"];
+    [_window setTitle:@"Aura"];
     [_window setDelegate:self];
     [_window setBackgroundColor:[NSColor blackColor]];
     
@@ -65,11 +65,11 @@
     });
     const bool audioReady = audioDriver->start(sampleRate, blockSize);
     if (!audioReady) {
-    [_window setTitle:@"Tinja — Audio Device Unavailable"];
+    [_window setTitle:@"Aura — Audio Device Unavailable"];
         NSAlert *alert = [[NSAlert alloc] init];
         [alert setAlertStyle:NSAlertStyleWarning];
         [alert setMessageText:@"Audio device unavailable"];
-    [alert setInformativeText:@"Tinja opened without audio I/O. Check the selected device and try again."];
+    [alert setInformativeText:@"Aura opened without audio I/O. Check the selected device and try again."];
         [alert addButtonWithTitle:@"OK"];
         [alert runModal];
     } else {

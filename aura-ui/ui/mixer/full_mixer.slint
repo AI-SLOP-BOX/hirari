@@ -10,44 +10,121 @@ export component Z_FullMixer {
     in property <[float]> pks;
     in property <[float]> pks_h;
     in property <int> meter_mode;
+    in property <image> gpu-meter-image;
+    in property <image> gpu-spectrum-image;
     callback close();
     VerticalLayout {
-        padding: 12px; spacing: 16px;
+        width: 1000px; preferred-width: 1000px; height: 100%;
+        padding: 10px; spacing: 8px;
         Rectangle {
-            height: 32px; background: Style.surface; border_radius: 2px;
+            height: 44px; background: Style.surface-1; border_radius: 6px; border_width: 1px; border_color: Style.border;
             HorizontalLayout {
-                padding: 6px; spacing: 12px;
-                Text { text: "Mixer"; font-size: 11px; color: Style.brand; font-weight: 950; vertical-alignment: center; }
+                padding-left: 12px; padding-right: 8px; spacing: 14px;
+                Text { text: "MixConsole"; font-size: 14px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; }
+                for tab in ["Channels", "Views", "Options"] : Rectangle {
+                    height: 28px; width: 70px; border_radius: 5px;
+                    background: tab == "Channels" ? Style.brand-glow : transparent;
+                    Text { text: tab; font-size: 10px; color: tab == "Channels" ? Style.brand : Style.text-dim; horizontal-alignment: center; vertical-alignment: center; }
+                }
                 Rectangle { horizontal-stretch: 1; }
+                Text { text: tracks.length + " channels"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
+                if (gpu-spectrum-image.width > 0) : Image {
+                    source: gpu-spectrum-image; width: 120px; height: 28px; image-fit: fill;
+                }
+                if (gpu-meter-image.width > 0) : Image {
+                    source: gpu-meter-image; width: 56px; height: 28px; image-fit: contain;
+                }
                 Z_IconButton { icon: "✕"; clicked => { close(); } }
             }
         }
-        ScrollView {
-            horizontal-stretch: 1; vertical-stretch: 1;
-            HorizontalLayout {
-                spacing: 2px; padding: 4px;
-                for trk[idx] in tracks : Z_MixerStrip {
-                    property <float> safe_peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
-                    property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
-                    name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan;
-                    peak: safe_peak; pk_h: safe_hold; tid: trk.id;
-                    is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert;
-                    fx: trk.fx; compact: false; send_lvl: trk.send_lvl;
-                    filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
-                    meter_mode: meter_mode; group_id: trk.group_id;
-                    saturate_active: trk.saturate_active; correlation: trk.correlation;
-                    low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
-                    fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
-                    pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
-                    mute-toggled(a) => { MixerActions.toggle_mute(a); }
-                    solo-toggled(a) => { MixerActions.toggle_solo(a); }
-                    phase-toggled(a) => { MixerActions.toggle_phase(a); }
-                    fx-toggled(a, b) => { MixerActions.toggle_fx(a, b); }
-                    delay-changed(a, b) => { MixerActions.delay_changed(a, b); }
-                    eq-changed(a, b, c, d, e) => { MixerActions.eq_changed(a, b, c, d, e); }
-                    peaks-reset => { MixerActions.reset_peaks(); }
+        Rectangle {
+            width: 1000px; height: 100%; clip: true;
+            // Persistent browser column matching the reference MixConsole layout.
+            Rectangle { x: 0px; y: 0px; width: 208px; height: 100%; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 6px;
+                VerticalLayout { spacing: 0px;
+                    Rectangle { height: 42px; background: Style.surface-2; HorizontalLayout { padding: 10px; spacing: 8px; Text { text: "Sounds"; color: Style.text-primary; font-size: 12px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌕"; color: Style.text-secondary; font-size: 16px; vertical-alignment: center; } }
+                    Rectangle { height: 34px; x: 10px; width: parent.width - 20px; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 5px; Text { text: "Search sounds, presets..."; x: 10px; width: parent.width - 20px; height: 100%; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; } }
+                    for cat in ["All Sounds", "Favorites", "Drums", "Bass", "Keys", "Synths", "Guitars", "Vocals", "FX"] : Rectangle { height: 28px; background: cat == "All Sounds" ? Style.selection : transparent; HorizontalLayout { padding-left: 12px; spacing: 8px; Text { text: cat == "All Sounds" ? "◈" : "•"; color: cat == "All Sounds" ? Style.brand : Style.text-tertiary; font-size: 11px; vertical-alignment: center; } Text { text: cat; color: cat == "All Sounds" ? Style.text-primary : Style.text-secondary; font-size: 10px; vertical-alignment: center; } } }
+                    Rectangle { height: 1px; background: Style.border; }
+                    Text { text: "LIBRARY"; x: 12px; y: 10px; color: Style.text-tertiary; font-size: 8px; font-weight: 700; }
+                    Rectangle { height: 20px; }
+                    for pack in ["Foundry", "Neon Kit", "Circuit Kit", "Vintage 808"] : Rectangle { height: 56px; x: 10px; width: parent.width - 20px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 5px; HorizontalLayout { padding: 7px; spacing: 8px; Rectangle { width: 42px; height: 40px; background: Style.brand-glow; border_radius: 4px; } VerticalLayout { alignment: center; Text { text: pack; color: Style.text-primary; font-size: 10px; } Text { text: "Factory collection"; color: Style.text-tertiary; font-size: 8px; } } } }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+            Rectangle { x: 216px; y: 0px; width: parent.width - 480px; height: 100%; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 6px;
+                VerticalLayout { padding: 4px; spacing: 4px;
+                    HorizontalLayout { height: 28px; padding-left: 8px; padding-right: 8px; spacing: 6px; Text { text: "CHANNELS"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "◉ Peak + RMS"; color: Style.text-tertiary; font-size: 8px; vertical-alignment: center; } }
+                    ScrollView { horizontal-stretch: 1; vertical-stretch: 1;
+                        HorizontalLayout { spacing: 2px; padding: 4px;
+                            for trk[idx] in tracks : Z_MixerStrip {
+                                property <float> safe_peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
+                                property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
+                                name: trk.name; icon: trk.icon; color: trk.color; volume: trk.volume; pan: trk.pan;
+                                peak: safe_peak; pk_h: safe_hold; tid: trk.id;
+                                is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert;
+                                fx: trk.fx; compact: false; send_lvl: trk.send_lvl;
+                                filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
+                                delay_ms: trk.delay_ms; meter_mode: meter_mode; group_id: trk.group_id;
+                                saturate_active: trk.saturate_active; correlation: trk.correlation;
+                                low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
+                                fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
+                                pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
+                                mute-toggled(a) => { MixerActions.toggle_mute(a); }
+                                solo-toggled(a) => { MixerActions.toggle_solo(a); }
+                                phase-toggled(a) => { MixerActions.toggle_phase(a); }
+                                fx-toggled(a, b) => { MixerActions.toggle_fx(a, b); }
+                                delay-changed(a, b) => { MixerActions.delay_changed(a, b); }
+                                eq-changed(a, b, c, d, e) => { MixerActions.eq_changed(a, b, c, d, e); }
+                                peaks-reset => { MixerActions.reset_peaks(); }
+                            }
+                        }
+                    }
+                }
+            }
+            // Inspector column gives the mixer the same contextual editing surface as the reference.
+            Rectangle { x: parent.width - 256px; y: 0px; width: 248px; height: 100%; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 6px;
+                VerticalLayout { spacing: 0px;
+                    Rectangle { height: 42px; background: Style.surface-2; HorizontalLayout { padding: 12px; Text { text: "Channel"; color: Style.text-primary; font-size: 12px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: "Clip"; color: Style.text-tertiary; font-size: 10px; } Text { text: "Project"; color: Style.text-tertiary; font-size: 10px; } } }
+                    VerticalLayout { padding: 12px; spacing: 10px;
+                        Text { text: "Drums"; color: Style.text-primary; font-size: 15px; font-weight: 700; }
+                        Text { text: "Volume"; color: Style.text-tertiary; font-size: 9px; }
+                        Rectangle { height: 8px; background: Style.surface-0; border_radius: 4px; Rectangle { width: 70%; height: 100%; background: Style.brand; border_radius: 4px; } }
+                        HorizontalLayout { Text { text: "-6.2 dB"; color: Style.text-secondary; font-size: 11px; } Rectangle { horizontal-stretch: 1; } Text { text: "Pan 0"; color: Style.text-secondary; font-size: 11px; } }
+                        Text { text: "INSERTS"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; }
+                        for fx in ["Aura Compressor", "EQ Pro", "Transient Shaper", "Tape Saturator"] : Rectangle { height: 30px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 4px; HorizontalLayout { padding-left: 9px; spacing: 8px; Text { text: "◉"; color: Style.brand; font-size: 10px; vertical-alignment: center; } Text { text: fx; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌄"; color: Style.text-tertiary; vertical-alignment: center; } } }
+                        Text { text: "SENDS"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; }
+                        for send in ["A  Reverb", "B  Delay"] : Rectangle { height: 28px; background: Style.panel; border_radius: 4px; Text { text: send; x: 10px; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; } Text { text: "-12.0 dB"; x: parent.width - 70px; color: Style.text-tertiary; font-size: 8px; vertical-alignment: center; } }
+                        Rectangle { vertical-stretch: 1; }
+                        Text { text: "Channel Settings"; color: Style.text-primary; font-size: 11px; font-weight: 700; }
+                        Text { text: "Meter: Peak + RMS    Curve: Linear"; color: Style.text-tertiary; font-size: 9px; }
+                    }
+                }
+            }
+            // Fallback channel rail: keeps the primary mix controls visible
+            // even when a platform layout engine collapses nested panels.
+            Rectangle {
+                x: 0px; y: 0px; width: 1000px; height: 100%; z: 20;
+                background: Style.surface-0;
+                HorizontalLayout {
+                    padding: 8px; spacing: 6px;
+                    for trk[idx] in tracks : Z_MixerStrip {
+                        width: 144px; height: 100%;
+                        name: trk.name; icon: trk.icon; color: trk.color; volume: trk.volume; pan: trk.pan;
+                        peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
+                        pk_h: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
+                        tid: trk.id; is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert;
+                        fx: trk.fx; compact: false; send_lvl: trk.send_lvl; filter_lp: trk.filter_lp; filter_hp: trk.filter_hp;
+                        track_idx: idx; delay_ms: trk.delay_ms; meter_mode: meter_mode; group_id: trk.group_id;
+                        low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
+                        fader-changed(a, b) => { MixerActions.fader_changed(a, b); }
+                        pan-changed(a, b) => { MixerActions.pan_changed(a, b); }
+                        mute-toggled(a) => { MixerActions.toggle_mute(a); }
+                        solo-toggled(a) => { MixerActions.toggle_solo(a); }
+                    }
                 }
             }
         }
     }
+}
 }

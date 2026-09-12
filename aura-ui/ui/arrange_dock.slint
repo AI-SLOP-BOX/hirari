@@ -1,0 +1,215 @@
+import { ScrollView } from "std-widgets.slint";
+import { Style } from "style.slint";
+import { Z_IconButton } from "primitives/icon_button.slint";
+
+// Desktop-first Arrange companion surface. The timeline remains owned by the
+// engine-backed editor; this dock supplies the persistent browser and the
+// instrument detail area shown in a modern production DAW.
+export component Z_ArrangeDock inherits Rectangle {
+    in property <image> gpu-waveform-image;
+    in property <image> gpu-spectrum-image;
+    in property <image> gpu-meter-image;
+    in property <image> gpu-piano-image;
+    in-out property <int> browser-tab: 0;
+    in-out property <int> synth-tab: 0;
+    in-out property <bool> browser-open: true;
+    in-out property <bool> synth-open: true;
+    // Keep the desktop proportions of the reference UI while remaining usable
+    // in the compact native preview window.
+    property <length> media-width: self.width * 0.22;
+    property <length> inspector-width: self.width * 0.19;
+    callback browser-selection(string);
+
+    background: transparent;
+    border-width: 0;
+
+    // Left media browser: the arrange workspace keeps this rail visible,
+    // matching the reference desktop DAW instead of hiding it behind menus.
+    Rectangle { x: 0px; y: 0px; width: media-width; height: parent.height - (synth-open ? 306px : 0px); background: Style.surface-1; border-width: 1px; border-color: Style.border; border-radius: 5px;
+        VerticalLayout { spacing: 0px;
+            Rectangle { height: 40px; background: Style.surface-2; HorizontalLayout { padding-left: 10px; padding-right: 8px; spacing: 8px; for tab[idx] in ["Sounds", "Plugins", "Library"] : Rectangle { horizontal-stretch: 1; height: 38px; Rectangle { y: parent.height - 2px; width: 100%; height: 2px; background: browser-tab == idx ? Style.brand : transparent; } Text { text: tab; width: 100%; height: 100%; color: browser-tab == idx ? Style.text-primary : Style.text-tertiary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { browser-tab = idx; } } } } }
+            Rectangle { height: 36px; x: 10px; width: parent.width - 20px; background: Style.surface-0; border-width: 1px; border-color: Style.border; border-radius: 5px; Text { text: "⌕  Search sounds, presets..."; x: 9px; width: parent.width - 18px; height: 100%; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; } }
+            Text { text: browser-tab == 0 ? "ALL SOUNDS" : (browser-tab == 1 ? "PLUG-INS" : "USER LIBRARY"); x: 12px; color: Style.text-tertiary; font-size: 8px; font-weight: 700; }
+            Rectangle { height: 26px; }
+            for item[idx] in ["Foundry", "Neon Kit", "Pulse Kit", "Asphalt Kit", "Maple Kit", "Circuit Kit", "Vintage 808", "Solstice Kit"] : Rectangle { height: 58px; x: 10px; width: parent.width - 20px; background: idx == 0 ? Style.selection : Style.panel; border-width: 1px; border-color: idx == 0 ? Style.brand.with-alpha(0.6) : Style.border; border-radius: 5px; HorizontalLayout { padding: 7px; spacing: 8px; Rectangle { width: 54px; height: 42px; background: [#2457C5, #4C1FA8, #087A86, #8C4A2F, #3E8D67, #4E5B9A, #73451F, #48516B][idx]; border-radius: 4px; Image { source: @image-url("assets/waveform.svg"); width: 46px; height: 34px; x: 4px; y: 4px; opacity: 0.8; } } VerticalLayout { alignment: center; Text { text: item; color: Style.text-primary; font-size: 10px; } Text { text: idx == 0 ? "Modern drums for modern music" : "Aura library"; color: Style.text-tertiary; font-size: 8px; wrap: word-wrap; } } } TouchArea { clicked => { browser-selection(item); } } }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+
+    // The timeline is deliberately owned by the dock rather than left as a
+    // transparent hole between the browser and inspector.  Keeping one
+    // concrete canvas here fixes the old arrange/track layers appearing on
+    // top of one another after a view switch.
+    Rectangle {
+        x: media-width; y: 0px;
+        width: parent.width - (browser-open ? media-width + inspector-width : media-width);
+        height: parent.height - (synth-open ? 306px : 0px);
+        background: Style.base; border-width: 1px; border-color: Style.border;
+        clip: true;
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle { height: 38px; background: Style.surface-2; border-width: 1px; border-color: Style.border;
+                HorizontalLayout { padding-left: 12px; padding-right: 10px; spacing: 12px;
+                    Text { text: "ARRANGEMENT"; color: Style.text-primary; font-size: 11px; font-weight: 700; }
+                    Text { text: "120 BPM"; color: Style.brand; font-size: 10px; font-family: Style.numeric-font; font-weight: 700; }
+                    Text { text: "4/4"; color: Style.text-tertiary; font-size: 10px; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: "C minor"; color: Style.text-secondary; font-size: 9px; }
+                    Text { text: "Snap 1/16"; color: Style.text-tertiary; font-size: 9px; }
+                }
+            }
+            Rectangle { height: 28px; background: Style.surface-1; border-width: 1px; border-color: Style.border;
+                HorizontalLayout { padding-left: 106px; padding-right: 8px; spacing: 0px;
+                    for bar in ["1", "5", "9", "13", "17", "21", "25", "29", "33"] : Text {
+                        horizontal-stretch: 1; text: bar; color: Style.text-tertiary; font-size: 8px; vertical-alignment: center;
+                    }
+                }
+            }
+            ScrollView {
+                vertical-stretch: 1; viewport-height: 520px;
+                VerticalLayout {
+                    spacing: 1px; padding-bottom: 8px;
+                    for lane[idx] in ["Drums", "Bass", "Synth Pad", "Lead", "Guitar", "Vocals", "FX"] : Rectangle {
+                        height: 58px; background: idx == 0 ? Style.panel-h : Style.surface-1;
+                        border-width: 1px; border-color: Style.border;
+                        HorizontalLayout {
+                            Rectangle { width: 104px; background: idx == 0 ? Style.brand-glow : Style.panel;
+                                VerticalLayout { padding-left: 10px; alignment: center;
+                                    Text { text: lane; color: Style.text-primary; font-size: 10px; font-weight: 600; }
+                                    Text { text: idx == 5 ? "Audio" : "MIDI"; color: Style.text-tertiary; font-size: 8px; }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; clip: true;
+                                // A small, high-contrast clip map makes the
+                                // timeline legible even before engine media is
+                                // loaded; real clips can replace these blocks.
+                                if (idx == 0) : Rectangle { x: 8px; y: 10px; width: 31%; height: 38px; background: #7856D6; border-radius: 4px; Text { text: "Drive Kit"; x: 8px; color: #F5F3FF; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 0) : Rectangle { x: parent.width * 0.33; y: 10px; width: 34%; height: 38px; background: #6948C8; border-radius: 4px; Text { text: "Drive Kit"; x: 8px; color: #F5F3FF; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 1) : Rectangle { x: parent.width * 0.06; y: 10px; width: 41%; height: 38px; background: #438A62; border-radius: 4px; Text { text: "Sub Motion"; x: 8px; color: #F0FFF5; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 1) : Rectangle { x: parent.width * 0.52; y: 10px; width: 36%; height: 38px; background: #397B58; border-radius: 4px; Text { text: "Sub Motion"; x: 8px; color: #F0FFF5; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 2) : Rectangle { x: parent.width * 0.02; y: 10px; width: 57%; height: 38px; background: #3D76C8; border-radius: 4px; Text { text: "Atmosphere"; x: 8px; color: #EFF6FF; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 2) : Rectangle { x: parent.width * 0.63; y: 10px; width: 29%; height: 38px; background: #3269B6; border-radius: 4px; }
+                                if (idx == 3) : Rectangle { x: parent.width * 0.17; y: 10px; width: 35%; height: 38px; background: #259B9D; border-radius: 4px; Text { text: "Fragments"; x: 8px; color: #E9FFFF; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 3) : Rectangle { x: parent.width * 0.56; y: 10px; width: 36%; height: 38px; background: #20888B; border-radius: 4px; }
+                                if (idx == 4) : Rectangle { x: parent.width * 0.05; y: 10px; width: 43%; height: 38px; background: #427FB4; border-radius: 4px; Text { text: "Clean Gtr_01"; x: 8px; color: #EFF8FF; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 5) : Rectangle { x: parent.width * 0.08; y: 10px; width: 46%; height: 38px; background: #7A4CB2; border-radius: 4px; Text { text: "Vocal_Main"; x: 8px; color: #FFF2FF; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 5) : Rectangle { x: parent.width * 0.59; y: 10px; width: 33%; height: 38px; background: #7043A5; border-radius: 4px; }
+                                if (idx == 6) : Rectangle { x: parent.width * 0.27; y: 10px; width: 22%; height: 38px; background: #7186A8; border-radius: 4px; Text { text: "Riser"; x: 8px; color: #F4F8FF; font-size: 9px; vertical-alignment: center; } }
+                                if (idx == 6) : Rectangle { x: parent.width * 0.62; y: 10px; width: 26%; height: 38px; background: #637A9B; border-radius: 4px; Text { text: "Impact"; x: 8px; color: #F4F8FF; font-size: 9px; vertical-alignment: center; } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (browser-open) : Rectangle {
+        x: parent.width - inspector-width; y: 0px; width: inspector-width; height: parent.height;
+        background: Style.surface-1; border-width: 1px; border-color: Style.border;
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 42px; background: Style.surface-2;
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 8px; spacing: 4px;
+                    for tab[idx] in ["Instruments", "Effects", "Loops", "Files"] : Rectangle {
+                        width: 68px; height: 40px;
+                        background: browser-tab == idx ? Style.brand-glow : transparent;
+                        Rectangle { y: parent.height - 2px; width: 100%; height: 2px; background: browser-tab == idx ? Style.brand : transparent; }
+                        Text { text: tab; width: 100%; height: 100%; color: browser-tab == idx ? Style.text-primary : Style.text-tertiary; font-size: 10px; font-weight: browser-tab == idx ? 700 : 500; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { browser-tab = idx; browser-selection(tab); } }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Z_IconButton { icon: "X"; compact: true; clicked => { browser-open = false; } }
+                }
+            }
+            Rectangle {
+                height: 46px; background: Style.surface;
+                Rectangle { x: 12px; y: 9px; width: parent.width - 24px; height: 28px; background: Style.surface-0; border-width: 1px; border-color: Style.border; border-radius: 6px;
+                    Text { text: "⌕  Search instruments, effects..."; x: 10px; width: parent.width - 20px; height: 100%; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; }
+                }
+            }
+            Rectangle { height: 1px; background: Style.border; }
+            ScrollView {
+                vertical-stretch: 1; viewport-height: 520px;
+                VerticalLayout {
+                    padding: 10px; spacing: 7px;
+                    Text { text: browser-tab == 0 ? "INSTRUMENTS" : (browser-tab == 1 ? "EFFECTS" : (browser-tab == 2 ? "LOOPS" : "PROJECT FILES")); font-size: 9px; color: Style.text-tertiary; font-weight: 700; }
+                    for item[idx] in ["Aura Synth", "Grand Piano", "Analog Keys", "Nova Bass", "Warm Strings", "Pulse Drums", "Vox Texture", "Sampler"] : Rectangle {
+                        height: 54px; background: idx == 0 ? Style.panel-h : Style.panel; border-width: 1px; border-color: idx == 0 ? Style.brand.with-alpha(0.55) : Style.border; border-radius: 6px;
+                        HorizontalLayout {
+                            padding: 7px; spacing: 9px;
+                            Rectangle { width: 40px; height: 40px; background: [Style.brand, #3BC6C8, #6B82FF, #D39A3A, #D766A4, #56C88A, #8B7CFF, #6C7D90][idx]; border-radius: 5px;
+                                if (idx == 0) : Image { source: @image-url("assets/synth.svg"); x: 4px; y: 4px; width: 32px; height: 32px; }
+                                if (idx == 1) : Image { source: @image-url("assets/mixer.svg"); x: 4px; y: 4px; width: 32px; height: 32px; }
+                                if (idx == 2) : Image { source: @image-url("assets/waveform.svg"); x: 4px; y: 4px; width: 32px; height: 32px; }
+                                if (idx == 3) : Image { source: @image-url("assets/mastering.svg"); x: 4px; y: 4px; width: 32px; height: 32px; }
+                                if (idx == 0) : Path { x: 5px; y: 10px; width: 30px; height: 20px; stroke: #FFFFFF.with-alpha(0.8); stroke-width: 1.5px; MoveTo { x: 0; y: 12; } LineTo { x: 7; y: 3; } LineTo { x: 15; y: 16; } LineTo { x: 23; y: 4; } LineTo { x: 30; y: 12; } }
+                                Text { text: idx == 0 ? "A" : (idx == 1 ? "P" : (idx == 2 ? "K" : (idx == 3 ? "B" : "•"))); width: 100%; height: 100%; color: #FFFFFF; font-size: 16px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; opacity: idx == 0 ? 0.0 : 0.9; }
+                            }
+                            VerticalLayout { vertical-stretch: 1; alignment: center; horizontal-stretch: 1;
+                                Text { text: item; color: Style.text-primary; font-size: 11px; font-weight: 600; }
+                                Text { text: Math.mod(idx, 2) == 0 ? "Instrument · Factory" : "Preset · Aura Library"; color: Style.text-tertiary; font-size: 9px; }
+                            }
+                            Text { text: idx == 0 ? "✓" : "⋯"; color: idx == 0 ? Style.ok : Style.text-tertiary; font-size: 12px; vertical-alignment: center; }
+                        }
+                        TouchArea { clicked => { browser-selection(item); } }
+                    }
+                    Rectangle { height: 1px; background: Style.border; }
+                    Text { text: "CATEGORIES"; font-size: 9px; color: Style.text-tertiary; font-weight: 700; }
+                    HorizontalLayout { spacing: 5px;
+                        for category in ["Synth", "Keys", "Drums", "FX"] : Rectangle { height: 26px; horizontal-stretch: 1; background: Style.surface-2; border-width: 1px; border-color: Style.border; border-radius: 5px; Text { text: category; width: 100%; height: 100%; color: Style.text-secondary; font-size: 9px; horizontal-alignment: center; vertical-alignment: center; } }
+                    }
+                }
+            }
+        }
+    }
+
+    if (synth-open) : Rectangle {
+        x: 0px; y: parent.height - 306px; width: parent.width - (browser-open ? inspector-width : 0px); height: 306px;
+        background: Style.surface-1; border-width: 1px; border-color: Style.border; border-radius: 6px;
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle { height: 40px; background: Style.surface-2;
+                HorizontalLayout { padding-left: 14px; padding-right: 8px; spacing: 10px;
+                    Rectangle { width: 26px; height: 26px; background: Style.brand-glow; border-radius: 5px; Image { source: @image-url("assets/synth.svg"); x: 3px; y: 3px; width: 20px; height: 20px; } }
+                    VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: "Aura Synth"; color: Style.text-primary; font-size: 11px; font-weight: 700; } Text { text: "Modern wavetable instrument"; color: Style.text-tertiary; font-size: 9px; } }
+                    for tab[idx] in ["OSC", "FILTER", "ENV", "LFO", "FX"] : Rectangle { width: 52px; height: 38px; Rectangle { y: parent.height - 2px; width: 100%; height: 2px; background: synth-tab == idx ? Style.brand : transparent; } Text { text: tab; width: 100%; height: 100%; color: synth-tab == idx ? Style.brand : Style.text-tertiary; font-size: 9px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { synth-tab = idx; } } }
+                    Z_IconButton { icon: "X"; compact: true; clicked => { synth-open = false; } }
+                }
+            }
+            HorizontalLayout { spacing: 8px; padding: 10px;
+                Rectangle { width: 178px; background: Style.panel; border-width: 1px; border-color: Style.border; border-radius: 5px;
+                    VerticalLayout { padding: 9px; spacing: 5px; Text { text: "OSCILLATORS"; color: Style.text-tertiary; font-size: 9px; font-weight: 700; }
+                        if (gpu-waveform-image.width > 0) : Image { source: gpu-waveform-image; width: 100%; height: 52px; image-fit: contain; }
+                        if (gpu-waveform-image.width <= 0) : Path { height: 52px; width: 100%; stroke: Style.brand; stroke-width: 2px; fill: transparent; MoveTo { x: 0; y: 30; } LineTo { x: 22; y: 12; } LineTo { x: 44; y: 44; } LineTo { x: 66; y: 16; } LineTo { x: 88; y: 35; } LineTo { x: 110; y: 8; } LineTo { x: 132; y: 40; } LineTo { x: 154; y: 18; } LineTo { x: 178; y: 22; } }
+                        Text { text: "Wavetable · Aura Wave 01"; color: Style.text-secondary; font-size: 9px; }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; background: Style.panel; border-width: 1px; border-color: Style.border; border-radius: 5px;
+                    VerticalLayout { padding: 9px; spacing: 7px; Text { text: synth-tab == 0 ? "MACROS" : (synth-tab == 1 ? "FILTER" : "MODULATION"); color: Style.text-tertiary; font-size: 9px; font-weight: 700; }
+                        HorizontalLayout { spacing: 12px; alignment: center;
+                            for knob[idx] in ["Motion", "Filter", "Space", "Character"] : Rectangle { width: 58px; height: 84px; VerticalLayout { alignment: center; spacing: 4px; Rectangle { width: 42px; height: 42px; border-radius: 21px; background: Style.surface-0; border-width: 3px; border-color: [Style.brand, #63C7C5, #D39A3A, #718093][idx]; Text { text: "" + (idx + 1); width: 100%; height: 100%; color: Style.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } } Text { text: knob; color: Style.text-secondary; font-size: 9px; horizontal-alignment: center; } Text { text: ["0.72", "0.45", "0.68", "0.30"][idx]; color: Style.text-tertiary; font-size: 8px; horizontal-alignment: center; } } }
+                        }
+                        Rectangle { height: 1px; background: Style.border; }
+                        HorizontalLayout { spacing: 7px; Text { text: "Preset"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; height: 26px; background: Style.surface-0; border-width: 1px; border-color: Style.border; border-radius: 4px; Text { text: "Atmospheric Motion"; x: 8px; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; } } }
+                    }
+                }
+                Rectangle { width: 204px; background: Style.panel; border-width: 1px; border-color: Style.border; border-radius: 5px;
+                    VerticalLayout { padding: 9px; spacing: 7px; Text { text: "MASTER"; color: Style.text-tertiary; font-size: 9px; font-weight: 700; } if (gpu-spectrum-image.width > 0) : Image { source: gpu-spectrum-image; width: 100%; height: 30px; image-fit: contain; }
+                        HorizontalLayout { spacing: 8px; alignment: center; if (gpu-meter-image.width > 0) : Image { source: gpu-meter-image; width: 30px; height: 90px; image-fit: contain; } if (gpu-meter-image.width <= 0) : Rectangle { width: 9px; height: 90px; background: Style.surface-0; border-radius: 3px; Rectangle { y: 24px; width: 100%; height: 64px; background: Style.ok; border-radius: 3px; } } if (gpu-meter-image.width <= 0) : Rectangle { width: 9px; height: 90px; background: Style.surface-0; border-radius: 3px; Rectangle { y: 32px; width: 100%; height: 56px; background: Style.brand; border-radius: 3px; } } Text { text: "-0.8 dB\n-14 LUFS"; color: Style.text-secondary; font-size: 10px; vertical-alignment: center; } }
+                        Rectangle { height: 1px; background: Style.border; }
+                        Text { text: "Output · Stereo Out"; color: Style.text-secondary; font-size: 9px; }
+                    }
+                }
+            }
+            Rectangle { height: 56px; background: Style.surface-2; border-width: 1px; border-color: Style.border;
+                if (gpu-piano-image.width > 0) : Image { source: gpu-piano-image; x: 12px; y: -40px; width: parent.width - 24px; height: 36px; image-fit: contain; }
+                HorizontalLayout { padding-left: 12px; padding-right: 12px; spacing: 2px;
+                    for key in ["C", "D", "E", "F", "G", "A", "B", "C", "D", "E", "F", "G", "A"] : Rectangle { horizontal-stretch: 1; height: 48px; background: (key == "C" || key == "F") ? #F4F7FB : #E1E6EC; border-width: 1px; border-color: #9AA8B8; border-radius: 2px; Text { text: key; y: 32px; width: 100%; color: #1A222C; font-size: 8px; horizontal-alignment: center; } }
+                }
+            }
+        }
+    }
+}

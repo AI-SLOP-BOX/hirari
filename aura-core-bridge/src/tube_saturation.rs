@@ -19,7 +19,13 @@ impl TubeSaturationEngine {
         }
     }
 
-    pub fn reset(&mut self) {}
+    /// Restore the parameter defaults. The processor is stateless between
+    /// blocks, so reset intentionally does not clear an audio history buffer.
+    pub fn reset(&mut self) {
+        self.drive = 0.0;
+        self.bias = 0.0;
+        self.dry_wet = 1.0;
+    }
 
     pub fn set_drive(&mut self, db: f32) {
         if db.is_finite() { self.drive = db.clamp(-60.0, 24.0); }
@@ -67,5 +73,22 @@ impl TubeSaturationEngine {
         self.drive.is_finite() && (-60.0..=24.0).contains(&self.drive)
             && self.bias.is_finite() && (-1.0..=1.0).contains(&self.bias)
             && self.dry_wet.is_finite() && (0.0..=1.0).contains(&self.dry_wet)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TubeSaturationEngine;
+
+    #[test]
+    fn reset_restores_parameter_defaults() {
+        let mut engine = TubeSaturationEngine::new();
+        engine.set_drive(12.0);
+        engine.set_bias(0.5);
+        engine.set_dry_wet(0.25);
+        engine.reset();
+        assert_eq!(engine.drive, 0.0);
+        assert_eq!(engine.bias, 0.0);
+        assert_eq!(engine.dry_wet, 1.0);
     }
 }

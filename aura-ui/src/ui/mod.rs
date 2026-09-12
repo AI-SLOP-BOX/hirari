@@ -8,6 +8,13 @@ pub mod command_router;
 pub mod diagnostics;
 pub mod editing_commands;
 pub mod editor;
+pub mod gpu_canvas;
+#[cfg(feature = "slint-wgpu")]
+pub mod slint_wgpu;
+#[cfg(feature = "gpu-canvas")]
+pub mod wgpu_canvas;
+#[cfg(feature = "egui-canvas")]
+pub mod egui_canvas;
 pub mod midi;
 pub mod midi_commands;
 pub mod misc;

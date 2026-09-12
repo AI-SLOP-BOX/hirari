@@ -3,11 +3,9 @@
 //! The audio callback must only enqueue validated blocks. This writer is
 //! intended for the non-realtime consumer thread: it owns file I/O, PCM
 //! conversion, header finalization, and atomic publication of the take.
-
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum RecordingStreamError {
     InvalidSampleRate,
@@ -17,7 +15,6 @@ pub enum RecordingStreamError {
     FileTooLarge,
     Io(String),
 }
-
 impl From<io::Error> for RecordingStreamError {
     fn from(error: io::Error) -> Self {
         Self::Io(error.to_string())
@@ -546,7 +543,6 @@ mod tests {
             let _ = recording_wav_metadata(&bytes);
         }
     }
-
     #[test]
     fn finalize_does_not_overwrite_an_existing_destination() {
         let path = temp_path();
@@ -560,7 +556,6 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"newer-take");
         let _ = std::fs::remove_file(path);
     }
-
     #[test]
     fn rejects_bad_blocks_without_writing_partial_audio() {
         let path = temp_path();
@@ -577,7 +572,6 @@ mod tests {
         drop(writer);
         assert!(!path.with_extension("wav.part").exists());
     }
-
     #[test]
     fn crash_surviving_spools_are_detected_and_invalid_files_are_ignored() {
         let path = std::env::temp_dir().join(format!(

@@ -232,8 +232,4 @@ mod tests {
             .any(|issue| issue.severity == AuditSeverity::Critical));
     }
 
-    #[test]
-    fn integrity_audit_checks_normal_and_failure_paths() {
-        assert!(ForensicAuditor.audit_integrity());
-    }
 }

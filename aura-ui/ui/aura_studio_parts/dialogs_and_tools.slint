@@ -1,0 +1,600 @@
+                HorizontalLayout {
+                    padding: 1px; spacing: 1px;
+                    for t in root.tracks : Rectangle {
+                        horizontal-stretch: 1; background: t.color.with-alpha(0.15);
+                        Rectangle { width: 100%; height: 2px; background: t.color; y: 6px; opacity: 0.4; }
+                    }
+                }
+                Rectangle { x: root.ph / project_len * parent.width; width: 2px; height: 100%; background: Style.ok; }
+            }
+            
+            // --- INDUSTRIAL STATUS BAR (TELEMETRY) ---
+            Rectangle {
+                height: 26px; background: Style.surface;
+                Rectangle { y: 0; height: 1px; background: Style.border; }
+                HorizontalLayout {
+                    padding-left: 10px; padding-right: 10px; spacing: 20px;
+                    HorizontalLayout {
+                        spacing: 8px; alignment: center;
+                        Rectangle { width: 12px; height: 12px; border_radius: 6px; background: Style.brand; opacity: 0.2 + 0.8 * Math.sin(0.0 / 200.0 * 1rad).abs(); }
+                        Text { text: "TOOL: " + (active_tool == 0 ? "SELECTION (V)" : (active_tool == 1 ? "SLICE (S)" : (active_tool == 2 ? "DRAW (B)" : "MUTE (M)"))); font-size: 8px; color: #666; font-weight: 900; vertical-alignment: center; }
+                    }
+                    
+                    Rectangle { width: 1px; background: Style.border; height: 16px; y: 5px; }
+                    HorizontalLayout {
+                        spacing: 8px; horizontal-stretch: 1;
+                        Text { text: last_action; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; vertical-alignment: center; }
+                    }
+                    HorizontalLayout {
+                        spacing: 12px; alignment: center; 
+                        VerticalLayout {
+                            alignment: center; spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 1px; alignment: center;
+                                for h in cpu_history : Rectangle {
+                                    width: 2px; height: (h * 12px).clamp(1px, 12px); 
+                                    background: h > 0.8 ? Style.record : (h > 0.5 ? Style.solo : Style.ok);
+                                    border_radius: 0.5px;
+                                }
+                            }
+                        Text { text: "CPU: " + Math.floor(cpu_usage) + "%"; font-size: Style.font-xxs; color: cpu_usage > 90 ? Style.record : Style.text-secondary; font-weight: 600; horizontal-alignment: center; }
+                        }
+                    }
+                    
+                    Rectangle { horizontal-stretch: 1; }
+                    
+                    HorizontalLayout {
+                        spacing: 10px; alignment: center;
+                        Text { text: input_dropped_blocks > 0 ? "Input drops: " + input_dropped_blocks : (audio_device_ready ? "音声: 準備完了" : "音声: オフライン"); font-size: 8px; color: input_dropped_blocks > 0 ? Style.record : (audio_device_ready ? Style.ok : Style.record); }
+                        Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: true; button-width: 54px; clicked => { TransportActions.toggle_play(); } }
+                        Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: true; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
+                        Z_IconButton { icon: "Scan Plugins"; compact: true; button-width: 82px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); } }
+                        if (!audio_device_ready) : Z_IconButton { icon: "Reconnect"; compact: true; button-width: 64px; active-col: Style.record; clicked => { CommandActions.palette_exec("RECONNECT_AUDIO"); } }
+                        Z_IconButton { icon: "Audio Settings"; compact: true; button-width: 82px; clicked => { bot_view = 20; mx_open = true; pr_open = false; } }
+                        if (sandbox_failures > 0) : Z_IconButton { icon: "Plugin Issues " + sandbox_failures; compact: true; button-width: 104px; active-col: Style.record; clicked => { bot_view = 16; mx_open = true; pr_open = false; } }
+                        Text { text: buffer_size > 0 ? "Buffer: " + buffer_size : "Buffer: --"; font-size: 8px; color: Style.text-tertiary; }
+                        Text { text: audio_sample_rate > 0.0 ? "SR: " + Math.round(audio_sample_rate) + " Hz" : "SR: --"; font-size: 8px; color: Style.text-tertiary; }
+                        Text {
+                            text: "TS: " + time_sig + " | CLICK: " + Math.floor(click_vol * 100) + "% | SNAP: " + snap_val;
+                            width: 170px; font-size: 8px; color: #A1A1A6; vertical-alignment: center; overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (bot_view == 19) : Rectangle {
+        // Keep the diagnostics surface below the production navigation bar.
+        // Keep diagnostics below the production navigation bar.
+        z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
+        background: Style.surface-1; border-width: 1px; border-color: Style.border;
+        Z_DiagnosticsPage {
+            x: 0px; y: 0px; width: 100%; height: 100%;
+            engine-state: root.diagnostic_state;
+            cpu-load: root.diagnostic_load;
+            dropped-blocks: root.input_dropped_blocks;
+            mailbox-overruns: root.diagnostic_overruns;
+            watchdog-trips: root.diagnostic_watchdogs;
+            sandbox-failures: root.diagnostic_sandbox_failures;
+            pdc-status: root.diagnostic_pdc;
+            range-overflow: root.diagnostic_range_overflow;
+        }
+    }
+    // Production-mode workflow pages need an explicit surface once a template
+    // has loaded. The legacy bottom-panel tree can have no measurable parent
+    // in the full arrangement layout, which previously made Export/MIDI Learn
+    // appear selectable but render as an empty canvas.
+    if (bot_view == 17) : Z_WorkflowPage {
+        z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
+        title: "MIDI Learn";
+        subtitle: "Map controllers to transport and track parameters";
+        status: "WAITING FOR MIDI INPUT";
+    }
+    if (bot_view == 18) : Z_WorkflowPage {
+        z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
+        title: "Export";
+        subtitle: "Bounce range, format and stem export settings";
+        status: root.is_rendering ? root.render_state : "READY TO EXPORT";
+    }
+            if (bot_view == 16) : Rectangle {
+        z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
+        background: Style.surface-1; border-width: 1px; border-color: Style.border;
+        VerticalLayout {
+            padding: 20px; spacing: 12px;
+            HorizontalLayout {
+                Text { text: "PLUGIN BROWSER"; font-size: 16px; color: Style.brand; font-weight: 700; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: plugin_catalog_status; font-size: 9px; color: Style.text-secondary; vertical-alignment: center; }
+                Z_IconButton { icon: "EXTENSIONS"; compact: false; button-width: 100px; clicked => { PluginActions.refresh_extensions(); } }
+                Z_IconButton { icon: "INSTALL"; compact: false; button-width: 82px; clicked => { CommandActions.palette_exec("INSTALL PLUGIN"); } }
+                Z_IconButton { icon: "RESCAN ALL"; compact: false; button-width: 100px; clicked => { PluginActions.rescan_plugins(); } }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                LineEdit { placeholder-text: "Search name, format, capability, path, or favorites"; text <=> plugin_catalog_query; edited => { PluginActions.catalog_query_changed(self.text); } horizontal-stretch: 1; }
+                Text { text: "CLAP / VST3 / AU"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+            }
+            if extension_catalog.length > 0 : Z_ExtensionBrowser {
+                height: 112px;
+                entries: extension_catalog;
+                status: extension_catalog_status;
+                refresh => { PluginActions.refresh_extensions(); }
+                install => { PluginActions.install_extension(); }
+                run(extension_id, command_id, payload) => { PluginActions.run_extension(extension_id, command_id, payload); }
+                toggle(extension_id, enabled) => { PluginActions.toggle_extension(extension_id, enabled); }
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 5px;
+                    for plugin in plugin_catalog : Rectangle {
+                        visible: plugin.visible;
+                        height: self.visible ? 52px : 0px;
+                        background: row.has-hover ? Style.panel-h : Style.panel;
+                        border-width: 1px; border-color: Style.border;
+                        HorizontalLayout {
+                            padding-left: 12px; padding-right: 10px; spacing: 10px;
+                            Rectangle { width: 5px; height: 28px; background: plugin.sandboxed ? Style.ok : Style.brand; }
+                            VerticalLayout { horizontal-stretch: 1; alignment: center;
+                                Text { text: plugin.name; font-size: 11px; color: Style.text; font-weight: 600; }
+                                Text { text: plugin.format + "  ·  " + plugin.capability + "  ·  " + (plugin.binary_bytes / 1024) + " KiB  ·  " + plugin.binary_hash; font-size: 8px; color: Style.text-muted; }
+                            }
+                            Text { text: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? "READY" : "CHECK"; font-size: 8px; color: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? Style.ok : Style.solo; vertical-alignment: center; }
+                            Z_IconButton { icon: "★"; compact: true; selected: plugin.favorite; active-col: Style.brand; clicked => { plugin-favorite-changed(plugin.id, !plugin.favorite); } }
+                            Z_IconButton { icon: "INSERT"; compact: false; button-width: 72px; clicked => { PluginActions.insert_plugin(plugin.id); } }
+                        }
+                        row := TouchArea { mouse-cursor: pointer; }
+                    }
+                }
+            }
+        }
+    }
+    // --- AURA COMMAND SPOTLIGHT ---
+    if (pal_open) : Rectangle {
+        z: 9500; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.7);
+        TouchArea { clicked => { pal_open = false; } }
+        Rectangle {
+            width: 580px; height: 420px; background: Style.surface; border_radius: 8px; border_width: 2.5px; border_color: Style.brand;
+            y: (parent.height - self.height) / 4; x: (parent.width - self.width) / 2;
+            VerticalLayout {
+                padding: 24px; spacing: 18px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: "Library"; font-size: Style.font-xxs; vertical-alignment: center; }
+                    LineEdit { 
+                        placeholder-text: "操作・プラグイン・トラックを検索"; font-size: 16px; horizontal-stretch: 1; 
+                        text <=> pal_query;
+                        accepted(t) => { pal_open = false; CommandActions.palette_exec(t); }
+                    }
+                }
+                Rectangle { height: 1px; background: Style.border; }
+                Text { text: production_mode ? "最近の操作" : "最近の操作 · ROUTE <source_id> <dest_id> ON|OFF · EXTENSION <id.command> {JSON}"; font-size: 9px; color: Style.text-tertiary; font-weight: 600; }
+                for act in ["SAVE PROJECT", "OPEN PROJECT", "SELECT ALL CLIPS", "CLEAR CLIP SELECTION", "COPY SELECTED CLIPS", "PASTE CLIPS", "DUPLICATE SELECTED TRACK", "DELETE SELECTED TRACK", "DUPLICATE SELECTED CLIP", "SPLIT SELECTED CLIP", "DELETE SELECTED CLIP", "REMOVE ACTIVE PLUGIN", "FREEZE SELECTED TRACK", "UNFREEZE SELECTED TRACK", "OPENUTAU EDIT", "SCAN PLUGINS", "TEST TONE"] : Rectangle {
+                    height: 38px; background: hov_act.has-hover ? Style.brand.with-alpha(0.1) : Style.surface; border_radius: 2px;
+                    HorizontalLayout { padding: 12px; Text { text: "> " + act; font-size: 11px; color: hov_act.has-hover ? Style.text-primary : Style.text-secondary; vertical-alignment: center; } }
+                    hov_act := TouchArea { clicked => { pal_open = false; CommandActions.palette_exec(act); } }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text { text: "Esc to close | ⌘K for Command Palette"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+            }
+        }
+    }
+    if (fx_open) : Rectangle {
+        z: 400; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.4);
+        TouchArea { clicked => { fx_open = false; } }
+        if (root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_PluginWnd {
+            name: fx_name;
+            track-id: root.tracks[root.selected_row].id;
+            plugin-index: fx_active_id;
+            parameter-names: root.plugin-parameter-names;
+            parameter-values: root.plugin-parameter-values;
+            track-latency-ms: root.plugin-track-latency-ms;
+            pdc-compensation-ms: root.plugin-pdc-compensation-ms;
+            pdc-status: root.plugin-pdc-status;
+            editor-capability: root.plugin-editor-capability; bypassed: root.plugin-bypassed; parameter-error: root.plugin-parameter-error;
+            preset-path: root.plugin-preset-path;
+            // Explicit source; routing UI supplies the selected source.
+            sidechain-source-id: root.sidechain-source-id;
+            sidechain-source-name: root.sidechain-source-name;
+            sidechain-result: root.sidechain-result;
+            sidechain-tap-point: root.sidechain-tap-point;
+            active: true;
+            close => { fx_open = false; }
+                            param_changed(id, val) => { PluginActions.set_filter(root.selected_row, "PARAM_" + (id + 1), val / 100.0); }
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+        if (root.tracks.length == 0) : Rectangle {
+            width: 420px; height: 160px; background: Style.surface; border_width: 2px; border_color: Style.brand;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            Text { text: "Plugin\nNo Track Selected"; color: Style.text-secondary; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+    }
+    // --- INTERACTIVE EXPORT MANIFEST (FINAL DISTILLATION) ---
+    if (is_rendering) : Rectangle {
+        background: Style.surface-0.with-alpha(0.9); z: 1000;
+        Rectangle {
+            width: 500px; height: 400px; background: Style.surface; border_width: 1.5px; border_color: Style.line-subtle; border_radius: 4px;
+            VerticalLayout {
+                padding: 24px; spacing: 20px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: "Export"; font-size: 18px; color: Style.brand; font-weight: 700; horizontal-stretch: 1; }
+                    Z_IconButton { icon: "✕"; clicked => { if (is_rendering) { RenderActions.cancel_render(); } else { render_state = "IDLE"; } } }
+                }
+                Rectangle { height: 2px; background: Style.border; }
+                HorizontalLayout {
+                    spacing: 20px;
+                    VerticalLayout {
+                        spacing: 8px; width: 200px;
+                        Text { text: "Render Summary"; font-size: 9px; color: Style.text-tertiary; font-weight: 600; }
+                        Text { text: "Tracks: " + root.tracks.length; font-size: 10px; color: Style.text-secondary; }
+                        Text { text: "Format: " + (root.audio_sample_rate > 0.0 ? Math.round(root.audio_sample_rate) + " Hz" : "--"); font-size: 10px; color: Style.text-secondary; }
+                        Text { text: root.render_summary; font-size: 9px; color: Style.text-secondary; wrap: word-wrap; }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Rectangle {
+                    height: 48px; background: Style.panel; border_radius: 2px;
+                    HorizontalLayout {
+                        padding: 10px; spacing: 12px;
+                        Text { text: render_state == "COMPLETE" ? "Export complete" : "Rendering project..."; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 100px; height: 12px; background: Style.surface-0; border_radius: 6px;
+                                Rectangle { width: render_progress_available ? render_progress * parent.width : (render_progress_indeterminate ? (render_elapsed_seconds * 0.18 - Math.floor(render_elapsed_seconds * 0.18 / 0.72) * 0.72 + 0.14) * parent.width : 0px); height: 100%; background: render_state == "COMPLETE" ? Style.ok : Style.brand; border_radius: 6px; }
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout { alignment: center; spacing: 8px; if (render_state == "PAUSED") : Z_IconButton { icon: "▶ RESUME"; clicked => { RenderActions.resume_render(); } } if (render_state != "PAUSED") : Z_IconButton { icon: "Ⅱ PAUSE"; clicked => { RenderActions.pause_render(); } } Z_IconButton { icon: "✕ CANCEL"; clicked => { RenderActions.cancel_render(); } } }
+            }
+        }
+    }
+
+    // --- HOLOGRAPHIC SENTINEL OVERLAY (SINGULARITY) ---
+    if (show_sentinel) : Rectangle {
+        z: 2000; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.8);
+        TouchArea { clicked => { show_sentinel = false; } }
+        Z_SentinelRingView { 
+            cpu: cpu_usage; soul: Style.brand; dna: 0.8; time: 0.0;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+    }
+    if (beginner_guide_open && production_mode) : Rectangle {
+        z: 5000; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.72);
+        TouchArea { clicked => { beginner_guide_open = false; onboarding-progress-changed(true, beginner_guide_step); } }
+        Rectangle {
+            x: (parent.width - 560px) / 2; y: 96px; width: 560px; height: 350px;
+            background: Style.surface; border-width: 1px; border-color: Style.brand; border_radius: 8px;
+            VerticalLayout {
+                padding: 24px; spacing: 14px;
+                HorizontalLayout {
+                    Text { text: "AURA QUICK START"; font-size: 16px; color: Style.brand; font-weight: 700; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Z_IconButton { icon: "CLOSE"; compact: true; clicked => { beginner_guide_open = false; onboarding-progress-changed(true, beginner_guide_step); } }
+                }
+                Text {
+                    text: beginner_guide_step == 0 ? "1 / 7   Create a track" : (beginner_guide_step == 1 ? "2 / 7   Add audio" : (beginner_guide_step == 2 ? "3 / 7   Open the mixer" : (beginner_guide_step == 3 ? "4 / 7   Find instruments and effects" : (beginner_guide_step == 4 ? "5 / 7   Add MIDI notes" : (beginner_guide_step == 5 ? "6 / 7   Shape automation" : "7 / 7   Save your work")))));
+                    font-size: 12px; color: Style.text-primary; font-weight: 600;
+                }
+                Text {
+                    text: beginner_guide_step == 0 ? "Create an audio track first. This is where your recording or imported sound will live." : (beginner_guide_step == 1 ? "Choose an audio file. If you are not ready, skip this step and record later." : (beginner_guide_step == 2 ? "The mixer is where you control volume, mute, solo and the overall balance." : (beginner_guide_step == 3 ? "Scan plugins to discover CLAP, VST3 and AU instruments and effects. Nothing is inserted automatically." : (beginner_guide_step == 4 ? "Open the MIDI editor and draw notes on the selected instrument or MIDI track." : (beginner_guide_step == 5 ? "Automation changes volume, pan, delay and plugin parameters over time. Every edit can be undone." : "Save creates a recoverable project snapshot. You can always undo changes later.")))));
+                    font-size: 10px; color: Style.text-secondary; wrap: word-wrap;
+                }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    if (beginner_guide_step == 0) : Z_IconButton { icon: "ADD TRACK"; button-width: 110px; clicked => { ProjectActions.add_track("AUDIO"); beginner_guide_step = 1; onboarding-progress-changed(false, 1); } }
+                    if (beginner_guide_step == 1) : Z_IconButton { icon: "ADD AUDIO"; button-width: 100px; clicked => { CommandActions.palette_exec("IMPORT AUDIO"); beginner_guide_step = 2; onboarding-progress-changed(false, 2); } }
+                    if (beginner_guide_step == 2) : Z_IconButton { icon: "MIXER"; button-width: 90px; clicked => { bot_view = 0; mx_open = true; pr_open = false; beginner_guide_step = 3; onboarding-progress-changed(false, 3); } }
+                    if (beginner_guide_step == 3) : Z_IconButton { icon: "SCAN PLUGINS"; button-width: 116px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); beginner_guide_step = 4; onboarding-progress-changed(false, 4); } }
+                    if (beginner_guide_step == 4) : Z_IconButton { icon: "MIDI"; button-width: 90px; clicked => { bot_view = 17; mx_open = true; pr_open = false; beginner_guide_step = 5; onboarding-progress-changed(false, 5); } }
+                    if (beginner_guide_step == 5) : Z_IconButton { icon: "AUTOMATION"; button-width: 112px; clicked => { bot_view = 13; mx_open = true; pr_open = false; beginner_guide_step = 6; onboarding-progress-changed(false, 6); } }
+                    if (beginner_guide_step == 6) : Z_IconButton { icon: "SAVE"; button-width: 90px; clicked => { CommandActions.palette_exec("SAVE PROJECT"); beginner_guide_open = false; onboarding-progress-changed(true, 6); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Z_IconButton { icon: beginner_guide_step < 6 ? "SKIP" : "DONE"; button-width: 70px; clicked => { beginner_guide_open = false; onboarding-progress-changed(true, beginner_guide_step); } }
+                }
+            }
+        }
+    }
+
+    // --- ESSENTIAL SIGNAL VOID MODE (PURE FOCUS) ---
+    if (is_void_mode && !production_mode) : Rectangle {
+        z: 3000; width: 100%; height: 100%; background: Style.surface-0;
+        VerticalLayout {
+            alignment: center; spacing: 60px;
+            Z_AudioEngineStatus { ready: true; time: 0.0; }
+            Rectangle {
+                width: 800px; height: 100px; background: Style.surface; border_radius: 1px;
+                HorizontalLayout {
+                    padding: 2px; spacing: 1px;
+                    for p in [0.1, 0.4, 0.8, -0.2, 0.6, 1.0, -0.4, 0.2, 0.5, 0.8, 1.0, 0.3, -0.8] : Rectangle {
+                        width: 2px; height: p.abs() * 80px; background: Style.brand; border_radius: 1px;
+                        y: (parent.height - self.height)/2;
+                    }
+                }
+            }
+            Text { text: "Focus Mode"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; horizontal-alignment: center; }
+            Z_IconButton { icon: "Exit Focus"; clicked => { is_void_mode = false; } }
+        }
+    }
+
+    // --- DIVINE MASTER CONSOLE (GLORIFICATION) ---
+    if (show_divine_console && !production_mode) : Rectangle {
+        z: 4000; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.95);
+        TouchArea { clicked => { show_divine_console = false; } }
+        Rectangle {
+            width: 800px; height: 520px; background: Style.surface; border_width: 2.5px; border_color: Style.brand; border_radius: 8px;
+            VerticalLayout {
+                padding: 40px; spacing: 30px;
+                                Text { text: "Master Console"; font-size: 32px; color: Style.brand; font-weight: 700; horizontal-alignment: center; }
+                Text { text: "Master Analysis"; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; font-weight: 500; }
+                
+                HorizontalLayout {
+                    spacing: 40px; alignment: center;
+                    // Sanctity Knob
+                    VerticalLayout {
+                        spacing: 12px;
+                        Rectangle {
+                            width: 120px; height: 120px; background: Style.surface; border_radius: 60px; border_width: 3px; border_color: Style.brand;
+                            Rectangle { width: 4px; height: 40px; background: Style.brand; x: 58px; y: 10px; opacity: 0.8; }
+                        }
+                        Text { text: "Balance"; font-size: 12px; color: Style.brand; horizontal-alignment: center; font-weight: 600; }
+                    }
+                    // Glory Knob
+                    VerticalLayout {
+                        spacing: 12px;
+                        Rectangle {
+                            width: 120px; height: 120px; background: Style.surface; border_radius: 60px; border_width: 3px; border_color: Style.solo;
+                            Rectangle { width: 4px; height: 40px; background: Style.solo; x: 58px; y: 10px; opacity: 0.8; }
+                        }
+                        Text { text: "Headroom"; font-size: 12px; color: Style.solo; horizontal-alignment: center; font-weight: 600; }
+                    }
+                }
+                
+                Rectangle { vertical-stretch: 1; }
+                Z_IconButton { icon: "Close"; clicked => { show_divine_console = false; } }
+            }
+        }
+    }
+
+    // --- NULL HORIZON (THE END / THE NEW BEGINNING) ---
+    if (is_null_horizon && !production_mode) : Rectangle {
+        z: 9999; width: 100%; height: 100%; background: Style.surface-3;
+        VerticalLayout {
+            alignment: center; spacing: 40px;
+            Text { text: "Audio Engine"; font-size: 16px; color: Style.text-primary; font-weight: 700; horizontal-alignment: center; }
+            Text { text: "Reset Mode Active"; font-size: 14px; color: Style.text-primary; font-weight: 600; horizontal-alignment: center; }
+            VerticalLayout {
+                spacing: 8px; alignment: center;
+                Text { text: "Restoring session assets..."; font-size: 9px; color: Style.text-secondary; horizontal-alignment: center; }
+                Rectangle { width: 200px; height: 2px; background: Style.line-subtle; Rectangle { width: Math.mod(root.ui_timer / 10, 200) * 1px; height: 100%; background: Style.brand; } }
+            }
+            Z_IconButton { icon: "Reset Project"; active-col: Style.brand; clicked => { is_null_horizon = false; ProjectActions.genesis_reset(); } }
+        }
+    }
+    if (export_open) : Rectangle {
+        z: 800; width: 100%; height: 100%; background: #000.with-alpha(0.8);
+        TouchArea { clicked => { export_open = false; } }
+        Z_ExportDialog { 
+            active: true; 
+            close => { export_open = false; } 
+            start_render(fmt, sr, b) => { export_open = false; RenderActions.start_render(""); }
+            start_stems => { export_open = false; CommandActions.palette_exec("EXPORT STEMS"); }
+            start_selected_stem => { export_open = false; CommandActions.palette_exec("EXPORT SELECTED STEM"); }
+            start_midi => { export_open = false; CommandActions.palette_exec("EXPORT MIDI"); }
+        }
+    }
+    if (spotlight_active) : Rectangle {
+        z: 1000; width: 100%; height: 100%; background: #000.with-alpha(0.6);
+        TouchArea { clicked => { spotlight_active = false; } }
+        Z_Spotlight { active: true; }
+    }
+
+    // Final visible arrangement surface. Keep it above legacy editor layers,
+    // but below dialogs and recovery overlays so export/spotlight/modals can
+    // always receive input when a project has many tracks.
+    if (root.tracks.length >= 1 && !show_arrange_surface && !mx_open && !pr_open && bot_view == 0) : Rectangle {
+        width: 100%; height: 100%; z: 100; clip: true; background: transparent;
+        Rectangle {
+            x: 0px; y: 0px; width: 100%; height: 32px; background: #202226; border-width: 1px; border-color: Style.border;
+            HorizontalLayout {
+                padding-left: 8px; padding-right: 8px; spacing: 4px;
+                Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: false; button-width: 54px; clicked => { TransportActions.toggle_play(); } }
+                Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: false; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
+                Z_IconButton {
+                    icon: "Editor"; compact: false; button-width: 58px;
+                    active: bot_view == 0;
+                    clicked => { bot_view = 0; mx_open = true; pr_open = false; }
+                }
+                Z_IconButton { icon: "Piano Roll"; compact: false; button-width: 74px; active: bot_view == 2; clicked => { bot_view = 2; mx_open = true; pr_open = true; } }
+                Z_IconButton { icon: "Mixer"; compact: false; button-width: 60px; active: bot_view == 0; clicked => { bot_view = 0; mx_open = true; pr_open = false; } }
+                Z_IconButton { icon: "Smart Controls"; compact: false; button-width: 92px; active: bot_view == 10; clicked => { bot_view = 10; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: "Live Loops"; compact: false; button-width: 76px; active: bot_view == 11; clicked => { bot_view = 11; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: "Step Seq"; compact: false; button-width: 68px; active: bot_view == 25; clicked => { bot_view = 25; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: "Score"; compact: false; button-width: 56px; active: bot_view == 8; clicked => { bot_view = 8; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: "Audio"; compact: false; button-width: 56px; active: bot_view == 1; clicked => { bot_view = 1; mx_open = true; pr_open = false; } }
+                // Keep the vocal workflow reachable in the production overlay.
+                // The legacy secondary navigation exposes this destination, but
+                // the track-count overlay is the surface used by real projects.
+                Z_IconButton { icon: "Vocal / OpenUtau"; compact: false; button-width: 116px; active: bot_view == ViewModes.openutau; active-col: Style.brand; clicked => { bot_view = ViewModes.openutau; mx_open = true; pr_open = false; } }
+                Z_IconButton { icon: "Scan Plugins"; compact: false; button-width: 92px; active-col: Style.brand; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); } }
+                Z_IconButton { icon: "Browser"; compact: false; button-width: 66px; active: bot_view == 16; clicked => { bot_view = 16; mx_open = true; pr_open = false; } }
+                Z_IconButton { icon: "Export"; compact: false; button-width: 58px; active: bot_view == 18; clicked => { bot_view = 18; mx_open = true; pr_open = false; export_open = true; } }
+                Z_IconButton { icon: "Diag"; compact: false; button-width: 58px; active: bot_view == 19; clicked => { bot_view = 19; mx_open = true; pr_open = false; } }
+                // Saving must remain discoverable in production mode. The
+                // keyboard shortcut and command palette are not reliable
+                // entry points for a first-time project with no path yet.
+                Z_IconButton { icon: "Save"; compact: false; button-width: 58px; active-col: Style.ok; clicked => { CommandActions.palette_exec("SAVE PROJECT"); } }
+                // Audio configuration must remain reachable during a healthy
+                // session as well as during device recovery. Keep this on the
+                // primary surface so real-device sample-rate and buffer-size
+                // changes do not depend on hidden/legacy panels.
+                Z_IconButton { icon: "Audio Settings"; compact: false; button-width: 96px; active: bot_view == ViewModes.preferences; clicked => { bot_view = ViewModes.preferences; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: demo_seeded ? "Demo ✓" : "Write Demo"; compact: false; button-width: 84px; active: demo_seeded; clicked => {
+                    if (root.tracks.length >= 4 && !demo_seeded) {
+                        MidiActions.add_note(root.tracks[0].id, 60, 0.0, 4.0, 100);
+                        MidiActions.add_note(root.tracks[0].id, 64, 4.0, 4.0, 96);
+                        MidiActions.add_note(root.tracks[0].id, 67, 8.0, 4.0, 104);
+                        MidiActions.add_note(root.tracks[0].id, 72, 12.0, 4.0, 108);
+                        MidiActions.add_note(root.tracks[1].id, 36, 0.0, 2.0, 108);
+                        MidiActions.add_note(root.tracks[1].id, 36, 4.0, 2.0, 104);
+                        MidiActions.add_note(root.tracks[1].id, 43, 8.0, 2.0, 106);
+                        MidiActions.add_note(root.tracks[1].id, 41, 12.0, 2.0, 104);
+                        MidiActions.add_note(root.tracks[1].id, 45, 16.0, 2.0, 106);
+                        MidiActions.add_note(root.tracks[1].id, 43, 20.0, 2.0, 104);
+                        MidiActions.add_note(root.tracks[1].id, 40, 24.0, 2.0, 106);
+                        MidiActions.add_note(root.tracks[1].id, 43, 28.0, 2.0, 104);
+                        MidiActions.add_note(root.tracks[2].id, 48, 0.0, 4.0, 86);
+                        MidiActions.add_note(root.tracks[2].id, 53, 4.0, 4.0, 86);
+                        MidiActions.add_note(root.tracks[2].id, 55, 8.0, 4.0, 86);
+                        MidiActions.add_note(root.tracks[2].id, 50, 12.0, 4.0, 86);
+                        MidiActions.add_note(root.tracks[2].id, 53, 16.0, 4.0, 84);
+                        MidiActions.add_note(root.tracks[2].id, 50, 20.0, 4.0, 84);
+                        MidiActions.add_note(root.tracks[2].id, 48, 24.0, 4.0, 84);
+                        MidiActions.add_note(root.tracks[2].id, 50, 28.0, 4.0, 84);
+                        MidiActions.add_note(root.tracks[3].id, 36, 0.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 1.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 2.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 3.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 36, 4.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 5.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 6.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 7.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 36, 8.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 9.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 10.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 11.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 36, 12.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 13.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 14.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 15.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 36, 16.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 17.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 18.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 19.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 36, 20.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 21.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 22.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 23.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 36, 24.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 25.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 26.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 27.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 36, 28.0, 0.5, 118);
+                        MidiActions.add_note(root.tracks[3].id, 42, 29.0, 0.5, 76);
+                        MidiActions.add_note(root.tracks[3].id, 38, 30.0, 0.5, 110);
+                        MidiActions.add_note(root.tracks[3].id, 42, 31.0, 0.5, 76);
+                        demo_seeded = true;
+                        CommandActions.palette_exec("SAVE DEMO");
+                        bot_view = 2;
+                    }
+                } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "CAPTURE " + root.recording_lifecycle; width: 120px; font-size: 8px; color: root.recording_lifecycle == "Recording" ? Style.record : Style.text-muted; horizontal-alignment: right; vertical-alignment: center; }
+                Text { text: root.last_action; width: 300px; font-size: 8px; color: Style.text-muted; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+            }
+        }
+        // The production track-count overlay owns the visible navigation for
+        // real sessions. Keep the OpenUtau editor in the same overlay so the
+        // button cannot select a destination whose content is clipped by the
+        // legacy bottom-panel tree.
+        if (bot_view == ViewModes.openutau) : Z_OpenUtauEditor {
+            x: 0px; y: 32px; width: 100%; height: parent.height - 32px;
+            score-path <=> root.openutau_score_path;
+            render-path <=> root.openutau_render_path;
+            status: root.openutau_status;
+            scoop <=> root.openutau_scoop;
+            vibrato <=> root.openutau_vibrato; vibrato-rate <=> root.openutau_vibrato_rate;
+            dynamics <=> root.openutau_dynamics;
+            consonants <=> root.openutau_consonants;
+            notes: root.openutau_notes;
+            open-score => { CommandActions.palette_exec("OPENUTAU EDIT"); }
+            launch-editor => { CommandActions.palette_exec("OPENUTAU LAUNCH"); }
+            render-score => { CommandActions.palette_exec("OPENUTAU RENDER"); }
+            import-render => { CommandActions.palette_exec("OPENUTAU IMPORT RENDER"); }
+            apply-tuning => { CommandActions.palette_exec("OPENUTAU APPLY TUNING"); }
+        }
+        if (bot_view == ViewModes.preferences) : Z_AudioSettings {
+            x: 0px; y: 32px; width: 100%; height: parent.height - 32px;
+            ready: root.audio_device_ready;
+            device-catalog: root.audio_device_catalog;
+            device-names: root.audio_device_names;
+            sample-rate: root.audio_sample_rate;
+            buffer-size: root.buffer_size;
+            dropped-blocks: root.input_dropped_blocks;
+            diagnostic: root.audio_diagnostic;
+            busy: root.is_ply || root.is_rec;
+        }
+        if (bot_view == 0 && root.tracks.length >= 4) : Rectangle {
+        x: ins_open ? Style.inspector-w : 0px; y: 205px;
+        width: parent.width - (ins_open ? Style.inspector-w : 0px);
+        height: 192px; clip: true; background: transparent; ScrollView { width: 100%; height: 100%;
+        Rectangle { width: 100%; height: root.tracks.length * 48px;
+        for trk[idx] in root.tracks : Rectangle {
+            property <Z_Track> track: trk;
+            x: 0px; y: idx * 48px; width: 100%; height: 47px; clip: true;
+            background: root.sel_idx == idx ? Style.selection : (Math.mod(idx, 2) == 0 ? Style.panel : Style.base);
+            Rectangle { x: 0px; width: 4px; height: 100%; background: track.color; }
+            HorizontalLayout {
+                padding-left: 10px; padding-right: 8px; spacing: 6px;
+                Text { text: (idx < 9 ? "0" : "") + (idx + 1) + " | " + track.name; width: 150px; font-size: 11px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; overflow: elide;
+                    TouchArea { clicked => { root.sel_idx = idx; ProjectActions.select_track(track.id); } }
+                }
+                HorizontalLayout { spacing: 2px; alignment: center;
+                    Z_IconButton { width: 20px; height: 20px; icon: "M"; compact: true; active: track.mute; active-col: Style.brand; clicked => { MixerActions.toggle_mute(track.id); } }
+                    Z_IconButton { width: 20px; height: 20px; icon: "S"; compact: true; active: track.solo; active-col: Style.solo; clicked => { MixerActions.toggle_solo(track.id); } }
+                    Z_IconButton { width: 20px; height: 20px; icon: "R"; compact: true; active: track.armed; active-col: Style.record; clicked => { ProjectActions.toggle_arm(track.id); } }
+                }
+                Rectangle { width: 86px; height: 18px;
+                    VerticalLayout { alignment: center; spacing: 2px;
+                        Rectangle { width: 86px; height: 4px; background: Style.surface-0; border-radius: 2px;
+                            Rectangle { width: track.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border-radius: 2px; }
+                            TouchArea { mouse-cursor: ew-resize; moved => { if (self.pressed) { MixerActions.fader_changed(track.id, (self.mouse_x / parent.width).clamp(0, 1)); } } }
+                        }
+                        Text { text: track.pan == 0.0 ? "C" : (track.pan < 0.0 ? "L" + Math.round(-track.pan * 128.0) : "R" + Math.round(track.pan * 127.0)); width: 86px; height: 10px; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; height: 100%; clip: true;
+                    for clip_data in track.clips : Rectangle {
+                        x: clip_data.start_beat * Style.grid-step * root.z_lvl; y: 6px;
+                        width: Math.max(28px, clip_data.length_beats * Style.grid-step * root.z_lvl - 2px); height: 35px;
+                        background: clip_data.color.with-alpha(clip_data.selected ? 0.58 : 0.28); border-width: clip_data.selected ? 2px : 1px; border-color: clip_data.selected ? Style.text-primary : clip_data.color; border-radius: 3px;
+                        Text { text: clip_data.name; x: 6px; width: parent.width - 12px; height: 12px; font-size: Style.font-xxs; color: Style.text-primary; vertical-alignment: center; overflow: elide; }
+                    TouchArea { clicked => { root.sel_idx = idx; root.sel_cid = clip_data.id; ProjectActions.select_track(track.id); } }
+                    }
+                }
+            }
+        } } } }
+        if (bot_view == 2 && root.tracks.length > 0) : Rectangle {
+            x: 0px; y: 34px; width: 100%; height: 520px; z: 5; background: Style.surface-1; border-width: 1px; border-color: Style.border; clip: true;
+            Text { text: "Piano Roll  |  Track " + (root.sel_idx + 1); x: 12px; y: 8px; font-size: 11px; color: Style.text; font-weight: 700; }
+            Text { text: "Click the grid to add notes  ·  Snap " + root.snap_val; x: 190px; y: 9px; font-size: 9px; color: Style.text-muted; }
+            Rectangle {
+                x: 60px; y: 32px; width: parent.width - 60px; height: 470px; background: Style.surface-0; clip: true;
+                TouchArea {
+                    clicked => {
+                        let raw_beat = self.mouse_x / (Style.grid-step / 1px * root.z_lvl * 1px); let snap = 4.0 / root.snap_division.max(1.0); let beat = ((raw_beat / snap).round() * snap).max(0.0);
+                        let pitch = (83 - Math.floor(self.mouse_y / 20px)).clamp(0, 127);
+                        MidiActions.add_note(root.tracks[root.sel_idx].id, pitch, beat, 1.0, 100);
+                    }
+                }
+                for p in 24 : Rectangle {
+                    y: p * 20px; width: 100%; height: 1px; background: Math.mod(p, 12) == 0 ? Style.border : Style.grid-subbeat;
+                    Text { text: "" + (83 - p); x: -52px; width: 44px; height: 20px; font-size: 8px; color: Style.text-muted; horizontal-alignment: right; vertical-alignment: center; }
+                }
+                for b in 32 : Rectangle {
+                    x: b * Style.grid-step * root.z_lvl; width: 1px; height: 100%; background: Math.mod(b, 4) == 0 ? Style.grid-bar : Style.grid-subbeat;
+                }
+                for note in root.tracks[root.sel_idx].piano_roll_notes : Rectangle {
+                    x: note.start_beat * Style.grid-step * root.z_lvl; y: (83 - note.pitch) * 20px + 2px;
+                    width: (note.length_beats * Style.grid-step * root.z_lvl).max(8px); height: 16px;
+                    background: note.selected ? Style.text-primary : Style.brand; border-radius: 2px;
+                    Text { text: "" + note.pitch; x: 4px; font-size: Style.font-xxs; color: Style.text-primary; vertical-alignment: center; }
+                }
+            }
+        }
+}}

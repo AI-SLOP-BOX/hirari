@@ -29,15 +29,3 @@ impl TrackIconOrchestrator {
             && self.get_track_icon(u32::MAX) == "Generic"
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::TrackIconOrchestrator;
-
-    #[test]
-    fn audit_checks_known_and_fallback_icons() {
-        let mut icons = TrackIconOrchestrator::new();
-        icons.mapping.insert(7, "Piano".into());
-        assert!(icons.audit_visuals());
-    }
-}

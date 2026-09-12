@@ -170,11 +170,19 @@ impl ClassifierOrchestrator {
 
 #[cfg(test)]
 mod tests {
-    use super::ClassifierOrchestrator;
+    use super::{AssetTypeRust, ClassifierOrchestrator};
 
     #[test]
-    fn classifier_audit_exercises_silence_and_buffer_features() {
-        assert!(ClassifierOrchestrator::new().audit_smart_file_classifier());
+    fn classifier_rejects_invalid_input_and_detects_sustained_loop() {
+        let classifier = ClassifierOrchestrator::new();
+        assert!(matches!(classifier.classify(&[], 48_000.0).asset_type, AssetTypeRust::Unknown));
+        assert!(matches!(
+            classifier.classify(&[f32::NAN; 2_048], 48_000.0).asset_type,
+            AssetTypeRust::Unknown
+        ));
+        let sustained = classifier.classify(&[0.1; 120_000], 48_000.0);
+        assert!(matches!(sustained.asset_type, AssetTypeRust::Loop));
+        assert!(sustained.confidence > 0.0);
     }
 
     #[test]

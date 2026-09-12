@@ -357,9 +357,17 @@ mod tests {
     }
 
     #[test]
-    fn empty_plan_is_a_valid_no_work_state() {
-        let orchestrator = DistributedRenderingOrchestrator::new();
-        assert!(orchestrator.audit_parallel_bounce_orchestrator());
+    fn empty_plan_resets_pending_work_and_advances_generation() {
+        let mut orchestrator = DistributedRenderingOrchestrator::new();
+        orchestrator.render_project_stems(vec![4, 5]);
+        let first_generation = orchestrator.generation();
+        assert_eq!(orchestrator.pending_count(), 2);
+
+        orchestrator.render_project_stems(Vec::new());
+        assert!(orchestrator.generation() > first_generation);
+        assert_eq!(orchestrator.pending_count(), 0);
+        assert_eq!(orchestrator.completed_count(), 0);
+        assert!(orchestrator.statuses().is_empty());
     }
 
     #[test]

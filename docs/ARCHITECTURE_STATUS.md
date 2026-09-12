@@ -16,6 +16,21 @@ what is canonical and what remains compatibility or contract-test code.
 | Release bundle | `packaging/Aura DAW.app` | Historical bundles are not release inputs |
 | Release gate | `scripts/verify_release_bundle.sh` via `aura-verify-release` | Ad-hoc smoke scripts are capability tests |
 
+## UI and rendering split
+
+The desktop shell is Slint. The default Cargo configuration selects Slint's
+WGPU 29 backend and installs a rendering notifier that uses the same device and
+queue as the Slint frame. Shared plot frames are uploaded as RGBA textures and
+imported back as Slint images for Arrange, Mixer, Synth, Waveform, Mastering
+and Piano Roll surfaces. An opt-in `gpu-canvas` feature keeps a standalone
+native `wgpu` 0.20 WGSL pipeline for renderer-level tests and integrations;
+it is not a second window. Slint continues to own layout, accessibility and
+input while dense plot pixels are produced by the GPU path. The separate C++
+graphics layer under `src/graphics/` remains a compatibility path for Metal
+and opt-in Vulkan experiments. The notifier tracks waveform, spectrum, meter,
+and piano-note streams independently, so a meter-only update does not rebuild
+the other three textures.
+
 ## Project lifecycle rules
 
 1. A project load is a control-thread transaction.

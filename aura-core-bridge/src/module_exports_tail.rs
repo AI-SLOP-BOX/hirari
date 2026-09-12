@@ -18,6 +18,11 @@ pub mod unified_engine;
 pub mod va_oscillator;
 pub mod vca_group_model;
 pub mod vca_console;
+/// Stable compatibility namespace for clients that imported the original
+/// `vca` module before the implementation was split into focused modules.
+pub mod vca {
+    pub use crate::vca_group_model::VcaConsole;
+}
 pub mod vca_fader_state;
 pub mod vca_gain_orchestrator;
 pub mod video;

@@ -285,6 +285,8 @@ public:
     }
 
     bool is_running() const { return m_running.load(std::memory_order_acquire); }
+    double sample_rate() const noexcept { return m_sampleRate; }
+    uint32_t buffer_size() const noexcept { return m_bufferSize; }
     bool device_lost() const { return m_deviceLost.load(std::memory_order_acquire); }
     int32_t last_error_code() const noexcept {
         return m_lastErrorCode.load(std::memory_order_acquire);

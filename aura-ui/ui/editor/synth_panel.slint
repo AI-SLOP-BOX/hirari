@@ -6,6 +6,8 @@ export component Z_AuraSynth {
     callback engine-changed(int);
     in property <color> accent-col: Style.brand;
     in property <float> ui_timer: 0.0;
+    in property <image> gpu-waveform-image;
+    in property <image> gpu-spectrum-image;
     
     in-out property <int> active_engine: 1; // 0: Neural Synth, 1: Surge XT, 2: Alchemy
     in-out property <int> active_skin: 0; // 0: Classic Dark, 1: Royal Blue, 2: Chroma Glow, 3: Retro Analog
@@ -18,7 +20,9 @@ export component Z_AuraSynth {
             
             // Engine and Skin Select Bar
             HorizontalLayout {
-                spacing: 20px; alignment: start;
+                spacing: 14px; alignment: start;
+                Text { text: "Nova Synth"; font-size: 15px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; }
+                Rectangle { width: 1px; height: 22px; background: Style.border; }
                 
                 // Engine selection
                 HorizontalLayout {
@@ -60,6 +64,7 @@ export component Z_AuraSynth {
                     Text { text: active_engine == 0 ? "Analog Oscillator" : active_engine == 1 ? "Wavetable Oscillator" : "Multi-sampler"; font-size: 10px; color: current_accent; font-weight: 700; }
                     Rectangle {
                         height: 100px; background: Style.surface-0; border_radius: 2px;
+                        if (gpu-waveform-image.width > 0) : Image { source: gpu-waveform-image; x: 4px; y: 4px; width: parent.width - 8px; height: parent.height - 8px; image-fit: fill; opacity: 0.75; }
                         // Oscillator preview. Parameter changes are forwarded
                         // to the shared macro engine below.
                         Path {
@@ -93,6 +98,7 @@ export component Z_AuraSynth {
                     Text { text: active_engine == 0 ? "Spectral Filter" : active_engine == 1 ? "Ladder Filter" : "Resynthesis Filter"; font-size: 10px; color: Style.text-secondary; font-weight: 700; }
                     Rectangle {
                         height: 140px; background: Style.surface; border_radius: 1px; clip: true;
+                        if (gpu-spectrum-image.width > 0) : Image { source: gpu-spectrum-image; x: 4px; y: 4px; width: parent.width - 8px; height: parent.height - 8px; image-fit: fill; opacity: 0.35; }
                         // Spectral Curve
                         Path {
                             fill: current_accent.with-alpha(0.15); stroke: current_accent; stroke_width: 2px;
@@ -107,6 +113,26 @@ export component Z_AuraSynth {
                         Z_Knob { label: "FREQ"; value: 0.6; accent-col: current_accent; changed(v) => { root.parameter-changed(3, v); } }
                         Z_Knob { label: "RES"; value: 0.3; accent-col: current_accent; changed(v) => { root.parameter-changed(4, v); } }
                         Z_Knob { label: "DRIVE"; value: 0.5; accent-col: Style.alert; changed(v) => { root.parameter-changed(5, v); } }
+                    }
+                }
+            }
+            // Compact modulation row keeps the instrument surface visually dense like the reference synth.
+            HorizontalLayout { height: 68px; spacing: 6px;
+                for block[idx] in ["AMP ENV", "MOD ENV", "LFO 1", "LFO 2"] : Rectangle { horizontal-stretch: 1; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 3px;
+                    VerticalLayout { padding: 6px; spacing: 4px; Text { text: block; color: idx == 0 ? current_accent : Style.text-tertiary; font-size: 8px; font-weight: 700; }
+                        if (idx == 0) : Path { width: 100%; height: 28px; stroke: current_accent; stroke_width: 1.5px; MoveTo { x: 0; y: 25; } LineTo { x: 8; y: 5; } LineTo { x: 28; y: 12; } LineTo { x: 52; y: 18; } LineTo { x: 78; y: 20; } }
+                        if (idx == 1) : Path { width: 100%; height: 28px; stroke: Style.ok; stroke_width: 1.5px; MoveTo { x: 0; y: 24; } LineTo { x: 10; y: 6; } LineTo { x: 25; y: 14; } LineTo { x: 44; y: 20; } LineTo { x: 78; y: 22; } }
+                        if (idx == 2) : Path { width: 100%; height: 28px; stroke: #63C7C5; stroke_width: 1.5px; MoveTo { x: 0; y: 16; } LineTo { x: 12; y: 5; } LineTo { x: 24; y: 16; } LineTo { x: 36; y: 27; } LineTo { x: 48; y: 16; } LineTo { x: 60; y: 5; } LineTo { x: 72; y: 16; } }
+                        if (idx == 3) : Path { width: 100%; height: 28px; stroke: Style.brand; stroke_width: 1.5px; MoveTo { x: 0; y: 8; } LineTo { x: 18; y: 8; } LineTo { x: 18; y: 23; } LineTo { x: 38; y: 23; } LineTo { x: 38; y: 8; } LineTo { x: 58; y: 8; } LineTo { x: 58; y: 23; } LineTo { x: 78; y: 23; } }
+                    }
+                }
+            }
+            Rectangle { height: 48px; background: Style.surface-2; border-width: 1px; border-color: Style.border; border-radius: 3px;
+                HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 2px;
+                    for key[idx] in ["C", "D", "E", "F", "G", "A", "B", "C", "D", "E", "F", "G", "A", "B", "C"] : Rectangle {
+                        horizontal-stretch: 1; height: 42px; background: (key == "C" || key == "F") ? #F4F7FB : #DEE5EC; border-width: 1px; border-color: #7A8794; border-radius: 2px;
+                        Text { text: key; y: 28px; width: 100%; color: #1A222C; font-size: 8px; horizontal-alignment: center; }
+                        TouchArea { clicked => { root.parameter-changed(32 + idx, 1.0); } }
                     }
                 }
             }
