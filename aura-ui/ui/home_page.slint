@@ -19,7 +19,7 @@ export component Z_HomePage inherits Rectangle {
         // that remains visible above Arrange, Mixer and Mastering.
         Rectangle { height: 48px; background: Style.surface-0; border_width: 1px; border_color: Style.border;
             HorizontalLayout { padding-left: 16px; padding-right: 16px; spacing: 8px;
-                Image { source: @image-url("assets/aura-mark.svg"); width: 28px; height: 28px; }
+                Image { source: @image-url("assets/hirari-logo.svg"); width: 28px; height: 28px; }
                 Text { text: "Hirari"; width: 64px; color: Style.text-primary; font-size: 16px; font-weight: 700; vertical-alignment: center; }
                 for menu in ["File", "Edit", "View", "Transport", "Track", "Mix", "Window", "Help"] : Text { text: menu; width: 44px; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
                 Rectangle { width: 1px; height: 24px; background: Style.border; }
@@ -39,7 +39,7 @@ export component Z_HomePage inherits Rectangle {
             width: 218px; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 9px;
             VerticalLayout {
                 padding: 16px; spacing: 6px;
-                HorizontalLayout { height: 34px; spacing: 8px; Image { source: @image-url("assets/aura-mark.svg"); width: 28px; height: 28px; } Text { text: "Hirari"; font-size: 19px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; } }
+                HorizontalLayout { height: 34px; spacing: 8px; Image { source: @image-url("assets/hirari-logo.svg"); width: 28px; height: 28px; } Text { text: "Hirari"; font-size: 19px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; } }
                 Text { text: "Studio workspace"; font-size: 9px; color: Style.text-tertiary; }
                 Rectangle { height: 18px; }
                 for item[idx] in ["Home", "Projects", "Templates", "Sounds", "Plugins", "Samples", "Cloud", "Settings"] : Rectangle {

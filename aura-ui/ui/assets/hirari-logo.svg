@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Hirari waveform H</title>
+  <desc>Abstract H formed from a continuous rainbow audio waveform.</desc>
+  <defs>
+    <linearGradient id="hirari-spectrum" x1="48" y1="256" x2="464" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#13E7E5"/>
+      <stop offset="0.22" stop-color="#168DFF"/>
+      <stop offset="0.42" stop-color="#8B5CFF"/>
+      <stop offset="0.58" stop-color="#D64DFF"/>
+      <stop offset="0.74" stop-color="#FF4FA3"/>
+      <stop offset="0.88" stop-color="#FF8466"/>
+      <stop offset="1" stop-color="#FFD84A"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#hirari-spectrum)">
+    <rect x="48"  y="228" width="24" height="56"  rx="12"/>
+    <rect x="82"  y="200" width="24" height="112" rx="12"/>
+    <rect x="116" y="166" width="24" height="180" rx="12"/>
+    <rect x="150" y="186" width="24" height="140" rx="12"/>
+    <rect x="184" y="213" width="24" height="86"  rx="12"/>
+    <rect x="218" y="231" width="24" height="50"  rx="12"/>
+    <rect x="252" y="231" width="24" height="50"  rx="12"/>
+    <rect x="286" y="231" width="24" height="50"  rx="12"/>
+    <rect x="320" y="213" width="24" height="86"  rx="12"/>
+    <rect x="354" y="186" width="24" height="140" rx="12"/>
+    <rect x="388" y="166" width="24" height="180" rx="12"/>
+    <rect x="422" y="200" width="24" height="112" rx="12"/>
+    <rect x="456" y="228" width="24" height="56"  rx="12"/>
+  </g>
+</svg>
