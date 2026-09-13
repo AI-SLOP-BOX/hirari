@@ -14,7 +14,7 @@ export component Z_FullMixer {
     in property <image> gpu-spectrum-image;
     callback close();
     VerticalLayout {
-        width: 1000px; preferred-width: 1000px; height: 100%;
+        width: 100%; preferred-width: 100%; height: 100%;
         padding: 10px; spacing: 8px;
         Rectangle {
             height: 44px; background: Style.surface-1; border_radius: 6px; border_width: 1px; border_color: Style.border;
@@ -38,7 +38,7 @@ export component Z_FullMixer {
             }
         }
         Rectangle {
-            width: 1000px; height: 100%; clip: true;
+            width: 100%; height: 100%; clip: true;
             // Persistent browser column matching the reference MixConsole layout.
             Rectangle { x: 0px; y: 0px; width: 208px; height: 100%; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 6px;
                 VerticalLayout { spacing: 0px;
