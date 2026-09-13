@@ -18,7 +18,7 @@ export component Z_AudioSettings inherits Rectangle {
             width: 196px; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 8px;
             VerticalLayout {
                 padding: 14px; spacing: 6px;
-                Text { text: "Aura"; font-size: 20px; color: Style.text-primary; font-weight: 700; }
+                Text { text: "Hirari"; font-size: 20px; color: Style.text-primary; font-weight: 700; }
                 Text { text: "Settings"; font-size: 10px; color: Style.text-tertiary; }
                 Rectangle { height: 16px; }
                 for item[idx] in ["General", "Audio", "MIDI", "Plugins", "Appearance", "Shortcuts", "Project"] : Rectangle {
@@ -27,7 +27,7 @@ export component Z_AudioSettings inherits Rectangle {
                     Text { text: item; x: 36px; font-size: 10px; color: item == "Audio" ? Style.text-primary : Style.text-dim; vertical-alignment: center; }
                 }
                 Rectangle { vertical-stretch: 1; }
-                Text { text: "Aura Studio"; font-size: 10px; color: Style.text-tertiary; }
+                Text { text: "Hirari Studio"; font-size: 10px; color: Style.text-tertiary; }
                 Text { text: "Audio engine settings"; font-size: 9px; color: Style.text-muted; }
             }
         }
