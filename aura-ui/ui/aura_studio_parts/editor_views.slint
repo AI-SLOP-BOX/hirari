@@ -23,7 +23,11 @@
                 // Editor panels must remain available for full projects too;
                 // the old `< 4 tracks` shortcut left a stale arrangement
                 // frame visible as soon as a template had four or more lanes.
-                if (mx_open || pr_open) : Rectangle {
+                // The full mixer is mounted by the primary editor surface when
+                // bot_view == 7. Do not instantiate the legacy bottom panel as
+                // well, otherwise both trees draw meters and controls on top of
+                // each other during a view switch.
+                if ((mx_open || pr_open) && bot_view != 7) : Rectangle {
                     height: 300px; background: Style.panel;
                     Rectangle { y: 0; height: 2px; background: #000; width: 100%; }
                     VerticalLayout {
