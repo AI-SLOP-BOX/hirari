@@ -149,7 +149,10 @@ def main():
         # consonant timing in the legacy format.
         lyrics = ["ひ", "か", "り", "ほ", "ど", "け", "る", "よ", "る", "に", "き", "み", "と", "み", "つ", "け"]
         tones = [60, 62, 64, 64, 62, 60, 62, 64, 65, 64, 67, 65, 64, 62, 60, 60]
-        voice_dir = os.environ.get("AURA_TETO_VOICE_DIR", "/Users/REDACTED/Library/Application Support/OpenUtau/Singers/KasaneTeto")
+        voice_dir = os.environ.get(
+            "AURA_TETO_VOICE_DIR",
+            str(Path.home() / "Library" / "Application Support" / "OpenUtau" / "Singers" / "KasaneTeto"),
+        )
         tempo = os.environ.get("AURA_VOCAL_TEMPO", "120")
         lines = ["[#SETTING]", f"Tempo={tempo}", "ProjectName=Aura Teto Tuned", f"VoiceDir={voice_dir}", "", "[#VERSION]", "UST Version1.2", ""]
         for index, (lyric, tone) in enumerate(zip(lyrics, tones)):

@@ -6,13 +6,15 @@ import os
 import random
 import wave
 from array import array
+from pathlib import Path
 
 SR = 44100
 BPM = 120
 BEAT = 60.0 / BPM
 BARS = 96
 N = int(BARS * 4 * BEAT * SR)
-OUT = os.environ.get("AURA_JPOP_OUT", "/Users/REDACTED/Desktop/logicpro_oss/dist/aura_jpop_teto_instrumental.wav")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+OUT = os.environ.get("AURA_JPOP_OUT", str(REPO_ROOT / "dist" / "aura_jpop_teto_instrumental.wav"))
 random.seed(2408)
 
 

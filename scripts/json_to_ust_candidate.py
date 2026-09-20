@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 PPQ = 480
-VOICE_DIR = "/Users/REDACTED/Library/Application Support/OpenUtau/Singers/KasaneTetoOfficial"
+VOICE_DIR = Path.home() / "Library" / "Application Support" / "OpenUtau" / "Singers" / "KasaneTetoOfficial"
 
 
 def main() -> int:
@@ -15,7 +15,7 @@ def main() -> int:
     tracks = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     vocal = next(track["notes"] for track in tracks if int(track["track_id"]) == 3)
     notes = sorted(vocal, key=lambda note: float(note["start_beat"]))
-    voice_dir = Path(sys.argv[3]).expanduser() if len(sys.argv) == 4 else Path(VOICE_DIR)
+    voice_dir = Path(sys.argv[3]).expanduser() if len(sys.argv) == 4 else VOICE_DIR
     lines = [
         "[#SETTING]", "Tempo=110", "ProjectName=Aura Candidate Teto",
         f"VoiceDir={voice_dir}", "OutFile=aura_candidate_teto.wav", "Mode2=True",

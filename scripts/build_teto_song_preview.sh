@@ -1,10 +1,10 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT="/Users/REDACTED/Library/OpenUtau/Singers/KasaneTetoOfficial/重音テト単独音"
-INSTRUMENTAL="${AURA_TETO_INSTRUMENTAL:-/Users/REDACTED/Documents/aura_full_song_preview.wav}"
-VOCAL="${AURA_TETO_VOCAL:-/Users/REDACTED/Documents/aura_teto_vocal.wav}"
-MIX="${AURA_TETO_MIX:-/Users/REDACTED/Documents/aura_teto_song_preview.wav}"
+ROOT="${AURA_TETO_VOICE_ROOT:-${HOME}/Library/OpenUtau/Singers/KasaneTetoOfficial/重音テト単独音}"
+INSTRUMENTAL="${AURA_TETO_INSTRUMENTAL:-${HOME}/Documents/aura_full_song_preview.wav}"
+VOCAL="${AURA_TETO_VOCAL:-${HOME}/Documents/aura_teto_vocal.wav}"
+MIX="${AURA_TETO_MIX:-${HOME}/Documents/aura_teto_song_preview.wav}"
 WORK="$(mktemp -d /tmp/aura-teto.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
