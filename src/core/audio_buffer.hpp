@@ -1,6 +1,5 @@
 #pragma once
 
-#include <vector>
 #include <algorithm>
 #include <memory>
 #include <atomic>
@@ -57,7 +56,6 @@ public:
             m_isExternal = other.m_isExternal;
             m_externalData = other.m_externalData;
             m_isDirty = other.m_isDirty;
-            m_pointers = std::move(other.m_pointers);
             other.m_storage = nullptr;
             other.m_data = nullptr;
             other.m_externalData = nullptr;
@@ -66,7 +64,6 @@ public:
             other.m_capacity = 0;
             other.m_isExternal = false;
             other.m_isDirty = true;
-            other.m_pointers.clear();
             for (auto& pointer : other.m_staticPointers) pointer = nullptr;
             updatePointers();
         }
@@ -88,8 +85,8 @@ public:
         size_t required = static_cast<size_t>(channels) * paddedSamples;
         const bool needsDataAllocation = required > m_capacity ||
                                          (m_isExternal && required != 0);
-        const bool needsPointerAllocation =
-            channels > kMaxFastPathChannels && m_pointers.size() != channels;
+        const bool needsPointerAllocation = channels > kMaxFastPathChannels &&
+            hirari_audio_buffer_storage_channel_count(m_storage) != channels;
 
         if (needsDataAllocation || needsPointerAllocation) {
             // --- INDUSTRIAL SOVEREIGNTY: Zero-Allocation Guard ---
@@ -106,20 +103,24 @@ public:
                                         : "AUDIO_BUFFER_POINTER_RESIZE_ATTEMPTED");
                 return false;
             }
-            if (needsDataAllocation) {
+            if (needsDataAllocation || needsPointerAllocation) {
                 if (required > std::numeric_limits<size_t>::max() / sizeof(float)) {
                     throw std::bad_array_new_length();
                 }
                 if (!m_storage) m_storage = hirari_audio_buffer_storage_create();
-                if (!m_storage || !hirari_audio_buffer_storage_reserve(m_storage, required)) {
+                if (!m_storage) throw std::bad_alloc();
+                if (needsDataAllocation) {
+                    if (!hirari_audio_buffer_storage_reserve(m_storage, required)) {
+                        throw std::bad_alloc();
+                    }
+                    m_data = hirari_audio_buffer_storage_data(m_storage);
+                    m_capacity = hirari_audio_buffer_storage_capacity(m_storage);
+                    m_isExternal = false;
+                }
+                if (needsPointerAllocation &&
+                    !hirari_audio_buffer_storage_prepare_channels(m_storage, channels)) {
                     throw std::bad_alloc();
                 }
-                m_data = hirari_audio_buffer_storage_data(m_storage);
-                m_capacity = hirari_audio_buffer_storage_capacity(m_storage);
-                m_isExternal = false;
-            }
-            if (needsPointerAllocation) {
-                m_pointers.assign(channels, nullptr);
             }
         }
         updatePointers();
@@ -294,13 +295,14 @@ public:
     const float* const* getArrayOfReadPointers() const {
         if (m_isExternal) return const_cast<const float* const*>(m_externalData);
         if (m_numChannels <= 2) return const_cast<const float* const*>(m_staticPointers);
-        return const_cast<const float* const*>(m_pointers.data());
+        return const_cast<const float* const*>(
+            hirari_audio_buffer_storage_channel_pointers(m_storage));
     }
 
     float** getArrayOfWritePointers() {
         if (m_isExternal) return m_externalData;
         if (m_numChannels <= 2) return m_staticPointers;
-        return m_pointers.data();
+        return hirari_audio_buffer_storage_channel_pointers(m_storage);
     }
 
 private:
@@ -313,7 +315,6 @@ private:
     void updatePointers() {
         if (m_data == nullptr && !m_isExternal) {
             for (auto& pointer : m_staticPointers) pointer = nullptr;
-            std::fill(m_pointers.begin(), m_pointers.end(), nullptr);
             return;
         }
         for (auto& pointer : m_staticPointers) pointer = nullptr;
@@ -324,9 +325,9 @@ private:
         }
         if (m_numChannels > kMaxFastPathChannels) {
             for (uint32_t c = 0; c < m_numChannels; ++c) {
-                m_pointers[c] = m_isExternal
-                                    ? m_externalData[c]
-                                    : m_data + (c * m_numSamples);
+                hirari_audio_buffer_storage_set_channel_pointer(
+                    m_storage, c, m_isExternal ? m_externalData[c]
+                                               : m_data + (c * m_numSamples));
             }
         }
     }
@@ -339,7 +340,6 @@ private:
     bool m_isDirty = true;
     float* m_data = nullptr;
     float** m_externalData = nullptr;
-    std::vector<float*> m_pointers;
     float* m_staticPointers[kMaxFastPathChannels] = {nullptr};
     // RT status is a property of the executing thread, not global process
     // state. UI and disk workers must remain free to allocate independently.

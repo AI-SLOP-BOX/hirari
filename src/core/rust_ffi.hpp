@@ -416,6 +416,11 @@ extern "C" bool hirari_audio_buffer_storage_reserve(void* storage, size_t capaci
 extern "C" void hirari_audio_buffer_storage_release(void* storage);
 extern "C" float* hirari_audio_buffer_storage_data(const void* storage);
 extern "C" size_t hirari_audio_buffer_storage_capacity(const void* storage);
+extern "C" bool hirari_audio_buffer_storage_prepare_channels(void* storage, size_t channel_count);
+extern "C" void hirari_audio_buffer_storage_set_channel_pointer(
+    void* storage, size_t channel, float* pointer);
+extern "C" float** hirari_audio_buffer_storage_channel_pointers(const void* storage);
+extern "C" size_t hirari_audio_buffer_storage_channel_count(const void* storage);
 extern "C" bool hirari_audio_buffer_deinterleave_interleaved(
     const float* source, size_t source_sample_count,
     float* const* channel_pointers, uint32_t channel_count, uint32_t frames);

@@ -91,6 +91,7 @@ pub unsafe extern "C" fn hirari_builtin_gain_process_state(
 struct AlignedAudioStorage {
     samples: *mut f32,
     capacity: usize,
+    channel_pointers: Vec<*mut f32>,
 }
 
 impl Drop for AlignedAudioStorage {
@@ -182,6 +183,7 @@ pub extern "C" fn hirari_audio_buffer_storage_create() -> *mut std::ffi::c_void 
     Box::into_raw(Box::new(AlignedAudioStorage {
         samples: std::ptr::null_mut(),
         capacity: 0,
+        channel_pointers: Vec::new(),
     }))
     .cast()
 }
@@ -246,6 +248,57 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_capacity(
         .cast::<AlignedAudioStorage>()
         .as_ref()
         .map_or(0, |storage| storage.capacity)
+}
+
+/// Reserves the planar channel pointer table used by the C++ AudioBuffer
+/// compatibility facade. Allocation is only requested from its control path.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_prepare_channels(
+    storage: *mut c_void,
+    channel_count: usize,
+) -> bool {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_mut() }) else {
+        return false;
+    };
+    if storage.channel_pointers.len() == channel_count {
+        return true;
+    }
+    if storage.channel_pointers.try_reserve(channel_count).is_err() {
+        return false;
+    }
+    storage.channel_pointers.resize(channel_count, std::ptr::null_mut());
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_set_channel_pointer(
+    storage: *mut c_void,
+    channel: usize,
+    pointer: *mut f32,
+) {
+    if let Some(slot) = (unsafe { storage.cast::<AlignedAudioStorage>().as_mut() })
+        .and_then(|storage| storage.channel_pointers.get_mut(channel))
+    {
+        *slot = pointer;
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_channel_pointers(
+    storage: *const c_void,
+) -> *mut *mut f32 {
+    unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }
+        .map_or(std::ptr::null_mut(), |storage| {
+            storage.channel_pointers.as_ptr() as *mut *mut f32
+        })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_channel_count(
+    storage: *const c_void,
+) -> usize {
+    unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }
+        .map_or(0, |storage| storage.channel_pointers.len())
 }
 
 #[no_mangle]
