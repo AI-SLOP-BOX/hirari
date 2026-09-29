@@ -8,7 +8,7 @@
 #include <cctype>
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct SectionMetadata
@@ -22,7 +22,7 @@ struct SectionMetadata {
 
 /**
  * @struct Marker
- * @brief Industrial Structural Node for Aura Studio Pro.
+ * @brief Industrial Structural Node for Hirari Studio Pro.
  */
 struct Marker {
     uint64_t samplePosition;
@@ -33,7 +33,7 @@ struct Marker {
 
 /**
  * @class ProjectMarkerSystem
- * @brief Industrial Storyboarding Engine for Aura Studio Pro.
+ * @brief Industrial Storyboarding Engine for Hirari Studio Pro.
  * Implements autonomous boundary detection and structural re-flow.
  */
 class ProjectMarkerSystem {
@@ -123,4 +123,4 @@ private:
     uint64_t m_lastUpdatePos;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

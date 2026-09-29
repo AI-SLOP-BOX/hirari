@@ -6,7 +6,7 @@
 #include <array>
 #include <nlohmann/json.hpp>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 using State = nlohmann::json;
 
@@ -98,4 +98,4 @@ private:
     std::array<StateShard, kNumShards> m_shards;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

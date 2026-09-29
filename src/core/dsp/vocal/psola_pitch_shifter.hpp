@@ -3,16 +3,16 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::Core::DSP::Vocal {
+namespace Hirari::Core::DSP::Vocal {
 
 /**
- * @class PsolaPitchShifter
- * @brief Formant-Preserving Pitch Shifter.
- * Uses a click-free dual-tap modulating delay network.
+ * @class DelayModPitchShifter
+ * @brief Low-latency two-tap delay-modulation pitch shifter.
+ * This is not pitch-synchronous overlap-add and does not provide true formant preservation.
  */
-class PsolaPitchShifter {
+class DelayModPitchShifter {
 public:
-    PsolaPitchShifter(double sampleRate = 48000.0) 
+    DelayModPitchShifter(double sampleRate = 48000.0)
         : m_sampleRate(sampleRate)
         , m_delayBuffer(8192, 0.0f)
         , m_writeIdx(0)
@@ -27,9 +27,10 @@ public:
     }
 
     /**
-     * @brief Performs formant-preserving pitch shifting.
+     * @brief Performs two-tap delay modulation; formantRatio only adjusts a
+     *        bounded spectral tilt and is not true formant preservation.
      */
-    void process(const float* input, float* output, uint32_t samples, 
+    void process(const float* input, float* output, uint32_t samples,
                  float ratio, float f0, double sr, float formantRatio = 1.0f,
                  float timingRatio = 1.0f) {
         // Keep the shifter's delay-time model tied to the actual stream rate;
@@ -41,20 +42,35 @@ public:
         const float period = static_cast<float>(effectiveSampleRate) / safeF0;
         const float safeFormantRatio = std::isfinite(formantRatio) ? std::clamp(formantRatio, 0.25f, 4.0f) : 1.0f;
         const float safeTimingRatio = std::isfinite(timingRatio) ? std::clamp(timingRatio, 0.25f, 4.0f) : 1.0f;
-        
+
         ratio = std::clamp(ratio, 0.5f, 2.0f);
         float tilt = std::clamp((ratio - 1.0f) * 0.4f + (safeFormantRatio - 1.0f) * 0.1f, -0.8f, 0.8f);
-        
+
         const float minDelay = std::clamp(std::max(2.0f * period, 256.0f * rateScale), 256.0f, 2048.0f);
         const float maxDelay = std::clamp(std::max(8.0f * period, minDelay + 256.0f), minDelay + 256.0f, 7000.0f);
         float delayRange = maxDelay - minDelay;
 
-        // Modulate delay phase speed based on pitch ratio
-        float phaseSpeed = (ratio - 1.0f) * safeTimingRatio / delayRange;
+        // A rising delay moves the read head farther into the past and lowers
+        // pitch. Therefore a requested upward shift must move the delay in the
+        // opposite direction. The prior sign inverted the requested interval.
+        const float phaseSpeed = (1.0f - ratio) * safeTimingRatio / delayRange;
+        const bool unity = std::abs(ratio - 1.0f) < 1.0e-6f &&
+            std::abs(safeFormantRatio - 1.0f) < 1.0e-6f &&
+            std::abs(safeTimingRatio - 1.0f) < 1.0e-6f;
 
         for (uint32_t s = 0; s < samples; ++s) {
             m_delayBuffer[m_writeIdx] = input[s];
-            
+
+            // Keep the delay history warm for the next edited block, but a
+            // neutral operation must be bit-transparent and must not insert
+            // the shifter's internal delay into an otherwise untouched clip.
+            if (unity) {
+                output[s] = input[s];
+                m_lastOut = input[s];
+                m_writeIdx = (m_writeIdx + 1) % 8192;
+                continue;
+            }
+
             m_phase += phaseSpeed;
             if (m_phase >= 1.0f) m_phase -= 1.0f;
             else if (m_phase < 0.0f) m_phase += 1.0f;
@@ -79,24 +95,24 @@ public:
             uint32_t idxA2 = (idxA1 + 1) % 8192;
             float fracA = readIdxA - std::floor(readIdxA);
             float sampleA = m_delayBuffer[idxA1] * (1.0f - fracA) + m_delayBuffer[idxA2] * fracA;
-            
+
             // Interpolated read from delay line for Tap B
             uint32_t idxB1 = static_cast<uint32_t>(readIdxB) % 8192;
             uint32_t idxB2 = (idxB1 + 1) % 8192;
             float fracB = readIdxB - std::floor(readIdxB);
             float sampleB = m_delayBuffer[idxB1] * (1.0f - fracB) + m_delayBuffer[idxB2] * fracB;
-            
+
             // Compute triangular crossfade windows (constant gain sum = 1.0)
             float winA = 1.0f - 2.0f * std::abs(phaseA - 0.5f);
             float winB = 1.0f - 2.0f * std::abs(phaseB - 0.5f);
-            
+
             // Overlap-add the dual taps
             float pitchShifted = sampleA * winA + sampleB * winB;
-            
+
             // Apply one-pole formant tilt filter
             m_lastOut = pitchShifted + (m_lastOut - pitchShifted) * tilt;
             output[s] = m_lastOut;
-            
+
             // Advance write index
             m_writeIdx = (m_writeIdx + 1) % 8192;
         }
@@ -110,4 +126,4 @@ private:
     float m_lastOut = 0.0f;
 };
 
-} // namespace Aura::Core::DSP::Vocal
+} // namespace Hirari::Core::DSP::Vocal

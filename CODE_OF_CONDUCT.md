@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Aura contributors must make participation respectful, safe, and productive.
+Hirari contributors must make participation respectful, safe, and productive.
 Harassment, discrimination, threats, sexualized attention, deliberate
 intimidation, doxxing, and sustained disruption are not accepted in project
 spaces or when representing the project.
@@ -16,4 +16,4 @@ Reports are handled as confidentially as practical, with conflicts of interest
 delegated to an uninvolved maintainer.
 
 This policy applies to repositories, reviews, issue trackers, project events,
-and public communication made on behalf of Aura.
+and public communication made on behalf of Hirari.

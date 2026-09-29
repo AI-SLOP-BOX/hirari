@@ -5,7 +5,7 @@
 #include <map>
 #include <memory>
 
-namespace Aura::Core::Notation {
+namespace Hirari::Core::Notation {
 
 /**
  * @struct EngravingAtom
@@ -52,4 +52,4 @@ private:
     std::vector<EngravingAtom> m_activeLayout;
 };
 
-} // namespace Aura::Core::Notation
+} // namespace Hirari::Core::Notation

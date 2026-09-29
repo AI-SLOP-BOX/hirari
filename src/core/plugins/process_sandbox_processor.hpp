@@ -11,7 +11,7 @@
 #include "plugin_sandbox_host.hpp"
 #include "../../dsp/iprocessor.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 class ProcessSandboxProcessor final : public DSP::IProcessor {
 public:
@@ -20,7 +20,8 @@ public:
         Quarantined = SandboxProtocol::kRecoveryQuarantined
     };
     static constexpr size_t kMaxStateBytes = SandboxProtocol::kMaxStateBytes;
-    static constexpr uint32_t kMaxParameters = 128;
+    static constexpr uint32_t kMaxParameterSnapshotEntries =
+        SandboxProtocol::kMaxParameterChanges;
     static constexpr uint32_t kConsecutiveOverrunLimit = 8;
 
     explicit ProcessSandboxProcessor(std::string pluginPath, double sampleRate = 44100.0,
@@ -35,6 +36,11 @@ public:
         // unique non-zero bootstrap context later.
         const uint64_t instance = s_generationSeed.fetch_add(1, std::memory_order_relaxed) + 1;
         m_host.setGenerationContext({1, instance, 1, 1});
+        m_parameterSnapshot = hirari_plugin_parameter_snapshot_create();
+    }
+
+    ~ProcessSandboxProcessor() override {
+        hirari_plugin_parameter_snapshot_destroy(m_parameterSnapshot);
     }
 
     bool start() {
@@ -50,6 +56,7 @@ public:
         m_host.stop();
     }
     bool isAlive() const noexcept { return m_host.isAlive(); }
+    bool isMidiInstrument() const noexcept override { return m_host.isMidiInstrument(); }
     bool pollHealth() noexcept {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
         return m_host.pollHealth() && !m_failed.load(std::memory_order_acquire);
@@ -187,13 +194,14 @@ public:
 
     bool enqueueParameterChange(uint32_t parameterId, double value,
                                 uint32_t sampleOffset = 0) noexcept {
-        if (parameterId >= kMaxParameters || !std::isfinite(value)) return false;
-        // Keep the desired host state even when the current worker mailbox is
-        // full.  The next lifecycle boundary replays this snapshot, so a
-        // transient overrun cannot silently reset a plug-in parameter.
-        m_parameterSnapshot[parameterId].store(value, std::memory_order_release);
-        m_parameterSnapshotValid[parameterId / 64].fetch_or(
-            1ULL << (parameterId % 64), std::memory_order_release);
+        if (!std::isfinite(value)) return false;
+        // Native plugin parameter IDs are not bounded by the size of the
+        // host's small restart snapshot. CLAP IDs are arbitrary uint32 values
+        // and VST3 IDs are likewise not parameter-array indices. Send every
+        // valid ID through the realtime mailbox and retain up to the mailbox's
+        // full distinct-ID capacity for lifecycle replay. The sparse cache is
+        // keyed by native ID instead of treating the ID as an array index.
+        (void)hirari_plugin_parameter_snapshot_set(m_parameterSnapshot, parameterId, value);
         return m_host.enqueueParameterChange(parameterId, value, sampleOffset);
     }
     // EffectChain and UI automation use the base IProcessor parameter
@@ -205,13 +213,15 @@ public:
     void setParameter(uint32_t parameterId, float value) noexcept override {
         (void)enqueueParameterChange(parameterId, static_cast<double>(value), 0);
     }
+    void setParameterAtSample(uint32_t parameterId, float value,
+                              uint32_t sampleOffset) noexcept override {
+        (void)enqueueParameterChange(parameterId, static_cast<double>(value), sampleOffset);
+    }
     float getParameter(uint32_t parameterId) const noexcept override {
-        if (parameterId >= kMaxParameters) return 0.0f;
-        const uint64_t valid = m_parameterSnapshotValid[parameterId / 64].load(
-            std::memory_order_acquire);
-        if ((valid & (1ULL << (parameterId % 64))) == 0) return 0.0f;
-        const double value = m_parameterSnapshot[parameterId].load(std::memory_order_acquire);
-        return std::isfinite(value) ? static_cast<float>(std::clamp(value, 0.0, 1.0)) : 0.0f;
+        double value = 0.0;
+        return hirari_plugin_parameter_snapshot_get(m_parameterSnapshot, parameterId, &value) && std::isfinite(value)
+            ? static_cast<float>(std::clamp(value, 0.0, 1.0))
+            : 0.0f;
     }
     void reset() noexcept override {
         // Reset is part of the realtime processor contract, so it must not
@@ -283,22 +293,12 @@ public:
 
 private:
     bool replayParameterSnapshotLocked() noexcept {
-        bool ok = true;
-        for (uint32_t parameterId = 0; parameterId < kMaxParameters; ++parameterId) {
-            const uint64_t valid = m_parameterSnapshotValid[parameterId / 64].load(
-                std::memory_order_acquire);
-            if ((valid & (1ULL << (parameterId % 64))) == 0) continue;
-            const double value = m_parameterSnapshot[parameterId].load(std::memory_order_acquire);
-            if (!std::isfinite(value)) {
-                ok = false;
-                continue;
-            }
-            // Zero is a valid parameter value.  Replaying all slots is
-            // intentional: the sandbox has no portable query for which
-            // parameters were serialized by a third-party format.
-            if (!m_host.enqueueParameterChange(parameterId, value, 0)) ok = false;
-        }
-        return ok;
+        return hirari_plugin_parameter_snapshot_visit(
+            m_parameterSnapshot, this,
+            [](void* context, uint32_t parameterId, double value) -> bool {
+                auto* processor = static_cast<ProcessSandboxProcessor*>(context);
+                return processor->m_host.enqueueParameterChange(parameterId, value, 0);
+            });
     }
 
     PluginSandboxHost m_host;
@@ -310,9 +310,8 @@ private:
     std::atomic<uint32_t> m_latencySamples{0};
     double m_preparedSampleRate = 0.0;
     uint32_t m_preparedBlockSize = 0;
-    std::array<std::atomic<double>, kMaxParameters> m_parameterSnapshot{};
-    std::array<std::atomic<uint64_t>, 2> m_parameterSnapshotValid{};
+    void* m_parameterSnapshot = nullptr;
     inline static std::atomic<uint64_t> s_generationSeed{0};
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

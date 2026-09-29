@@ -4,7 +4,7 @@
 #include <string>
 #include <map>
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @struct ArpPattern
@@ -52,4 +52,4 @@ private:
     std::map<std::string, ArpPattern> m_library;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

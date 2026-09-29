@@ -2,16 +2,14 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
-#include <queue>
 #include <algorithm>
 #include <atomic>
 #include <functional>
-#include <limits>
-#include <map>
+#include "../rust_ffi.hpp"
 
 #include "pdc_graph.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 // AudioNode represents a track, bus, or plugin processing unit
 class AudioNode {
@@ -58,76 +56,57 @@ public:
         m_executionOrder.clear();
         m_stages.clear();
 
-        std::unordered_map<uint32_t, uint32_t> inDegrees;
-        std::unordered_map<uint32_t, uint32_t> nodeDepths;
-        std::queue<uint32_t> zeroInDegreeQueue;
-
+        std::vector<uint32_t> nodeIds;
+        std::vector<uint32_t> nodeLatencies;
+        std::vector<uint32_t> edgeSources;
+        std::vector<uint32_t> edgeDestinations;
         for (const auto& pair : m_nodes) {
-            inDegrees[pair.first] = pair.second->inDegree;
-            nodeDepths[pair.first] = 0;
-            if (pair.second->inDegree == 0) {
-                zeroInDegreeQueue.push(pair.first);
+            nodeIds.push_back(pair.first);
+            nodeLatencies.push_back(pair.second->processingLatency);
+            for (uint32_t destination : pair.second->outgoingEdges) {
+                edgeSources.push_back(pair.first);
+                edgeDestinations.push_back(destination);
             }
         }
-
-        // 1. Kahn's Topological Sort with Stage Level Calculations
-        while (!zeroInDegreeQueue.empty()) {
-            uint32_t curr = zeroInDegreeQueue.front();
-            zeroInDegreeQueue.pop();
-            m_executionOrder.push_back(curr);
-
-            uint32_t currDepth = nodeDepths[curr];
-            const auto& edges = m_nodes[curr]->outgoingEdges;
-            for (uint32_t dest : edges) {
-                nodeDepths[dest] = std::max(nodeDepths[dest], currDepth + 1);
-                inDegrees[dest]--;
-                if (inDegrees[dest] == 0) {
-                    zeroInDegreeQueue.push(dest);
-                }
-            }
-        }
-
-        // Cycle check
-        if (m_executionOrder.size() != m_nodes.size()) {
+        std::vector<uint32_t> executionOrder(nodeIds.size());
+        std::vector<uint32_t> stageDepths(nodeIds.size());
+        if (!hirari_compile_staged_routing_graph(
+                nodeIds.empty() ? nullptr : nodeIds.data(), nodeIds.size(),
+                edgeSources.empty() ? nullptr : edgeSources.data(),
+                edgeDestinations.empty() ? nullptr : edgeDestinations.data(),
+                edgeSources.size(),
+                executionOrder.empty() ? nullptr : executionOrder.data(), executionOrder.size(),
+                stageDepths.empty() ? nullptr : stageDepths.data(), stageDepths.size())) {
             return false;
         }
+        m_executionOrder = std::move(executionOrder);
 
-        // 2. Compile PipeWire-style Stages
+        // Compile PipeWire-style stages from Rust's longest-path depths.
         uint32_t maxDepth = 0;
-        for (const auto& pair : nodeDepths) {
-            maxDepth = std::max(maxDepth, pair.second);
-        }
-
-        m_stages.resize(maxDepth + 1);
-        for (const auto& pair : nodeDepths) {
-            m_stages[pair.second].nodeIds.push_back(pair.first);
+        for (uint32_t depth : stageDepths) maxDepth = std::max(maxDepth, depth);
+        m_stages.resize(nodeIds.empty() ? 1 : static_cast<size_t>(maxDepth) + 1);
+        for (size_t index = 0; index < nodeIds.size(); ++index) {
+            m_stages[stageDepths[index]].nodeIds.push_back(nodeIds[index]);
         }
         for (auto& stage : m_stages) {
             std::sort(stage.nodeIds.begin(), stage.nodeIds.end());
         }
+        if (nodeIds.empty()) return true;
 
-        // 3. Use the shared solver for the production PDC calculation.  Keeping
-        // this at the graph boundary prevents the UI-facing PDC implementation
-        // and the realtime routing graph from drifting apart.
-        std::map<uint32_t, PDCGraphSolver::Node> solverNodes;
-        for (const auto& [id, node] : m_nodes) {
-            solverNodes.emplace(id, PDCGraphSolver::Node{
-                id,
-                node->processingLatency,
-                0,
-                0,
-                true,
-                node->outgoingEdges,
-            });
+        std::vector<uint32_t> nodeCompensations(nodeIds.size());
+        [[maybe_unused]] uint32_t globalLatency = 0;
+        if (!hirari_pdc_solve_engine_graph(
+                nodeIds.empty() ? nullptr : nodeIds.data(),
+                nodeLatencies.empty() ? nullptr : nodeLatencies.data(), nodeIds.size(),
+                edgeSources.empty() ? nullptr : edgeSources.data(),
+                edgeDestinations.empty() ? nullptr : edgeDestinations.data(), edgeSources.size(),
+                nullptr, 0, nullptr,
+                nodeCompensations.empty() ? nullptr : nodeCompensations.data(),
+                nodeCompensations.size(), &globalLatency)) {
+            return false;
         }
-
-        PDCGraphSolver solver;
-        solver.solve(solverNodes);
-        if (solver.hasCycle()) return false;
-
-        // 4. Publish the compensation offsets calculated by the shared solver.
-        for (const auto& [id, node] : m_nodes) {
-            node->cumulativeDelay = solverNodes.at(id).compensation;
+        for (size_t index = 0; index < nodeIds.size(); ++index) {
+            m_nodes.at(nodeIds[index])->cumulativeDelay = nodeCompensations[index];
         }
 
         return true;
@@ -163,4 +142,4 @@ private:
     std::vector<ProcessStage> m_stages;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

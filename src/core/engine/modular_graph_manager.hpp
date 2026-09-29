@@ -8,7 +8,7 @@
 #include "../midi_buffer.hpp"
 #include "../../dsp/iprocessor.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ModularGraphManager
@@ -20,7 +20,7 @@ class ModularGraphManager {
 public:
     struct Node {
         uint32_t id;
-        std::shared_ptr<::Aura::DSP::IProcessor> processor;
+        std::shared_ptr<::Hirari::DSP::IProcessor> processor;
         std::vector<uint32_t> inputs;
         std::vector<uint32_t> outputs;
         AudioBuffer buffer;
@@ -31,7 +31,7 @@ public:
         return instance;
     }
  
-    void addNode(uint32_t id, std::shared_ptr<::Aura::DSP::IProcessor> proc) {
+    void addNode(uint32_t id, std::shared_ptr<::Hirari::DSP::IProcessor> proc) {
         if (!proc) return;
         Node n; n.id = id; n.processor = proc;
         n.buffer.resize(2, 4096);
@@ -52,12 +52,12 @@ public:
     /**
      * @brief SOVEREIGN EXECUTION: Zero-allocation topological process.
      */
-    void process(AudioBuffer& masterBuffer, uint32_t numSamples, const ::Aura::DSP::ProcessContext& context) {
+    void process(AudioBuffer& masterBuffer, uint32_t numSamples, const ::Hirari::DSP::ProcessContext& context) {
         if (numSamples == 0 || numSamples > 4096 || masterBuffer.getNumChannels() < 2 ||
             masterBuffer.getNumSamples() < numSamples ||
             m_dirty.load(std::memory_order_acquire)) return;
         masterBuffer.clear(numSamples);
-        ::Aura::Core::MidiBuffer midi;
+        ::Hirari::Core::MidiBuffer midi;
         for (const uint32_t id : m_sortedOrder) {
             auto it = m_nodes.find(id);
             if (it == m_nodes.end() || !it->second.processor) continue;
@@ -125,4 +125,4 @@ public:
     ModularGraphManager() = default;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

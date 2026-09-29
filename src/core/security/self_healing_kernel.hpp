@@ -2,7 +2,7 @@
 #include <atomic>
 #include <functional>
 
-namespace Aura::Core::Security {
+namespace Hirari::Core::Security {
 
 /**
  * @class SelfHealingKernel
@@ -40,4 +40,4 @@ private:
     std::function<void()> m_recoveryCallback;
 };
 
-} // namespace Aura::Core::Security
+} // namespace Hirari::Core::Security

@@ -6,7 +6,7 @@
 #include <complex>
 #include <cmath>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @brief FFTUtils: Industrial-grade Radix-2 Fast Fourier Transform.
@@ -83,4 +83,4 @@ private:
     }
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

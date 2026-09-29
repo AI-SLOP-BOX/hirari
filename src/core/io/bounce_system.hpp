@@ -16,7 +16,7 @@
 #include "../../dsp/utils/dither.hpp"
 #include "../../io/persistence/wav_writer.hpp"
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @class BounceEngine
@@ -142,27 +142,27 @@ public:
             }
         }
 
-        std::unique_ptr<::Aura::IO::Persistence::WavWriter::Pcm16StreamWriter> pcm16;
-        std::unique_ptr<::Aura::IO::Persistence::WavWriter::Pcm24StreamWriter> pcm24;
-        std::unique_ptr<::Aura::IO::Persistence::WavWriter::Float32StreamWriter> float32;
+        std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter> pcm16;
+        std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter> pcm24;
+        std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Float32StreamWriter> float32;
         if (options.bitDepth == 16) {
             pcm16 = std::make_unique<
-                ::Aura::IO::Persistence::WavWriter::Pcm16StreamWriter>(
+                ::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter>(
                     options.path, totalSamples, options.sampleRate);
             if (!pcm16->isOpen()) return;
         } else if (options.bitDepth == 24) {
             pcm24 = std::make_unique<
-                ::Aura::IO::Persistence::WavWriter::Pcm24StreamWriter>(
+                ::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter>(
                     options.path, totalSamples, options.sampleRate);
             if (!pcm24->isOpen()) return;
         } else {
             float32 = std::make_unique<
-                ::Aura::IO::Persistence::WavWriter::Float32StreamWriter>(
+                ::Hirari::IO::Persistence::WavWriter::Float32StreamWriter>(
                     options.path, options.sampleRate, 2);
             if (!float32->isOpen()) return;
         }
 
-        ::Aura::DSP::Utils::TPDFDither ditherL, ditherR;
+        ::Hirari::DSP::Utils::TPDFDither ditherL, ditherR;
         const float normalizationGain = options.normalize && m_maxPeak > 0.0f
             ? 1.0f / m_maxPeak : 1.0f;
         for (uint64_t s = 0; s < totalSamples; s += blockSize) {
@@ -220,4 +220,4 @@ private:
     float m_maxPeak = 0.0f;
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

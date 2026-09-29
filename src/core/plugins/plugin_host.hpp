@@ -17,11 +17,19 @@
 #include "../../dsp/iprocessor.hpp"
 #include "../audio_buffer.hpp"
 #include "../midi_buffer.hpp"
+#include "../rust_ffi.hpp"
 #include "plugin_admission.hpp"
 #include "process_sandbox_processor.hpp"
 #include "../../dsp/effects/spectral_restoration_processor.hpp"
+#include "../../dsp/effects/cabinet_simulator.hpp"
+#include "../../dsp/effects/stereo_imager.hpp"
+#include "../../dsp/effects/stereo_expander.hpp"
+#include "../../dsp/effects/atmos_reverb.hpp"
+#include "../../dsp/effects/deesser.hpp"
+#include "../../dsp/effects/transient_shaper.hpp"
+#include "../../dsp/effects/chromaglow.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @brief PluginFormat: The professional standard for external DSP extensions.
@@ -36,24 +44,23 @@ struct PluginDescription {
 };
 
 /** A small, deterministic built-in processor used by the internal factory. */
-class BuiltinGainProcessor final : public ::Aura::DSP::IProcessor {
+class BuiltinGainProcessor final : public ::Hirari::DSP::IProcessor {
 public:
+    BuiltinGainProcessor() : m_state(hirari_builtin_gain_create()) {}
+    ~BuiltinGainProcessor() override { hirari_builtin_gain_destroy(m_state); }
+    BuiltinGainProcessor(const BuiltinGainProcessor&) = delete;
+    BuiltinGainProcessor& operator=(const BuiltinGainProcessor&) = delete;
+
     void prepareToPlay(double sampleRate, uint32_t blockSize) noexcept override {
-        m_sampleRate = (std::isfinite(sampleRate) && sampleRate > 0.0) ? sampleRate : 0.0;
-        m_blockSize = blockSize;
+        hirari_builtin_gain_prepare(m_state, sampleRate, blockSize);
     }
 
-    void process(::Aura::Core::AudioBuffer& buffer, ::Aura::Core::MidiBuffer&,
-                 const ::Aura::DSP::ProcessContext&) noexcept override {
-        if (m_sampleRate <= 0.0 || m_blockSize == 0) return;
-        for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
-            float* samples = buffer.getWritePointer(channel);
-            if (!samples) continue;
-            for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
-                const float value = samples[i] * m_gain;
-                samples[i] = std::isfinite(value) ? value : 0.0f;
-            }
-        }
+    void process(::Hirari::Core::AudioBuffer& buffer, ::Hirari::Core::MidiBuffer&,
+                 const ::Hirari::DSP::ProcessContext&) noexcept override {
+        (void)hirari_builtin_gain_process_state(
+            m_state,
+            buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
+            buffer.getNumSamples());
     }
 
     void reset() noexcept override {}
@@ -65,14 +72,14 @@ public:
         return true;
     }
     void setParameter(uint32_t id, float value) noexcept override {
-        if (id == 0 && std::isfinite(value)) m_gain = std::clamp(value, 0.0f, 4.0f);
+        hirari_builtin_gain_set_parameter(m_state, id, value);
     }
-    float getParameter(uint32_t id) const noexcept override { return id == 0 ? m_gain : 0.0f; }
+    float getParameter(uint32_t id) const noexcept override {
+        return hirari_builtin_gain_get_parameter(m_state, id);
+    }
 
 private:
-    double m_sampleRate = 0.0;
-    uint32_t m_blockSize = 0;
-    float m_gain = 1.0f;
+    void* m_state = nullptr;
 };
 
 class PluginFactory {
@@ -87,7 +94,7 @@ public:
         return "auto";
     }
 
-    static std::shared_ptr<::Aura::DSP::IProcessor> create(const PluginDescription& description,
+    static std::shared_ptr<::Hirari::DSP::IProcessor> create(const PluginDescription& description,
                                                             std::string* error = nullptr) {
         if (error) error->clear();
         if (description.format != PluginFormat::Internal) {
@@ -115,7 +122,28 @@ public:
         }
         if (description.name == "Spectral Restoration" ||
             description.name == "SpectraLayers Restoration") {
-            return std::make_shared<::Aura::DSP::Effects::SpectralRestorationProcessor>();
+            return std::make_shared<::Hirari::DSP::Effects::SpectralRestorationProcessor>();
+        }
+        if (description.name == "Cabinet Simulator") {
+            return std::make_shared<::Hirari::DSP::Effects::CabinetSimulator>();
+        }
+        if (description.name == "Stereo Imager") {
+            return std::make_shared<::Hirari::DSP::Effects::StereoImager>();
+        }
+        if (description.name == "Stereo Expander") {
+            return std::make_shared<::Hirari::DSP::Effects::StereoExpander>();
+        }
+        if (description.name == "Atmos Immersive Reverb") {
+            return std::make_shared<::Hirari::DSP::Effects::AtmosReverb>();
+        }
+        if (description.name == "DeEsser" || description.name == "De-Esser") {
+            return std::make_shared<::Hirari::DSP::Effects::DeEsser>();
+        }
+        if (description.name == "Transient Shaper") {
+            return std::make_shared<::Hirari::DSP::Effects::TransientShaper>();
+        }
+        if (description.name == "ChromaGlow") {
+            return std::make_shared<::Hirari::DSP::Effects::ChromaGlow>();
         }
         if (error) *error = "unknown internal plugin: " + description.name;
         return {};
@@ -123,16 +151,16 @@ public:
 };
 
 /**
- * @brief AuraPluginHost: The Pro-Grade bridge for external .vst3/.component files.
+ * @brief HirariPluginHost: The Pro-Grade bridge for external .vst3/.component files.
  * Uses POSIX dynamic library symbols loading to load VST3 factory entrypoints.
  */
-class ExternalPluginProcessor : public ::Aura::DSP::IProcessor {
+class ExternalPluginProcessor : public ::Hirari::DSP::IProcessor {
 public:
     enum class LoadState { Unloaded, Operational, Failed, Unsupported };
     using ProcessFunction = void (ExternalPluginProcessor::*)(
-        ::Aura::Core::AudioBuffer&,
-        ::Aura::Core::MidiBuffer&,
-        const ::Aura::DSP::ProcessContext&) noexcept;
+        ::Hirari::Core::AudioBuffer&,
+        ::Hirari::Core::MidiBuffer&,
+        const ::Hirari::DSP::ProcessContext&) noexcept;
     static constexpr const char* kNoProcessFunctionDiagnostic =
         "external plugin process function is not connected";
 
@@ -236,9 +264,9 @@ public:
         }
     }
 
-    void process(::Aura::Core::AudioBuffer& buffer,
-                 ::Aura::Core::MidiBuffer& midi,
-                 const ::Aura::DSP::ProcessContext& context) noexcept override {
+    void process(::Hirari::Core::AudioBuffer& buffer,
+                 ::Hirari::Core::MidiBuffer& midi,
+                 const ::Hirari::DSP::ProcessContext& context) noexcept override {
         // No processing is performed unless the host is operational.
         if (loadState() != LoadState::Operational || !hasProcessFunction()) {
             m_processFailed.store(true, std::memory_order_release);
@@ -323,12 +351,12 @@ public:
     }
 
 private:
-    void processInternal(::Aura::Core::AudioBuffer&, ::Aura::Core::MidiBuffer&,
-                         const ::Aura::DSP::ProcessContext&) noexcept {}
+    void processInternal(::Hirari::Core::AudioBuffer&, ::Hirari::Core::MidiBuffer&,
+                         const ::Hirari::DSP::ProcessContext&) noexcept {}
 
-    void processSandbox(::Aura::Core::AudioBuffer& buffer,
-                        ::Aura::Core::MidiBuffer& midi,
-                        const ::Aura::DSP::ProcessContext&) noexcept {
+    void processSandbox(::Hirari::Core::AudioBuffer& buffer,
+                        ::Hirari::Core::MidiBuffer& midi,
+                        const ::Hirari::DSP::ProcessContext&) noexcept {
         if (!m_sandbox) {
             m_processFailed.store(true, std::memory_order_release);
             buffer.clear();
@@ -403,8 +431,8 @@ public:
         // Keep the native scanner aligned with the Rust catalog.  The plural
         // name is the public path-list API; accept the old singular spelling
         // as a compatibility fallback for existing launch scripts.
-        const char* raw = std::getenv("AURA_PLUGIN_PATHS");
-        if (!raw || *raw == '\0') raw = std::getenv("AURA_PLUGIN_PATH");
+        const char* raw = std::getenv("HIRARI_PLUGIN_PATHS");
+        if (!raw || *raw == '\0') raw = std::getenv("HIRARI_PLUGIN_PATH");
         if (!raw || *raw == '\0') return {};
         std::string paths(raw);
         size_t begin = 0;
@@ -425,4 +453,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

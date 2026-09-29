@@ -1,10 +1,10 @@
 #pragma once
 #include <vector>
-#include <algorithm>
-#include <random>
+#include <cstdint>
 #include "midi_quantizer.hpp"
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class MidiTransformer
@@ -25,10 +25,11 @@ public:
      */
     static void transform(std::vector<MIDINote>& notes, const Filter& f, 
                           int pitch_offset, float vel_scale, int humanize_ticks) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::MidiOrchestrator.
-        // Rust's SIMD-optimized math handles event manipulation and pitch/velocity 
-        // scaling with absolute bit-accuracy, forensics-ready, and perfectly secure.
+        if (notes.empty()) return;
+        (void)hirari_midi_transform_notes(
+            notes.data(), notes.size(), f.minPitch, f.maxPitch,
+            f.minVel, f.maxVel, f.minLen, f.maxLen,
+            pitch_offset, vel_scale, humanize_ticks);
     }
 
     /**
@@ -36,10 +37,12 @@ public:
      * INDUSTRIAL: Delegating scale mapping and key quantization to the Rust 'MidiOrchestrator'.
      */
     static void applyScaleQuantize(std::vector<MIDINote>& notes, uint8_t root, const std::vector<int>& scale) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // Scale quantization and musical mapping are now managed in the Rust layer.
-        // Rust's LogicalEngine ensures bit-accurate musical distribution instantaneously.
+        static_assert(sizeof(int) == sizeof(int32_t), "scale degrees require 32-bit integers");
+        if (notes.empty() || scale.empty()) return;
+        (void)hirari_midi_apply_scale_quantize(
+            notes.data(), notes.size(), root,
+            reinterpret_cast<const int32_t*>(scale.data()), scale.size());
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

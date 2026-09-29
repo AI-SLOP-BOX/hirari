@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-namespace Aura::IO::Drivers {
+namespace Hirari::IO::Drivers {
 
 /**
  * @brief Canonical platform-aware factory for audio drivers.
@@ -55,7 +55,7 @@ public:
         }
         void stop() override { m_running = false; }
         std::string getDriverName() const override {
-            return "Aura Silent Fallback (audio backend unavailable)";
+            return "Hirari Silent Fallback (audio backend unavailable)";
         }
         double getSampleRate() const override { return m_config.sampleRate; }
         uint32_t getBufferSize() const override { return m_config.bufferSize; }
@@ -94,12 +94,12 @@ public:
     }
 };
 
-} // namespace Aura::IO::Drivers
+} // namespace Hirari::IO::Drivers
 
 #if defined(__APPLE__)
 #include "../../core/driver/mac_audio_driver.hpp"
 
-namespace Aura::IO::Drivers {
+namespace Hirari::IO::Drivers {
 
 class MacDriverBridge : public IDriver {
 public:
@@ -115,7 +115,7 @@ public:
         }
         m_config = config;
         
-        m_driver = std::make_unique<::Aura::Core::Driver::MacAudioDriver>([this](float* l, float* r, uint32_t len) {
+        m_driver = std::make_unique<::Hirari::Core::Driver::MacAudioDriver>([this](float* l, float* r, uint32_t len) {
             if (m_callback) {
                 float* outChans[2] = { l, r };
                 m_callback(nullptr, outChans, len);
@@ -143,7 +143,7 @@ public:
     }
 
     std::string getDriverName() const override {
-        return "Aura CoreAudio Driver";
+        return "Hirari CoreAudio Driver";
     }
 
     double getSampleRate() const override { return m_config.sampleRate; }
@@ -155,7 +155,7 @@ public:
 private:
     Config m_config;
     ProcessCallback m_callback;
-    std::unique_ptr<::Aura::Core::Driver::MacAudioDriver> m_driver;
+    std::unique_ptr<::Hirari::Core::Driver::MacAudioDriver> m_driver;
     bool m_running;
     std::string m_error;
 };
@@ -172,12 +172,12 @@ inline std::unique_ptr<IDriver> DriverFactory::create(API api) {
         std::string("requested audio API is unavailable: ") + apiName(api));
 }
 
-} // namespace Aura::IO::Drivers
+} // namespace Hirari::IO::Drivers
 #else
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
 #include "../../core/external/jack_bridge_deep.hpp"
 
-namespace Aura::IO::Drivers {
+namespace Hirari::IO::Drivers {
 
 class JackDriverBridge final : public IDriver {
 public:
@@ -189,12 +189,12 @@ public:
             return false;
         }
         m_config = config;
-        if (!::Aura::Core::External::JackBridgeDeep::getInstance().tryInitialize("Aura")) {
-            m_error = ::Aura::Core::External::JackBridgeDeep::getInstance().lastError();
+        if (!::Hirari::Core::External::JackBridgeDeep::getInstance().tryInitialize("Hirari")) {
+            m_error = ::Hirari::Core::External::JackBridgeDeep::getInstance().lastError();
             return false;
         }
-        m_config.sampleRate = ::Aura::Core::External::JackBridgeDeep::getInstance().sampleRate();
-        m_config.bufferSize = ::Aura::Core::External::JackBridgeDeep::getInstance().bufferSize();
+        m_config.sampleRate = ::Hirari::Core::External::JackBridgeDeep::getInstance().sampleRate();
+        m_config.bufferSize = ::Hirari::Core::External::JackBridgeDeep::getInstance().bufferSize();
         m_initialized = true;
         return true;
     }
@@ -205,7 +205,7 @@ public:
             return false;
         }
         m_callback = std::move(callback);
-        ::Aura::Core::External::JackBridgeDeep::getInstance().setProcessCallback(&process, this);
+        ::Hirari::Core::External::JackBridgeDeep::getInstance().setProcessCallback(&process, this);
         m_running = true;
         return true;
     }
@@ -213,11 +213,11 @@ public:
     void stop() override {
         m_running = false;
         m_callback = {};
-        ::Aura::Core::External::JackBridgeDeep::getInstance().shutdown();
+        ::Hirari::Core::External::JackBridgeDeep::getInstance().shutdown();
         m_initialized = false;
     }
 
-    std::string getDriverName() const override { return "Aura JACK Driver"; }
+    std::string getDriverName() const override { return "Hirari JACK Driver"; }
     double getSampleRate() const override { return m_config.sampleRate; }
     uint32_t getBufferSize() const override { return m_config.bufferSize; }
     bool isRunning() const override { return m_running; }
@@ -249,13 +249,13 @@ inline std::unique_ptr<IDriver> DriverFactory::create(API api) {
         std::string("requested audio API is unavailable: ") + apiName(api));
 }
 
-} // namespace Aura::IO::Drivers
+} // namespace Hirari::IO::Drivers
 #else
-namespace Aura::IO::Drivers {
+namespace Hirari::IO::Drivers {
 inline std::unique_ptr<IDriver> DriverFactory::create(API api) {
     return std::make_unique<SilentDriver>(
         std::string("audio API is not implemented on this platform: ") + apiName(api));
 }
-} // namespace Aura::IO::Drivers
+} // namespace Hirari::IO::Drivers
 #endif
 #endif // defined(__APPLE__)

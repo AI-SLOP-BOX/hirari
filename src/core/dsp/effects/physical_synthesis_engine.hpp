@@ -7,11 +7,11 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class PhysicalSynthesisEngine
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements infinite physical synthesis DNA and physical focus profiling.
  */
 class PhysicalSynthesisEngine {
@@ -60,4 +60,4 @@ private:
     PhysicalDNA m_activeDNA; // --- PHASE 124: PHYSICAL DNA ---
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

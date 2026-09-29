@@ -4,8 +4,9 @@
 #include <mutex>
 #include <cstdint>
 #include <cstring>
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Security {
+namespace Hirari::Core::Security {
 
 /**
  * @class SecurityManager
@@ -54,14 +55,7 @@ public:
 
 private:
     static uint32_t calculateCRC32(const uint8_t* data, size_t size) noexcept {
-        uint32_t crc = 0xFFFFFFFFu;
-        for (size_t i = 0; i < size; ++i) {
-            crc ^= data[i];
-            for (unsigned bit = 0; bit < 8; ++bit) {
-                crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
-            }
-        }
-        return ~crc;
+        return hirari_crc32_bytes(data, size);
     }
 
     struct Region { void* ptr; size_t size; uint32_t checksum; };
@@ -72,4 +66,4 @@ private:
     SecurityManager() = default;
 };
 
-} // namespace Aura::Core::Security
+} // namespace Hirari::Core::Security

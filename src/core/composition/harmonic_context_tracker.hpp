@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Aura::Core::Composition {
+namespace Hirari::Core::Composition {
 
 struct HarmonicContextState {
     float tension = 0.5f;
@@ -28,4 +28,4 @@ private:
     HarmonicContextState m_state;
 };
 
-} // namespace Aura::Core::Composition
+} // namespace Hirari::Core::Composition

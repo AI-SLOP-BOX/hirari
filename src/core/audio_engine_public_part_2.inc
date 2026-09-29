@@ -43,6 +43,13 @@
     bool add_region(uint32_t tid, rust::Str path, double startBeat) const {
         return m_engine && m_engine->add_region(tid, std::string_view(path.data(), path.size()), startBeat);
     }
+    uint64_t queue_region_import(uint32_t tid, rust::Str path, uint64_t startSample) const {
+        return m_engine ? m_engine->queue_region_import(
+            tid, std::string_view(path.data(), path.size()), startSample) : 0;
+    }
+    uint8_t complete_region_import(uint64_t ticket) const {
+        return m_engine ? m_engine->complete_region_import(ticket) : 3;
+    }
     bool replace_region_audio(uint32_t tid, uint32_t rid, rust::Str path) const {
         return m_engine && m_engine->replace_region_audio(tid, rid, std::string_view(path.data(), path.size()));
     }
@@ -143,7 +150,7 @@
     }
     bool set_sandbox_plugin_state(uint32_t trackId, uint32_t sandboxIndex,
                                   rust::Slice<const uint8_t> state) const {
-        if (!m_engine || state.size() > Aura::Core::Plugins::SandboxProtocol::kMaxStateBytes)
+        if (!m_engine || state.size() > Hirari::Core::Plugins::SandboxProtocol::kMaxStateBytes)
             return false;
         std::vector<uint8_t> bytes(state.begin(), state.end());
         return m_engine && m_engine->set_sandbox_plugin_state(trackId, sandboxIndex, bytes);
@@ -158,6 +165,25 @@
     bool set_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
                               uint32_t parameterId, float value) const {
         return m_engine && m_engine->set_plugin_parameter(tid, pluginIndex, parameterId, value);
+    }
+    bool set_plugin_automation(uint32_t tid, uint32_t pluginIndex,
+                               uint32_t parameterId, rust::Vec<double> packedPoints) const {
+        if (!m_engine || packedPoints.size() % 3 != 0 || packedPoints.size() > 300'000) return false;
+        std::vector<::Hirari::Core::ProjectSerializer::AutomationPoint> points;
+        points.reserve(packedPoints.size() / 3);
+        double previousTime = -1.0;
+        for (size_t i = 0; i < packedPoints.size(); i += 3) {
+            const double time = packedPoints[i];
+            const double value = packedPoints[i + 1];
+            const double curve = packedPoints[i + 2];
+            if (!std::isfinite(time) || time < 0.0 || time > 9007199254740992.0 ||
+                std::trunc(time) != time ||
+                time <= previousTime || !std::isfinite(value) || value < 0.0 || value > 1.0 ||
+                !std::isfinite(curve) || curve < -1.0 || curve > 1.0) return false;
+            points.push_back({time, static_cast<float>(value), static_cast<float>(curve)});
+            previousTime = time;
+        }
+        return m_engine->set_plugin_automation(tid, pluginIndex, parameterId, points);
     }
     bool set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
                                            uint32_t parameterId, float value) const {
@@ -224,6 +250,10 @@
     bool set_route_gain(uint32_t sourceId, uint32_t destId, float gain, bool enabled) const {
         return m_engine && m_engine->set_route_gain(sourceId, destId, gain, enabled);
     }
+    bool set_send_route(uint32_t sourceId, uint32_t destId, float gain,
+                        bool preFader, bool enabled) const {
+        return m_engine && m_engine->set_send_route(sourceId, destId, gain, preFader, enabled);
+    }
     bool set_feedback_route(uint32_t sourceId, uint32_t destId, float gain, bool enabled) const {
         return m_engine && m_engine->set_feedback_route(sourceId, destId, gain, enabled);
     }
@@ -243,7 +273,7 @@
         if (output.empty() || output.size() < 4 || output.substr(output.size() - 4) != ".wav") {
             return rust::String("{\"code\":\"invalid_render_path\",\"retryable\":false}");
         }
-        if (format > 1) return rust::String("{\"code\":\"unsupported_render_format\",\"retryable\":false}");
+        if (format > 3) return rust::String("{\"code\":\"unsupported_render_format\",\"retryable\":false}");
         const bool ok = m_engine->bounce_project(std::string_view(path.data(), path.size()), format);
         return rust::String(ok ? "{\"ok\":true}" :
                             "{\"code\":\"bounce_failed\",\"retryable\":true}");
@@ -253,7 +283,7 @@
         if (format > 1) {
             return rust::String("{\"ok\":false,\"code\":\"unsupported_wave_format\",\"retryable\":false}");
         }
-        return rust::String(::Aura::IO::WavLoader::loadDiagnosticJson(input, format == 1));
+        return rust::String(::Hirari::IO::WavLoader::loadDiagnosticJson(input, format == 1));
     }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
     float get_bounce_progress() const noexcept { return m_engine ? m_engine->get_bounce_progress() : 0.0f; }
@@ -261,8 +291,8 @@
     bool has_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const noexcept {
         return m_engine && m_engine->has_plugin_native_editor(trackId, pluginIndex);
     }
-    void bind_native_editor_host(::Aura::Core::Plugins::NativeEditorHost::OpenCallback open,
-                                 ::Aura::Core::Plugins::NativeEditorHost::CloseCallback close) {
+    void bind_native_editor_host(::Hirari::Core::Plugins::NativeEditorHost::OpenCallback open,
+                                 ::Hirari::Core::Plugins::NativeEditorHost::CloseCallback close) {
         m_nativeEditorHost.bind(std::move(open), std::move(close));
     }
     void clear_native_editor_host() { m_nativeEditorHost.clear(); }
@@ -300,6 +330,15 @@
     void execute_restoration(uint32_t tid, float intensity) const { if (m_engine) m_engine->execute_restoration(tid, intensity); }
     bool execute_vocal_remover(uint32_t tid) const { return m_engine && m_engine->execute_vocal_remover(tid); }
     bool set_articulation_map(uint32_t tid, uint32_t mapHash) const { return m_engine && m_engine->set_articulation_map(tid, mapHash); }
+    bool set_expression_map(uint32_t tid, rust::Vec<uint32_t> packed, rust::String json,
+                            uint32_t articulationId) const {
+        if (!m_engine) return false;
+        std::vector<uint32_t> native(packed.begin(), packed.end());
+        return m_engine->set_expression_map(tid, native, std::string(json.data(), json.size()), articulationId);
+    }
+    bool set_expression_map_pro(uint32_t tid, rust::String json) const {
+        return m_engine && m_engine->set_expression_map_pro(tid, std::string(json.data(), json.size()));
+    }
     bool set_track_eq(uint32_t tid, float lowBoostDb, float lowCutDb,
                       float highBoostDb, float highCutDb) const {
         return m_engine && m_engine->set_track_eq(tid, lowBoostDb, lowCutDb, highBoostDb, highCutDb);
@@ -313,6 +352,9 @@
     }
     void undo() const { if (m_engine) m_engine->undo(); }
     void redo() const { if (m_engine) m_engine->redo(); }
+    bool is_undo_transaction_active() const {
+        return m_engine && m_engine->is_undo_transaction_active();
+    }
     void begin_undo_transaction(rust::Str name) const {
         if (m_engine) m_engine->begin_undo_transaction(std::string_view(name.data(), name.size()));
     }
@@ -320,11 +362,17 @@
     bool abort_undo_transaction() const { return m_engine && m_engine->abort_undo_transaction(); }
 
     bool move_region(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region(tid, rid, startBeat); }
+    bool move_region_sync_group(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region_sync_group(tid, rid, startBeat); }
     bool split_region(uint32_t tid, uint32_t rid, double split) const { return m_engine && m_engine->split_region(tid, rid, split); }
+    uint32_t split_region_with_right_id(uint32_t tid, uint32_t rid, double split) const { return m_engine ? m_engine->split_region_with_right_id(tid, rid, split) : 0; }
     bool remove_region(uint32_t tid, uint32_t rid) const { return m_engine && m_engine->remove_region(tid, rid); }
     uint32_t duplicate_region(uint32_t tid, uint32_t rid, uint64_t startSample) const { return m_engine ? m_engine->duplicate_region(tid, rid, startSample) : 0; }
     bool set_region_gain(uint32_t tid, uint32_t rid, float gain) const { return m_engine && m_engine->set_region_gain(tid, rid, gain); }
     bool set_region_muted(uint32_t tid, uint32_t rid, bool muted) const { return m_engine && m_engine->set_region_muted(tid, rid, muted); }
+    bool set_region_comp_ranges(uint32_t tid, uint32_t rid,
+                               rust::Slice<const uint64_t> packedRanges, bool managed) const {
+        return m_engine && m_engine->set_region_comp_ranges(tid, rid, packedRanges, managed);
+    }
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) const { return m_engine && m_engine->set_region_fades(tid, rid, fadeIn, fadeOut); }
     bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
                                float gain, uint64_t fadeIn, uint64_t fadeOut) const {
@@ -338,6 +386,7 @@
     }
     bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) const { return m_engine && m_engine->set_region_reverse(tid, rid, reverse); }
     bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio) const { return m_engine && m_engine->set_region_warp_ratio(tid, rid, ratio); }
+    bool set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled) const { return m_engine && m_engine->set_region_pitch_preserve_warp(tid, rid, enabled); }
     bool set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones) const { return m_engine && m_engine->set_region_pitch_semitones(tid, rid, semitones); }
     bool set_region_audio_note_segment(uint32_t tid, uint32_t rid, double startSeconds,
                                        double endSeconds, double pitchOffsetCents,
@@ -351,6 +400,30 @@
         return m_engine && m_engine->set_region_audio_note_anchor(
             tid, rid, segmentStartSeconds, positionSeconds, pitchCents, formantCents);
     }
+    bool set_region_audio_note_pitch_anchor(uint32_t tid, uint32_t rid,
+                                            double segmentStartSeconds,
+                                            double positionSeconds,
+                                            double pitchCents) const {
+        return m_engine && m_engine->set_region_audio_note_pitch_anchor(
+            tid, rid, segmentStartSeconds, positionSeconds, pitchCents);
+    }
+    bool set_region_audio_note_formant_anchor(uint32_t tid, uint32_t rid,
+                                              double segmentStartSeconds,
+                                              double positionSeconds,
+                                              double formantCents) const {
+        return m_engine && m_engine->set_region_audio_note_formant_anchor(
+            tid, rid, segmentStartSeconds, positionSeconds, formantCents);
+    }
+    bool move_region_audio_note_anchor(uint32_t tid, uint32_t rid,
+                                       double segmentStartSeconds,
+                                       double oldPositionSeconds,
+                                       double newPositionSeconds,
+                                       double valueCents,
+                                       bool editFormant) const {
+        return m_engine && m_engine->move_region_audio_note_anchor(
+            tid, rid, segmentStartSeconds, oldPositionSeconds, newPositionSeconds,
+            valueCents, editFormant);
+    }
     bool clear_region_audio_note_segments(uint32_t tid, uint32_t rid) const {
         return m_engine && m_engine->clear_region_audio_note_segments(tid, rid);
     }
@@ -363,6 +436,15 @@
     }
     bool analyze_region_audio_note_segments(uint32_t tid, uint32_t rid, double sampleRate) const {
         return m_engine && m_engine->analyze_region_audio_note_segments(tid, rid, sampleRate);
+    }
+    bool start_region_audio_note_analysis(uint32_t tid, uint32_t rid, double sampleRate) const {
+        return m_engine && m_engine->start_region_audio_note_analysis(tid, rid, sampleRate);
+    }
+    uint8_t region_audio_note_analysis_status(uint32_t tid, uint32_t rid) const {
+        return m_engine ? m_engine->region_audio_note_analysis_status(tid, rid) : 0;
+    }
+    bool finalize_region_audio_note_analysis(uint32_t tid, uint32_t rid) const {
+        return m_engine && m_engine->finalize_region_audio_note_analysis(tid, rid);
     }
     bool set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count) const { return m_engine && m_engine->set_region_loop_count(tid, rid, count); }
     bool set_region_locked(uint32_t tid, uint32_t rid, bool locked) const { return m_engine && m_engine->set_region_locked(tid, rid, locked); }
@@ -380,17 +462,23 @@
         if (m_engine) m_engine->set_midi_note(trackId, pitch, velocity, startSample, lengthSamples);
     }
     bool replace_midi_notes(rust::Vec<uint64_t> packed, bool recordUndo) const {
-        if (!m_engine || packed.size() % 5 != 0 || packed.size() / 5 > 100000) return false;
-        std::vector<::Aura::Core::Engine::AuraUnifiedEngine::ScheduledMidiNote> notes;
-        notes.reserve(packed.size() / 5);
-        for (size_t i = 0; i < packed.size(); i += 5) {
+        if (!m_engine || packed.size() % 9 != 0 || packed.size() / 9 > 100000) return false;
+        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::ScheduledMidiNote> notes;
+        notes.reserve(packed.size() / 9);
+        for (size_t i = 0; i < packed.size(); i += 9) {
             const uint64_t track = packed[i];
             const uint64_t pitch = packed[i + 1];
             const uint64_t velocity = packed[i + 2];
+            const uint64_t midiChannel = packed[i + 3];
             if (track > UINT32_MAX || pitch > 127 || velocity == 0 || velocity > 127 ||
-                packed[i + 4] == 0 || packed[i + 3] > UINT64_MAX - packed[i + 4]) return false;
+                midiChannel > 15 || packed[i + 5] == 0 || packed[i + 6] > 100 ||
+                packed[i + 7] > UINT32_MAX || packed[i + 8] > 127 ||
+                packed[i + 4] > UINT64_MAX - packed[i + 5]) return false;
             notes.push_back({static_cast<uint32_t>(track), static_cast<uint8_t>(pitch),
-                static_cast<uint8_t>(velocity), packed[i + 3], packed[i + 4]});
+                static_cast<uint8_t>(velocity), static_cast<uint8_t>(midiChannel),
+                static_cast<uint8_t>(packed[i + 8]),
+                packed[i + 4], packed[i + 5], static_cast<uint8_t>(packed[i + 6]),
+                static_cast<uint32_t>(packed[i + 7])});
         }
         return m_engine->replace_midi_notes(notes, recordUndo);
     }
@@ -398,13 +486,17 @@
         rust::Vec<uint64_t> packed;
         if (!m_engine) return packed;
         const auto notes = m_engine->midi_notes_snapshot();
-        packed.reserve(notes.size() * 5);
+        packed.reserve(notes.size() * 9);
         for (const auto& note : notes) {
             packed.push_back(note.trackId);
             packed.push_back(note.pitch);
             packed.push_back(note.velocity);
+            packed.push_back(note.midiChannel);
             packed.push_back(note.startSample);
             packed.push_back(note.lengthSamples);
+            packed.push_back(note.probability);
+            packed.push_back(note.regionId);
+            packed.push_back(note.articulationId);
         }
         return packed;
     }
@@ -419,8 +511,8 @@
     bool clear_hrtf_kernel(uint32_t tid) const {
         return m_engine && m_engine->clear_hrtf_kernel(tid);
     }
-    void set_automation_record_mode(uint32_t mode) const {
-        if (m_engine) m_engine->set_automation_record_mode(mode);
+    bool set_automation_record_mode(uint32_t mode) const {
+        return m_engine && m_engine->set_automation_record_mode(mode);
     }
     void set_automation_punch_range(uint64_t start, uint64_t end) const {
         if (m_engine) m_engine->set_automation_punch_range(start, end);
@@ -431,7 +523,7 @@
     void set_plugin_blacklisted(std::string_view id, bool value) const { if (m_engine) m_engine->set_plugin_blacklisted(id, value); }
     bool set_automation_data(uint32_t tid, uint32_t paramId,
                              rust::Vec<double> packedPoints) const {
-        std::vector<::Aura::Core::Engine::AuraUnifiedEngine::AutomationPoint> converted;
+        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::AutomationPoint> converted;
         if (packedPoints.size() % 3 != 0) return false;
         converted.reserve(packedPoints.size() / 3);
         double previousTime = -1.0;
@@ -442,7 +534,7 @@
             if (!std::isfinite(time) || !std::isfinite(value) || !std::isfinite(curve)
                 || time < 0.0 || std::trunc(time) != time || time <= previousTime || value < 0.0 || value > 1.0
                 || curve < -1.0 || curve > 1.0) return false;
-            ::Aura::Core::Engine::AuraUnifiedEngine::AutomationPoint p;
+            ::Hirari::Core::Engine::HirariUnifiedEngine::AutomationPoint p;
             p.time = std::max(0.0, time);
             p.value = std::clamp(static_cast<float>(value), 0.0f, 1.0f);
             p.curve = std::clamp(static_cast<float>(curve), -1.0f, 1.0f);
@@ -452,7 +544,7 @@
         return m_engine && m_engine->set_automation_data(tid, paramId, converted);
     }
     bool set_track_delay_automation(uint32_t tid, rust::Vec<double> packedPoints) const {
-        std::vector<::Aura::Core::Engine::AuraUnifiedEngine::AutomationPoint> converted;
+        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::AutomationPoint> converted;
         if (packedPoints.size() % 3 != 0) return false;
         converted.reserve(packedPoints.size() / 3);
         double previousTime = -1.0;
@@ -467,7 +559,7 @@
         return m_engine && m_engine->set_track_delay_automation(tid, converted);
     }
     // Compatibility API: stop only this wrapper's device.  The underlying
-    // AuraUnifiedEngine is a process-wide singleton and must not be shut down
+    // HirariUnifiedEngine is a process-wide singleton and must not be shut down
     // when one Rust/FFI handle is dropped.
     void shutdown() const;
 
@@ -537,6 +629,16 @@
         return m_engine ? m_engine->get_region_audio_interleaved(tid, rid, 16u * 1024u * 1024u)
                         : rust::Vec<float>{};
     }
+    rust::Vec<float> get_region_audio_interleaved_range(uint32_t tid, uint32_t rid,
+                                                        uint64_t startFrame,
+                                                        uint32_t frames,
+                                                        uint32_t channels) const {
+        return m_engine ? m_engine->get_region_audio_interleaved_range(
+            tid, rid, startFrame, frames, channels) : rust::Vec<float>{};
+    }
+    uint64_t get_region_source_frame_count(uint32_t tid, uint32_t rid) const {
+        return m_engine ? m_engine->get_region_source_frame_count(tid, rid) : 0;
+    }
     double get_region_sample_rate(uint32_t tid, uint32_t rid) const {
         return m_engine ? m_engine->get_region_sample_rate(tid, rid) : 0.0;
     }
@@ -545,9 +647,98 @@
     }
     float get_cpu_total_v() const;
     rust::String get_project_layout_json() const;
+    uint64_t request_project_layout_snapshot() const {
+        const auto state = m_projectLayoutSnapshotState;
+        const auto engine = m_engine;
+        if (!state || !engine) return 0;
+        const auto cancellation = std::make_shared<std::atomic<bool>>(false);
+        uint64_t requestId = 0;
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (state->activeId != 0 || state->hasResult) return 0;
+            requestId = state->nextId++;
+            if (requestId == 0) requestId = state->nextId++;
+            state->activeId = requestId;
+            state->activeCancellation = cancellation;
+        }
+        try {
+            std::thread([state, engine, requestId, cancellation]() {
+                const uint64_t before = engine->get_project_state_revision();
+                const std::string layout = engine->get_project_layout_json_cancellable(cancellation.get()).c_str();
+                const uint64_t after = engine->get_project_state_revision();
+                std::string result;
+                if (cancellation->load(std::memory_order_acquire)) {
+                    result = "CANCELLED";
+                } else if (before == after && !layout.empty()) {
+                    result.reserve(layout.size() + 32);
+                    result = "READY ";
+                    result += std::to_string(after);
+                    result.push_back('\n');
+                    result += layout;
+                } else {
+                    result = "STALE";
+                }
+                std::lock_guard<std::mutex> lock(state->mutex);
+                if (state->activeId == requestId) {
+                    state->resultId = requestId;
+                    state->result = std::move(result);
+                    state->hasResult = true;
+                    state->activeId = 0;
+                    state->activeCancellation.reset();
+                }
+            }).detach();
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (state->activeId == requestId) {
+                state->activeId = 0;
+                state->activeCancellation.reset();
+            }
+            return 0;
+        }
+        return requestId;
+    }
+    rust::String poll_project_layout_snapshot(uint64_t requestId) const {
+        const auto state = m_projectLayoutSnapshotState;
+        if (!state || requestId == 0) return rust::String("ERROR");
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->activeId == requestId) return rust::String();
+        if (state->hasResult && state->resultId == requestId) {
+            std::string result = std::move(state->result);
+            state->result.clear();
+            state->resultId = 0;
+            state->hasResult = false;
+            return rust::String(result);
+        }
+        return rust::String("ERROR");
+    }
+    bool cancel_project_layout_snapshot(uint64_t requestId) const {
+        const auto state = m_projectLayoutSnapshotState;
+        if (!state || requestId == 0) return false;
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->activeId == requestId && state->activeCancellation) {
+            state->activeCancellation->store(true, std::memory_order_release);
+            return true;
+        }
+        if (state->hasResult && state->resultId == requestId) {
+            state->result.clear();
+            state->resultId = 0;
+            state->hasResult = false;
+            return true;
+        }
+        return false;
+    }
     rust::String get_routing_snapshot_json() const;
     uint64_t get_project_generation() const {
         return m_engine ? m_engine->get_project_generation() : 0;
+    }
+    uint64_t get_project_layout_revision() const {
+        return m_engine ? m_engine->get_project_layout_revision() : 0;
+    }
+    uint64_t get_project_state_revision() const {
+        return m_engine ? m_engine->get_project_state_revision() : 0;
+    }
+    void mark_project_layout_changed() const {
+        if (m_engine) m_engine->mark_project_layout_changed();
     }
 
     // Command Dispatch
@@ -563,6 +754,5 @@
     }
     
     // Core Access for telemetry shims
-    const ::Aura::Core::Engine::AuraUnifiedEngine& get_core() const { return *m_engine; }
-    std::shared_ptr<::Aura::Core::Engine::AuraUnifiedEngine> get_core_shared() const { return m_engine; }
-
+    const ::Hirari::Core::Engine::HirariUnifiedEngine& get_core() const { return *m_engine; }
+    std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> get_core_shared() const { return m_engine; }

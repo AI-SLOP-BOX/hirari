@@ -9,7 +9,7 @@
 #include "bounce_engine.hpp"
 #include "../../io/persistence/wav_writer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class TrackFreezeManager
@@ -42,7 +42,7 @@ public:
         if (path.empty()) return false;
         auto rendered = renderOffline(track, totalSamples);
         if (!rendered) return false;
-        Aura::IO::Persistence::WavWriter::Float32StreamWriter writer(
+        Hirari::IO::Persistence::WavWriter::Float32StreamWriter writer(
             path.string(), sampleRate, 2);
         if (!writer.isOpen()) return false;
         for (uint64_t offset = 0; offset < totalSamples;) {
@@ -74,7 +74,7 @@ public:
                                      uint32_t sampleRate) {
         if (!track || path.empty() || totalSamples == 0 || sampleRate == 0 ||
             totalSamples > kMaxFreezeSamples) return false;
-        Aura::Core::IO::WavDecoder decoder;
+        Hirari::Core::IO::WavDecoder decoder;
         if (!decoder.open(path.string()) ||
             std::abs(decoder.getSampleRate() - static_cast<double>(sampleRate)) > 0.5) {
             return false;
@@ -104,6 +104,43 @@ public:
     }
 
 private:
+    struct RenderContext {
+        Track* track = nullptr;
+        AudioBuffer* block = nullptr;
+    };
+
+    static bool resetOfflineRender(void* opaque) noexcept {
+        auto* context = static_cast<RenderContext*>(opaque);
+        if (context == nullptr || context->track == nullptr) return false;
+        try {
+            context->track->resetForOfflineRender();
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    static bool renderBlock(void* opaque, float* left, float* right,
+                            uint32_t frames, uint64_t playhead) noexcept {
+        auto* context = static_cast<RenderContext*>(opaque);
+        if (context == nullptr || context->track == nullptr || context->block == nullptr ||
+            left == nullptr || right == nullptr || frames == 0 ||
+            context->block->getNumChannels() < 2 ||
+            context->block->getNumSamples() < frames) return false;
+        try {
+            context->block->clear();
+            context->track->process(*context->block, frames, playhead);
+            const float* sourceLeft = context->block->getReadPointer(0);
+            const float* sourceRight = context->block->getReadPointer(1);
+            if (sourceLeft == nullptr || sourceRight == nullptr) return false;
+            std::memcpy(left, sourceLeft, static_cast<size_t>(frames) * sizeof(float));
+            std::memcpy(right, sourceRight, static_cast<size_t>(frames) * sizeof(float));
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
     static std::shared_ptr<AudioBuffer> renderOffline(
         const std::shared_ptr<Track>& track, uint64_t totalSamples) {
         if (!track || totalSamples == 0 || totalSamples > kMaxFreezeSamples ||
@@ -112,23 +149,12 @@ private:
             constexpr uint32_t kRenderBlockSize = 1024;
             auto rendered = std::make_shared<AudioBuffer>(2, static_cast<uint32_t>(totalSamples));
             AudioBuffer block(2, kRenderBlockSize);
-            track->resetForOfflineRender();
-            uint64_t renderedSamples = 0;
-            while (renderedSamples < totalSamples) {
-                const uint32_t blockSize = static_cast<uint32_t>(std::min<uint64_t>(
-                    kRenderBlockSize, totalSamples - renderedSamples));
-                block.clear();
-                track->process(block, blockSize, renderedSamples);
-                for (uint32_t channel = 0; channel < 2; ++channel) {
-                    const float* source = block.getReadPointer(channel);
-                    float* destination = rendered->getWritePointer(channel);
-                    if (source == nullptr || destination == nullptr) return nullptr;
-                    std::memcpy(destination + static_cast<size_t>(renderedSamples),
-                                source,
-                                static_cast<size_t>(blockSize) * sizeof(float));
-                }
-                renderedSamples += blockSize;
-            }
+            RenderContext context{track.get(), &block};
+            if (!hirari_track_freeze_render(
+                    totalSamples, kRenderBlockSize,
+                    rendered->getWritePointer(0), rendered->getWritePointer(1),
+                    rendered->getNumSamples(), &context,
+                    &resetOfflineRender, &renderBlock)) return nullptr;
             return rendered;
         } catch (...) {
             return nullptr;
@@ -139,4 +165,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

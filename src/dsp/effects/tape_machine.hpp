@@ -7,7 +7,7 @@
 #include "../iprocessor.hpp"
 #include "delay_line.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class TapeMachine
@@ -76,4 +76,4 @@ private:
     float m_drive, m_flutter, m_noise;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

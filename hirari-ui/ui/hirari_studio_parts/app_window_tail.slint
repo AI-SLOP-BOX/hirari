@@ -1,0 +1,41 @@
+            vertical-stretch: 1;
+            height: 100%;
+            // High-Density Snap & Tool Header
+            Rectangle {
+                height: 38px; background: Style.surface; border_width: 1px; border_color: Style.border;
+                HorizontalLayout {
+                    padding: 4px; spacing: 12px;
+                    // Snap & Grid Section
+                    HorizontalLayout {
+                        spacing: 4px; alignment: start;
+                        Z_IconButton { icon: "SNAP"; active: true; clicked => { snap_open = !snap_open; } }
+                        Rectangle {
+                            width: 60px; height: 100%; background: #000; border_radius: 2px;
+                            Text { text: snap_val; font-size: 10px; color: Style.brand; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { snap_open = !snap_open; } }
+                        }
+                    }
+                    // Tool Selection
+                    HorizontalLayout {
+                        spacing: 2px;
+                        for tool[idx] in ["Selection", "Slice", "Draw", "Mute"] : Z_IconButton {
+                                            icon: idx == 0 ? "↖" : (idx == 1 ? "CUT" : (idx == 2 ? "DRAW" : "M"));
+                            active: active_tool == idx;
+                            clicked => { active_tool = idx; }
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    // Time Visibility Toggles
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Z_IconButton { icon: "⌚ BEATS"; active: tm_beats; clicked => { tm_beats = !tm_beats; } }
+                    }
+                }
+                // Snap Popup Overlay (Industrial Grid Settings)
+                if snap_open : Rectangle {
+                    x: 42px; y: 40px; width: 110px; height: 180px; background: Style.surface; border_width: 1.5px; border_color: #333; z: 100; clip: true;
+                    VerticalLayout {
+                        padding: 4px; spacing: 1px;
+                        Text { text: "GRID RESOLUTION"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; horizontal-alignment: center; }
+                        for v in ["1/1", "1/4", "1/8", "1/16", "1/32", "1/64", "Adaptive"] : Rectangle {
+                            height: 22px; background: area_sn.has_hover ? Style.border : #000;

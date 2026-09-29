@@ -5,7 +5,7 @@
 #include <string>
 #include <algorithm>
 
-namespace Aura::Core::Video {
+namespace Hirari::Core::Video {
 
 struct SMPTETimecode {
     uint8_t hours, minutes, seconds, frames;
@@ -71,4 +71,4 @@ private:
     }
 };
 
-} // namespace Aura::Core::Video
+} // namespace Hirari::Core::Video

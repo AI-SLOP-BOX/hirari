@@ -6,7 +6,7 @@
 #endif
 #include <cstdint>
 
-namespace Aura::SIMD {
+namespace Hirari::SIMD {
 
 /**
  * @class SIMDKernel
@@ -46,4 +46,4 @@ public:
     }
 };
 
-} // namespace Aura::SIMD
+} // namespace Hirari::SIMD

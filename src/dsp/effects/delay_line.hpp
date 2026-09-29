@@ -1,50 +1,50 @@
 #pragma once
 
-#include <vector>
-#include <atomic>
-#include <algorithm>
-#include <cmath>
+#include <cstdint>
+#include "../../core/rust_ffi.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
-/**
- * @brief DelayLine: Professional-grade sample-accurate delay.
- * Used for PDC (Plugin Delay Compensation) to align tracks in time.
- */
+/** Rust-backed integer-sample delay line used by PDC and lookahead DSP. */
 class DelayLine {
 public:
-    DelayLine(uint32_t maxDelaySamples) {
-        // Enforce power-of-2 for fast bitwise masking
-        m_mask = 1;
-        while (m_mask < maxDelaySamples) m_mask <<= 1;
-        m_buffer.assign(m_mask, 0.0f);
-        m_mask -= 1;
+    explicit DelayLine(uint32_t maxDelaySamples)
+        : m_state(hirari_integer_delay_create(maxDelaySamples)) {}
+
+    ~DelayLine() { hirari_integer_delay_destroy(m_state); }
+
+    DelayLine(const DelayLine&) = delete;
+    DelayLine& operator=(const DelayLine&) = delete;
+
+    DelayLine(DelayLine&& other) noexcept : m_state(other.m_state) {
+        other.m_state = nullptr;
     }
 
-    /**
-     * @brief Processes a single sample through the delay and returns the delayed value.
-     */
-    float process(float sample, uint32_t delaySamples) {
-        if (m_buffer.empty()) return 0.0f;
-        const float safeSample = std::isfinite(sample) ? sample : 0.0f;
-        const uint32_t safeDelay = std::min(delaySamples, m_mask);
-        m_buffer[m_writeIdx] = safeSample;
-        const uint32_t readIdx = (m_writeIdx - safeDelay) & m_mask;
-        const float output = m_buffer[readIdx];
-        m_writeIdx = (m_writeIdx + 1) & m_mask;
-        return std::isfinite(output) ? output : 0.0f;
+    DelayLine& operator=(DelayLine&& other) noexcept {
+        if (this != &other) {
+            hirari_integer_delay_destroy(m_state);
+            m_state = other.m_state;
+            other.m_state = nullptr;
+        }
+        return *this;
     }
 
-
-    void reset() {
-        std::fill(m_buffer.begin(), m_buffer.end(), 0.0f);
-        m_writeIdx = 0;
+    float process(float sample, uint32_t delaySamples) noexcept {
+        return hirari_integer_delay_process(m_state, sample, delaySamples);
     }
+
+    void push(float sample) noexcept {
+        hirari_integer_delay_push(m_state, sample);
+    }
+
+    float read(uint32_t delaySamples) const noexcept {
+        return hirari_integer_delay_read(m_state, delaySamples);
+    }
+
+    void reset() noexcept { hirari_integer_delay_reset(m_state); }
 
 private:
-    std::vector<float> m_buffer;
-    uint32_t m_writeIdx = 0;
-    uint32_t m_mask = 0;
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

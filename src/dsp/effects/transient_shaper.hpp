@@ -1,80 +1,41 @@
 #pragma once
 
-#include <vector>
-#include <cmath>
-#include <algorithm>
 #include "../iprocessor.hpp"
+#include "../../core/rust_ffi.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
-/**
- * @class TransientShaper
- * @brief Dynamic Envelope modification for Percussion and Drums.
- * HONEST FIX: Implements dual-envelope detection (Fast Attack vs slow envelope)
- * to isolate and boost/cut the initial crack of a drum sound.
- * Provides the 'Snap' and 'Weight' found in professional SSL-style transient designers.
- */
-class TransientShaper : public IProcessor {
+/** C++ processor API adapter for Rust transient-envelope shaping. */
+class TransientShaper final : public IProcessor {
 public:
-    TransientShaper() : m_attackEnv(0.0f), m_sustainEnv(0.0f) {
-        reset();
+    TransientShaper() : m_state(hirari_transient_shaper_create(44'100.0)) {}
+    ~TransientShaper() override { hirari_transient_shaper_destroy(m_state); }
+
+    TransientShaper(const TransientShaper&) = delete;
+    TransientShaper& operator=(const TransientShaper&) = delete;
+
+    std::string getName() const override { return "Transient Shaper"; }
+    void prepareToPlay(double sampleRate, uint32_t) noexcept override {
+        hirari_transient_shaper_prepare(m_state, sampleRate);
     }
-
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        m_sampleRate = sr;
-        updateBallistics();
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer&,
+                 const ProcessContext&) noexcept override {
+        if (m_bypassed || buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
+        hirari_transient_shaper_process(m_state, buffer.getWritePointer(0),
+            buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr,
+            buffer.getNumSamples());
     }
+    void reset() noexcept override { hirari_transient_shaper_reset(m_state); }
 
-    /**
-     * @brief PROCESS: Dynamically reshapes the signal's attack and tail.
-     */
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        if (m_bypassed || buffer.getNumChannels() == 0) return;
-        const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
-        const float attackGain = std::clamp(1.0f + m_attack, 0.0f, 2.0f);
-        const float sustainGain = std::clamp(1.0f + m_sustain, 0.0f, 2.0f);
-        for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
-            const float l = buffer.getReadPointer(0)[i];
-            const float r = channels > 1 ? buffer.getReadPointer(1)[i] : l;
-            const float level = std::max(std::abs(l), std::abs(r));
-            m_attackEnv = m_attackAlpha * m_attackEnv + (1.0f - m_attackAlpha) * level;
-            m_sustainEnv = m_sustainAlpha * m_sustainEnv + (1.0f - m_sustainAlpha) * level;
-            const float transient = std::clamp(m_attackEnv - m_sustainEnv, -1.0f, 1.0f);
-            const float body = std::clamp(m_sustainEnv, 0.0f, 1.0f);
-            const float gain = std::clamp(1.0f + transient * (attackGain - 1.0f) + body * (sustainGain - 1.0f), 0.0f, 3.0f);
-            buffer.getWritePointer(0)[i] = l * gain;
-            if (channels > 1) buffer.getWritePointer(1)[i] = r * gain;
-        }
+    void setAttack(float attack) noexcept {
+        hirari_transient_shaper_set_attack(m_state, attack);
     }
-
-
-    void reset() noexcept override {
-        m_attackEnv = 0.0f;
-        m_sustainEnv = 0.0f;
-        m_currentGain = 1.0f;
+    void setSustain(float sustain) noexcept {
+        hirari_transient_shaper_set_sustain(m_state, sustain);
     }
-
-    // Parameters (-1.0 to 1.0)
-    void setAttack(float a) { m_attack = a; }
-    void setSustain(float s) { m_sustain = s; }
 
 private:
-    void updateBallistics() {
-        // Attack envelope: Fast (approx 5ms)
-        m_attackAlpha = std::exp(-1.0f / (m_sampleRate * 0.005f));
-        // Sustain envelope: Slow (approx 50ms)
-        m_sustainAlpha = std::exp(-1.0f / (m_sampleRate * 0.050f));
-    }
-
-    double m_sampleRate = 44100.0;
-    float m_attack = 0.0f;
-    float m_sustain = 0.0f;
-
-    float m_attackEnv = 0.0f;
-    float m_sustainEnv = 0.0f;
-    float m_attackAlpha = 0.9f;
-    float m_sustainAlpha = 0.99f;
-    float m_currentGain = 1.0f;
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

@@ -8,7 +8,7 @@
 #include <map>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class BounceCoreProfessionalFinal
@@ -35,7 +35,7 @@ public:
      */
     void executeProfessionalBatchRender(const std::vector<ExportTask>& tasks) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::BounceCoreOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::BounceCoreOrchestrator.
         // Rust's high-precision concurrency engine ensures that parallel stem rendering 
         // is technically superior and perfectly synchronized without race conditions.
         // Rust's RenderEngine ensures bit-accurate audio calculation.
@@ -53,4 +53,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

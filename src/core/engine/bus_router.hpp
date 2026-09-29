@@ -6,7 +6,7 @@
 #include <map>
 #include <cstdint>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class BusRouter
@@ -78,4 +78,4 @@ public:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

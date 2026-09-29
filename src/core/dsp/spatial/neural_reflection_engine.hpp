@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <random>
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @class NeuralReflectionEngine
@@ -71,4 +71,4 @@ private:
     std::vector<float> m_gains;
 };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

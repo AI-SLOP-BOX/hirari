@@ -5,7 +5,7 @@
 #include <memory>
 #include "../../dsp/mixing/pro_limiter.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief SelectionBasedProcessor: Logic Pro-style offline region processing.
@@ -31,4 +31,4 @@ private:
     SelectionBasedProcessor() = default;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

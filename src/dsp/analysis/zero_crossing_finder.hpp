@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief ZeroCrossingFinder: Precision audio editing utility.
@@ -40,4 +40,4 @@ public:
 
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

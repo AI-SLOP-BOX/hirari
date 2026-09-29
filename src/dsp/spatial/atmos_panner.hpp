@@ -11,7 +11,7 @@
 #include <arm_neon.h>
 #endif
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @class AtmosPanner
@@ -130,9 +130,9 @@ public:
     }
  
     /**
-     * @brief SOVEREIGN BINAURAL: Industrial HRTF processing for high-fidelity 3D monitoring.
+     * @brief SOVEREIGN BINHIRARIL: Industrial HRTF processing for high-fidelity 3D monitoring.
      */
-    void processBinaural(const float* monoIn, Core::AudioBuffer& stOut, Position pos) {
+    void processBinhiraril(const float* monoIn, Core::AudioBuffer& stOut, Position pos) {
         if (!monoIn || stOut.getNumChannels() < 2 || stOut.getNumSamples() == 0) return;
         uint32_t n = stOut.getNumSamples();
         float* L = stOut.getWritePointer(0);
@@ -144,7 +144,7 @@ public:
         float azimuth_rad = std::atan2(pos.x, pos.y);
         float elevation = std::asin(std::clamp(pos.z / (radius + 0.0001f), -1.0f, 1.0f));
 
-        // 1. ITD (Interaural Time Difference)
+        // 1. ITD (Interhiraril Time Difference)
         float itd_s = static_cast<float>((m_sampleRate * 0.175 / 343.0) *
                                          (azimuth_rad + std::sin(azimuth_rad)));
         
@@ -201,4 +201,4 @@ public:
      double m_sampleRate;
  };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

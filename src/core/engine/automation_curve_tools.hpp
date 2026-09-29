@@ -4,7 +4,7 @@
 #include <cmath>
 #include <vector>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 template <typename Point>
 class AutomationCurveTools {

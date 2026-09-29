@@ -4,7 +4,7 @@
 #include <vector>
 #include <numbers>
 
-namespace Aura::DSP {
+namespace Hirari::DSP {
 
 /**
  * @class FastFFT
@@ -55,4 +55,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP
+} // namespace Hirari::DSP

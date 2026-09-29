@@ -3,11 +3,11 @@
 #include <cassert>
 #include <atomic>
 
-class WatchdogProbe final : public Aura::DSP::IProcessor {
+class WatchdogProbe final : public Hirari::DSP::IProcessor {
 public:
     void prepareToPlay(double, uint32_t) noexcept override {}
-    void process(Aura::Core::AudioBuffer&, Aura::Core::MidiBuffer&,
-                 const Aura::DSP::ProcessContext&) noexcept override {}
+    void process(Hirari::Core::AudioBuffer&, Hirari::Core::MidiBuffer&,
+                 const Hirari::DSP::ProcessContext&) noexcept override {}
     void reset() noexcept override {}
 
     bool takeWatchdogTrip() noexcept override {
@@ -21,7 +21,7 @@ private:
 };
 
 int main() {
-    Aura::Core::EffectChain chain;
+    Hirari::Core::EffectChain chain;
     auto first = std::make_shared<WatchdogProbe>();
     auto second = std::make_shared<WatchdogProbe>();
     chain.addProcessor(first);

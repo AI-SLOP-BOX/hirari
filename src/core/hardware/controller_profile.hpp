@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Aura::Core::Hardware {
+namespace Hirari::Core::Hardware {
 struct MidiPortProfile { std::string id,name; bool input=false,output=false; uint32_t manufacturer=0; };
 struct ControlMapping { uint8_t channel=0, controller=0; std::string command; float min=0,max=1; };
 class ControllerProfile {

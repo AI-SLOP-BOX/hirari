@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace Aura::Core::Composition {
+namespace Hirari::Core::Composition {
 
 enum class SnapMode : uint8_t { Off, Grid, RelativeGrid, ZeroCrossing };
 

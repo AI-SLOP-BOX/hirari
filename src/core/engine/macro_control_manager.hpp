@@ -1,12 +1,10 @@
 #pragma once
-#include <vector>
-#include <array>
-#include <atomic>
-#include <algorithm>
-#include <cmath>
-#include "../parameter_smoother.hpp"
 
-namespace Aura::Core::Engine {
+#include <cstddef>
+#include <cstdint>
+#include "../rust_ffi.hpp"
+
+namespace Hirari::Core::Engine {
 
 struct MacroMapping {
     uint32_t targetParamId;
@@ -15,91 +13,51 @@ struct MacroMapping {
     bool invert;
 };
 
-/**
- * @class MacroControlManager
- * @brief Industrial Parameter Macro Orchestration Engine.
- * HONEST FIX: Implemented real mapping logic with range scaling.
- */
+/** C++ API adapter for the Rust-owned macro values, smoothing and mappings. */
 class MacroControlManager {
 public:
     static constexpr size_t kMaxMacros = 128;
 
-    MacroControlManager() {
-        for (auto& v : m_targetValues) v.store(0.0f);
-    }
+    MacroControlManager() : m_state(hirari_macro_mapping_create()) {}
+    ~MacroControlManager() { hirari_macro_mapping_destroy(m_state); }
+    MacroControlManager(const MacroControlManager&) = delete;
+    MacroControlManager& operator=(const MacroControlManager&) = delete;
 
-    static MacroControlManager& getInstance() { static MacroControlManager i; return i; }
+    static MacroControlManager& getInstance() {
+        static MacroControlManager instance;
+        return instance;
+    }
 
     void setMacroValue(uint32_t macroIdx, float value) {
-        if (macroIdx < kMaxMacros && std::isfinite(value)) {
-            m_targetValues[macroIdx].store(std::clamp(value, 0.0f, 1.0f),
-                                           std::memory_order_relaxed);
-        }
+        hirari_macro_control_set_value(m_state, macroIdx, value);
     }
 
-    /// Returns the latest control-thread value without touching smoother
-    /// state. Audio processors can use this for inexpensive parameter reads;
-    /// time-critical modulation should still use getMappedValue() after the
-    /// audio-side smoother update.
     float getMacroValue(uint32_t macroIdx) const noexcept {
-        if (macroIdx >= kMaxMacros) return 0.0f;
-        return m_targetValues[macroIdx].load(std::memory_order_relaxed);
+        return hirari_macro_control_get_value(m_state, macroIdx);
     }
 
-    // Used only by the control-plane MIDI Learn binder. The returned address
-    // is stable for the lifetime of this manager because the macro storage is
-    // a fixed-size array; the audio/input path only performs atomic stores.
-    std::atomic<float>* targetPointer(uint32_t macroIdx) noexcept {
-        return macroIdx < kMaxMacros ? &m_targetValues[macroIdx] : nullptr;
-    }
+    // MIDI Learn targets this opaque Rust state and a macro index directly.
+    const void* midiLearnState() const noexcept { return m_state; }
 
     void addMapping(uint32_t macroIdx, const MacroMapping& mapping) {
-        if (macroIdx >= kMaxMacros || !std::isfinite(mapping.min) ||
-            !std::isfinite(mapping.max)) return;
-        MacroMapping safe = mapping;
-        safe.min = std::clamp(safe.min, 0.0f, 1.0f);
-        safe.max = std::clamp(safe.max, 0.0f, 1.0f);
-        if (safe.min > safe.max) std::swap(safe.min, safe.max);
-        auto& mappings = m_mappings[macroIdx];
-        auto it = std::find_if(mappings.begin(), mappings.end(),
-                               [&](const MacroMapping& item) {
-                                   return item.targetParamId == safe.targetParamId;
-                               });
-        if (it != mappings.end()) *it = safe;
-        else mappings.push_back(safe);
+        hirari_macro_mapping_add(m_state, macroIdx, mapping.targetParamId,
+                                 mapping.min, mapping.max, mapping.invert);
     }
 
     void clearMappings(uint32_t macroIdx) {
-        if (macroIdx < kMaxMacros) m_mappings[macroIdx].clear();
+        hirari_macro_mapping_clear(m_state, macroIdx);
     }
 
-    /**
-     * @brief Calculates and returns the mapped value for a specific target.
-     * INDUSTRIAL: Delegating mapped value calculation and parameter scaling to the Rust 'MacroOrchestrator'.
-     */
     float getMappedValue(uint32_t macroIdx, uint32_t targetId) const {
-        if (macroIdx >= kMaxMacros) return 0.0f;
-        const float normalized = std::clamp(
-            m_smoothers[macroIdx].getCurrentValue(), 0.0f, 1.0f);
-        for (const auto& mapping : m_mappings[macroIdx]) {
-            if (mapping.targetParamId != targetId) continue;
-            const float source = mapping.invert ? 1.0f - normalized : normalized;
-            return mapping.min + source * (mapping.max - mapping.min);
-        }
-        return normalized;
+        return hirari_macro_mapping_evaluate(m_state, macroIdx, targetId);
     }
 
-    void updateSmoothers(float sr) {
-        for (size_t i = 0; i < kMaxMacros; ++i) {
-            m_smoothers[i].setSmoothingTime(10.0f, sr); // 10ms standard
-            m_smoothers[i].setTarget(m_targetValues[i].load(std::memory_order_relaxed));
-        }
+    void updateSmoothers(float sampleRate) {
+        hirari_macro_control_update_smoothers(m_state, sampleRate);
     }
 
 private:
-    std::array<std::atomic<float>, kMaxMacros> m_targetValues;
-    std::array<std::vector<MacroMapping>, kMaxMacros> m_mappings;
-    mutable std::array<Aura::Core::ParameterSmoother, kMaxMacros> m_smoothers;
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

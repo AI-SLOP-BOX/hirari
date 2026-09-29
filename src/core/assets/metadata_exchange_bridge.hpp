@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 
-namespace Aura::Core::Assets {
+namespace Hirari::Core::Assets {
 
 /**
  * @struct SceneObject
@@ -38,4 +38,4 @@ private:
     MetadataExchangeBridge() = default;
 };
 
-} // namespace Aura::Core::Assets
+} // namespace Hirari::Core::Assets

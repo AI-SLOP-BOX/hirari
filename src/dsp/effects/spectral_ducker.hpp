@@ -9,7 +9,7 @@
 #include "../iprocessor.hpp"
 #include "../utils/fft_utils.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class SidechainSpectralDucker
@@ -167,4 +167,4 @@ private:
     float m_amount = 0.5f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

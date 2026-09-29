@@ -4,7 +4,7 @@
 #include <cmath>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct SurroundPosition
@@ -92,4 +92,4 @@ private:
     OutputLayout m_layout;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

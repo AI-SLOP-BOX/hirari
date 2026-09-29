@@ -1,0 +1,112 @@
+import { LineEdit, ScrollView } from "std-widgets.slint";
+import { Style } from "../style.slint";
+import { Z_Track } from "../model/track_model.slint";
+
+export component Z_Spotlight {
+    in property <bool> active: false;
+    in property <[Z_Track]> tracks: [];
+    in-out property <string> query: "";
+    callback track_selected(int);
+    callback clip_selected(int, int);
+    callback command_selected(string);
+
+    Rectangle {
+        x: (parent.width - 520px) / 2;
+        y: 84px;
+        width: 520px;
+        height: 390px;
+        background: Style.surface-1;
+        border-radius: 8px;
+        border-width: 2px;
+        border-color: Style.brand;
+        clip: true;
+
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 48px;
+                background: #000;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 10px;
+                    Text { text: "⌕"; font-size: 19px; color: Style.brand; vertical-alignment: center; }
+                    LineEdit {
+                        text <=> root.query;
+                        placeholder-text: "Search tracks, clips or commands";
+                        horizontal-stretch: 1;
+                        font-size: 14px;
+                        accepted(text) => { root.command_selected(text.to-uppercase()); }
+                    }
+                    Text { text: "ESC"; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center; font-weight: 600; }
+                }
+            }
+
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 4px;
+
+                    Text {
+                        text: root.query == "" ? "QUICK ACTIONS" : "MATCHING TRACKS";
+                        color: Style.text-tertiary;
+                        font-size: 9px;
+                        font-weight: 700;
+                    }
+
+                    if (root.query == "" || "open project" == root.query.to-lowercase()) : Rectangle {
+                        height: 34px;
+                        background: #00000000;
+                        Text { x: 10px; text: "Open Project"; color: Style.text-primary; font-size: 11px; vertical-alignment: center; }
+                        Text { x: parent.width - 90px; text: "⌘ O"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+                        TouchArea { clicked => { root.command_selected("OPEN PROJECT"); } }
+                    }
+                    if (root.query == "" || "save project" == root.query.to-lowercase()) : Rectangle {
+                        height: 34px;
+                        background: #00000000;
+                        Text { x: 10px; text: "Save Project"; color: Style.text-primary; font-size: 11px; vertical-alignment: center; }
+                        Text { x: parent.width - 90px; text: "⌘ S"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+                        TouchArea { clicked => { root.command_selected("SAVE PROJECT"); } }
+                    }
+                    if (root.query == "" || "import audio" == root.query.to-lowercase()) : Rectangle {
+                        height: 34px;
+                        background: #00000000;
+                        Text { x: 10px; text: "Import Audio"; color: Style.text-primary; font-size: 11px; vertical-alignment: center; }
+                        TouchArea { clicked => { root.command_selected("IMPORT AUDIO"); } }
+                    }
+                    if (root.query == "" || "scan plugins" == root.query.to-lowercase()) : Rectangle {
+                        height: 34px;
+                        background: #00000000;
+                        Text { x: 10px; text: "Scan Plugins"; color: Style.text-primary; font-size: 11px; vertical-alignment: center; }
+                        TouchArea { clicked => { root.command_selected("SCAN PLUGINS"); } }
+                    }
+
+                    for track[idx] in root.tracks : Rectangle {
+                        if (root.query != "" && track.name.to-lowercase() == root.query.to-lowercase()) : Rectangle {
+                            height: 34px;
+                            background: #00000000;
+                            Text { x: 10px; text: track.name; color: Style.text-primary; font-size: 11px; vertical-alignment: center; }
+                            Text { x: parent.width - 90px; text: "TRACK"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+                            TouchArea { clicked => { root.track_selected(idx); } }
+                        }
+                        for clip in track.clips : Rectangle {
+                            if (root.query != "" && clip.name.to-lowercase() == root.query.to-lowercase()) : Rectangle {
+                                height: 34px;
+                                background: #00000000;
+                                Text { x: 10px; text: clip.name; color: Style.text-primary; font-size: 11px; vertical-alignment: center; }
+                                Text { x: parent.width - 90px; text: "CLIP · " + track.name; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+                                TouchArea { clicked => { root.clip_selected(idx, clip.id); } }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                height: 24px;
+                background: Style.surface;
+                Text { x: 10px; text: "Enter a command · click a matching full track/clip name · letter case is ignored"; color: Style.text-tertiary; font-size: 8px; vertical-alignment: center; }
+            }
+        }
+    }
+}

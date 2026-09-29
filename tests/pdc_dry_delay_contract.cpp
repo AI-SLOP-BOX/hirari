@@ -4,13 +4,13 @@
 #include "core/audio_processor_graph.hpp"
 
 namespace {
-class SilentLatencyProcessor final : public Aura::DSP::IProcessor {
+class SilentLatencyProcessor final : public Hirari::DSP::IProcessor {
 public:
     explicit SilentLatencyProcessor(uint32_t latency) : m_latency(latency) {}
 
     void prepareToPlay(double, uint32_t) noexcept override {}
-    void process(Aura::Core::AudioBuffer& buffer, Aura::Core::MidiBuffer&,
-                 const Aura::DSP::ProcessContext&) noexcept override {
+    void process(Hirari::Core::AudioBuffer& buffer, Hirari::Core::MidiBuffer&,
+                 const Hirari::DSP::ProcessContext&) noexcept override {
         for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
             float* samples = buffer.getWritePointer(channel);
             for (uint32_t index = 0; index < buffer.getNumSamples(); ++index) {
@@ -26,11 +26,11 @@ private:
     uint32_t m_latency;
 };
 
-class InvalidOutputProcessor final : public Aura::DSP::IProcessor {
+class InvalidOutputProcessor final : public Hirari::DSP::IProcessor {
 public:
     void prepareToPlay(double, uint32_t) noexcept override {}
-    void process(Aura::Core::AudioBuffer& buffer, Aura::Core::MidiBuffer&,
-                 const Aura::DSP::ProcessContext&) noexcept override {
+    void process(Hirari::Core::AudioBuffer& buffer, Hirari::Core::MidiBuffer&,
+                 const Hirari::DSP::ProcessContext&) noexcept override {
         for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
             float* samples = buffer.getWritePointer(channel);
             for (uint32_t index = 0; index < buffer.getNumSamples(); ++index) {
@@ -44,7 +44,7 @@ public:
 }
 
 int main() {
-    using namespace Aura;
+    using namespace Hirari;
     Core::AudioProcessorGraph graph;
     auto processor = std::make_shared<SilentLatencyProcessor>(4);
     processor->setMix(0.5f);

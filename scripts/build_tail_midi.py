@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a short accompaniment-only MIDI tail from an Aura note JSON file."""
+"""Build a short accompaniment-only MIDI tail from a Hirari note JSON file."""
 
 import json
 import struct

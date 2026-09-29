@@ -1,4 +1,4 @@
-# SKILL: Aura Graphics (GPU Hardware Acceleration)
+# SKILL: Hirari Graphics (GPU Hardware Acceleration)
 
 ## 🎨 Metal/Vulkan Drawing Directives
 DAWが重くなる原因の50%は「波形の描画」です。オーディオ処理の邪魔をしないためのグラフィックルールの徹底。

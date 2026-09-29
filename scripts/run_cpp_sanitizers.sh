@@ -5,7 +5,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
 CXX=${CXX:-c++}
-OUT_DIR=${TMPDIR:-/tmp}/aura-sanitizers
+OUT_DIR=${TMPDIR:-/tmp}/hirari-sanitizers
 mkdir -p "$OUT_DIR"
 
 if ! command -v "$CXX" >/dev/null 2>&1; then

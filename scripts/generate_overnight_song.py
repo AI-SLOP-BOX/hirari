@@ -1,6 +1,6 @@
 import json, struct, pathlib
 PPQ=480; BPM=96; BARS=80
-out=pathlib.Path("dist/aura_final_chisa");out.mkdir(exist_ok=True)
+out=pathlib.Path("dist/hirari_final_chisa");out.mkdir(exist_ok=True)
 def vlq(n):
  b=[n&127];n>>=7
  while n:b.append((n&127)|128);n>>=7
@@ -51,7 +51,7 @@ for i,line in enumerate(lines):
   dur=step-18 if j<len(chars)-1 else PPQ+PPQ//2
   mel.append((pos,dur,pitch,112 if i>=8 else 96,chv))
 midi=b"MThd"+struct.pack(">IHHH",6,1,5,PPQ)+tr(meta)+nt(D,9)+nt(B,1)+nt(P,2)+nt(mel,0)
-p=out/"aura_final_chisa.mid";p.write_bytes(midi)
+p=out/"hirari_final_chisa.mid";p.write_bytes(midi)
 tracks=[]
 for track_id, source in enumerate((D, B, P, mel)):
     tracks.append({"track_id": track_id, "notes": [
@@ -60,5 +60,5 @@ for track_id, source in enumerate((D, B, P, mel)):
          "lyric": lyric or ""}
         for start, duration, pitch, velocity, lyric in source
     ]})
-(out / "aura_final_chisa.midi.json").write_text(json.dumps(tracks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+(out / "hirari_final_chisa.midi.json").write_text(json.dumps(tracks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print(p,len(mel),BARS*4*60/BPM)

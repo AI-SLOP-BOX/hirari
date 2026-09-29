@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cmath>
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @enum CommandType
@@ -89,4 +89,4 @@ private:
     std::atomic<uint64_t> m_rejected{0};
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

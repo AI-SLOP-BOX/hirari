@@ -16,13 +16,13 @@ public:
         m_engine->set_playing(playing);
         return true;
     }
-    void set_loop(bool enabled) const { if (m_engine) m_engine->set_loop(enabled); }
-    bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { return m_engine && m_engine->set_cycle_range(start_sample, end_sample, enabled); }
+    void set_loop(bool enabled) const { if (m_engine) { m_engine->set_loop(enabled); m_engine->mark_project_state_changed(); } }
+    bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { if (!m_engine || !m_engine->set_cycle_range(start_sample, end_sample, enabled)) return false; m_engine->mark_project_state_changed(); return true; }
     bool is_loop_enabled() const { return m_engine && m_engine->is_loop_enabled(); }
     uint64_t cycle_start() const { return m_engine ? m_engine->cycle_start() : 0; }
     uint64_t cycle_end() const { return m_engine ? m_engine->cycle_end() : 0; }
     void set_metronome_enabled(bool enabled) const {
-        if (m_engine) m_engine->set_metronome_enabled(enabled);
+        if (m_engine) { m_engine->set_metronome_enabled(enabled); m_engine->mark_project_state_changed(); }
     }
     bool is_metronome_enabled() const {
         return m_engine && m_engine->is_metronome_enabled();
@@ -49,19 +49,30 @@ public:
         return result;
     }
     bool set_time_signature_event(double beat, uint8_t numerator, uint8_t denominator) const {
-        return m_engine && m_engine->set_time_signature_event(beat, numerator, denominator);
+        if (!m_engine || !m_engine->set_time_signature_event(beat, numerator, denominator)) return false;
+        m_engine->mark_project_state_changed(); return true;
     }
-    void clear_time_signature_events() const { if (m_engine) m_engine->clear_time_signature_events(); }
-    void clear_tempo_events(double initial_bpm) const { if (m_engine) m_engine->clear_tempo_events(initial_bpm); }
+    bool remove_time_signature_event(double beat) const {
+        if (!m_engine || !m_engine->remove_time_signature_event(beat)) return false;
+        m_engine->mark_project_state_changed(); return true;
+    }
+    void clear_time_signature_events() const { if (m_engine) { m_engine->clear_time_signature_events(); m_engine->mark_project_state_changed(); } }
+    void clear_tempo_events(double initial_bpm) const { if (m_engine) { m_engine->clear_tempo_events(initial_bpm); m_engine->mark_project_state_changed(); } }
     bool set_tempo_event(double beat, double bpm, bool ramp) const {
-        return m_engine && m_engine->set_tempo_event(beat, bpm, ramp);
+        if (!m_engine || !m_engine->set_tempo_event(beat, bpm, ramp)) return false;
+        m_engine->mark_project_state_changed(); return true;
     }
-    bool remove_tempo_event(double beat) const { return m_engine && m_engine->remove_tempo_event(beat); }
+    bool set_tempo_transition_event(double beat, double bpm, bool ramp) const {
+        if (!m_engine || !m_engine->set_tempo_transition_event(beat, bpm, ramp)) return false;
+        m_engine->mark_project_state_changed(); return true;
+    }
+    bool remove_tempo_event(double beat) const { if (!m_engine || !m_engine->remove_tempo_event(beat)) return false; m_engine->mark_project_state_changed(); return true; }
     bool move_tempo_event(double from_beat, double to_beat) const {
-        return m_engine && m_engine->move_tempo_event(from_beat, to_beat);
+        if (!m_engine || !m_engine->move_tempo_event(from_beat, to_beat)) return false;
+        m_engine->mark_project_state_changed(); return true;
     }
     float get_tempo() const { return m_engine ? m_engine->get_tempo() : 120.0f; }
-    bool set_tempo(float bpm) const { return m_engine && m_engine->set_tempo(bpm); }
+    bool set_tempo(float bpm) const { if (!m_engine || !m_engine->set_tempo(bpm)) return false; m_engine->mark_project_state_changed(); return true; }
     void midi_clock_tick(uint64_t timestamp) const { if (m_engine) m_engine->midi_clock_tick(timestamp); }
     uint64_t midi_clock_ticks() const { return m_engine ? m_engine->midi_clock_ticks() : 0; }
     uint64_t midi_clock_last_tick() const { return m_engine ? m_engine->midi_clock_last_tick() : 0; }
@@ -74,7 +85,8 @@ public:
         return m_engine ? m_engine->get_track_volume(tid) : -1.0f;
     }
     bool set_master_gain(float value) const {
-        return m_engine && m_engine->set_master_gain(value);
+        if (!m_engine || !m_engine->set_master_gain(value)) return false;
+        m_engine->mark_project_state_changed(); return true;
     }
     bool add_control_room_speaker(rust::Str name, float gain) const {
         return m_engine && m_engine->add_control_room_speaker(std::string(name), gain);
@@ -88,10 +100,23 @@ public:
     bool upsert_control_room_cue(uint32_t id, float gain, bool enabled) const { return m_engine && m_engine->upsert_control_room_cue(id, gain, enabled); }
     bool remove_control_room_cue(uint32_t id) const { return m_engine && m_engine->remove_control_room_cue(id); }
     bool set_control_room_cue_enabled(uint32_t id, bool enabled) const { return m_engine && m_engine->set_control_room_cue_enabled(id, enabled); }
+    bool set_control_room_cue_bus_track(uint32_t cueId, uint32_t busTrackId) const { return m_engine && m_engine->set_control_room_cue_bus_track(cueId, busTrackId); }
+    bool set_control_room_cue_output_channel(uint32_t cueId, uint32_t outputChannel) const { return m_engine && m_engine->set_control_room_cue_output_channel(cueId, outputChannel); }
+    bool set_control_room_cue_click_enabled(uint32_t cueId, bool enabled) const { return m_engine && m_engine->set_control_room_cue_click_enabled(cueId, enabled); }
     float control_room_cue_gain(uint32_t id) const { return m_engine ? m_engine->control_room_cue_gain(id) : 0.0f; }
+    bool set_control_room_active_cue(uint32_t id) const { return m_engine && m_engine->set_control_room_active_cue(id); }
+    uint32_t control_room_active_cue() const { return m_engine ? m_engine->control_room_active_cue() : 0; }
     bool control_room_validate() const { return m_engine && m_engine->control_room_validate(); }
     void set_control_room_dim(bool enabled) const { if (m_engine) m_engine->set_control_room_dim(enabled); }
+    bool set_control_room_dim_reduction_db(float db) const { return m_engine && m_engine->set_control_room_dim_reduction_db(db); }
+    float control_room_dim_reduction_db() const { return m_engine ? m_engine->control_room_dim_reduction_db() : -20.0f; }
     void set_control_room_talkback(bool enabled, float gain) const { if (m_engine) m_engine->set_control_room_talkback(enabled, gain); }
+    bool set_control_room_talkback_input_channel(uint32_t channel) const {
+        return m_engine && m_engine->set_control_room_talkback_input_channel(channel);
+    }
+    uint32_t control_room_talkback_input_channel() const {
+        return m_engine ? m_engine->control_room_talkback_input_channel() : 0;
+    }
     bool control_room_dimmed() const { return m_engine && m_engine->control_room_dimmed(); }
     bool control_room_talkback_enabled() const { return m_engine && m_engine->control_room_talkback_enabled(); }
     float control_room_monitor_gain() const { return m_engine ? m_engine->control_room_monitor_gain() : 0.0f; }
@@ -146,6 +171,10 @@ public:
     bool set_track_input_monitor(uint32_t tid, bool enabled) const {
         return m_engine && m_engine->set_track_input_monitor(tid, enabled);
     }
+    bool set_track_input_monitor_channels(uint32_t tid, bool enabled,
+                                          uint32_t left, uint32_t right) const {
+        return m_engine && m_engine->set_track_input_monitor_channels(tid, enabled, left, right);
+    }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = m_driver && m_driver->is_running();
@@ -172,7 +201,7 @@ public:
         return rust::String(m_driver->status());
 #else
         if (m_driver->isSilentFallback()) return rust::String("silent-fallback");
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
         return rust::String(m_driver->status());
 #endif
 #endif
@@ -198,10 +227,14 @@ public:
     }
     uint64_t get_audio_callback_count() const { return m_driver ? m_driver->callback_count() : 0; }
     uint64_t get_dropped_input_blocks() const { return m_driver ? m_driver->dropped_input_blocks() : 0; }
-    rust::Vec<float> poll_audio_input() const;
+    void discard_pending_audio_input() const;
+    uint32_t get_audio_input_channel_count() const { return m_driver ? m_driver->input_channel_count() : 0; }
+    uint32_t get_audio_output_channel_count() const { return m_driver ? m_driver->output_channel_count() : 0; }
+    rust::Vec<float> poll_audio_input(uint32_t& channelCount,
+                                      uint64_t& droppedInputBlocks) const;
     void try_reconnect_audio_device() const {
 #if defined(__APPLE__)
-        const char* isolated = std::getenv("AURA_NATIVE_TEST_ISOLATION");
+        const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
         if (isolated && std::strcmp(isolated, "1") == 0) return;
 #endif
         std::lock_guard<std::mutex> lock(m_configMutex);
@@ -218,32 +251,46 @@ public:
         return rust::String("[]");
 #endif
     }
+    rust::String audio_input_device_uid() const {
+#if defined(__APPLE__)
+        return rust::String(m_driver ? m_driver->selected_device_uid() : std::string{});
+#else
+        return rust::String("");
+#endif
+    }
     rust::String list_midi_devices_json() const {
-        return rust::String(::Aura::Core::Driver::list_core_midi_devices_json());
+        return rust::String(::Hirari::Core::Driver::list_core_midi_devices_json());
     }
     bool send_midi_message(uint32_t uniqueId, rust::Slice<const uint8_t> data) const {
-        return ::Aura::Core::Driver::send_core_midi_message(uniqueId, data.data(), data.size());
+        return ::Hirari::Core::Driver::send_core_midi_message(uniqueId, data.data(), data.size());
     }
-    bool start_midi_input() const { return ::Aura::Core::Driver::start_core_midi_input(); }
-    void stop_midi_input() const { ::Aura::Core::Driver::stop_core_midi_input(); }
-    rust::String poll_midi_input_json() const { return rust::String(::Aura::Core::Driver::poll_core_midi_input_json()); }
+    bool start_midi_input() const { return ::Hirari::Core::Driver::start_core_midi_input(); }
+    void stop_midi_input() const { ::Hirari::Core::Driver::stop_core_midi_input(); }
+    rust::String poll_midi_input_json() const { return rust::String(::Hirari::Core::Driver::poll_core_midi_input_json()); }
+    uint64_t midi_host_time_now() const { return ::Hirari::Core::Driver::core_midi_host_time_now(); }
+    uint64_t midi_host_time_delta_samples(uint64_t start, uint64_t event, double sampleRate) const {
+        return ::Hirari::Core::Driver::core_midi_host_time_delta_samples(start, event, sampleRate);
+    }
+    uint64_t midi_dropped_input_events() const {
+        return ::Hirari::Core::Driver::core_midi_dropped_input_events();
+    }
     bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
 #if defined(__APPLE__)
         if (!m_driver || !m_driver->select_device(deviceId, sampleRate, bufferSize) ||
             !m_driver->is_running() || !m_engine) return false;
         m_engine->waitForAudioCallbacks();
-        ::Aura::Core::Engine::EngineConfig cfg;
+        ::Hirari::Core::Engine::EngineConfig cfg;
         cfg.tempo = m_engine->get_tempo();
         cfg.sampleRate = m_driver->sample_rate();
         cfg.blockSize = m_driver->buffer_size();
         m_engine->apply_config(cfg);
         return std::abs(m_engine->get_sample_rate() - cfg.sampleRate) < 0.5 &&
                m_engine->get_block_size() == cfg.blockSize;
-#elif defined(AURA_ENABLE_JACK)
+#elif defined(HIRARI_ENABLE_JACK)
         if (!m_driver || !m_driver->select_device(deviceId, sampleRate, bufferSize)) return false;
         if (!m_engine || !m_driver->is_running()) return false;
         m_engine->waitForAudioCallbacks();
-        ::Aura::Core::Engine::EngineConfig cfg;
+        ::Hirari::Core::Engine::EngineConfig cfg;
         cfg.tempo = m_engine->get_tempo();
         cfg.sampleRate = m_driver->sample_rate();
         cfg.blockSize = m_driver->buffer_size();
@@ -272,10 +319,10 @@ public:
         // hostile or malformed caller could wrap the frame count and reach
         // the DSP with a different size than the slice actually contains.
         if (!m_engine || left.empty() || right.empty() || left.size() != right.size() ||
-            left.size() > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize) {
+            left.size() > ::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize) {
             return;
         }
-#if !defined(__APPLE__) && !defined(AURA_ENABLE_JACK)
+#if !defined(__APPLE__) && !defined(HIRARI_ENABLE_JACK)
         // Keep the non-hardware fallback on the same callback boundary as a
         // real driver. The dispatcher invokes process_driver_block, which
         // owns the single native graph render; do not render it a second time
@@ -301,7 +348,7 @@ public:
                               uint64_t frames, float bpm, double sample_rate,
                               float strength, float swing) const noexcept {
         if (!m_engine || channels == 0 || channels > 32 || frames == 0 ||
-            frames > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize ||
+            frames > ::Hirari::Core::Engine::AudioQuantizer::kMaxWarpSamples ||
             planar.size() != static_cast<size_t>(channels) * frames) return false;
         std::array<float*, 32> buffers{};
         for (uint32_t c = 0; c < channels; ++c) buffers[c] = planar.data() + static_cast<size_t>(c) * frames;
@@ -309,17 +356,59 @@ public:
                                             sample_rate, strength, swing);
     }
 
+    bool set_region_warp_markers(uint32_t tid, uint32_t rid,
+                                 rust::Slice<const uint64_t> source_samples,
+                                 rust::Slice<const uint64_t> timeline_samples,
+                                 rust::Slice<const uint8_t> transient_flags) const {
+        if (!m_engine || source_samples.size() != timeline_samples.size() ||
+            source_samples.size() != transient_flags.size() || source_samples.size() > 100'000) return false;
+        std::vector<::Hirari::Core::Engine::Region::WarpMarker> markers;
+        markers.reserve(source_samples.size());
+        for (size_t i = 0; i < source_samples.size(); ++i) {
+            markers.push_back({source_samples[i], timeline_samples[i], transient_flags[i] != 0});
+        }
+        return m_engine->set_region_warp_markers(tid, rid, markers);
+    }
+    bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
+                                    rust::Slice<const uint32_t> targetTids,
+                                    rust::Slice<const uint32_t> targetRids) const {
+        if (!m_engine || targetTids.size() != targetRids.size() ||
+            targetTids.empty() || targetTids.size() > 32) return false;
+        std::vector<std::pair<uint32_t, uint32_t>> targets;
+        targets.reserve(targetTids.size());
+        for (size_t i = 0; i < targetTids.size(); ++i)
+            targets.emplace_back(targetTids[i], targetRids[i]);
+        return m_engine->align_regions_to_reference(referenceTid, referenceRid, targets);
+    }
+    uint8_t region_alignment_status(uint32_t referenceTid, uint32_t referenceRid) const {
+        return m_engine ? m_engine->region_alignment_status(referenceTid, referenceRid) : 0;
+    }
+    bool finalize_region_alignment(uint32_t referenceTid, uint32_t referenceRid) const {
+        return m_engine && m_engine->finalize_region_alignment(referenceTid, referenceRid);
+    }
+    bool quantize_region_sync_group(uint32_t tid, uint32_t rid,
+                                    float strength, double gridBeats, float swing) const {
+        return m_engine && m_engine->quantize_region_sync_group(
+            tid, rid, strength, gridBeats, swing);
+    }
+    uint8_t region_quantize_status(uint32_t tid, uint32_t rid) const {
+        return m_engine ? m_engine->region_quantize_status(tid, rid) : 0;
+    }
+    bool finalize_region_quantize(uint32_t tid, uint32_t rid) const {
+        return m_engine && m_engine->finalize_region_quantize(tid, rid);
+    }
+
     void process_pitch_shift_block(rust::Slice<float> left, rust::Slice<float> right,
                                    float ratio, float fundamental_hz,
                                    double sample_rate, float formant_ratio,
                                    float timing_ratio) const noexcept {
-        if (left.empty() || left.size() != right.size() || left.size() > ::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize ||
+        if (left.empty() || left.size() != right.size() || left.size() > ::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize ||
             !std::isfinite(ratio) || ratio < 0.5f || ratio > 2.0f || !std::isfinite(fundamental_hz) || fundamental_hz <= 0.0f ||
             !std::isfinite(sample_rate) || sample_rate < 8'000.0 || sample_rate > 384'000.0 ||
             !std::isfinite(formant_ratio) || formant_ratio < 0.25f || formant_ratio > 4.0f ||
             !std::isfinite(timing_ratio) || timing_ratio < 0.25f || timing_ratio > 4.0f) return;
-        static thread_local ::Aura::Core::DSP::Vocal::PsolaPitchShifter shifterL;
-        static thread_local ::Aura::Core::DSP::Vocal::PsolaPitchShifter shifterR;
+        static thread_local ::Hirari::Core::DSP::Vocal::DelayModPitchShifter shifterL;
+        static thread_local ::Hirari::Core::DSP::Vocal::DelayModPitchShifter shifterR;
         static thread_local double lastSampleRate = 0.0;
         if (lastSampleRate != sample_rate) {
             shifterL.reset();
@@ -328,8 +417,8 @@ public:
         }
         static thread_local std::vector<float> inL;
         static thread_local std::vector<float> inR;
-        if (inL.capacity() < left.size()) inL.reserve(::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize);
-        if (inR.capacity() < right.size()) inR.reserve(::Aura::Core::Engine::AuraUnifiedEngine::kMaxAudioBlockSize);
+        if (inL.capacity() < left.size()) inL.reserve(::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize);
+        if (inR.capacity() < right.size()) inR.reserve(::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize);
         inL.assign(left.data(), left.data() + left.size());
         inR.assign(right.data(), right.data() + right.size());
         shifterL.process(inL.data(), left.data(), static_cast<uint32_t>(left.size()), ratio, fundamental_hz, sample_rate, formant_ratio, timing_ratio);
@@ -350,9 +439,9 @@ public:
             !std::isfinite(sample_rate) || sample_rate < 8'000.0 ||
             sample_rate > 384'000.0) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Aura::Core::AudioBuffer view;
+        ::Hirari::Core::AudioBuffer view;
         view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        ::Hirari::DSP::Analysis::SpectralProcessor processor;
         processor.applySpectralGain(view, sample_rate,
                                     {t0, f0, t1, f1}, gain);
         for (size_t i = 0; i < left.size(); ++i)
@@ -368,9 +457,9 @@ public:
             !std::isfinite(profile_seconds) || !std::isfinite(sample_rate) ||
             sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Aura::Core::AudioBuffer view;
+        ::Hirari::Core::AudioBuffer view;
         view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        ::Hirari::DSP::Analysis::SpectralProcessor processor;
         processor.reduceNoise(view, sample_rate, amount, profile_seconds);
         for (size_t i = 0; i < left.size(); ++i)
             if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
@@ -382,9 +471,9 @@ public:
         if (left.empty() || left.size() != right.size() ||
             left.size() > 16u * 1024u * 1024u || !std::isfinite(ceiling)) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Aura::Core::AudioBuffer view;
+        ::Hirari::Core::AudioBuffer view;
         view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        ::Hirari::DSP::Analysis::SpectralProcessor processor;
         (void)processor.repairClipped(view, ceiling);
         for (size_t i = 0; i < left.size(); ++i)
             if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
@@ -403,9 +492,9 @@ public:
             !std::isfinite(f1) || !std::isfinite(sample_rate) ||
             sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Aura::Core::AudioBuffer view;
+        ::Hirari::Core::AudioBuffer view;
         view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Aura::DSP::Analysis::SpectralProcessor processor;
+        ::Hirari::DSP::Analysis::SpectralProcessor processor;
         processor.removeHum(view, sample_rate, fundamental_hz,
                              {t0, f0, t1, f1}, harmonics, bandwidth_hz);
         for (size_t i = 0; i < left.size(); ++i)
@@ -437,12 +526,12 @@ public:
         // while m_configMutex is held so a concurrent start cannot slip
         // between the UI preflight and driver reconfiguration.
         if (m_engine->is_playing()) return false;
-        ::Aura::Core::Engine::EngineConfig cfg;
+        ::Hirari::Core::Engine::EngineConfig cfg;
         cfg.tempo = tempo; cfg.sampleRate = sr; cfg.blockSize = bs;
 #if defined(__APPLE__)
         // The graph and CoreAudio must be rebuilt as one transaction. Updating
         // only the graph leaves the device callback on the previous format.
-        const char* isolated = std::getenv("AURA_NATIVE_TEST_ISOLATION");
+        const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
         const bool offlineIsolation = isolated && std::strcmp(isolated, "1") == 0;
         if (!offlineIsolation) {
             if (!m_driver || !m_driver->reconfigure(static_cast<double>(sr), bs)) {
@@ -460,7 +549,7 @@ public:
         // Device/sample-rate/block-size changes are control-thread events.
         // Quiesce any callback that still owns the previous audio context
         // before rebuilding track processors and PDC state.
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
         if (m_driver && m_driver->is_running() &&
             !m_driver->reconfigure(static_cast<double>(sr), bs)) {
             return false;
@@ -480,7 +569,7 @@ public:
         const uint32_t previousBlockSize = m_engine->get_block_size();
         if (!apply_config_locked(tempo, sr, bs)) return false;
 #if defined(__APPLE__)
-        const char* isolated = std::getenv("AURA_NATIVE_TEST_ISOLATION");
+        const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
         const bool offlineIsolation = isolated && std::strcmp(isolated, "1") == 0;
         if (!offlineIsolation && (!m_driver || !m_driver->is_running())) {
             // start_locked prepares the graph before opening the device. If
@@ -496,4 +585,3 @@ public:
                std::abs(m_engine->get_sample_rate() - static_cast<double>(sr)) < 0.5 &&
                m_engine->get_block_size() == bs;
     }
-

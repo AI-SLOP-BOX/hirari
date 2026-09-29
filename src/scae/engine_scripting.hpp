@@ -5,7 +5,7 @@
 #include <map>
 #include <functional>
 
-namespace Aura::SCAE::Scripting {
+namespace Hirari::SCAE::Scripting {
 
 /**
  * @class EngineScriptingWrapper
@@ -60,4 +60,4 @@ private:
     EngineScriptingWrapper() = default;
 };
 
-} // namespace Aura::SCAE::Scripting
+} // namespace Hirari::SCAE::Scripting

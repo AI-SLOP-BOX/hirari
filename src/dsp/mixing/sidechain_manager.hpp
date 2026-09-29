@@ -7,7 +7,7 @@
 #include <map>
 #include <mutex>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief SidechainBus: A high-performance auxiliary audio buffer for routing control signals.
@@ -33,7 +33,7 @@ public:
      * @brief Writes the current track output into a sidechain bus for others to read.
      */
     // Compatibility-only control-plane API. New audio code must use
-    // Aura::Core::Engine::SidechainManager::copySidechainBlock(), which
+    // Hirari::Core::Engine::SidechainManager::copySidechainBlock(), which
     // publishes bounded snapshots without exposing internal storage.
     bool writeSource(uint32_t trackId, const float* data, size_t numFrames) {
         if (data == nullptr || numFrames == 0 || numFrames > kMaxBlockSize) return false;
@@ -84,4 +84,4 @@ private:
     mutable std::mutex m_busMutex;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

@@ -1,26 +1,17 @@
 #pragma once
 
 #include <vector>
-#include <array>
 #include <string>
-#include <fstream>
 #include <stdexcept>
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <cmath>
 #include <filesystem>
 #include "persistence/wav_writer.hpp"
-#include <chrono>
-#include <atomic>
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 #include "../core/io/audio_decoder.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @brief WavLoader: High-fidelity WAVE file loader and normalizer.
@@ -132,11 +123,11 @@ public:
     /// Canonical decode entrypoint. All normal callers now use the same
     /// checked RIFF/RF64 parser as the core importer and native contract.
     static std::vector<std::vector<float>> load(const std::string& path, WavInfo& outInfo) {
-        ::Aura::Core::IO::WavDecoder decoder;
+        ::Hirari::Core::IO::WavDecoder decoder;
         if (!decoder.open(path)) {
             throw std::runtime_error("Invalid or unsupported WAVE file: " + path);
         }
-        ::Aura::Core::AudioBuffer decoded;
+        ::Hirari::Core::AudioBuffer decoded;
         decoder.decodeFull(decoded);
         if (decoded.isEmpty()) {
             throw std::runtime_error("WAVE file contains no decodable samples: " + path);
@@ -156,58 +147,40 @@ public:
         return result;
     }
 
-    /// Loads the bounded WAVE64 float32 export format. RIFF/RF64 continues to
-    /// use the canonical decoder above; this explicit entrypoint avoids making
-    /// the legacy parser guess between four-byte and GUID chunk layouts.
+    /// Loads the bounded WAVE64 float32 export format through the Rust decoder.
+    /// RIFF/RF64 continues to use the canonical Symphonia-backed decoder above.
     static std::vector<std::vector<float>> loadWave64(const std::string& path, WavInfo& outInfo) {
-        const std::array<uint8_t, 16> riff{0x52,0x49,0x46,0x46,0x2e,0x91,0xcf,0x11,0xa5,0xd6,0x28,0xdb,0x04,0xc1,0x00,0x00};
-        const std::array<uint8_t, 16> wave{0x57,0x41,0x56,0x45,0x2e,0x91,0xcf,0x11,0xa5,0xd6,0x28,0xdb,0x04,0xc1,0x00,0x00};
-        const std::array<uint8_t, 16> fmtId{0x66,0x6d,0x74,0x20,0x2e,0x91,0xcf,0x11,0xa5,0xd6,0x28,0xdb,0x04,0xc1,0x00,0x00};
-        const std::array<uint8_t, 16> dataId{0x64,0x61,0x74,0x61,0x2e,0x91,0xcf,0x11,0xa5,0xd6,0x28,0xdb,0x04,0xc1,0x00,0x00};
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open()) throw std::runtime_error("WAVE64 file not found: " + path);
-        file.seekg(0, std::ios::end); const auto end = file.tellg();
-        if (end < 40) throw std::runtime_error("WAVE64 header is truncated.");
-        const auto size = static_cast<uint64_t>(end);
-        if (size > kMaximumDecodedBytes + 1024ull * 1024ull ||
-            size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-            throw std::runtime_error("WAVE64 file exceeds the decoded size limit.");
+        HirariWave64DecodedOwned decoded{};
+        const uint8_t ok = hirari_wave64_decode(path.data(), path.size(), &decoded);
+        struct DecodedGuard {
+            HirariWave64DecodedOwned* decoded;
+            ~DecodedGuard() { hirari_wave64_decoded_free(decoded); }
+        } guard{&decoded};
+        if (!ok) {
+            const std::string detail = decoded.error
+                ? std::string(reinterpret_cast<const char*>(decoded.error), decoded.error_size)
+                : std::string("unsupported or invalid file");
+            throw std::runtime_error("WAVE64 decode failed: " + detail + ": " + path);
         }
-        file.seekg(0, std::ios::beg);
-        std::vector<uint8_t> bytes(static_cast<size_t>(size));
-        file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        if (!file || !std::equal(riff.begin(), riff.end(), bytes.begin()) || !std::equal(wave.begin(), wave.end(), bytes.begin() + 24)) throw std::runtime_error("Invalid WAVE64 header.");
-        const auto u64 = [](const uint8_t* p) { uint64_t v = 0; for (unsigned i = 0; i < 8; ++i) v |= static_cast<uint64_t>(p[i]) << (i * 8); return v; };
-        if (u64(bytes.data() + 16) != size) throw std::runtime_error("WAVE64 file size is inconsistent.");
-        bool haveFmt = false, haveData = false; uint64_t dataStart = 0, dataSize = 0;
-        size_t pos = 40;
-        while (pos < bytes.size()) {
-            if (bytes.size() - pos < 24) throw std::runtime_error("WAVE64 chunk header is truncated.");
-            const uint64_t chunkSize = u64(bytes.data() + pos + 16);
-            if (chunkSize < 24 || chunkSize > bytes.size() - pos) throw std::runtime_error("WAVE64 chunk exceeds file bounds.");
-            const size_t payload = pos + 24; const size_t payloadSize = static_cast<size_t>(chunkSize - 24);
-            if (std::equal(fmtId.begin(), fmtId.end(), bytes.begin() + pos)) {
-                if (payloadSize < 16 || bytes[payload] != 3 || bytes[payload + 1] != 0) throw std::runtime_error("Unsupported WAVE64 format.");
-                outInfo.numChannels = static_cast<uint16_t>(bytes[payload + 2] | (bytes[payload + 3] << 8));
-                outInfo.sampleRate = static_cast<uint32_t>(bytes[payload + 4] | (bytes[payload + 5] << 8) | (bytes[payload + 6] << 16) | (bytes[payload + 7] << 24));
-                outInfo.bitDepth = static_cast<uint16_t>(bytes[payload + 14] | (bytes[payload + 15] << 8));
-                if (outInfo.numChannels == 0 || outInfo.numChannels > 32 || outInfo.sampleRate == 0 || outInfo.bitDepth != 32) throw std::runtime_error("Unsupported WAVE64 format values.");
-                haveFmt = true;
-            } else if (std::equal(dataId.begin(), dataId.end(), bytes.begin() + pos)) { dataStart = payload; dataSize = payloadSize; haveData = true; }
-            if (chunkSize > std::numeric_limits<uint64_t>::max() - 7u)
-                throw std::runtime_error("WAVE64 chunk alignment overflows.");
-            const uint64_t aligned = (chunkSize + 7u) & ~uint64_t{7u};
-            if (aligned > static_cast<uint64_t>(bytes.size() - pos))
-                throw std::runtime_error("WAVE64 chunk padding exceeds file bounds.");
-            pos += static_cast<size_t>(aligned);
+        if (decoded.channels == 0 || decoded.channels > 32 || decoded.bit_depth != 32 ||
+            decoded.frames > std::numeric_limits<size_t>::max() ||
+            decoded.frames > std::numeric_limits<size_t>::max() / decoded.channels ||
+            decoded.sample_count != static_cast<size_t>(decoded.frames) * decoded.channels ||
+            decoded.sample_count > kMaximumDecodedBytes / sizeof(float) ||
+            (decoded.sample_count != 0 && decoded.samples == nullptr)) {
+            throw std::runtime_error("WAVE64 decoder returned invalid metadata: " + path);
         }
-        if (!haveFmt || !haveData || dataSize % 4 != 0 || (dataSize / 4) % outInfo.numChannels != 0) throw std::runtime_error("WAVE64 fmt/data chunks are invalid.");
-        outInfo.numSamples = dataSize / 4 / outInfo.numChannels;
-        std::vector<std::vector<float>> result(outInfo.numChannels, std::vector<float>(outInfo.numSamples));
-        for (uint64_t frame = 0; frame < outInfo.numSamples; ++frame) for (uint16_t channel = 0; channel < outInfo.numChannels; ++channel) {
-            float value = 0.0f; std::memcpy(&value, bytes.data() + dataStart + (frame * outInfo.numChannels + channel) * 4, 4);
-            if (!std::isfinite(value)) throw std::runtime_error("WAVE64 contains a non-finite sample.");
-            result[channel][frame] = value;
+        outInfo.sampleRate = decoded.sample_rate;
+        outInfo.numChannels = decoded.channels;
+        outInfo.bitDepth = decoded.bit_depth;
+        outInfo.numSamples = decoded.frames;
+        std::vector<std::vector<float>> result(
+            decoded.channels, std::vector<float>(static_cast<size_t>(decoded.frames)));
+        for (uint64_t frame = 0; frame < decoded.frames; ++frame) {
+            for (uint16_t channel = 0; channel < decoded.channels; ++channel) {
+                result[channel][static_cast<size_t>(frame)] =
+                    decoded.samples[static_cast<size_t>(frame) * decoded.channels + channel];
+            }
         }
         return result;
     }
@@ -277,4 +250,4 @@ public:
     }
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

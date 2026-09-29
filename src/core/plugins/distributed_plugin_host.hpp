@@ -9,7 +9,7 @@
 #include <cmath>
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @struct SharedAudioBus
@@ -118,4 +118,4 @@ private:
     std::atomic<uint64_t> m_fallbackCount{0};
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

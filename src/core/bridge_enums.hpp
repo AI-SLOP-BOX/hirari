@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace Aura::Core::BridgeFFI {
+namespace Hirari::Core::BridgeFFI {
 
 enum class EngineCommand : uint32_t {
     Volume = 0,
@@ -14,4 +14,4 @@ enum class EngineCommand : uint32_t {
     RestorationIntensity = 7
 };
 
-} // namespace Aura::Core::BridgeFFI
+} // namespace Hirari::Core::BridgeFFI

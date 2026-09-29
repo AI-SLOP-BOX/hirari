@@ -48,6 +48,10 @@
         return m_shared ? m_shared->activeChannels.load(std::memory_order_acquire) : 0;
     }
 
+    bool isMidiInstrument() const noexcept {
+        return m_shared && m_shared->midiInstrument.load(std::memory_order_acquire) != 0;
+    }
+
     uint32_t takeProcessErrors() noexcept {
 #if defined(_WIN32)
         return 0;

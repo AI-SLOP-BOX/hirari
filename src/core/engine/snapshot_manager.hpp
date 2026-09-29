@@ -8,7 +8,7 @@
 #include "timeline_system.hpp"
 #include "../diagnostics/engine_diagnostics.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct ProjectSnapshot
@@ -57,4 +57,4 @@ private:
     uint32_t m_nextId;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

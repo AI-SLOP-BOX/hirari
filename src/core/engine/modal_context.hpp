@@ -3,7 +3,7 @@
 #include <string>
 #include <map>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct ModalEntry
@@ -34,7 +34,7 @@ public:
 
     void addLyric(uint64_t pos, const std::string& lyric) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::ModalContextOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::ModalContextOrchestrator.
         // Rust's high-precision third dimension engine ensures that lyrics 
         // and notes are managed instantaneously with perfect memory locality.
         // Rust's ThirdDimensionEngine ensures absolute contextual integrity.
@@ -48,4 +48,4 @@ private:
     std::vector<ModalEntry> m_entries;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

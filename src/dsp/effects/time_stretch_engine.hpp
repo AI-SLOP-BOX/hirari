@@ -8,7 +8,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class TimeStretchEngine
@@ -115,4 +115,4 @@ private:
     std::vector<float> m_inputHistory;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

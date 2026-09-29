@@ -8,7 +8,7 @@
 #include "../iprocessor.hpp"
 #include "delay_line.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class PingPongDelay
@@ -129,4 +129,4 @@ private:
     float m_feedbackR = 0.5f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

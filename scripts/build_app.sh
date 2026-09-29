@@ -2,19 +2,19 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-APP_DIR="$ROOT_DIR/packaging/Aura DAW.app"
+APP_DIR="$ROOT_DIR/packaging/Hirari DAW.app"
 
 SIGNING_IDENTITY="-"
-if [ "${AURA_RELEASE_MODE:-0}" = "1" ]; then
-    : "${AURA_CODESIGN_IDENTITY:?AURA_CODESIGN_IDENTITY is required in release mode}"
-    SIGNING_IDENTITY="$AURA_CODESIGN_IDENTITY"
+if [ "${HIRARI_RELEASE_MODE:-0}" = "1" ]; then
+    : "${HIRARI_CODESIGN_IDENTITY:?HIRARI_CODESIGN_IDENTITY is required in release mode}"
+    SIGNING_IDENTITY="$HIRARI_CODESIGN_IDENTITY"
     # A signed artifact must not be produced from a checkout that still
     # tracks local fixture clones.  Keep ordinary developer builds usable,
     # but fail closed for the release path.
-    AURA_STRICT_SOURCE_HYGIENE=1 "$ROOT_DIR/scripts/audit_repository_hygiene.sh"
+    HIRARI_STRICT_SOURCE_HYGIENE=1 "$ROOT_DIR/scripts/audit_repository_hygiene.sh"
 fi
-STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aura-app-stage.XXXXXX")
-STAGED_APP="$STAGE_DIR/Aura DAW.app"
+STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/hirari-app-stage.XXXXXX")
+STAGED_APP="$STAGE_DIR/Hirari DAW.app"
 cleanup() { rm -rf "$STAGE_DIR"; }
 trap cleanup EXIT INT TERM
 APP_DIR_TARGET="$APP_DIR"
@@ -22,7 +22,7 @@ APP_DIR="$STAGED_APP"
 CONTENTS_DIR="$APP_DIR/Contents"
 BIN_DIR="$CONTENTS_DIR/MacOS"
 
-cargo build --release -p aura-ui --manifest-path "$ROOT_DIR/Cargo.toml"
+cargo build --release -p hirari-ui --manifest-path "$ROOT_DIR/Cargo.toml"
 
 # Build the isolated plugin worker from the same source revision as the app.
 # This prevents stale or missing worker binaries from making a packaged app
@@ -30,7 +30,7 @@ cargo build --release -p aura-ui --manifest-path "$ROOT_DIR/Cargo.toml"
 "$ROOT_DIR/scripts/build_plugin_worker.sh"
 
 mkdir -p "$BIN_DIR" "$CONTENTS_DIR/Resources"
-install -m 755 "$ROOT_DIR/target/release/aura-ui" "$BIN_DIR/Aura DAW"
+install -m 755 "$ROOT_DIR/target/release/hirari-ui" "$BIN_DIR/Hirari DAW"
 install -m 644 "$ROOT_DIR/packaging/macos/Info.plist" "$CONTENTS_DIR/Info.plist"
 
 # Every packaged build carries an explicit resource manifest.  The runtime
@@ -38,9 +38,9 @@ install -m 644 "$ROOT_DIR/packaging/macos/Info.plist" "$CONTENTS_DIR/Info.plist"
 # stale/hand-assembled bundle whose Resources directory merely happens to
 # exist.  Concrete Metal/UI assets can be added to the manifest as they are
 # introduced without changing the bundle contract.
-RESOURCE_MANIFEST="$CONTENTS_DIR/Resources/aura-resources.manifest"
+RESOURCE_MANIFEST="$CONTENTS_DIR/Resources/hirari-resources.manifest"
 printf '%s\n' \
-    'aura.resources.v1' \
+    'hirari.resources.v1' \
     'ui=slint-compiled' \
     'metal=optional' \
     'status=generated' > "$RESOURCE_MANIFEST"
@@ -61,11 +61,11 @@ done
 # The isolated plug-in worker is part of the application runtime.  Omitting it
 # makes every third-party plug-in appear to fail with MissingHelper when the
 # packaged app is launched outside the repository.
-if [ ! -x "$ROOT_DIR/build-tools/aura-plugin-host-worker" ]; then
-    echo "Missing sandbox worker: $ROOT_DIR/build-tools/aura-plugin-host-worker" >&2
+if [ ! -x "$ROOT_DIR/build-tools/hirari-plugin-host-worker" ]; then
+    echo "Missing sandbox worker: $ROOT_DIR/build-tools/hirari-plugin-host-worker" >&2
     exit 1
 fi
-install -m 755 "$ROOT_DIR/build-tools/aura-plugin-host-worker" "$BIN_DIR/aura-plugin-host-worker"
+install -m 755 "$ROOT_DIR/build-tools/hirari-plugin-host-worker" "$BIN_DIR/hirari-plugin-host-worker"
 
 # Record the exact executable pair shipped in this bundle.  This catches a
 # stale worker copied from a different build even when both files are valid
@@ -78,7 +78,7 @@ hash_file() {
     # executable body, not an incidental signature that the app bundle step
     # will replace.
     if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
-        hash_tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/aura-build-hash.XXXXXX")
+        hash_tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/hirari-build-hash.XXXXXX")
         normalized="$hash_tmp_dir/executable"
         cp "$file" "$normalized"
         codesign --remove-signature "$normalized" >/dev/null 2>&1 || true
@@ -95,12 +95,12 @@ hash_file() {
     [ "$cleanup_normalized" -eq 0 ] || rm -rf "$hash_tmp_dir"
     printf '%s\n' "$hash"
 }
-BUILD_MANIFEST="$CONTENTS_DIR/Resources/aura-build.manifest"
+BUILD_MANIFEST="$CONTENTS_DIR/Resources/hirari-build.manifest"
 {
-    printf '%s\n' 'aura.build.v1'
-    printf 'main_sha256=%s\n' "$(hash_file "$BIN_DIR/Aura DAW")"
-    printf 'worker_sha256=%s\n' "$(hash_file "$BIN_DIR/aura-plugin-host-worker")"
-    printf 'worker_source=build-tools/aura-plugin-host-worker\n'
+    printf '%s\n' 'hirari.build.v1'
+    printf 'main_sha256=%s\n' "$(hash_file "$BIN_DIR/Hirari DAW")"
+    printf 'worker_sha256=%s\n' "$(hash_file "$BIN_DIR/hirari-plugin-host-worker")"
+    printf 'worker_source=build-tools/hirari-plugin-host-worker\n'
 } > "$BUILD_MANIFEST"
 chmod 644 "$BUILD_MANIFEST"
 
@@ -118,10 +118,10 @@ fi
 # resource manifest; this second pass makes the executable identity manifest
 # part of that sealed tree without creating a hash/signature cycle.
 {
-    printf '%s\n' 'aura.build.v1'
-    printf 'main_sha256=%s\n' "$(hash_file "$BIN_DIR/Aura DAW")"
-    printf 'worker_sha256=%s\n' "$(hash_file "$BIN_DIR/aura-plugin-host-worker")"
-    printf 'worker_source=build-tools/aura-plugin-host-worker\n'
+    printf '%s\n' 'hirari.build.v1'
+    printf 'main_sha256=%s\n' "$(hash_file "$BIN_DIR/Hirari DAW")"
+    printf 'worker_sha256=%s\n' "$(hash_file "$BIN_DIR/hirari-plugin-host-worker")"
+    printf 'worker_source=build-tools/hirari-plugin-host-worker\n'
 } > "$BUILD_MANIFEST"
 if command -v codesign >/dev/null 2>&1; then
     codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR" >/dev/null

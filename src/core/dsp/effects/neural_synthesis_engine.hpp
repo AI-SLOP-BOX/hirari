@@ -7,11 +7,11 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class NeuralSynthesisEngine
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements infinite neural DNA and neural focus profiling.
  */
 class NeuralSynthesisEngine {
@@ -55,7 +55,7 @@ public:
     }
 
     void process(float* buffer, uint32_t numSamples) {
-#if defined(AURA_ENABLE_EXPERIMENTAL_AI)
+#if defined(HIRARI_ENABLE_EXPERIMENTAL_AI)
         // Optional experimental path. The industrial core stays deterministic
         // unless the build explicitly opts into this module.
         if (!buffer) return;
@@ -76,4 +76,4 @@ private:
     NeuralDNA m_activeDNA; // --- PHASE 114: NEURAL DNA ---
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

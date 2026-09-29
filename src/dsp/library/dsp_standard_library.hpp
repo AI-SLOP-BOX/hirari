@@ -5,10 +5,10 @@
 #include <array>
 #include <complex>
 
-namespace Aura::DSP::Library {
+namespace Hirari::DSP::Library {
 
 /**
- * @namespace AuraStandardDSP
+ * @namespace HirariStandardDSP
  * @brief THE INDUSTRIAL STANDARD DSP LIBRARY.
  * 
  * Provides high-fidelity, SIMD-ready algorithms for pro-audio applications.
@@ -127,4 +127,4 @@ namespace Standard {
 
 } // namespace Standard
 
-} // namespace Aura::DSP::Library
+} // namespace Hirari::DSP::Library

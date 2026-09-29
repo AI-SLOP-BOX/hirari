@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class MeteringBridge
@@ -59,4 +59,4 @@ private:
     std::array<MeterData, kMaxTracks> m_tracks;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

@@ -3,7 +3,7 @@
 #include <vector>
 #include <string>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 [[nodiscard]] __attribute__((always_inline)) inline float dbToLinear(float db) noexcept {
     return std::pow(10.0f, db * 0.05f);
@@ -66,4 +66,4 @@ namespace Bridge {
     };
 }
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

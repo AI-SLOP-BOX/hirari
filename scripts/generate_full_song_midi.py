@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a longer, sectioned Aura MIDI arrangement for real-device testing."""
+"""Create a longer, sectioned Hirari MIDI arrangement for real-device testing."""
 
 import json
 import sys
@@ -87,7 +87,7 @@ def make_song():
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: generate_full_song_midi.py PROJECT.aura")
+        raise SystemExit("usage: generate_full_song_midi.py PROJECT.hirari")
     project = Path(sys.argv[1]).expanduser().resolve()
     sidecar = Path(f"{project}.midi.json")
     song = make_song()

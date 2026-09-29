@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 
-namespace Aura::Core::Security {
+namespace Hirari::Core::Security {
 
 /**
  * @struct ComplianceReport
@@ -39,4 +39,4 @@ private:
     ComplianceEngine() = default;
 };
 
-} // namespace Aura::Core::Security
+} // namespace Hirari::Core::Security

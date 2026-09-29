@@ -3,7 +3,7 @@
 #include <map>
 #include <mutex>
 
-namespace Aura::Core::Assets {
+namespace Hirari::Core::Assets {
 
 /**
  * @class MetadataRegistry
@@ -32,4 +32,4 @@ private:
     std::map<std::string, std::string> m_db; // INDUSTRIAL: Scale to SQLite/RocksDB
 };
 
-} // namespace Aura::Core::Assets
+} // namespace Hirari::Core::Assets

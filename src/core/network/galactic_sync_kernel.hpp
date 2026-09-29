@@ -3,7 +3,7 @@
 #include <deque>
 #include <atomic>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @class GalacticSyncKernel
@@ -73,4 +73,4 @@ private:
     std::map<std::string, PeerNode> m_peers;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

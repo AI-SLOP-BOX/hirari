@@ -1,9 +1,9 @@
 #include "bridge_shims.hpp"
-#include "aura-core-bridge/src/lib.rs.h"
+#include "hirari-core-bridge/src/lib.rs.h"
 #include "dsp/spatial/metal_audio_kernel.hpp"
 #include <cstring>
 
-namespace Aura::Core::Bridge {
+namespace Hirari::Core::Bridge {
 
     std::unique_ptr<BridgeFFI::AudioEngine> new_audio_engine() {
         return std::make_unique<BridgeFFI::AudioEngine>();
@@ -17,21 +17,21 @@ namespace Aura::Core::Bridge {
         return std::make_unique<BridgeFFI::AnalysisHub>(engine.get_core_shared());
     }
 
-    const Engine::AuraUnifiedEngine& get_unified_engine(const BridgeFFI::AudioEngine& bridge) {
+    const Engine::HirariUnifiedEngine& get_unified_engine(const BridgeFFI::AudioEngine& bridge) {
         return bridge.get_core();
     }
 
-    rust::Slice<const float> get_track_peaks_l(const Engine::AuraUnifiedEngine& engine) {
+    rust::Slice<const float> get_track_peaks_l(const Engine::HirariUnifiedEngine& engine) {
         return engine.get_track_peaks_l();
     }
-    rust::Slice<const float> get_track_peaks_r(const Engine::AuraUnifiedEngine& engine) {
+    rust::Slice<const float> get_track_peaks_r(const Engine::HirariUnifiedEngine& engine) {
         return engine.get_track_peaks_r();
     }
 
-    rust::Vec<float> get_track_peaks_l_owned(const Engine::AuraUnifiedEngine& engine) {
+    rust::Vec<float> get_track_peaks_l_owned(const Engine::HirariUnifiedEngine& engine) {
         rust::Vec<float> result;
         for (int attempt = 0; attempt < 4; ++attempt) {
-            Engine::AuraUnifiedEngine::TelemetryData snapshot{};
+            Engine::HirariUnifiedEngine::TelemetryData snapshot{};
             if (!engine.copy_telemetry(engine.get_active_telemetry_idx(), snapshot)) continue;
             result.clear();
             result.reserve(snapshot.count);
@@ -41,10 +41,10 @@ namespace Aura::Core::Bridge {
         return result;
     }
 
-    rust::Vec<float> get_track_peaks_r_owned(const Engine::AuraUnifiedEngine& engine) {
+    rust::Vec<float> get_track_peaks_r_owned(const Engine::HirariUnifiedEngine& engine) {
         rust::Vec<float> result;
         for (int attempt = 0; attempt < 4; ++attempt) {
-            Engine::AuraUnifiedEngine::TelemetryData snapshot{};
+            Engine::HirariUnifiedEngine::TelemetryData snapshot{};
             if (!engine.copy_telemetry(engine.get_active_telemetry_idx(), snapshot)) continue;
             result.clear();
             result.reserve(snapshot.count);
@@ -54,8 +54,8 @@ namespace Aura::Core::Bridge {
         return result;
     }
 
-    bool pop_event(const Engine::AuraUnifiedEngine& engine, BridgeEvent& ev) {
-        ::Aura::Core::EngineEvent nativeEv;
+    bool pop_event(const Engine::HirariUnifiedEngine& engine, BridgeEvent& ev) {
+        ::Hirari::Core::EngineEvent nativeEv;
         if (engine.pop_event(nativeEv)) {
             ev.timestamp = nativeEv.timestamp;
             ev.event_type = nativeEv.type;
@@ -68,13 +68,13 @@ namespace Aura::Core::Bridge {
         return false;
     }
 
-    bool push_command(const BridgeFFI::AudioEngine& engine, AuraCommand cmd, uint32_t tid,
+    bool push_command(const BridgeFFI::AudioEngine& engine, HirariCommand cmd, uint32_t tid,
                       float val, uint64_t ts, uint64_t expected_project_generation,
                       uint64_t expected_audio_generation) {
         // INDUSTRIAL: Branchless Boundary Validation
         uint32_t mask = (tid < 1024) ? 0xFFFFFFFF : 0;
         if (!mask) return false;
-        return engine.push_command(static_cast<::Aura::Core::CommandType>(cmd), tid, val, ts,
+        return engine.push_command(static_cast<::Hirari::Core::CommandType>(cmd), tid, val, ts,
                                    expected_project_generation, expected_audio_generation);
     }
 
@@ -104,7 +104,7 @@ namespace Aura::Core::Bridge {
     }
 
     bool initialize_gpu_with_status() {
-        return ::Aura::DSP::Spatial::MetalAudioKernel::getInstance().initialize();
+        return ::Hirari::DSP::Spatial::MetalAudioKernel::getInstance().initialize();
     }
 
-} // namespace Aura::Core::Bridge
+} // namespace Hirari::Core::Bridge

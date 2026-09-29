@@ -1,7 +1,7 @@
 #include <mutex>
 #include <condition_variable>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @class VFXSyncKernel
@@ -62,4 +62,4 @@ private:
     std::condition_variable m_vfxReady;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

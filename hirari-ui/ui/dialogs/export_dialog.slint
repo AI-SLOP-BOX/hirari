@@ -1,0 +1,62 @@
+import { Style } from "../style.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { ComboBox } from "std-widgets.slint";
+import { RenderActions } from "../actions/render_actions.slint";
+
+// Export configuration is isolated from the main workspace so its layout can
+// evolve without increasing AppWindow's responsibility.
+export component Z_ExportDialog {
+    in property <bool> active: false;
+    callback close();
+    callback start_render(string, string, bool);
+    callback start_stems();
+    callback start_selected_stem();
+    callback start_midi();
+
+    Rectangle {
+        width: 520px; height: 500px; background: Style.surface; border_radius: 3px; border_width: 2px; border_color: Style.brand;
+        VerticalLayout {
+            padding: 24px; spacing: 20px;
+            Text { text: "Export"; font-size: 14px; color: Style.brand; font-weight: 700; horizontal-alignment: center; }
+            VerticalLayout {
+                spacing: 12px;
+                Text { text: "Output Format"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                ComboBox {
+                    model: ["WAV · PCM16", "WAV · PCM24", "WAV · Float32", "WAVE64 · Float32"];
+                    current-index <=> RenderActions.render-format;
+                }
+                // The native bounce uses the engine's current sample rate;
+                // do not advertise a hard-coded rate that can disagree with
+                // the actual WAV header after a device/config change.
+                Text {
+                    text: "Current engine rate · " + (RenderActions.render-format == 0 ? "PCM16" : (RenderActions.render-format == 1 ? "PCM24" : (RenderActions.render-format == 2 ? "Float32" : "WAVE64 Float32")));
+                    font-size: Style.font-xxs; color: Style.text-secondary;
+                }
+            }
+            VerticalLayout {
+                spacing: 12px;
+                Text { text: "Effect Tail"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                ComboBox {
+                    model: ["None", "1 second", "2 seconds", "5 seconds", "10 seconds", "30 seconds"];
+                    current-index <=> RenderActions.render-tail-index;
+                }
+                Text { text: "Adds time after the last clip so reverb and delay can ring out."; font-size: Style.font-xxs; color: Style.text-secondary; }
+            }
+            Rectangle { height: 1px; background: Style.border; }
+            VerticalLayout {
+                spacing: 12px;
+                Text { text: "Metadata"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                Text { text: "Metadata follows the current project settings."; font-size: Style.font-xxs; color: Style.text-secondary; }
+            }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 16px; alignment: end;
+                Z_IconButton { icon: "CANCEL"; clicked => { close(); } }
+                Z_IconButton { icon: "EXPORT STEMS"; clicked => { start_stems(); } }
+                Z_IconButton { icon: "EXPORT SELECTED"; clicked => { start_selected_stem(); } }
+                Z_IconButton { icon: "EXPORT MIDI"; clicked => { start_midi(); } }
+                Z_IconButton { icon: "START RENDER"; active-col: Style.brand; clicked => { start_render("", "current", true); } }
+            }
+        }
+    }
+}

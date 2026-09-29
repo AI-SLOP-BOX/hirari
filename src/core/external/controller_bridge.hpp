@@ -6,7 +6,7 @@
 #include <atomic>
 #include "../midi_buffer.hpp"
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /**
  * @class HardwareControllerBridge
@@ -52,4 +52,4 @@ private:
     std::map<uint32_t, std::atomic<float>> m_faderPositions;
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

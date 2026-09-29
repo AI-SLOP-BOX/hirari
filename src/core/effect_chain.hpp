@@ -13,20 +13,17 @@
 #include "../dsp/iprocessor.hpp"
 #include "engine/sidechain_manager.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class EffectChain
  * @brief Thread-safe DSP Signal Orchestrator: Manages ordered plugin chains per track.
  *
  * Thread Safety Design (Lock-Free RT Processing):
- * - UI/Control mutations (addProcessor, setBypass, setSampleRate, clear) are protected by m_mutex.
- *   These allocate a new immutable snapshot of the ProcessorList and swap it atomically using
- *   m_activeProcessors pointer.
- * - The real-time audio thread only loads this atomic pointer via m_activeProcessors.load().
- *   This avoids mutex lock contentions, try_lock failures, and std::vector allocation.
- * - Retired lists are registered in m_retiredLists and safely freed only on the control thread (under lock),
- *   guaranteeing no std::shared_ptr count drops or heavy object deallocations happen in the audio thread.
+ * - C++ owns IProcessor objects and serializes processor edits under m_mutex.
+ * - Rust owns immutable realtime snapshots, traverses them without locks or
+ *   allocation, and gates readers against control mutations. C++ retains shared
+ *   processor ownership until Rust reports that callback readers have exited.
  */
 class EffectChain {
 public:
@@ -36,33 +33,40 @@ public:
         bool parallel = false;
     };
 
-    using ProcessorList = std::vector<Entry>;
-
     explicit EffectChain(Engine::SidechainManager* sidechainManager = nullptr)
         : m_sidechainManager(sidechainManager ? sidechainManager
-                                               : &Engine::SidechainManager::getInstance()) {
-        auto list = std::make_unique<ProcessorList>();
-        m_activeProcessors.store(list.release(), std::memory_order_release);
-    }
+                                               : &Engine::SidechainManager::getInstance()),
+          m_rustState(hirari_effect_chain_runtime_create()) {}
 
     ~EffectChain() {
-        if (const auto* list = m_activeProcessors.exchange(nullptr, std::memory_order_relaxed)) {
-            m_retiredLists.push_back(list);
-        }
         // Track destruction is a control-thread operation. Wait only here,
         // never in process(), so the final generation cannot leak or be freed
         // while a callback still traverses it.
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (m_audioReaders.load(std::memory_order_acquire) != 0 &&
+        while (hirari_effect_chain_runtime_audio_reader_count(m_rustState) != 0 &&
                std::chrono::steady_clock::now() < deadline) {
             std::this_thread::yield();
         }
         // A device callback that failed to quiesce must not deadlock process
-        // shutdown forever. Do not reclaim retired lists after a timeout:
+        // shutdown forever. Do not reclaim retired snapshots after a timeout:
         // leaking the detached generation is safer than freeing it while an
         // audio thread may still be traversing it.
-        if (m_audioReaders.load(std::memory_order_acquire) != 0) return;
+        if (hirari_effect_chain_runtime_audio_reader_count(m_rustState) != 0) {
+            // Runtime snapshots contain raw processor addresses. Keep both
+            // those objects and the Rust snapshot storage alive if shutdown
+            // could not quiesce the callback within the bounded wait.
+            auto* retained = new std::vector<Entry>();
+            retained->reserve(m_pendingProcessors.size() + m_retiredProcessorOwners.size());
+            for (auto& entry : m_pendingProcessors) retained->push_back(std::move(entry));
+            for (auto& entry : m_retiredProcessorOwners) retained->push_back(std::move(entry));
+            m_pendingProcessors.clear();
+            m_retiredProcessorOwners.clear();
+            m_rustState = nullptr;
+            return;
+        }
         reclaimRetired();
+        hirari_effect_chain_runtime_destroy(m_rustState);
+        m_rustState = nullptr;
     }
 
     /**
@@ -82,116 +86,23 @@ public:
      * @brief Safe no-op interface mapping. Replaced try_lock with lock-free atomic pointer load.
      */
     void syncToAudioThread() noexcept {
-        // No-op. The audio thread reads the published pointer directly at atomic speed.
+        // No-op. The Rust-owned immutable snapshot is already published.
     }
 
     /**
-     * @brief Process the active processor chain on the audio thread.
-     * Reads m_activeProcessors (immutable after publishNewList on control thread).
+     * @brief Process the Rust-published processor snapshot on the audio thread.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const DSP::ProcessContext& context) {
-        ReaderGuard reader(m_audioReaders, m_audioMutation);
-        if (!reader.active()) {
-            buffer.clear(buffer.getNumSamples());
-            return;
-        }
-        const auto* list = m_activeProcessors.load(std::memory_order_acquire);
-        if (!list) return;
-
-        for (const auto& entry : *list) {
-            if (entry.bypassed || !entry.processor) continue;
-            const bool useParallel = entry.parallel && buffer.getNumChannels() <= 2 &&
-                buffer.getNumSamples() <= m_parallelBuffer.getNumSamples();
-            if (useParallel) {
-                for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-                    std::memcpy(m_parallelBuffer.getWritePointer(c), buffer.getReadPointer(c),
-                                static_cast<size_t>(buffer.getNumSamples()) * sizeof(float));
-                }
-            }
-            try {
-                entry.processor->process(useParallel ? m_parallelBuffer : buffer, midi, context);
-            } catch (...) {
-                buffer.clear(buffer.getNumSamples());
-                continue;
-            }
-            if (useParallel) {
-                const float mix = std::clamp(entry.processor->getMix(), 0.0f, 1.0f);
-                for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-                    float* dst = buffer.getWritePointer(c);
-                    const float* wet = m_parallelBuffer.getReadPointer(c);
-                    for (uint32_t s = 0; s < buffer.getNumSamples(); ++s)
-                        dst[s] = dst[s] * (1.0f - mix) + wet[s] * mix;
-                }
-            }
-            (void)buffer.sanitizeNonFinite();
-        }
+        processThroughRust(buffer, midi, context, false, 0);
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi,
                  const DSP::ProcessContext& context, uint32_t trackId) {
-        ReaderGuard reader(m_audioReaders, m_audioMutation);
-        if (!reader.active()) {
-            buffer.clear(buffer.getNumSamples());
-            return;
-        }
-        const auto* list = m_activeProcessors.load(std::memory_order_acquire);
-        if (!list) return;
-
-        for (uint32_t index = 0; index < list->size(); ++index) {
-            const auto& entry = (*list)[index];
-            if (entry.bypassed || !entry.processor) continue;
-            DSP::ProcessContext pluginContext = context;
-            Engine::SidechainManager::LinkSnapshot sidechainSnapshot{};
-            std::array<float, Engine::SidechainManager::kMaxBlockSize> sidechainLeft{};
-            std::array<float, Engine::SidechainManager::kMaxBlockSize> sidechainRight{};
-            const bool hasSidechain = context.blockSize <= Engine::SidechainManager::kMaxBlockSize &&
-                m_sidechainManager->copySidechainBlock(trackId, index,
-                    sidechainLeft.data(), sidechainRight.data(),
-                    static_cast<uint32_t>(context.blockSize), sidechainSnapshot);
-            float* sidechainChannels[2] = {
-                hasSidechain ? sidechainLeft.data() : nullptr,
-                hasSidechain ? sidechainRight.data() : nullptr
-            };
-            Core::AudioBuffer sidechainView;
-            if (sidechainChannels[0] && sidechainChannels[1] && context.blockSize > 0 &&
-                sidechainSnapshot.frames >= context.blockSize &&
-                static_cast<uint32_t>(context.sampleRate) == sidechainSnapshot.sampleRate &&
-                (context.audioConfigGeneration == 0 ||
-                 sidechainSnapshot.sourceGeneration == context.audioConfigGeneration)) {
-                sidechainView.wrapChannels(sidechainChannels, 2, context.blockSize);
-                pluginContext.sidechainBuffer = &sidechainView;
-            } else {
-                pluginContext.sidechainBuffer = nullptr;
-            }
-            const bool useParallel = entry.parallel && buffer.getNumChannels() <= 2 &&
-                buffer.getNumSamples() <= m_parallelBuffer.getNumSamples();
-            if (useParallel) {
-                for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-                    std::memcpy(m_parallelBuffer.getWritePointer(c), buffer.getReadPointer(c),
-                                static_cast<size_t>(buffer.getNumSamples()) * sizeof(float));
-                }
-            }
-            try {
-                entry.processor->process(useParallel ? m_parallelBuffer : buffer, midi, pluginContext);
-            } catch (...) {
-                buffer.clear(buffer.getNumSamples());
-                continue;
-            }
-            if (useParallel) {
-                const float mix = std::clamp(entry.processor->getMix(), 0.0f, 1.0f);
-                for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-                    float* dst = buffer.getWritePointer(c);
-                    const float* wet = m_parallelBuffer.getReadPointer(c);
-                    for (uint32_t s = 0; s < buffer.getNumSamples(); ++s)
-                        dst[s] = dst[s] * (1.0f - mix) + wet[s] * mix;
-                }
-            }
-            (void)buffer.sanitizeNonFinite();
-        }
+        processThroughRust(buffer, midi, context, true, trackId);
     }
 
     uint32_t getTotalLatencySamples() const {
-        return m_totalLatency.load(std::memory_order_relaxed);
+        return hirari_effect_chain_runtime_total_latency_samples(m_rustState);
     }
 
     // Maximum post-input duration needed for an offline bounce.  Serial
@@ -200,42 +111,22 @@ public:
     // renderer can append enough silence without touching the RT list.
     uint32_t getTotalTailSamples() const noexcept {
         std::lock_guard<std::mutex> lock(m_mutex);
-        uint64_t serial = 0;
-        uint32_t parallel = 0;
-        for (const auto& entry : m_pendingProcessors) {
-            if (entry.bypassed || !entry.processor) continue;
-            const uint32_t tail = entry.processor->getTailSamples();
-            if (entry.parallel) {
-                parallel = std::max(parallel, tail);
-            } else {
-                serial += tail;
-                if (serial > std::numeric_limits<uint32_t>::max()) {
-                    serial = std::numeric_limits<uint32_t>::max();
-                }
-            }
-        }
-        return static_cast<uint32_t>(std::min<uint64_t>(
-            std::numeric_limits<uint32_t>::max(), serial + parallel));
+        return static_cast<uint32_t>(hirari_effect_chain_runtime_metric(
+            m_rustState, 2, &EffectChain::readProcessorMetric));
     }
 
     // Control-thread only: drains processor watchdog edges without touching
     // the immutable realtime list from the audio callback.
     uint32_t takeWatchdogTrips() {
         std::lock_guard<std::mutex> lock(m_mutex);
-        uint32_t trips = 0;
-        for (auto& entry : m_pendingProcessors) {
-            if (entry.processor && entry.processor->takeWatchdogTrip()) ++trips;
-        }
-        return trips;
+        return static_cast<uint32_t>(hirari_effect_chain_runtime_metric(
+            m_rustState, 0, &EffectChain::readProcessorMetric));
     }
 
     uint64_t nonFiniteSampleCount() const noexcept {
         std::lock_guard<std::mutex> lock(m_mutex);
-        uint64_t count = 0;
-        for (const auto& entry : m_pendingProcessors) {
-            if (entry.processor) count += entry.processor->nonFiniteSampleCount();
-        }
-        return count;
+        return hirari_effect_chain_runtime_metric(
+            m_rustState, 1, &EffectChain::readProcessorMetric);
     }
 
     /**
@@ -278,6 +169,41 @@ public:
     bool getBypass(uint32_t index) const {
         std::lock_guard<std::mutex> lock(m_mutex);
         return index < m_pendingProcessors.size() && m_pendingProcessors[index].bypassed;
+    }
+
+    // Audio-thread automation path. It reads the published immutable list and
+    // calls the processor's noexcept parameter setter without taking the
+    // control-plane mutex or changing shared_ptr ownership.
+    bool setParameterRealtime(uint32_t processorIndex, uint32_t parameterId,
+                              float value, uint32_t sampleOffset = 0) noexcept {
+        if (!std::isfinite(value)) return false;
+        ReaderGuard reader(m_rustState);
+        if (!reader.active()) return false;
+        auto* processor = static_cast<DSP::IProcessor*>(
+            hirari_effect_chain_runtime_processor_at(m_rustState, processorIndex));
+        if (!processor) return false;
+        processor->setParameterAtSample(parameterId, value, sampleOffset);
+        return true;
+    }
+
+    // Apply a sorted automation batch under one audio-reader guard. A single
+    // guard per control point would add two atomics for every scheduled value
+    // and inflate callback cost on dense curves.
+    void setParameterAutomationRealtime(
+        const DSP::TimedParameterEvent* events, size_t eventCount) noexcept {
+        if (!events || eventCount == 0) return;
+        ReaderGuard reader(m_rustState);
+        if (!reader.active()) return;
+        for (size_t index = 0; index < eventCount; ++index) {
+            const auto& event = events[index];
+            if (!std::isfinite(event.normalizedValue)) continue;
+            auto* processor = static_cast<DSP::IProcessor*>(
+                hirari_effect_chain_runtime_processor_at(m_rustState, event.processorIndex));
+            if (processor) {
+                processor->setParameterAtSample(
+                    event.parameterId, event.normalizedValue, event.sampleOffset);
+            }
+        }
     }
 
     bool setParameter(uint32_t processorIndex, uint32_t parameterId, float value) {
@@ -378,19 +304,28 @@ public:
     }
 
     /**
-     * @brief Safely reclaims memory from retired processor lists if no audio threads are reading them.
+     * @brief Reclaim retired Rust snapshots and their C++ processor owners.
      */
     void reclaimRetired() {
-        if (m_audioReaders.load(std::memory_order_acquire) != 0) return;
-        for (auto* list : m_retiredLists) delete list;
-        m_retiredLists.clear();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        reclaimRetiredLocked();
     }
 
+private:
+    void reclaimRetiredLocked() {
+        if (hirari_effect_chain_runtime_audio_reader_count(m_rustState) != 0) return;
+        hirari_effect_chain_runtime_reclaim(m_rustState);
+        m_retiredProcessorOwners.clear();
+    }
+
+public:
     /**
      * @brief Clear all processors. UI/Message thread only.
      */
     void clear() {
         std::lock_guard<std::mutex> lock(m_mutex);
+        m_retiredProcessorOwners.insert(
+            m_retiredProcessorOwners.end(), m_pendingProcessors.begin(), m_pendingProcessors.end());
         m_pendingProcessors.clear();
         publishNewList();
     }
@@ -399,6 +334,7 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         if (index >= m_pendingProcessors.size()) return false;
         if (removed) *removed = m_pendingProcessors[index];
+        m_retiredProcessorOwners.push_back(m_pendingProcessors[index]);
         m_pendingProcessors.erase(m_pendingProcessors.begin() + index);
         publishNewList();
         return true;
@@ -432,43 +368,115 @@ public:
     }
 
 private:
-    struct ReaderGuard {
-        ReaderGuard(std::atomic<uint32_t>& readers, const std::atomic<bool>& mutation)
-            : m_readers(readers), m_active(false) {
-            if (mutation.load(std::memory_order_acquire)) return;
-            m_readers.fetch_add(1, std::memory_order_acquire);
-            if (mutation.load(std::memory_order_acquire)) {
-                m_readers.fetch_sub(1, std::memory_order_release);
-                return;
-            }
-            m_active = true;
+    static uint64_t readProcessorMetric(void* handle, uint32_t metric) noexcept {
+        auto* processor = static_cast<DSP::IProcessor*>(handle);
+        if (!processor) return 0;
+        switch (metric) {
+            case 0: return processor->takeWatchdogTrip() ? 1u : 0u;
+            case 1: return processor->nonFiniteSampleCount();
+            case 2: return processor->getTailSamples();
+            default: return 0;
         }
+    }
+
+    struct ProcessCallbackContext {
+        EffectChain* owner;
+        Core::AudioBuffer* buffer;
+        Core::MidiBuffer* midi;
+        const DSP::ProcessContext* context;
+        uint32_t trackId;
+        bool withSidechain;
+    };
+
+    static bool processRealtimeNode(void* opaque, uint32_t index, void* processorHandle,
+                                    bool parallel, float* mix) {
+        auto* call = static_cast<ProcessCallbackContext*>(opaque);
+        auto* processor = static_cast<DSP::IProcessor*>(processorHandle);
+        if (!call || !mix || !processor) return false;
+        Core::AudioBuffer& target = parallel ? call->owner->m_parallelBuffer : *call->buffer;
+        if (call->withSidechain)
+            return processRealtimeNodeWithSidechain(*call, *processor, target, index, mix);
+        try {
+            processor->process(target, *call->midi, *call->context);
+        } catch (...) {
+            return false;
+        }
+        *mix = processor->getMix();
+        return true;
+    }
+
+    static bool processRealtimeNodeWithSidechain(
+        ProcessCallbackContext& call, DSP::IProcessor& processor, Core::AudioBuffer& target,
+        uint32_t index, float* mix) {
+        DSP::ProcessContext pluginContext = *call.context;
+        Engine::SidechainManager::LinkSnapshot sidechainSnapshot{};
+        std::array<float, Engine::SidechainManager::kMaxBlockSize> sidechainLeft{};
+        std::array<float, Engine::SidechainManager::kMaxBlockSize> sidechainRight{};
+        const bool hasSidechain = call.context->blockSize <=
+                Engine::SidechainManager::kMaxBlockSize &&
+            call.owner->m_sidechainManager->copySidechainBlock(
+                call.trackId, index, sidechainLeft.data(), sidechainRight.data(),
+                static_cast<uint32_t>(call.context->blockSize), sidechainSnapshot);
+        Core::AudioBuffer sidechainView;
+        if (hasSidechain && call.context->blockSize > 0 &&
+            sidechainSnapshot.frames >= call.context->blockSize &&
+            static_cast<uint32_t>(call.context->sampleRate) == sidechainSnapshot.sampleRate &&
+            (call.context->audioConfigGeneration == 0 ||
+             sidechainSnapshot.sourceGeneration == call.context->audioConfigGeneration)) {
+            float* sidechainChannels[2] = {sidechainLeft.data(), sidechainRight.data()};
+            sidechainView.wrapChannels(sidechainChannels, 2,
+                static_cast<uint32_t>(call.context->blockSize));
+            pluginContext.sidechainBuffer = &sidechainView;
+        } else {
+            pluginContext.sidechainBuffer = nullptr;
+        }
+        try {
+            processor.process(target, *call.midi, pluginContext);
+        } catch (...) {
+            return false;
+        }
+        *mix = processor.getMix();
+        return true;
+    }
+
+    void processThroughRust(Core::AudioBuffer& buffer, Core::MidiBuffer& midi,
+                            const DSP::ProcessContext& context,
+                            bool withSidechain, uint32_t trackId) {
+        ReaderGuard reader(m_rustState);
+        if (!reader.active()) {
+            buffer.clear(buffer.getNumSamples());
+            return;
+        }
+        ProcessCallbackContext callback{this, &buffer, &midi,
+                                        &context, trackId, withSidechain};
+        hirari_effect_chain_runtime_process_block(
+            m_rustState, &callback,
+            buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
+            m_parallelBuffer.getArrayOfWritePointers(), m_parallelBuffer.getNumChannels(),
+            m_parallelBuffer.getNumSamples(), buffer.getNumSamples(),
+            &EffectChain::processRealtimeNode);
+    }
+
+    struct ReaderGuard {
+        explicit ReaderGuard(void* state)
+            : m_state(state), m_active(hirari_effect_chain_runtime_enter_audio(state)) {}
         ~ReaderGuard() {
-            if (m_active) m_readers.fetch_sub(1, std::memory_order_release);
+            if (m_active) hirari_effect_chain_runtime_leave_audio(m_state);
         }
         bool active() const noexcept { return m_active; }
-        std::atomic<uint32_t>& m_readers;
+        void* m_state;
         bool m_active;
     };
 
     // Control-thread mutations of a processor instance must not overlap an
-    // audio callback.  The immutable list protects list ownership, but the
-    // processor objects are intentionally shared between generations.
+    // audio callback. Rust snapshots hold raw handles; C++ retains shared
+    // owners across generations until every callback reader has left.
     void beginAudioMutation() const noexcept {
-        m_audioMutation.store(true, std::memory_order_release);
-        while (m_audioReaders.load(std::memory_order_acquire) != 0) {
-            std::this_thread::yield();
-        }
+        hirari_effect_chain_runtime_begin_mutation(m_rustState);
     }
 
     void endAudioMutation() const noexcept {
-        m_audioMutation.store(false, std::memory_order_release);
-    }
-
-    void retireOrDelete(const ProcessorList* list) {
-        if (!list) return;
-        if (m_audioReaders.load(std::memory_order_acquire) == 0) delete list;
-        else m_retiredLists.push_back(list);
+        hirari_effect_chain_runtime_end_mutation(m_rustState);
     }
 
     // Session-owned when injected; the process-wide singleton remains only as
@@ -479,40 +487,25 @@ private:
     AudioBuffer m_parallelBuffer;
     mutable std::mutex m_mutex;
     std::vector<Entry> m_pendingProcessors;  // Owned by UI thread (under mutex)
-    std::atomic<const ProcessorList*> m_activeProcessors{nullptr}; // Loaded by audio thread
-    std::vector<const ProcessorList*> m_retiredLists; // Retained to be deleted by control thread
-    std::atomic<uint32_t> m_totalLatency{0};
-    // Readers are counted before loading the pointer.  A publisher exchanges
-    // the pointer first and only then reclaims old generations; a reader that
-    // starts afterwards can therefore observe only the new generation.
-    std::atomic<uint32_t> m_audioReaders{0};
-    mutable std::atomic<bool> m_audioMutation{false};
+    std::vector<Entry> m_retiredProcessorOwners; // Keep removed processors alive for old RT snapshots
+    void* m_rustState = nullptr;
+    // Reader admission and mutation exclusion live with the Rust runtime
+    // snapshots they protect.
 
-    // Helper: Publishes a new immutable list to the active processors pointer,
-    // and safely collects previous lists on the control thread to avoid RT deallocations.
+    // Publish immutable raw-processor metadata to Rust. C++ retains shared
+    // ownership separately so no shared_ptr operation occurs on the callback.
     void publishNewList() {
-        reclaimRetired();
-
-        auto newList = std::make_unique<ProcessorList>(m_pendingProcessors);
-
-        // Recompute total latency from new pending/active set
-        uint32_t total = 0;
-        for (const auto& entry : *newList) {
-            if (!entry.bypassed && entry.processor) {
-                total += entry.processor->getLatencySamples();
-            }
+        std::vector<HirariEffectChainNodeView> nodes;
+        nodes.reserve(m_pendingProcessors.size());
+        for (const auto& entry : m_pendingProcessors) {
+            nodes.push_back({entry.processor.get(),
+                             static_cast<uint8_t>(entry.bypassed),
+                             static_cast<uint8_t>(entry.parallel),
+                             entry.processor ? entry.processor->getLatencySamples() : 0});
         }
-        m_totalLatency.store(total, std::memory_order_relaxed);
-
-        const ProcessorList* oldList = m_activeProcessors.exchange(newList.release(), std::memory_order_release);
-        if (oldList) {
-            m_retiredLists.push_back(oldList);
-        }
-        // The exchange happens before this reclamation attempt.  Readers that
-        // were already inside process() keep the old list alive; readers that
-        // arrive later load the new list and cannot reference oldList.
-        reclaimRetired();
+        (void)hirari_effect_chain_runtime_publish(m_rustState, nodes.data(), nodes.size());
+        reclaimRetiredLocked();
     }
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

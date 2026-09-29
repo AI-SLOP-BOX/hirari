@@ -4,7 +4,7 @@
 #include <random>
 #include "../../core/midi_buffer.hpp"
 
-namespace Aura::DSP::Synthesis {
+namespace Hirari::DSP::Synthesis {
 
 /**
  * @class VirtualDrummerEngine
@@ -137,4 +137,4 @@ private:
     std::mt19937 m_rng;
 };
 
-} // namespace Aura::DSP::Synthesis
+} // namespace Hirari::DSP::Synthesis

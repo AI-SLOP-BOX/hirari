@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-OUT=${TMPDIR:-/tmp}/aura-ffmpeg-engine-contract
+OUT=${TMPDIR:-/tmp}/hirari-ffmpeg-engine-contract
 
 if [ "$(uname -s)" = "Darwin" ]; then
     CXX=${CXX:-c++}

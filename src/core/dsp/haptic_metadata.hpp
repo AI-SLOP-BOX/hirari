@@ -3,7 +3,7 @@
 #include <atomic>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::DSP {
+namespace Hirari::Core::DSP {
 
 /**
  * @class HapticMetadataGenerator
@@ -23,4 +23,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::DSP
+} // namespace Hirari::Core::DSP

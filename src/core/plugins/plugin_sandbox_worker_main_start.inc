@@ -1,7 +1,7 @@
 int main(int argc, char** argv) {
     if (argc == 2 && std::strcmp(argv[1], "--capabilities") == 0) {
         const char* capabilities =
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
             "{\"clap\":true,\"au\":true,\"vst3\":true}\n";
 #elif defined(__APPLE__)
             "{\"clap\":true,\"au\":true,\"vst3\":false}\n";
@@ -18,8 +18,8 @@ int main(int argc, char** argv) {
     const char* sharedName = nullptr;
     double sampleRate = 44100.0;
     uint32_t minFrames = 1;
-    uint32_t maxFrames = Aura::Core::Plugins::SandboxProtocol::kMaxFrames;
-    uint32_t channels = Aura::Core::Plugins::SandboxProtocol::kMaxChannels;
+    uint32_t maxFrames = Hirari::Core::Plugins::SandboxProtocol::kMaxFrames;
+    uint32_t channels = Hirari::Core::Plugins::SandboxProtocol::kMaxChannels;
     const char* requestedFormat = "auto";
     for (int i = 1; i < argc; ++i) {
         const char* option = argv[i];
@@ -68,75 +68,76 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (!std::isfinite(sampleRate) || sampleRate <= 0.0 || sampleRate > 384000.0 ||
-        minFrames == 0 || minFrames > Aura::Core::Plugins::SandboxProtocol::kMaxFrames ||
-        maxFrames < minFrames || maxFrames > Aura::Core::Plugins::SandboxProtocol::kMaxFrames ||
-        channels == 0 || channels > Aura::Core::Plugins::SandboxProtocol::kMaxChannels) {
+        minFrames == 0 || minFrames > Hirari::Core::Plugins::SandboxProtocol::kMaxFrames ||
+        maxFrames < minFrames || maxFrames > Hirari::Core::Plugins::SandboxProtocol::kMaxFrames ||
+        channels == 0 || channels > Hirari::Core::Plugins::SandboxProtocol::kMaxChannels) {
         debugLog("requested audio configuration is invalid");
         return 2;
     }
 
     if (!applyWorkerLimits()) {
-        const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorSecurity;
+        const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorSecurity;
         (void)::write(statusFd, &error, sizeof(error));
         return 11;
     }
 
     struct stat sharedStat{};
     bool sharedValid = ::fstat(sharedFd, &sharedStat) == 0 &&
-        static_cast<size_t>(sharedStat.st_size) >= sizeof(Aura::Core::Plugins::SandboxProtocol::SharedAudioBlock);
+        static_cast<size_t>(sharedStat.st_size) >= sizeof(Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock);
     if (!sharedValid && sharedName) {
         const int namedFd = ::shm_open(sharedName, O_RDWR, 0);
         if (namedFd >= 0) {
             sharedFd = namedFd;
             sharedValid = ::fstat(sharedFd, &sharedStat) == 0 &&
-                static_cast<size_t>(sharedStat.st_size) >= sizeof(Aura::Core::Plugins::SandboxProtocol::SharedAudioBlock);
+                static_cast<size_t>(sharedStat.st_size) >= sizeof(Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock);
         }
     }
     if (!sharedValid ||
-        static_cast<size_t>(sharedStat.st_size) < sizeof(Aura::Core::Plugins::SandboxProtocol::SharedAudioBlock)) {
+        static_cast<size_t>(sharedStat.st_size) < sizeof(Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock)) {
         debugLog("shared audio block descriptor and name are unavailable");
         return 4;
     }
-    auto* shared = static_cast<Aura::Core::Plugins::SandboxProtocol::SharedAudioBlock*>(
-        ::mmap(nullptr, sizeof(Aura::Core::Plugins::SandboxProtocol::SharedAudioBlock),
+    auto* shared = static_cast<Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock*>(
+        ::mmap(nullptr, sizeof(Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock),
                PROT_READ | PROT_WRITE, MAP_SHARED, sharedFd, 0));
     if (shared == MAP_FAILED) {
         debugLog("shared audio block mapping failed");
         return 5;
     }
     if (shared->protocolVersion.load(std::memory_order_acquire) !=
-        Aura::Core::Plugins::SandboxProtocol::kAudioBlockProtocolVersion) {
-        const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorAbi;
+        Hirari::Core::Plugins::SandboxProtocol::kAudioBlockProtocolVersion) {
+        const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorAbi;
         (void)::write(statusFd, &error, sizeof(error));
-        ::munmap(shared, sizeof(Aura::Core::Plugins::SandboxProtocol::SharedAudioBlock));
+        ::munmap(shared, sizeof(Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock));
         return 12;
     }
     shared->activeSampleRate.store(static_cast<uint32_t>(sampleRate), std::memory_order_release);
     shared->activeChannels.store(channels, std::memory_order_release);
 
     void* pluginHandle = nullptr;
-    const Aura::Core::Plugins::ClapAbi::Entry* clapEntry = nullptr;
-    const Aura::Core::Plugins::ClapAbi::Plugin* clapPlugin = nullptr;
+    const Hirari::Core::Plugins::ClapAbi::Entry* clapEntry = nullptr;
+    const Hirari::Core::Plugins::ClapAbi::Plugin* clapPlugin = nullptr;
+    bool midiInstrument = false;
     bool clapStarted = false;
 #if defined(__APPLE__)
-    Aura::Core::Plugins::SandboxAU::Runtime auRuntime;
+    Hirari::Core::Plugins::SandboxAU::Runtime auRuntime;
     bool auStarted = false;
 #endif
-#if defined(AURA_ENABLE_VST3_SDK)
-    Aura::Core::Plugins::SandboxVST3::Runtime vst3Runtime;
+#if defined(HIRARI_ENABLE_VST3_SDK)
+    Hirari::Core::Plugins::SandboxVST3::Runtime vst3Runtime;
     bool vst3Started = false;
 #endif
-    const Aura::Core::Plugins::ClapAbi::StateExtension* clapState = nullptr;
-    const bool testFaultsEnabled = std::getenv("AURA_PLUGIN_TEST_FAULTS") != nullptr;
+    const Hirari::Core::Plugins::ClapAbi::StateExtension* clapState = nullptr;
+    const bool testFaultsEnabled = std::getenv("HIRARI_PLUGIN_TEST_FAULTS") != nullptr;
     uint64_t processedBlocks = 0;
     uint64_t crashAfterBlocks = 0;
     uint32_t delayMilliseconds = 0;
     if (testFaultsEnabled) {
-        if (const char* value = std::getenv("AURA_PLUGIN_WORKER_CRASH_AFTER_BLOCKS")) {
+        if (const char* value = std::getenv("HIRARI_PLUGIN_WORKER_CRASH_AFTER_BLOCKS")) {
             uint64_t parsed = 0;
             if (parseUint64(value, parsed)) crashAfterBlocks = parsed;
         }
-        if (const char* value = std::getenv("AURA_PLUGIN_WORKER_DELAY_MS")) {
+        if (const char* value = std::getenv("HIRARI_PLUGIN_WORKER_DELAY_MS")) {
             uint32_t parsed = 0;
             if (parseUint32(value, parsed)) delayMilliseconds = parsed;
         }
@@ -157,25 +158,26 @@ int main(int argc, char** argv) {
         (requestedFormat[0] == 'v' && !pathIsVst3) ||
         (requestedFormat[0] == 'a' && !pathIsAudioUnit) ||
         (requestedBuiltin && !builtinPassthrough)) {
-        const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorUnsupported;
+        const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorUnsupported;
         (void)::write(statusFd, &error, sizeof(error));
         ::munmap(shared, sizeof(*shared));
         return 12;
     }
     if (isVst3) {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (!vst3Runtime.load(pluginPath, sampleRate, maxFrames)) {
             debugLog(vst3Runtime.error());
-            const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorInstance;
+            const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorInstance;
             (void)::write(statusFd, &error, sizeof(error));
             ::munmap(shared, sizeof(*shared));
             return 10;
         }
         vst3Started = true;
+        midiInstrument = vst3Runtime.isMidiInstrument();
 #else
         // VST3 requires the official ABI interfaces. Do not acknowledge
         // readiness until an SDK adapter is present.
-        const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorUnsupported;
+        const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorUnsupported;
         (void)::write(statusFd, &error, sizeof(error));
         ::munmap(shared, sizeof(*shared));
         return 12;
@@ -184,21 +186,22 @@ int main(int argc, char** argv) {
     if (isAudioUnit) {
 #if defined(__APPLE__)
         if (!auRuntime.load(pluginPath, sampleRate, maxFrames, channels)) {
-            const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorInstance;
+            const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorInstance;
             (void)::write(statusFd, &error, sizeof(error));
             ::munmap(shared, sizeof(*shared));
             return 10;
         }
         auStarted = true;
+        midiInstrument = auRuntime.isMidiInstrument();
 #else
-        const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorUnsupported;
+        const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorUnsupported;
         (void)::write(statusFd, &error, sizeof(error));
         ::munmap(shared, sizeof(*shared));
         return 12;
 #endif
     }
     const bool vst3SdkLoaded = isVst3 &&
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         true;
 #else
         false;
@@ -211,7 +214,7 @@ int main(int argc, char** argv) {
         (pluginImage.empty() ? nullptr : ::dlopen(pluginImage.c_str(), RTLD_NOW | RTLD_LOCAL));
     if (pluginHandle == nullptr) {
         debugLog("dlopen failed");
-        const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorLoad;
+        const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorLoad;
         (void)::write(statusFd, &error, sizeof(error));
         ::munmap(shared, sizeof(*shared));
         return 6;
@@ -220,7 +223,7 @@ int main(int argc, char** argv) {
     const char* symbol = isClap ? "clap_entry" : (isVst3 ? "GetPluginFactory" : nullptr);
     if (!builtinPassthrough && !isAudioUnit && !vst3SdkLoaded &&
         (symbol == nullptr || ::dlsym(pluginHandle, symbol) == nullptr)) {
-        const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorAbi;
+        const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorAbi;
         (void)::write(statusFd, &error, sizeof(error));
         if (!builtinPassthrough && !isAudioUnit) ::dlclose(pluginHandle);
         ::munmap(shared, sizeof(*shared));
@@ -230,18 +233,18 @@ int main(int argc, char** argv) {
         debugLog("initializing CLAP entry");
         // CLAP exports `clap_entry` as a const entry object, not a function.
         // Calling the symbol as a function is undefined behaviour.
-        clapEntry = reinterpret_cast<const Aura::Core::Plugins::ClapAbi::Entry*>(
+        clapEntry = reinterpret_cast<const Hirari::Core::Plugins::ClapAbi::Entry*>(
             ::dlsym(pluginHandle, "clap_entry"));
         if (!clapEntry || !clapEntry->init || !clapEntry->deinit || !clapEntry->get_factory ||
             clapEntry->clap_version.major != 1 || !clapEntry->init(pluginPath)) {
-            const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorAbi;
+            const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorAbi;
             (void)::write(statusFd, &error, sizeof(error));
             ::dlclose(pluginHandle);
             ::munmap(shared, sizeof(*shared));
             return 8;
         }
-        const auto* factory = static_cast<const Aura::Core::Plugins::ClapAbi::Factory*>(
-            clapEntry->get_factory(Aura::Core::Plugins::ClapAbi::kPluginFactoryId));
+        const auto* factory = static_cast<const Hirari::Core::Plugins::ClapAbi::Factory*>(
+            clapEntry->get_factory(Hirari::Core::Plugins::ClapAbi::kPluginFactoryId));
         debugLog("factory acquired");
         if (!factory || !factory->get_plugin_count || !factory->get_plugin_descriptor ||
             !factory->create_plugin || factory->get_plugin_count(factory) == 0) {
@@ -251,7 +254,7 @@ int main(int argc, char** argv) {
             return 9;
         }
         uint32_t descriptorIndex = 0;
-        const char* requestedFeature = std::getenv("AURA_PLUGIN_KIND");
+        const char* requestedFeature = std::getenv("HIRARI_PLUGIN_KIND");
         if (requestedFeature && *requestedFeature) {
             const uint32_t count = factory->get_plugin_count(factory);
             bool found = false;
@@ -269,14 +272,18 @@ int main(int argc, char** argv) {
                 clapEntry->deinit();
                 ::dlclose(pluginHandle);
                 ::munmap(shared, sizeof(*shared));
-                const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorInstance;
+                const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorInstance;
                 (void)::write(statusFd, &error, sizeof(error));
                 return 10;
             }
         }
         const auto* descriptor = factory->get_plugin_descriptor(factory, descriptorIndex);
-        Aura::Core::Plugins::ClapAbi::Host host{
-            {1, 0, 0}, "aura-sandbox", "Aura", "Aura", "", "1",
+        midiInstrument = clapDescriptorHasFeature(descriptor, "instrument") ||
+            clapDescriptorHasFeature(descriptor, "synthesizer") ||
+            clapDescriptorHasFeature(descriptor, "sampler") ||
+            clapDescriptorHasFeature(descriptor, "drum");
+        Hirari::Core::Plugins::ClapAbi::Host host{
+            {1, 0, 0}, "hirari-sandbox", "Hirari", "Hirari", "", "1",
             &noopRestart, &noopProcess, &noopCallback, &noExtension};
         clapPlugin = descriptor ? factory->create_plugin(factory, &host, descriptor->id) : nullptr;
         debugLog("plugin instance created");
@@ -296,20 +303,21 @@ int main(int argc, char** argv) {
             clapEntry->deinit();
             ::dlclose(pluginHandle);
             ::munmap(shared, sizeof(*shared));
-            const uint8_t error = Aura::Core::Plugins::SandboxProtocol::kErrorInstance;
+            const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorInstance;
             (void)::write(statusFd, &error, sizeof(error));
             return 10;
         }
         debugLog("plugin activated and processing started");
         clapStarted = true;
-        clapState = static_cast<const Aura::Core::Plugins::ClapAbi::StateExtension*>(
-            clapPlugin->get_extension ? clapPlugin->get_extension(clapPlugin, Aura::Core::Plugins::ClapAbi::kStateExtensionId) : nullptr);
+        clapState = static_cast<const Hirari::Core::Plugins::ClapAbi::StateExtension*>(
+            clapPlugin->get_extension ? clapPlugin->get_extension(clapPlugin, Hirari::Core::Plugins::ClapAbi::kStateExtensionId) : nullptr);
     }
 #else
     (void)pluginPath;
 #endif
 
-    const uint8_t ready = Aura::Core::Plugins::SandboxProtocol::kReady;
+    shared->midiInstrument.store(midiInstrument ? 1u : 0u, std::memory_order_release);
+    const uint8_t ready = Hirari::Core::Plugins::SandboxProtocol::kReady;
     debugLog("sending ready");
     if (::write(statusFd, &ready, sizeof(ready)) != 1) {
 #if !defined(_WIN32)
@@ -319,4 +327,3 @@ int main(int argc, char** argv) {
         ::munmap(shared, sizeof(*shared));
         return 3;
     }
-

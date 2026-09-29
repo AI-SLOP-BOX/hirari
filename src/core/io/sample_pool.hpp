@@ -6,7 +6,7 @@
 #include <mutex>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @class GlobalSamplePool
@@ -50,4 +50,4 @@ private:
     std::mutex m_poolMutex;
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

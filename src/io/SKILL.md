@@ -1,4 +1,4 @@
-# SKILL: Aura IO & Export
+# SKILL: Hirari IO & Export
 
 ## 🤖 AI Role: Support Only (補助)
 AIが勝手にファイルを書き出したり、外部に送信したり、自動でリリースを代行するようなエージェント化は決して行わないこと。AIはあくまで書き出しの「実行補助」に留まります。

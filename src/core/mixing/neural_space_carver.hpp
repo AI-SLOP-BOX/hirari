@@ -4,7 +4,7 @@
 #include <cmath>
 #include <atomic>
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 
 struct AzimuthElevation {
     float azimuth;
@@ -59,4 +59,4 @@ private:
     NeuralSpaceCarver() = default;
 };
 
-} // namespace Aura::Core::Mixing
+} // namespace Hirari::Core::Mixing

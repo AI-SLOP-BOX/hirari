@@ -6,7 +6,7 @@
 #include "../../core/audio_buffer.hpp"
 #include "../iprocessor.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class HarmonicReconstructor
@@ -63,4 +63,4 @@ private:
     std::vector<float> m_lastIn;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

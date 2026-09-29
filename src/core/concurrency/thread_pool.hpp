@@ -1,86 +1,71 @@
 #pragma once
-#include <vector>
-#include <queue>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
+
+#include "audio_task_manager.hpp"
+
+#include <algorithm>
 #include <functional>
 #include <future>
+#include <memory>
+#include <stdexcept>
+#include <thread>
 #include <type_traits>
-#include <algorithm>
+#include <utility>
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
-/**
- * @class ThreadPool
- * @brief Professional Task-based Concurrency Engine.
- * HONEST FIX: Replaces dangerous 'std::async' thread explosion with 
- * a core-count-limited worker pool. Prevents CPU context-switch thrashing.
- */
+/** Task-based background pool backed by the Rust-owned worker scheduler. */
 class ThreadPool {
+    struct FutureTask final : AudioTaskJob {
+        explicit FutureTask(std::function<void()> callback) : work(std::move(callback)) {}
+
+        void run() noexcept override {
+            std::unique_ptr<FutureTask> owner(this);
+            work();
+        }
+
+        std::function<void()> work;
+    };
+
 public:
     static ThreadPool& getInstance() {
         const auto detected = std::thread::hardware_concurrency();
-        // The standard permits hardware_concurrency() to return 0 when the
-        // platform cannot report a value.  A zero-sized pool would accept
-        // work forever without a worker to execute it.
         static ThreadPool instance(detected == 0 ? 1u : detected);
         return instance;
     }
+
+    explicit ThreadPool(size_t threads) {
+        threads = std::max<size_t>(1, threads);
+        m_scheduler.start(static_cast<uint32_t>(threads), 8192,
+            hirari_audio_background_worker_enter, hirari_audio_background_worker_leave);
+        if (!m_scheduler.isRunning()) {
+            throw std::runtime_error("Failed to start Rust background task scheduler");
+        }
+    }
+
+    ThreadPool(const ThreadPool&) = delete;
+    ThreadPool& operator=(const ThreadPool&) = delete;
 
     template<class F, class... Args>
     auto enqueue(F&& f, Args&&... args)
         -> std::future<std::invoke_result_t<F, Args...>> {
         using return_type = std::invoke_result_t<F, Args...>;
-
         auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-        );
-        
-        std::future<return_type> res = task->get_future();
-        {
-            std::unique_lock<std::mutex> lock(m_queueMutex);
-            if (m_stop) throw std::runtime_error("ThreadPool stopped");
-            m_tasks.emplace([task](){ (*task)(); });
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        std::future<return_type> result = task->get_future();
+        auto* job = new FutureTask([task] { (*task)(); });
+        const auto worker = m_nextWorker.fetch_add(1, std::memory_order_relaxed);
+        if (!m_scheduler.enqueue(worker, job)) {
+            delete job;
+            throw std::runtime_error("Rust background task scheduler is stopped or full");
         }
-        m_condition.notify_one();
-        return res;
+        return result;
     }
 
-    ~ThreadPool() {
-        {
-            std::unique_lock<std::mutex> lock(m_queueMutex);
-            m_stop = true;
-        }
-        m_condition.notify_all();
-        for (std::thread& worker : m_workers) worker.join();
-    }
+    ~ThreadPool() { m_scheduler.stop(); }
 
 private:
-    explicit ThreadPool(size_t threads) : m_stop(false) {
-        threads = std::max<size_t>(1u, threads);
-        for (size_t i = 0; i < threads; ++i) {
-            m_workers.emplace_back([this] {
-                for (;;) {
-                    std::function<void()> task;
-                    {
-                        std::unique_lock<std::mutex> lock(this->m_queueMutex);
-                        this->m_condition.wait(lock, [this]{ return this->m_stop || !this->m_tasks.empty(); });
-                        if (this->m_stop && this->m_tasks.empty()) return;
-                        task = std::move(this->m_tasks.front());
-                        this->m_tasks.pop();
-                    }
-                    task();
-                }
-            });
-        }
-    }
-
-    std::vector<std::thread> m_workers;
-    std::queue<std::function<void()>> m_tasks;
-    std::mutex m_queueMutex;
-    std::condition_variable m_condition;
-    bool m_stop;
+    AudioTaskStealingScheduler m_scheduler;
+    std::atomic<uint32_t> m_nextWorker{0};
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

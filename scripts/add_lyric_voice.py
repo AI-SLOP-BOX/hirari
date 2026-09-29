@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Add an original Japanese lyric/formant vocal layer to an Aura demo WAV."""
+"""Add an original Japanese lyric/formant vocal layer to a Hirari demo WAV."""
 import math, wave
 from array import array
 from pathlib import Path
 
-SRC=Path("dist/aura_neon_original.wav"); OUT=Path("dist/aura_neon_original_with_vocal.wav")
+SRC=Path("dist/hirari_neon_original.wav"); OUT=Path("dist/hirari_neon_original_with_vocal.wav")
 SR=44100; BPM=172; BEAT=60/BPM
 phrase=[("ひ",60), ("か",62), ("り",64), ("ほ",64), ("ど",62), ("け",60), ("る",62), ("よ",64), ("る",65), ("に",64), ("き",67), ("み",65), ("と",64), ("み",62), ("つ",60), ("け",62)]
 vowels={"あ":"a","か":"a","さ":"a","た":"a","な":"a","は":"a","ま":"a","ら":"a","が":"a","だ":"a","ざ":"a","ぱ":"a","ば":"a","ひ":"i","き":"i","し":"i","ち":"i","に":"i","り":"i","み":"i","い":"i","ぎ":"i","じ":"i","ぴ":"i","び":"i","る":"u","く":"u","す":"u","つ":"u","ぬ":"u","ふ":"u","む":"u","ゆ":"u","う":"u","ぐ":"u","ず":"u","ぶ":"u","ぷ":"u","ほ":"o","こ":"o","そ":"o","と":"o","の":"o","も":"o","ろ":"o","よ":"o","お":"o","ご":"o","ど":"o","ぼ":"o","ぽ":"o","え":"e","け":"e","せ":"e","て":"e","ね":"e","め":"e","れ":"e","へ":"e","げ":"e","ぜ":"e","で":"e","べ":"e","ぺ":"e"}

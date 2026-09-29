@@ -8,7 +8,7 @@ BPM = 112
 BEAT = 60.0 / BPM
 BARS = 8
 DURATION = BARS * 4 * BEAT
-OUT = Path("dist/aura_cua_neon_tide.wav")
+OUT = Path("dist/hirari_cua_neon_tide.wav")
 
 def midi(n):
     return 440.0 * 2.0 ** ((n - 69) / 12.0)

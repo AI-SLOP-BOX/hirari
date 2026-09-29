@@ -13,10 +13,10 @@
 #include "../src/io/audio_export_engine.hpp"
 
 int main() {
-    using Aura::Core::AudioBuffer;
-    using Aura::Core::Engine::Region;
-    using Aura::Core::Engine::TimelineSystem;
-    using Aura::Core::Engine::Track;
+    using Hirari::Core::AudioBuffer;
+    using Hirari::Core::Engine::Region;
+    using Hirari::Core::Engine::TimelineSystem;
+    using Hirari::Core::Engine::Track;
 
     TimelineSystem timeline;
     auto track = std::make_shared<Track>(77, "Bounce Contract", Track::Audio);
@@ -115,12 +115,12 @@ int main() {
     assert(crossfadeOutput.getReadPointer(0)[8] < -0.5f);
 
     const auto destination = std::filesystem::temp_directory_path() /
-                             "aura-bounce-contract.wav";
+                             "hirari-bounce-contract.wav";
     std::vector<std::vector<float>> rendered{
         {0.0f, 0.25f, -0.25f, 0.5f},
         {0.0f, -0.25f, 0.25f, -0.5f}
     };
-    assert(Aura::IO::WavSaver::save(destination.string(), rendered, 48000));
+    assert(Hirari::IO::WavSaver::save(destination.string(), rendered, 48000));
     std::ifstream file(destination, std::ios::binary);
     assert(file.good());
     char riff[4] = {};
@@ -133,9 +133,9 @@ int main() {
     // The product BounceEngine must publish through the canonical streaming
     // writer, not its former private RIFF/RF64 implementation.
     const auto streamedBounce = std::filesystem::temp_directory_path() /
-                                "aura-bounce-streaming-contract.wav";
-    Aura::Core::IO::BounceEngine bounce;
-    Aura::Core::IO::BounceEngine::Options bounceOptions;
+                                "hirari-bounce-streaming-contract.wav";
+    Hirari::Core::IO::BounceEngine bounce;
+    Hirari::Core::IO::BounceEngine::Options bounceOptions;
     bounceOptions.path = streamedBounce.string();
     bounceOptions.sampleRate = 48'000;
     bounceOptions.bitDepth = 24;
@@ -150,8 +150,8 @@ int main() {
     std::filesystem::remove(streamedBounce, ec);
 
     const auto pcm16Bounce = std::filesystem::temp_directory_path() /
-                             "aura-bounce-pcm16-contract.wav";
-    Aura::Core::IO::BounceEngine::Options pcm16Options;
+                             "hirari-bounce-pcm16-contract.wav";
+    Hirari::Core::IO::BounceEngine::Options pcm16Options;
     pcm16Options.path = pcm16Bounce.string();
     pcm16Options.sampleRate = 48'000;
     pcm16Options.bitDepth = 16;
@@ -171,8 +171,8 @@ int main() {
     // both channel layouts.  The normalized path is intentionally exercised
     // because it performs a two-pass render rather than buffering the song.
     const auto exportPcm16 = std::filesystem::temp_directory_path() /
-                             "aura-audio-export-pcm16-contract.wav";
-    Aura::IO::AudioExportEngine::ExportOptions exportOptions;
+                             "hirari-audio-export-pcm16-contract.wav";
+    Hirari::IO::AudioExportEngine::ExportOptions exportOptions;
     exportOptions.filename = exportPcm16.string();
     exportOptions.sampleRate = 48'000.0;
     exportOptions.bitDepth = 16;
@@ -180,7 +180,7 @@ int main() {
     exportOptions.endSample = 8;
     exportOptions.channels = 2;
     exportOptions.normalize = true;
-    const bool exportOk = Aura::IO::AudioExportEngine::bounce(timeline, exportOptions, {});
+    const bool exportOk = Hirari::IO::AudioExportEngine::bounce(timeline, exportOptions, {});
     if (!exportOk) {
         std::cerr << "AudioExportEngine PCM16 normalized contract failed\n";
         return 100;
@@ -193,12 +193,12 @@ int main() {
     std::filesystem::remove(exportPcm16, ec);
 
     const auto exportMono = std::filesystem::temp_directory_path() /
-                            "aura-audio-export-mono-contract.wav";
+                            "hirari-audio-export-mono-contract.wav";
     exportOptions.filename = exportMono.string();
     exportOptions.bitDepth = 24;
     exportOptions.channels = 1;
     exportOptions.normalize = false;
-    const bool monoExportOk = Aura::IO::AudioExportEngine::bounce(timeline, exportOptions, {});
+    const bool monoExportOk = Hirari::IO::AudioExportEngine::bounce(timeline, exportOptions, {});
     if (!monoExportOk) {
         std::cerr << "AudioExportEngine mono PCM24 contract failed\n";
         return 101;
@@ -214,10 +214,10 @@ int main() {
     // A mono 24-bit file has an odd-sized data chunk.  The writer must add
     // the RIFF padding byte while the loader must still report one sample.
     const auto oddPath = std::filesystem::temp_directory_path() /
-                         "aura-bounce-odd-contract.wav";
-    assert(Aura::IO::WavSaver::save(oddPath.string(), {{0.25f}}, 48000));
-    Aura::IO::WavLoader::WavInfo oddInfo{};
-    const auto oddDecoded = Aura::IO::WavLoader::load(oddPath.string(), oddInfo);
+                         "hirari-bounce-odd-contract.wav";
+    assert(Hirari::IO::WavSaver::save(oddPath.string(), {{0.25f}}, 48000));
+    Hirari::IO::WavLoader::WavInfo oddInfo{};
+    const auto oddDecoded = Hirari::IO::WavLoader::load(oddPath.string(), oddInfo);
     assert(oddInfo.numChannels == 1 && oddInfo.numSamples == 1);
     assert(oddDecoded.size() == 1 && std::isfinite(oddDecoded[0][0]));
     std::filesystem::remove(oddPath, ec);

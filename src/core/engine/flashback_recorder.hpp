@@ -9,7 +9,7 @@
 #include <mutex>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class FlashbackRecorder
@@ -113,4 +113,4 @@ private:
     mutable std::mutex m_eventMutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

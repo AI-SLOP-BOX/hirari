@@ -7,7 +7,7 @@
 #include "../iprocessor.hpp"
 #include "../mixing/state_variable_filter.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @brief AtmosEQ: Professional 12-Channel Immersive Equalizer.
@@ -167,4 +167,4 @@ private:
     std::atomic<uint32_t> m_activeBandSlot{0};
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

@@ -38,7 +38,7 @@ extern char** environ;
 #include "plugin_sandbox_protocol.hpp"
 #include "plugin_admission.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @class PluginSandboxHost
@@ -59,4 +59,4 @@ class PluginSandboxHost {
 #include "plugin_sandbox_host_part_8.inc"
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

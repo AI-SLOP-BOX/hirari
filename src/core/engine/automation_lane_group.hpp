@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 struct AutomationLaneState { uint32_t id=0; bool linked=false, protectedLane=false, preview=false; float previewValue=0; };
 class AutomationLaneGroup {
 public:

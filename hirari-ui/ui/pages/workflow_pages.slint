@@ -1,0 +1,453 @@
+import { Style } from "../style.slint";
+import { Button, Slider, CheckBox, LineEdit, ComboBox } from "std-widgets.slint";
+import { CommandActions } from "../actions/command_actions.slint";
+import { StepActions } from "../actions/step_actions.slint";
+import { StackActions } from "../actions/stack_actions.slint";
+import { MidiActions } from "../actions/midi_actions.slint";
+import { TransportActions } from "../actions/transport_actions.slint";
+import { Z_GlobalTempoEditor } from "../editor/global_tempo_editor.slint";
+import { Z_GlobalMarkers } from "../timeline/global_markers.slint";
+import { Z_Marker } from "../model/models.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { Z_StepCell } from "../feature_page.slint";
+import { CompingActions } from "../actions/comping_actions.slint";
+import { Z_CompRange, Z_CompTake } from "../model/models.slint";
+
+export component Z_CompingPage inherits Rectangle {
+    in property <[Z_CompTake]> takes: [];
+    in property <[Z_CompRange]> comp-ranges: [];
+    in property <float> crossfade: 0.01;
+    width: 100%; height: 300px;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 14px; spacing: 8px;
+        Text { text: "Take Comping"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: "Drag across a take lane to replace that timeline range. Short clicks select the full take."; font-size: 10px; color: Style.text-dim; }
+        HorizontalLayout {
+            Text { text: "BOUNDARY CROSSFADE"; font-size: 9px; color: Style.text-secondary; vertical-alignment: center; }
+            Slider { horizontal-stretch: 1; minimum: 0.0; maximum: 0.25; step: 0.005; value: root.crossfade; released(v) => { CompingActions.crossfade_changed(v); } }
+            Text { text: Math.round(root.crossfade * 1000) + " ms"; width: 42px; font-size: 9px; color: Style.brand; vertical-alignment: center; }
+            Button { text: "PREVIEW"; clicked => { CompingActions.preview(); } }
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        if (root.takes.length == 0) : Text {
+            text: "No recorded comp takes yet. Record audio to create take lanes.";
+            color: Style.text-muted; font-size: 10px; vertical-alignment: center;
+        }
+        for take[idx] in root.takes : Rectangle {
+            height: 34px; background: Style.panel; border-width: 1px; border-color: Style.border; border-radius: 3px;
+            HorizontalLayout {
+                Text { text: take.name; width: 64px; color: Style.text; font-size: 10px; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
+                Rectangle {
+                    horizontal-stretch: 1; height: 22px; background: Style.surface; border-width: 1px; border-color: Style.border; border-radius: 2px;
+                    for peak[index] in take.wave : Rectangle {
+                        x: (index * 1.0 / Math.max(1, take.wave.length)) * parent.width;
+                        width: Math.max(1px, parent.width / Math.max(1, take.wave.length));
+                        y: parent.height / 2 - peak * parent.height / 2;
+                        height: Math.max(1px, peak * parent.height);
+                        background: Style.text-secondary; opacity: 0.8;
+                    }
+                    for range in root.comp-ranges: Rectangle {
+                        visible: range.take_id == take.id;
+                        x: range.start * parent.width; y: 2px;
+                        width: Math.max(1px, (range.end - range.start) * parent.width); height: 16px;
+                        background: Style.brand; border-radius: 2px;
+                    }
+                    TouchArea {
+                        property <length> swipe-start-x: 0px;
+                        mouse-cursor: crosshair;
+                        pointer-event(e) => {
+                            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                                swipe-start-x = self.mouse_x;
+                            } else if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                                let a = (swipe-start-x / parent.width).clamp(0.0, 1.0);
+                                let b = (self.mouse_x / parent.width).clamp(0.0, 1.0);
+                                if (Math.abs(b - a) < 0.01) { CompingActions.select_take(take.id); }
+                                else { CompingActions.swipe_take(take.id, Math.min(a, b), Math.max(a, b)); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+export component Z_WorkflowPage inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> status: "READY";
+    in property <string> guidance;
+    in property <image> analysis-image;
+    width: 100%;
+    height: 300px;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 18px; spacing: 10px;
+        Text { text: root.title; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: root.subtitle; font-size: 10px; color: Style.text-dim; }
+        Rectangle { height: 1px; background: Style.border; }
+        Rectangle {
+            background: Style.panel; border-width: 1px; border-color: Style.border;
+            VerticalLayout {
+                padding: 14px; spacing: 8px;
+                Text { text: root.status; font-size: 10px; color: Style.text-secondary; font-family: Style.numeric-font; }
+                Text { text: root.guidance; font-size: 11px; color: Style.text; wrap: word-wrap; }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+        if (analysis-image.width > 0) : Image {
+            source: analysis-image; height: 56px; width: 100%; image-fit: fill;
+        }
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+export component Z_MidiLearnPage inherits Rectangle {
+    in property <string> status: "MIDI INPUT OFF";
+    in property <int> target-track-id: -1;
+    in property <string> target-track-type: "";
+    in-out property <int> target_macro: 0;
+    width: 100%;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 18px; spacing: 12px;
+        Text { text: "MIDI Input & Learn"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: "Learn hardware CC controls and recover up to 30 seconds of recent MIDI notes."; font-size: 10px; color: Style.text-dim; }
+        Rectangle { height: 1px; background: Style.border; }
+        HorizontalLayout {
+            spacing: 6px;
+            for macro_index[idx] in [0, 1, 2, 3, 4, 5, 6, 7] : Button {
+                text: "MACRO " + (macro_index + 1);
+                checkable: true;
+                checked: root.target_macro == macro_index;
+                clicked => { root.target_macro = macro_index; }
+            }
+            Button { text: "ARM LEARN"; clicked => { MidiActions.arm_midi_learn(root.target_macro); } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                text: "INSERT RECENT MIDI";
+                enabled: root.target-track-id >= 0 && (root.target-track-type == "Midi" || root.target-track-type == "MIDI" || root.target-track-type == "Instrument");
+                clicked => { MidiActions.insert_retrospective(root.target-track-id); }
+            }
+            Text {
+                text: root.target-track-id >= 0 && (root.target-track-type == "Midi" || root.target-track-type == "MIDI" || root.target-track-type == "Instrument") ? "Insert buffered notes on the selected MIDI track (up to 30 seconds)." : "Select a MIDI or Instrument track first.";
+                font-size: 9px; color: Style.text-muted; vertical-alignment: center;
+            }
+        }
+        Text { text: root.status; color: Style.ok; font-size: 10px; font-family: Style.numeric-font; }
+        Rectangle { vertical-stretch: 1; }
+        Text { text: "CC mappings are saved with the project."; font-size: 9px; color: Style.text-muted; }
+    }
+}
+
+export component Z_StepSequencerPage inherits Rectangle {
+    in property <int> selected-track-id: -1;
+    in property <[bool]> active-steps: [];
+    in property <int> unmapped-note-count: 0;
+    in property <[int]> step-velocities: [];
+    in property <[int]> step-probabilities: [];
+    in property <[int]> step-gates: [];
+    in property <[int]> lane-pitches: [36, 38, 42, 46, 40, 45];
+    in property <string> selected-track-type: "";
+    in property <int> selected-region-id: -1;
+    in property <string> selected-region-name: "";
+    in property <float> selected-region-length-beats: 0.0;
+    in property <int> selected-region-bars: 0;
+    in property <int> step-resolution: 16;
+    in property <int> step-feel: 0;
+    property <string> step-feel-name: root.step-feel == 1 ? "Triplet" : (root.step-feel == 2 ? "Dotted" : "Straight");
+    property <float> step-feel-multiplier: root.step-feel == 1 ? 0.6666667 : (root.step-feel == 2 ? 1.5 : 1.0);
+    property <float> step-beats: 4.0 / root.step-resolution * root.step-feel-multiplier;
+    property <float> minimum-gate-percent: Math.max(5.0, Math.ceil(1.5625 / root.step-beats));
+    property <float> reversible-step-count: root.selected-region-length-beats >= 0.015625 ? Math.min(128.0, Math.floor((root.selected-region-length-beats - 0.015625) / root.step-beats) + 1) : 0.0;
+    in-out property <int> selected-lane: 0;
+    in-out property <int> selected-step: 0;
+    in-out property <int> selected-bar: 0;
+    property <int> visible-bar: root.selected-region-bars > 0 ? Math.min(root.selected-bar, root.selected-region-bars - 1) : 0;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 12px; spacing: 6px;
+        Text { text: "Step Sequencer"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: root.selected-region-id >= 0 ? (root.selected-region-length-beats > 128.0 * root.step-beats ? "MIDI region: " + root.selected-region-name + " · first 128 steps shown · 1/" + root.step-resolution + " " + root.step-feel-name : "MIDI region: " + root.selected-region-name + " · 1/" + root.step-resolution + " " + root.step-feel-name + " steps · velocity and probability") : "Select a MIDI region in Arrange to edit its pattern"; font-size: 10px; color: Style.text-dim; }
+        if (root.unmapped-note-count > 0) : Text { text: root.unmapped-note-count + " MIDI notes are outside this grid or lane; the original notes are preserved."; font-size: 9px; color: Style.solo; }
+        Rectangle { height: 1px; background: Style.border; }
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: "STEP SIZE"; width: 58px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            for resolution in [4, 8, 16, 32, 64] : Button {
+                text: (root.step-resolution == resolution ? "● " : "") + "1/" + resolution;
+                clicked => { StepActions.set_step_resolution(resolution); }
+            }
+            Button {
+                text: "REVERSE LANE";
+                enabled: root.selected-track-id >= 0 && root.selected-region-id >= 0 && root.reversible-step-count >= 2 && (root.selected-track-type == "Midi" || root.selected-track-type == "MIDI" || root.selected-track-type == "Instrument");
+                clicked => { StepActions.reverse_lane(root.selected-track-id, root.selected-lane); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: "FEEL"; width: 34px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            for feel in [0, 1, 2] : Button {
+                text: (root.step-feel == feel ? "● " : "") + (feel == 0 ? "Straight" : (feel == 1 ? "Triplet" : "Dotted"));
+                clicked => { StepActions.set_step_feel(feel); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "PAGE"; width: 38px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Button { text: "‹"; enabled: root.selected-region-id >= 0 && root.visible-bar > 0; clicked => { root.selected-bar = Math.max(0, root.visible-bar - 1); } }
+            Text { text: root.selected-region-id >= 0 ? (root.visible-bar + 1) + " / " + root.selected-region-bars : "NO REGION"; width: 48px; color: Style.brand; vertical-alignment: center; horizontal-alignment: center; }
+            Button { text: "›"; enabled: root.selected-region-id >= 0 && root.visible-bar + 1 < root.selected-region-bars; clicked => { root.selected-bar = root.visible-bar + 1; } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        for lane in 6 : HorizontalLayout {
+            height: 22px; spacing: 4px;
+            Text { text: "LANE " + (lane + 1) + " · MIDI " + (root.lane-pitches.length == 6 ? root.lane-pitches[lane] : 36); width: 82px; font-size: 8px; color: Style.text; vertical-alignment: center; }
+            Button {
+                text: "−";
+                width: 20px;
+                height: 20px;
+                enabled: root.selected-region-id >= 0 && root.lane-pitches.length == 6 && root.lane-pitches[lane] > 0;
+                clicked => { StepActions.set_lane_pitch(root.selected-track-id, lane, root.lane-pitches[lane] - 1); }
+            }
+            Button {
+                text: "+";
+                width: 20px;
+                height: 20px;
+                enabled: root.selected-region-id >= 0 && root.lane-pitches.length == 6 && root.lane-pitches[lane] < 127;
+                clicked => { StepActions.set_lane_pitch(root.selected-track-id, lane, root.lane-pitches[lane] + 1); }
+            }
+            for step in 16 : Z_StepCell {
+                accent: Math.abs(step * root.step-beats - Math.round(step * root.step-beats)) < 0.01 ? Style.brand : Style.border;
+                active: root.active-steps.length == 768 ? root.active-steps[lane * 128 + root.visible-bar * 16 + step] : false;
+                selected: root.selected-lane == lane && root.selected-step == step;
+                velocity: root.step-velocities.length == 768 ? root.step-velocities[lane * 128 + root.visible-bar * 16 + step] : 100;
+                clicked() => {
+                    root.selected-lane = lane;
+                    root.selected-step = step;
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "STEP " + (root.selected-step + 1); width: 48px; color: Style.text-secondary; vertical-alignment: center; }
+            Button {
+                text: root.active-steps.length == 768 && root.active-steps[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step] ? "REMOVE STEP" : "ADD STEP";
+                enabled: root.selected-track-id >= 0 && root.selected-region-id >= 0 && (root.selected-track-type == "Midi" || root.selected-track-type == "MIDI" || root.selected-track-type == "Instrument") && ((root.visible-bar * 16 + root.selected-step) * root.step-beats + 0.015625 <= root.selected-region-length-beats);
+                clicked => {
+                    let active = root.active-steps.length == 768 && root.active-steps[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step];
+                    StepActions.step_toggled(root.selected-track-id, root.selected-lane, root.visible-bar * 16 + root.selected-step, !active);
+                }
+            }
+            Text { text: "VELOCITY"; color: Style.text; vertical-alignment: center; }
+            Slider {
+                horizontal-stretch: 1;
+                minimum: 1;
+                maximum: 127;
+                step: 1;
+                enabled: root.selected-region-id >= 0 && root.active-steps.length == 768 && root.active-steps[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step];
+                value: (root.step-velocities.length == 768 ? root.step-velocities[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step] : 100) * 1.0;
+                changed(v) => { StepActions.set_velocity(root.selected-track-id, root.selected-lane, root.visible-bar * 16 + root.selected-step, v); }
+                released(v) => { MidiActions.commit_note_edit(root.selected-track-id); }
+            }
+            Text { text: root.step-velocities.length == 768 ? root.step-velocities[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step] : "—"; width: 30px; color: Style.brand; vertical-alignment: center; }
+            Text { text: "PROB"; color: Style.text; vertical-alignment: center; }
+            Slider {
+                horizontal-stretch: 1;
+                minimum: 0;
+                maximum: 100;
+                step: 1;
+                enabled: root.selected-region-id >= 0 && root.active-steps.length == 768 && root.active-steps[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step];
+                value: (root.step-probabilities.length == 768 ? root.step-probabilities[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step] : 100) * 1.0;
+                changed(v) => { StepActions.set_probability(root.selected-track-id, root.selected-lane, root.visible-bar * 16 + root.selected-step, v); }
+                released(v) => { MidiActions.commit_note_edit(root.selected-track-id); }
+            }
+            Text { text: root.step-probabilities.length == 768 ? root.step-probabilities[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step] + "%" : "—"; width: 34px; color: Style.brand; vertical-alignment: center; }
+            Text { text: "GATE"; color: Style.text; vertical-alignment: center; }
+            Slider {
+                horizontal-stretch: 1;
+                minimum: root.minimum-gate-percent;
+                maximum: 400;
+                step: 1;
+                enabled: root.selected-region-id >= 0 && root.active-steps.length == 768 && root.active-steps[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step];
+                value: (root.step-gates.length == 768 ? root.step-gates[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step] : 80) * 1.0;
+                changed(v) => { StepActions.set_gate_percent(root.selected-track-id, root.selected-lane, root.visible-bar * 16 + root.selected-step, v); }
+                released(v) => { MidiActions.commit_note_edit(root.selected-track-id); }
+            }
+            Text { text: root.step-gates.length == 768 ? root.step-gates[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step] + "%" : "—"; width: 34px; color: Style.brand; vertical-alignment: center; }
+            Button {
+                text: "APPLY";
+                enabled: root.selected-region-id >= 0 && root.active-steps.length == 768 && root.active-steps[root.selected-lane * 128 + root.visible-bar * 16 + root.selected-step];
+                clicked => { MidiActions.commit_note_edit(root.selected-track-id); }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        Text { text: "Select a cell, add or remove its note, then set velocity and playback probability. Slider release applies the edit; APPLY also commits keyboard changes."; font-size: 9px; color: Style.text-muted; }
+    }
+}
+
+export component Z_GlobalTracksPage inherits Rectangle {
+    in property <float> bpm: 120.0;
+    in property <float> playhead-beat: 0.0;
+    in property <float> zoom-level: 1.0;
+    in property <[float]> tempo-event-beats: [];
+    in property <[float]> tempo-event-bpms: [];
+    in property <[Z_Marker]> markers: [];
+    in property <string> time-signature: "4/4";
+    in property <bool> cycle-active: false;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 12px; spacing: 8px;
+        HorizontalLayout {
+            Text { text: "Global Tracks"; font-size: 15px; font-weight: 700; color: Style.text; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "TEMPO · METER · MARKERS · CYCLE"; font-size: 9px; color: Style.text-dim; vertical-alignment: center; }
+            Z_IconButton { icon: root.cycle-active ? "CYCLE ON" : "CYCLE OFF"; active: root.cycle-active; active-col: Style.cycle; clicked => { TransportActions.set_loop_enabled(!root.cycle-active); } }
+        }
+        Z_GlobalTempoEditor {
+            set-base-tempo(bpm) => { TransportActions.set_bpm(bpm); }
+            set-time-signature(beat, numerator, denominator) => { TransportActions.set_time_signature_event(beat, numerator, denominator); }
+            tap-tempo => { TransportActions.tap_tempo(); }
+            set-tempo-event(beat, bpm, ramp) => { TransportActions.set_tempo_event(beat, bpm, ramp); }
+            remove-tempo-event(beat) => { TransportActions.remove_tempo_event(beat); }
+            move-tempo-event(from, to) => { TransportActions.move_tempo_event(from, to); }
+            bpm: root.bpm;
+            time_sig: root.time-signature == "3/4" ? 1 : (root.time-signature == "6/8" ? 2 : (root.time-signature == "7/8" ? 3 : 0));
+            event_beat: root.playhead-beat;
+            tempo_event_beats: root.tempo-event-beats;
+            tempo_event_bpms: root.tempo-event-bpms;
+        }
+        HorizontalLayout {
+            Text { text: "MARKERS · " + root.markers.length; font-size: 9px; color: Style.text-dim; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "Click the timeline to add a marker."; font-size: 9px; color: Style.text-muted; vertical-alignment: center; }
+        }
+        Z_GlobalMarkers { markers: root.markers; z_lvl: root.zoom-level; ph: root.playhead-beat; }
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+export component Z_FlexPitchPage inherits Rectangle {
+    in property <int> selected-clip-id: -1;
+    in property <bool> selected-clip-editable: false;
+    in property <string> selected-clip-name: "";
+    in property <float> warp-ratio: 1.0;
+    in property <bool> pitch-preserve-warp: false;
+    in property <float> pitch-semitones: 0.0;
+    in property <float> region-gain: 1.0;
+    in property <int> sync-group-id: 0;
+    in-out property <string> sync-group-text: "0";
+    in-out property <float> quantize-strength: 1.0;
+    in-out property <int> quantize-grid-index: 2;
+    in-out property <float> quantize-swing: 0.0;
+    callback changed(int, float);
+    callback pitch-preserve-changed(bool);
+    callback sync-group-changed(string);
+    callback quantize-requested(int, float, int, float);
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 18px; spacing: 12px;
+        Text { text: "Flex & Pitch"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: root.selected-clip-editable ? "Selected audio region: " + root.selected-clip-name : (root.selected-clip-id >= 0 ? "Flex & Pitch edits are available on Audio and Vocal regions." : "Select an audio region in Arrange to edit timing, pitch or region gain."); font-size: 10px; color: Style.text-dim; }
+        Rectangle { height: 1px; background: Style.border; }
+        CheckBox {
+            text: "Preserve pitch while changing playback speed (WSOLA)";
+            checked: root.pitch-preserve-warp;
+            enabled: root.selected-clip-editable;
+            toggled => { root.pitch-preserve-changed(self.checked); }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "SYNC GROUP"; width: 92px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Text { text: root.sync-group-id == 0 ? "UNLINKED" : "GROUP " + root.sync-group-id; width: 92px; font-size: 9px; color: root.sync-group-id == 0 ? Style.text-muted : Style.brand; vertical-alignment: center; }
+            LineEdit { text <=> root.sync-group-text; placeholder-text: "0 = unlink"; enabled: root.selected-clip-id >= 0; horizontal-stretch: 1; }
+            Button { text: "APPLY"; enabled: root.selected-clip-id >= 0; clicked => { root.sync-group-changed(root.sync-group-text); } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "GROUP QUANTIZE"; width: 92px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Slider { horizontal-stretch: 1; minimum: 0.0; maximum: 1.0; step: 0.05; value: root.quantize-strength; enabled: root.selected-clip-editable; released(v) => { root.quantize-strength = v; } }
+            Text { text: Math.round(root.quantize-strength * 100.0) + "%"; width: 34px; font-size: 9px; color: Style.brand; }
+            ComboBox { model: ["1/4", "1/8", "1/16", "1/32", "1/64", "1/4T", "1/8T", "1/16T", "1/32T", "1/4D", "1/8D", "1/16D", "1/32D"]; current-index <=> root.quantize-grid-index; enabled: root.selected-clip-editable; }
+            Button { text: "QUANTIZE"; enabled: root.selected-clip-editable; clicked => { root.quantize-requested(root.selected-clip-id, root.quantize-strength, root.quantize-grid-index, root.quantize-swing); } }
+        }
+        HorizontalLayout {
+            Text { text: "SWING"; width: 92px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Slider { horizontal-stretch: 1; minimum: -1.0; maximum: 1.0; step: 0.05; value: root.quantize-swing; enabled: root.selected-clip-editable; released(v) => { root.quantize-swing = v; } }
+            Text { text: (root.quantize-swing > 0.0 ? "+" : "") + Math.round(root.quantize-swing * 100.0) + "%"; width: 40px; font-size: 9px; color: Style.brand; }
+        }
+        Text { text: root.sync-group-id > 0 ? "Uses the project tempo map and one shared transient map for this audio sync group. Undoable." : "Uses the project tempo map on this region. Assign a sync group to keep multi-mic timing linked."; font-size: 8px; color: Style.text-muted; }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                horizontal-stretch: 1; height: 112px; background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout {
+                    padding: 10px; spacing: 7px;
+                    HorizontalLayout {
+                        Text { text: "PLAYBACK SPEED"; font-size: 9px; color: Style.text; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: Math.round(root.warp-ratio * 100.0) / 100.0 + "x"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
+                    }
+                    Slider { vertical-stretch: 1; minimum: 0.5; maximum: 2.0; step: 0.01; value: root.warp-ratio; enabled: root.selected-clip-editable; released(v) => { root.changed(0, v); } }
+                    Text { text: root.pitch-preserve-warp ? "Clip length changes · pitch-preserving WSOLA" : "Clip length changes · pitch follows speed"; font-size: 8px; color: Style.text-muted; }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1; height: 112px; background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout {
+                    padding: 10px; spacing: 7px;
+                    HorizontalLayout {
+                        Text { text: "PITCH"; font-size: 9px; color: Style.text; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: (root.pitch-semitones > 0.0 ? "+" : "") + Math.round(root.pitch-semitones * 10.0) / 10.0 + " st"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
+                    }
+                    Slider { vertical-stretch: 1; minimum: -24.0; maximum: 24.0; step: 0.1; value: root.pitch-semitones; enabled: root.selected-clip-editable; released(v) => { root.changed(1, v); } }
+                    Text { text: "−24 – +24 semitones"; font-size: 8px; color: Style.text-muted; }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1; height: 112px; background: Style.panel; border-width: 1px; border-color: Style.border;
+                VerticalLayout {
+                    padding: 10px; spacing: 7px;
+                    HorizontalLayout {
+                        Text { text: "REGION GAIN"; font-size: 9px; color: Style.text; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: Math.round(root.region-gain * 100.0) / 100.0 + "x"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
+                    }
+                    Slider { vertical-stretch: 1; minimum: 0.0; maximum: 2.0; step: 0.01; value: root.region-gain; enabled: root.selected-clip-editable; released(v) => { root.changed(2, v); } }
+                    Text { text: "0.00x – 2.00x"; font-size: 8px; color: Style.text-muted; }
+                }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        Text { text: "Edits use the selected region's saved values and enter the project Undo history."; font-size: 9px; color: Style.text-muted; }
+    }
+}
+
+export component Z_TrackStackPage inherits Rectangle {
+    in property <int> selected-track-id: -1;
+    background: Style.surface; border-width: 1px; border-color: Style.border;
+    VerticalLayout {
+        padding: 18px; spacing: 12px;
+        Text { text: "Track Stacks"; font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: "Group selected tracks into one reusable mix control surface"; font-size: 10px; color: Style.text-dim; }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "Create from selected"; enabled: root.selected-track-id >= 0; clicked => { StackActions.create_from_selected(root.selected-track-id); } }
+            Button { text: "Add selected"; enabled: root.selected-track-id >= 0; clicked => { StackActions.add_selected(root.selected-track-id); } }
+            Button { text: "Delete stack"; clicked => { StackActions.delete_stack(); } }
+            Button { text: "Collapse"; clicked => { StackActions.collapsed_changed(true); } }
+            Button { text: "Expand"; clicked => { StackActions.collapsed_changed(false); } }
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        HorizontalLayout {
+            Text { text: "Stack level"; width: 90px; color: Style.text; vertical-alignment: center; }
+            Slider { horizontal-stretch: 1; value: 1.0; changed(v) => { StackActions.gain_changed(v * 2.0); } }
+        }
+        Text { text: "Changes are persisted with the project and available to CLI transactions."; font-size: 9px; color: Style.text-muted; }
+        Rectangle { vertical-stretch: 1; }
+    }
+}

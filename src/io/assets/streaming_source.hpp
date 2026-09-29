@@ -11,9 +11,9 @@
 
 #include "../../core/audio_region.hpp"
 
-namespace Aura::Core::Assets {
+namespace Hirari::Core::Assets {
 
-class StreamingSource : public ::Aura::Core::IAudioSource {
+class StreamingSource : public ::Hirari::Core::IAudioSource {
 public:
     float getSample(uint32_t channel, uint64_t sampleIdx) const override {
         if (channel >= m_numChannels || sampleIdx >= m_totalSamples) return 0.0f;
@@ -211,4 +211,4 @@ private:
     bool m_truncatedTail = false;
 };
 
-} // namespace Aura::Core::Assets
+} // namespace Hirari::Core::Assets

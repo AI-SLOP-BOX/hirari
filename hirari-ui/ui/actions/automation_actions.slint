@@ -1,0 +1,10 @@
+// Automation lane and point editing contract.
+export global AutomationActions {
+    callback toggle_automation(int);
+    callback automation_edit_started(int, int);
+    callback automation_point_moved(int, int, int, float, float, float);
+    callback add_automation_point(int, int, float, float);
+    callback automation_edit_finished(int, int);
+    callback clear_automation_lane(int, int);
+    callback toggle_auto_rw(int);
+}

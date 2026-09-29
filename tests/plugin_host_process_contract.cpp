@@ -12,11 +12,11 @@
 #endif
 
 int main() {
-    using namespace Aura::Core::Plugins;
+    using namespace Hirari::Core::Plugins;
 
-    Aura::Core::AudioBuffer buffer(2, 16);
-    Aura::Core::MidiBuffer midi;
-    Aura::DSP::ProcessContext context{};
+    Hirari::Core::AudioBuffer buffer(2, 16);
+    Hirari::Core::MidiBuffer midi;
+    Hirari::DSP::ProcessContext context{};
 
     ExternalPluginProcessor external({"test", "test", PluginFormat::Internal, "internal"});
     assert(external.load());
@@ -27,7 +27,7 @@ int main() {
     assert(!external.processFailed());
 
     std::string factoryError;
-    auto gain = PluginFactory::create({"Gain", "Aura", PluginFormat::Internal, "builtin://gain"},
+    auto gain = PluginFactory::create({"Gain", "Hirari", PluginFormat::Internal, "builtin://gain"},
                                       &factoryError);
     assert(gain && factoryError.empty());
     gain->prepareToPlay(48000.0, 16);
@@ -35,7 +35,7 @@ int main() {
     buffer.getWritePointer(0)[0] = 0.25f;
     gain->process(buffer, midi, context);
     assert(std::abs(buffer.getReadPointer(0)[0] - 0.5f) < 1.0e-6f);
-    assert(!PluginFactory::create({"Missing", "Aura", PluginFormat::Internal, "builtin://missing"},
+    assert(!PluginFactory::create({"Missing", "Hirari", PluginFormat::Internal, "builtin://missing"},
                                   &factoryError));
     auto& infrastructure = PluginHostInfrastructure::getInstance();
     assert(infrastructure.registerInternal("Gain", "test-builtin-gain"));

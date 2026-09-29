@@ -4,7 +4,7 @@
 #include "track.hpp"
 #include "marker_system.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class RippleEditingEngine
@@ -32,4 +32,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

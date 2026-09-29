@@ -3,7 +3,7 @@
 #include "audio_drivers.hpp"
 #include "drivers/audio_driver_factory.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
     // Deprecated: Use IAudioDriver 
     using IAudioInterface = IAudioDriver;
     using DummyHardware = DummyAudioDriver;
@@ -36,7 +36,7 @@ namespace Aura::IO {
 
         void stop() override { if (m_driver) m_driver->stop(); }
         std::string getDeviceName() const override {
-            return m_driver ? m_driver->getDriverName() : "Aura audio driver unavailable";
+            return m_driver ? m_driver->getDriverName() : "Hirari audio driver unavailable";
         }
         State state() const override {
             if (!m_driver) return State::Failed;
@@ -60,4 +60,4 @@ namespace Aura::IO {
     public:
         static std::unique_ptr<IAudioInterface> createDefault();
     };
-} // namespace Aura::IO
+} // namespace Hirari::IO

@@ -7,7 +7,7 @@
 #include <mutex>
 #include "lock_free.hpp"
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @class DeferredDeleter
@@ -75,4 +75,4 @@ private:
     std::mutex m_waitMutex;
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

@@ -4,7 +4,7 @@
 #include <vector>
 #include "concurrency/lock_free.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class BufferPool
@@ -83,4 +83,4 @@ private:
     Concurrency::SPSCQueue<uint32_t, kMaxBuffers> m_availableIndices;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief DrumIsolator: Specialized Transient Separator for rhythmic extraction.
@@ -47,4 +47,4 @@ private:
     float m_releaseCoeff = 0.001f;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

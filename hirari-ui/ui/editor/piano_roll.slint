@@ -1,0 +1,284 @@
+import { Style } from "../style.slint";
+import { ScrollView } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
+import { Z_IconButton } from "../primitives/icon_button.slint";
+import { ZNote } from "../model/midi_model.slint";
+import { CommandActions } from "../actions/command_actions.slint";
+
+export component Z_PianoRoll {
+    // Keep gesture origins on the component rather than on repeated note
+    // delegates: replacing the notes model during a drag recreates delegates.
+    property <int> drag-start-pitch: 0;
+    property <float> drag-start-beat: 0.0;
+    property <float> drag-start-length: 1.0;
+    property <float> drag-applied-beats: 0.0;
+    property <float> drag-applied-pitches: 0.0;
+    property <float> drag-applied-resize: 0.0;
+    callback project-changed();
+    callback quantize();
+    callback ramp-velocities();
+    callback insert-chord(int, float, int, float, int);
+    callback insert-progression(int, float, int, float, int);
+    callback delete-all();
+    callback add-note(int, float, float, int);
+    callback select-note(int, float, int);
+    callback move-note(int, float, float, int, int);
+    callback resize-note(int, float, float, int);
+    callback note-edit-finished() -> bool;
+    callback set-velocity(int, int, float);
+    callback set-articulation(int, int);
+    callback set-articulation-map(int, int);
+    callback set-articulation-name(int, string);
+    callback set-articulation-output(int, int, int, int, int);
+    callback import-expression-map-pro() -> bool;
+    callback set-lyric(int, float, string);
+    in property <int> trk_id;
+    in property <int> track-number;
+    in property <float> ui_timer;
+    in property <float> zoom_lvl: 1.0;
+    in property <[ZNote]> notes;
+    in property <[int]> articulation-switches: [];
+    in property <[string]> articulation-names: [];
+    in property <[int]> articulation-switch-channels: [];
+    in property <[int]> articulation-output-kinds: [];
+    in property <[int]> articulation-output-a: [];
+    in property <[int]> articulation-output-b: [];
+    in-out property <int> map-articulation-id: 1;
+    in-out property <[float]> cc1: [];
+    in-out property <[float]> cc11: [];
+    in-out property <[float]> cc64: [];
+    in property <float> ph;
+    in property <image> gpu-piano-image;
+    in property <int> active_tool;
+    // Switches the keyboard lane into a General MIDI drum-lane view.
+    in-out property <bool> drum-mode: false;
+    in property <float> snap_division: 16.0;
+    in-out property <int> chord-root: 60;
+    in-out property <int> chord-quality: 0;
+    in-out property <float> chord-length: 4.0;
+    in-out property <int> chord-inversion: 0;
+    in-out property <int> progression-preset: 0;
+
+    Rectangle {
+        background: Style.surface;
+        VerticalLayout {
+            Rectangle {
+                height: 54px; background: Style.surface-1;
+                VerticalLayout {
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 10px; spacing: 8px;
+                        Text { text: (drum-mode ? "Drum Editor" : "Piano Roll") + " · Track " + (track-number + 1); font-size: Style.font-xxs; color: Style.text-secondary; horizontal-stretch: 1; vertical-alignment: center; }
+                    Z_IconButton { icon: drum-mode ? "PIANO" : "DRUM"; clicked => { drum-mode = !drum-mode; } }
+                    Z_IconButton { icon: "Q"; clicked => { quantize(); project-changed(); } }
+                    Z_IconButton { icon: "RAMP"; clicked => { ramp-velocities(); project-changed(); } }
+                    Z_IconButton { icon: "ROOT-"; clicked => { chord-root = (chord-root - 1).max(0); } }
+                    Z_IconButton { icon: "ROOT+"; clicked => { chord-root = (chord-root + 1).min(127); } }
+                    Z_IconButton { icon: chord-quality == 0 ? "MAJ" : (chord-quality == 1 ? "MIN" : (chord-quality == 2 ? "7TH" : "SUS")); clicked => { chord-quality = Math.mod(chord-quality + 1, 4); } }
+                    Z_IconButton { icon: "LEN"; clicked => { chord-length = chord-length == 1.0 ? 2.0 : (chord-length == 2.0 ? 4.0 : 1.0); } }
+                    Z_IconButton { icon: "INV" + chord-inversion; clicked => { chord-inversion = Math.mod(chord-inversion + 1, 3); } }
+                    Z_IconButton { icon: "CHORD"; clicked => { insert-chord(chord-root, ph, chord-quality, chord-length, chord-inversion); project-changed(); } }
+                    Z_IconButton { icon: "P" + (progression-preset + 1); clicked => { progression-preset = Math.mod(progression-preset + 1, 3); } }
+                    Z_IconButton { icon: "PROG"; clicked => { insert-progression(chord-root, ph, progression-preset, chord-length, chord-inversion); project-changed(); } }
+                    Z_IconButton { icon: "PIANO VIDEO"; compact: true; button-width: 96px; clicked => { CommandActions.palette_exec("PIANO VISUALIZER"); } }
+                    Z_IconButton { icon: "DEL"; clicked => { delete-all(); project-changed(); } }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 10px; spacing: 6px;
+                        Text { text: "ARTICULATION"; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center; }
+                    Z_IconButton { icon: "LOAD MAP"; button-width: 76px; compact: true; clicked => { if (import-expression-map-pro()) { project-changed(); } } }
+                    Z_IconButton { icon: "MAP" + map-articulation-id; clicked => { map-articulation-id = map-articulation-id >= 255 ? 1 : map-articulation-id + 1; } }
+                    LineEdit { text: articulation-names.length > map-articulation-id ? articulation-names[map-articulation-id] : ""; placeholder-text: "Articulation name"; width: 140px; edited => { set-articulation-name(map-articulation-id, self.text); project-changed(); } }
+                    Z_IconButton { icon: (articulation-switches.length > map-articulation-id && articulation-switches[map-articulation-id] >= 0 ? "KS " + articulation-switches[map-articulation-id] : "KS OFF"); clicked => { let pitch = articulation-switches.length > map-articulation-id ? articulation-switches[map-articulation-id] : -1; set-articulation-map(map-articulation-id, pitch < 0 ? 60 : Math.max(0, pitch - 1)); project-changed(); } }
+                    Z_IconButton { icon: "KS+"; clicked => { let pitch = articulation-switches.length > map-articulation-id ? articulation-switches[map-articulation-id] : -1; set-articulation-map(map-articulation-id, pitch < 0 ? 60 : Math.min(127, pitch + 1)); project-changed(); } }
+                    Z_IconButton { icon: "KSCLR"; clicked => { set-articulation-map(map-articulation-id, -1); project-changed(); } }
+                        Z_IconButton {
+                            icon: ((articulation-output-kinds.length > map-articulation-id && articulation-output-kinds[map-articulation-id] >= 6) ?
+                                (articulation-output-kinds[map-articulation-id] == 6 ? "OFF:PC" : (articulation-output-kinds[map-articulation-id] == 7 ? "OFF:CC" : (articulation-output-kinds[map-articulation-id] == 8 ? "OFF:PRESS" : "OFF:BEND"))) :
+                                ((articulation-output-kinds.length <= map-articulation-id || articulation-output-kinds[map-articulation-id] == 0 || articulation-output-kinds[map-articulation-id] == 1) ? "ON:PC" : (articulation-output-kinds[map-articulation-id] == 2 ? "ON:CC" : (articulation-output-kinds[map-articulation-id] == 3 ? "ON:PRESS" : "ON:BEND"))));
+                            clicked => {
+                                let current = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 0;
+                                let off_phase = current >= 6;
+                                let base = off_phase ? current - 5 : current;
+                                let next_base = base >= 4 ? 1 : base + 1;
+                                let next = next_base + (off_phase ? 5 : 0);
+                                let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0;
+                                let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0;
+                                let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0;
+                                set-articulation-output(map-articulation-id, next, a, b, channel);
+                                project-changed();
+                            }
+                        }
+                        Z_IconButton {
+                            icon: (articulation-output-kinds.length > map-articulation-id && articulation-output-kinds[map-articulation-id] >= 6) ? "NOTE OFF" : "NOTE ON";
+                            clicked => {
+                                let current = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 0;
+                                let next = current == 0 ? 6 : (current >= 6 ? current - 5 : current + 5);
+                                let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0;
+                                let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0;
+                                let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0;
+                                set-articulation-output(map-articulation-id, next, a, b, channel);
+                                project-changed();
+                            }
+                        }
+                        Text { text: "A " + (articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0) + "  B " + (articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0) + "  CH " + ((articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0) + 1); font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
+                        Z_IconButton { icon: "A-"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 1; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind == 0 ? 1 : kind, Math.max(0, a - 1), b, channel); project-changed(); } }
+                        Z_IconButton { icon: "A+"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 1; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind == 0 ? 1 : kind, Math.min(127, a + 1), b, channel); project-changed(); } }
+                        Z_IconButton { icon: "B-"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 1; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind == 0 ? 1 : kind, a, Math.max(kind == 1 ? -1 : 0, b - 1), channel); project-changed(); } }
+                        Z_IconButton { icon: "B+"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 1; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind == 0 ? 1 : kind, a, Math.min(127, b + 1), channel); project-changed(); } }
+                        Z_IconButton { icon: "CH-"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 0; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind, a, b, Math.max(0, channel - 1)); project-changed(); } }
+                        Z_IconButton { icon: "CH+"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 0; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind, a, b, Math.min(15, channel + 1)); project-changed(); } }
+                        Z_IconButton { icon: "OUT CLR"; clicked => { let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, 5, 0, 0, channel); project-changed(); } }
+                    }
+                }
+            }
+            HorizontalLayout {
+                Rectangle {
+                    width: 44px; height: 84 * 14px; clip: true;
+                    for key in 84 : Rectangle {
+                        y: key * 14px - grid.viewport-y; width: 44px; height: 14px;
+                        visible: self.y + self.height > 0px && self.y < parent.height;
+                        background: (Math.mod(key, 12) == 1 || Math.mod(key, 12) == 3 || Math.mod(key, 12) == 6 || Math.mod(key, 12) == 8 || Math.mod(key, 12) == 10) ? Style.surface-0 : Style.surface-3;
+                        border-width: 0.5px; border-color: Style.line-subtle;
+                        if (drum-mode) : Text {
+                            text: (83 - key == 36 ? "Kick" : (83 - key == 38 ? "Snare" : (83 - key == 42 ? "Closed HH" : (83 - key == 46 ? "Open HH" : (83 - key == 49 ? "Crash" : (83 - key == 51 ? "Ride" : ""))))));
+                            font-size: Style.font-xxs; color: Style.text-tertiary; x: 2px; vertical-alignment: center;
+                        }
+                        if (!drum-mode && Math.mod(key, 12) == 0) : Text { text: "C" + Math.floor((83 - key) / 12); font-size: Style.font-xxs; color: Style.text-tertiary; x: 2px; vertical-alignment: center; }
+                    }
+                }
+                grid := ScrollView {
+                    viewport-width: 128.0 * Style.grid-step * zoom_lvl;
+                    viewport-height: 84 * 14px;
+                    Rectangle {
+                        background: Style.surface;
+                        if (gpu-piano-image.width > 0) : Image {
+                            source: gpu-piano-image; x: 0; y: 0; width: parent.width; height: parent.height;
+                            image-fit: fill; opacity: 0.24;
+                        }
+                        TouchArea { clicked => {
+                            let beat = self.mouse_x / (Style.grid-step / 1px * zoom_lvl * 1px);
+                            let snap = 4.0 / snap_division.max(1.0);
+                            add-note(83 - Math.floor(self.mouse_y / 14px), (beat / snap).round() * snap, 1.0, 100);
+                            project-changed();
+                        } }
+                        for bar in 128 : Rectangle {
+                            x: bar * Style.grid-step * zoom_lvl; width: 1px; height: 100%;
+                            visible: self.x + self.width > grid.viewport-x && self.x < grid.viewport-x + grid.width;
+                            background: Math.mod(bar, 4) == 0 ? Style.line-strong : Style.grid-subbeat;
+                        }
+                        for row in 84 : Rectangle {
+                            y: row * 14px; width: 100%; height: 1px;
+                            background: Math.mod(83 - row, 12) == 0 ? Style.line-strong : Style.grid-subbeat;
+                        }
+                        for note[note_index] in notes : Rectangle {
+                            x: note.start_beat * Style.grid-step * zoom_lvl;
+                            y: (83 - note.pitch) * 14px + 1px;
+                            width: (note.length_beats * Style.grid-step * zoom_lvl).max(4px); height: 12px;
+                            background: note.selected ? Style.text-primary : Style.brand.with-alpha(0.45 + note.velocity / 127.0 * 0.55);
+                            border-width: note.selected ? 2px : 1px; border-color: note.selected ? Style.text-primary : Style.brand; border-radius: 1px;
+                            LineEdit {
+                                text: note.lyric;
+                                placeholder-text: "lyric";
+                                edited => { set-lyric(note.pitch, note.start_beat, self.text); }
+                                font-size: 9px;
+                                x: 2px;
+                                y: 0px;
+                            }
+                            TouchArea {
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                        root.drag-start-pitch = note.pitch;
+                                        root.drag-start-beat = note.start_beat;
+                                        root.drag-start-length = note.length_beats;
+                                        root.drag-applied-beats = 0.0;
+                                        root.drag-applied-pitches = 0.0;
+                                    } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                                        if (note-edit-finished()) { root.project-changed(); }
+                                    } else if (event.kind == PointerEventKind.cancel) {
+                                        if (note-edit-finished()) { root.project-changed(); }
+                                    }
+                                }
+                                clicked => { select-note(note.pitch, note.start_beat, note_index); }
+                                moved => {
+                                    if (self.pressed) {
+                                        let beat_delta = ((self.mouse_x - self.pressed_x) / (Style.grid-step / 1px * zoom_lvl * 1px) + root.drag-applied-beats).max(-root.drag-start-beat);
+                                        let pitch_delta = Math.floor((self.pressed_y - self.mouse_y) / 14px + root.drag-applied-pitches).max(-root.drag-start-pitch).min(127 - root.drag-start-pitch);
+                                        root.drag-applied-beats = beat_delta;
+                                        root.drag-applied-pitches = pitch_delta;
+                                        move-note(root.drag-start-pitch, root.drag-start-beat,
+                                            beat_delta, pitch_delta, note_index);
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                x: parent.width - 5px; width: 5px; height: parent.height;
+                                background: note.selected ? Style.text-primary : Style.brand;
+                                TouchArea {
+                                    pointer-event(event) => {
+                                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                            root.drag-start-pitch = note.pitch;
+                                            root.drag-start-beat = note.start_beat;
+                                            root.drag-start-length = note.length_beats;
+                                            root.drag-applied-resize = 0.0;
+                                        } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                                            if (note-edit-finished()) { root.project-changed(); }
+                                        } else if (event.kind == PointerEventKind.cancel) {
+                                            if (note-edit-finished()) { root.project-changed(); }
+                                        }
+                                    }
+                                    moved => {
+                                        if (self.pressed) {
+                                            let resize_delta = (self.mouse_x - self.pressed_x) / (Style.grid-step / 1px * zoom_lvl * 1px) + root.drag-applied-resize;
+                                            let snap = 4.0 / snap_division.max(1.0);
+                                            let next_length = (((root.drag-start-length + resize_delta) / snap).round() * snap).max(0.0625);
+                                            root.drag-applied-resize = next_length - root.drag-start-length;
+                                            resize-note(root.drag-start-pitch, root.drag-start-beat, next_length, note_index);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { x: ph * Style.grid-step * zoom_lvl; width: 1px; height: 100%; background: Style.ok; opacity: 0.6; }
+                    }
+                }
+            }
+            Rectangle {
+                height: 64px; background: Style.surface-1; border-width: 1px; border-color: Style.line-subtle;
+                Text { text: "Velocity"; x: 4px; y: 4px; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                Rectangle {
+                    x: 44px; clip: true; width: parent.width - 44px;
+                    for note_index[idx] in notes : Rectangle {
+                        x: note_index.start_beat * Style.grid-step * zoom_lvl - grid.viewport-x; width: 5px; height: 54px; y: 8px;
+                        VerticalLayout { alignment: end; Rectangle { height: note_index.velocity / 127.0 * 44px; width: 3px; background: note_index.selected ? Style.ok : Style.brand; } }
+                        TouchArea {
+                            pointer-event(event) => {
+                                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                                    if (note-edit-finished()) { root.project-changed(); }
+                                } else if (event.kind == PointerEventKind.cancel) {
+                                    if (note-edit-finished()) { root.project-changed(); }
+                                }
+                            }
+                            moved => { if (self.pressed) { set-velocity(trk_id, idx, Math.floor(((54.0 - self.mouse_y / 1px) / 44.0) * 127.0)); } }
+                        }
+                    }
+                }
+            }
+            Rectangle {
+                height: 26px; background: Style.surface-1; border-width: 1px; border-color: Style.line-subtle;
+                Text { text: "ART ID"; x: 4px; y: 2px; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                Rectangle {
+                    x: 88px; clip: true; width: parent.width - 88px; height: parent.height;
+                    for note_index[idx] in notes : Rectangle {
+                        x: note_index.start_beat * Style.grid-step * zoom_lvl - grid.viewport-x;
+                        width: (note_index.length_beats * Style.grid-step * zoom_lvl).max(16px);
+                        height: 20px; y: 3px;
+                        background: note_index.selected ? Style.ok : Style.brand.with-alpha(0.55);
+                        border-radius: 2px;
+                        Text { text: "A" + note_index.articulation; x: 3px; font-size: 9px; color: Style.text-primary; vertical-alignment: center; }
+                        TouchArea { mouse-cursor: pointer; clicked => { set-articulation(idx, Math.mod(note_index.articulation + 1, 256)); } }
+                    }
+                }
+            }
+        }
+    }
+}

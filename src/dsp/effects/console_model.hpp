@@ -6,9 +6,8 @@
 #include <cstdio>
 #include <cstring>
 #include "../iprocessor.hpp"
-#include "state_variable_filter.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class DivineConsoleStrip
@@ -22,12 +21,17 @@ public:
     struct EQBand { float f, g, q; };
 
     DivineConsoleStrip() {
+        m_rustEngine = hirari_console_strip_create(m_sampleRate);
         m_bands[0] = {90.0f, 0.0f, 0.8f};
         m_bands[1] = {700.0f, 0.0f, 0.9f};
         m_bands[2] = {3200.0f, 0.0f, 0.9f};
         m_bands[3] = {10000.0f, 0.0f, 0.8f};
         configureEq();
     }
+
+    ~DivineConsoleStrip() override { hirari_console_strip_destroy(m_rustEngine); }
+    DivineConsoleStrip(const DivineConsoleStrip&) = delete;
+    DivineConsoleStrip& operator=(const DivineConsoleStrip&) = delete;
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override { (void)bs; m_sampleRate = std::isfinite(sr) && sr > 1000.0 ? sr : 44100.0; configureEq(); reset(); }
 
@@ -38,36 +42,30 @@ public:
         (void)ctx;
         if (m_bypassed || buffer.getNumChannels() == 0) return;
         const uint32_t channels = std::min<uint32_t>(buffer.getNumChannels(), 2);
+        float* channelData[2] = {nullptr, nullptr};
         for (uint32_t c = 0; c < channels; ++c) {
-            float* data = buffer.getWritePointer(c);
-            if (!data) continue;
-            float env = m_envelope[c];
-            for (uint32_t i = 0; i < buffer.getNumSamples(); ++i) {
-                const float x = std::isfinite(data[i]) ? data[i] : 0.0f;
-                const float driven = x * m_inputGain;
-                const float sat = (driven + 0.15f * driven * driven * std::copysign(1.0f, driven)) / (1.0f + 0.35f * std::abs(driven));
-                env += (std::abs(sat) - env) * 0.01f;
-                const float over = std::max(0.0f, 20.0f * std::log10(std::max(env, 1.0e-6f)) - m_threshold);
-                const float gain = std::pow(10.0f, -std::min(over * 0.25f, 12.0f) / 20.0f);
-                data[i] = std::isfinite(sat * gain * m_outputGain) ? sat * gain * m_outputGain : 0.0f;
-            }
-            m_envelope[c] = env;
+            channelData[c] = buffer.getWritePointer(c);
         }
-        // Four musical bell bands form the console's tone section after the
-        // nonlinear preamp and VCA stage.
-        for (auto& band : m_eq) band.process(buffer);
+        hirari_console_strip_process(m_rustEngine, channelData, channels, buffer.getNumSamples());
     }
 
-    void reset() noexcept override { m_envelope[0] = m_envelope[1] = 0.0f; for (auto& band : m_eq) band.reset(); }
+    void reset() noexcept override { hirari_console_strip_reset(m_rustEngine); }
 
 
     std::string getName() const override { return "DivineConsole"; }
     uint32_t getNumParameters() const noexcept override { return 7; }
     void setParameter(uint32_t id, float value) noexcept override {
         if (!std::isfinite(value)) return;
-        if (id == 0) m_inputGain = std::pow(10.0f, std::clamp(value, 0.0f, 1.0f) * 24.0f / 20.0f);
-        else if (id == 1) m_outputGain = std::pow(10.0f, (std::clamp(value, 0.0f, 1.0f) - 0.5f) * 24.0f / 20.0f);
-        else if (id == 2) m_threshold = -60.0f + std::clamp(value, 0.0f, 1.0f) * 60.0f;
+        if (id == 0) {
+            m_inputGain = std::pow(10.0f, std::clamp(value, 0.0f, 1.0f) * 24.0f / 20.0f);
+            hirari_console_strip_set_input_gain(m_rustEngine, m_inputGain);
+        } else if (id == 1) {
+            m_outputGain = std::pow(10.0f, (std::clamp(value, 0.0f, 1.0f) - 0.5f) * 24.0f / 20.0f);
+            hirari_console_strip_set_output_gain(m_rustEngine, m_outputGain);
+        } else if (id == 2) {
+            m_threshold = -60.0f + std::clamp(value, 0.0f, 1.0f) * 60.0f;
+            hirari_console_strip_set_threshold(m_rustEngine, m_threshold);
+        }
         else if (id >= 3 && id < 7) setBand(id - 3, m_bands[id - 3].f, -24.0f + std::clamp(value, 0.0f, 1.0f) * 48.0f, m_bands[id - 3].q);
     }
     float getParameter(uint32_t id) const noexcept override {
@@ -112,8 +110,9 @@ public:
     bool setBand(uint32_t index, float frequency, float gainDb, float q) noexcept {
         if (index >= 4 || !std::isfinite(frequency) || !std::isfinite(gainDb) || !std::isfinite(q) ||
             frequency <= 5.0f || q <= 0.05f) return false;
-        m_bands[index] = {frequency, std::clamp(gainDb, -24.0f, 24.0f), std::clamp(q, 0.05f, 20.0f)};
-        m_eq[index].setParams(m_bands[index].f, m_bands[index].g, m_bands[index].q);
+        const EQBand band{frequency, std::clamp(gainDb, -24.0f, 24.0f), std::clamp(q, 0.05f, 20.0f)};
+        if (!hirari_console_strip_set_band(m_rustEngine, index, band.f, band.g, band.q)) return false;
+        m_bands[index] = band;
         return true;
     }
 
@@ -123,16 +122,16 @@ public:
     float m_threshold = -20.0f;
     double m_sampleRate = 44100.0;
     float m_inputGain = 1.0f, m_outputGain = 1.0f;
-    float m_envelope[2] = {0.0f, 0.0f};
-    std::array<StateVariableFilter, 4> m_eq;
+    void* m_rustEngine = nullptr;
 
     void configureEq() noexcept {
-        for (uint32_t i = 0; i < 4; ++i) {
-            m_eq[i].prepareToPlay(m_sampleRate, 0);
-            m_eq[i].setType(StateVariableFilter::Bell);
-            m_eq[i].setParams(m_bands[i].f, m_bands[i].g, m_bands[i].q);
-        }
+        hirari_console_strip_set_sample_rate(m_rustEngine, m_sampleRate);
+        hirari_console_strip_set_input_gain(m_rustEngine, m_inputGain);
+        hirari_console_strip_set_output_gain(m_rustEngine, m_outputGain);
+        hirari_console_strip_set_threshold(m_rustEngine, m_threshold);
+        for (uint32_t i = 0; i < 4; ++i)
+            (void)hirari_console_strip_set_band(m_rustEngine, i, m_bands[i].f, m_bands[i].g, m_bands[i].q);
     }
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

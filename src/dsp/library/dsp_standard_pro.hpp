@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace Aura::DSP::Library {
+namespace Hirari::DSP::Library {
 
 /**
  * @class DSPStandardPro
@@ -120,4 +120,4 @@ public:
     // [Implementing 1000s of lines of convolution, phase-vocoder, and impulse response logic]
 };
 
-} // namespace Aura::DSP::Library
+} // namespace Hirari::DSP::Library

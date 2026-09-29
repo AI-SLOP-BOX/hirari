@@ -6,11 +6,11 @@
 #include <vector>
 
 int main() {
-    using Aura::DSP::Analysis::SpectralEditor;
+    using Hirari::DSP::Analysis::SpectralEditor;
 
     // Natural-order forward/inverse must be an identity before any editor
     // operation is trusted; this guards the permutation contract directly.
-    Aura::DSP::Analysis::FFTEngine fft(16);
+    Hirari::DSP::Analysis::FFTEngine fft(16);
     std::array<float, 16> fftInput{};
     std::array<float, 16> fftOutput{};
     std::array<std::complex<float>, 16> spectrum{};

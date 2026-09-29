@@ -1,4 +1,4 @@
-# SKILL: Aura Offline Rendering (Bounce Engine)
+# SKILL: Hirari Offline Rendering (Bounce Engine)
 
 ## 💽 Export & Bouncing Directives
 ユーザーが楽曲を最終的にWAVファイル等に書き出す「オフライン・レンダリング」の掟です。

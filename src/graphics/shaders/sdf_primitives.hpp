@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::Graphics::Shaders {
+namespace Hirari::Graphics::Shaders {
 
 /**
  * @namespace SDF
@@ -43,4 +43,4 @@ inline float aastep(float edge, float dist, float pixelWidth = 1.0f) {
 
 } // namespace SDF
 
-} // namespace Aura::Graphics::Shaders
+} // namespace Hirari::Graphics::Shaders

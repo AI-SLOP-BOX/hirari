@@ -5,7 +5,7 @@
 #include <mutex>
 #include <algorithm>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 enum class TrackType { Audio, Instrument, Bus, MIDI };
 
@@ -106,4 +106,4 @@ private:
     std::unordered_map<std::string, ProjectTemplate> m_templates;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

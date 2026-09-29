@@ -5,7 +5,7 @@
 #include <valarray>
 #include <cmath>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class SpectralAnalyzerDeep
@@ -78,4 +78,4 @@ private:
     std::vector<double> m_magnitudes;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

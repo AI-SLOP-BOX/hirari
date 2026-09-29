@@ -5,7 +5,7 @@
 #include <algorithm>
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @struct Grain
@@ -76,4 +76,4 @@ private:
     std::mt19937 m_rng{std::random_device{}()};
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

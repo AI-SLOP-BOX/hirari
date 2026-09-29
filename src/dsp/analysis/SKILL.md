@@ -1,4 +1,4 @@
-# 📊 SKILL: Aura DSP Analysis (Professional Monitoring)
+# 📊 SKILL: Hirari DSP Analysis (Professional Monitoring)
 
 ## 🤖 AI Role: Support Only (補助)
 AIはあくまで分析結果の「提案者」に留まります。AIに自動マスタリングを丸投げしたり、最終的な書き出し判断をAIが単独で行うような実装は行いません。

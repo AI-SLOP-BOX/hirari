@@ -4,13 +4,13 @@ set -u
 # Real-device evidence matrix.
 # This runner deliberately distinguishes PASS, FAIL, and SKIPPED.  A missing
 # device, SDK, or third-party fixture must never become a release pass by
-# accident.  Set AURA_REAL_DEVICE_STRICT=1 to require every capability.
+# accident.  Set HIRARI_REAL_DEVICE_STRICT=1 to require every capability.
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-OUT_DIR=${AURA_EVIDENCE_DIR:-${TMPDIR:-/tmp}/aura-real-device-evidence}
+OUT_DIR=${HIRARI_EVIDENCE_DIR:-${TMPDIR:-/tmp}/hirari-real-device-evidence}
 mkdir -p "$OUT_DIR"
 REPORT="$OUT_DIR/matrix-$(date +%Y%m%d-%H%M%S).tsv"
-STRICT=${AURA_REAL_DEVICE_STRICT:-0}
+STRICT=${HIRARI_REAL_DEVICE_STRICT:-0}
 FAILURES=0
 SKIPS=0
 
@@ -57,10 +57,10 @@ else
     record coreaudio_device SKIPPED "requires macOS CoreAudio"
 fi
 
-if { [ -n "${AURA_VST3_FIXTURE:-}" ] || [ -e "$HOME/Library/Audio/Plug-Ins/VST3/Surge XT.vst3" ]; } \
-    && { [ -x "${AURA_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" ] || [ -n "${AURA_VST3_SDK:-}" ]; }; then
+if { [ -n "${HIRARI_VST3_FIXTURE:-}" ] || [ -e "$HOME/Library/Audio/Plug-Ins/VST3/Surge XT.vst3" ]; } \
+    && { [ -x "${HIRARI_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3" ] || [ -n "${HIRARI_VST3_SDK:-}" ]; }; then
     VST3_SDK_READY=0
-    for sdk in "${AURA_VST3_SDK:-}" /tmp/aura-vst3-sdk-new; do
+    for sdk in "${HIRARI_VST3_SDK:-}" /tmp/hirari-vst3-sdk-new; do
         if [ -n "$sdk" ] && [ -f "$sdk/CMakeLists.txt" ] && [ -d "$sdk/public.sdk" ]; then
             VST3_SDK_READY=1
             break
@@ -68,15 +68,15 @@ if { [ -n "${AURA_VST3_FIXTURE:-}" ] || [ -e "$HOME/Library/Audio/Plug-Ins/VST3/
     done
     if [ "$VST3_SDK_READY" -eq 1 ]; then
         run_optional vst3 "$ROOT_DIR/scripts/run_vst3_e2e_local.sh"
-    elif [ -x "${AURA_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" ]; then
-        PREBUILT="${AURA_PLUGIN_HOST_BIN:-$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3}"
-        run_optional vst3 env AURA_PLUGIN_HOST_BIN="$PREBUILT" \
+    elif [ -x "${HIRARI_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3" ]; then
+        PREBUILT="${HIRARI_PLUGIN_HOST_BIN:-$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3}"
+        run_optional vst3 env HIRARI_PLUGIN_HOST_BIN="$PREBUILT" \
             "$ROOT_DIR/scripts/run_vst3_e2e_smoke.sh"
     else
-        record vst3 SKIPPED "VST3 fixture found but AURA_VST3_SDK is not prepared"
+        record vst3 SKIPPED "VST3 fixture found but HIRARI_VST3_SDK is not prepared"
     fi
 else
-    record vst3 SKIPPED "set AURA_VST3_FIXTURE to a real VST3 bundle"
+    record vst3 SKIPPED "set HIRARI_VST3_FIXTURE to a real VST3 bundle"
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then

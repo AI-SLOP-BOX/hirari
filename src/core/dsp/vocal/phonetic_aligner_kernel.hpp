@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Aura::Core::DSP::Vocal {
+namespace Hirari::Core::DSP::Vocal {
 
 /**
  * @class PhoneticAlignerKernel
@@ -64,4 +64,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::DSP::Vocal
+} // namespace Hirari::Core::DSP::Vocal

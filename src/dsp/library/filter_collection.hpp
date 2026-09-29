@@ -4,7 +4,7 @@
 #include <cmath>
 #include <array>
 
-namespace Aura::DSP::Library {
+namespace Hirari::DSP::Library {
 
 /**
  * @class FilterCollection
@@ -69,4 +69,4 @@ private:
     // [Auxiliary math for Chebyshev/Bessel polynomial expansion]
 };
 
-} // namespace Aura::DSP::Library
+} // namespace Hirari::DSP::Library

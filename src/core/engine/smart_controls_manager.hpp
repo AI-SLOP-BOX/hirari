@@ -5,7 +5,7 @@
 #include <cmath>
 #include "macro_control_manager.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct ControlMapping
@@ -69,4 +69,4 @@ private:
     std::unordered_map<uint32_t, std::vector<ControlMapping>> m_mappings;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

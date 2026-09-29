@@ -4,7 +4,7 @@
 #include <atomic>
 #include <algorithm>
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @brief DrumSynthBass: Professional SOTA Kick Designer.
@@ -55,4 +55,4 @@ private:
     std::atomic<bool> m_shouldTrigger{false}, m_isActive{false};
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

@@ -5,7 +5,7 @@
 #include "linkwitz_riley.hpp"
 #include "../effects/pro_limiter.hpp"
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @class MultiBandDynamics
@@ -75,7 +75,7 @@ private:
     float m_loL[1024]{0}, m_loR[1024]{0};
     float m_midL[1024]{0}, m_midR[1024]{0};
     float m_hiL[1024]{0}, m_hiR[1024]{0};
-    ::Aura::Core::AudioBuffer m_view;
+    ::Hirari::Core::AudioBuffer m_view;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

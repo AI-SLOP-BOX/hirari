@@ -1,6 +1,6 @@
-# SKILL: Aura DSP (Digital Signal Processing)
+# SKILL: Hirari DSP (Digital Signal Processing)
 
-Advanced audio engineering rules for the Aura DAW.
+Advanced audio engineering rules for the Hirari DAW.
 
 ## 🎛️ DSP Directives (Audio Mastery)
 - **K-WEIGHTING**: All loudness analysis must follow ITU-R BS.1770 K-Weighting filters (+4dB High Shelf, RLB High Pass).

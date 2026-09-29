@@ -6,7 +6,7 @@
 #include "../iprocessor.hpp"
 #include "../analysis/fast_fft.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class ConvolutionProcessor
@@ -148,4 +148,4 @@ private:
     std::vector<float> m_fftImag = std::vector<float>(kFFTSize, 0.0f);
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

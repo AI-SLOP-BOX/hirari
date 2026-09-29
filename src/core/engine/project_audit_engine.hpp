@@ -4,7 +4,7 @@
 #include <memory>
 #include "bus_router.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 struct AuditIssue {
     enum Severity { Low, Medium, High, Critical };
@@ -50,4 +50,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

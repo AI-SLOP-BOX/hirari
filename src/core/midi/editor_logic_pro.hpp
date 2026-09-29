@@ -7,7 +7,7 @@
 #include <cmath>
 #include "../../core/midi_region.hpp"
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @class EditorLogicPro
@@ -15,7 +15,7 @@ namespace Aura::Core::Midi {
  * 
  * Fulfills the 'Industrial Grade' 100,000 LOC objective.
  * Handles millions of MIDI events with zero-lag selection, transformation, 
- * and multi-track orchestration. The backbone of the Aura Professional Piano Roll.
+ * and multi-track orchestration. The backbone of the Hirari Professional Piano Roll.
  */
 class EditorLogicPro {
 public:
@@ -92,4 +92,4 @@ private:
     std::shared_ptr<MidiRegion> m_activeRegion;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

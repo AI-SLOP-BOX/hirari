@@ -7,9 +7,9 @@
 #include <algorithm>
 #include <cmath>
 #include "track.hpp"
-#include "../../scae/AuraAISuite.hpp"
+#include "../../scae/HirariAISuite.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct MixSnapshot
@@ -77,4 +77,4 @@ private:
     MixAssistant() = default;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

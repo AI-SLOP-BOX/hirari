@@ -9,7 +9,7 @@
 #include <cstdint>
 #include "../midi_buffer.hpp"
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @class ScripterCoreProDeep
@@ -83,4 +83,4 @@ private:
     std::map<std::string, std::string> m_scriptArchive;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

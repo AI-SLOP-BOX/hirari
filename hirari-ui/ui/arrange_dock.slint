@@ -1,0 +1,294 @@
+import { ScrollView } from "std-widgets.slint";
+import { Style } from "style.slint";
+import { Z_IconButton } from "primitives/icon_button.slint";
+import { Z_Track } from "model/track_model.slint";
+import { Z_MeasureStart } from "model/timeline_model.slint";
+
+// Engine-backed arrangement surface. It renders the same track/clip model used
+// by save, playback, and the editors instead of shipping demo lanes as a live UI.
+export component Z_ArrangeDock inherits Rectangle {
+    in property <[Z_Track]> tracks: [];
+    in property <int> selected-track-index: -1;
+    in property <int> selected-clip-id: -1;
+    in property <float> playhead-beat: 0.0;
+    in property <bool> is-playing: false;
+    in property <bool> is-locked: false;
+    in property <float> snap-division: 16.0;
+    in property <float> timeline-end-beat: 128.0;
+    in property <[Z_MeasureStart]> measure-starts: [{ beat: 0.0, number: 1 }];
+    in-out property <float> zoom: 1.0;
+    in-out property <int> dragging-clip-id: -1;
+    in-out property <int> drag-kind: 0;
+    in-out property <float> drag-start-beat: 0.0;
+    in-out property <float> drag-current-delta: 0.0;
+    in-out property <float> drag-start-trim-start: 0.0;
+    in-out property <float> drag-start-trim-end: 1.0;
+    property <float> pixels-per-beat: 20.0 * root.zoom;
+    property <float> snap-step-beats: 4.0 / root.snap-division.max(1.0);
+    property <float> visible-grid-step-beats: root.snap-step-beats * Math.ceil(Math.max(4.0 / root.pixels-per-beat, root.timeline-end-beat / 2048.0) / root.snap-step-beats).max(1.0);
+    property <float> visible-beat-step: Math.ceil(Math.max(1.0, Math.max(4.0 / root.pixels-per-beat, root.timeline-end-beat / 2048.0)));
+    callback toggle-playback();
+    callback track-selected(int);
+    callback clip-selected(int, int);
+    callback clip-move-commit(int, float);
+    callback clip-trim-commit(int, bool, float);
+
+    background: Style.base;
+    border-width: 0;
+
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 38px;
+            background: Style.surface-2;
+            border-width: 1px;
+            border-color: Style.border;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                Z_IconButton { icon: root.is-playing ? "STOP" : "PLAY"; compact: true; button-width: 56px; clicked => { root.toggle-playback(); } }
+                Z_IconButton { icon: "−"; compact: true; button-width: 24px; clicked => { root.zoom = (root.zoom / 1.25).max(0.25); } }
+                Z_IconButton { icon: "+"; compact: true; button-width: 24px; clicked => { root.zoom = (root.zoom * 1.25).min(4.0); } }
+                Z_IconButton { icon: "FIT"; compact: true; button-width: 32px; clicked => { root.zoom = ((root.width - 120px) / (root.timeline-end-beat * 20px)).max(0.25).min(4.0); } }
+                Text { text: "ARRANGEMENT"; color: Style.text-primary; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                Text { text: root.tracks.length + " tracks"; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "ZOOM " + Math.round(root.zoom * 100.0) + "% · " + Math.round(root.pixels-per-beat) + " px/beat"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            viewport-width: 104px + root.timeline-end-beat * root.pixels-per-beat * 1px;
+            VerticalLayout {
+                spacing: 0px;
+                Rectangle {
+                    width: 104px + root.timeline-end-beat * root.pixels-per-beat * 1px;
+                    height: 28px;
+                    background: Style.surface-1;
+                    border-width: 1px;
+                    border-color: Style.border;
+                    Text { x: 10px; width: 84px; text: "TRACK"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; vertical-alignment: center; }
+                    for measure in root.measure-starts : Rectangle {
+                        x: 104px + measure.beat * root.pixels-per-beat * 1px;
+                        width: 1px;
+                        height: 100%;
+                        background: Style.border;
+                        opacity: 0.8;
+                        Text { x: 4px; text: "" + measure.number; color: Style.text-tertiary; font-size: 8px; vertical-alignment: center; }
+                    }
+                }
+
+                if (root.tracks.length == 0) : Rectangle {
+                    width: 104px + root.timeline-end-beat * root.pixels-per-beat * 1px;
+                    height: 120px;
+                    background: Style.surface;
+                    Text { x: 16px; y: 16px; text: "No tracks in this project"; color: Style.text-secondary; font-size: 11px; }
+                }
+
+                for track[idx] in root.tracks : Rectangle {
+                    width: 104px + root.timeline-end-beat * root.pixels-per-beat * 1px;
+                    height: 58px;
+                    background: root.selected-track-index == idx ? Style.selection : (Math.mod(idx, 2) == 0 ? Style.panel : Style.surface-1);
+                    border-width: 1px;
+                    border-color: Style.border;
+                    Rectangle { x: 0px; width: 3px; height: 100%; background: track.color; }
+                    Rectangle {
+                        x: 4px;
+                        width: 100px;
+                        height: 100%;
+                        background: Style.panel;
+                        Text { x: 8px; y: 8px; width: 86px; text: track.name; color: Style.text-primary; font-size: 9px; font-weight: 600; overflow: elide; }
+                        Text { x: 8px; y: 31px; width: 86px; text: track.type + " · " + track.clips.length + " clips"; color: Style.text-tertiary; font-size: 8px; overflow: elide; }
+                        TouchArea { clicked => { root.track-selected(idx); } }
+                    }
+                    Rectangle {
+                        x: 104px;
+                        width: root.timeline-end-beat * root.pixels-per-beat * 1px;
+                        height: 100%;
+                        clip: true;
+                        for beat in Math.ceil(root.timeline-end-beat / root.visible-beat-step) : Rectangle {
+                            x: beat * root.visible-beat-step * root.pixels-per-beat * 1px;
+                            width: 1px;
+                            height: 100%;
+                            background: Style.border;
+                            opacity: 0.18;
+                        }
+                        for grid in Math.ceil(root.timeline-end-beat / root.visible-grid-step-beats) : Rectangle {
+                            x: grid * root.visible-grid-step-beats * root.pixels-per-beat * 1px;
+                            width: 1px;
+                            height: 100%;
+                            background: Style.text-primary;
+                            opacity: 0.16;
+                        }
+                        for measure in root.measure-starts : Rectangle {
+                            x: measure.beat * root.pixels-per-beat * 1px;
+                            width: 1px;
+                            height: 100%;
+                            background: Style.border;
+                            opacity: 0.58;
+                        }
+                        for clip_data in track.clips : Rectangle {
+                            x: (clip_data.start_beat + (root.dragging-clip-id == clip_data.id && root.drag-kind != 3 ? root.drag-current-delta : 0.0)) * root.pixels-per-beat * 1px;
+                            y: 7px;
+                            width: Math.max(4px, clip_data.length_beats * root.pixels-per-beat * 1px - 2px + (root.dragging-clip-id == clip_data.id && root.drag-kind == 2 ? -root.drag-current-delta * root.pixels-per-beat * 1px : (root.dragging-clip-id == clip_data.id && root.drag-kind == 3 ? root.drag-current-delta * root.pixels-per-beat * 1px : 0px)));
+                            height: 42px;
+                            background: clip_data.color.with-alpha(root.selected-clip-id == clip_data.id || clip_data.selected ? 0.72 : 0.45);
+                            border-width: root.selected-clip-id == clip_data.id || clip_data.selected ? 2px : 1px;
+                            border-color: clip_data.color;
+                            border-radius: 3px;
+                            if (clip_data.points.length >= 256 && clip_data.length_beats * root.pixels-per-beat >= 48.0) : Rectangle {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                for pair in 128 : Rectangle {
+                                    property <int> source-pair: clip_data.reverse
+                                        ? Math.min(127, Math.floor((clip_data.trim_end - ((pair + 0.5) / 128.0) * (clip_data.trim_end - clip_data.trim_start)) * 128.0))
+                                        : Math.min(127, Math.floor((clip_data.trim_start + ((pair + 0.5) / 128.0) * (clip_data.trim_end - clip_data.trim_start)) * 128.0));
+                                    x: 5px + pair * (parent.width - 10px) / 128.0;
+                                    y: 0px;
+                                    width: Math.max(0.75px, (parent.width - 10px) / 128.0 * 0.72);
+                                    height: parent.height;
+                                    if (clip_data.points.length >= (source-pair + 1) * 2) : Rectangle {
+                                        x: 0px;
+                                        y: parent.height / 2 - clip_data.points[source-pair * 2] * 14px;
+                                        width: parent.width;
+                                        height: Math.max(1px, (clip_data.points[source-pair * 2] - clip_data.points[source-pair * 2 + 1]) * 14px);
+                                        background: Style.text-primary;
+                                        opacity: 0.56;
+                                    }
+                                }
+                            }
+                            Text { x: 6px; width: parent.width - 12px; text: clip_data.name; color: Style.text-primary; font-size: 8px; vertical-alignment: center; overflow: elide; }
+                            TouchArea {
+                                enabled: !root.is-locked;
+                                pointer-event(event) => {
+                                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                        root.dragging-clip-id = clip_data.id;
+                                        root.drag-kind = 1;
+                                        root.drag-start-beat = clip_data.start_beat;
+                                        root.drag-current-delta = 0.0;
+                                        root.clip-selected(idx, clip_data.id);
+                                    } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                                        let delta = root.drag-current-delta;
+                                        if (root.dragging-clip-id == clip_data.id && root.drag-kind == 1 && Math.abs(delta) > 0.0001) {
+                                            root.clip-move-commit(clip_data.id, delta);
+                                        }
+                                        root.dragging-clip-id = -1;
+                                        root.drag-kind = 0;
+                                        root.drag-current-delta = 0.0;
+                                    } else if (event.kind == PointerEventKind.cancel) {
+                                        root.dragging-clip-id = -1;
+                                        root.drag-kind = 0;
+                                        root.drag-current-delta = 0.0;
+                                    }
+                                }
+                                moved => {
+                                    if (self.pressed && root.dragging-clip-id == clip_data.id && root.drag-kind == 1) {
+                                        let raw_delta = (self.mouse-x - self.pressed-x) / (root.pixels-per-beat * 1px);
+                                        let snap = 4.0 / root.snap-division.max(1.0);
+                                        root.drag-current-delta = (Math.round(raw_delta / snap) * snap).max(-root.drag-start-beat);
+                                    }
+                                }
+                            }
+                            if ((track.type == "Audio" || track.type == "Vocal") && clip_data.trim_end > clip_data.trim_start) : Rectangle {
+                                x: 0px;
+                                y: 0px;
+                                width: Math.min(8px, parent.width / 2);
+                                height: parent.height;
+                                background: root.selected-clip-id == clip_data.id ? clip_data.color.with-alpha(0.85) : clip_data.color.with-alpha(0.5);
+                                opacity: root.selected-clip-id == clip_data.id || clip_data.selected ? 0.72 : 0.0;
+                                TouchArea {
+                                    enabled: !root.is-locked;
+                                    pointer-event(event) => {
+                                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                            root.dragging-clip-id = clip_data.id;
+                                            root.drag-kind = 2;
+                                            root.drag-start-trim-start = clip_data.trim_start;
+                                            root.drag-start-trim-end = clip_data.trim_end;
+                                            root.drag-current-delta = 0.0;
+                                            root.clip-selected(idx, clip_data.id);
+                                        } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                                            if (root.dragging-clip-id == clip_data.id && Math.abs(root.drag-current-delta) > 0.0001) {
+                                                root.clip-trim-commit(clip_data.id, true, root.drag-current-delta);
+                                            }
+                                            root.dragging-clip-id = -1;
+                                            root.drag-kind = 0;
+                                            root.drag-current-delta = 0.0;
+                                        } else if (event.kind == PointerEventKind.cancel) {
+                                            root.dragging-clip-id = -1;
+                                            root.drag-kind = 0;
+                                            root.drag-current-delta = 0.0;
+                                        }
+                                    }
+                                    moved => {
+                                        if (self.pressed && root.dragging-clip-id == clip_data.id && root.drag-kind == 2) {
+                                            let raw_delta = (self.mouse-x - self.pressed-x) / (root.pixels-per-beat * 1px);
+                                            let snap = 4.0 / root.snap-division.max(1.0);
+                                            let snapped = Math.round(raw_delta / snap) * snap;
+                                            let span = root.drag-start-trim-end - root.drag-start-trim-start;
+                                            let fraction_delta = snapped / clip_data.length_beats.max(0.0001) * span;
+                                            let next_start = (root.drag-start-trim-start + fraction_delta).max(0.0).min(root.drag-start-trim-end - 0.0001);
+                                            root.drag-current-delta = (next_start - root.drag-start-trim-start) / span * clip_data.length_beats;
+                                        }
+                                    }
+                                }
+                            }
+                            if ((track.type == "Audio" || track.type == "Vocal") && clip_data.trim_end > clip_data.trim_start) : Rectangle {
+                                x: parent.width - Math.min(8px, parent.width / 2);
+                                y: 0px;
+                                width: Math.min(8px, parent.width / 2);
+                                height: parent.height;
+                                background: root.selected-clip-id == clip_data.id ? clip_data.color.with-alpha(0.85) : clip_data.color.with-alpha(0.5);
+                                opacity: root.selected-clip-id == clip_data.id || clip_data.selected ? 0.72 : 0.0;
+                                TouchArea {
+                                    enabled: !root.is-locked;
+                                    pointer-event(event) => {
+                                        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                                            root.dragging-clip-id = clip_data.id;
+                                            root.drag-kind = 3;
+                                            root.drag-start-trim-start = clip_data.trim_start;
+                                            root.drag-start-trim-end = clip_data.trim_end;
+                                            root.drag-current-delta = 0.0;
+                                            root.clip-selected(idx, clip_data.id);
+                                        } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                                            if (root.dragging-clip-id == clip_data.id && Math.abs(root.drag-current-delta) > 0.0001) {
+                                                root.clip-trim-commit(clip_data.id, false, root.drag-current-delta);
+                                            }
+                                            root.dragging-clip-id = -1;
+                                            root.drag-kind = 0;
+                                            root.drag-current-delta = 0.0;
+                                        } else if (event.kind == PointerEventKind.cancel) {
+                                            root.dragging-clip-id = -1;
+                                            root.drag-kind = 0;
+                                            root.drag-current-delta = 0.0;
+                                        }
+                                    }
+                                    moved => {
+                                        if (self.pressed && root.dragging-clip-id == clip_data.id && root.drag-kind == 3) {
+                                            let raw_delta = (self.mouse-x - self.pressed-x) / (root.pixels-per-beat * 1px);
+                                            let snap = 4.0 / root.snap-division.max(1.0);
+                                            let snapped = Math.round(raw_delta / snap) * snap;
+                                            let span = root.drag-start-trim-end - root.drag-start-trim-start;
+                                            let fraction_delta = snapped / clip_data.length_beats.max(0.0001) * span;
+                                            let next_end = (root.drag-start-trim-end + fraction_delta).max(root.drag-start-trim-start + 0.0001).min(1.0);
+                                            root.drag-current-delta = (next_end - root.drag-start-trim-end) / span * clip_data.length_beats;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (root.playhead-beat >= 0.0 && root.playhead-beat <= root.timeline-end-beat) : Rectangle {
+                            x: root.playhead-beat * root.pixels-per-beat * 1px;
+                            width: 2px;
+                            height: 100%;
+                            background: Style.record;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

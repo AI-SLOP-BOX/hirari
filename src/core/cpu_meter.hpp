@@ -9,7 +9,7 @@
 #include <x86intrin.h>
 #endif
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class CPUMeter
@@ -124,4 +124,4 @@ private:
     }
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

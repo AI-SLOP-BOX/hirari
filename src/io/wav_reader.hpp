@@ -3,7 +3,7 @@
 // Legacy metadata-oriented API backed by the canonical core WAV decoder.
 #include "../core/io/audio_decoder.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 class WavReader {
 public:
@@ -38,4 +38,4 @@ private:
     std::vector<std::vector<float>> m_data;
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

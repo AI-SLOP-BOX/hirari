@@ -3,7 +3,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CXX_BIN=${CXX:-c++}
-OUTPUT=${AURA_CLAP_FIXTURE_OUTPUT:-$ROOT_DIR/build-tools/minimal-gain.clap}
+OUTPUT=${HIRARI_CLAP_FIXTURE_OUTPUT:-$ROOT_DIR/build-tools/minimal-gain.clap}
 mkdir -p "$(dirname "$OUTPUT")"
 
 case "$(uname -s)" in

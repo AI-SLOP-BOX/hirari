@@ -6,7 +6,7 @@
 #include "../audio_buffer.hpp"
 #include "lock_free.hpp"
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @class AudioBufferPool
@@ -48,4 +48,4 @@ private:
     MPMCQueue<AudioBuffer*> m_availableQueue; 
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

@@ -7,7 +7,7 @@
 #include <cstdio>
 #include "../iprocessor.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class ScaleAssistant
@@ -139,4 +139,4 @@ private:
     std::array<std::array<int16_t, 128>, 16> m_noteMap{};
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include <sstream>
 
-namespace Aura::IO::Assets {
+namespace Hirari::IO::Assets {
 
 /**
  * @brief AssetMetadata: Fast metadata for DAW assets (samples, presets).
@@ -58,4 +58,4 @@ private:
     std::unordered_map<std::string, std::unordered_set<std::string>> m_invertedIndex;
 };
 
-} // namespace Aura::IO::Assets
+} // namespace Hirari::IO::Assets

@@ -4,9 +4,9 @@
 #include <map>
 #include <string>
 #include "../core/engine/track.hpp"
-#include "AuraAISuite.hpp"
+#include "HirariAISuite.hpp"
 
-namespace Aura::SCAE::Intelligence {
+namespace Hirari::SCAE::Intelligence {
 
 /**
  * @class MixingIntelligenceDeep
@@ -80,4 +80,4 @@ private:
     float m_lastProjectLoudness;
 };
 
-} // namespace Aura::SCAE::Intelligence
+} // namespace Hirari::SCAE::Intelligence

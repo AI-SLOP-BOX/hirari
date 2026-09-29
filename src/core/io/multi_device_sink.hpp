@@ -7,7 +7,7 @@
 #include <atomic>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @struct DeviceEndpoint
@@ -84,4 +84,4 @@ private:
     std::vector<DeviceEndpoint> m_endpoints;
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

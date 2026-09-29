@@ -3,7 +3,7 @@
 #include <vector>
 #include <cmath>
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @brief AmbisonicEncoder: Professional 360-degree spherical spatialization.
@@ -42,4 +42,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

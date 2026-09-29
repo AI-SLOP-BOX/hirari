@@ -8,7 +8,7 @@
 #include <functional>
 #include <atomic>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class TaskStealingScheduler
@@ -72,4 +72,4 @@ private:
     std::atomic<bool> m_stop;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

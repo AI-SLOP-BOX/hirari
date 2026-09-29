@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include "../../core/engine/macro_control_manager.hpp"
 
-namespace Aura::IO::Sync {
+namespace Hirari::IO::Sync {
 
 /**
  * @class OscMidi2Router
@@ -47,4 +47,4 @@ private:
     std::unordered_map<std::string, uint32_t> m_routingMap; // "/osc/address" -> MacroID (ツマミのID)
 };
 
-} // namespace Aura::IO::Sync
+} // namespace Hirari::IO::Sync

@@ -5,7 +5,7 @@
 #include <vector>
 #include <map>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class TonalSync
@@ -86,4 +86,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

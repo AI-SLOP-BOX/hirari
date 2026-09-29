@@ -5,6 +5,6 @@
 // no-op Rust-bridge shim, which silently discarded every inserted processor.
 #include "../effect_chain.hpp"
 
-namespace Aura::Core::Engine {
-using EffectChain = ::Aura::Core::EffectChain;
+namespace Hirari::Core::Engine {
+using EffectChain = ::Hirari::Core::EffectChain;
 }

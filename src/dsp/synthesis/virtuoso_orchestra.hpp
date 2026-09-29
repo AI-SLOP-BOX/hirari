@@ -10,7 +10,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @brief VirtuosoOrchestra: High-fidelity physical modeling synthesis engine.
@@ -134,4 +134,4 @@ private:
     std::vector<Voice> m_voices;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

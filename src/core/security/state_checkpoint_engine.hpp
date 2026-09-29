@@ -4,7 +4,7 @@
 #include <mutex>
 #include <algorithm>
 
-namespace Aura::Core::Security {
+namespace Hirari::Core::Security {
 
 /**
  * @class StateCheckpointEngine
@@ -64,4 +64,4 @@ private:
     mutable std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Security
+} // namespace Hirari::Core::Security

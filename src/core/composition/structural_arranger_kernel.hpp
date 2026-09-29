@@ -5,11 +5,11 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "harmonic_context_tracker.hpp"
 
-namespace Aura::Core::Composition {
+namespace Hirari::Core::Composition {
 
 /**
  * @struct StructuralSection
- * @brief Industrial Structural Scene for Aura Studio Pro.
+ * @brief Industrial Structural Scene for Hirari Studio Pro.
  */
 struct StructuralSection {
     std::string type; // Cinematic Build, Industrial Descent, etc.
@@ -20,7 +20,7 @@ struct StructuralSection {
 
 /**
  * @class StructuralArrangerKernel
- * @brief Industrial Narrative Engine for Aura Studio Pro.
+ * @brief Industrial Narrative Engine for Hirari Studio Pro.
  * Implements autonomous scene synthesis and structural archetyping.
  */
 class StructuralArrangerKernel {
@@ -61,4 +61,4 @@ private:
     StructuralArrangerKernel() = default;
 };
 
-} // namespace Aura::Core::Composition
+} // namespace Hirari::Core::Composition

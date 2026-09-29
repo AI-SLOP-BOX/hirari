@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief FlexTimeEngine: Professional granular time-stretching.
@@ -51,4 +51,4 @@ private:
     std::vector<float> m_window;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

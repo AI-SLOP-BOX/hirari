@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <new>
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @class ForensicScratchpad
@@ -77,4 +77,4 @@ private:
     ForensicScratchpad& operator=(const ForensicScratchpad&) = delete;
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

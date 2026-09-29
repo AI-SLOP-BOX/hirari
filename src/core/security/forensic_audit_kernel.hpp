@@ -3,7 +3,7 @@
 #include <string>
 #include <chrono>
 
-namespace Aura::Core::Security {
+namespace Hirari::Core::Security {
 
 /**
  * @struct AuditEntry
@@ -48,4 +48,4 @@ private:
     std::vector<AuditEntry> m_ledger;
 };
 
-} // namespace Aura::Core::Security
+} // namespace Hirari::Core::Security

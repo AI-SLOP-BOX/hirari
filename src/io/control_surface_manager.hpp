@@ -7,7 +7,7 @@
 #include <string>
 #include "../core/engine/param_tree.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @brief ControlSurface: Professional Hardware Interaction.
@@ -66,4 +66,4 @@ private:
     std::array<uint16_t, 8> m_feedback{};
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

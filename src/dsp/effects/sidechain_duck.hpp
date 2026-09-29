@@ -9,7 +9,7 @@
 #include "../iprocessor.hpp"
 #include "../../core/engine/bus_system.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class SidechainDuck
@@ -99,4 +99,4 @@ private:
     double m_lfoPhase = 0.0;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

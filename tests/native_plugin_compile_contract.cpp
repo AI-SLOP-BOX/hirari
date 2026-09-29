@@ -43,7 +43,7 @@
 #include "src/rendering/bounce/bouncing_engine.hpp"
 #include "src/core/engine/bounce_engine.hpp"
 #include "src/core/io/bounce_system.hpp"
-#include "src/ui/waveform_cache.hpp"
+#include "src/graphics/ui_components/support/waveform_cache.hpp"
 #include "src/ai/local_ai_models.hpp"
 #include "src/core/security/security_manager.hpp"
 #include "src/core/security/license_vault.hpp"
@@ -63,7 +63,7 @@
 #include "src/io/audio_interface.hpp"
 #include "src/core/external/audio_driver_pro.hpp"
 #include "src/core/external/jack_bridge_deep.hpp"
-#include "src/core/AuraPluginSDK.hpp"
+#include "src/core/HirariPluginSDK.hpp"
 #include <atomic>
 #include <array>
 #include <chrono>
@@ -77,21 +77,21 @@
 #endif
 
 namespace {
-class SDKContractProcessor final : public Aura::SDK::IProcessor {
+class SDKContractProcessor final : public Hirari::SDK::IProcessor {
 public:
     std::string getName() const override { return "SDK Contract"; }
     void prepareToPlay(double, uint32_t) override {}
-    void process(::Aura::Core::AudioBuffer&, ::Aura::Core::MidiBuffer&, const Aura::SDK::ProcessContext&) override {}
+    void process(::Hirari::Core::AudioBuffer&, ::Hirari::Core::MidiBuffer&, const Hirari::SDK::ProcessContext&) override {}
     void reset() override {}
 };
 
-class SDKContractFactory final : public Aura::SDK::IPluginFactory {
+class SDKContractFactory final : public Hirari::SDK::IPluginFactory {
 public:
-    Aura::SDK::PluginDescriptor getDescriptor() const override {
-        Aura::SDK::PluginDescriptor descriptor;
-        descriptor.identifier = "com.aura.sdk.contract";
+    Hirari::SDK::PluginDescriptor getDescriptor() const override {
+        Hirari::SDK::PluginDescriptor descriptor;
+        descriptor.identifier = "com.hirari.sdk.contract";
         descriptor.name = "SDK Contract";
-        descriptor.vendor = "Aura";
+        descriptor.vendor = "Hirari";
         descriptor.version = "1.0.0";
         descriptor.parameters.push_back({1, "Mix", 0.0f, 1.0f, 1.0f, true});
         descriptor.supportsSidechain = true;
@@ -100,12 +100,12 @@ public:
         descriptor.components.push_back({"sidechain", 2, 2, true});
         return descriptor;
     }
-    std::unique_ptr<Aura::SDK::IProcessor> create() const override {
+    std::unique_ptr<Hirari::SDK::IProcessor> create() const override {
         return std::make_unique<SDKContractProcessor>();
     }
 };
 
-class UndoContractCommand final : public Aura::Core::Undo::Command {
+class UndoContractCommand final : public Hirari::Core::Undo::Command {
 public:
     UndoContractCommand(int& value, int delta, std::string name)
         : m_value(value), m_delta(delta), m_name(std::move(name)) {}
@@ -118,10 +118,10 @@ private:
     std::string m_name;
 };
 
-class NonFiniteProcessor final : public Aura::DSP::IProcessor {
+class NonFiniteProcessor final : public Hirari::DSP::IProcessor {
 public:
     void prepareToPlay(double, uint32_t) noexcept override {}
-    void process(Aura::Core::AudioBuffer& buffer, Aura::Core::MidiBuffer&, const Aura::DSP::ProcessContext&) noexcept override {
+    void process(Hirari::Core::AudioBuffer& buffer, Hirari::Core::MidiBuffer&, const Hirari::DSP::ProcessContext&) noexcept override {
         for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
             float* samples = buffer.getWritePointer(channel);
             for (uint32_t index = 0; index < buffer.getNumSamples(); ++index) {

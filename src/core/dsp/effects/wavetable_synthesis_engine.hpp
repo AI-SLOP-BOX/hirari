@@ -7,11 +7,11 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class WavetableSynthesisEngine
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements infinite wavetable DNA and wavetable focus profiling.
  */
 class WavetableSynthesisEngine {
@@ -60,4 +60,4 @@ private:
     WavetableDNA m_activeDNA; // --- PHASE 125: WAVETABLE DNA ---
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

@@ -11,7 +11,7 @@
 #include <cmath>
 #include <limits>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class ParameterTree
@@ -78,4 +78,4 @@ private:
     mutable std::shared_mutex m_mutex;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

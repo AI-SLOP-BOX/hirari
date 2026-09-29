@@ -8,7 +8,7 @@
 #include <vector>
 #include <Metal/Metal.h>
 
-namespace Aura::Rendering::Metal {
+namespace Hirari::Rendering::Metal {
 
 /**
  * @class WaveformCompute
@@ -143,4 +143,4 @@ private:
     std::vector<Peak> m_peaks;
 };
 
-} // namespace Aura::Rendering::Metal
+} // namespace Hirari::Rendering::Metal

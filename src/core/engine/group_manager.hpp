@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <mutex>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct GroupSettings
@@ -72,4 +72,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

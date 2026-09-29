@@ -2,7 +2,7 @@
 #include <atomic>
 #include <string>
 
-namespace Aura::IO::Sync {
+namespace Hirari::IO::Sync {
 
 /**
  * @class TransportSyncManager
@@ -45,4 +45,4 @@ private:
     std::atomic<SyncSource> m_syncSource{SyncSource::Internal};
 };
 
-} // namespace Aura::IO::Sync
+} // namespace Hirari::IO::Sync

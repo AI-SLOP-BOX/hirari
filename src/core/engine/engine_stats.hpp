@@ -9,7 +9,7 @@
 #include <mutex>
 #include <algorithm>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct TrackTelemetry
@@ -73,4 +73,4 @@ private:
     std::map<uint32_t, std::unique_ptr<TrackTelemetry>> m_tracks;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

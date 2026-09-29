@@ -1,0 +1,11 @@
+// Render-only action contract.
+export global RenderActions {
+    in-out property <bool> stem-export-mode: false;
+    in-out property <int> render-format: 0;
+    in-out property <int> render-tail-index: 2;
+    callback start_render(string, int);
+    callback start_stems(string, string);
+    callback cancel_render();
+    callback pause_render();
+    callback resume_render();
+}

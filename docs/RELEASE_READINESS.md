@@ -26,7 +26,7 @@ still requires the official Steinberg SDK checkout.
 
 The full strict real-device matrix also passed with zero skips on the attached
 macOS host: software device transition, CoreAudio, Vital VST3, AU, and CLAP.
-The evidence report is `/tmp/aura-real-device-evidence-current/matrix-20260905-135839.tsv`.
+The evidence report is `/tmp/hirari-real-device-evidence-current/matrix-20260905-135839.tsv`.
 
 After the MIDI export UI wiring, the release smoke was rerun with reduced
 stress rounds and passed: release bundle build, ad-hoc signature verification,
@@ -38,7 +38,7 @@ release metadata ZIP verification.
 - `scripts/build_app.sh`: 成功（release bundle を生成）
 - `codesign --verify --deep --strict`: 成功
 - GUI launch smoke: 成功
-- `AURA_HEADLESS=1` 起動: `native_engine=ready`, `audio_driver=running`
+- `HIRARI_HEADLESS=1` 起動: `native_engine=ready`, `audio_driver=running`
 - FFmpeg codec contract (hostile Unicode paths, MP3/FLAC): 成功
 - 100-track realtime matrix (48 kHz, 128/256/512/1024 frames, 2,000 blocks): deadline miss 0
 - Recording stress / cancellation / recovery gate: 成功
@@ -53,7 +53,7 @@ release metadata ZIP verification.
 - Manual UI E2E: 成功（Quick Start、Electronicテンプレート、Piano Roll、Mixer、Diagnostics/Slint attributionを実機確認。詳細は [`MANUAL_E2E_RESULTS.md`](MANUAL_E2E_RESULTS.md)）
 
 - Release bundle license notices: 成功（`LICENSE`、`THIRD_PARTY_NOTICES.md`、`LICENSE-COMBINED-DISTRIBUTION.md`をResourcesへ同梱し、bundle verifierで必須検査）
-- Release debug-hook exclusion: 成功（本番バイナリに`AURA_UI_SMOKE`文字列なし）
+- Release debug-hook exclusion: 成功（本番バイナリに`HIRARI_UI_SMOKE`文字列なし）
 - Distribution signing boundary: `scripts/sign_and_notarize_release.sh`を追加。Developer ID未設定時は失敗し、公証プロファイル指定時はsubmit／staple／validateを必須化する。
 - Session XML persistence: 属性エスケープ／復号、保存前のID・有限値検証、flush／POSIX fsync後のatomic renameを実装し、特殊文字・不正入力・保存途中クラッシュに対する回帰契約を通過。
 
@@ -62,7 +62,7 @@ release metadata ZIP verification.
 Short-round strict verification reached 83% and passed CLI/native/Rust/UI,
 sanitizer, fuzz, codec, recording, lifecycle, project-soak, and device-
 transition gates. The only stop was the external-plugin matrix, which correctly
-failed closed because `AURA_VST3_SDK` is not configured; no VST3 compatibility
+failed closed because `HIRARI_VST3_SDK` is not configured; no VST3 compatibility
 claim is made without the official SDK and fixture.
 
 The post-change fast gate completed with 980 core tests passing and zero
@@ -86,8 +86,8 @@ OpenUtauの完全往復は、現環境に実レンダラーのコマンド指定
 VST3はSDK未準備、AUは外部コンポーネント検証が時間内に完了しなかったため、いずれも
 成功扱いにはしていない。
 
-Aura is suitable for public source release as an early technical preview.
-This document defines what Aura may claim and what requires an environment
+Hirari is suitable for public source release as an early technical preview.
+This document defines what Hirari may claim and what requires an environment
 specific evidence artifact.
 
 ## Capability matrix
@@ -102,7 +102,7 @@ specific evidence artifact.
 | Surge XT | Compatible host target, not bundled | Real Surge XT instance in the selected format and architecture |
 | OpenUtau | Bridge/import integration; external render handoff | OpenUtau project import, tuning edit, render, re-import and audio comparison |
 | Long-running stability | Testable, not universally guaranteed | Device-specific duration run with zero unexplained dropouts, NaN/Inf, leaks or corruption |
-| Forkability | Aura-owned source can be forked under MIT | Clean checkout build and repository health gate |
+| Forkability | Hirari-owned source can be forked under MIT | Clean checkout build and repository health gate |
 
 The plugin rows do not imply redistribution. Plugin binaries, presets,
 voicebanks and SDKs remain subject to their own licenses and installation
@@ -120,8 +120,8 @@ The current worktree was rebuilt with `scripts/build_app.sh`. The packaged
 binary passed direct headless smoke and strict ad-hoc signature validation:
 
 ```text
-AURA_HEADLESS_READY native_engine=ready bridge=ready project_layout=valid resources=ready audio_device_ready=true audio_driver=running
-packaging/Aura DAW.app: valid on disk
+HIRARI_HEADLESS_READY native_engine=ready bridge=ready project_layout=valid resources=ready audio_device_ready=true audio_driver=running
+packaging/Hirari DAW.app: valid on disk
 ```
 
 The same bundle was launched through the normal macOS application path; a
@@ -143,7 +143,7 @@ semicolons, and shell-like text.
 The current real-device matrix reports the software device transition and
 CoreAudio device contract as passing. The installed AU fixture timed out under
 the bounded 14-second probe, and the VST3 fixture was skipped because
-`AURA_VST3_SDK` is not configured. These are recorded as unresolved external
+`HIRARI_VST3_SDK` is not configured. These are recorded as unresolved external
 fixture evidence, not promoted to application failures or compatibility claims.
 
 ## Strict release gate
@@ -151,18 +151,18 @@ fixture evidence, not promoted to application failures or compatibility claims.
 The canonical entry point is:
 
 ```sh
-cmake --build build --target aura-verify-release
+cmake --build build --target hirari-verify-release
 ```
 
-On macOS, `aura-verify` now depends on that same strict release target before
+On macOS, `hirari-verify` now depends on that same strict release target before
 running repository-health checks. There is no weaker CMake verification path
 that can pass while the packaged release gate is failing.
 
-The ordinary Rust/UI suite runs with `AURA_NATIVE_TEST_ISOLATION=1` so its
+The ordinary Rust/UI suite runs with `HIRARI_NATIVE_TEST_ISOLATION=1` so its
 results are deterministic and do not silently depend on whichever CoreAudio
 device happens to be connected. Real device initialization, start/stop and
 reconfiguration are exercised separately by the strict device-transition gate
-owned by `aura-verify-release`.
+owned by `hirari-verify-release`.
 
 The same lockfile-enforced formatting, workspace check, and serialized test
 commands also run in `.github/workflows/ci.yml` on every pull request and push
@@ -174,11 +174,11 @@ That target builds the app, creates the repository CLAP fixture, runs the
 full test groups, and verifies the packaged bundle. On macOS it also requires
 the configured device and external-plugin matrix. Missing SDKs, fixtures or
 device capabilities are not silently promoted to a pass in strict mode.
-The bundle build also emits `Contents/Resources/aura-resources.manifest`; the
+The bundle build also emits `Contents/Resources/hirari-resources.manifest`; the
 headless app check and release verifier require this readable manifest instead
 of treating an empty `Resources` directory as proof that packaging succeeded.
 
-The full test group includes `aura-test-cli-e2e`, which creates a canonical
+The full test group includes `hirari-test-cli-e2e`, which creates a canonical
 project, queries its generation pair, performs a native JSONL bounce, verifies
 the resulting WAV, replays the same request through the durable ledger, and
 checks history branch restore. The ledger is written as `prepared` before
@@ -204,8 +204,8 @@ scripts/run_real_device_matrix.sh
 ```
 
 It writes a timestamped TSV report and one log per capability under
-`$AURA_EVIDENCE_DIR` (or the system temporary directory). The report keeps
-`PASS`, `FAIL`, and `SKIPPED` distinct; set `AURA_REAL_DEVICE_STRICT=1` to
+`$HIRARI_EVIDENCE_DIR` (or the system temporary directory). The report keeps
+`PASS`, `FAIL`, and `SKIPPED` distinct; set `HIRARI_REAL_DEVICE_STRICT=1` to
 make missing hardware, SDKs, or third-party fixtures fail the run instead of
 allowing an incomplete matrix. This runner is evidence collection, not a
 universal compatibility claim.
@@ -213,9 +213,9 @@ universal compatibility claim.
 For a VST3-capable build, configure the official SDK and fixture explicitly:
 
 ```sh
-AURA_VST3_SDK=/path/to/vst3sdk \
-AURA_VST3_FIXTURE=/path/to/plugin.vst3 \
-cmake --build build --target aura-verify-release
+HIRARI_VST3_SDK=/path/to/vst3sdk \
+HIRARI_VST3_FIXTURE=/path/to/plugin.vst3 \
+cmake --build build --target hirari-verify-release
 ```
 
 ## Latest local evidence
@@ -243,11 +243,11 @@ strict matrix must still be rerun after the changes are intentionally staged
 into reviewable commits, and distribution signing/notarization requires release
 credentials.
 
-The current source was also rebuilt into `packaging/Aura DAW.app`. Bundle
+The current source was also rebuilt into `packaging/Hirari DAW.app`. Bundle
 structure, executable hashes, resources, ad-hoc signature, packaged CLAP worker,
 and headless application initialization all passed with plugin retries forbidden.
 The previously captured machine matrix report
-`$TMPDIR/aura-real-device-evidence-current/matrix-20260828-230314.tsv` recorded
+`$TMPDIR/hirari-real-device-evidence-current/matrix-20260828-230314.tsv` recorded
 zero skips: software device transition, attached CoreAudio initialize/start/
 stop/reconfigure, Surge XT VST3, Surge XT AU, and repository CLAP all passed.
 
@@ -275,19 +275,19 @@ capability inputs:
 
 | Gate | Result | Evidence input |
 | --- | --- | --- |
-| Full `aura-verify-release` | Passed | release app, full Rust/UI tests, ASan/UBSan, TSan, stress and bundle verification |
+| Full `hirari-verify-release` | Passed | release app, full Rust/UI tests, ASan/UBSan, TSan, stress and bundle verification |
 | CLAP worker | Passed | repository `minimal-gain.clap` fixture, packaged worker handshake/process/recovery |
-| VST3 worker | Passed | Steinberg SDK at `/tmp/aura-vst3-sdk-new` and installed Surge XT VST3 fixture; process, bounded MIDI, state restore, crash/quarantine and overrun recovery smoke |
+| VST3 worker | Passed | Steinberg SDK at `/tmp/hirari-vst3-sdk-new` and installed Surge XT VST3 fixture; process, bounded MIDI, state restore, crash/quarantine and overrun recovery smoke |
 | AU worker | Passed | installed Surge XT component; Apple AU validation plus isolated effect initialization, ClassInfo state round-trip, MIDI forwarding and reconfiguration smoke |
 | CoreAudio device transition | Passed | initialize/start/stop/reconfigure contract on the attached macOS device |
-| OpenUtau project/CLI handoff | Passed (local evidence) | OpenUtau v0.1.565.0 opened `teto_chorus_aura_tuned_diagnostic_v10.ustx` with Kasane Teto / WORLDLINE-R; Aura CLI imported the same USTX plus a WAV, persisted the pair, and re-inspected 16 source notes, singer identity, SHA-256 hashes, 44.1 kHz stereo audio, 8,464,113 frames and one region |
-| Recording lifecycle | Passed (contract evidence) | RIFF/RF64-capable header finalization, exact finalized frame-count verification across the writer drain boundary, WAV re-read after stop, repeated same-path take replacement and 250-round lifecycle/temporary-file cleanup stress; `aura-test-recording-long` is available for duration-bounded disk-throughput runs |
+| OpenUtau project/CLI handoff | Passed (local evidence) | OpenUtau v0.1.565.0 opened `teto_chorus_hirari_tuned_diagnostic_v10.ustx` with Kasane Teto / WORLDLINE-R; Hirari CLI imported the same USTX plus a WAV, persisted the pair, and re-inspected 16 source notes, singer identity, SHA-256 hashes, 44.1 kHz stereo audio, 8,464,113 frames and one region |
+| Recording lifecycle | Passed (contract evidence) | RIFF/RF64-capable header finalization, exact finalized frame-count verification across the writer drain boundary, WAV re-read after stop, repeated same-path take replacement and 250-round lifecycle/temporary-file cleanup stress; `hirari-test-recording-long` is available for duration-bounded disk-throughput runs |
 
 The strict real-device matrix was also run on the attached Apple Silicon Mac
-with `AURA_REAL_DEVICE_STRICT=1`: software device transition, CoreAudio,
+with `HIRARI_REAL_DEVICE_STRICT=1`: software device transition, CoreAudio,
 VST3, AU and CLAP all returned `PASS` with zero `SKIPPED` capabilities. The
 latest local matrix report was
-`/tmp/aura-real-device-evidence-latest/matrix-20260827-064855.tsv`;
+`/tmp/hirari-real-device-evidence-latest/matrix-20260827-064855.tsv`;
 the timestamped TSV and per-capability logs are emitted under the configured
 evidence directory for each run.
 
@@ -301,7 +301,7 @@ parameter/audio equivalence after a complete project save and application
 restart (the current test proves finite non-silent note audio, not waveform
 identity), OpenUtau's actual audio export from the OpenUtau application and
 re-import of that newly exported file inside the DAW (the current evidence
-covers the real OpenUtau project UI plus Aura's validated import/persistence
+covers the real OpenUtau project UI plus Hirari's validated import/persistence
 handoff using an existing WAV),
 multi-hour recording/autosave, sleep/wake, physical MIDI/SysEx, and every AU
 component or architecture combination.
@@ -312,7 +312,7 @@ multi-hour disk-throughput run. A 60-second local recording stress run and a
 separate 5-minute recording stress run completed successfully with
 finalized-frame and temporary-file checks. A 5-minute time-budgeted worker
 lifecycle run also completed 87 rounds without exceeding its resource budgets.
-The new `aura-test-recording-long` target
+The new `hirari-test-recording-long` target
 exercises configurable duration and block volume and fails on dropped frames,
 writer errors, payload-size mismatch, or temporary-file residue. A multi-hour
 hardware run must still record device, filesystem, duration, dropped frames,
@@ -321,7 +321,7 @@ hardware evidence.
 
 The realtime callback soak is independently available as the ignored
 `callback_soak_has_no_nonfinite_output_or_deadline_misses` integration test.
-It runs for `AURA_REALTIME_SOAK_SECONDS` (30 seconds by default), exercises
+It runs for `HIRARI_REALTIME_SOAK_SECONDS` (30 seconds by default), exercises
 control-plane changes while processing 256-frame blocks, and fails on any
 deadline miss or non-finite sample. A one-second smoke run passed locally;
 longer runs remain software-host evidence until repeated on physical devices.
@@ -365,7 +365,7 @@ platform without inheriting a misleading global success claim.
 
 ### Current hardware boundary (2026-08-29)
 
-`AURA_REQUIRE_HARDWARE_DEVICE=1 scripts/run_device_transition_contract.sh`
+`HIRARI_REQUIRE_HARDWARE_DEVICE=1 scripts/run_device_transition_contract.sh`
 failed closed because this host had no usable CoreAudio output device. The
 software fallback and 20-cycle reconfiguration matrix passed, but physical
 device start/stop/reconfigure remains **not evidenced** here.
@@ -379,7 +379,7 @@ workspace run completed with zero failures, including 468 core unit tests,
 evidence; it does not upgrade hardware- or third-party-dependent checks.
 
 The current UI package also passes its 33 unit tests and 4 UI/Core integration
-tests with `cargo test -p aura-ui --locked --no-default-features --tests`.
+tests with `cargo test -p hirari-ui --locked --no-default-features --tests`.
 These tests cover the production workflow, transport callbacks, template
 navigation, render output handoff, and empty-peak handling; they do not replace
 manual GUI and hardware acceptance.
@@ -391,7 +391,7 @@ external inputs it reports `SKIPPED` (or fails in strict mode).
 
 ## Recommended public wording
 
-> Aura is an MIT-licensed, programmable macOS DAW engine and early technical
+> Hirari is an MIT-licensed, programmable macOS DAW engine and early technical
 > preview. CLAP and macOS AU are exercised through an isolated worker. VST3,
 > Surge XT and OpenUtau import handoff are validated by capability-specific
 > fixtures and evidence rather than bundled binaries. Vital remains an

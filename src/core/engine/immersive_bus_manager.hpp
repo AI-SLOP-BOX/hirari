@@ -7,7 +7,7 @@
 #include <algorithm>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ImmersiveBusManager
@@ -65,4 +65,4 @@ private:
     std::mutex m_allocationMutex; // For industrial thread-safe lazy init
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

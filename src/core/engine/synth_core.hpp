@@ -11,13 +11,13 @@
 #include "../audio_buffer.hpp"
 #include "macro_control_manager.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class SynthCore
  * @brief Multi-engine synthesizer.
  */
-class SynthCore : public ::Aura::DSP::IProcessor {
+class SynthCore : public ::Hirari::DSP::IProcessor {
 public:
     enum class EngineType { Subtractive, FM, Wavetable };
 
@@ -29,7 +29,7 @@ public:
         reset();
     }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& context) noexcept override {
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Hirari::DSP::ProcessContext& context) noexcept override {
         (void)context;
         if (buffer.getNumChannels() == 0 || buffer.getNumSamples() == 0) return;
         const uint32_t count = buffer.getNumSamples();
@@ -166,4 +166,4 @@ private:
     uint64_t m_age = 0;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

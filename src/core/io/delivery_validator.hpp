@@ -4,7 +4,7 @@
 #include <vector>
 #include <fstream>
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 struct DeliveryIssue { std::filesystem::path file; std::string message; };
 struct DeliveryReport { size_t checked=0; std::vector<DeliveryIssue> issues; bool ok() const noexcept{return issues.empty()&&checked>0;} };
 class DeliveryValidator {

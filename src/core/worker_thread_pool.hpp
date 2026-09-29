@@ -8,7 +8,7 @@
 #include <functional>
 #include <atomic>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @brief WorkerThreadPool: Parallel DSP processing for large-scale multi-voice instruments.
@@ -64,4 +64,4 @@ private:
     std::atomic<size_t> m_completedTasks{0};
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

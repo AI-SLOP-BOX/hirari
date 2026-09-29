@@ -4,7 +4,7 @@
 #include <atomic>
 #include <algorithm>
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @class SubtractiveSynth
@@ -76,4 +76,4 @@ private:
     float m_lowpassState;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

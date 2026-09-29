@@ -6,7 +6,7 @@
 #include <algorithm>
 #include "loudness_meter.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief MasteringReference: Side-by-side comparison with professional tracks.
@@ -60,4 +60,4 @@ private:
     LoudnessMeter m_meter;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

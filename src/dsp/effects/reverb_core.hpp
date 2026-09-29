@@ -11,7 +11,7 @@
 #include "../iprocessor.hpp"
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class TPTOnePole
@@ -82,7 +82,7 @@ public:
             std::ceil(std::max(0.0, samples))));
     }
 
-    std::string getName() const override { return "Aura Reverb Pro"; }
+    std::string getName() const override { return "Hirari Reverb Pro"; }
 
     void setDecay(float t60) {
         t60 = std::isfinite(t60) ? std::clamp(t60, 0.05f, 60.0f) : 2.4f;
@@ -154,4 +154,4 @@ private:
     float m_decaySeconds = 2.4f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

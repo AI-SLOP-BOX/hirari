@@ -5,7 +5,7 @@
 #include <memory>
 #include "../audio_buffer.hpp"
 
-namespace Aura::SCAE {
+namespace Hirari::SCAE {
 
 /**
  * @class AISourceSeparator
@@ -30,14 +30,14 @@ public:
         
         // --- HONEST FIX: REMOVED RT ALLOCATIONS ---
         if (!out.vocal || !out.drum || !out.bass || !out.other) {
-            ::Aura::Core::Diagnostics::LogBuffer::post(0, 0, "STEM_SPLIT_BUFFER_MISSING");
+            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "STEM_SPLIT_BUFFER_MISSING");
             return; 
         }
         if (out.vocal->getNumChannels() < 2 || out.drum->getNumChannels() < 2 ||
             out.bass->getNumChannels() < 2 || out.other->getNumChannels() < 2 ||
             out.vocal->getNumSamples() < len || out.drum->getNumSamples() < len ||
             out.bass->getNumSamples() < len || out.other->getNumSamples() < len) {
-            ::Aura::Core::Diagnostics::LogBuffer::post(0, 0, "STEM_SPLIT_BUFFER_SIZE_MISMATCH");
+            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "STEM_SPLIT_BUFFER_SIZE_MISMATCH");
             return;
         }
 
@@ -90,4 +90,4 @@ public:
     }
 };
 
-} // namespace Aura::SCAE
+} // namespace Hirari::SCAE

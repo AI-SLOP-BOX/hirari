@@ -15,7 +15,7 @@
 #include <mach/thread_act.h>
 #endif
 
-namespace Aura::IO::Audio {
+namespace Hirari::IO::Audio {
 
 /**
  * @class RealtimeAudioDriver
@@ -25,7 +25,7 @@ class RealtimeAudioDriver {
 public:
     ~RealtimeAudioDriver() { stop(); }
 
-    bool start(::Aura::AuraEngine& engine, double sr, uint32_t bs) {
+    bool start(::Hirari::HirariEngine& engine, double sr, uint32_t bs) {
         if (!std::isfinite(sr) || sr < 8000.0 || sr > 384000.0 || bs == 0 || bs > 8192 ||
             m_running.exchange(true, std::memory_order_acq_rel)) {
             return false;
@@ -91,4 +91,4 @@ private:
     std::mutex m_waitMutex;
 };
 
-} // namespace Aura::IO::Audio
+} // namespace Hirari::IO::Audio

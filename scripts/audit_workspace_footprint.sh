@@ -6,12 +6,12 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
-max_bytes=${AURA_WORKSPACE_MAX_BYTES:-1073741824}
+max_bytes=${HIRARI_WORKSPACE_MAX_BYTES:-1073741824}
 total_kib=0
-records=$(mktemp "${TMPDIR:-/tmp}/aura-footprint.XXXXXX")
+records=$(mktemp "${TMPDIR:-/tmp}/hirari-footprint.XXXXXX")
 trap 'rm -f "$records"' EXIT INT TERM
 
-printf '%s\n' '== Aura workspace footprint (read-only) =='
+printf '%s\n' '== Hirari workspace footprint (read-only) =='
 for path in dist build-tools artifacts packaging .openutau-review; do
     if [ ! -e "$path" ]; then
         continue
@@ -57,7 +57,7 @@ fi
 
 total_bytes=$((total_kib * 1024))
 if [ "$total_bytes" -gt "$max_bytes" ]; then
-    printf 'AURA_FOOTPRINT_ERROR generated workspace footprint %s bytes exceeds %s\n' \
+    printf 'HIRARI_FOOTPRINT_ERROR generated workspace footprint %s bytes exceeds %s\n' \
         "$total_bytes" "$max_bytes" >&2
     exit 1
 fi

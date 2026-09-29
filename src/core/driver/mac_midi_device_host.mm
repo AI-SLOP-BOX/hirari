@@ -2,16 +2,24 @@
 
 #if defined(__APPLE__)
 #include <CoreMIDI/CoreMIDI.h>
+#include <mach/mach_time.h>
+#include <cmath>
 #include <sstream>
 #include <deque>
 #include <mutex>
+#include <atomic>
 
-namespace Aura::Core::Driver {
+namespace Hirari::Core::Driver {
 
 namespace {
-struct MidiInputEvent { MIDIUniqueID source = 0; std::vector<uint8_t> data; };
+struct MidiInputEvent {
+    MIDIUniqueID source = 0;
+    MIDITimeStamp hostTime = 0;
+    std::vector<uint8_t> data;
+};
 std::mutex inputMutex;
 std::deque<MidiInputEvent> inputQueue;
+std::atomic<uint64_t> droppedInputEvents{0};
 MIDIClientRef inputClient = 0;
 MIDIPortRef inputPort = 0;
 
@@ -27,8 +35,15 @@ void readInput(const MIDIPacketList* list, void* /*readProcRefCon*/, void* srcCo
     const MIDIPacket* packet = &list->packet[0];
     for (UInt32 i = 0; i < list->numPackets; ++i) {
         if (!packet) break;
-        if (packet->length > 0 && packet->length <= 256 && inputQueue.size() < 1024)
-            inputQueue.push_back(MidiInputEvent{sourceId, std::vector<uint8_t>(packet->data, packet->data + packet->length)});
+        if (packet->length > 0 && packet->length <= 256 && inputQueue.size() < 1024) {
+            inputQueue.push_back(MidiInputEvent{
+                sourceId,
+                packet->timeStamp,
+                std::vector<uint8_t>(packet->data, packet->data + packet->length)
+            });
+        } else if (packet->length > 0) {
+            droppedInputEvents.fetch_add(1, std::memory_order_relaxed);
+        }
         packet = MIDIPacketNext(packet);
     }
 }
@@ -82,8 +97,8 @@ bool send_core_midi_message(uint32_t uniqueId, const uint8_t* data, size_t size)
     if (!destination) return false;
     MIDIClientRef client = 0;
     MIDIPortRef port = 0;
-    if (MIDIClientCreate(CFSTR("Aura MIDI"), nullptr, nullptr, &client) != noErr ||
-        MIDIOutputPortCreate(client, CFSTR("Aura Output"), &port) != noErr) {
+    if (MIDIClientCreate(CFSTR("Hirari MIDI"), nullptr, nullptr, &client) != noErr ||
+        MIDIOutputPortCreate(client, CFSTR("Hirari Output"), &port) != noErr) {
         if (client) MIDIClientDispose(client);
         return false;
     }
@@ -100,8 +115,8 @@ bool send_core_midi_message(uint32_t uniqueId, const uint8_t* data, size_t size)
 bool start_core_midi_input() {
     std::lock_guard<std::mutex> lock(inputMutex);
     if (inputPort) return true;
-    if (MIDIClientCreate(CFSTR("Aura MIDI Input"), nullptr, nullptr, &inputClient) != noErr ||
-        MIDIInputPortCreate(inputClient, CFSTR("Aura Input"), readInput, nullptr, &inputPort) != noErr) {
+    if (MIDIClientCreate(CFSTR("Hirari MIDI Input"), nullptr, nullptr, &inputClient) != noErr ||
+        MIDIInputPortCreate(inputClient, CFSTR("Hirari Input"), readInput, nullptr, &inputPort) != noErr) {
         if (inputPort) MIDIPortDispose(inputPort);
         if (inputClient) MIDIClientDispose(inputClient);
         inputPort = 0; inputClient = 0; return false;
@@ -128,7 +143,9 @@ std::string poll_core_midi_input_json() {
     while (!inputQueue.empty()) {
         auto event = std::move(inputQueue.front()); inputQueue.pop_front();
         if (!first) json << ','; first = false;
-        json << "{\"source_unique_id\":" << event.source << ",\"data_hex\":\"";
+        json << "{\"source_unique_id\":" << event.source
+             << ",\"host_time\":" << static_cast<uint64_t>(event.hostTime)
+             << ",\"data_hex\":\"";
         static constexpr char hex[] = "0123456789abcdef";
         for (uint8_t byte : event.data) json << hex[byte >> 4] << hex[byte & 0xf];
         json << "\"}";
@@ -136,5 +153,25 @@ std::string poll_core_midi_input_json() {
     json << ']'; return json.str();
 }
 
-} // namespace Aura::Core::Driver
+uint64_t core_midi_host_time_now() {
+    return static_cast<uint64_t>(mach_absolute_time());
+}
+
+uint64_t core_midi_host_time_delta_samples(uint64_t start, uint64_t event, double sampleRate) {
+    if (event <= start || !std::isfinite(sampleRate) || sampleRate <= 0.0) return 0;
+    mach_timebase_info_data_t timebase{};
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.denom == 0) return 0;
+    const long double elapsedNanos =
+        static_cast<long double>(event - start) * timebase.numer / timebase.denom;
+    const long double frames = elapsedNanos * sampleRate / 1'000'000'000.0L;
+    if (!std::isfinite(static_cast<double>(frames)) || frames <= 0.0L ||
+        frames >= static_cast<long double>(UINT64_MAX)) return 0;
+    return static_cast<uint64_t>(frames + 0.5L);
+}
+
+uint64_t core_midi_dropped_input_events() {
+    return droppedInputEvents.load(std::memory_order_relaxed);
+}
+
+} // namespace Hirari::Core::Driver
 #endif

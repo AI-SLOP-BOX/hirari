@@ -4,7 +4,7 @@
 #include <atomic>
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @brief SidechainLink: Enables inter-track dynamic routing.
@@ -46,4 +46,4 @@ private:
     std::atomic<float> m_level{0.0f};
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

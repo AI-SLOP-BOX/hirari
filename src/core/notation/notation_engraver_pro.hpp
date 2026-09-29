@@ -5,7 +5,7 @@
 #include <map>
 #include <memory>
 
-namespace Aura::Core::Notation {
+namespace Hirari::Core::Notation {
 
 /**
  * @struct NotationSymbol
@@ -50,4 +50,4 @@ private:
     std::vector<NotationSymbol> m_pageCache;
 };
 
-} // namespace Aura::Core::Notation
+} // namespace Hirari::Core::Notation

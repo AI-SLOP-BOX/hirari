@@ -8,7 +8,7 @@
 #include <chrono>
 #include <array>
 
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
 #if defined(__APPLE__)
 #define VK_USE_PLATFORM_METAL_EXT 1
 #endif
@@ -17,7 +17,7 @@
 #include "vulkan_surface.hpp"
 #endif
 
-namespace Aura::Graphics::Platform {
+namespace Hirari::Graphics::Platform {
 
 /**
  * @class VulkanGraphicsKernel
@@ -31,7 +31,7 @@ public:
     virtual ~VulkanGraphicsKernel();
 
     bool initialize(void* nativeWindowHandle) override;
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
     // Platform layers create the VkSurfaceKHR because only they know whether
     // the host window is Win32, X11, Wayland, Cocoa, or MoltenVK-backed.
     bool initializeWithSurface(VkInstance instance, VkSurfaceKHR surface,
@@ -106,7 +106,7 @@ private:
     void pushSDF(const SDFPushConstants& constants);
     
     float m_scale = 1.0f;
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
     VkInstance m_instance = VK_NULL_HANDLE;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
@@ -141,4 +141,4 @@ private:
     size_t m_scissorDepth = 0;
 };
 
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform

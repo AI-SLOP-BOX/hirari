@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-namespace Aura::Graphics::Platform {
+namespace Hirari::Graphics::Platform {
 
 /**
  * @class MetalGraphicsKernel
@@ -113,4 +113,4 @@ fragment float4 msdf_fragment(VertexOut in [[stage_in]],
 }
 )";
 
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform

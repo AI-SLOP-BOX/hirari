@@ -1,12 +1,12 @@
-#include "../../src/external/aura_sdk.hpp"
+#include "../../src/external/hirari_sdk.hpp"
 #include <algorithm>
 
-class ExampleGain final : public AuraSDK::IPlugin {
+class ExampleGain final : public HirariSDK::IPlugin {
 public:
     void initialize(double) override {}
 
-    void process(AuraSDK::ProcessData& data) override {
-        const float gain = AuraSDK::FastDSP::dbToLinear(m_gainDb);
+    void process(HirariSDK::ProcessData& data) override {
+        const float gain = HirariSDK::FastDSP::dbToLinear(m_gainDb);
         const uint32_t channels = std::min(data.numInputs, data.numOutputs);
         for (uint32_t c = 0; c < channels; ++c) {
             if (!data.inputs[c] || !data.outputs[c]) continue;
@@ -15,11 +15,11 @@ public:
         }
     }
 
-    const char* getName() const override { return "Aura SDK Example Gain"; }
-    const char* getVendor() const override { return "Aura"; }
-    AuraSDK::Version getVersion() const override { return {1, 0, 0}; }
+    const char* getName() const override { return "Hirari SDK Example Gain"; }
+    const char* getVendor() const override { return "Hirari"; }
+    HirariSDK::Version getVersion() const override { return {1, 0, 0}; }
     uint32_t getNumParameters() const override { return 1; }
-    void getParameterInfo(uint32_t index, AuraSDK::IPlugin::ParameterInfo& info) override {
+    void getParameterInfo(uint32_t index, HirariSDK::IPlugin::ParameterInfo& info) override {
         if (index == 0) info = {0, "Gain (dB)", -24.0f, 24.0f, 0.0f, true};
     }
     void setParameter(uint32_t id, float value) override {
@@ -31,4 +31,4 @@ private:
     float m_gainDb = 0.0f;
 };
 
-AURA_PLUGIN_EXPORT { return new ExampleGain(); }
+HIRARI_PLUGIN_EXPORT { return new ExampleGain(); }

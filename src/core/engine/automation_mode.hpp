@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @enum AutomationMode
@@ -20,4 +20,4 @@ enum class AutomationMode {
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

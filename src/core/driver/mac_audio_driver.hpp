@@ -18,7 +18,7 @@
 #include <xmmintrin.h>
 #endif
 
-namespace Aura::Core::Driver {
+namespace Hirari::Core::Driver {
 
 /**
  * @class MacAudioDriver
@@ -27,7 +27,11 @@ namespace Aura::Core::Driver {
  */
 class MacAudioDriver {
 public:
-    using ProcessCallback = std::function<void(float* l, float* r, uint32_t len)>;
+    using ProcessCallback = std::function<void(const float* const* inputs,
+                                               uint32_t inputChannelCount,
+                                               float* const* outputs,
+                                               uint32_t outputChannelCount,
+                                               uint32_t len)>;
 
     // The sink and its context are owned by the registrant and must remain
     // alive until unregister_input_capture_sink() returns. The callback runs
@@ -101,26 +105,39 @@ public:
                                    kAudioUnitScope_Input, 1, &enable, sizeof(enable));
         if (err != noErr) return failStart(err);
 
-        // --- 1. SET STREAM FORMAT (32-bit Float Non-Interleaved) ---
+        // --- 1. SET STREAM FORMATS (32-bit Float Non-Interleaved) ---
+        AudioDeviceID inputDevice = requestedDevice;
+        if (inputDevice == kAudioObjectUnknown) {
+            UInt32 deviceSize = sizeof(inputDevice);
+            (void)AudioUnitGetProperty(m_unit, kAudioOutputUnitProperty_CurrentDevice,
+                                       kAudioUnitScope_Global, 0, &inputDevice, &deviceSize);
+        }
+        m_inputChannelCount = input_channel_count_for_device(inputDevice);
+        if (m_inputChannelCount == 0) return failStart(-1);
+        m_outputChannelCount = output_channel_count_for_device(inputDevice);
+        if (m_outputChannelCount < 2) return failStart(-1);
+
         AudioStreamBasicDescription format{};
         format.mSampleRate = sampleRate;
         format.mFormatID = kAudioFormatLinearPCM;
         format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
         format.mBitsPerChannel = 32;
-        format.mChannelsPerFrame = 2;
         format.mFramesPerPacket = 1;
         format.mBytesPerPacket = 4;
         format.mBytesPerFrame = 4;
 
+        AudioStreamBasicDescription outputFormat = format;
+        outputFormat.mChannelsPerFrame = m_outputChannelCount;
+        AudioStreamBasicDescription inputFormat = format;
+        inputFormat.mChannelsPerFrame = m_inputChannelCount;
+
         err = AudioUnitSetProperty(m_unit, kAudioUnitProperty_StreamFormat,
-                                   kAudioUnitScope_Input, 0, &format, sizeof(format));
+                                   kAudioUnitScope_Input, 0, &outputFormat, sizeof(outputFormat));
         if (err != noErr) return failStart(err);
         err = AudioUnitSetProperty(m_unit, kAudioUnitProperty_StreamFormat,
-                                   kAudioUnitScope_Output, 1, &format, sizeof(format));
+                                   kAudioUnitScope_Output, 1, &inputFormat, sizeof(inputFormat));
         if (err != noErr) return failStart(err);
 
-        m_inputChannelCount = std::min<uint32_t>(format.mChannelsPerFrame, kMaxInputChannels);
-        if (m_inputChannelCount == 0) return failStart();
         const size_t inputSampleCount = static_cast<size_t>(m_inputChannelCount) * bufferSize;
         std::unique_ptr<float[]> inputBuffer(new (std::nothrow) float[inputSampleCount]);
         if (!inputBuffer) return failStart();
@@ -157,6 +174,13 @@ public:
 
             if (!data || data->mNumberBuffers == 0) return noErr;
 
+            // The input buffers are owned by this driver and remain valid
+            // through the output callback below. Expose the device inputs
+            // to the realtime engine without routing through the
+            // recording queue or allocating a second copy.
+            const float* engineInputs[kMaxInputChannels] = {};
+            UInt32 engineInputChannelCount = 0;
+
             // Pull hardware input into storage allocated during start(). The
             // AudioBufferList is stack-only and contains no ownership.
             const auto* inputSink = self->m_inputSink.load(std::memory_order_acquire);
@@ -180,6 +204,8 @@ public:
                     const float* channels[kMaxInputChannels] = {};
                     for (UInt32 channel = 0; channel < self->m_inputChannelCount; ++channel)
                         channels[channel] = static_cast<const float*>(inputData.mBuffers[channel].mData);
+                    std::copy_n(channels, self->m_inputChannelCount, engineInputs);
+                    engineInputChannelCount = self->m_inputChannelCount;
                     inputSink->callback(inputSink->context, channels,
                                         self->m_inputChannelCount, frames, time);
                 }
@@ -204,10 +230,27 @@ public:
                         std::fill_n(static_cast<float*>(data->mBuffers[b].mData),
                                     frames * data->mBuffers[b].mNumberChannels, 0.0f);
                 }
-            } else if (data->mNumberBuffers >= 2) {
-                auto* outL = static_cast<float*>(data->mBuffers[0].mData);
-                auto* outR = static_cast<float*>(data->mBuffers[1].mData);
-                if (outL && outR) self->m_callback(outL, outR, frames);
+            } else if (data->mNumberBuffers >= self->m_outputChannelCount) {
+                float* outputs[kMaxOutputChannels] = {};
+                bool planar = true;
+                for (UInt32 channel = 0; channel < self->m_outputChannelCount; ++channel) {
+                    const auto& buffer = data->mBuffers[channel];
+                    if (!buffer.mData || buffer.mNumberChannels != 1) {
+                        planar = false;
+                        break;
+                    }
+                    outputs[channel] = static_cast<float*>(buffer.mData);
+                }
+                if (planar) self->m_callback(
+                    engineInputChannelCount ? engineInputs : nullptr,
+                    engineInputChannelCount, outputs, self->m_outputChannelCount, frames);
+                else {
+                    for (UInt32 b = 0; b < data->mNumberBuffers; ++b) {
+                        if (data->mBuffers[b].mData && data->mBuffers[b].mNumberChannels > 0)
+                            std::fill_n(static_cast<float*>(data->mBuffers[b].mData),
+                                        frames * data->mBuffers[b].mNumberChannels, 0.0f);
+                    }
+                }
             } else if (data->mBuffers[0].mData) {
                 // The engine callback operates on separate channel spans. Do
                 // not pretend an interleaved buffer has that layout; silence
@@ -281,12 +324,16 @@ public:
         m_inputBuffer.reset();
         m_inputBufferFrames = 0;
         m_inputChannelCount = 0;
+        m_outputChannelCount = 0;
         m_stopping.store(false, std::memory_order_release);
     }
 
     bool is_running() const { return m_running.load(std::memory_order_acquire); }
     double sample_rate() const noexcept { return m_sampleRate; }
     uint32_t buffer_size() const noexcept { return m_bufferSize; }
+    uint32_t input_channel_count() const noexcept { return m_inputChannelCount; }
+    uint32_t output_channel_count() const noexcept { return m_outputChannelCount; }
+    AudioDeviceID device_id() const noexcept { return m_device; }
     bool device_lost() const { return m_deviceLost.load(std::memory_order_acquire); }
     int32_t last_error_code() const noexcept {
         return m_lastErrorCode.load(std::memory_order_acquire);
@@ -309,7 +356,57 @@ public:
 private:
     static constexpr uint32_t kMaxFramesPerSlice = 8192;
 
-    static constexpr UInt32 kMaxInputChannels = 2;
+    static constexpr UInt32 kMaxInputChannels = 32;
+    static constexpr UInt32 kMaxOutputChannels = 32;
+
+    static UInt32 input_channel_count_for_device(AudioDeviceID device) noexcept {
+        if (device == kAudioObjectUnknown) return 0;
+        AudioObjectPropertyAddress address = {
+            kAudioDevicePropertyStreamConfiguration,
+            kAudioDevicePropertyScopeInput,
+            kAudioObjectPropertyElementMain,
+        };
+        UInt32 dataSize = 0;
+        if (AudioObjectGetPropertyDataSize(device, &address, 0, nullptr, &dataSize) != noErr ||
+            dataSize < sizeof(AudioBufferList)) {
+            return 0;
+        }
+        std::unique_ptr<std::uint8_t[]> storage(new (std::nothrow) std::uint8_t[dataSize]);
+        if (!storage) return 0;
+        auto* buffers = reinterpret_cast<AudioBufferList*>(storage.get());
+        if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &dataSize, buffers) != noErr) {
+            return 0;
+        }
+        uint64_t channels = 0;
+        for (UInt32 index = 0; index < buffers->mNumberBuffers; ++index) {
+            channels += buffers->mBuffers[index].mNumberChannels;
+        }
+        return static_cast<UInt32>(std::min<uint64_t>(channels, kMaxInputChannels));
+    }
+
+    static UInt32 output_channel_count_for_device(AudioDeviceID device) noexcept {
+        if (device == kAudioObjectUnknown) return 0;
+        AudioObjectPropertyAddress address = {
+            kAudioDevicePropertyStreamConfiguration,
+            kAudioDevicePropertyScopeOutput,
+            kAudioObjectPropertyElementMain,
+        };
+        UInt32 dataSize = 0;
+        if (AudioObjectGetPropertyDataSize(device, &address, 0, nullptr, &dataSize) != noErr ||
+            dataSize < sizeof(AudioBufferList)) {
+            return 0;
+        }
+        std::unique_ptr<std::uint8_t[]> storage(new (std::nothrow) std::uint8_t[dataSize]);
+        if (!storage) return 0;
+        auto* buffers = reinterpret_cast<AudioBufferList*>(storage.get());
+        if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &dataSize, buffers) != noErr) {
+            return 0;
+        }
+        uint64_t channels = 0;
+        for (UInt32 index = 0; index < buffers->mNumberBuffers; ++index)
+            channels += buffers->mBuffers[index].mNumberChannels;
+        return static_cast<UInt32>(std::min<uint64_t>(channels, kMaxOutputChannels));
+    }
 
     void wait_for_callbacks_to_quiesce() noexcept {
         while (m_callbacksInFlight.load(std::memory_order_acquire) != 0)
@@ -344,9 +441,10 @@ private:
     std::unique_ptr<float[]> m_inputBuffer;
     uint32_t m_inputBufferFrames = 0;
     uint32_t m_inputChannelCount = 0;
+    uint32_t m_outputChannelCount = 0;
     bool m_initialized = false;
     AudioDeviceID m_device = kAudioObjectUnknown;
     bool m_deviceListenerInstalled = false;
 };
 
-} // namespace Aura::Core::Driver
+} // namespace Hirari::Core::Driver

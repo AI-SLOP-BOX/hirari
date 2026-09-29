@@ -19,7 +19,7 @@
 #endif
 #include "../engine/track.hpp"
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @class SessionIO
@@ -102,7 +102,7 @@ public:
             std::to_string(nonce) + "-" + std::to_string(sequence);
         std::ofstream file(temporary, std::ios::out | std::ios::trunc);
         if (!file.is_open()) return;
-        file << "<AuraProject version=\"1.0\">\n";
+        file << "<HirariProject version=\"1.0\">\n";
         
         for (auto& track : tracks) {
             if (!track) continue;
@@ -122,7 +122,7 @@ public:
             file << "  </Track>\n";
         }
         
-        file << "</AuraProject>\n";
+        file << "</HirariProject>\n";
         file.flush();
         const bool writeOk = file.good();
         file.close();
@@ -174,8 +174,8 @@ public:
         // Basic structural validation. Require one complete root document and
         // reject trailing non-whitespace bytes so concatenated/partially
         // recovered files cannot be accepted as valid sessions.
-        const auto rootStart = xml.find("<AuraProject");
-        const auto rootEnd = xml.rfind("</AuraProject>");
+        const auto rootStart = xml.find("<HirariProject");
+        const auto rootEnd = xml.rfind("</HirariProject>");
         if (rootStart == std::string::npos || rootEnd == std::string::npos ||
             rootStart != xml.find_first_not_of(" \t\r\n") ||
             xml.find_first_not_of(" \t\r\n", rootEnd + 14) != std::string::npos) {
@@ -371,4 +371,4 @@ private:
     SessionIO() = default;
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

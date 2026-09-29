@@ -3,7 +3,7 @@
 #include <string>
 #include <mutex>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @struct ComputeNode
@@ -46,4 +46,4 @@ private:
     std::vector<ComputeNode> m_nodes;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

@@ -6,7 +6,7 @@
 #include <mutex>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief AudioTake: A single recording attempt.
@@ -58,4 +58,4 @@ private:
     mutable std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

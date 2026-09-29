@@ -14,7 +14,7 @@
 #include "../core/concurrency/audio_task_manager.hpp"
 #include "../core/concurrency/thread_pool.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @class ParallelAssetManager
@@ -53,7 +53,7 @@ public:
         for (const auto& path : paths) {
             if (path.empty()) continue;
             if (!scheduled.insert(path).second) continue;
-            futures.push_back(Aura::Core::Concurrency::ThreadPool::getInstance().enqueue([this, path, batchGeneration]() {
+            futures.push_back(Hirari::Core::Concurrency::ThreadPool::getInstance().enqueue([this, path, batchGeneration]() {
                 WavLoader::WavInfo info;
                 try {
                     auto data = WavLoader::load(path, info);
@@ -100,4 +100,4 @@ private:
     std::vector<std::string> m_failedPaths;
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

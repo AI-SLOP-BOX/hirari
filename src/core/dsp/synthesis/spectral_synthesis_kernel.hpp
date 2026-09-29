@@ -5,7 +5,7 @@
 #include <algorithm>
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @class SpectralSynthesisKernel
@@ -65,4 +65,4 @@ private:
     std::vector<float> m_window;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

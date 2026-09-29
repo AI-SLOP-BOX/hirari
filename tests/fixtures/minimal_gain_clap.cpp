@@ -6,7 +6,7 @@
 #include <thread>
 #include <new>
 
-using namespace Aura::Core::Plugins::ClapAbi;
+using namespace Hirari::Core::Plugins::ClapAbi;
 
 namespace {
 struct FixtureState {
@@ -40,11 +40,11 @@ void reset(const Plugin*) {}
 
 ProcessStatus process(const Plugin* plugin, const Process* request) {
     auto& state = stateFor(plugin);
-    if (const char* crash = std::getenv("AURA_CLAP_FIXTURE_CRASH");
+    if (const char* crash = std::getenv("HIRARI_CLAP_FIXTURE_CRASH");
         crash && std::strcmp(crash, "1") == 0) {
         std::_Exit(86);
     }
-    if (const char* delay = std::getenv("AURA_CLAP_FIXTURE_DELAY_MS");
+    if (const char* delay = std::getenv("HIRARI_CLAP_FIXTURE_DELAY_MS");
         delay && *delay != '\0') {
         const long milliseconds = std::strtol(delay, nullptr, 10);
         if (milliseconds > 0 && milliseconds <= 1000) {
@@ -127,7 +127,7 @@ bool saveState(const Plugin* plugin, const OStream* stream) {
 
 bool loadState(const Plugin* plugin, const IStream* stream) {
     auto& state = stateFor(plugin);
-    if (const char* delay = std::getenv("AURA_CLAP_FIXTURE_STATE_DELAY_MS");
+    if (const char* delay = std::getenv("HIRARI_CLAP_FIXTURE_STATE_DELAY_MS");
         delay && *delay != '\0') {
         const long milliseconds = std::strtol(delay, nullptr, 10);
         if (milliseconds > 0 && milliseconds <= 10000)
@@ -141,8 +141,8 @@ bool loadState(const Plugin* plugin, const IStream* stream) {
 }
 
 const StateExtension stateExtension{&saveState, &loadState};
-const Descriptor descriptor{{1, 0, 0}, "com.aura.test.minimal-gain", "Aura Test Gain",
-                           "Aura Tests", "", "", "", "1.0", nullptr};
+const Descriptor descriptor{{1, 0, 0}, "com.hirari.test.minimal-gain", "Hirari Test Gain",
+                           "Hirari Tests", "", "", "", "1.0", nullptr};
 
 const Plugin* createPlugin(const Factory*, const Host*, const char*) {
     auto* state = new (std::nothrow) FixtureState{};

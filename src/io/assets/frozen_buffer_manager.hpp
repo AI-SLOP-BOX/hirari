@@ -4,7 +4,7 @@
 #include "../../io/wav_loader_utils.hpp"
 #include <filesystem>
 
-namespace Aura::IO::Assets {
+namespace Hirari::IO::Assets {
 
 /**
  * @brief FrozenBufferManager: Professional track freezing with disk persistence.
@@ -43,4 +43,4 @@ private:
     std::map<uint32_t, std::string> m_frozenPaths;
 };
 
-} // namespace Aura::IO::Assets
+} // namespace Hirari::IO::Assets

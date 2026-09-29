@@ -19,7 +19,7 @@
 #include "../../core/status_queue.hpp"
 #include "../../core/concurrency/thread_pool.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief BouncingEngine: High-speed offline rendering for "Bounce-In-Place."
@@ -38,7 +38,7 @@ public:
      */
     std::future<bool> bounceInPlace(uint32_t trackId, const std::string& destinationPath,
                                     OutputFormat format = OutputFormat::WAV) {
-        return Aura::Core::Concurrency::ThreadPool::getInstance().enqueue([this, trackId, destinationPath, format]() {
+        return Hirari::Core::Concurrency::ThreadPool::getInstance().enqueue([this, trackId, destinationPath, format]() {
             return this->performInternalRender(TimelineSystem::getInstance(), trackId, destinationPath, format);
         });
     }
@@ -48,7 +48,7 @@ public:
     std::future<bool> bounceInPlace(TimelineSystem& timeline, uint32_t trackId,
                                     const std::string& destinationPath,
                                     OutputFormat format = OutputFormat::WAV) {
-        return Aura::Core::Concurrency::ThreadPool::getInstance().enqueue([this, &timeline, trackId, destinationPath, format]() {
+        return Hirari::Core::Concurrency::ThreadPool::getInstance().enqueue([this, &timeline, trackId, destinationPath, format]() {
             return this->performInternalRender(timeline, trackId, destinationPath, format);
         });
     }
@@ -77,7 +77,7 @@ private:
             uint32_t blockSize = 1024;
             const double sampleRate = timeline.getSampleRate();
             if (!std::isfinite(sampleRate) || sampleRate <= 0.0 || sampleRate > 384000.0) {
-                ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
+                ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
                     StatusQueue::Severity::Error, "Bounce-In-Place: invalid project sample rate.");
                 return false;
             }
@@ -85,7 +85,7 @@ private:
             // Bounce the actual occupied span of the requested track.
             const uint64_t totalSamples = timeline.getTrackEndSample(trackId);
             if (totalSamples == 0) {
-                ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
+                ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
                     StatusQueue::Severity::Error, "Bounce-In-Place: track has no audio regions.");
                 return false;
             }
@@ -95,14 +95,14 @@ private:
             // The normal WAV path is streamed directly to the durable writer;
             // only WAVE64 keeps a bounded-by-project float buffer until the
             // dedicated float32 streaming writer is introduced.
-            std::unique_ptr<::Aura::IO::Persistence::WavWriter::Pcm16StreamWriter> pcmStream;
+            std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter> pcmStream;
             std::vector<std::vector<float>> exportBuffer;
             if (format == OutputFormat::WAV) {
                 pcmStream = std::make_unique<
-                    ::Aura::IO::Persistence::WavWriter::Pcm16StreamWriter>(
+                    ::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter>(
                         destination.string(), totalSamples, static_cast<uint32_t>(sampleRate));
                 if (!pcmStream->isOpen()) {
-                    ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
+                    ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
                         StatusQueue::Severity::Error,
                         "Bounce-In-Place: unable to open streaming WAV output.");
                     return false;
@@ -116,13 +116,13 @@ private:
             }
             AudioBuffer renderedBlock(numChannels, blockSize);
 
-            ::Aura::Core::StatusQueue::getInstance().pushFromAudio(StatusQueue::Severity::Info, "Starting Bounce-In-Place...");
+            ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(StatusQueue::Severity::Info, "Starting Bounce-In-Place...");
 
             for (uint64_t pos = 0; pos < totalSamples; pos += blockSize) {
                 uint32_t frameCount = static_cast<uint32_t>(std::min<uint64_t>(blockSize, totalSamples - pos));
                 
                 if (!timeline.renderTrackInto(trackId, renderedBlock, frameCount, pos)) {
-                    ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
+                    ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
                         StatusQueue::Severity::Error,
                         "Bounce-In-Place: track render failed.");
                     return false;
@@ -137,7 +137,7 @@ private:
                 if (!right) right = left;
                 if (format == OutputFormat::WAV) {
                     if (!pcmStream->writeFrames(left, right, frameCount)) {
-                        ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
+                        ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
                             StatusQueue::Severity::Error,
                             "Bounce-In-Place: streaming WAV write failed.");
                         return false;
@@ -152,7 +152,7 @@ private:
 
             bool success = format == OutputFormat::WAV
                 ? pcmStream->finish()
-                : ::Aura::IO::WavSaver::saveWave64(
+                : ::Hirari::IO::WavSaver::saveWave64(
                     temporary.string(), exportBuffer, static_cast<uint32_t>(sampleRate));
             if (success && format == OutputFormat::WAVE64) {
                 std::error_code publishError;
@@ -178,9 +178,9 @@ private:
             }
             
             if (success) {
-                ::Aura::Core::StatusQueue::getInstance().pushFromAudio(StatusQueue::Severity::Info, "Bounce-In-Place Completed: " + path);
+                ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(StatusQueue::Severity::Info, "Bounce-In-Place Completed: " + path);
             } else {
-                ::Aura::Core::StatusQueue::getInstance().pushFromAudio(StatusQueue::Severity::Error, "Export Failed.");
+                ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(StatusQueue::Severity::Error, "Export Failed.");
             }
 
             return success;
@@ -189,7 +189,7 @@ private:
                 std::error_code cleanupError;
                 std::filesystem::remove(temporary, cleanupError);
             }
-            ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
+            ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
                 StatusQueue::Severity::Error,
                 std::string("Bounce Exception: ") + e.what());
             return false;
@@ -198,11 +198,11 @@ private:
                 std::error_code cleanupError;
                 std::filesystem::remove(temporary, cleanupError);
             }
-            ::Aura::Core::StatusQueue::getInstance().pushFromAudio(
+            ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
                 StatusQueue::Severity::Error, "Bounce Exception: unknown failure");
             return false;
         }
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

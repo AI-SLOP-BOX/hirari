@@ -6,7 +6,7 @@
 #include <array>
 #include "../core/audio_processor_graph.hpp"
 
-namespace Aura::Synthesis {
+namespace Hirari::Synthesis {
 
 /**
  * @struct SyntheticVoice
@@ -169,4 +169,4 @@ private:
     std::vector<SyntheticVoice> m_voices;
 };
 
-} // namespace Aura::Synthesis
+} // namespace Hirari::Synthesis

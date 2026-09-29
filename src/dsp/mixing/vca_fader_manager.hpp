@@ -7,7 +7,7 @@
 #include <vector>
 #include "../../core/engine/param_tree.hpp"
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @class VCAManager
@@ -97,4 +97,4 @@ private:
     std::bitset<kMaxTracks> m_vcaSoloBitmap;
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

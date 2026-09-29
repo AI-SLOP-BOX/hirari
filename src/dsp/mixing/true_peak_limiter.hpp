@@ -6,7 +6,7 @@
 #include "../iprocessor.hpp"
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @class TruePeakLimiter
@@ -93,4 +93,4 @@ private:
     float m_stateL[4], m_stateR[4]; // Filter history
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

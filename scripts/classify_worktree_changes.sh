@@ -4,7 +4,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 
-report=${1:-"${TMPDIR:-/tmp}/aura-worktree-classification-$(date +%Y%m%d-%H%M%S).tsv"}
+report=${1:-"${TMPDIR:-/tmp}/hirari-worktree-classification-$(date +%Y%m%d-%H%M%S).tsv"}
 mkdir -p "$(dirname "$report")"
 printf 'status\tcategory\tpath\n' >"$report"
 
@@ -30,11 +30,11 @@ category_for() {
 {
     # Keep the top-level audit bounded; nested engine repositories are listed
     # as a single boundary below rather than expanding thousands of files.
-    git diff --name-status --no-renames -- . ':!aura-core-bridge'
-    if [ -d aura-core-bridge/.git ] || [ -f aura-core-bridge/.git ]; then
-        printf 'M\taura-core-bridge/\n'
+    git diff --name-status --no-renames -- . ':!hirari-core-bridge'
+    if [ -d hirari-core-bridge/.git ] || [ -f hirari-core-bridge/.git ]; then
+        printf 'M\thirari-core-bridge/\n'
     fi
-    git ls-files --others --exclude-standard -- . ':!aura-core-bridge' | sed 's/^/?\t/'
+    git ls-files --others --exclude-standard -- . ':!hirari-core-bridge' | sed 's/^/?\t/'
 } | while IFS= read -r line; do
     [ -n "$line" ] || continue
     status=$(printf '%s' "$line" | cut -f1)
@@ -43,5 +43,5 @@ category_for() {
     printf '%s\t%s\t%s\n' "$status" "$(category_for "$path")" "$path" >>"$report"
 done
 
-printf 'AURA_WORKTREE_CLASSIFICATION=%s\n' "$report"
+printf 'HIRARI_WORKTREE_CLASSIFICATION=%s\n' "$report"
 awk -F '\t' 'NR > 1 {count[$2]++} END {for (key in count) printf "%s=%d\n", key, count[key]}' "$report" | sort

@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <array>
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class ProceduralFoleyKernel
@@ -144,4 +144,4 @@ private:
     std::uniform_real_distribution<float> m_noiseDist{-1.0f, 1.0f};
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

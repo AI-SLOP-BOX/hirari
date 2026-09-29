@@ -1,11 +1,11 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT="${AURA_TETO_VOICE_ROOT:-${HOME}/Library/OpenUtau/Singers/KasaneTetoOfficial/重音テト単独音}"
-INSTRUMENTAL="${AURA_TETO_INSTRUMENTAL:-${HOME}/Documents/aura_full_song_preview.wav}"
-VOCAL="${AURA_TETO_VOCAL:-${HOME}/Documents/aura_teto_vocal.wav}"
-MIX="${AURA_TETO_MIX:-${HOME}/Documents/aura_teto_song_preview.wav}"
-WORK="$(mktemp -d /tmp/aura-teto.XXXXXX)"
+ROOT="${HIRARI_TETO_VOICE_ROOT:-${HOME}/Library/OpenUtau/Singers/KasaneTetoOfficial/重音テト単独音}"
+INSTRUMENTAL="${HIRARI_TETO_INSTRUMENTAL:-${HOME}/Documents/hirari_full_song_preview.wav}"
+VOCAL="${HIRARI_TETO_VOCAL:-${HOME}/Documents/hirari_teto_vocal.wav}"
+MIX="${HIRARI_TETO_MIX:-${HOME}/Documents/hirari_teto_song_preview.wav}"
+WORK="$(mktemp -d /tmp/hirari-teto.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
 typeset -a lyrics=(ひ か り ほ ど け る よ る に き み と み つ け た こ え)

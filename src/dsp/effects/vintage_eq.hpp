@@ -11,7 +11,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class VintagePassiveEQ
@@ -174,4 +174,4 @@ private:
     FilterState m_highFilter[2];
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

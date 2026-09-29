@@ -3,7 +3,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @brief PanningLaw: Constant Power (-3dB) Panning for precise stereo imaging.
@@ -27,4 +27,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

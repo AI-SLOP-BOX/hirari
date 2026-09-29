@@ -18,7 +18,7 @@
 #include "audio_processor_graph.hpp"
 #include "../io/persistence/wav_writer.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class OfflineRenderer
@@ -56,7 +56,7 @@ public:
             ? 0u
             : totalSamples * 6u;
         if (dataBytes == 0) return;
-        ::Aura::IO::Persistence::WavWriter::Pcm24StreamWriter stream(
+        ::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter stream(
             path, totalSamples, static_cast<uint32_t>(m_sampleRate), true);
         if (!stream.isOpen()) return;
 
@@ -165,4 +165,4 @@ private:
     uint32_t m_rng = 0xA0A22026u;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

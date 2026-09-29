@@ -7,11 +7,11 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class HybridSynthesisEngine
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements infinite hybrid DNA and hybrid focus profiling.
  */
 class HybridSynthesisEngine {
@@ -60,4 +60,4 @@ private:
     HybridDNA m_activeDNA; // --- PHASE 130: HYBRID DNA ---
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

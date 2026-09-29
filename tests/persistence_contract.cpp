@@ -16,13 +16,13 @@ int main() {
     const unsigned pid = static_cast<unsigned>(::getpid());
 #endif
     const auto path = std::filesystem::temp_directory_path() /
-        ("aura-persistence-contract-" + std::to_string(pid) + ".json");
+        ("hirari-persistence-contract-" + std::to_string(pid) + ".json");
     const auto lock = std::filesystem::path(path.string() + ".save.lock");
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
     std::filesystem::remove(lock, ignored);
 
-    auto& serializer = Aura::IO::Persistence::AsyncSerializer::getInstance();
+    auto& serializer = Hirari::IO::Persistence::AsyncSerializer::getInstance();
     auto first = serializer.serializeAsync(path.string(), "{\"version\":1}");
     auto second = serializer.serializeAsync(path.string(), "{\"version\":2}");
     assert(first.get());

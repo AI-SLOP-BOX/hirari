@@ -1,21 +1,16 @@
 #pragma once
-#include <atomic>
+
 #include <array>
-#include <string_view>
-#include <cstring>
-#include <chrono>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
-#if defined(__APPLE__)
-#include <mach/mach_time.h>
-#endif
+#include <string_view>
 
-namespace Aura::Core::Diagnostics {
+#include "rust_ffi.hpp"
 
-/**
- * @class LogBuffer
- * @brief INDUSTRIAL: Forensic "Black Box" Stream.
- * Mach-precise, lock-free, and high-density diagnostic capture.
- */
+namespace Hirari::Core::Diagnostics {
+
+/** Rust-owned bounded diagnostic ring with a source-compatible C++ adapter. */
 class LogBuffer {
 public:
     static constexpr size_t kMaxLogs = 1024;
@@ -28,76 +23,26 @@ public:
         char msg[kMaxLogLen];
     };
 
-    static uint64_t getTimestamp() {
-#if defined(__APPLE__)
-        return mach_absolute_time();
-#else
-        return std::chrono::steady_clock::now().time_since_epoch().count();
-#endif
+    static uint64_t getTimestamp() noexcept {
+        return hirari_log_buffer_timestamp();
     }
 
-    // Bounded MPMC queue. Audio, UI, recovery, and worker threads may all
-    // publish diagnostics; a plain fetch_add ring lets a consumer observe a
-    // half-written slot when there are multiple producers.
     static void post(uint32_t level, uint32_t componentId, std::string_view msg) noexcept {
-        uint64_t position = m_enqueuePosition.load(std::memory_order_relaxed);
-        Slot* slot = nullptr;
-        for (;;) {
-            slot = &m_storage.slots[position & (kMaxLogs - 1)];
-            const uint64_t sequence = slot->sequence.load(std::memory_order_acquire);
-            const auto difference = static_cast<std::int64_t>(sequence - position);
-            if (difference == 0) {
-                if (m_enqueuePosition.compare_exchange_weak(
-                        position, position + 1, std::memory_order_relaxed)) break;
-            } else if (difference < 0) {
-                return; // Full: diagnostics must never block the producer.
-            } else {
-                position = m_enqueuePosition.load(std::memory_order_relaxed);
-            }
-        }
-
-        auto& entry = slot->entry;
-        entry.timestamp = getTimestamp();
-        entry.level = level;
-        entry.componentId = componentId;
-        const size_t len = std::min(msg.length(), kMaxLogLen - 1);
-        std::memcpy(entry.msg, msg.data(), len);
-        entry.msg[len] = '\0';
-        slot->sequence.store(position + 1, std::memory_order_release);
+        hirari_log_buffer_post(
+            storage().state, level, componentId,
+            reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
     }
 
     static bool pop(LogEntry& out) noexcept {
-        uint64_t position = m_dequeuePosition.load(std::memory_order_relaxed);
-        Slot* slot = nullptr;
-        for (;;) {
-            slot = &m_storage.slots[position & (kMaxLogs - 1)];
-            const uint64_t sequence = slot->sequence.load(std::memory_order_acquire);
-            const auto difference = static_cast<std::int64_t>(sequence - (position + 1));
-            if (difference == 0) {
-                if (m_dequeuePosition.compare_exchange_weak(
-                        position, position + 1, std::memory_order_relaxed)) break;
-            } else if (difference < 0) {
-                return false; // Empty.
-            } else {
-                position = m_dequeuePosition.load(std::memory_order_relaxed);
-            }
-        }
-
-        out = slot->entry;
-        slot->sequence.store(position + kMaxLogs, std::memory_order_release);
-        return true;
+        return hirari_log_buffer_pop(storage().state, &out);
     }
 
-    /**
-     * @struct BlackBoxRegister
-     * @brief Last-Known-Good Engine State.
-     */
     struct BlackBoxRegister {
         std::atomic<uint32_t> lastTrackCount{0};
         std::atomic<uint32_t> lastBlockSize{0};
         std::atomic<float> lastCPULoad{0.0f};
         std::atomic<uint64_t> lastSyncTimestamp{0};
-        
+
         static BlackBoxRegister& getInstance() {
             static BlackBoxRegister instance;
             return instance;
@@ -105,23 +50,22 @@ public:
     };
 
 private:
-    struct Slot {
-        std::atomic<uint64_t> sequence{0};
-        LogEntry entry{};
+    static constexpr size_t kStateStorageBytes = 128 * 1024;
+
+    struct StateStorage {
+        alignas(64) std::array<std::byte, kStateStorageBytes> bytes;
+        void* state;
+
+        StateStorage() : bytes{}, state(hirari_log_buffer_init(bytes.data(), bytes.size())) {}
     };
 
-    struct Storage {
-        std::array<Slot, kMaxLogs> slots{};
-        Storage() noexcept {
-            for (uint64_t index = 0; index < kMaxLogs; ++index) {
-                slots[index].sequence.store(index, std::memory_order_relaxed);
-            }
-        }
-    };
+    static StateStorage m_stateStorage;
 
-    static inline Storage m_storage{};
-    static inline std::atomic<uint64_t> m_enqueuePosition{0};
-    static inline std::atomic<uint64_t> m_dequeuePosition{0};
+    static StateStorage& storage() {
+        return m_stateStorage;
+    }
 };
 
-} // namespace Aura::Core::Diagnostics
+inline LogBuffer::StateStorage LogBuffer::m_stateStorage{};
+
+} // namespace Hirari::Core::Diagnostics

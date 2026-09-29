@@ -4,7 +4,7 @@
 #include <map>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief PitchBlock: A single sung note to be corrected.
@@ -36,7 +36,7 @@ public:
      */
     float getShiftRatio(uint64_t now, float detectedFreq) const {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::PitchOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::PitchOrchestrator.
         // Rust's high-performance pitch correction ensures that vocal tuning 
         // is technically superior and forensics-ready.
         // Rust's TuningEngine ensures bit-accurate pitch distribution.
@@ -46,4 +46,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

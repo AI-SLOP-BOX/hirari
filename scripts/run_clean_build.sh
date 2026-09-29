@@ -5,8 +5,8 @@ set -eu
 # never placed inside the repository, so a stale local build cannot satisfy
 # this check accidentally.
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-CLEAN_TARGET=${AURA_CLEAN_TARGET_DIR:-${TMPDIR:-/tmp}/aura-clean-target.$$.${RANDOM:-0}}
-KEEP=${AURA_KEEP_CLEAN_TARGET:-0}
+CLEAN_TARGET=${HIRARI_CLEAN_TARGET_DIR:-${TMPDIR:-/tmp}/hirari-clean-target.$$.${RANDOM:-0}}
+KEEP=${HIRARI_KEEP_CLEAN_TARGET:-0}
 cleanup() {
   [ "$KEEP" = 1 ] || rm -rf "$CLEAN_TARGET"
 }

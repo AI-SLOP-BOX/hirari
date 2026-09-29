@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 
 struct MeterSnapshot { float peakL=0, peakR=0, rmsL=0, rmsR=0, loudnessLUFS=-INFINITY, correlation=0, gainDb=0; std::vector<float> spectrum; };
 

@@ -1,10 +1,10 @@
 #include "vulkan_surface.hpp"
 
-#if defined(_WIN32) && defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(_WIN32) && defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-namespace Aura::Graphics::Platform {
+namespace Hirari::Graphics::Platform {
 
 bool createVulkanSurfaceForNativeView(VkInstance instance, void* nativeView,
                                       VkSurfaceKHR* surface, std::string& error) {
@@ -29,5 +29,5 @@ bool createVulkanSurfaceForNativeView(VkInstance instance, void* nativeView,
     return true;
 }
 
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform
 #endif

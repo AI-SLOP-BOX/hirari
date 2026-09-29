@@ -2,7 +2,7 @@
 #include <map>
 #include <cstdint>
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @struct NoteExpressionState
@@ -37,4 +37,4 @@ private:
     std::map<uint8_t, NoteExpressionState> m_noteStates;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

@@ -3,7 +3,7 @@
 #include <vector>
 #include <iostream>
 
-#include "../../AuraUltimate.hpp"
+#include "../../HirariUltimate.hpp"
 #include "../engine/macro_control_manager.hpp"
 #include "../../rendering/bounce/bounce_engine.hpp"
 
@@ -12,7 +12,7 @@
 // #include <pybind11/embed.h>
 // namespace py = pybind11;
 
-namespace Aura::Core::Scripting {
+namespace Hirari::Core::Scripting {
 
 /**
  * @class PythonExtensionEngine
@@ -42,14 +42,14 @@ public:
     }
 
     /**
-     * @brief Pythonスクリプトの中から、DAW（Aura）のC++機能群を呼び出せるようにAPIを公開（バインド）する
+     * @brief Pythonスクリプトの中から、DAW（Hirari）のC++機能群を呼び出せるようにAPIを公開（バインド）する
      */
-    void bindAuraAPI() {
+    void bindHirariAPI() {
         // 仮想的な pybind11 によるモジュール登録とAPIバインドの高度な実装
         
         /*
-        PYBIND11_EMBEDDED_MODULE(aura, m) {
-            m.doc() = "Aura DAW Python Extension API";
+        PYBIND11_EMBEDDED_MODULE(hirari, m) {
+            m.doc() = "Hirari DAW Python Extension API";
 
             // 1. 【バッチ処理・自動化】Pythonから直接ステムのパラレル書き出しを指示
             m.def("bounce_master", [](const std::string& absolutePath, int totalSamples, int sampleRate) {
@@ -97,4 +97,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Scripting
+} // namespace Hirari::Core::Scripting

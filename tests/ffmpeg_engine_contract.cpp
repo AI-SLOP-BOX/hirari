@@ -15,7 +15,7 @@ int main() {
         return 2;
     }
     const auto root = std::filesystem::temp_directory_path() /
-                      "aura ffmpeg contract; hostile path";
+                      "hirari ffmpeg contract; hostile path";
     std::error_code ec;
     std::filesystem::create_directories(root, ec);
     if (ec) return 3;
@@ -28,9 +28,9 @@ int main() {
         left[i] = static_cast<float>((i % 32) - 16) / 64.0f;
         right[i] = -left[i];
     }
-    if (!Aura::IO::Persistence::WavWriter::writePcm16(
+    if (!Hirari::IO::Persistence::WavWriter::writePcm16(
             input.string(), left.data(), right.data(), left.size(), 48'000)) return 4;
-    auto& ffmpeg = Aura::Core::IO::FFmpegEngine::getInstance();
+    auto& ffmpeg = Hirari::Core::IO::FFmpegEngine::getInstance();
     if (!ffmpeg.exportToFormat(input.string(), mp3.string(), "libmp3lame") ||
         !ffmpeg.exportToFormat(input.string(), flac.string(), "flac")) return 5;
     std::array<char, 4> mp3Header{};
@@ -47,14 +47,14 @@ int main() {
     // The import side must use the same safe argv boundary and canonical WAV
     // reader after external decoding. Verify both formats produce finite,
     // bounded audio rather than merely checking their container signatures.
-    auto mp3Audio = Aura::Core::IO::AudioDecoderManager::getInstance().importFile(mp3.string());
+    auto mp3Audio = Hirari::Core::IO::AudioDecoderManager::getInstance().importFile(mp3.string());
     if (!mp3Audio || mp3Audio->getNumChannels() == 0 ||
         mp3Audio->getNumSamples() == 0 || mp3Audio->getNumSamples() > 65'536) return 8;
     for (uint32_t channel = 0; channel < mp3Audio->getNumChannels(); ++channel)
         for (uint32_t frame = 0; frame < mp3Audio->getNumSamples(); ++frame)
             if (!std::isfinite(mp3Audio->getReadPointer(channel)[frame])) return 9;
 
-    auto flacAudio = Aura::Core::IO::AudioDecoderManager::getInstance().importFile(flac.string());
+    auto flacAudio = Hirari::Core::IO::AudioDecoderManager::getInstance().importFile(flac.string());
     if (!flacAudio || flacAudio->getNumChannels() == 0 ||
         flacAudio->getNumSamples() == 0 || flacAudio->getNumSamples() > 65'536) return 10;
     for (uint32_t channel = 0; channel < flacAudio->getNumChannels(); ++channel)

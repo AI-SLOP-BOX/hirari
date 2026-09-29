@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <numbers>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class SampleRateConverter
@@ -71,4 +71,4 @@ private:
     double m_ratio = 1.0;
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

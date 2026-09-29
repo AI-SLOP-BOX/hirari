@@ -5,7 +5,7 @@
 #include <mutex>
 #include "../diagnostics/forensic_kernel.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct IPCFrame
@@ -25,7 +25,7 @@ struct IPCFrame {
 
 /**
  * @class SharedMemoryIPC
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements autonomous dispatch sovereignty and packet validation.
  */
 class SharedMemoryIPC {
@@ -45,4 +45,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

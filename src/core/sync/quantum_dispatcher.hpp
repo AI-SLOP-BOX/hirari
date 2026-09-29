@@ -5,7 +5,7 @@
 #include <functional>
 #include <atomic>
 
-namespace Aura::Core::Sync {
+namespace Hirari::Core::Sync {
 
 /**
  * @struct QuantumEvent
@@ -65,4 +65,4 @@ private:
     std::priority_queue<QuantumEvent, std::vector<QuantumEvent>, std::greater<QuantumEvent>> m_queue;
 };
 
-} // namespace Aura::Core::Sync
+} // namespace Hirari::Core::Sync

@@ -1,46 +1,51 @@
 #pragma once
 
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
+#include <cstdint>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
-namespace Aura::Core::Plugins {
+#include "../rust_ffi.hpp"
 
-struct PluginCompatibilityRecord {
-    std::string identifier;
-    bool blacklisted = false;
-    uint32_t scanFailures = 0;
-    uint32_t crashCount = 0;
-    std::string lastError;
-};
+namespace Hirari::Core::Plugins {
 
-class PluginCompatibilityRegistry {
+/** C++ engine adapter for Rust-owned third-party plug-in compatibility state. */
+class PluginCompatibilityRegistry final {
 public:
-    void markScanFailure(const std::string& id, const std::string& error) {
-        if (id.empty()) return; auto& r = m_records[id]; r.identifier = id; ++r.scanFailures; r.lastError = error;
-    }
-    void markCrash(const std::string& id) { if (id.empty()) return; auto& r=m_records[id]; r.identifier=id; ++r.crashCount; }
-    void setBlacklisted(const std::string& id, bool value) { if (id.empty()) return; auto& r=m_records[id]; r.identifier=id; r.blacklisted=value; }
-    bool isBlacklisted(const std::string& id) const { auto it=m_records.find(id); return it != m_records.end() && it->second.blacklisted; }
-    const PluginCompatibilityRecord* find(const std::string& id) const { auto it=m_records.find(id); return it==m_records.end()?nullptr:&it->second; }
-    std::vector<PluginCompatibilityRecord> records() const { std::vector<PluginCompatibilityRecord> out; for(const auto& [_,r]:m_records) out.push_back(r); std::sort(out.begin(),out.end(),[](const auto&a,const auto&b){return a.identifier<b.identifier;}); return out; }
+    PluginCompatibilityRegistry() : m_state(hirari_plugin_registry_create()) {}
+    ~PluginCompatibilityRegistry() { hirari_plugin_registry_destroy(m_state); }
 
-    bool save(const std::filesystem::path& path) const {
-        const auto temp = path.string()+".tmp"; std::ofstream f(temp, std::ios::trunc); if(!f) return false;
-        f << "id\tblacklisted\tscan_failures\tcrashes\terror\n";
-        for (const auto& r : records()) f << r.identifier << '\t' << (r.blacklisted?1:0) << '\t' << r.scanFailures << '\t' << r.crashCount << '\t' << r.lastError << '\n';
-        f.flush(); if(!f) return false; std::error_code ec; std::filesystem::rename(temp,path,ec); if(ec) std::filesystem::remove(temp,ec); return !ec;
+    PluginCompatibilityRegistry(const PluginCompatibilityRegistry&) = delete;
+    PluginCompatibilityRegistry& operator=(const PluginCompatibilityRegistry&) = delete;
+
+    void markScanFailure(const std::string& id, const std::string& error) {
+        (void)hirari_plugin_registry_record_scan_failure(
+            m_state, reinterpret_cast<const uint8_t*>(id.data()), id.size(),
+            reinterpret_cast<const uint8_t*>(error.data()), error.size());
     }
-    bool load(const std::filesystem::path& path) {
-        std::ifstream f(path); if (!f) return false; std::string line; std::getline(f, line); if (line != "id\tblacklisted\tscan_failures\tcrashes\terror") return false;
-        std::unordered_map<std::string, PluginCompatibilityRecord> next;
-        while (std::getline(f, line)) { std::vector<std::string> fields; size_t p=0, n=0; while ((n=line.find('\t',p)) != std::string::npos) { fields.push_back(line.substr(p,n-p)); p=n+1; } fields.push_back(line.substr(p)); if(fields.size()<5 || fields[0].empty()) continue;
-            try { PluginCompatibilityRecord r{fields[0], fields[1]=="1", static_cast<uint32_t>(std::stoul(fields[2])), static_cast<uint32_t>(std::stoul(fields[3])), fields[4]}; next[r.identifier]=std::move(r); } catch (...) { return false; } }
-        m_records.swap(next); return true;
+
+    void markCrash(const std::string& id) {
+        (void)hirari_plugin_registry_record_crash(
+            m_state, reinterpret_cast<const uint8_t*>(id.data()), id.size());
     }
-private: std::unordered_map<std::string, PluginCompatibilityRecord> m_records;
+
+    void setBlacklisted(const std::string& id, bool value) {
+        (void)hirari_plugin_registry_set_blacklisted(
+            m_state, reinterpret_cast<const uint8_t*>(id.data()), id.size(), value);
+    }
+
+    std::string snapshotJson() const {
+        uint8_t* bytes = nullptr;
+        size_t size = 0;
+        if (!hirari_plugin_registry_snapshot_json(m_state, &bytes, &size)) return "[]";
+        struct SnapshotGuard {
+            uint8_t* bytes;
+            size_t size;
+            ~SnapshotGuard() { hirari_plugin_registry_snapshot_json_free(bytes, size); }
+        } guard{bytes, size};
+        return std::string(reinterpret_cast<const char*>(bytes), size);
+    }
+
+private:
+    void* m_state = nullptr;
 };
-}
+
+} // namespace Hirari::Core::Plugins

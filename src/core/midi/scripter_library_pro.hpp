@@ -4,7 +4,7 @@
 #include <string>
 #include <map>
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @class ScripterLibraryPro
@@ -52,4 +52,4 @@ private:
     std::map<std::string, ScriptDef> m_library;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

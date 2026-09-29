@@ -1,6 +1,6 @@
-# Contributing to Aura DAW
+# Contributing to Hirari DAW
 
-Aura welcomes focused fixes with reproducible evidence. Before editing, read
+Hirari welcomes focused fixes with reproducible evidence. Before editing, read
 `docs/ARCHITECTURE_STATUS.md` and the nearest `SKILL.md` for the subsystem.
 
 ## Development workflow
@@ -11,7 +11,7 @@ Aura welcomes focused fixes with reproducible evidence. Before editing, read
 3. Add a regression test for behavior changes. Tests must exercise the real
    production path and must not turn missing capabilities into passes.
 4. Run `cargo fmt --all -- --check`, `cargo check --workspace --locked`, and
-   `AURA_NATIVE_TEST_ISOLATION=1 RUST_TEST_THREADS=1 cargo test --workspace --locked`.
+   `HIRARI_NATIVE_TEST_ISOLATION=1 RUST_TEST_THREADS=1 cargo test --workspace --locked`.
 5. For native or release changes, run the relevant script under `scripts/` and
    include its PASS/FAIL/SKIPPED evidence in the change description.
 

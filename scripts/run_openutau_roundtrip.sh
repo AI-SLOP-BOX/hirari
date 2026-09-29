@@ -4,13 +4,13 @@ set -eu
 # OpenUtau round-trip evidence runner.  The renderer is deliberately injected
 # so CI never pretends that a source-only parser is an OpenUtau integration.
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-SOURCE=${AURA_OPENUTAU_SOURCE:-}
-OUTPUT=${AURA_OPENUTAU_RENDER_OUTPUT:-}
-RENDER_COMMAND=${AURA_OPENUTAU_RENDER_COMMAND:-}
-STRICT=${AURA_OPENUTAU_STRICT:-0}
+SOURCE=${HIRARI_OPENUTAU_SOURCE:-}
+OUTPUT=${HIRARI_OPENUTAU_RENDER_OUTPUT:-}
+RENDER_COMMAND=${HIRARI_OPENUTAU_RENDER_COMMAND:-}
+STRICT=${HIRARI_OPENUTAU_STRICT:-0}
 
 if [ -z "$SOURCE" ] || [ -z "$OUTPUT" ] || [ -z "$RENDER_COMMAND" ]; then
-    message="set AURA_OPENUTAU_SOURCE, AURA_OPENUTAU_RENDER_OUTPUT, and AURA_OPENUTAU_RENDER_COMMAND"
+    message="set HIRARI_OPENUTAU_SOURCE, HIRARI_OPENUTAU_RENDER_OUTPUT, and HIRARI_OPENUTAU_RENDER_COMMAND"
     if [ "$STRICT" = "1" ]; then
         echo "OpenUtau round-trip: FAIL ($message)" >&2
         exit 1

@@ -7,7 +7,7 @@
 #include <atomic>
 #include <cmath>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 class GPUSpectrumAnalyzer {
 public:
@@ -202,4 +202,4 @@ private:
     mutable std::atomic<float> m_atomicMagnitude[kFFTSize / 2];
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

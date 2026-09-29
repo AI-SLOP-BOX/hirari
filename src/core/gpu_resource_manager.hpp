@@ -5,7 +5,7 @@
 #include <map>
 #include <array>
 
-namespace Aura::Core::BridgeFFI {
+namespace Hirari::Core::BridgeFFI {
 
 /**
  * @class GpuResourceManager
@@ -65,4 +65,4 @@ private:
 
 inline const GpuResourceManager& get_gpu_manager() { return GpuResourceManager::getInstance(); }
 
-} // namespace Aura::Core::BridgeFFI
+} // namespace Hirari::Core::BridgeFFI

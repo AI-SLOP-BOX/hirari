@@ -66,6 +66,34 @@ removed after an implementation and a matching verification command exist.
 - Render/export and waveform publication now share the canonical
   `GenerationGate` implementation; the former duplicate `PublicationGate`
   semantics are an alias with the same begin/cancel/accept rules.
+- Selection exports keep completed synchronous renders out of the pending
+  source queue, reject duplicate IDs before writing or enqueueing, and validate
+  async ranges before slicing. The selection contract passed 6 tests with
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo test -p hirari-core-bridge --lib selection_based_processor -- --test-threads=1`.
+- UI render inspection streams audio through a fixed 64 KiB buffer, returns a
+  typed validity result for completion checks, rejects partial frames, and
+  chooses a unique default output path per render. The WAV inspector contracts
+  passed 4 tests with
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo test -p hirari-ui --bin hirari-ui render_inspector -- --test-threads=1`;
+  the unique-path contract passed separately with the same settings.
+- New-project startup and templates now derive visible tracks from the native
+  project graph; templates create native track types rather than relabeling a
+  starter track, and no longer synthesize unsaved MIDI notes. Project reset
+  clears project-scoped MIDI, recording, routing, composition, snapshot, and
+  export-queue state while preserving the configured advanced-export renderer.
+  A regression test confirms native and mirrored MIDI state is cleared with
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo test -p hirari-core-bridge --lib new_project_clears_project_scoped_midi_mirrors -- --test-threads=1`.
+- Starting a template now detaches the previous save target without deleting
+  its persisted MIDI sidecar; the same rule now applies to the New Project and
+  Genesis reset actions. Track-ID-keyed UI overlays are cleared at project
+  boundaries, and project hydration seeds native MIDI notes before applying
+  legacy sidecars, so reused IDs and partial sidecars cannot revive old notes.
+  Command-line startup now uses the same project hydration path as Open.
+  UI tests verify both overlay clearing and canonical lyric restoration;
+  a partial legacy sidecar test verifies unlisted tracks retain their native
+  MIDI notes. All 56 UI unit tests pass with
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo test -p hirari-ui --bin hirari-ui -- --test-threads=1`, and
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo check -p hirari-ui --tests` pass.
 - Audio-device transition coverage now includes a dedicated fallback and
   reconfiguration contract for sample-rate/block-size changes and invalid
   transitions. A long-duration stress target and a strict external-plugin
@@ -103,14 +131,14 @@ removed after an implementation and a matching verification command exist.
   canonical Rust export/reader tests.
 - Native BWF offline rendering now accounts for the RF64 `ds64` chunk in its
   published `riffSize` while retaining BWF metadata.
-- Vulkan shader build failures now expose stable `AURA_SHADER_ERROR` codes for
+- Vulkan shader build failures now expose stable `HIRARI_SHADER_ERROR` codes for
   compiler failure, compiler absence, invalid SPIR-V, and missing SDK/headers;
   enabling Vulkan without its compiler now fails closed instead of silently
   skipping shader validation.
 - Vulkan-enabled native compilation now covers the split `VulkanContext` and
   `VulkanGraphicsKernel` implementation units; their conditional compilation
   boundaries are closed within each included unit and verified with
-  `AURA_ENABLE_VULKAN=1 cargo check -p aura-core-bridge`.
+  `HIRARI_ENABLE_VULKAN=1 cargo check -p hirari-core-bridge`.
 - Render and sandbox completion checks use bounded job/sequence polling;
   remaining sleeps are only polling intervals with explicit deadlines.
 - Release fixture generation, strict bundle verification, native compile
@@ -180,7 +208,7 @@ removed after an implementation and a matching verification command exist.
   dependency-free JSON diagnostic boundary; malformed, missing, and valid
   WAVE64 cases are covered by the native compile contract without changing
   the legacy throwing loader APIs.
-- The Rust/CXX bridge exposes the native WAVE diagnostic to `AuraCore`, with a
+- The Rust/CXX bridge exposes the native WAVE diagnostic to `HirariCore`, with a
   Rust integration test preserving the missing-file reason and format.
 - Canonical native persistence now provides a bounded-memory PCM24 streaming
   publisher with RF64 headers, fsync, directory sync, atomic rename, and
@@ -392,7 +420,7 @@ removed after an implementation and a matching verification command exist.
   directory sync and cleanup on failure; partial copies are not exposed as
   project assets.
 - The native `ProjectCollector` temporary publication names now include the
-  process identity as well as the sequence, preventing separate Aura
+  process identity as well as the sequence, preventing separate Hirari
   processes from colliding on a shared project directory during collection.
 - The native plugin contract now exercises project collection with two
   different same-basename assets and verifies that both published files
@@ -486,7 +514,7 @@ removed after an implementation and a matching verification command exist.
   execution identities aligned.
 - Native stress no longer maintains an unused global worker-name baseline;
   worker leak checks remain scoped to the PID descendants of each test command,
-  avoiding false ownership claims from unrelated Aura sessions.
+  avoiding false ownership claims from unrelated Hirari sessions.
 - History checkout/restore now holds the history transaction lock across
   project hydration and HEAD publication, restoring the previous project bytes
   if HEAD publication fails. Revert and cherry-pick use the same atomic
@@ -496,7 +524,7 @@ removed after an implementation and a matching verification command exist.
   Existing-project saves preserve that identity, first history commit adopts it,
   and replacing a committed project at the same path fails closed instead of
   silently mixing histories.
-- OpenUtau source/render pairs are now held on the Aura control plane and copied
+- OpenUtau source/render pairs are now held on the Hirari control plane and copied
   into canonical ProjectDocument saves/loads instead of existing only as a
   transient region import. CLI project inspection reports the persisted vocal
   count, with a regression test covering the save boundary. Imports now retain
@@ -520,8 +548,11 @@ removed after an implementation and a matching verification command exist.
 | AU component matrix | Basic AU smoke exists; multi-component fixture coverage is incomplete. | Mono/stereo, effect/instrument, fallback-component, state and watchdog fixture tests. |
 | MIDI 2.0/SysEx | Bounded SysEx fragmentation/reassembly and strict UMP packet framing validation now exist with ordering, size, word-count, message-type, and reset tests. Native code now has a heap-free bounded `MidiFragmentReassembler`; completed messages that fit the 256-byte realtime slot are inserted into `MidiBuffer`, while larger messages publish to a bounded SPSC `MidiExtendedMessageRing`. The ring is now embedded in `SharedAudioBlock`; the sandbox worker consumes bounded messages and exposes them as CLAP MIDI-SysEx events, and the minimal CLAP fixture E2E now injects a 300-byte payload and verifies the resulting audio response. Legacy MIDI remains covered separately. | Real third-party MIDI 2.0/SysEx compatibility and AU/VST3 event mapping still require SDK/device fixtures. |
 | Real device transitions | Software fallback and lifecycle guards exist; macOS now has a real CoreAudio initialize/start/stop/reconfigure contract and the release gate requires it. | Hardware disconnect/reconnect, recording and PDC integration tests still require a dedicated device fixture. |
-| Long-duration stress | Native lifecycle/resource-budget stress exists, persistence has a 256-generation repeated save/load soak with temporary-file leak assertions, and native worker stress supports either a round budget or `AURA_STRESS_DURATION_SECONDS` for bounded time-based runs. The worker matrix covers continuous blocks, reconfiguration, project-v2 state restore, multi-instance isolation, overrun recovery, crash/restart, and quarantine. A 5-minute local time-budget run completed 87 worker rounds, and a 5-minute recording stress completed with finalized-frame and temporary-file checks. The test lock records an owner PID and recovers stale locks after interrupted runs. The CMake `aura-test-project-soak` gate runs an explicit 64-track, eight-cycle save/reload/render graph-preservation test. | Multi-hour/large-project soak with waveform, render, save and device transitions. |
+| Long-duration stress | Native lifecycle/resource-budget stress exists, persistence has a 256-generation repeated save/load soak with temporary-file leak assertions, and native worker stress supports either a round budget or `HIRARI_STRESS_DURATION_SECONDS` for bounded time-based runs. The worker matrix covers continuous blocks, reconfiguration, project-v2 state restore, multi-instance isolation, overrun recovery, crash/restart, and quarantine. A 5-minute local time-budget run completed 87 worker rounds, and a 5-minute recording stress completed with finalized-frame and temporary-file checks. The test lock records an owner PID and recovers stale locks after interrupted runs. The CMake `hirari-test-project-soak` gate runs an explicit 64-track, eight-cycle save/reload/render graph-preservation test. | Multi-hour/large-project soak with waveform, render, save and device transitions. |
 | macOS multi-session audio callback | Test isolation now prevents the legacy device callback from binding multiple session graphs to the process-wide compatibility engine. | Replace the compatibility callback with an injected session callback before claiming simultaneous real-device sessions. |
+| UI render/project operation gate | The `EXPORT ATMOS MASTER` command now dispatches through `RenderActions`, so it shares the main render path's unique destination, telemetry, and `OperationGate` lease. Command-palette open/save/restore, New Project, template creation, and Genesis reset also acquire the same gate; a running render now excludes project-graph replacement. The gate contract test verifies Render rejects Load, Save, and Recover. The full 60-test UI suite passed after these changes with `CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 cargo test -p hirari-ui --bin hirari-ui -- --test-threads=1`. | Add an application-level smoke test that starts each render entry point and verifies concurrent project replacement is rejected while the renderer retains the correct output path. |
+| UI project-load transaction | UI loads and recovery flows checkpoint the active Core state in canonical v2 plus its MIDI sidecar, and restore Core/UI together if candidate loading or view hydration fails. Rollback also restores UI-owned EQ overlays and transient clip/note selection from an in-memory track snapshot. If rollback fails, the UI best-effort resyncs to the graph Core still owns, clears the prior Save target, and switches status to Save As Only so a partial graph cannot overwrite the old project. Project-scoped routing/plugin/selection reset has one shared implementation across load, recovery, undo/redo, and template paths, including the active plugin index. MIDI hydration propagates native snapshot, metadata-clear, and authoring-metadata sync failures; optimistic piano-roll edits also resync from Core after rejection. Recovery applies `.midi.json.bak.<generation>` only when its stored project checksum and backup timestamp match the selected native `.bak.<generation>`. Missing, corrupt, or mismatched recovery sidecars fail hydration so the load transaction restores the active session instead of retaining notes from another generation. Core recovery loads and validates matching `.comping.json.bak.<generation>` and `.midi-events.json.bak.<generation>` as part of the same Core rollback transaction. Latest-recovery actions now try generations in numeric order and continue after a candidate load or hydration failure, with a complete rollback between attempts. A regression reproduces C4-to-G4 cross-generation contamination, verifies generation 1 and 2 across three saves, rejects a mismatched or missing sidecar while preserving the active session, and confirms latest recovery skips a corrupt or unavailable generation in favor of generation 2. The Core diagnostic API distinguishes checkpoint, ordinary load, and rollback failures. Failure injection covers checkpoint write/read I/O; failed rollback returns `RollbackFailed` and the UI reflects the surviving Core graph. The full UI suite passed 61/61 with `CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 cargo test -p hirari-ui --bin hirari-ui -- --test-threads=1`. The full Core suite passed 891/891 with `CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 cargo test -p hirari-core-bridge --lib -- --test-threads=1`. | Audit restoration of remaining project-scoped UI state and exercise process death after each backup-chain rotation step. |
+| UI project-save transaction | The UI MIDI note sidecar joins the native primary and native sidecars in one Core save transaction: it is staged atomically, backed up, validated after publication, and restored with the previous project files if publication fails, while the current in-memory session remains available for another save attempt. Project Save, Save As, Demo Save, and recovery-as use this boundary. Auxiliary sidecar backup chains rotate through the same ten generations as the native project, including advancing stale generations when the current sidecar is absent. UI backup sidecars carry the checksum and timestamp of their native project backup; a mismatch is rejected during recovery. Three-save tests verify generation 1 and 2 association, and a forced save failure verifies the wrapped backup is unwrapped when restoring the current UI sidecar. The missing-current-file rotation test and full 891-test Core suite pass. | Add process-kill fault injection at each file rotation and verify restart-time cleanup or fail-closed recovery. |
 | FFI return-type migration | Structured diagnostics now cover project, bounce, sandbox, driver, track scalar/fader/pan/toggle/EQ/macro mutations, track lifecycle, project scale, vocal remover, articulation map, mixing advice, auto mixing/arrangement, undo/redo, transport playback/playhead/loop/test-tone, MIDI note/clearing/swing/humanize, recording-take selection, comp segment/snapshot validation, plugin preset save/load, and region add/replace/edit controls, plugin add/remove/bypass, plugin state, route/feedback/sidechain validation, audio device configuration/reconnect, automation data, plugin parameters, tempo controls, preview synth selection/pad assignment/scan/preload/trigger, and video frame/load requests; state size/error boundaries now have explicit regression tests; legacy bool/void APIs remain for ABI/UI compatibility. | Migrate any remaining analysis-only mutators without breaking the CXX ABI. |
 | Render/record fixed sleeps | Completed for the current Rust integration paths. | Keep the bounded-deadline audit passing when new workflows are added. |
 | Local AI stem/mastering runtime | Fails closed with an explicit unavailable-model error; no fake inference is reported. | Bundle and verify a real CoreML/Demucs provider, then add deterministic audio-quality fixtures. |
@@ -532,8 +563,8 @@ removed after an implementation and a matching verification command exist.
 The following currently pass locally:
 
 ```text
-cargo check -p aura-core-bridge
-cargo test -p aura-core-bridge --lib    # 346 passed
+cargo check -p hirari-core-bridge
+cargo test -p hirari-core-bridge --lib    # 346 passed
 scripts/audit_session_singletons.sh
 scripts/check_realtime_boundary.sh
 scripts/run_native_plugin_compile_contract.sh
@@ -567,7 +598,7 @@ by unit tests.
 
 The direct FFmpeg codec contract is also a first-class CMake target. On the
 attached macOS machine it generated and identified both MP3 and FLAC outputs
-through Aura's argv-based launcher using paths containing spaces and shell
+through Hirari's argv-based launcher using paths containing spaces and shell
 metacharacters. The release gate now includes this contract through
-`aura-test-all`; codec availability and output-format validation remain
+`hirari-test-all`; codec availability and output-format validation remain
 environment-specific release requirements.

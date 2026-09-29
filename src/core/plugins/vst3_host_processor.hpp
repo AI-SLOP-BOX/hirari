@@ -16,13 +16,13 @@
 #endif
 #include "../../dsp/iprocessor.hpp"
 #include "../audio_buffer.hpp"
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
 #include "vst3_sandbox_adapter.hpp"
 #endif
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
-class VST3HostProcessor : public ::Aura::DSP::IProcessor {
+class VST3HostProcessor : public ::Hirari::DSP::IProcessor {
 public:
     enum class LoadState : uint8_t {
         Unloaded,
@@ -36,7 +36,7 @@ public:
     using ProcessFunction = void (VST3HostProcessor::*)(
         Core::AudioBuffer&,
         Core::MidiBuffer&,
-        const ::Aura::DSP::ProcessContext&) noexcept;
+        const ::Hirari::DSP::ProcessContext&) noexcept;
     static constexpr const char* kNoProcessFunctionDiagnostic =
         "VST3 process function is not connected";
 
@@ -54,7 +54,7 @@ public:
     void prepareToPlay(double sr, uint32_t sz) noexcept override {
         m_sampleRate = sr;
         m_maxBlockSize = sz;
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         // VST3's ProcessSetup is immutable for the active processing session.
         // Re-prepare an already loaded instance when the device changes so a
         // later block cannot be sent with the old sample rate or max frame
@@ -85,8 +85,8 @@ public:
 #endif
     }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& /*context*/) noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Hirari::DSP::ProcessContext& /*context*/) noexcept override {
+#if defined(HIRARI_ENABLE_VST3_SDK)
         const uint32_t channels = buffer.getNumChannels();
         const uint32_t frames = buffer.getNumSamples();
         if (!m_initialized.load(std::memory_order_acquire) || channels == 0 ||
@@ -166,7 +166,7 @@ public:
     }
 
     void reset() noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_initialized.load(std::memory_order_acquire) && !m_runtime.reset()) {
             m_processFailed.store(true, std::memory_order_release);
         }
@@ -176,7 +176,7 @@ public:
     }
 
     std::vector<uint8_t> getState() const override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         std::vector<uint8_t> state;
         auto* runtime = const_cast<SandboxVST3::Runtime*>(&m_runtime);
         if (!runtime->saveState(state)) return {};
@@ -187,7 +187,7 @@ public:
     }
 
     bool setState(const std::vector<uint8_t>& state) override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         return m_runtime.loadState(state.data(), state.size());
 #else
         (void)state;
@@ -208,7 +208,7 @@ public:
             return false;
         }
 
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (!m_runtime.load(path.c_str(), m_sampleRate, m_maxBlockSize)) {
             m_error = m_runtime.error();
             m_state = LoadState::Failed;
@@ -277,7 +277,7 @@ public:
     // The actual parent-window attachment remains a UI-thread operation and
     // must not be inferred from audio processing readiness.
     bool hasNativeEditor() const noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         return m_initialized.load(std::memory_order_acquire) && m_runtime.hasEditorView();
 #else
         return false;
@@ -285,7 +285,7 @@ public:
     }
 
     uint64_t openNativeEditor(uintptr_t parent) noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         return m_initialized.load(std::memory_order_acquire) ? m_runtime.openEditor(parent) : 0;
 #else
         (void)parent;
@@ -294,7 +294,7 @@ public:
     }
 
     bool closeNativeEditor(uint64_t session) noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         return m_runtime.closeEditor(session);
 #else
         (void)session;
@@ -372,7 +372,7 @@ private:
     }
 
     bool instantiateWithoutSdk() noexcept {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         return false;
 #else
         if (!m_handle || !m_vst3FactoryProc) return false;
@@ -429,13 +429,13 @@ private:
     }
 
     void unloadLibrary() noexcept {
-#if !defined(AURA_ENABLE_VST3_SDK)
+#if !defined(HIRARI_ENABLE_VST3_SDK)
         releaseVst3Object(m_controllerObject);
         releaseVst3Object(m_componentObject);
         m_controllerObject = nullptr;
         m_componentObject = nullptr;
 #endif
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         m_runtime.unload();
 #endif
         m_initialized = false;
@@ -468,7 +468,7 @@ private:
     // RT-safe failure telemetry; diagnostic text is never written by process().
     std::atomic<bool> m_processFailed{false};
     std::atomic<uint64_t> m_nonFiniteSamples{0};
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
     SandboxVST3::Runtime m_runtime;
     SandboxProtocol::SharedAudioBlock m_shared;
 #else
@@ -477,4 +477,4 @@ private:
 #endif
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

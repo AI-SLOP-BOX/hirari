@@ -1,9 +1,9 @@
 #include <arm_neon.h>
 #include <cmath>
 #include <algorithm>
-#include "../../core/Aura.hpp"
+#include "../../core/Hirari.hpp"
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @class SIMDSVF
@@ -78,4 +78,4 @@ private:
     float32x4_t m_ic1, m_ic2; // Lanes 0=L, 1=R
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

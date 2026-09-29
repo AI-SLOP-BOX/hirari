@@ -3,7 +3,7 @@
 #if defined(__APPLE__)
 #include "au_sandbox_adapter.hpp"
 #endif
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
 #include "vst3_sandbox_adapter.hpp"
 #endif
 
@@ -71,13 +71,13 @@ bool hasPluginExtension(const char* path, const char* extension) noexcept {
     return dot[std::strlen(extension)] == '\0';
 }
 }
-bool debugEnabled() noexcept { return std::getenv("AURA_PLUGIN_DEBUG") != nullptr; }
+bool debugEnabled() noexcept { return std::getenv("HIRARI_PLUGIN_DEBUG") != nullptr; }
 void debugLog(const char* message) noexcept {
-    if (debugEnabled()) std::fprintf(stderr, "[aura-plugin-worker] %s\n", message);
+    if (debugEnabled()) std::fprintf(stderr, "[hirari-plugin-worker] %s\n", message);
 }
 
 bool clapDescriptorHasFeature(
-    const Aura::Core::Plugins::ClapAbi::Descriptor* descriptor,
+    const Hirari::Core::Plugins::ClapAbi::Descriptor* descriptor,
     const char* requestedFeature) noexcept {
     if (!descriptor || !requestedFeature || !descriptor->features) return false;
     for (const char* const* feature = descriptor->features; *feature; ++feature) {
@@ -86,39 +86,56 @@ bool clapDescriptorHasFeature(
     return false;
 }
 struct MidiInputContext {
-    const Aura::Core::Plugins::SandboxProtocol::MidiEvent* events = nullptr;
+    enum class EventKind : uint8_t { Midi, Extended, Parameter };
+    struct EventRef {
+        EventKind kind = EventKind::Midi;
+        uint32_t index = 0;
+        uint32_t sampleOffset = 0;
+    };
+    const Hirari::Core::Plugins::SandboxProtocol::MidiEvent* events = nullptr;
     uint32_t count = 0;
-    std::array<Aura::Core::Plugins::MidiExtendedMessageRing::Message,
-               Aura::Core::Plugins::MidiExtendedMessageRing::kCapacity> extended{};
+    std::array<Hirari::Core::Plugins::MidiExtendedMessageRing::Message,
+               Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity> extended{};
     uint32_t extendedCount = 0;
-    std::array<Aura::Core::Plugins::ClapAbi::EventParamValue,
-               Aura::Core::Plugins::SandboxProtocol::kMaxParameterChanges> parameters{};
+    std::array<Hirari::Core::Plugins::ClapAbi::EventParamValue,
+               Hirari::Core::Plugins::SandboxProtocol::kMaxParameterChanges> parameters{};
     uint32_t parameterCount = 0;
+    std::array<EventRef,
+        Hirari::Core::Plugins::SandboxProtocol::kMaxMidiEvents +
+        Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity +
+        Hirari::Core::Plugins::SandboxProtocol::kMaxParameterChanges> ordered{};
+    uint32_t orderedCount = 0;
+    mutable std::array<Hirari::Core::Plugins::ClapAbi::EventMidi,
+                       Hirari::Core::Plugins::SandboxProtocol::kMaxMidiEvents> convertedMidi{};
+    mutable std::array<Hirari::Core::Plugins::ClapAbi::EventMidi2,
+                       Hirari::Core::Plugins::SandboxProtocol::kMaxMidiEvents> convertedMidi2{};
+    mutable std::array<Hirari::Core::Plugins::ClapAbi::EventMidiSysex,
+                       Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity> convertedSysex{};
 };
 
 struct MidiOutputContext {
-    Aura::Core::Plugins::SandboxProtocol::SharedAudioBlock* shared = nullptr;
+    Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock* shared = nullptr;
     uint32_t frames = 0;
 };
 
-bool midiOutputTryPush(const Aura::Core::Plugins::ClapAbi::OutputEvents* output,
-                       const Aura::Core::Plugins::ClapAbi::EventHeader* header) {
+bool midiOutputTryPush(const Hirari::Core::Plugins::ClapAbi::OutputEvents* output,
+                       const Hirari::Core::Plugins::ClapAbi::EventHeader* header) {
     auto* context = static_cast<MidiOutputContext*>(output ? output->ctx : nullptr);
     if (!context || !context->shared || !header ||
-        header->space_id != Aura::Core::Plugins::ClapAbi::kCoreEventSpaceId)
+        header->space_id != Hirari::Core::Plugins::ClapAbi::kCoreEventSpaceId)
         return false;
     if (header->time >= context->frames) return false;
-    uint8_t data[Aura::Core::Plugins::SandboxProtocol::kMaxMidiPayloadBytes]{};
+    uint8_t data[Hirari::Core::Plugins::SandboxProtocol::kMaxMidiPayloadBytes]{};
     uint32_t dataSize = 0;
-    if (header->type == Aura::Core::Plugins::ClapAbi::kEventMidi) {
-        if (header->size < sizeof(Aura::Core::Plugins::ClapAbi::EventMidi)) return false;
-        Aura::Core::Plugins::ClapAbi::EventMidi midi{};
+    if (header->type == Hirari::Core::Plugins::ClapAbi::kEventMidi) {
+        if (header->size < sizeof(Hirari::Core::Plugins::ClapAbi::EventMidi)) return false;
+        Hirari::Core::Plugins::ClapAbi::EventMidi midi{};
         std::memcpy(&midi, header, sizeof(midi));
         std::memcpy(data, midi.data, sizeof(midi.data));
         dataSize = sizeof(midi.data);
-    } else if (header->type == Aura::Core::Plugins::ClapAbi::kEventMidiSysex) {
-        if (header->size < sizeof(Aura::Core::Plugins::ClapAbi::EventMidiSysex)) return false;
-        Aura::Core::Plugins::ClapAbi::EventMidiSysex sysex{};
+    } else if (header->type == Hirari::Core::Plugins::ClapAbi::kEventMidiSysex) {
+        if (header->size < sizeof(Hirari::Core::Plugins::ClapAbi::EventMidiSysex)) return false;
+        Hirari::Core::Plugins::ClapAbi::EventMidiSysex sysex{};
         std::memcpy(&sysex, header, sizeof(sysex));
         if (sysex.buffer == nullptr || sysex.size == 0 ||
             sysex.size > sizeof(data)) {
@@ -127,9 +144,9 @@ bool midiOutputTryPush(const Aura::Core::Plugins::ClapAbi::OutputEvents* output,
         }
         std::memcpy(data, sysex.buffer, sysex.size);
         dataSize = sysex.size;
-    } else if (header->type == Aura::Core::Plugins::ClapAbi::kEventMidi2) {
-        if (header->size < sizeof(Aura::Core::Plugins::ClapAbi::EventMidi2)) return false;
-        Aura::Core::Plugins::ClapAbi::EventMidi2 midi2{};
+    } else if (header->type == Hirari::Core::Plugins::ClapAbi::kEventMidi2) {
+        if (header->size < sizeof(Hirari::Core::Plugins::ClapAbi::EventMidi2)) return false;
+        Hirari::Core::Plugins::ClapAbi::EventMidi2 midi2{};
         std::memcpy(&midi2, header, sizeof(midi2));
         std::memcpy(data, midi2.data, sizeof(midi2.data));
         dataSize = sizeof(midi2.data);
@@ -137,7 +154,7 @@ bool midiOutputTryPush(const Aura::Core::Plugins::ClapAbi::OutputEvents* output,
         return false;
     }
     const uint32_t index = context->shared->outputMidiEvents.load(std::memory_order_relaxed);
-    if (index >= Aura::Core::Plugins::SandboxProtocol::kMaxMidiEvents) {
+    if (index >= Hirari::Core::Plugins::SandboxProtocol::kMaxMidiEvents) {
         context->shared->outputMidiDropped.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
@@ -150,57 +167,57 @@ bool midiOutputTryPush(const Aura::Core::Plugins::ClapAbi::OutputEvents* output,
     return true;
 }
 
-uint32_t midiInputSize(const Aura::Core::Plugins::ClapAbi::InputEvents* input) {
+uint32_t midiInputSize(const Hirari::Core::Plugins::ClapAbi::InputEvents* input) {
     const auto* context = static_cast<const MidiInputContext*>(input ? input->ctx : nullptr);
-    return context ? context->count + context->extendedCount + context->parameterCount : 0;
+    return context ? context->orderedCount : 0;
 }
 
-const Aura::Core::Plugins::ClapAbi::EventHeader* midiInputGet(
-    const Aura::Core::Plugins::ClapAbi::InputEvents* input, uint32_t index) {
+const Hirari::Core::Plugins::ClapAbi::EventHeader* midiInputGet(
+    const Hirari::Core::Plugins::ClapAbi::InputEvents* input, uint32_t index) {
     const auto* context = static_cast<const MidiInputContext*>(input ? input->ctx : nullptr);
-    if (!context || index >= context->count + context->extendedCount + context->parameterCount) return nullptr;
-    if (index >= context->count + context->extendedCount) {
-        const auto& parameter = context->parameters[
-            index - context->count - context->extendedCount];
+    if (!context || index >= context->orderedCount) return nullptr;
+    const auto& reference = context->ordered[index];
+    if (reference.kind == MidiInputContext::EventKind::Parameter) {
+        const auto& parameter = context->parameters[reference.index];
         return &parameter.header;
     }
-    if (index >= context->count) {
-        const auto& extended = context->extended[index - context->count];
+    if (reference.kind == MidiInputContext::EventKind::Extended) {
+        const auto& extended = context->extended[reference.index];
         if (extended.size == 0 || extended.size > UINT32_MAX ||
             extended.sampleOffset > UINT32_MAX) return nullptr;
-        static thread_local Aura::Core::Plugins::ClapAbi::EventMidiSysex convertedSysex{};
-        convertedSysex.header.size = sizeof(convertedSysex);
-        convertedSysex.header.time = static_cast<uint32_t>(extended.sampleOffset);
-        convertedSysex.header.space_id = Aura::Core::Plugins::ClapAbi::kCoreEventSpaceId;
-        convertedSysex.header.type = Aura::Core::Plugins::ClapAbi::kEventMidiSysex;
-        convertedSysex.header.flags = 0;
-        convertedSysex.port_index = 0;
-        convertedSysex.buffer = extended.data.data();
-        convertedSysex.size = extended.size;
-        return &convertedSysex.header;
+        auto& converted = context->convertedSysex[reference.index];
+        converted.header.size = sizeof(converted);
+        converted.header.time = static_cast<uint32_t>(extended.sampleOffset);
+        converted.header.space_id = Hirari::Core::Plugins::ClapAbi::kCoreEventSpaceId;
+        converted.header.type = Hirari::Core::Plugins::ClapAbi::kEventMidiSysex;
+        converted.header.flags = 0;
+        converted.port_index = 0;
+        converted.buffer = extended.data.data();
+        converted.size = extended.size;
+        return &converted.header;
     }
-    const auto* event = &context->events[index];
+    const auto* event = &context->events[reference.index];
     if (event->size < 3 || event->sampleOffset > UINT32_MAX) return nullptr;
     // A MIDI 2.0 UMP is carried losslessly in the fixed 16-byte payload.
     // Expose it as CLAP_EVENT_MIDI2 instead of rejecting it as a non-legacy
     // two/three-byte MIDI message.
-    if (event->size == sizeof(Aura::Core::Plugins::ClapAbi::EventMidi2::data)) {
-        static thread_local Aura::Core::Plugins::ClapAbi::EventMidi2 convertedMidi2{};
-        convertedMidi2.header.size = sizeof(convertedMidi2);
-        convertedMidi2.header.time = static_cast<uint32_t>(event->sampleOffset);
-        convertedMidi2.header.space_id = Aura::Core::Plugins::ClapAbi::kCoreEventSpaceId;
-        convertedMidi2.header.type = Aura::Core::Plugins::ClapAbi::kEventMidi2;
-        convertedMidi2.header.flags = 0;
-        convertedMidi2.port_index = 0;
-        convertedMidi2.reserved = 0;
-        std::memcpy(convertedMidi2.data, event->data, sizeof(convertedMidi2.data));
-        return &convertedMidi2.header;
+    if (event->size == sizeof(Hirari::Core::Plugins::ClapAbi::EventMidi2::data)) {
+        auto& converted = context->convertedMidi2[reference.index];
+        converted.header.size = sizeof(converted);
+        converted.header.time = static_cast<uint32_t>(event->sampleOffset);
+        converted.header.space_id = Hirari::Core::Plugins::ClapAbi::kCoreEventSpaceId;
+        converted.header.type = Hirari::Core::Plugins::ClapAbi::kEventMidi2;
+        converted.header.flags = 0;
+        converted.port_index = 0;
+        converted.reserved = 0;
+        std::memcpy(converted.data, event->data, sizeof(converted.data));
+        return &converted.header;
     }
-    static thread_local Aura::Core::Plugins::ClapAbi::EventMidi converted{};
+    auto& converted = context->convertedMidi[reference.index];
     converted.header.size = sizeof(converted);
     converted.header.time = static_cast<uint32_t>(event->sampleOffset);
-    converted.header.space_id = Aura::Core::Plugins::ClapAbi::kCoreEventSpaceId;
-    converted.header.type = Aura::Core::Plugins::ClapAbi::kEventMidi;
+    converted.header.space_id = Hirari::Core::Plugins::ClapAbi::kCoreEventSpaceId;
+    converted.header.type = Hirari::Core::Plugins::ClapAbi::kEventMidi;
     converted.header.flags = 0;
     converted.port_index = 0;
     std::memcpy(converted.data, event->data, sizeof(converted.data));
@@ -215,7 +232,7 @@ struct StateStreamContext {
     bool writing = false;
 };
 
-int64_t writeState(const Aura::Core::Plugins::ClapAbi::OStream* stream,
+int64_t writeState(const Hirari::Core::Plugins::ClapAbi::OStream* stream,
                    const void* data, uint64_t size) {
     auto* context = static_cast<StateStreamContext*>(stream ? stream->ctx : nullptr);
     if (!context || !context->writing || (!data && size) ||
@@ -227,7 +244,7 @@ int64_t writeState(const Aura::Core::Plugins::ClapAbi::OStream* stream,
     return static_cast<int64_t>(size);
 }
 
-int64_t readState(const Aura::Core::Plugins::ClapAbi::IStream* stream,
+int64_t readState(const Hirari::Core::Plugins::ClapAbi::IStream* stream,
                   void* data, uint64_t size) {
     auto* context = static_cast<StateStreamContext*>(stream ? stream->ctx : nullptr);
     if (!context || context->writing || (!data && size) ||
@@ -238,10 +255,10 @@ int64_t readState(const Aura::Core::Plugins::ClapAbi::IStream* stream,
     return static_cast<int64_t>(size);
 }
 
-void noopRestart(const Aura::Core::Plugins::ClapAbi::Host*) {}
-void noopProcess(const Aura::Core::Plugins::ClapAbi::Host*) {}
-void noopCallback(const Aura::Core::Plugins::ClapAbi::Host*) {}
-const void* noExtension(const Aura::Core::Plugins::ClapAbi::Host*, const char*) { return nullptr; }
+void noopRestart(const Hirari::Core::Plugins::ClapAbi::Host*) {}
+void noopProcess(const Hirari::Core::Plugins::ClapAbi::Host*) {}
+void noopCallback(const Hirari::Core::Plugins::ClapAbi::Host*) {}
+const void* noExtension(const Hirari::Core::Plugins::ClapAbi::Host*, const char*) { return nullptr; }
 
 bool applyWorkerLimits() noexcept {
     struct rlimit coreLimit{0, 0};

@@ -5,7 +5,7 @@
 #include "simd_svf.hpp"
 #include "../effects/fet_compressor.hpp"
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @class SpectralSidechainDucker
@@ -58,4 +58,4 @@ private:
     float m_lowR = 0.0f;
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

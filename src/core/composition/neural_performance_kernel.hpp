@@ -5,11 +5,11 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::Composition {
+namespace Hirari::Core::Composition {
 
 /**
  * @class NeuralPerformanceKernel
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements autonomous performative expression and DNA profiling.
  */
 class NeuralPerformanceKernel {
@@ -53,4 +53,4 @@ private:
     PerformanceDNA m_activeDNA; // --- PHASE 95: PERFORMANCE DNA ---
 };
 
-} // namespace Aura::Core::Composition
+} // namespace Hirari::Core::Composition

@@ -7,7 +7,7 @@
 #include "../audio_region.hpp"
 #include "../../dsp/analysis/transient_detector.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief RegionSlicer: Logic Pro-style 'Slice at Transients' capability.
@@ -59,4 +59,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

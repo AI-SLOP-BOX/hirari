@@ -7,7 +7,7 @@
 #include <span>
 #include <stdexcept>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class FFTEngine
@@ -98,4 +98,4 @@ private:
     std::vector<std::complex<float>> m_complexScratch; // RT-safe reuse
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

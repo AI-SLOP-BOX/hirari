@@ -1,6 +1,6 @@
 /*
- * Aura DAW Ultimate - Sovereign Channel Strip
- * Copyright (c) 2024-2026 Aura DAW Project. All rights reserved.
+ * Hirari DAW Ultimate - Sovereign Channel Strip
+ * Copyright (c) 2024-2026 Hirari DAW Project. All rights reserved.
  */
 
 #pragma once
@@ -9,7 +9,7 @@
 #include "../../core/audio_buffer.hpp"
 #include "../iprocessor.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class SovereignChannelStrip
@@ -39,4 +39,4 @@ private:
     std::array<float, 2> m_z{0,0};
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

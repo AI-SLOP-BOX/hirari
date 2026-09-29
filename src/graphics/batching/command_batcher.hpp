@@ -5,7 +5,7 @@
 #include <atomic>
 #include "../graphics_kernel.hpp"
 
-namespace Aura::Graphics::Batching {
+namespace Hirari::Graphics::Batching {
 
 /**
  * @struct DrawCommand
@@ -50,4 +50,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Graphics::Batching
+} // namespace Hirari::Graphics::Batching

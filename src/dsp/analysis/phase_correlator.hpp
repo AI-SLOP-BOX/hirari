@@ -5,7 +5,7 @@
 #include <vector>
 #include "../math/fast_math.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief PhaseCorrelator: Monitors L/R phase relationship.
@@ -47,4 +47,4 @@ private:
     float m_smoothedCorr = 0.0f;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

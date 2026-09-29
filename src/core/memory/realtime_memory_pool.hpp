@@ -1,77 +1,37 @@
 #pragma once
-#include <vector>
-#include <atomic>
+
+#include <cstddef>
 #include <cstdint>
-#include <array>
-#include <cstring>
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Memory {
+namespace Hirari::Core::Memory {
 
-/**
- * @class RealtimeMemoryPool
- * @brief Industrial Linear Allocator for RT-thread scratch memory.
- * HONEST FIX: Purged 'Harmonic Tension' scaling and implemented deterministic linear allocation.
- */
+/** C++ lifetime and API adapter for the Rust-owned realtime arena allocator. */
 class RealtimeMemoryPool {
 public:
     static constexpr uint8_t kNumArenas = 8;
-    static constexpr size_t kDefaultArenaSize = 1024 * 1024 * 4; // 4MB per arena
+    static constexpr size_t kDefaultArenaSize = 1024 * 1024 * 4;
 
-    static RealtimeMemoryPool& getInstance() { static RealtimeMemoryPool i; return i; }
-
-    /**
-     * @brief Resets the current arena for the next processing frame.
-     */
-    void reset(uint32_t frameIdx) {
-        uint32_t f = frameIdx % kNumArenas;
-        m_heads[f].val.store(0, std::memory_order_release);
-        m_frameIdx.store(f, std::memory_order_release);
+    static RealtimeMemoryPool& getInstance() {
+        static RealtimeMemoryPool instance;
+        return instance;
     }
 
-    /**
-     * @brief RT-Safe linear allocation (lock-free).
-     */
-    void* allocate(size_t sizeBytes) {
-        if (sizeBytes == 0 || sizeBytes > m_arenaSizes[0] || sizeBytes > SIZE_MAX - 63) return nullptr;
-        uint32_t f = m_frameIdx.load(std::memory_order_acquire);
+    RealtimeMemoryPool(const RealtimeMemoryPool&) = delete;
+    RealtimeMemoryPool& operator=(const RealtimeMemoryPool&) = delete;
+    ~RealtimeMemoryPool() { hirari_realtime_memory_pool_destroy(m_state); }
 
-        // 64-byte alignment for SIMD safety
-        size_t alignedSize = (sizeBytes + 63) & ~63;
-        size_t head = m_heads[f].val.load(std::memory_order_relaxed);
-        for (;;) {
-            if (head > m_arenaSizes[f] - alignedSize) return nullptr;
-            if (m_heads[f].val.compare_exchange_weak(head, head + alignedSize,
-                                                     std::memory_order_relaxed,
-                                                     std::memory_order_relaxed)) {
-                return m_arenas[f] + head;
-            }
-        }
+    void reset(uint32_t frameIdx) noexcept {
+        hirari_realtime_memory_pool_reset(m_state, frameIdx);
+    }
+
+    void* allocate(size_t sizeBytes) noexcept {
+        return hirari_realtime_memory_pool_allocate(m_state, sizeBytes);
     }
 
 private:
-    RealtimeMemoryPool() {
-        for (size_t i = 0; i < kNumArenas; ++i) {
-            m_arenaSizes[i] = kDefaultArenaSize;
-            m_arenas[i] = new uint8_t[kDefaultArenaSize];
-            std::memset(m_arenas[i], 0, kDefaultArenaSize);
-            m_heads[i].val.store(0);
-        }
-    }
-
-    ~RealtimeMemoryPool() {
-        for (size_t i = 0; i < kNumArenas; ++i) {
-            delete[] m_arenas[i];
-        }
-    }
-
-    struct alignas(64) ArenaHead {
-        std::atomic<size_t> val{0};
-    };
-
-    std::array<uint8_t*, kNumArenas> m_arenas;
-    std::array<size_t, kNumArenas> m_arenaSizes;
-    std::array<ArenaHead, kNumArenas> m_heads;
-    std::atomic<uint32_t> m_frameIdx{0};
+    RealtimeMemoryPool() : m_state(hirari_realtime_memory_pool_create()) {}
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::Core::Memory
+} // namespace Hirari::Core::Memory

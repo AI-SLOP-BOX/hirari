@@ -4,7 +4,7 @@
 #include <algorithm>
 #include "../engine_types.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 struct GroovePoint {
     int32_t tickOffset;
@@ -80,4 +80,4 @@ private:
     GrooveManager() = default;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

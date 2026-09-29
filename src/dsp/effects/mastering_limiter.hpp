@@ -8,7 +8,7 @@
 #include "../iprocessor.hpp"
 #include "delay_line.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class MasteringLimiter
@@ -167,4 +167,4 @@ private:
     float m_currentGain = 1.0f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

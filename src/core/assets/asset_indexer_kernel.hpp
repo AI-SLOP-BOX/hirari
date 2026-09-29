@@ -4,7 +4,7 @@
 #include <thread>
 #include <atomic>
 
-namespace Aura::Core::Assets {
+namespace Hirari::Core::Assets {
 
 /**
  * @class AssetIndexerKernel
@@ -32,4 +32,4 @@ private:
     std::atomic<bool> m_monitoring{false};
 };
 
-} // namespace Aura::Core::Assets
+} // namespace Hirari::Core::Assets

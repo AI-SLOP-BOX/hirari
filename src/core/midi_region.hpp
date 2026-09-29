@@ -1,112 +1,84 @@
 #pragma once
 #include <vector>
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <memory>
 #include <algorithm>
 #include <cmath>
-#include <mutex>
 #include "audio_types.hpp"
 #include "midi_buffer.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
+
+static_assert(sizeof(MIDINote) == 24 && offsetof(MIDINote, pitch) == 0 &&
+              offsetof(MIDINote, velocity) == 1 && offsetof(MIDINote, startBeat) == 8 &&
+              offsetof(MIDINote, lengthBeats) == 16,
+              "MIDINote must match the Rust MIDI region ABI");
 
 /**
  * @class MidiRegion
- * @brief Industrial MIDI Orchestrator for Aura Studio Pro.
+ * @brief Industrial MIDI Orchestrator for Hirari Studio Pro.
  */
 class MidiRegion {
 public:
     MidiRegion(uint32_t id, const std::string& name, double startBeat = 0, double lengthBeats = 4.0) 
-        : m_id(id), m_name(name), m_startBeat(startBeat), m_lengthBeats(lengthBeats) {}
+        : m_id(id), m_name(name), m_startBeat(startBeat), m_lengthBeats(lengthBeats),
+          m_noteState(hirari_midi_region_state_create(nullptr, 0)) {}
 
     MidiRegion(const std::vector<MIDINote>& notes, double startBeat, double lengthBeats)
-        : m_id(0), m_name("Generated"), m_startBeat(startBeat), m_lengthBeats(lengthBeats), m_notes(notes) {}
+        : m_id(0), m_name("Generated"), m_startBeat(startBeat), m_lengthBeats(lengthBeats),
+          m_noteState(hirari_midi_region_state_create(notes.data(), notes.size())) {}
+
+    ~MidiRegion() { hirari_midi_region_state_destroy(m_noteState); }
 
     uint32_t getId() const { return m_id; }
     const std::string& getName() const { return m_name; }
 
     void addNote(MIDINote n) {
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        m_notes.push_back(n);
+        (void)hirari_midi_region_state_add(m_noteState, &n);
     }
     bool removeNote(uint32_t index) {
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        if (index >= m_notes.size()) return false;
-        m_notes.erase(m_notes.begin() + static_cast<std::ptrdiff_t>(index));
-        return true;
+        return hirari_midi_region_state_remove(m_noteState, index);
     }
     void removeNotesAt(double beat, int pitch, double tolerance = 0.125) {
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        m_notes.erase(std::remove_if(m_notes.begin(), m_notes.end(),
-            [&](const MIDINote& note) {
-                return note.pitch == static_cast<uint8_t>(std::clamp(pitch, 0, 127)) &&
-                       std::abs(note.startBeat - beat) <= std::max(0.0, tolerance);
-            }), m_notes.end());
+        hirari_midi_region_state_remove_notes_at(m_noteState, beat, pitch, tolerance);
     }
 
     void setMutedAt(double beat, int pitch, bool muted) {
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        for (auto& note : m_notes) {
-            if (note.pitch == static_cast<uint8_t>(std::clamp(pitch, 0, 127)) &&
-                std::abs(note.startBeat - beat) <= 0.125) {
-                note.velocity = muted ? 0 : std::max<uint8_t>(1, note.velocity);
+        hirari_midi_region_state_set_muted_at(m_noteState, beat, pitch, muted);
+    }
+    bool copyProcessedNotes(std::vector<MIDINote>& destination) const {
+        if (!m_noteState) return false;
+        for (unsigned attempt = 0; attempt < 4; ++attempt) {
+            const size_t capacity = hirari_midi_region_state_count(m_noteState);
+            destination.resize(capacity);
+            const size_t copied = hirari_midi_region_state_copy(
+                m_noteState, destination.data(), capacity);
+            if (copied <= capacity) {
+                destination.resize(copied);
+                return true;
             }
         }
-    }
-    [[deprecated("use copyProcessedNotes() for cross-thread reads")]]
-    const std::vector<MIDINote>& getProcessedNotes() const { return m_notes; }
-    // Legacy reference access is retained for control-thread callers. New
-    // readers must use copyProcessedNotes() so UI/CLI edits cannot race a
-    // serializer or renderer.
-    bool copyProcessedNotes(std::vector<MIDINote>& destination) const {
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        destination = m_notes;
-        return true;
+        destination.clear();
+        return false;
     }
 
     bool updateNote(size_t index, const MIDINote& note) {
-        if (!std::isfinite(note.startBeat) || !std::isfinite(note.lengthBeats) ||
-            note.startBeat < 0.0 || note.lengthBeats <= 0.0) return false;
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        if (index >= m_notes.size()) return false;
-        m_notes[index] = note;
-        return true;
+        return hirari_midi_region_state_update(m_noteState, index, &note);
     }
 
     bool replaceNotes(const std::vector<MIDINote>& notes) {
-        if (notes.size() > 1'000'000) return false;
-        for (const auto& note : notes) {
-            if (!std::isfinite(note.startBeat) || !std::isfinite(note.lengthBeats) ||
-                note.startBeat < 0.0 || note.lengthBeats <= 0.0) return false;
-        }
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        m_notes = notes;
-        return true;
+        return hirari_midi_region_state_replace(m_noteState, notes.data(), notes.size());
     }
 
     void transpose(int semitones, double startBeat = -1.0, double endBeat = -1.0) {
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        for (auto& note : m_notes) {
-            if (startBeat >= 0.0 && (note.startBeat < startBeat ||
-                (endBeat >= 0.0 && note.startBeat > endBeat))) continue;
-            const int pitch = std::clamp(static_cast<int>(note.pitch) + semitones, 0, 127);
-            note.pitch = static_cast<uint8_t>(pitch);
-        }
+        hirari_midi_region_state_transpose(m_noteState, semitones, startBeat, endBeat);
     }
 
     void quantize(double grid, double strength = 1.0, double startBeat = -1.0, double endBeat = -1.0) {
-        if (!std::isfinite(grid) || grid <= 0.0 || !std::isfinite(strength)) return;
-        strength = std::clamp(strength, 0.0, 1.0);
-        std::lock_guard<std::mutex> lock(m_notesMutex);
-        for (auto& note : m_notes) {
-            if (startBeat >= 0.0 && (note.startBeat < startBeat ||
-                (endBeat >= 0.0 && note.startBeat > endBeat))) continue;
-            const double snapped = std::round(note.startBeat / grid) * grid;
-            note.startBeat += (snapped - note.startBeat) * strength;
-        }
-        std::stable_sort(m_notes.begin(), m_notes.end(),
-            [](const MIDINote& a, const MIDINote& b) { return a.startBeat < b.startBeat; });
+        (void)hirari_midi_region_state_quantize(
+            m_noteState, grid, strength, startBeat, endBeat);
     }
     
     double getStartBeat() const { return m_startBeat; }
@@ -117,10 +89,9 @@ private:
     std::string m_name;
     double m_startBeat;
     double m_lengthBeats;
-    std::vector<MIDINote> m_notes;
-    mutable std::mutex m_notesMutex;
+    void* m_noteState = nullptr;
 };
 
 using MIDIRegion = MidiRegion;
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

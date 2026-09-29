@@ -1,13 +1,13 @@
-# SKILL: Aura Synthesis & Instruments
+# SKILL: Hirari Synthesis & Instruments
 
 ## 🤖 AI Role: Support Only (補助)
 AIが自律的に楽曲を生成したり、楽器のパッチを自動生成して適用するエージェント化は行いません。AIはあくまで人間が求める音への「近道」を補助する存在です。
 
-Virtual Instrument engineering rules for the Aura Library.
+Virtual Instrument engineering rules for the Hirari Library.
 
 ## 🎹 Instrument Directives
 - **POLYPHONIC VOICE MANAGEMENT**: All instruments must support at least 32 concurrent voices.
-- **SAMPLE-ACCURATE MIDI**: MIDI events must be extracted per block, using `MidiDispatcher`. Triggers should happen at the `sampleOffset` of the `MidiEvent`.
+- **SAMPLE-ACCURATE MIDI**: Keep events in the fixed-capacity `MidiBuffer`, sort by `sampleOffset`, and trigger voices at each event's sample position.
 - **MULTI-ZONE MAPPING**: Samplers must support root key mapping and velocity layer selection.
 - **AHDSR ENVELOPES**: Always use the `AHDSR` utility for amplitude (and filter) modulation to ensure musical, logarithmic decay.
 

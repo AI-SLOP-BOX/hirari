@@ -8,11 +8,11 @@
 #include <cmath>
 #include "../log_buffer.hpp"
 
-namespace Aura::Core::Diagnostics {
+namespace Hirari::Core::Diagnostics {
 
 /**
  * @class EngineDiagnostics
- * @brief Professional telemetry and health monitoring system for the Aura Engine.
+ * @brief Professional telemetry and health monitoring system for the Hirari Engine.
  * HONEST FIX: Purged 'Infinite Void Transcendence' and other clinical hallucinations.
  */
 class EngineDiagnostics {
@@ -85,4 +85,4 @@ private:
     SystemHealth m_health;
 };
 
-} // namespace Aura::Core::Diagnostics
+} // namespace Hirari::Core::Diagnostics

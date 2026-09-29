@@ -12,7 +12,7 @@
 #include <unistd.h>
 #endif
 
-namespace Aura::IO::Persistence {
+namespace Hirari::IO::Persistence {
 
 /**
  * @brief ProjectSerializer: Handles saving and loading the entire project state.
@@ -44,7 +44,7 @@ public:
         // Point 6: Every project gets a checksum to prevent loading 'ghost' or corrupted data.
         const uint64_t checksum = checksumFor(jsonData);
         
-        file << jsonData << "\n--AURA_CRC:" << std::to_string(checksum);
+        file << jsonData << "\n--HIRARI_CRC:" << std::to_string(checksum);
         file.flush();
         if (!file) {
             file.close();
@@ -88,11 +88,11 @@ public:
 
         std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         
-        const size_t crcPos = content.rfind("\n--AURA_CRC:");
+        const size_t crcPos = content.rfind("\n--HIRARI_CRC:");
         if (crcPos == std::string::npos) return ""; // Re-init needed or corrupted
         
         const std::string data = content.substr(0, crcPos);
-        const auto markerSize = std::string("\n--AURA_CRC:").size();
+        const auto markerSize = std::string("\n--HIRARI_CRC:").size();
         const std::string encoded = content.substr(crcPos + markerSize);
         uint64_t expected = 0;
         try {
@@ -122,4 +122,4 @@ private:
     }
 };
 
-} // namespace Aura::IO::Persistence
+} // namespace Hirari::IO::Persistence

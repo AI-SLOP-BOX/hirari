@@ -1,0 +1,12 @@
+[package]
+name = "hirari-plugin-protocol"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Allocation-free Rust ABI primitives shared with the isolated plugin worker."
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+standalone-static = []

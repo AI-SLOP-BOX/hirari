@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief InputStageUtility: Pre-fader gain and phase management.
@@ -36,4 +36,4 @@ private:
     std::atomic<bool> m_isPhaseInverted{false};
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

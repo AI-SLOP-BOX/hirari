@@ -4,7 +4,7 @@
 
 // Minimal CLAP 1.x ABI declarations used only inside the sandbox worker.
 // This is intentionally not exposed to the DAW or audio thread.
-namespace Aura::Core::Plugins::ClapAbi {
+namespace Hirari::Core::Plugins::ClapAbi {
 
 struct Version { uint32_t major, minor, revision; };
 struct Host;
@@ -165,4 +165,4 @@ struct Entry {
 };
 
 inline constexpr const char* kPluginFactoryId = "clap.plugin-factory";
-} // namespace Aura::Core::Plugins::ClapAbi
+} // namespace Hirari::Core::Plugins::ClapAbi

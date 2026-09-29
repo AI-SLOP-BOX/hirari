@@ -1,36 +1,25 @@
 #pragma once
 
-#include <cctype>
 #include <filesystem>
 #include <string>
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Plugins::PluginAdmission {
+namespace Hirari::Core::Plugins::PluginAdmission {
 
 inline std::string formatForPath(const std::filesystem::path& path) {
-    std::string extension = path.extension().string();
-    for (char& character : extension) {
-        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    const std::string nativePath = path.string();
+    switch (hirari_plugin_format_for_path(nativePath.c_str())) {
+        case 1: return "VST3";
+        case 2: return "AU";
+        case 3: return "CLAP";
+        default: return {};
     }
-    if (extension == ".vst3") return "VST3";
-    if (extension == ".component") return "AU";
-    if (extension == ".clap") return "CLAP";
-    return {};
 }
 
 inline bool isSafeCandidate(const std::filesystem::path& path,
                             const std::string& expectedFormat = {}) {
-    std::error_code ec;
-    const auto status = std::filesystem::symlink_status(path, ec);
-    if (ec || std::filesystem::is_symlink(status)) return false;
-    if (!std::filesystem::is_directory(status) && !std::filesystem::is_regular_file(status)) {
-        return false;
-    }
-    if (expectedFormat.empty()) return true;
-    std::string normalizedExpected = expectedFormat;
-    for (char& character : normalizedExpected) {
-        character = static_cast<char>(std::toupper(static_cast<unsigned char>(character)));
-    }
-    return formatForPath(path) == normalizedExpected;
+    const std::string nativePath = path.string();
+    return hirari_plugin_is_safe_candidate(nativePath.c_str(), expectedFormat.c_str());
 }
 
-} // namespace Aura::Core::Plugins::PluginAdmission
+} // namespace Hirari::Core::Plugins::PluginAdmission

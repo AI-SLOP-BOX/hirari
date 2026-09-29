@@ -11,7 +11,7 @@
 #include <chrono>
 #include <filesystem>
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @class StreamingBuffer
@@ -213,4 +213,4 @@ private:
     std::condition_variable m_cv;
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

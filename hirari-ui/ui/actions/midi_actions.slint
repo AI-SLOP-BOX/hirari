@@ -1,0 +1,26 @@
+// Piano-roll and MIDI note editing contract.
+export global MidiActions {
+    callback arm_midi_learn(int);
+    callback insert_retrospective(int);
+    callback piano_roll_delete();
+    callback select_note(int, int, float, int);
+    callback move_note(int, int, float, float, int, int);
+    callback resize_note(int, int, float, float, int);
+    callback commit_note_edit(int) -> bool;
+    callback add_note(int, int, float, float, int);
+    callback delete_note(int, int);
+    callback quantize_notes(int, float);
+    callback ramp_selected_velocities(int);
+    callback insert_chord(int, int, float, int, float, int);
+    callback insert_progression(int, int, float, int, float, int);
+    callback set_note_velocity(int, int, float);
+    callback set_note_articulation(int, int, int);
+    callback set_articulation_map(int, int, int);
+    callback set_articulation_map_name(int, int, string);
+    callback set_articulation_map_output(int, int, int, int, int, int);
+    callback import_expression_map_pro(int) -> bool;
+    callback set_note_lyric(int, int, float, string);
+    callback apply_swing(float, float);
+    callback humanize(float, int, int);
+    callback set_expression_events(string);
+}

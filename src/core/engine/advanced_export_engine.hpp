@@ -14,7 +14,7 @@
 #include "timeline_system.hpp"
 #include "../../io/audio_export_engine.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct ExportFormat
@@ -193,7 +193,7 @@ public:
             }
             const auto destination = outputFor(job);
             const std::string label = destination.stem().string();
-            ::Aura::IO::AudioExportEngine::ExportOptions options;
+            ::Hirari::IO::AudioExportEngine::ExportOptions options;
             options.filename = destination.string();
             options.sampleRate = job.format.sampleRate;
             options.bitDepth = job.format.bitDepth;
@@ -204,7 +204,7 @@ public:
             options.renderTap = job.renderTap;
             options.cancellation = &m_cancelRequested;
             const bool rendered = job.format.codec == ExportFormat::Codec::WAV &&
-                ::Aura::IO::AudioExportEngine::bounce(
+                ::Hirari::IO::AudioExportEngine::bounce(
                     timeline, options, [this, jobIndex, jobCount](float localProgress) {
                         const float bounded = std::clamp(localProgress, 0.0f, 1.0f);
                         const float aggregate =
@@ -246,4 +246,4 @@ private:
 
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

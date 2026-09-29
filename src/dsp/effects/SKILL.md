@@ -1,4 +1,4 @@
-# 🎭 SKILL: Aura DSP Effects (Boutique & Vintage)
+# 🎭 SKILL: Hirari DSP Effects (Boutique & Vintage)
 
 ## 🤖 AI Role: Support Only (補助)
 AIによる音色操作の自律化は行いません。クリエイティブな実験やサウンドメイキングをAIが支配することを禁止します。
@@ -7,16 +7,16 @@ This folder contains high-end sonic sculpting and time-based effects.
 
 ## 📁 Key File Responsibilities
 - `lush_reverb.hpp`: High-end Hall/Chamber Algorithmic Reverb (FDN).
-- `analog_saturator.hpp`: Multiple saturation models with 2x oversampling.
+- `analog_saturator.hpp`: C++ host adapter for Rust-owned saturation models and 2x oversampling.
 - `vintage_eq.hpp`: Pultec-style passive EQ (Low-end trick).
 - `multiband_exciter.hpp`: LR-4 crossover based frequency saturation.
 - `elastic_audio.hpp`: Multi-mode Time-Stretch (Poly/Mono/Percussive).
 - `delay_line.hpp`: High-performance circular buffer.
-- `oversampler.hpp`: Polyphase FIR 2x up/down sampler.
+- `hirari-core-bridge/src/oversampler.rs`: Stateful two-branch all-pass 2x interpolation used by the Rust saturator.
 
 ## 🛡️ Effects Selection & Processing Rules
 - **NON-LINEAR OVERSAMPLING (OVERSAMPLER2X)**: Non-linear effects (Saturators, Distortions) MUST use 2x oversampling to prevent digital aliasing.
-- **FIR POLYPHASE FILTERING**: Use high-quality coefficients for up/down sampling to maintain phase coherence.
+- **2X ALL-PASS INTERPOLATION**: The saturator uses fixed complementary all-pass branches and sample-accurate Rust-owned state.
 - **HADAMARD DECORRELATION**: For Reverb, use the Hadamard matrix for dense, musical reverb tails without resonant metallic clusters.
 
 ## 🏗️ Analog-Modeling Implementation

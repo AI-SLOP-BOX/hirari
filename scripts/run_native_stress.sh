@@ -2,21 +2,21 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-ROUNDS=${AURA_STRESS_ROUNDS:-100}
-DURATION_SECONDS=${AURA_STRESS_DURATION_SECONDS:-0}
-MAX_RSS_KB=${AURA_STRESS_MAX_RSS_KB:-65536}
-MAX_FDS=${AURA_STRESS_MAX_FDS:-128}
-MAX_RSS_GROWTH_KB=${AURA_STRESS_MAX_RSS_GROWTH_KB:-8192}
-MAX_FD_GROWTH=${AURA_STRESS_MAX_FD_GROWTH:-16}
-WARMUP_ROUNDS=${AURA_STRESS_WARMUP_ROUNDS:-2}
-MAX_RETRY_SUCCESSES=${AURA_STRESS_MAX_RETRY_SUCCESSES:-0}
-BASELINE_SAMPLES=${AURA_STRESS_BASELINE_SAMPLES:-3}
-REQUIRE_RESOURCE_METRICS=${AURA_REQUIRE_RESOURCE_METRICS:-0}
+ROUNDS=${HIRARI_STRESS_ROUNDS:-100}
+DURATION_SECONDS=${HIRARI_STRESS_DURATION_SECONDS:-0}
+MAX_RSS_KB=${HIRARI_STRESS_MAX_RSS_KB:-65536}
+MAX_FDS=${HIRARI_STRESS_MAX_FDS:-128}
+MAX_RSS_GROWTH_KB=${HIRARI_STRESS_MAX_RSS_GROWTH_KB:-8192}
+MAX_FD_GROWTH=${HIRARI_STRESS_MAX_FD_GROWTH:-16}
+WARMUP_ROUNDS=${HIRARI_STRESS_WARMUP_ROUNDS:-2}
+MAX_RETRY_SUCCESSES=${HIRARI_STRESS_MAX_RETRY_SUCCESSES:-0}
+BASELINE_SAMPLES=${HIRARI_STRESS_BASELINE_SAMPLES:-3}
+REQUIRE_RESOURCE_METRICS=${HIRARI_REQUIRE_RESOURCE_METRICS:-0}
 retry_successes=0
 peak_rss_seen=0
 peak_fds_seen=0
-ARTIFACT_DIR=${AURA_STRESS_ARTIFACT_DIR:-}
-BASELINE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aura-stress-baseline.XXXXXX")
+ARTIFACT_DIR=${HIRARI_STRESS_ARTIFACT_DIR:-}
+BASELINE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/hirari-stress-baseline.XXXXXX")
 OBSERVED_DIR="$BASELINE_DIR/observed"
 mkdir -p "$OBSERVED_DIR"
 cleanup_baseline() {
@@ -29,7 +29,7 @@ cleanup_baseline() {
         fi
     done
     # Give children a short grace period, then reap only the processes this
-    # coordinator launched. Never use a name-based kill here: other Aura
+    # coordinator launched. Never use a name-based kill here: other Hirari
     # sessions may be running on the same machine.
     for pid in ${CURRENT_TEST_PID:-} ${CURRENT_TEST_WORKER_PIDS:-}; do
         [ -n "$pid" ] || continue
@@ -54,16 +54,16 @@ if [ "$RSS_METRICS_AVAILABLE" -eq 0 ] || [ "$FD_METRICS_AVAILABLE" -eq 0 ]; then
 fi
 
 case "$ROUNDS" in
-    ''|*[!0-9]*) echo "AURA_STRESS_ROUNDS must be numeric" >&2; exit 2 ;;
+    ''|*[!0-9]*) echo "HIRARI_STRESS_ROUNDS must be numeric" >&2; exit 2 ;;
 esac
-[ "$ROUNDS" -gt 0 ] || { echo "AURA_STRESS_ROUNDS must be positive" >&2; exit 2; }
+[ "$ROUNDS" -gt 0 ] || { echo "HIRARI_STRESS_ROUNDS must be positive" >&2; exit 2; }
 case "$DURATION_SECONDS" in
-    ''|*[!0-9]*) echo "AURA_STRESS_DURATION_SECONDS must be numeric" >&2; exit 2 ;;
+    ''|*[!0-9]*) echo "HIRARI_STRESS_DURATION_SECONDS must be numeric" >&2; exit 2 ;;
 esac
 case "$BASELINE_SAMPLES" in
-    ''|*[!0-9]*) echo "AURA_STRESS_BASELINE_SAMPLES must be numeric" >&2; exit 2 ;;
+    ''|*[!0-9]*) echo "HIRARI_STRESS_BASELINE_SAMPLES must be numeric" >&2; exit 2 ;;
 esac
-[ "$BASELINE_SAMPLES" -gt 0 ] || { echo "AURA_STRESS_BASELINE_SAMPLES must be positive" >&2; exit 2; }
+[ "$BASELINE_SAMPLES" -gt 0 ] || { echo "HIRARI_STRESS_BASELINE_SAMPLES must be positive" >&2; exit 2; }
 
 median_file() {
     file=$1
@@ -74,9 +74,9 @@ median_file() {
 
 shared_memory_count() {
     if [ -d /dev/shm ]; then
-        find /dev/shm -maxdepth 1 -type f -name 'aura_plugin_*' -print 2>/dev/null | wc -l | tr -d ' '
+        find /dev/shm -maxdepth 1 -type f -name 'hirari_plugin_*' -print 2>/dev/null | wc -l | tr -d ' '
     elif command -v lsof >/dev/null 2>&1; then
-        lsof -n -c aura-plugin-host-worker 2>/dev/null | grep -c '/aura_plugin_' || true
+        lsof -n -c hirari-plugin-host-worker 2>/dev/null | grep -c '/hirari_plugin_' || true
     else
         echo 0
     fi
@@ -107,7 +107,7 @@ new_worker_pids() {
     for pid in $(descendant_pids "$root_pid"); do
         command_line=$(ps -o command= -p "$pid" 2>/dev/null || true)
         case "$command_line" in
-            */aura-plugin-host-worker|*/aura-plugin-host-worker-vst3|*/aura-plugin-host-worker\ *|*/aura-plugin-host-worker-vst3\ *)
+            */hirari-plugin-host-worker|*/hirari-plugin-host-worker-vst3|*/hirari-plugin-host-worker\ *|*/hirari-plugin-host-worker-vst3\ *)
                 printf '%s\n' "$pid" ;;
         esac
     done
@@ -143,7 +143,7 @@ run_worker_test() {
         return 2
     fi
     while [ "$attempt" -le 3 ]; do
-        log_file=$(mktemp "${TMPDIR:-/tmp}/aura-worker-test.XXXXXX")
+        log_file=$(mktemp "${TMPDIR:-/tmp}/hirari-worker-test.XXXXXX")
         run_test_command "$test_name" >"$log_file" 2>&1 &
         test_pid=$!
         CURRENT_TEST_PID=$test_pid
@@ -291,13 +291,13 @@ run_test_command() {
        [ "$test_name" = "isolated_plugin_worker_survives_audio_reconfiguration" ] ||
        [ "$test_name" = "real_plugin_worker_fault_is_quarantined_without_nonfinite_audio" ] ||
        [ "$test_name" = "real_plugin_overruns_quarantine_then_recover_audio_and_midi" ]; then
-        AURA_PLUGIN_HOST_BIN="$WORKER_BIN" \
-        AURA_VST3_FIXTURE="$AURA_VST3_FIXTURE" \
+        HIRARI_PLUGIN_HOST_BIN="$WORKER_BIN" \
+        HIRARI_VST3_FIXTURE="$HIRARI_VST3_FIXTURE" \
         "$SANDBOX_TEST_BIN" "$test_name" --exact --ignored --test-threads=1
     else
-        AURA_PLUGIN_HOST_BIN="$WORKER_BIN" \
-        AURA_CLAP_FIXTURE="$ROOT_DIR/build-tools/minimal-gain.clap" \
-        AURA_PLUGIN_PATHS="$ROOT_DIR/build-tools" \
+        HIRARI_PLUGIN_HOST_BIN="$WORKER_BIN" \
+        HIRARI_CLAP_FIXTURE="$ROOT_DIR/build-tools/minimal-gain.clap" \
+        HIRARI_PLUGIN_PATHS="$ROOT_DIR/build-tools" \
         "$SANDBOX_TEST_BIN" "$test_name" --exact --ignored --test-threads=1
     fi
 }
@@ -306,9 +306,9 @@ run_test_command() {
 # worker case and every round measures dependency resolution and test-harness
 # startup more than worker lifecycle.  Callers may provide a prebuilt binary
 # when running from a staged/release tree.
-SANDBOX_TEST_BIN=${AURA_STRESS_TEST_BIN:-}
+SANDBOX_TEST_BIN=${HIRARI_STRESS_TEST_BIN:-}
 if [ -z "$SANDBOX_TEST_BIN" ]; then
-    cargo test -p aura-core-bridge --test plugin_sandbox_workflow --no-run --quiet
+    cargo test -p hirari-core-bridge --test plugin_sandbox_workflow --no-run --quiet
     SANDBOX_TEST_BIN=$(find "$ROOT_DIR/target/debug/deps" -type f -perm -111 \
         -name 'plugin_sandbox_workflow-*' -print0 | xargs -0 ls -t 2>/dev/null | head -n 1)
 fi
@@ -317,11 +317,11 @@ if [ -z "$SANDBOX_TEST_BIN" ] || [ ! -x "$SANDBOX_TEST_BIN" ]; then
     exit 2
 fi
 
-WORKER_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker"
-if [ -n "${AURA_VST3_FIXTURE:-}" ]; then
-    AURA_PLUGIN_WORKER_OUTPUT="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3" \
+WORKER_BIN="$ROOT_DIR/build-tools/hirari-plugin-host-worker"
+if [ -n "${HIRARI_VST3_FIXTURE:-}" ]; then
+    HIRARI_PLUGIN_WORKER_OUTPUT="$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3" \
         "$ROOT_DIR/scripts/build_plugin_worker_with_vst3.sh" >/dev/null
-    WORKER_BIN="$ROOT_DIR/build-tools/aura-plugin-host-worker-vst3"
+    WORKER_BIN="$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3"
 else
     "$ROOT_DIR/scripts/build_plugin_worker.sh" >/dev/null
 fi
@@ -340,7 +340,7 @@ while [ "$i" -le "$ROUNDS" ]; do
     run_worker_test repeated_mailbox_overruns_quarantine_then_recover_to_audio
     run_worker_test crashing_clap_worker_is_restarted_then_quarantined
     run_worker_test generic_worker_fault_injection_quarantines_clap
-    if [ -n "${AURA_VST3_FIXTURE:-}" ]; then
+    if [ -n "${HIRARI_VST3_FIXTURE:-}" ]; then
         run_worker_test official_vst3_fixture_instantiates_and_processes_in_the_isolated_worker
         run_worker_test isolated_plugin_worker_survives_audio_reconfiguration
         run_worker_test real_plugin_worker_fault_is_quarantined_without_nonfinite_audio

@@ -7,7 +7,7 @@
 #include "../../audio_buffer.hpp"
 #include "phonetic_aligner_kernel.hpp"
 
-namespace Aura::DSP::Vocal {
+namespace Hirari::DSP::Vocal {
 
 /**
  * @class VocalForensicSuite
@@ -74,7 +74,7 @@ public:
      * @brief PHONETIC SYNC: Orchestrates neural lyric alignment with absolute precision.
      * INDUSTRIAL: Delegating phonetic analysis to the Rust 'VocalOrchestrator'.
      */
-    void updatePhoneticSync(const std::vector<::Aura::Core::DSP::Vocal::PhoneticAlignerKernel::Phoneme>& phonemes, const float* env, uint32_t sz) {
+    void updatePhoneticSync(const std::vector<::Hirari::Core::DSP::Vocal::PhoneticAlignerKernel::Phoneme>& phonemes, const float* env, uint32_t sz) {
         if (phonemes.empty() || !env || sz == 0) { m_phoneticConfidence = 0.0f; return; }
         double energy = 0.0;
         uint32_t finite = 0;
@@ -99,4 +99,4 @@ private:
     float m_phoneticConfidence = 1.0f;
 };
 
-} // namespace Aura::DSP::Vocal
+} // namespace Hirari::DSP::Vocal

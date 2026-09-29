@@ -3,7 +3,7 @@
 #include <mutex>
 #include "forensic_journaler.hpp"
 
-namespace Aura::Core::Diagnostics {
+namespace Hirari::Core::Diagnostics {
 
 class ForensicKernel {
 public:
@@ -31,4 +31,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Diagnostics
+} // namespace Hirari::Core::Diagnostics

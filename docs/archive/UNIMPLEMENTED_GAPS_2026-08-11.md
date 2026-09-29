@@ -1,4 +1,4 @@
-# Aura DAW 未実装・未接続一覧
+# Hirari DAW 未実装・未接続一覧
 
 調査日: 2026-08-11  
 調査方法: Rust／C++／FFI／Slintを3方向のサブエージェントで読み取り専用監査し、現行ソースと突合。
@@ -23,7 +23,7 @@
 ### 2026-09-06 選択範囲レンダーをネイティブグラフへ接続
 
 - C++オーディオグラフに半開区間のオフラインレンダー範囲を追加。
-- Rustの `AuraCore::bounce_project_range()` から同じトラック／ルーティング／
+- Rustの `HirariCore::bounce_project_range()` から同じトラック／ルーティング／
   インサート経路を通して選択範囲を書き出せるようにした。
 - 失敗時・完了時に範囲設定を必ず解除し、次回のフルバウンスへ状態が漏れないようにした。
 
@@ -81,7 +81,7 @@ project-specific routing or mix audit.
 - Added a control-plane Standard MIDI File writer with format-1 tempo and
   per-track chunks, sample-to-tick conversion, note validation, deterministic
   ordering, lyric meta-events, and atomic publication.
-- `AuraCore::export_midi_file()` now exports the canonical scheduled-note model
+- `HirariCore::export_midi_file()` now exports the canonical scheduled-note model
   to `.mid` for interchange with other DAWs and hardware sequencers.
 - The stable command contract now exposes `export_midi_file` as an audited
   external file operation with the same generation and path policy as bounce.
@@ -117,7 +117,7 @@ project-specific routing or mix audit.
 ### 2026-09-06 Advanced Exportの通常経路接続
 
 - `AdvancedExportEngine`にネイティブWAV file-renderer経路を追加し、
-  `AuraCore`とStable APIから現在のプロジェクトバウンスグラフを呼び出せるようにした。
+  `HirariCore`とStable APIから現在のプロジェクトバウンスグラフを呼び出せるようにした。
 - レンダー完了前はactive jobを消費せず、同名衝突・空ファイル・失敗時は公開済みファイルを
   ロールバックする。UI/CLIがplanning-only queueで停止しない。
 
@@ -142,7 +142,7 @@ project-specific routing or mix audit.
   requests now fail with a diagnostic, and the native contract verifies that
   the driver remains closed. CoreAudio now uses the production
   `MacAudioDriverHost` adapter directly (see the 2026-09-06 entry above).
-- ASIO is also refused unless an explicit `AURA_ENABLE_ASIO_SDK` build is
+- ASIO is also refused unless an explicit `HIRARI_ENABLE_ASIO_SDK` build is
   configured; the in-tree buffer simulator is never advertised as hardware.
 
 ### 2026-09-05 optional JACK backend
@@ -150,16 +150,16 @@ project-specific routing or mix audit.
 - Replaced the comment-only `JackBridgeDeep` with an opt-in JACK client that
   registers stereo input/output ports, reads the negotiated sample rate and
   block size, and invokes a bounded realtime process callback. Builds without
-  `AURA_ENABLE_JACK` fail closed with a diagnostic; both disabled and
+  `HIRARI_ENABLE_JACK` fail closed with a diagnostic; both disabled and
   JACK-enabled header contracts compile successfully.
 - `DriverFactory::API::JACK` now exposes that bridge on non-Apple builds; an
   unavailable JACK server still returns the explicit Silent fallback.
 
 ### 2026-09-05 JACK AudioEngine integration
 
-- When `AURA_ENABLE_JACK` is enabled, `AudioEngine` now owns the JACK host
+- When `HIRARI_ENABLE_JACK` is enabled, `AudioEngine` now owns the JACK host
   directly instead of stopping at the legacy `DriverFactory` facade. The JACK
-  realtime callback enters the production `AuraUnifiedEngine` graph, and the
+  realtime callback enters the production `HirariUnifiedEngine` graph, and the
   negotiated sample rate/block size is applied to that graph on startup,
   device selection, and reconfiguration.
 - JACK remains opt-in and was verified here by compiling the full
@@ -200,27 +200,27 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 ### 高優先（P1）
 
 - `src/core/engine/effect_chain.hpp:43`／`src/core/engine/track.hpp:172-181`: RT callback内のmutex、vectorコピー、shared_ptr参照カウント操作。control threadでimmutable snapshotを構築し、callbackはatomic世代参照だけにする。
-- `src/core/aura_unified_engine.cpp:314`／`src/core/log_buffer.hpp:38`: callback内で文字列コピー・timestamp・ログ書き込みを行う。callbackはatomic flag/counterだけ更新し、詳細ログはcontrol threadで回収する。
-- `aura-core-bridge/src/modules/audio_engine.rs:46,306`: 将来RT経路へ接続するとVec確保、Mutex、ファイル処理、NaN伝播が発生する。Rust RT APIを事前確保済みsliceとlock-freeイベントに限定し、DSP境界でfinite検証する。
+- `src/core/hirari_unified_engine.cpp:314`／`src/core/log_buffer.hpp:38`: callback内で文字列コピー・timestamp・ログ書き込みを行う。callbackはatomic flag/counterだけ更新し、詳細ログはcontrol threadで回収する。
+- `hirari-core-bridge/src/modules/audio_engine.rs:46,306`: 将来RT経路へ接続するとVec確保、Mutex、ファイル処理、NaN伝播が発生する。Rust RT APIを事前確保済みsliceとlock-freeイベントに限定し、DSP境界でfinite検証する。
 - `src/dsp/synthesis/sampler_mapping_engine.hpp:34-47`: `resolveSample()`が常に空、`addZone()`がno-op。MIDIノートからサンプルを解決できないため、zone registryとnote/velocity範囲検証を実装する。
-- `aura-core-bridge/src/library.rs:23-35`: 実ファイルを走査せず固定アセット1件を登録。`read_dir`、メタデータ、拡張子、存在確認による実走査へ置換する。
-- `aura-core-bridge/src/resources.rs:30-52`: scan/consolidateが空、auditが無条件true。既存resource managerへ統合し、欠損・サイズ・重複を検査する。
-- `aura-core-bridge/src/session_launcher.rs:31-51`: BPM／sample rate未検証でゼロ除算・`% 0` panicの可能性。有限値・正値検証とResult化が必要。
+- `hirari-core-bridge/src/library.rs:23-35`: 実ファイルを走査せず固定アセット1件を登録。`read_dir`、メタデータ、拡張子、存在確認による実走査へ置換する。
+- `hirari-core-bridge/src/resources.rs:30-52`: scan/consolidateが空、auditが無条件true。既存resource managerへ統合し、欠損・サイズ・重複を検査する。
+- `hirari-core-bridge/src/session_launcher.rs:31-51`: BPM／sample rate未検証でゼロ除算・`% 0` panicの可能性。有限値・正値検証とResult化が必要。
 - `src/scae/vocal_restoration.hpp:114-124`: Vocals以外を全ゼロにする固定ダミー。未接続なら成功扱いせず、明示的な未対応エラーを返す。
-- `src/core/aura_unified_engine.cpp:1059-1061`: `browser_preview()`が引数を無視して何もしない。実プレビュー登録・デコード・再生キュー接続が必要。
-- `src/synthesis/aura_sampler_pro.hpp:247-248`: `updateVoiceCC()`が空。CC/MPEをvoice単位へ伝播する必要がある。
-- `aura-ui/ui/aura_studio.slint:66-137`／`aura-ui/src/slint_ui.rs:608-1665`: `automation_point_moved`、`area_select`、`plugin_param_changed`、`set_route`等のcallbackがUIに存在するがRust接続なし。編集操作が見た目だけで終わる。
-- `aura-ui/ui/aura_studio.slint:3128,3541-3546`: 空プロジェクト・削除直後に`tracks[sel_idx]`を直接参照する。空モデル用の安全な選択状態が必要。
-- `aura-ui/src/slint_ui.rs:322-336`／`src/core/aura_unified_engine.cpp:942-968`: 波形初回取得で同期デコードしUIをブロックする。Open後はplaceholderを表示し、デコードとピーク生成を完全にworkerへ移す。UI側の初回クリップ生成は非同期リクエスト／完了ポーリングへ移行済み。残る範囲はGPU LODキャッシュとの統合。
+- `src/core/hirari_unified_engine.cpp:1059-1061`: `browser_preview()`が引数を無視して何もしない。実プレビュー登録・デコード・再生キュー接続が必要。
+- `src/synthesis/hirari_sampler_pro.hpp:247-248`: `updateVoiceCC()`が空。CC/MPEをvoice単位へ伝播する必要がある。
+- `hirari-ui/ui/hirari_studio.slint:66-137`／`hirari-ui/src/slint_ui.rs:608-1665`: `automation_point_moved`、`area_select`、`plugin_param_changed`、`set_route`等のcallbackがUIに存在するがRust接続なし。編集操作が見た目だけで終わる。
+- `hirari-ui/ui/hirari_studio.slint:3128,3541-3546`: 空プロジェクト・削除直後に`tracks[sel_idx]`を直接参照する。空モデル用の安全な選択状態が必要。
+- `hirari-ui/src/slint_ui.rs:322-336`／`src/core/hirari_unified_engine.cpp:942-968`: 波形初回取得で同期デコードしUIをブロックする。Open後はplaceholderを表示し、デコードとピーク生成を完全にworkerへ移す。UI側の初回クリップ生成は非同期リクエスト／完了ポーリングへ移行済み。残る範囲はGPU LODキャッシュとの統合。
 
 ### 中優先（P2）
 
 - `src/dsp/iprocessor.hpp:60-70`: state/parameter APIが空、取得値0、automation常時true。未対応を明示する`supports*`契約へ変更する。
 - `src/core/gpu_audio_kernel.hpp:29-31`: float pointer版`processFXChain`が空でAudioBuffer版と二重化。APIを統合する。
 - `src/core/dsp/effects/procedural_foley_kernel.hpp:15-23`: trigger/processが空。未対応ならUIから隠し、実装時はイベントキューと出力を接続する。
-- `src/graphics/ui_components/aura_pro_ui.hpp:103-105`: `DummyInspector::render()`が空。実状態を描画するか未対応表示にする。
-- `aura-ui/ui/aura_studio.slint:2916-2924,3040-3044,4183,4310-4318`: plugin状態、sample rate、latency、memory、LUFSが固定表示。実エンジン値へ接続し、未取得時は`N/A`表示にする。
-- `src/core/aura_unified_engine.cpp:1024-1034`: 波形cacheの一時ファイルがカレントディレクトリに残る。cache root、世代、削除／GCを定義する。
+- `src/graphics/ui_components/hirari_pro_ui.hpp:103-105`: `DummyInspector::render()`が空。実状態を描画するか未対応表示にする。
+- `hirari-ui/ui/hirari_studio.slint:2916-2924,3040-3044,4183,4310-4318`: plugin状態、sample rate、latency、memory、LUFSが固定表示。実エンジン値へ接続し、未取得時は`N/A`表示にする。
+- `src/core/hirari_unified_engine.cpp:1024-1034`: 波形cacheの一時ファイルがカレントディレクトリに残る。cache root、世代、削除／GCを定義する。
 
 ### 導線の現状判定
 
@@ -248,16 +248,16 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 - Rust側のProjectDocumentを追加し、メタデータ、サンプルレート、トラック、リージョン、ゲイン、フェード、Mute/Soloを同一JSONで原子保存・検証付き復元。
 - Render UIをキュー投入済み／処理中／完了／失敗／キャンセル未接続に分け、進捗未接続時に偽のパーセント表示をしないよう修正。
 - C++バウンスにatomicな状態、進捗、キャンセル要求APIを追加。RTコールバックをブロックせず、Idle／Queued／Rendering／Completed／Failed／Cancelledを区別。
-- C++バウンス状態をAudioEngine wrapper、CXX bridge、AuraCore、Slint Timerへ接続。UIが実進捗・完了・失敗・キャンセルを表示し、キャンセル要求を送信可能。
+- C++バウンス状態をAudioEngine wrapper、CXX bridge、HirariCore、Slint Timerへ接続。UIが実進捗・完了・失敗・キャンセルを表示し、キャンセル要求を送信可能。
 - Sidechain Followerが入力バッファの有限値RMSを使うようになり、空入力・NaN/Inf・異常depthを安全に処理。
 - AU/VST3/CLAPのシステムスキャンを実装し、ユーザーパス展開、権限エラー、重複、拡張子、Info.plistメタデータを安全に処理。
 - Plugin registryの登録・一覧・存在確認・未実装instantiateの失敗理由を実装し、ロード成功と誤認しないよう明示。
 - PluginSandboxHostの基底DSP APIとの`noexcept`契約不一致を修正。
-- 内蔵Aura/LimiterをTrackのEffectChainへ接続し、prepare・ブロック境界同期・音声処理を実装。外部形式は追加失敗として扱う。
+- 内蔵Hirari/LimiterをTrackのEffectChainへ接続し、prepare・ブロック境界同期・音声処理を実装。外部形式は追加失敗として扱う。
 - `ParameterAutomatorPro`がplugin/parameterごとの値を保持し、有限値検証・0..1クランプ・安全な取得・クリアを提供。
 - `PluginScanner::scanInSandbox`を入力検証と状態管理へ変更し、空path・不存在・directory・非通常ファイルを明示的に拒否。実プロセス起動は未実装として偽装しない。
 - UIのSCAN操作を実ファイルシステム走査へ接続し、発見件数・拒否件数・未ロード状態をLast Actionへ表示。
-- AudioEngine／AuraCoreの各ハンドル破棄で共有singletonをshutdownしないよう修正し、プロセス終了用の明示的な`shutdown_process()`を追加。
+- AudioEngine／HirariCoreの各ハンドル破棄で共有singletonをshutdownしないよう修正し、プロセス終了用の明示的な`shutdown_process()`を追加。
 - Preview sampleを制御側のappend-only世代ストレージとatomic raw pointerへ変更し、audio callback内のshared_ptr refcount／解放を排除。
 - SubBassGeneratorのno-op processを実入力処理へ置換し、LPF/DCブロック、エンベロープ、ゼロクロス基音推定、1オクターブ下のサイン生成、有限値保護を実装。
 - DeEsserのlookahead placeholderを固定リングバッファへ置換し、先読み検出ゲインを遅延音へ適用。低SR、短いbuffer、NaN/Infを処理。
@@ -277,11 +277,11 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 - `src/dsp/effects/console_dsp.hpp`の空processを実装。入力／サイドチェイン検出、VCA型attack/release、threshold/ratio、drive付きtanh飽和、有限値保護を追加。
 - `src/dsp/effects/pitch_corrector.hpp`の空processを実装。ブロック内ゼロクロス推定、最近傍半音スナップ、補正量平滑化、既存PitchShifter接続、未検出時の安全なパススルーを追加。
 - `src/core/engine/scale_system.hpp`のscale／chordスタブを実装。Major／Minor等の正しい12音マスク、rootを考慮した最近傍量子化、入力検証付きコード履歴を追加。
-- `aura-core-bridge/src/track_group_orchestrator.rs`と`vca_gain_orchestrator.rs`の空管理処理を実装。グループ双方向所属、属性伝播、整合性監査、VCAゲインの有限値検証、トラック割当、階層ゲイン解決を追加。
+- `hirari-core-bridge/src/track_group_orchestrator.rs`と`vca_gain_orchestrator.rs`の空管理処理を実装。グループ双方向所属、属性伝播、整合性監査、VCAゲインの有限値検証、トラック割当、階層ゲイン解決を追加。
 - C++の`GroupManager`／`VCAManager`／`VCAControlSystem`にも所属管理、属性同期、VCAゲイン解決を実装し、Rust側だけに処理が閉じる状態を解消。
 - Trackのブロック処理からC++ `VCAManager`の解決済みゲインをO(1) atomic lookupで参照し、エフェクトチェーン後のTrack信号へ適用。
 
-検証済み: `cargo build --release -p aura-ui` 成功、Rustワークスペーステスト61件成功、`track.hpp` Clang構文検証成功。
+検証済み: `cargo build --release -p hirari-ui` 成功、Rustワークスペーステスト61件成功、`track.hpp` Clang構文検証成功。
 
 ## 追加監査で判明した未実装・未接続項目
 
@@ -294,7 +294,7 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 
 ### P0: オーディオコールバック寿命（主要経路は解消済み）
 
-- `src/core/aura_unified_engine.cpp`でcallbackのin-flight数とquiescence待機を導入し、削除・再prepare時のTrack解放をshutdownへ延期済み。残課題はCoreAudioのstop完了通知とエンジンquiescence待機を同一状態機械へ統合すること。
+- `src/core/hirari_unified_engine.cpp`でcallbackのin-flight数とquiescence待機を導入し、削除・再prepare時のTrack解放をshutdownへ延期済み。残課題はCoreAudioのstop完了通知とエンジンquiescence待機を同一状態機械へ統合すること。
 - `src/core/engine/track.hpp:143-150` はRT上でatomic shared_ptrロードを行い、参照カウント操作／解放がcallbackへ現れる可能性がある。
 - `src/core/effect_chain.hpp:43-59` はRT上で`try_lock()`を使用。待機しないが、標準mutex依存はRT保証として不十分。
 
@@ -309,22 +309,22 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 - C++／Rust双方のGroup/VCA基本管理・伝播・階層解決を実装済み。残課題はGroup属性によるMute／Solo／Pan等のTrack操作伝播と、プロジェクト保存への所属情報追加。
 - VCAゲインのTrack音声適用まで実装済み。残課題はGroup属性によるMute／Solo／Pan等のTrack操作伝播と、プロジェクト保存への所属情報追加。
 - `src/core/engine/scale_system.hpp`: スケール量子化とコード履歴を実装済み。残課題はUI／MIDIイベント経路への接続とコード履歴の公開API。
-- `aura-core-bridge/src/parallel_bounce_orchestrator.rs`: 重複排除付きの決定論的タスク計画、タスク取得、完了通知、監査を実装。残課題はこの計画を実際のオーディオレンダラー／WAVエンコーダへ接続すること。未接続時にレンダリング成功とは報告しない。
+- `hirari-core-bridge/src/parallel_bounce_orchestrator.rs`: 重複排除付きの決定論的タスク計画、タスク取得、完了通知、監査を実装。残課題はこの計画を実際のオーディオレンダラー／WAVエンコーダへ接続すること。未接続時にレンダリング成功とは報告しない。
 - `src/io/mmap_audio_file.hpp`: 空ファイル、mmap失敗、RIFFチャンク破損、未整列データ、範囲外サンプル、NaN/Infを検証。16/24/32-bit PCMと32-bit floatを安全に読み出し、例外時もマッピングとFDを解放。
-- `aura-core-bridge/src/session_launcher.rs`: BPM/sample rateの有限値・正値検証、quantization幅のゼロ回避、重複clip監査、境界起動テストを実装。
+- `hirari-core-bridge/src/session_launcher.rs`: BPM/sample rateの有限値・正値検証、quantization幅のゼロ回避、重複clip監査、境界起動テストを実装。
 - `src/io/audio_drivers.hpp`: 旧Dummyドライバを明示的なSilent fallbackとして状態管理。初期化前start、不正sample rate、ゼロbufferを失敗扱いにし、状態・エラー取得APIを追加。
 - `src/core/engine/effect_chain.hpp`: no-opの二重実装を廃止し、動作する`src/core/effect_chain.hpp`へalias統合。プロセッサ追加・clear・block処理が実装経路へ到達する。
 - `src/core/driver/mac_audio_driver.hpp`: callbackのin-flight数を追跡し、`AudioOutputUnitStop`後にquiescenceを待ってからAudioUnitを破棄する停止順序へ変更。
 - `src/platform/macos/coreaudio_device.mm`: 共通AudioDevice経路にもcallbackのin-flight待機、停止中の無音化、Renderエラー検出、NULL/不正バッファ保護、開始失敗時cleanupを追加。
-- `aura-ui/src/slint_ui.rs`: transportの再生状態をCoreを正とする同期へ変更し、再生ヘッドの有限値検証、automation表示切替、automation pointの範囲・値検証付きUI反映を追加。
-- `src/core/effect_chain.hpp`／`track.hpp`／`aura_unified_engine.*`／`audio_engine.hpp`／`aura-ui/src/slint_ui.rs`: 内蔵Auraプラグインのparameter変更をUIからTrackのEffectChainへ接続。外部形式・存在しないFXは失敗表示し、成功と誤認しない。
+- `hirari-ui/src/slint_ui.rs`: transportの再生状態をCoreを正とする同期へ変更し、再生ヘッドの有限値検証、automation表示切替、automation pointの範囲・値検証付きUI反映を追加。
+- `src/core/effect_chain.hpp`／`track.hpp`／`hirari_unified_engine.*`／`audio_engine.hpp`／`hirari-ui/src/slint_ui.rs`: 内蔵Hirariプラグインのparameter変更をUIからTrackのEffectChainへ接続。外部形式・存在しないFXは失敗表示し、成功と誤認しない。
 - `src/core/engine/macro_control_manager.hpp`: no-opだったmacro mapping登録・反転・範囲変換・重複更新を実装し、非有限値と範囲外入力を拒否。
-- `src/core/aura_unified_engine.*`／`audio_engine.hpp`／`aura-core-bridge/src/lib.rs`／`aura-ui/src/slint_ui.rs`: Macro変更をUIからCoreのMacroControlManagerへ接続し、UI表示モデルも正規化値へ更新。
-- `src/core/engine/routing_engine.hpp`／`aura_unified_engine.*`／`audio_engine.hpp`／`aura-core-bridge/src/lib.rs`／`aura-ui/src/slint_ui.rs`: no-opだったroute登録をCoreへ接続。重複更新、解除、自己接続拒否、UI結果表示を実装。
+- `src/core/hirari_unified_engine.*`／`audio_engine.hpp`／`hirari-core-bridge/src/lib.rs`／`hirari-ui/src/slint_ui.rs`: Macro変更をUIからCoreのMacroControlManagerへ接続し、UI表示モデルも正規化値へ更新。
+- `src/core/engine/routing_engine.hpp`／`hirari_unified_engine.*`／`audio_engine.hpp`／`hirari-core-bridge/src/lib.rs`／`hirari-ui/src/slint_ui.rs`: no-opだったroute登録をCoreへ接続。重複更新、解除、自己接続拒否、UI結果表示を実装。
 - Track処理へ多段の実音声ルーティングを接続。固定長・atomic公開のトポロジー順を制御側で構築し、オーディオスレッドでは入力加算→Track処理→次段送信を行う。登録時のCycle検出、未コンパイル時の安全なフォールバック、BusTrack生成・BusSystem登録、Bus pre-FX集約→処理→post-FX公開、Bus専用EffectChain、SidechainCompressorの実処理、plugin index単位のsidechain注入、UI/FFIからのlink設定、Track削除時の解除、再prepare後のsource buffer自動再公開まで対応済み。feedback routeも通常Cycleとは分離した固定1ブロック遅延経路として実装済み。任意サンプル遅延、feedback量の自動安定化は未完了。
 - `src/dsp/synthesis/sampler_mapping_engine.hpp`: note/velocity範囲を検証するzone registryとサンプル解決を実装。
-- `aura-core-bridge/src/library.rs`: 固定ダミーアセットを廃止し、音声拡張子・存在・サイズ・重複を検証する再帰ファイル走査へ移行。
-- `aura-ui/ui/aura_studio.slint`／`aura-ui/src/slint_ui.rs`: 空トラックモデル時のInspector／Plugin表示と選択行を安全化。`tracks[sel_idx]`の範囲外評価を抑止。
+- `hirari-core-bridge/src/library.rs`: 固定ダミーアセットを廃止し、音声拡張子・存在・サイズ・重複を検証する再帰ファイル走査へ移行。
+- `hirari-ui/ui/hirari_studio.slint`／`hirari-ui/src/slint_ui.rs`: 空トラックモデル時のInspector／Plugin表示と選択行を安全化。`tracks[sel_idx]`の範囲外評価を抑止。
 
 ### P1: デバイス・入力整合性
 
@@ -336,7 +336,7 @@ Rust/C++の未実装、RT安全性、UI/FFI/デバイス導線を3系統で読�
 
 ### P1: UI callback未接続
 
-`aura-ui/ui/aura_studio.slint:66-117`の宣言に対し、Rust側登録がない主要callback:
+`hirari-ui/ui/hirari_studio.slint:66-117`の宣言に対し、Rust側登録がない主要callback:
 
 - `plugin_param_changed`, `set_filter`, `toggle_phase`, `set_route`, `macro_changed`
 - `loop_changed`, `set_tool`, `set_snap`, `set_track_delay`, `set_time_sig`
@@ -354,8 +354,8 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### 1. 実オーディオ経路の二重化
 
-- `aura-core-bridge/src/modules/audio_engine.rs`のRustオーディオ処理は、実デバイスコールバックから呼ばれていない。
-- 実デバイスはC++の`AuraUnifiedEngine::processBlockDirect()`へ接続されている。
+- `hirari-core-bridge/src/modules/audio_engine.rs`のRustオーディオ処理は、実デバイスコールバックから呼ばれていない。
+- 実デバイスはC++の`HirariUnifiedEngine::processBlockDirect()`へ接続されている。
 - Rust側を正式な処理グラフへ統合するか、未使用の二重実装を整理して責務を一本化する必要がある。
 
 ### 2. RTスレッド上の`shared_ptr`解放
@@ -365,7 +365,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### 3. AudioEngine singletonのライフサイクル
 
-- 各`AuraCore::Drop`とAudioEngineデストラクタは共有singletonをshutdownしないよう修正済み。
+- 各`HirariCore::Drop`とAudioEngineデストラクタは共有singletonをshutdownしないよう修正済み。
 - 個別のdriver停止とプロセス終了用`shutdown_process()`を分離した。複数インスタンスでの実機ライフサイクル確認が残る。
 
 ### 4. Save/Openの完全対称化
@@ -376,7 +376,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### 5. Export開始callbackと進捗
 
-- C++側の進捗・状態・キャンセルAPIをAudioEngine wrapper、CXX bridge、AuraCore、Slint Timerへ接続済み。
+- C++側の進捗・状態・キャンセルAPIをAudioEngine wrapper、CXX bridge、HirariCore、Slint Timerへ接続済み。
 - 実機での長時間バウンス中に進捗が単調増加し、完了・失敗・キャンセル表示が一致することの確認が残る。
 
 ## P2: プレビュー後または機能拡張フェーズ
@@ -407,7 +407,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### GPU／可視化
 
-- `aura-ui`の通常描画はSlintのRectangle/Path中心で、Vulkan/Metal独自経路は起動・描画へ接続されていない。
+- `hirari-ui`の通常描画はSlintのRectangle/Path中心で、Vulkan/Metal独自経路は起動・描画へ接続されていない。
 - 一部Visualizerと波形はsin波・固定値・空Pathを表示する。
 - 実波形、FFT、transientデータを描画モデルへ渡し、データなし時だけEmpty Stateを表示する必要がある。
 
@@ -427,7 +427,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ## UI/UXの実用DAW化（2026-08-11）
 
-今回、機能名と主要画面の表示を標準的なDAW用語へ整理した。`AURA SOVEREIGN`、`QUANTUM LOCK`、`DIVINE`、`VOID` などの演出優先のラベルを、`AURA DAW`、`LOCK TRACK`、`MASTER CONSOLE`、`FOCUS MODE` など、操作内容が読んだ瞬間に分かる表記へ変更した。
+今回、機能名と主要画面の表示を標準的なDAW用語へ整理した。`HIRARI SOVEREIGN`、`QUANTUM LOCK`、`DIVINE`、`VOID` などの演出優先のラベルを、`HIRARI DAW`、`LOCK TRACK`、`MASTER CONSOLE`、`FOCUS MODE` など、操作内容が読んだ瞬間に分かる表記へ変更した。
 
 - トップメニューを`FILE / EDIT / TRACK / MIX / PLUGIN / WINDOW / HELP`へ統一。
 - 新規プロジェクト画面、ルーティング、バージョン履歴、プロジェクト状態、空間音響の見出しを実用語へ変更。
@@ -442,12 +442,12 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 - 選択はApple Blue系、オーディオ状態はミューテッドグリーン、Soloはオレンジ、録音・警告は赤に限定する。
 - 本文は`SF Pro Text`、時間・BPM・レベル値は`SF Mono`を優先する。
 - 共通ボタンは22px高、3px角丸、薄い縦グラデーションと1px境界線を使う。発光、過度な丸角、理由のないアニメーションは追加しない。
-- `aura_studio.slint` の`side_tab == 4`重複表示を解消し、タブ名から絵文字を外して役割を明確化。
+- `hirari_studio.slint` の`side_tab == 4`重複表示を解消し、タブ名から絵文字を外して役割を明確化。
 - `industrial_styles.slint` の旧ネオン配色も共通のチャコール／機能色へ同期。現時点でIndustrialStyle系ファイルはメイン画面から未接続であり、循環importは確認されていない。
 - 本番サイドバーを`Track / Browse / Status / Settings`の4タブに限定し、旧Plugin Rackの重複表示を削除。下部ビューは`Mixer / Editor`を主導線とし、Piano Roll等は既存コードをADV側へ残す。
 - 最新UI整理では本番サイドバーを`Inspector / Library`の2タブへさらに縮小し、下部を`Mixer / Audio Editor / Piano Roll / Score`の4ビューへ整理。旧モード用の状態・実装は互換性のためADV側に保持する。
 - 共通ボタンを最低60x24px、ノブ表示を48px、コンパクトフェーダーを24x160pxへ拡大。小画面での実機確認は未完了。
-- UI共通層を`ui/style.slint`（唯一のStyle）と`ui/components.slint`（共通ノブ／ボタン）へ切り出し、`aura_studio.slint`から重複定義を除去。旧`industrial_styles.slint`は削除し、独立部品はcanonical Styleをimportする構成へ変更。
+- UI共通層を`ui/style.slint`（唯一のStyle）と`ui/components.slint`（共通ノブ／ボタン）へ切り出し、`hirari_studio.slint`から重複定義を除去。旧`industrial_styles.slint`は削除し、独立部品はcanonical Styleをimportする構成へ変更。
 - `Z_Miracle`を削除し、実用名の`Z_AudioEngineStatus`として`ui/panels.slint`へ移動。現在の分割単位は`style / components / panels / main`。
 - MixerStripの`ai_status`／`ai_detail`とTrackモデルの同名フィールドを削除。上部の情報表示はネットワークフィードではなくCPU・遅延・Diskの1行ステータスへ統合した。
 - ショートカットは再生、ループ、Undo、Redo、Open、Save、Command Palette、Inspectorの8系統へ整理。フェーダーとノブはホバー時にアクセント表示し、操作対象を明示する。
@@ -513,8 +513,8 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### P0：UIモノリス
 
-- `aura-ui/ui/aura_studio.slint`は約4,500行・50以上のコンポーネントで、AppWindowへ状態、レイアウト、操作、実験パネルが集中している。
-- 循環importは確認されなかったが、`style → components/panels → aura_studio`の一方向依存に対して、AppWindowへの依存が過密になっている。
+- `hirari-ui/ui/hirari_studio.slint`は約4,500行・50以上のコンポーネントで、AppWindowへ状態、レイアウト、操作、実験パネルが集中している。
+- 循環importは確認されなかったが、`style → components/panels → hirari_studio`の一方向依存に対して、AppWindowへの依存が過密になっている。
 - 次の分割単位は`transport.slint`、`timeline.slint`、`mixer.slint`、`piano_roll.slint`、`browser.slint`、`overlays.slint`とし、AppWindowは接続だけにする。
 
 ### P1：操作部品と状態の不統一
@@ -538,7 +538,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### 優先順位
 
 1. 空配列・固定モック表示のガードとUnavailable状態
-2. `aura_studio.slint`のTransport／Timeline／Mixer分割
+2. `hirari_studio.slint`のTransport／Timeline／Mixer分割
 3. 共通FocusableControlとcallbackドメイン分割
 4. Vulkanは未対応時のフォールバックを明示した上でSwapchain描画を実装
 5. VST3／CLAPはinstance生成とprocess接続を実装するまで「対応済み」と表示しない
@@ -551,7 +551,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ## 今回のUI保守改善（2026-08-11）
 
-- `aura_studio.slint` に残っていた `Courier New` の直書きを `Style.numeric-font` に統一し、数値表示のフォントテーマを一箇所で変更できるようにした。
+- `hirari_studio.slint` に残っていた `Courier New` の直書きを `Style.numeric-font` に統一し、数値表示のフォントテーマを一箇所で変更できるようにした。
 
 ## 外部プラグインのロード状態（2026-08-11）
 
@@ -637,7 +637,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### まだ残るP0/P1
 
 - 実機オーディオ出力はmacOS CoreAudioが既定。Linux JACKは
-  `AURA_ENABLE_JACK`を有効にしたビルドでAudioEngineへ接続されるが、実行時は
+  `HIRARI_ENABLE_JACK`を有効にしたビルドでAudioEngineへ接続されるが、実行時は
   JACKサーバーが必要。Windows WASAPI/ASIOとLinux PipeWireは未接続で、
   SilentDriverは起動用フォールバックであり音声出力の代替実装ではない。
 - VST3/CLAPはエントリポイント解決までで、インスタンス生成、activate/process、パラメータ、GUI埋め込み、子プロセスIPCサンドボックスは未実装。
@@ -645,13 +645,13 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### 2026-08-12 Vulkan/macOS追加対応
 
-- `aura-core-bridge/build.rs` に `AURA_ENABLE_VULKAN=1` の明示的オプトインを追加した。通常ビルドへVulkan SDK／MoltenVKのリンクを強制せず、環境が揃った場合だけVulkan translation unitと`vulkan`ライブラリを有効化する。
+- `hirari-core-bridge/build.rs` に `HIRARI_ENABLE_VULKAN=1` の明示的オプトインを追加した。通常ビルドへVulkan SDK／MoltenVKのリンクを強制せず、環境が揃った場合だけVulkan translation unitと`vulkan`ライブラリを有効化する。
 - `src/graphics/platform/vulkan_kernel.cpp` は、Vulkan instance、physical device、graphics queue family、logical deviceの実在確認まで行う。Surface／Swapchain／CommandBuffer／Submit／Present／shader pipelineが未接続のため、ここで成功扱いせず、MetalまたはCPUへフォールバックする。
 - Vulkan instance作成時は実行環境の対応APIバージョンを取得し、1.3固定要求で古いloader／MoltenVKを不必要に拒否しない。
 - `src/rendering/vulkan/vulkan_context.hpp` は、外部から渡されたSurfaceに対してgraphics+present queue familyを選択し、logical deviceとqueueを所有する。さらにSurface capability／format／extentに基づくSwapchain、image view、command pool、command buffer、semaphore／fenceを作成できる。
 - 同ファイルに最小のAcquire→画像clear command→Submit→Presentフローを追加した。RenderPass／graphics pipeline／UIの実描画は引き続き未実装で、Vulkanはクリアフレーム検証と描画基盤の段階である。
-- `aura-core-bridge/build.rs` はVulkan有効ビルド時に`glslc`が存在すれば`vulkan_ui.vert`／`vulkan_ui.frag`をVulkan 1.2向けSPIR-Vへ検証コンパイルする。SPIR-Vの組み込みとGraphics Pipeline接続は引き続き未実装。
-- 同ビルド処理は生成SPIR-Vを`aura_vulkan_ui_spv.hpp`へ変換し、実行バイナリへ埋め込む。`VulkanContext`はDevice初期化時にVertex／Fragmentの`VkShaderModule`を生成し、Swapchain作成時にRenderPass、Framebuffer、Descriptor、固定長1024矩形のUniform Buffer、インスタンスGraphics Pipelineまで生成・破棄できる。`VulkanGraphicsKernel::initializeWithSurface`から外部Surfaceを渡し、フレーム内の矩形群を1回の`vkCmdDraw`でPresentまで実行できる。macOS向けには`vulkan_surface_macos.mm`でCAMetalLayer→`VK_EXT_metal_surface`変換を追加し、macOSのKernel初期化時に必要なInstance拡張を検証して自動接続する。Windows向けWin32 HWND、Linux向けX11 Display/WindowのSurface factoryも追加したが、Windows/LinuxのInstance拡張有効化と自動Kernel接続、Wayland対応、大量UI以外の描画プリミティブは引き続き未実装。
+- `hirari-core-bridge/build.rs` はVulkan有効ビルド時に`glslc`が存在すれば`vulkan_ui.vert`／`vulkan_ui.frag`をVulkan 1.2向けSPIR-Vへ検証コンパイルする。SPIR-Vの組み込みとGraphics Pipeline接続は引き続き未実装。
+- 同ビルド処理は生成SPIR-Vを`hirari_vulkan_ui_spv.hpp`へ変換し、実行バイナリへ埋め込む。`VulkanContext`はDevice初期化時にVertex／Fragmentの`VkShaderModule`を生成し、Swapchain作成時にRenderPass、Framebuffer、Descriptor、固定長1024矩形のUniform Buffer、インスタンスGraphics Pipelineまで生成・破棄できる。`VulkanGraphicsKernel::initializeWithSurface`から外部Surfaceを渡し、フレーム内の矩形群を1回の`vkCmdDraw`でPresentまで実行できる。macOS向けには`vulkan_surface_macos.mm`でCAMetalLayer→`VK_EXT_metal_surface`変換を追加し、macOSのKernel初期化時に必要なInstance拡張を検証して自動接続する。Windows向けWin32 HWND、Linux向けX11 Display/WindowのSurface factoryも追加したが、Windows/LinuxのInstance拡張有効化と自動Kernel接続、Wayland対応、大量UI以外の描画プリミティブは引き続き未実装。
 - `src/core/driver/mac_audio_driver_host.mm` はCoreAudio再接続に失敗した場合、旧デバイス設定の入力キューを破棄してから次の録音セッションを開始する。デバイス切断後の古い入力ブロック混入を防止する。
 - バウンスの実レンダリングと外部デバイス切断時の再接続・自動Pauseは、macOS実機での手動検証が必要。
 
@@ -671,9 +671,9 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ## C++オーディオ境界とプレビューサンプル寿命（2026-08-11）
 
-- `AuraUnifiedEngine::processBlock()`で空ブロック、2ch未満、範囲外offsetを早期拒否し、要求サイズをバッファ末尾へクランプ。`processBlockDirect()`でもnullポインタ、1ch以下、空ブロックを無音化してから終了するようにした。
+- `HirariUnifiedEngine::processBlock()`で空ブロック、2ch未満、範囲外offsetを早期拒否し、要求サイズをバッファ末尾へクランプ。`processBlockDirect()`でもnullポインタ、1ch以下、空ブロックを無音化してから終了するようにした。
 - プレビューサンプルの再登録・消去時、再生停止中かつコールバックが quiescent の場合に旧スナップショットを回収するようにした。再生中はRTスレッドの生ポインタを壊さないため旧データを保持する。
-- `aura_unified_engine.cpp`のClang構文検証に成功し、Rustワークスペースは72テスト全件成功。
+- `hirari_unified_engine.cpp`のClang構文検証に成功し、Rustワークスペースは72テスト全件成功。
 
 ## 実機オーディオ境界の追加確認（2026-08-11）
 
@@ -685,7 +685,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 - `AudioBuffer::wrapChannels()`でチャンネル配列内のnullポインタを検出し、外部バッファとして登録しないようにした。
 - `getReadPointer()`/`getWritePointer()`にチャンネル範囲チェックを追加し、offset付き取得もnullとバッファ末尾を安全に扱うようにした。
-- `aura_unified_engine.cpp`と`audio_buffer.hpp`のClang構文検証に成功。実機CoreAudioの自動Pauseは既存のUIテレメトリ経路で継続確認する。
+- `hirari_unified_engine.cpp`と`audio_buffer.hpp`のClang構文検証に成功。実機CoreAudioの自動Pauseは既存のUIテレメトリ経路で継続確認する。
 
 ## MIDI・クロック状態の追加安全化（2026-08-11）
 
@@ -714,7 +714,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ## チューナー・サンプラー・ラウドネスの追加修正（2026-08-11）
 
 - `VocalPitchCorrectorEngine`の自己相関lag上限をバッファ内へ制限し、最大lagの隣接参照による範囲外アクセスを防止。左右長、SR、amount/speed、NaN入力も安全化した。
-- `AuraSamplerAdvancedEngine`で外部から破損したlayer indexを無音終了し、NaN/Infサンプルを無音扱いにした。layer、velocity、再生位置を監査する。
+- `HirariSamplerAdvancedEngine`で外部から破損したlayer indexを無音終了し、NaN/Infサンプルを無音扱いにした。layer、velocity、再生位置を監査する。
 - `LoudnessAnalyzerEngine`のリングバッファ、窓長、累積値、最新メトリクスを監査するようにした。
 - `StereoImagerEngine`で左右長不一致、無効SR、NaN入力、過大出力を防止し、状態監査を実装した。
 - `cargo test --workspace --no-fail-fast`は72件すべて成功。
@@ -743,11 +743,11 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### 2026-08-12 RT安全性・PDC接続追加対応
 
 - `src/core/effect_chain.hpp` のProcessorList世代回収を、音声スレッドのReaderGuardで保護した。公開ポインタ交換後に既存読者が残っている場合は古いリストを保持し、Use-after-freeを避ける。
-- `src/core/engine/pdc_manager.hpp` を `AuraUnifiedEngine::syncStructuralChanges()` に接続した。RoutingEngineの接続と各Track／BusのEffectChain遅延を制御スレッドで再計算し、Track側は事前確保リング遅延（最大8192サンプル）で補償する。
-- 外部VST3／CLAP／AUの別プロセスサンドボックスは未完了。現状はインスタンス生成・process・IPCヘルパーが存在しないため、外部形式を成功扱いせず安全に拒否する。次段階では専用の`aura-plugin-host`ヘルパー実行ファイルと共有メモリ／ウォッチドッグを追加する。
-- `src/core/plugins/plugin_sandbox_host.hpp` に制御スレッド専用のヘルパー起動・停止・`pollHealth()`を追加した。`AURA_PLUGIN_HOST_BIN` が未設定なら起動せず、音声スレッドの`isAlive()`は原子値のみを読む。共有メモリで音声を往復する処理とWindows Job Objectはまだ未接続であり、処理済み音声を返すとは扱わない。
+- `src/core/engine/pdc_manager.hpp` を `HirariUnifiedEngine::syncStructuralChanges()` に接続した。RoutingEngineの接続と各Track／BusのEffectChain遅延を制御スレッドで再計算し、Track側は事前確保リング遅延（最大8192サンプル）で補償する。
+- 外部VST3／CLAP／AUの別プロセスサンドボックスは未完了。現状はインスタンス生成・process・IPCヘルパーが存在しないため、外部形式を成功扱いせず安全に拒否する。次段階では専用の`hirari-plugin-host`ヘルパー実行ファイルと共有メモリ／ウォッチドッグを追加する。
+- `src/core/plugins/plugin_sandbox_host.hpp` に制御スレッド専用のヘルパー起動・停止・`pollHealth()`を追加した。`HIRARI_PLUGIN_HOST_BIN` が未設定なら起動せず、音声スレッドの`isAlive()`は原子値のみを読む。共有メモリで音声を往復する処理とWindows Job Objectはまだ未接続であり、処理済み音声を返すとは扱わない。
 - `src/core/engine/tempo_map.hpp` の`setBPM()`を現在のサンプルレートへ追従させ、ランプ区間の`getBPMAt()`を線形補間へ修正した。テンポマップ未接続のUI側固定BPM変換と、ランプ／サンプルレート変更の統合テストは引き続き必要。
-- `AuraUnifiedEngine`／CXX bridge／`aura-ui/src/slint_ui.rs`へ`samples_to_beats`／`beats_to_samples`を接続した。MIDIノート、リージョン表示・移動・分割、スクラブ、再生ヘッド表示は固定BPM式ではなくCoreの変換APIを使う。複数テンポイベントをUI操作から編集するAPIと実テンポマップ編集UIは未実装。
+- `HirariUnifiedEngine`／CXX bridge／`hirari-ui/src/slint_ui.rs`へ`samples_to_beats`／`beats_to_samples`を接続した。MIDIノート、リージョン表示・移動・分割、スクラブ、再生ヘッド表示は固定BPM式ではなくCoreの変換APIを使う。複数テンポイベントをUI操作から編集するAPIと実テンポマップ編集UIは未実装。
 - `TempoMap`にテンポイベントの追加・削除・クリアを追加し、CXX bridgeと`DAW_Actions`の`set_tempo_event`／`remove_tempo_event`へ接続した。ランプ区間のサンプル→ビート積分は正確な二次式、逆変換は有界Newton反復へ変更した。イベント一覧を表示・ドラッグ編集する専用UIは未実装。
 - `Z_GlobalTempoEditor`に現在の再生位置をイベント位置として表示し、`APPLY`／`REMOVE`操作を追加した。現段階は再生ヘッド位置への単一イベント編集導線で、複数イベント一覧・ドラッグ移動・Undo統合は未実装。
 - オーディオデバイス未接続時はUIポーリングで再生を自動Pauseし、録音状態も停止して不完全な入力を誤って確定しないようにした。再接続・サンプルレート変更・実機抜去時の長時間挙動は、実CoreAudioデバイスでの確認が必要。
@@ -757,7 +757,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 - Phase Invertをプロジェクト形式v15へ保存し、Open時の復元とトラック複製時の継承にも対応した。
 - `ChannelStrip`のゲイン／Pan平滑化をブロック単位からサンプル単位へ修正。再生中のフェーダー・Pan操作でブロック境界の段差を作らない。
 - 内蔵プラグイン画面の`set_filter`を選択トラックの実IDとFX 0へ接続し、LimiterパラメータスライダーがUIだけでなく実Processorへ届くようにした。外部VST3/CLAPは引き続き未接続時に明示拒否する。
-- `TempoMap::getEvents()`、CXX bridge、`AuraCore::get_tempo_events()`を追加し、`Z_GlobalTempoEditor`へ複数イベントの一覧・選択・再編集・削除・ドラッグ移動を接続した。停止中も一覧を同期する。テンポ追加・上書き・削除・移動は`UndoTransactionManager`へ接続済み。
+- `TempoMap::getEvents()`、CXX bridge、`HirariCore::get_tempo_events()`を追加し、`Z_GlobalTempoEditor`へ複数イベントの一覧・選択・再編集・削除・ドラッグ移動を接続した。停止中も一覧を同期する。テンポ追加・上書き・削除・移動は`UndoTransactionManager`へ接続済み。
 
 ### 2026-09-05 スペクトル復元の有限クリップ対応
 
@@ -767,7 +767,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### 2026-09-05 波形キャッシュのバックグラウンド実行
 
-- `AuraUnifiedEngine`の波形ピークキャッシュ用`AudioTaskStealingScheduler`をエンジン生成時に2ワーカーで起動し、終了時はキャッシュジョブをdrainしてからjoinするようにした。これまで非同期ビルダーが存在してもスケジューラ未起動のため、初回波形要求が常に同期フォールバックになっていた。
+- `HirariUnifiedEngine`の波形ピークキャッシュ用`AudioTaskStealingScheduler`をエンジン生成時に2ワーカーで起動し、終了時はキャッシュジョブをdrainしてからjoinするようにした。これまで非同期ビルダーが存在してもスケジューラ未起動のため、初回波形要求が常に同期フォールバックになっていた。
 - `FFTEngine`は非ゼロの2のべき乗以外をコンストラクタで拒否する。スペクトル処理が不正サイズを内部状態へ持ち込まない契約をネイティブ回帰テストで固定した。
 
 ### 2026-09-05 メディアCLIの入力境界
@@ -806,7 +806,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### 2026-09-05 ノート単位ピッチ編集の探索コスト
 
 - トラックのVariAudio互換セグメント評価を、サンプルごとの先頭からの線形探索から、正規化済み開始時刻に対する`upper_bound`探索へ変更した。最大4096セグメントでも音声スレッドの探索量を線形から対数へ抑える。
-- `src/core/aura_unified_engine.cpp`の構文コンパイルで、既存のリージョン／ワープ経路との統合を確認した。
+- `src/core/hirari_unified_engine.cpp`の構文コンパイルで、既存のリージョン／ワープ経路との統合を確認した。
 - 重なった不正なノートセグメントでは従来どおり先頭一致を選ぶよう、候補の後方確認を追加した。通常の非重複セグメントは二分探索のまま高速に処理する。
 
 ### 2026-09-05 トラック処理のブロック長境界
@@ -823,14 +823,14 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### 2026-09-05 Direct audio callbackのチャンネル境界
 
-- `AuraUnifiedEngine::processBlockDirect()`で先頭2チャンネルだけでなく、宣言された全チャンネル（最大32）をnull検証してから外部バッファをラップするようにした。不完全なマルチチャンネルコールバックが空のラッパーを経由してDSPへ進まない。
+- `HirariUnifiedEngine::processBlockDirect()`で先頭2チャンネルだけでなく、宣言された全チャンネル（最大32）をnull検証してから外部バッファをラップするようにした。不完全なマルチチャンネルコールバックが空のラッパーを経由してDSPへ進まない。
 - エンジン構文コンパイルとネイティブ契約スクリプトで確認済み。実機デバイスのマルチチャンネルコールバックは引き続き実機検証対象。
 - `AudioBuffer::applyGain()`でもNaN/Infゲインを無操作で拒否し、オートメーションや外部制御値から不定値を下流へ拡散させないようにした。
 - CLAP入力イベントの`std::stable_sort`を固定配列の挿入ソートへ置換した。標準ライブラリ実装による一時ヒープ確保を避け、MIDI／パラメータイベントの並び替えを音声スレッドで完全にallocation-freeにした。
 
 ### 2026-09-05 CLAP出力イベントの時刻契約
 
-- CLAPプラグインが返す出力MIDIイベントは、プラグイン側の生成順が時刻順とは限らないため、Auraへ取り込んだ直後に安定ソートするようにした。同一サンプル位置のイベント順は維持し、後段のMIDI処理が単調なサンプル時刻を前提にしても破綻しない。
+- CLAPプラグインが返す出力MIDIイベントは、プラグイン側の生成順が時刻順とは限らないため、Hirariへ取り込んだ直後に安定ソートするようにした。同一サンプル位置のイベント順は維持し、後段のMIDI処理が単調なサンプル時刻を前提にしても破綻しない。
 - `tests/clap_direct_process_contract.cpp`で異なる時刻のMIDI 1.0／MIDI 2.0入力を同時に通し、エコーを含む結果が時刻順になることを固定した。ネイティブプラグイン契約スクリプトで合格済み。
 
 ### 2026-09-05 サンプラーのボイス空きリスト
@@ -873,11 +873,11 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### 2026-09-05 ソース配布への fixture clone 混入検査
 
 - 作業ツリーには`third_party_synths`の追跡エントリが1,037件残っており、`.gitignore`だけでは既にGit indexへ入ったクローンを除外できない。レビュー用の`.openutau-review`も配布対象へ混入させてはいけない。
-- `scripts/audit_repository_hygiene.sh`に`AURA_STRICT_SOURCE_HYGIENE=1`モードを追加し、これらの追跡クローンを検出して失敗させる。通常のdirty checkout向け既定モードは維持し、release/source reviewでのみfail-closedにする。
+- `scripts/audit_repository_hygiene.sh`に`HIRARI_STRICT_SOURCE_HYGIENE=1`モードを追加し、これらの追跡クローンを検出して失敗させる。通常のdirty checkout向け既定モードは維持し、release/source reviewでのみfail-closedにする。
 
 ### 2026-09-05 プラグイン能力照会の反復起動
 
-- プラグインカタログ走査と実体 admission のたびに`aura-plugin-host-worker --capabilities`を新規プロセスで起動していたため、複数プラグインの追加やブラウザ更新で不要なプロセス起動が発生していた。
+- プラグインカタログ走査と実体 admission のたびに`hirari-plugin-host-worker --capabilities`を新規プロセスで起動していたため、複数プラグインの追加やブラウザ更新で不要なプロセス起動が発生していた。
 - ワーカー選択環境をキーに能力応答をプロセス内キャッシュし、同一ホストの反復照会を一度に抑えた。ワーカー本体のロード／DSP処理や隔離境界は変更していない。
 - `plugin_catalog`関連13テストが合格済み。CLAP隔離ワークフローは既存のfixture smokeで引き続き検証する。
 
@@ -895,7 +895,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 ### 2026-09-05 リリース経路のfixture clone fail-closed
 
-- `build_app.sh`と`verify_release_bundle.sh`の`AURA_RELEASE_MODE=1`経路で、`AURA_STRICT_SOURCE_HYGIENE=1`相当の追跡検査を自動実行するようにした。
+- `build_app.sh`と`verify_release_bundle.sh`の`HIRARI_RELEASE_MODE=1`経路で、`HIRARI_STRICT_SOURCE_HYGIENE=1`相当の追跡検査を自動実行するようにした。
 - 通常の開発ビルドは既存のdirty checkoutで継続できるが、署名付きリリースは`third_party_synths`や`.openutau-review`をGit indexに残したまま生成できない。クローン混入を「監査を手動で忘れた」だけで通過させない。
 - `.gitattributes`にも`export-ignore`を追加し、作業ツリーが完全整理前でも`git archive`のソース配布からfixtureクローン、ビルド出力、診断ログを除外する。
 
@@ -971,13 +971,13 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 - リアルタイムコールバックから子プロセスを停止・再起動しないまま、プロセッサ側の失敗ラッチ、連続overrunカウンタ、quarantineをリセットする経路を追加した。実プラグインのDSP状態再初期化は既存のcontrol-plane reconfigure/restartに委譲し、RT安全性を維持する。
 - SDK有効の直接VST3経路には`setProcessing(false/true)`によるコンポーネントリセットも追加し、VST3ホスト側のno-opを解消した。
 - 分離workerにもcontrol-plane専用のresetコマンドを追加し、CLAPはdeactivate/activate、VST3はprocessing再初期化、AUは`AudioUnitReset`をworker内で実行できるようにした。RTの`reset()`と子プロセス操作を分離している。
-- `Track` → `AuraUnifiedEngine` → `AudioEngine` → Rust bridgeまで`reset_sandboxed_plugin(track,index)`を公開し、UI/CLIからcontrol-plane resetを明示的に要求できるようにした。
+- `Track` → `HirariUnifiedEngine` → `AudioEngine` → Rust bridgeまで`reset_sandboxed_plugin(track,index)`を公開し、UI/CLIからcontrol-plane resetを明示的に要求できるようにした。
 - `reset_sandboxed_plugin`をvalidated command APIとexecutorにも追加し、権限・track ID検証を通るUI/CLI操作として実行できるようにした。
 
 ### 2026-09-06 Rust統合エンジンの実音声ブリッジ
 
-- 非推奨の`AuraUnifiedOrchestrator::render_block()`は従来メタデータだけを更新していたため、互換呼び出し側が実音声を処理できなかった。
-- `render_block_with_core()`を追加し、`AuraCore::process_audio_block()`（C++本体グラフ）へステレオバッファを渡して有限性検証後に進捗を記録するようにした。Rust側に二重DSPグラフは作らない。
+- 非推奨の`HirariUnifiedOrchestrator::render_block()`は従来メタデータだけを更新していたため、互換呼び出し側が実音声を処理できなかった。
+- `render_block_with_core()`を追加し、`HirariCore::process_audio_block()`（C++本体グラフ）へステレオバッファを渡して有限性検証後に進捗を記録するようにした。Rust側に二重DSPグラフは作らない。
 
 ### 2026-09-06 非Appleオフラインcallback境界
 
@@ -1005,7 +1005,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### 2026-09-06 ネイティブプラグインGUI能力の公開契約
 
 - VST3/AU側にはエディタビュー検出処理が存在していたが、`IProcessor`やTrack/Core APIから公開されておらず、DSPが動くこととGUIを埋め込めることをUIが区別できなかった。
-- `IProcessor::hasNativeEditor()`を共通契約に追加し、SDK有効のVST3/AU実装からTrack、AuraCore、Stable APIまで公開した。ネイティブGUIがない場合も、パラメータUIのみ利用可能な状態として診断JSONで明示する。
+- `IProcessor::hasNativeEditor()`を共通契約に追加し、SDK有効のVST3/AU実装からTrack、HirariCore、Stable APIまで公開した。ネイティブGUIがない場合も、パラメータUIのみ利用可能な状態として診断JSONで明示する。
 - プラグインウィンドウのPDC表示横に能力ラベルを接続し、ネイティブビュー検出と実際の埋め込みを分離して表示する。現在は`NATIVE EDITOR AVAILABLE · UI HOST PENDING`（検出のみ）または`PARAMETER EDITOR · NATIVE UI UNAVAILABLE`を表示し、埋め込み済みと誤認させない。未選択時も`NO PLUGIN SELECTED`となる。
 - パラメータUIを固定4個からCoreが列挙した全パラメータへ変更し、外部プラグインの後半パラメータもホスト側から編集できるようにした。
 - 多数のパラメータでウィンドウのレイアウトが破綻しないよう、パラメータ列をスクロール可能なビューへ変更した。
@@ -1037,7 +1037,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### 2026-09-06 MixConsoleスナップショットのUI接続
 
 - MixConsoleスナップショットはCore／Command APIには存在したが、デスクトップUIのコマンドパレットから保存・差分確認・呼び出し・適用を実行できなかった。
-- `AuraCore::capture_mix_snapshot_json`を追加し、現行のトラック状態、プラグインパラメータ／バイパス、オーディオルーティングをCore境界で一括収集するようにした。Stable APIにも同じ入口を公開した。
+- `HirariCore::capture_mix_snapshot_json`を追加し、現行のトラック状態、プラグインパラメータ／バイパス、オーディオルーティングをCore境界で一括収集するようにした。Stable APIにも同じ入口を公開した。
 - UIコマンド`MIX SNAPSHOT CAPTURE <name>`、`APPLY <index>`、`RECALL <index>`、`DIFF <first> <second>`を追加した。適用成功後はトラック表示モデルをネイティブ状態から再同期し、古いフェーダー表示を残さない。
 
 ### 2026-09-06 Control Room操作のコマンドパレット接続
@@ -1067,13 +1067,13 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 ### 2026-09-06 MIDI Clock外部同期の公開経路
 
 - C++の外部同期カーネルにはClock tick、tick数、最終timestamp、BPM保持があったが、Rust／Stable APIから確認・注入できなかった。
-- AudioEngine／FFI／AuraCoreへ同期境界を追加し、`midi_clock_tick_json`と`midi_clock_status_json`で状態をJSON化した。BPMは有限かつ1..1000に制限し、timestampを音声スレッド側で生成しない。
+- AudioEngine／FFI／HirariCoreへ同期境界を追加し、`midi_clock_tick_json`と`midi_clock_status_json`で状態をJSON化した。BPMは有限かつ1..1000に制限し、timestampを音声スレッド側で生成しない。
 - `midi_clock_tick`／`inspect_midi_clock`をCommand APIへ、`MIDI CLOCK TICK <timestamp> [bpm]`／`MIDI CLOCK STATUS`をUIへ追加した。
 
 ### 2026-09-06 外部同期コントローラの接続
 
 - Rust側にはMIDI Clock／MTC／MMC／LTCの外部同期状態機械があったが、Coreのフィールドに接続されず、設定・MMC受信・MTC受信をクライアントから操作できなかった。
-- `ExternalSyncController`をAuraCoreのランタイム状態へ接続し、プロトコル、source、enabled/running、beat、timecodeをStable APIから取得可能にした。
+- `ExternalSyncController`をHirariCoreのランタイム状態へ接続し、プロトコル、source、enabled/running、beat、timecodeをStable APIから取得可能にした。
 - `configure_external_sync_json`、`external_sync_mmc_json`、`external_sync_mtc_json`を追加し、UIから`SYNC CONFIG`／`SYNC MMC`／`SYNC STATUS`で操作できるようにした。MIDI Clock tickも同期状態機械へ反映する。
 - `configure_external_sync`／`apply_external_mmc`／`apply_external_mtc`／`inspect_external_sync`をvalidated Command API／executorへ追加し、CLI・AIも同じ外部同期状態機械を操作できるようにした。
 
@@ -1081,7 +1081,7 @@ Record/Arm/FXの一部はUI状態だけを変更し、エンジン未接続を�
 
 - クリップ初回波形のピーク生成をUI構築中の同期デコードから分離し、AudioEngineのリクエストID、ワーカー、完了ポーリング、対象クリップへの反映まで接続した。UIスレッドは大きな音声ファイルのデコードを待たない。
 - MIDIノートのVibrato Rate編集を検証付きのCore操作へ変更し、存在しないノートへの書き込みを拒否するようにした。編集値は`midi_notes_json`へ`vibrato_rate_millihz`として反映され、UI／CLI／AIが同じ状態を参照できる。
-- HRTFは近似パンナーだけでなく、最大128-tapの左右測定IRをトラック単位で制御スレッドから注入・解除できる経路をAudioEngine／CXX／AuraCoreへ追加した。リアルタイム側は固定長カーネルのみを読む。
+- HRTFは近似パンナーだけでなく、最大128-tapの左右測定IRをトラック単位で制御スレッドから注入・解除できる経路をAudioEngine／CXX／HirariCoreへ追加した。リアルタイム側は固定長カーネルのみを読む。
 - `set_hrtf_kernel_json`／Stable API `set_hrtf_kernel` を追加し、SOFA等の外部データベースアダプタが左右IRをJSON契約で渡せるようにした。入力の有限値・左右長・タップ上限を境界で検証する。
 
 ### 2026-09-06 AU Cocoa Viewのネイティブ埋め込み

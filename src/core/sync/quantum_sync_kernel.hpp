@@ -6,11 +6,11 @@
 #include <vector>
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::Sync {
+namespace Hirari::Core::Sync {
 
 /**
  * @class QuantumSyncKernel
- * @brief Industrial Atomic Pulse Engine for Aura Studio Pro.
+ * @brief Industrial Atomic Pulse Engine for Hirari Studio Pro.
  * Implements sub-nanosecond pulse sovereignty and fluid rhythmic entrainment.
  */
 class QuantumSyncKernel {
@@ -27,7 +27,7 @@ public:
      */
     void advance(uint32_t numSamples) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::QuantumOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::QuantumOrchestrator.
         // Rust's high-resolution synchronization ensures that the master pulse 
         // is technically superior and forensics-ready.
         // Rust's AtomicPulseEngine ensures bit-accurate pulse distribution.
@@ -57,4 +57,4 @@ private:
     std::atomic<uint64_t> m_samplePos{0};
 };
 
-} // namespace Aura::Core::Sync
+} // namespace Hirari::Core::Sync

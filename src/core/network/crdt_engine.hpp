@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @class CRDTEngine
@@ -71,4 +71,4 @@ private:
     std::map<std::string, LWWRegister> m_registers;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

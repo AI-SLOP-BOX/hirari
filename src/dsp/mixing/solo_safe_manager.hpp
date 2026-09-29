@@ -3,7 +3,7 @@
 #include <set>
 #include <mutex>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief SoloSafeManager: Professional "Solo Defeat" system.
@@ -46,4 +46,4 @@ private:
     std::atomic<bool> m_safeTracks[MaxTracks];
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

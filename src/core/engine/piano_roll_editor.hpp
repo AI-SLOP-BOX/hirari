@@ -5,7 +5,7 @@
 #include <set>
 #include "../midi_region.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief PianoRollEditor: Orchestrates MIDI note editing logic.
@@ -109,4 +109,4 @@ private:
     std::set<uint32_t> m_selection; // Note ID collection
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

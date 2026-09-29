@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <vector>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class AutoSaveManager
@@ -55,4 +55,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

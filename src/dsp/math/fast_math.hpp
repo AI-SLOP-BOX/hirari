@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstdint>
 
-namespace Aura::DSP::Math {
+namespace Hirari::DSP::Math {
 
 /**
  * @brief FastMath: High-performance mathematical approximations for Pro DSP.
@@ -36,4 +36,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Math
+} // namespace Hirari::DSP::Math

@@ -2,7 +2,7 @@
 using namespace metal;
 
 /**
- * @brief Aura Cinematic Waveform: Light-Textured Density Rendering.
+ * @brief Hirari Cinematic Waveform: Light-Textured Density Rendering.
  * Replaces basic polylines with glowing fragments that represent energy 
  * through additive blending and sub-pixel sample markers.
  */
@@ -53,7 +53,7 @@ fragment float4 waveform_fragment(
     float density = std::pow(in.energy, 0.65f);
     base.a *= density;
     
-    // 2. Sub-pixel Glow: Additive 'Liquid Aura' bloom
+    // 2. Sub-pixel Glow: Additive 'Liquid Hirari' bloom
     // We mix a 'Primary Electric' blue (Logic 11 style) into the highlight.
     float4 bloom = float4(0.3f, 0.7f, 1.0f, 0.0f) * std::pow(in.energy, 2.0f);
     

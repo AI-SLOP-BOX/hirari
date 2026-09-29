@@ -1,6 +1,6 @@
 /*
- * Aura DAW Ultimate - High-Performance Digital Audio Workstation
- * Copyright (c) 2024-2026 Aura DAW Project. All rights reserved.
+ * Hirari DAW Ultimate - High-Performance Digital Audio Workstation
+ * Copyright (c) 2024-2026 Hirari DAW Project. All rights reserved.
  * Licensed under the MIT License.
  */
 
@@ -8,13 +8,20 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <string>
 #include <vector>
 #include "../core/audio_buffer.hpp"
 #include "../core/midi_buffer.hpp"
+#include "../core/rust_ffi.hpp"
 
-namespace Aura::DSP {
+namespace Hirari::DSP {
+
+struct TimedParameterEvent {
+    uint32_t processorIndex = 0;
+    uint32_t parameterId = 0;
+    uint32_t sampleOffset = 0;
+    float normalizedValue = 0.0f;
+};
 
 /**
  * @struct ProcessContext
@@ -69,6 +76,9 @@ public:
     virtual std::string getName() const { return "Processor"; }
     virtual uint32_t getLatencySamples() const noexcept { return 0; }
     virtual uint32_t getTailSamples() const noexcept { return 0; }
+    // True only when the loaded processor is a note-generating instrument.
+    // Hosts use this control metadata to avoid adding a second fallback synth.
+    virtual bool isMidiInstrument() const noexcept { return false; }
     
     // State Persistence (SBF-v5 Binary Snapshots)
     virtual std::vector<uint8_t> getState() const {
@@ -76,15 +86,9 @@ public:
         // it has no plugin-specific parameters. This preserves mix/bypass and
         // routing state across project reloads instead of silently resetting
         // legacy effects to defaults.
-        constexpr uint32_t kMagic = 0x41555241u; // "AURA"
-        constexpr uint16_t kVersion = 1;
         std::vector<uint8_t> state(16, 0);
-        std::memcpy(state.data(), &kMagic, sizeof(kMagic));
-        std::memcpy(state.data() + 4, &kVersion, sizeof(kVersion));
-        const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
-        std::memcpy(state.data() + 6, &flags, sizeof(flags));
-        std::memcpy(state.data() + 8, &m_mix, sizeof(m_mix));
-        std::memcpy(state.data() + 12, &m_sidechainBusId, sizeof(m_sidechainBusId));
+        (void)hirari_processor_state_encode(m_bypassed, m_mix, m_sidechainBusId,
+                                            state.data(), state.size());
         return state;
     }
     /// Restore a persisted state blob on the control thread.  Returning the
@@ -92,17 +96,12 @@ public:
     /// a plugin or fail during decoding, and callers must not confuse that
     /// with a successful restore.  Existing callers may ignore the result.
     virtual bool setState(const std::vector<uint8_t>& data) {
-        if (data.size() != 16) return false;
-        uint32_t magic = 0; uint16_t version = 0; uint16_t flags = 0;
-        float mix = 0.0f; uint32_t sidechain = 0;
-        std::memcpy(&magic, data.data(), sizeof(magic));
-        std::memcpy(&version, data.data() + 4, sizeof(version));
-        std::memcpy(&flags, data.data() + 6, sizeof(flags));
-        std::memcpy(&mix, data.data() + 8, sizeof(mix));
-        std::memcpy(&sidechain, data.data() + 12, sizeof(sidechain));
-        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 ||
-            !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
-        m_bypassed = (flags & 1u) != 0;
+        uint8_t bypassed = 0;
+        float mix = 0.0f;
+        uint32_t sidechain = 0;
+        if (!hirari_processor_state_decode(data.data(), data.size(), &bypassed,
+                                           &mix, &sidechain)) return false;
+        m_bypassed = bypassed != 0;
         m_mix = mix;
         m_sidechainBusId = sidechain;
         return true;
@@ -118,6 +117,13 @@ public:
 
     // Parameter Interface
     virtual void setParameter(uint32_t /*id*/, float /*value*/) noexcept {}
+    // Hosts with sample-offset parameter mailboxes override this. Legacy and
+    // in-process processors only receive block-boundary values; applying a
+    // later event at offset zero would silently change its timing.
+    virtual void setParameterAtSample(uint32_t id, float value,
+                                      uint32_t sampleOffset) noexcept {
+        if (sampleOffset == 0) setParameter(id, value);
+    }
     virtual float getParameter(uint32_t /*id*/) const noexcept { return 0.0f; }
     virtual uint32_t getNumParameters() const noexcept { return 0; }
     // Native-unit parameter metadata is optional for legacy processors. A
@@ -180,4 +186,4 @@ public:
     std::string getName() const override { return "PurityPass"; }
 };
 
-} // namespace Aura::DSP
+} // namespace Hirari::DSP

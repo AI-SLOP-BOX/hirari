@@ -16,7 +16,7 @@
 #include "process_sandbox_processor.hpp"
 #include "plugin_admission.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @struct PluginDescriptor
@@ -163,7 +163,7 @@ public:
         PluginDescriptor descriptor;
         descriptor.uuid = uuid.empty() ? "builtin-" + name : uuid;
         descriptor.name = name;
-        descriptor.vendor = "Aura";
+        descriptor.vendor = "Hirari";
         descriptor.category = "Built-in";
         descriptor.format = "Internal";
         descriptor.binaryPath = "builtin://" + name;
@@ -304,7 +304,7 @@ public:
      * always created and started through the isolated worker. No legacy host
      * may silently instantiate an external binary in the DAW process.
      */
-    std::shared_ptr<::Aura::DSP::IProcessor> createProcessor(
+    std::shared_ptr<::Hirari::DSP::IProcessor> createProcessor(
         const std::string& uuid, std::string* error = nullptr) const {
         PluginDescriptor descriptor;
         {
@@ -344,7 +344,7 @@ public:
         return sandbox;
     }
 
-    std::shared_ptr<::Aura::DSP::IProcessor> createInternalProcessor(
+    std::shared_ptr<::Hirari::DSP::IProcessor> createInternalProcessor(
         const std::string& uuid, std::string* error = nullptr) const {
         PluginDescriptor descriptor;
         {
@@ -491,4 +491,4 @@ private:
     mutable std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

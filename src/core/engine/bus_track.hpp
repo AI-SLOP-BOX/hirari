@@ -9,21 +9,23 @@
 #include "track.hpp"
 #include "bus_system.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /** AUX/Bus track with an explicit pre-FX input and post-FX output boundary. */
 class BusTrack : public Track {
 public:
     BusTrack(uint32_t id, const std::string& name, uint32_t busId,
-             SidechainManager* sidechainManager = nullptr)
-        : Track(id, name, Track::Type::Bus, sidechainManager),
-          m_busId(busId), m_busEffectChain(sidechainManager) {}
+             SidechainManager* sidechainManager = nullptr,
+             std::shared_ptr<ProjectLayoutRevision> layoutRevision = {})
+        : Track(id, name, Track::Type::Bus, sidechainManager, std::move(layoutRevision)),
+          m_busId(busId), m_trackState(hirari_bus_track_create(), &hirari_bus_track_destroy),
+          m_busEffectChain(sidechainManager) {}
 
-    void resolveBus(std::shared_ptr<::Aura::Core::Engine::Bus> bus) noexcept {
+    void resolveBus(std::shared_ptr<::Hirari::Core::Engine::Bus> bus) noexcept {
         m_cachedBus = std::move(bus);
         m_cachedBusRaw = m_cachedBus.get();
     }
-    void resolveBus(::Aura::Core::Engine::Bus* bus) noexcept {
+    void resolveBus(::Hirari::Core::Engine::Bus* bus) noexcept {
         m_cachedBus.reset();
         m_cachedBusRaw = bus;
     }
@@ -37,29 +39,32 @@ public:
 
     bool addPlugin(uint32_t pluginType) override {
         if (pluginType > 10) return false;
-        const char* pluginPath = "Aura/BusLimiter";
-        if (pluginType == 1) pluginPath = "Aura/Compressor";
-        else if (pluginType == 2) pluginPath = "Aura/Gate";
-        else if (pluginType == 3) pluginPath = "Aura/Saturation";
-        else if (pluginType == 4) pluginPath = "Aura/Transient";
-        else if (pluginType == 5) pluginPath = "Aura/DeEsser";
-        else if (pluginType == 6) pluginPath = "Aura/Delay";
-        else if (pluginType == 7) pluginPath = "Aura/Reverb";
-        else if (pluginType == 8) pluginPath = "Aura/DynamicEQ";
-        else if (pluginType == 9) pluginPath = "Aura/MidSide";
-        else if (pluginType == 10) pluginPath = "Aura/Width";
-        auto processor = std::make_shared<Aura::Core::Plugin::ExternalPluginHost>(
+        const char* pluginPath = "Hirari/BusLimiter";
+        if (pluginType == 1) pluginPath = "Hirari/Compressor";
+        else if (pluginType == 2) pluginPath = "Hirari/Gate";
+        else if (pluginType == 3) pluginPath = "Hirari/Saturation";
+        else if (pluginType == 4) pluginPath = "Hirari/Transient";
+        else if (pluginType == 5) pluginPath = "Hirari/DeEsser";
+        else if (pluginType == 6) pluginPath = "Hirari/Delay";
+        else if (pluginType == 7) pluginPath = "Hirari/Reverb";
+        else if (pluginType == 8) pluginPath = "Hirari/DynamicEQ";
+        else if (pluginType == 9) pluginPath = "Hirari/MidSide";
+        else if (pluginType == 10) pluginPath = "Hirari/Width";
+        auto processor = std::make_shared<Hirari::Core::Plugin::ExternalPluginHost>(
             pluginPath,
-            Aura::Core::Plugin::ExternalPluginHost::Format::Internal);
+            Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);
         if (!processor->isOperational()) return false;
         m_busEffectChain.addProcessor(std::move(processor));
         const uint32_t blockSize = getWorkBuffer(0).getNumSamples();
         if (blockSize > 0) m_busEffectChain.setSampleRate(getSampleRate(), blockSize);
+        markProjectLayoutChanged();
         return true;
     }
 
     bool setPluginParameter(uint32_t pluginIndex, uint32_t parameterId, float value) override {
-        return m_busEffectChain.setParameter(pluginIndex, parameterId, value);
+        const bool changed = m_busEffectChain.setParameter(pluginIndex, parameterId, value);
+        if (changed) markProjectLayoutChanged();
+        return changed;
     }
 
     // Bus plugins live in the dedicated bus chain; inheriting Track's
@@ -81,10 +86,10 @@ public:
     }
 
     bool processAccumulated(uint32_t len, uint64_t playhead) override {
-        if (!Track::processAccumulated(len, playhead)) return false;
+        if (!Track::processAccumulatedDeferredOutput(len, playhead)) return false;
         auto& work = getWorkBuffer(len);
-        Aura::Core::MidiBuffer midi;
-        Aura::DSP::ProcessContext context{};
+        Hirari::Core::MidiBuffer midi;
+        Hirari::DSP::ProcessContext context{};
         context.playhead = playhead;
         context.blockStart = playhead;
         context.blockEnd = playhead <= std::numeric_limits<uint64_t>::max() - len
@@ -97,14 +102,20 @@ public:
         context.numOutputChannels = work.getNumChannels();
         m_busEffectChain.syncToAudioThread();
         m_busEffectChain.process(work, midi, context, getId());
-        applyPdcCompensation(work, len);
+        finalizeTrackOutput(len, playhead);
         return true;
     }
 
     bool addPreFxInput(const AudioBuffer& input, uint32_t len, float gain) noexcept {
         if (!m_cachedBusRaw || input.getNumChannels() < 2 || len == 0 ||
             len > Bus::kMaxSamples || input.getNumSamples() < len) return false;
-        return m_cachedBusRaw->addSamples(input.getReadPointer(0), input.getReadPointer(1), len, gain);
+        return addPreFxInput(input.getReadPointer(0), input.getReadPointer(1), len, gain);
+    }
+
+    bool addPreFxInput(const float* left, const float* right,
+                       uint32_t len, float gain) noexcept {
+        if (!m_cachedBusRaw || len == 0 || len > Bus::kMaxSamples) return false;
+        return m_cachedBusRaw->addSamples(left, right, len, gain);
     }
 
     bool loadPreFxIntoWork(uint32_t len) noexcept {
@@ -114,43 +125,31 @@ public:
     }
 
     void setReadPostFx(bool postFx) noexcept {
-        m_readPostFx.store(postFx, std::memory_order_release);
+        hirari_bus_track_set_read_post_fx(m_trackState.get(), postFx);
     }
 
     void setInputGain(float gain) noexcept {
-        m_inputGain.store(std::isfinite(gain) ? std::clamp(gain, 0.0f, 4.0f) : 1.0f,
-                          std::memory_order_release);
+        hirari_bus_track_set_input_gain(m_trackState.get(), gain);
     }
 
     void setPhaseInverted(bool inverted) noexcept {
-        m_invertPhase.store(inverted, std::memory_order_release);
+        hirari_bus_track_set_phase_inverted(m_trackState.get(), inverted);
     }
 
     // Copies the selected bus stage into the caller's output. This method is
     // allocation-free and is intended for the audio thread.
     void fetchAudio(float* l, float* r, uint64_t /*start*/, uint32_t len,
-                    const ::Aura::DSP::ProcessContext& /*context*/) {
+                    const ::Hirari::DSP::ProcessContext& /*context*/) {
         if (!l || !r || len == 0 || !m_cachedBusRaw) return;
-        const bool post = m_readPostFx.load(std::memory_order_acquire);
-        if (!(post ? m_cachedBusRaw->readPost(l, r, len) : m_cachedBusRaw->readPre(l, r, len))) {
-            std::fill_n(l, len, 0.0f);
-            std::fill_n(r, len, 0.0f);
-            return;
-        }
-        const float gain = m_inputGain.load(std::memory_order_relaxed);
-        const float sign = m_invertPhase.load(std::memory_order_relaxed) ? -1.0f : 1.0f;
-        const float scale = gain * sign;
-        for (uint32_t i = 0; i < len; ++i) {
-            l[i] *= scale;
-            r[i] *= scale;
-        }
+        (void)hirari_bus_track_fetch_audio(
+            m_trackState.get(), m_cachedBusRaw->nativeAudioState(), l, r, len);
     }
 
     // BusTrack processing boundary: pre-FX bus input is placed in the Track
     // work buffer, then the inherited Track chain processes it and the result
     // is published as the bus post-FX stage. No allocation is performed here.
     bool processBus(uint32_t len, uint64_t playhead) noexcept {
-        if (!m_cachedBusRaw || len == 0 || len > ::Aura::Core::Engine::Bus::kMaxSamples || !canProcess(len)) return false;
+        if (!m_cachedBusRaw || len == 0 || len > ::Hirari::Core::Engine::Bus::kMaxSamples || !canProcess(len)) return false;
         auto& work = getWorkBuffer(len);
         float* left = work.getWritePointer(0);
         float* right = work.getWritePointer(1);
@@ -168,12 +167,11 @@ public:
 
 private:
     uint32_t m_busId = 0;
-    std::shared_ptr<::Aura::Core::Engine::Bus> m_cachedBus;
-    ::Aura::Core::Engine::Bus* m_cachedBusRaw = nullptr;
-    std::atomic<float> m_inputGain{1.0f};
-    std::atomic<bool> m_invertPhase{false};
-    std::atomic<bool> m_readPostFx{true};
-    Aura::Core::EffectChain m_busEffectChain;
+    std::shared_ptr<::Hirari::Core::Engine::Bus> m_cachedBus;
+    ::Hirari::Core::Engine::Bus* m_cachedBusRaw = nullptr;
+    std::unique_ptr<void, decltype(&hirari_bus_track_destroy)> m_trackState{
+        nullptr, &hirari_bus_track_destroy};
+    Hirari::Core::EffectChain m_busEffectChain;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

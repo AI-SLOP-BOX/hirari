@@ -10,24 +10,24 @@
 #include <string>
 #if defined(_WIN32)
 #include <process.h>
-#define AURA_GETPID _getpid
+#define HIRARI_GETPID _getpid
 #else
 #include <unistd.h>
-#define AURA_GETPID getpid
+#define HIRARI_GETPID getpid
 #endif
 
 int main() {
-    using Aura::Core::RecordingEngine;
+    using Hirari::Core::RecordingEngine;
 
     const auto root = std::filesystem::temp_directory_path() /
-                      ("aura-recording-stress-" + std::to_string(static_cast<unsigned long>(AURA_GETPID())));
+                      ("hirari-recording-stress-" + std::to_string(static_cast<unsigned long>(HIRARI_GETPID())));
     std::error_code ec;
     std::filesystem::create_directories(root, ec);
     assert(!ec);
     const auto output = root / "take.wav";
 
     unsigned long rounds = 250;
-    if (const char* configured = std::getenv("AURA_RECORDING_STRESS_ROUNDS")) {
+    if (const char* configured = std::getenv("HIRARI_RECORDING_STRESS_ROUNDS")) {
         char* end = nullptr;
         const unsigned long parsed = std::strtoul(configured, &end, 10);
         if (end != configured && *end == '\0' && parsed > 0 && parsed <= 100000) rounds = parsed;
@@ -37,7 +37,7 @@ int main() {
     // keeps the normal native contract sensitive to stop-time tail loss while
     // remaining small enough for local iteration.
     unsigned long blocksPerTake = 17;
-    if (const char* configured = std::getenv("AURA_RECORDING_STRESS_BLOCKS_PER_TAKE")) {
+    if (const char* configured = std::getenv("HIRARI_RECORDING_STRESS_BLOCKS_PER_TAKE")) {
         char* end = nullptr;
         const unsigned long parsed = std::strtoul(configured, &end, 10);
         if (end != configured && *end == '\0' && parsed > 0 && parsed <= 1000000) {
@@ -46,7 +46,7 @@ int main() {
     }
 
     double durationSeconds = 0.0;
-    if (const char* configured = std::getenv("AURA_RECORDING_STRESS_DURATION_SECONDS")) {
+    if (const char* configured = std::getenv("HIRARI_RECORDING_STRESS_DURATION_SECONDS")) {
         char* end = nullptr;
         const double parsed = std::strtod(configured, &end);
         if (end != configured && *end == '\0' && std::isfinite(parsed) && parsed >= 0.0 && parsed <= 86400.0) {

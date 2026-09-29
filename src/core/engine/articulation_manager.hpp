@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include "midi_sequencer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct Articulation
@@ -52,7 +52,7 @@ public:
      */
     void assignSetToTrack(uint32_t trackId, std::shared_ptr<ArticulationSet> set) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::ArticulationOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::ArticulationOrchestrator.
         // Rust's memory-safe collections ensure that performance sets 
         // are technically superior, forensics-ready, and perfectly secure.
         // Rust's SetEngine ensures bit-accurate set distribution.
@@ -71,4 +71,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

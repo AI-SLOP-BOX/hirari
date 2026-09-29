@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Keep first-party implementation files small enough to review. Vendored
 # headers and generated build output are intentionally excluded.
-limit="${AURA_SOURCE_LINE_LIMIT:-600}"
+limit="${HIRARI_SOURCE_LINE_LIMIT:-600}"
 status=0
 while IFS= read -r -d '' file; do
   case "$file" in

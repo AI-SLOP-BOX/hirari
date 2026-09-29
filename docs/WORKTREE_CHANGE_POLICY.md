@@ -1,7 +1,7 @@
 # Worktree change policy
 
 Large migrations and native-engine experiments can temporarily produce a noisy
-worktree. Aura keeps that noise reviewable without deleting or resetting user
+worktree. Hirari keeps that noise reviewable without deleting or resetting user
 work. The canonical classifier is:
 
 ```sh
@@ -17,13 +17,13 @@ The report has four intentional categories:
 - `generated`: build products, logs, packaged apps, caches, and temporary audit
   output. These are evidence artifacts, not source changes.
 
-The `aura-core-bridge` nested repository is recorded as one boundary entry so
+The `hirari-core-bridge` nested repository is recorded as one boundary entry so
 its own history can be reviewed independently. The classifier never removes,
 stages, resets, or rewrites files. Reviewers should inspect source and tooling
 first, then generated evidence, and finally compare the nested repository at
 its recorded revision.
 
 Generated evidence belongs under `artifacts/` or `release-metadata/`; both are
-ignored for normal commits. `Cargo.lock` is intentionally tracked because Aura
+ignored for normal commits. `Cargo.lock` is intentionally tracked because Hirari
 is an application and reproducible dependency resolution is part of its build
 contract.

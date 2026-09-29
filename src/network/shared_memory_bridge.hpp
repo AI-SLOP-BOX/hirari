@@ -10,11 +10,11 @@
 #include <new>
 #include "../core/plugins/midi_fragment_transport.hpp"
 
-namespace Aura::Network {
+namespace Hirari::Network {
 
 /**
  * @class SharedMemoryBridge
- * @brief Zero-latency IPC bridge for Aura DAW side-car applications.
+ * @brief Zero-latency IPC bridge for Hirari DAW side-car applications.
  * INDUSTRIAL: Mirrors engine telemetry and state into a POSIX shared memory segment.
  * This allows external UI processes (mirrors/tablets) to read levels without network overhead.
  */
@@ -34,7 +34,7 @@ public:
         std::atomic<bool> isPlaying;
         // Extended MIDI lives beside telemetry so both processes map one
         // fixed-size region; the ring contains no process-local pointers.
-        Aura::Core::Plugins::MidiExtendedMessageRing extendedMidi;
+        Hirari::Core::Plugins::MidiExtendedMessageRing extendedMidi;
     };
 
     static SharedMemoryBridge& getInstance() {
@@ -49,7 +49,7 @@ public:
         if (m_state || m_fd != -1) stop();
         static std::atomic<uint64_t> sequence{0};
         m_segmentName = segmentName.empty()
-            ? "/aura_sovereign_bridge_" + std::to_string(
+            ? "/hirari_sovereign_bridge_" + std::to_string(
                   static_cast<unsigned long long>(::getpid())) + "_" +
                   std::to_string(sequence.fetch_add(1, std::memory_order_relaxed) + 1)
             : segmentName;
@@ -147,7 +147,7 @@ public:
             sampleOffset, articulationId, bytes, size);
     }
 
-    bool popExtendedMidi(Aura::Core::Plugins::MidiExtendedMessageRing::Message& message) noexcept {
+    bool popExtendedMidi(Hirari::Core::Plugins::MidiExtendedMessageRing::Message& message) noexcept {
         return m_state && m_state->extendedMidi.pop(message);
     }
 
@@ -185,4 +185,4 @@ private:
     std::string m_segmentName;
 };
 
-} // namespace Aura::Network
+} // namespace Hirari::Network

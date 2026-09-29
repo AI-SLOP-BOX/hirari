@@ -6,7 +6,7 @@
 #include <limits>
 #include "../engine_types.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 enum class MarkerType { Point, Section };
 
@@ -80,4 +80,4 @@ private:
     double m_lastSampleRate = 44100.0;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

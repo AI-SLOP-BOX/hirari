@@ -7,7 +7,7 @@
 #include <atomic>
 #include <mutex>
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 enum class DriverProtocol { CoreAudio, ASIO, JACK, WASAPI, ALSA, Dummy };
 
@@ -37,7 +37,7 @@ public:
 
 #include "buffer_interleaver.hpp"
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @class AudioDriverFacade
@@ -134,4 +134,4 @@ private:
     std::atomic<void*> m_processContext{nullptr};
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

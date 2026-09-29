@@ -2,7 +2,7 @@
 #include <cmath>
 #include <atomic>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class PIDSmoother
@@ -48,4 +48,4 @@ private:
     std::atomic<float> m_target{0.0f}, m_current{0.0f};
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

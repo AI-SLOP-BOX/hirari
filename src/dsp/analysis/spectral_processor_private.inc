@@ -1,89 +1,63 @@
 private:
-    struct Snapshot {
-        const Core::AudioBuffer* owner = nullptr;
-        uint32_t channels = 0;
-        uint32_t samples = 0;
-        std::string label;
-        std::vector<float> data;
-    };
-
-    static constexpr size_t kMaxHistory = 16;
-    static constexpr size_t kMaxSnapshotSamples = 16u * 1024u * 1024u;
-    static constexpr size_t kMaxHistoryBytes = 256u * 1024u * 1024u;
-
-    using History = std::deque<Snapshot>;
-    static History::const_iterator findLastOwned(const History& history,
-                                                  const Core::AudioBuffer* owner) noexcept {
-        const auto reverse = std::find_if(history.rbegin(), history.rend(),
-                                          [owner](const Snapshot& snapshot) { return snapshot.owner == owner; });
-        return reverse == history.rend() ? history.end() : std::prev(reverse.base());
-    }
-    static History::iterator findLastOwned(History& history,
-                                           const Core::AudioBuffer* owner) noexcept {
-        const auto reverse = std::find_if(history.rbegin(), history.rend(),
-                                          [owner](const Snapshot& snapshot) { return snapshot.owner == owner; });
-        return reverse == history.rend() ? history.end() : std::prev(reverse.base());
-    }
-    static size_t countOwned(const History& history,
-                             const Core::AudioBuffer* owner) noexcept {
-        return static_cast<size_t>(std::count_if(
-            history.begin(), history.end(),
-            [owner](const Snapshot& snapshot) { return snapshot.owner == owner; }));
+    static uintptr_t ownerKey(const Core::AudioBuffer& buffer) noexcept {
+        return reinterpret_cast<uintptr_t>(&buffer);
     }
 
-    static bool makeSnapshot(const Core::AudioBuffer& buffer, Snapshot& out) {
-        const uint64_t count = static_cast<uint64_t>(buffer.getNumChannels()) * buffer.getNumSamples();
-        if (count > kMaxSnapshotSamples) return false;
-        out.channels = buffer.getNumChannels();
-        out.samples = buffer.getNumSamples();
-        out.owner = &buffer;
-        try { out.data.resize(static_cast<size_t>(count)); }
-        catch (...) { return false; }
-        size_t at = 0;
-        for (uint32_t c = 0; c < out.channels; ++c) {
-            const float* source = buffer.getReadPointer(c);
-            if (!source) return false;
-            std::copy(source, source + out.samples, out.data.begin() + static_cast<std::ptrdiff_t>(at));
-            at += out.samples;
+    const std::string& historyLabel(uintptr_t owner, bool redo) const noexcept {
+        m_labelCache.clear();
+        const size_t length = hirari_spectral_history_label(m_history, owner, redo, nullptr, 0);
+        try { m_labelCache.resize(length); }
+        catch (...) { return m_labelCache; }
+        if (length > 0) {
+            hirari_spectral_history_label(m_history, owner, redo,
+                reinterpret_cast<uint8_t*>(m_labelCache.data()), length);
         }
-        return true;
-    }
-
-    static bool restoreSnapshot(Core::AudioBuffer& buffer, const Snapshot& snapshot) {
-        if (snapshot.channels == 0 || snapshot.samples == 0 ||
-            snapshot.data.size() != static_cast<size_t>(snapshot.channels) * snapshot.samples) return false;
-        if (buffer.getNumChannels() != snapshot.channels || buffer.getNumSamples() != snapshot.samples) {
-            if (!buffer.resize(snapshot.channels, snapshot.samples)) return false;
-        }
-        size_t at = 0;
-        for (uint32_t c = 0; c < snapshot.channels; ++c) {
-            float* destination = buffer.getWritePointer(c);
-            if (!destination) return false;
-            std::copy(snapshot.data.begin() + static_cast<std::ptrdiff_t>(at),
-                      snapshot.data.begin() + static_cast<std::ptrdiff_t>(at + snapshot.samples), destination);
-            at += snapshot.samples;
-        }
-        return true;
+        return m_labelCache;
     }
 
     void captureBefore(const Core::AudioBuffer& buffer, const char* label) {
-        Snapshot snapshot;
-        if (!makeSnapshot(buffer, snapshot)) return;
-        snapshot.label = label ? label : "Spectral Edit";
-        if (m_undo.size() >= kMaxHistory) m_undo.pop_front();
-        m_undo.push_back(std::move(snapshot));
-        m_redo.clear();
-        trimHistory();
+        const char* safeLabel = label ? label : "Spectral Edit";
+        (void)hirari_spectral_history_capture(m_history, ownerKey(buffer),
+            buffer.getNumChannels(), buffer.getNumSamples(), buffer.getArrayOfReadPointers(),
+            reinterpret_cast<const uint8_t*>(safeLabel), std::strlen(safeLabel));
     }
 
-    void trimHistory() noexcept {
-        while (historyBytes() > kMaxHistoryBytes && (!m_undo.empty() || !m_redo.empty())) {
-            if (!m_undo.empty()) m_undo.pop_front();
-            else m_redo.pop_front();
+    bool restoreHistory(Core::AudioBuffer& buffer, bool redo) {
+        const uintptr_t owner = ownerKey(buffer);
+        void* target = hirari_spectral_history_peek(m_history, owner, redo);
+        if (!target) return false;
+        std::unique_ptr<void, decltype(&hirari_spectral_history_token_destroy)>
+            targetGuard(target, &hirari_spectral_history_token_destroy);
+        const uint32_t channels = hirari_spectral_history_snapshot_channels(m_history, target);
+        const uint32_t frames = hirari_spectral_history_snapshot_frames(m_history, target);
+        const size_t labelLength = hirari_spectral_history_snapshot_label(m_history, target, nullptr, 0);
+        std::string label;
+        try { label.resize(labelLength); }
+        catch (...) { return false; }
+        if (labelLength > 0) {
+            hirari_spectral_history_snapshot_label(m_history, target,
+                reinterpret_cast<uint8_t*>(label.data()), labelLength);
         }
+        void* current = hirari_spectral_history_snapshot_create(owner,
+            buffer.getNumChannels(), buffer.getNumSamples(), buffer.getArrayOfReadPointers(),
+            reinterpret_cast<const uint8_t*>(label.data()), label.size());
+        if (!current) return false;
+        std::unique_ptr<void, decltype(&hirari_spectral_history_snapshot_destroy)>
+            currentGuard(current, &hirari_spectral_history_snapshot_destroy);
+        if ((buffer.getNumChannels() != channels || buffer.getNumSamples() != frames) &&
+            !buffer.resize(channels, frames)) return false;
+        for (uint32_t c = 0; c < channels; ++c) {
+            if (!buffer.getWritePointer(c)) return false;
+        }
+        if (!hirari_spectral_history_snapshot_restore(m_history, target, buffer.getArrayOfWritePointers(),
+                                                       channels, frames)) return false;
+        if (!hirari_spectral_history_finish_restore(m_history, owner, redo,
+                                                    target, current)) return false;
+        targetGuard.release();
+        currentGuard.release();
+        return true;
     }
 
-    History m_undo;
-    History m_redo;
-    bool m_groupHistory = false;
+    void* m_history = hirari_spectral_history_create();
+    mutable std::string m_labelCache;
 };

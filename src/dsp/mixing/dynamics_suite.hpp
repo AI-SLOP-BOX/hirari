@@ -4,7 +4,7 @@
 #include <cmath>
 #include <atomic>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief DynamicsSuite: Unified Dynamics Processing (Logic Pro-style).
@@ -45,4 +45,4 @@ private:
     float m_sidechainThresh = -20.0f;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

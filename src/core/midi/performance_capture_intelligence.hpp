@@ -2,7 +2,7 @@
 #include <vector>
 #include <chrono>
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @struct MidiGesture
@@ -41,4 +41,4 @@ private:
     MidiGesture m_lastGesture;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

@@ -28,7 +28,7 @@
         if (size) std::memcpy(m_shared->state, data, size);
         m_shared->stateSize.store(static_cast<uint32_t>(size), std::memory_order_relaxed);
         m_shared->stateVersion.store(SandboxProtocol::kStateProtocolVersion, std::memory_order_relaxed);
-        m_shared->stateChecksum.store(SandboxProtocol::stateChecksum(data, size), std::memory_order_relaxed);
+        m_shared->stateChecksum.store(hirari_plugin_state_checksum(data, size), std::memory_order_relaxed);
         m_shared->stateProjectGeneration.store(context.project, std::memory_order_relaxed);
         m_shared->statePluginGeneration.store(context.plugin, std::memory_order_relaxed);
         m_shared->stateAudioGeneration.store(context.audio, std::memory_order_relaxed);
@@ -46,7 +46,7 @@
             m_shared->stateGeneration.load(std::memory_order_acquire) == context.state;
         const bool checksumOk = generationOk && m_shared->stateError.load(std::memory_order_acquire) ==
             SandboxProtocol::kStateErrorNone && m_shared->stateChecksum.load(std::memory_order_acquire) ==
-            SandboxProtocol::stateChecksum(data, size);
+            hirari_plugin_state_checksum(data, size);
         if (checksumOk) m_stateCache.assign(data, data + size);
         if (!checksumOk) {
             const uint8_t workerError = m_shared->stateError.load(std::memory_order_acquire);
@@ -94,14 +94,15 @@
         }
         auto state = std::vector<uint8_t>(m_shared->state, m_shared->state + size);
         const uint8_t workerError = m_shared->stateError.load(std::memory_order_acquire);
-        const bool versionOk = SandboxProtocol::isSupportedStateVersion(
-            m_shared->stateVersion.load(std::memory_order_acquire));
-        const bool checksumOk = m_shared->stateChecksum.load(std::memory_order_acquire) ==
-            SandboxProtocol::stateChecksum(state.data(), state.size());
-        if (!versionOk || workerError != SandboxProtocol::kStateErrorNone || !checksumOk) {
+        const uint8_t validationError = hirari_plugin_state_validate(
+            state.data(), state.size(),
+            m_shared->stateVersion.load(std::memory_order_acquire),
+            m_shared->stateChecksum.load(std::memory_order_acquire));
+        if (validationError != SandboxProtocol::kStateErrorNone ||
+            workerError != SandboxProtocol::kStateErrorNone) {
             const uint8_t error = workerError != SandboxProtocol::kStateErrorNone
                 ? workerError
-                : (!versionOk ? SandboxProtocol::kStateErrorVersion : SandboxProtocol::kStateErrorChecksum);
+                : validationError;
             m_lastStateError.store(error, std::memory_order_release);
             return m_stateCache;
         }

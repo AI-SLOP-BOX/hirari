@@ -6,7 +6,7 @@
 #include <cstdint>
 #include "../../core/midi_buffer.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class Arpeggiator
@@ -131,4 +131,4 @@ private:
     uint32_t m_randomSeed = 1;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

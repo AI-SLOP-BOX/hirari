@@ -18,7 +18,7 @@
 #include <unistd.h>
 #endif
 
-namespace Aura::IO::Persistence {
+namespace Hirari::IO::Persistence {
 
 struct SaveWorkerHandle {
     std::thread worker;
@@ -272,4 +272,4 @@ private:
     std::vector<SaveWorkerHandle> m_workers;
 };
 
-} // namespace Aura::IO::Persistence
+} // namespace Hirari::IO::Persistence

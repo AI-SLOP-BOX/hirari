@@ -1,13 +1,13 @@
 #pragma once
 #include <chrono>
-#include "../../core/aura_message_bus.hpp"
+#include "../../core/hirari_message_bus.hpp"
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class ForensicTimer
  * @brief High-resolution RAII timer for professional DSP performance auditing.
- * INDUSTRIAL: Measures execution time and reports it to the AuraMessageBus with zero-technical drift.
+ * INDUSTRIAL: Measures execution time and reports it to the HirariMessageBus with zero-technical drift.
  */
 class ForensicTimer {
 public:
@@ -26,8 +26,8 @@ public:
         auto duration = std::chrono::duration<float, std::milli>(end - m_start).count();
         
         // INDUSTRIAL: Dispatch performance telemetry to the sovereign message bus.
-        ::Aura::Core::AuraMessageBus::getInstance().push(
-            ::Aura::Core::AuraMessageBus::DSPPerformance{ m_componentId, duration }
+        ::Hirari::Core::HirariMessageBus::getInstance().push(
+            ::Hirari::Core::HirariMessageBus::DSPPerformance{ m_componentId, duration }
         );
     }
 
@@ -36,4 +36,4 @@ private:
     std::chrono::time_point<std::chrono::high_resolution_clock> m_start;
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

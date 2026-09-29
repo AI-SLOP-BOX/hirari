@@ -7,10 +7,10 @@
 #include "rust/cxx.h"
 #include "../concurrency/lock_free.hpp"
 
-namespace Aura::Core::BridgeFFI { struct FFIEvent; }
-using FFIEvent = Aura::Core::BridgeFFI::FFIEvent;
+namespace Hirari::Core::BridgeFFI { struct FFIEvent; }
+using FFIEvent = Hirari::Core::BridgeFFI::FFIEvent;
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class NotificationSystem
@@ -57,8 +57,8 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine
 
-namespace Aura::Core::BridgeFFI {
+namespace Hirari::Core::BridgeFFI {
     void poll_events(rust::Fn<void(FFIEvent)> handler);
 }

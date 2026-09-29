@@ -6,7 +6,7 @@
 #include <cmath>
 #include "../iprocessor.hpp"
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @brief AtmosCompressor: Professional 12-Channel Immersive Dynamics.
@@ -86,4 +86,4 @@ private:
     float m_gain = 1.0f;
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

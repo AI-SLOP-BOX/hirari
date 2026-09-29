@@ -6,13 +6,13 @@ from array import array
 from pathlib import Path
 
 SR = 44100
-BPM = int(os.environ.get("AURA_SONG_BPM", "100"))
+BPM = int(os.environ.get("HIRARI_SONG_BPM", "100"))
 BEAT = 60.0 / BPM
 BARS = 32
 DURATION = BARS * 4 * BEAT
 N = int(DURATION * SR)
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OUT = os.environ.get("AURA_SONG_OUT", str(REPO_ROOT / "dist" / "aura_demo_song.wav"))
+OUT = os.environ.get("HIRARI_SONG_OUT", str(REPO_ROOT / "dist" / "hirari_demo_song.wav"))
 STEMS = os.path.splitext(OUT)[0] + "_stems"
 random.seed(17)
 

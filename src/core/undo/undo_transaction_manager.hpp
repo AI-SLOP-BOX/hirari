@@ -3,7 +3,7 @@
 #include <vector>
 #include <memory>
 
-namespace Aura::Core::Undo {
+namespace Hirari::Core::Undo {
 
 /**
  * @interface ICommand
@@ -80,4 +80,4 @@ private:
     size_t m_totalMemory = 0;
 };
 
-} // namespace Aura::Core::Undo
+} // namespace Hirari::Core::Undo

@@ -4,7 +4,7 @@
 #include <map>
 #include <mutex>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @class CollaborationHubKernel
@@ -78,4 +78,4 @@ private:
     std::map<std::string, uint64_t> m_userSequences;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

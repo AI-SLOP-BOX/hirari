@@ -8,7 +8,7 @@
 #include <cstring>
 #include <atomic>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @struct TouchEvent
@@ -92,8 +92,8 @@ private:
     
     int m_socketFd;
     sockaddr_in m_broadcastAddr;
-    ::Aura::Core::RingBuffer<TouchEvent, 1024> m_incomingQueue;
+    ::Hirari::Core::RingBuffer<TouchEvent, 1024> m_incomingQueue;
     std::atomic<uint64_t> m_bytesSent;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

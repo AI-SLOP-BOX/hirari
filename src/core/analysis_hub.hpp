@@ -6,32 +6,32 @@
 #include "rust/cxx.h"
 #include "bridge_types.hpp"
 
-namespace Aura::Core::Engine { class AuraUnifiedEngine; }
+namespace Hirari::Core::Engine { class HirariUnifiedEngine; }
 
-namespace Aura::Core::Bridge {
+namespace Hirari::Core::Bridge {
 bool initialize_gpu_with_status();
-rust::Vec<float> get_track_peaks_l_owned(const ::Aura::Core::Engine::AuraUnifiedEngine& engine);
-rust::Vec<float> get_track_peaks_r_owned(const ::Aura::Core::Engine::AuraUnifiedEngine& engine);
+rust::Vec<float> get_track_peaks_l_owned(const ::Hirari::Core::Engine::HirariUnifiedEngine& engine);
+rust::Vec<float> get_track_peaks_r_owned(const ::Hirari::Core::Engine::HirariUnifiedEngine& engine);
 }
 
-namespace Aura::Core::BridgeFFI {
+namespace Hirari::Core::BridgeFFI {
 
 struct StructureNode;
 
 /**
  * @class AnalysisHub
- * @brief Professional Analysis Bridge for Aura Studio Pro.
+ * @brief Professional Analysis Bridge for Hirari Studio Pro.
  */
 class AnalysisHub {
 public:
-    AnalysisHub(std::shared_ptr<::Aura::Core::Engine::AuraUnifiedEngine> engine) 
+    AnalysisHub(std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> engine)
         : m_engine(std::move(engine)) {}
 
     rust::Vec<float> get_mixing_advice_v() const;
     // Native container only; the CXX boundary owns conversion to rust::Vec.
-    std::vector<::Aura::Core::Bridge::PlainClash> get_spectral_clash_v() const;
+    std::vector<::Hirari::Core::Bridge::PlainClash> get_spectral_clash_v() const;
     void trigger_background_analysis() const;
-    ::Aura::Core::Bridge::PlainLoudness get_master_loudness_v() const;
+    ::Hirari::Core::Bridge::PlainLoudness get_master_loudness_v() const;
     rust::String get_arrangement_advice(uint32_t track_id) const;
     rust::Vec<float> get_imaging_data_v() const;
     rust::String get_song_structure_json() const;
@@ -49,10 +49,10 @@ public:
     rust::String get_intelligence_dashboard_json() const;
 
 private:
-    std::shared_ptr<::Aura::Core::Engine::AuraUnifiedEngine> m_engine;
+    std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> m_engine;
     
     mutable std::vector<float> m_loudnessHistory;
     mutable std::mutex m_loudnessHistoryMutex;
 };
 
-} // namespace Aura::Core::BridgeFFI
+} // namespace Hirari::Core::BridgeFFI

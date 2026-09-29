@@ -3,7 +3,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 if [ "$(uname -s)" != "Darwin" ]; then
-    if [ "${AURA_REQUIRE_HARDWARE_DEVICE:-0}" = "1" ]; then
+    if [ "${HIRARI_REQUIRE_HARDWARE_DEVICE:-0}" = "1" ]; then
         echo "macOS CoreAudio contract: required but host is not macOS" >&2
         exit 1
     fi
@@ -11,7 +11,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 0
 fi
 
-OUT_DIR=${TMPDIR:-/tmp}/aura-macos-audio-device-contract
+OUT_DIR=${TMPDIR:-/tmp}/hirari-macos-audio-device-contract
 mkdir -p "$OUT_DIR"
 
 ${CXX:-clang++} -std=c++20 -Wall -Wextra -I"$ROOT_DIR" -I"$ROOT_DIR/src" \
@@ -25,7 +25,7 @@ if "$OUT_DIR/macos-audio-device-contract"; then
     exit 0
 fi
 
-if [ "${AURA_REQUIRE_HARDWARE_DEVICE:-0}" = "1" ]; then
+if [ "${HIRARI_REQUIRE_HARDWARE_DEVICE:-0}" = "1" ]; then
     echo "macOS CoreAudio device contract failed and hardware is required" >&2
     exit 1
 fi

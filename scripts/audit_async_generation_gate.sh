@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-SRC="$ROOT/aura-core-bridge/src"
+SRC="$ROOT/hirari-core-bridge/src"
 
 # These modules publish work after an asynchronous boundary.  Keep the list
 # explicit: adding a new publisher without choosing a generation policy should

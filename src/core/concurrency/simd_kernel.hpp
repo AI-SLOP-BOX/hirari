@@ -9,7 +9,7 @@
 #include <cstdint>
 
 
-namespace Aura::Core::SIMD {
+namespace Hirari::Core::SIMD {
 
 /**
  * @class SIMDKernel
@@ -248,4 +248,4 @@ struct SIMDKernel {
     }
 };
 
-} // namespace Aura::Core::SIMD
+} // namespace Hirari::Core::SIMD

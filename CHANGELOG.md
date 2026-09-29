@@ -1,6 +1,6 @@
 # Changelog
 
-All notable user-visible changes will be recorded here. Aura currently has no
+All notable user-visible changes will be recorded here. Hirari currently has no
 stable release; entries describe the development preview and do not imply
 production support.
 
@@ -11,7 +11,7 @@ production support.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.
-- Opt-in automatic rustup bootstrap via `AURA_AUTO_INSTALL_RUST=1`.
+- Opt-in automatic rustup bootstrap via `HIRARI_AUTO_INSTALL_RUST=1`.
 - AU/VST3/CLAP compatibility inventory reports with architecture and
   FOUND/SKIP status.
 - Long-duration realtime callback soak and bounded external-plugin probes.
@@ -29,7 +29,11 @@ production support.
 - macOS CI bundle job covering headless readiness, signature, and release
   metadata verification.
 - Optional one-command installation of `cargo-audit` and `cargo-deny` via
-  `AURA_AUTO_INSTALL_SECURITY=1`.
+  `HIRARI_AUTO_INSTALL_SECURITY=1`.
+- Opt-in Moufu project-layout publishing, with filesystem paths and serialized
+  plug-in state removed from shared snapshots.
+- Bounded Moufu receive frames and queueing, with DNS re-resolution on retries.
+- Moufu link and incoming-state notifications surfaced to the Hirari app.
 
 ### Changed
 

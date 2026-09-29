@@ -13,24 +13,24 @@ public:
 
         // Instantiate Internal Plugin if path matches
         if (m_format == Format::Internal) {
-            if (m_path == "Aura/Limiter") m_internal = std::make_unique<DSP::Effects::ProLimiter>();
-            else if (m_path == "Aura/SubBass") m_internal = std::make_unique<DSP::Effects::SubBassGenerator>();
-            else if (m_path == "Aura/Compressor") m_internal = std::make_unique<DSP::Effects::DynamicCompressor>();
-            else if (m_path == "Aura/Gate") m_internal = std::make_unique<NativeNoiseGate>();
-            else if (m_path == "Aura/Saturation") m_internal = std::make_unique<DSP::Effects::TubeSaturation>();
-            else if (m_path == "Aura/Transient") m_internal = std::make_unique<NativeTransientShaper>();
-            else if (m_path == "Aura/DeEsser") m_internal = std::make_unique<NativeDeEsser>();
-            else if (m_path == "Aura/Delay") m_internal = std::make_unique<NativeDelay>();
-            else if (m_path == "Aura/Reverb") m_internal = std::make_unique<NativeReverb>();
-            else if (m_path == "Aura/DynamicEQ") m_internal = std::make_unique<NativeDynamicEq>();
-            else if (m_path == "Aura/MidSide") m_internal = std::make_unique<NativeMidSide>();
-            else if (m_path == "Aura/Width") m_internal = std::make_unique<NativeStereoWidth>();
+            if (m_path == "Hirari/Limiter") m_internal = std::make_unique<DSP::Effects::ProLimiter>();
+            else if (m_path == "Hirari/SubBass") m_internal = std::make_unique<DSP::Effects::SubBassGenerator>();
+            else if (m_path == "Hirari/Compressor") m_internal = std::make_unique<DSP::Effects::DynamicCompressor>();
+            else if (m_path == "Hirari/Gate") m_internal = std::make_unique<NativeNoiseGate>();
+            else if (m_path == "Hirari/Saturation") m_internal = std::make_unique<DSP::Effects::TubeSaturation>();
+            else if (m_path == "Hirari/Transient") m_internal = std::make_unique<NativeTransientShaper>();
+            else if (m_path == "Hirari/DeEsser") m_internal = std::make_unique<NativeDeEsser>();
+            else if (m_path == "Hirari/Delay") m_internal = std::make_unique<NativeDelay>();
+            else if (m_path == "Hirari/Reverb") m_internal = std::make_unique<NativeReverb>();
+            else if (m_path == "Hirari/DynamicEQ") m_internal = std::make_unique<NativeDynamicEq>();
+            else if (m_path == "Hirari/MidSide") m_internal = std::make_unique<NativeMidSide>();
+            else if (m_path == "Hirari/Width") m_internal = std::make_unique<NativeStereoWidth>();
             // NeuralCloner is not part of the available processor interface;
             // leave it failed rather than manufacturing an external bridge.
             m_state = m_internal ? LoadState::Operational : LoadState::Failed;
             if (!m_internal) m_error = "unknown internal plugin: " + m_path;
         } else {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
             if (m_format == Format::VST3) {
                 m_vst3 = std::make_unique<Plugins::VST3HostProcessor>();
                 if (!m_vst3->loadVst3(m_path)) {
@@ -66,7 +66,7 @@ public:
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {
         if (m_internal) m_internal->prepareToPlay(sr, bs);
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) m_vst3->prepareToPlay(sr, bs);
 #endif
         if (m_external) {
@@ -81,7 +81,7 @@ public:
 
     uint32_t getLatencySamples() const noexcept override {
         if (m_internal) return m_internal->getLatencySamples();
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) return m_vst3->getLatencySamples();
 #endif
         return m_external ? m_external->getLatencySamples() : 0u;
@@ -89,7 +89,7 @@ public:
 
     uint32_t getTailSamples() const noexcept override {
         if (m_internal) return m_internal->getTailSamples();
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) return m_vst3->getTailSamples();
 #endif
         return m_external ? m_external->getTailSamples() : 0u;
@@ -116,7 +116,7 @@ public:
             return;
         }
 
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) {
             m_vst3->process(b, midi, context);
             if (m_vst3->processFailed())
@@ -140,7 +140,7 @@ public:
 
     void reset() noexcept override {
         if (m_internal) m_internal->reset();
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) m_vst3->reset();
 #endif
         // External reset is intentionally a lifecycle no-op: stopping the
@@ -159,7 +159,7 @@ public:
             }
             return state;
         }
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) return m_vst3->getState();
 #endif
         return m_external ? m_external->getState() : std::vector<uint8_t>{};
@@ -173,7 +173,7 @@ public:
             }
             return restored;
         }
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) return m_vst3->setState(state);
 #endif
         return m_external && m_external->setState(state);
@@ -189,7 +189,7 @@ public:
             }
             return setState(state);
         }
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) return m_vst3->restoreStateChecked(state);
 #endif
         return m_external && m_external->restoreStateChecked(state);
@@ -247,13 +247,13 @@ public:
     const std::string& path() const { return m_path; }
 
     bool hasNativeEditor() const noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         if (m_vst3) return m_vst3->hasNativeEditor();
 #endif
         return false;
     }
     uint64_t openNativeEditor(uintptr_t parent) noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         return m_vst3 ? m_vst3->openNativeEditor(parent) : 0;
 #else
         (void)parent;
@@ -261,7 +261,7 @@ public:
 #endif
     }
     bool closeNativeEditor(uint64_t session) noexcept override {
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
         return m_vst3 && m_vst3->closeNativeEditor(session);
 #else
         (void)session;
@@ -301,7 +301,7 @@ private:
     Format m_format;
     std::unique_ptr<DSP::IProcessor> m_internal;
     std::unique_ptr<Plugins::ProcessSandboxProcessor> m_external;
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
     std::unique_ptr<Plugins::VST3HostProcessor> m_vst3;
 #endif
     LoadState m_state = LoadState::Unloaded;

@@ -1,11 +1,11 @@
 #include <cassert>
 #include <vector>
 
-#include "../src/ui/waveform_cache.hpp"
+#include "../src/graphics/ui_components/support/waveform_cache.hpp"
 
 int main() {
-    auto& cache = Aura::UI::WaveformCache::getInstance();
-    Aura::UI::WaveformLevel level;
+    auto& cache = Hirari::UI::WaveformCache::getInstance();
+    Hirari::UI::WaveformLevel level;
 
     cache.clearRegion(9101);
     assert(cache.requestWaveform(9101, 2,

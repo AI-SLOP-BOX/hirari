@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstdint>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief TransportAnchor: High-resolution temporal clock for multi-engine synchronization.
@@ -61,4 +61,4 @@ private:
     const std::chrono::steady_clock::time_point m_startedAt = std::chrono::steady_clock::now();
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -1,6 +1,6 @@
 /*
- * Aura DAW Ultimate - High-Performance Digital Audio Workstation
- * Copyright (c) 2024-2026 Aura DAW Project. All rights reserved.
+ * Hirari DAW Ultimate - High-Performance Digital Audio Workstation
+ * Copyright (c) 2024-2026 Hirari DAW Project. All rights reserved.
  * Licensed under the MIT License.
  */
 
@@ -11,7 +11,7 @@
 #include <algorithm>
 #include "dsp_utils.hpp"
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class PitchShifter
@@ -77,4 +77,4 @@ private:
     float m_phase1 = 0, m_phase2 = 0;
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

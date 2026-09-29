@@ -3,7 +3,7 @@
 #include <vector>
 #include <optional>
 
-namespace Aura::Core::Sync {
+namespace Hirari::Core::Sync {
 
 /**
  * @class LockFreeQueue
@@ -41,4 +41,4 @@ private:
     T m_buffer[Size];
 };
 
-} // namespace Aura::Core::Sync
+} // namespace Hirari::Core::Sync

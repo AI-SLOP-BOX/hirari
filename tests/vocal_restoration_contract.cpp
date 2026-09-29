@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 namespace {
-bool checkFiniteAndIdentity(Aura::Core::AudioBuffer& buffer,
+bool checkFiniteAndIdentity(Hirari::Core::AudioBuffer& buffer,
                             const float* expected,
                             uint32_t samples,
                             float tolerance) {
@@ -22,12 +22,12 @@ bool checkFiniteAndIdentity(Aura::Core::AudioBuffer& buffer,
 } // namespace
 
 int main() {
-    using Aura::Core::AudioBuffer;
-    using Aura::SCAE::Intelligence::VocalRestorationMaster;
+    using Hirari::Core::AudioBuffer;
+    using Hirari::SCAE::Intelligence::VocalRestorationMaster;
 
     bool rejectedInvalidFft = false;
     try {
-        Aura::DSP::Analysis::FFTEngine invalid(0);
+        Hirari::DSP::Analysis::FFTEngine invalid(0);
         (void)invalid;
     } catch (const std::invalid_argument&) {
         rejectedInvalidFft = true;

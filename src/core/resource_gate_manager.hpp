@@ -8,7 +8,7 @@
 #include "../dsp/analysis/psychoacoustic_model.hpp"
 #include "../dsp/simd/simd_kernel.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ResourceGateManager
@@ -77,4 +77,4 @@ private:
     uint64_t m_tailThresholdSamples;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -13,9 +13,9 @@ if ! command -v cargo-cyclonedx >/dev/null 2>&1; then
     exit 1
 fi
 
-cargo cyclonedx --all --format json --override-filename aura-sbom
+cargo cyclonedx --all --format json --override-filename hirari-sbom
 sbom_count=0
-for sbom in "$repository_root"/*/aura-sbom.json; do
+for sbom in "$repository_root"/*/hirari-sbom.json; do
     [ -f "$sbom" ] || continue
     package_name=$(basename "$(dirname "$sbom")")
     mv "$sbom" "$output_dir/${package_name}-sbom.cdx.json"

@@ -9,11 +9,11 @@
 #include <mutex>
 #include "../diagnostics/forensic_kernel.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class PluginSandbox
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements autonomous plugin isolation and stability profiling.
  */
 class PluginSandbox {
@@ -115,4 +115,4 @@ private:
     std::array<std::atomic<float>, kMaxRealtimePlugins> m_avgCpuJitter{};
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

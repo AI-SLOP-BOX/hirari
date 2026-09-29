@@ -7,7 +7,7 @@
 #include <memory>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 struct MeterData {
     float peak[2];
@@ -80,4 +80,4 @@ private:
     std::atomic<uint32_t> m_uiIdx{99};
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

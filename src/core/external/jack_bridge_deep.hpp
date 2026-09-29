@@ -6,17 +6,19 @@
 #include <mutex>
 #include <string>
 
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
 #include <jack/jack.h>
 #endif
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /** Optional JACK audio bridge. JACK is opt-in and never reports a fake device. */
 class JackBridgeDeep {
 public:
     using ProcessCallback = void (*)(const float* const* inputs,
+                                      uint32_t inputChannelCount,
                                       float* const* outputs,
+                                      uint32_t outputChannelCount,
                                       uint32_t frames,
                                       void* context) noexcept;
 
@@ -38,7 +40,7 @@ public:
             return false;
         }
         m_clientName = clientName;
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
         jack_status_t status = JackFailure;
         m_client = jack_client_open(m_clientName.c_str(), JackNullOption, &status);
         if (!m_client) {
@@ -62,7 +64,7 @@ public:
         m_error.clear();
         return true;
 #else
-        m_error = "JACK support is not compiled; enable AURA_ENABLE_JACK with libjack";
+        m_error = "JACK support is not compiled; enable HIRARI_ENABLE_JACK with libjack";
         return false;
 #endif
     }
@@ -87,7 +89,7 @@ public:
         auto* self = static_cast<JackBridgeDeep*>(arg);
         if (!self || !self->m_running.load(std::memory_order_acquire) || nframes == 0 ||
             nframes > self->m_bufferSize.load(std::memory_order_acquire)) return 0;
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
         const float* inputs[2] = {
             static_cast<const float*>(jack_port_get_buffer(self->m_inputPorts[0], nframes)),
             static_cast<const float*>(jack_port_get_buffer(self->m_inputPorts[1], nframes))};
@@ -96,7 +98,8 @@ public:
             static_cast<float*>(jack_port_get_buffer(self->m_outputPorts[1], nframes))};
         if (!inputs[0] || !inputs[1] || !outputs[0] || !outputs[1]) return 0;
         const auto callback = self->m_callback.load(std::memory_order_acquire);
-        if (callback) callback(inputs, outputs, nframes, self->m_context.load(std::memory_order_acquire));
+        if (callback) callback(inputs, 2, outputs, 2, nframes,
+                               self->m_context.load(std::memory_order_acquire));
         else {
             for (uint32_t frame = 0; frame < nframes; ++frame) {
                 outputs[0][frame] = 0.0f;
@@ -121,7 +124,7 @@ private:
         m_running.store(false, std::memory_order_release);
         m_callback.store(nullptr, std::memory_order_release);
         m_context.store(nullptr, std::memory_order_release);
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
         if (m_client) {
             jack_deactivate(m_client);
             jack_client_close(m_client);
@@ -140,11 +143,11 @@ private:
     std::atomic<bool> m_running{false};
     std::atomic<ProcessCallback> m_callback{nullptr};
     std::atomic<void*> m_context{nullptr};
-#if defined(AURA_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK)
     jack_client_t* m_client = nullptr;
     jack_port_t* m_inputPorts[2] = {};
     jack_port_t* m_outputPorts[2] = {};
 #endif
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

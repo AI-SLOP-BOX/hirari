@@ -10,7 +10,7 @@
 #include "../../io/persistence/wav_reader.hpp"
 #include "../../core/io/sample_pool.hpp"
 
-namespace Aura::DSP::Synthesis {
+namespace Hirari::DSP::Synthesis {
 
 /**
  * @class Multisampler
@@ -122,4 +122,4 @@ private:
     bool m_isLoaded = false;
 };
 
-} // namespace Aura::DSP::Synthesis
+} // namespace Hirari::DSP::Synthesis

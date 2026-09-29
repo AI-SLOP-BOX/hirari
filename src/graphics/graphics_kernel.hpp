@@ -3,7 +3,7 @@
 #include <string>
 #include <memory>
 
-namespace Aura::Graphics {
+namespace Hirari::Graphics {
 
 struct Vertex {
     float x, y;
@@ -85,4 +85,4 @@ public:
 };
 
 } // namespace Platform
-} // namespace Aura::Graphics
+} // namespace Hirari::Graphics

@@ -8,7 +8,7 @@
 #include <vector>
 #include <mutex>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 // Small, dependency-free project history store used by the UI and headless CLI.
 // Each revision is immutable and written atomically, allowing recovery after a
@@ -29,7 +29,7 @@ public:
         if (ec) return false;
         const auto revisions = list_unlocked();
         const uint64_t id = revisions.empty() ? 1 : revisions.back().id + 1;
-        const auto target = m_directory / ("revision-" + std::to_string(id) + ".aura");
+        const auto target = m_directory / ("revision-" + std::to_string(id) + ".hirari");
         const auto temp = target.string() + ".tmp-" + std::to_string(m_tempSequence++);
         { std::ofstream f(temp, std::ios::binary | std::ios::trunc); if (!f) return false;
           f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
@@ -52,7 +52,7 @@ private:
         for (const auto& e : std::filesystem::directory_iterator(m_directory, ec)) {
             if (ec || !e.is_regular_file()) continue;
             const auto name = e.path().filename().string();
-            if (name.rfind("revision-", 0) != 0 || e.path().extension() != ".aura") continue;
+            if (name.rfind("revision-", 0) != 0 || e.path().extension() != ".hirari") continue;
             try { const auto id = std::stoull(name.substr(9, name.size() - 14));
                   result.push_back({id, name, e.file_size()}); } catch (...) {}
         }
@@ -63,7 +63,7 @@ private:
 public:
 
     bool load(uint64_t id, std::vector<uint8_t>& data) const {
-        const auto path = m_directory / ("revision-" + std::to_string(id) + ".aura");
+        const auto path = m_directory / ("revision-" + std::to_string(id) + ".hirari");
         std::ifstream f(path, std::ios::binary); if (!f) return false;
         data.assign(std::istreambuf_iterator<char>(f), {}); return !data.empty();
     }

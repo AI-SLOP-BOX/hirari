@@ -17,9 +17,9 @@
 #endif
 #include "../../core/utils/string_hash.hpp"
 
-namespace Aura::IO::Assets {
+namespace Hirari::IO::Assets {
 
-using namespace ::Aura::Core::Utils;
+using namespace ::Hirari::Core::Utils;
 
 /**
  * @brief CachingSubsystem: High-performance, non-blocking disk caching for track Freezing.
@@ -100,7 +100,7 @@ private:
         const std::filesystem::path output(path);
         static std::atomic<uint64_t> sequence{0};
         const auto id = sequence.fetch_add(1, std::memory_order_relaxed);
-        const std::filesystem::path temporary = output.string() + ".tmp-aura-cache-" + std::to_string(id);
+        const std::filesystem::path temporary = output.string() + ".tmp-hirari-cache-" + std::to_string(id);
         std::error_code ec;
         if (output.has_parent_path()) {
             std::filesystem::create_directories(output.parent_path(), ec);
@@ -161,4 +161,4 @@ private:
     std::vector<std::thread> m_workers;
 };
 
-} // namespace Aura::IO::Assets
+} // namespace Hirari::IO::Assets

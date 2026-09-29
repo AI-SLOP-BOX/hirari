@@ -7,7 +7,7 @@
 #include <cstdint>
 #include "audio_region.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class Take
@@ -116,4 +116,4 @@ private:
     std::vector<uint32_t> m_activeCompIndices;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

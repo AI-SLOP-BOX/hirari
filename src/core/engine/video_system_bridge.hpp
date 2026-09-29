@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace Aura::Core::Engine::VideoBridge {
+namespace Hirari::Core::Engine::VideoBridge {
 
 bool requestFrameAt(double seconds) noexcept;
 bool loadVideo(const char* path) noexcept;

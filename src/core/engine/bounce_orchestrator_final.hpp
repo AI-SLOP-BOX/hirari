@@ -15,7 +15,7 @@
 #include "timeline_system.hpp"
 #include "../../rendering/bounce/bouncing_engine.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class BounceOrchestratorFinal
@@ -120,7 +120,7 @@ private:
         const auto temporary = std::filesystem::path(sidecar.string() + ".tmp");
         std::ofstream file(temporary, std::ios::trunc);
         if (!file) return;
-        file << "{\n  \"schema\": \"aura.export-metadata.v1\"";
+        file << "{\n  \"schema\": \"hirari.export-metadata.v1\"";
         for (const auto& [key, value] : metadata) {
             auto escape = [](const std::string& input) {
                 std::string out;
@@ -179,4 +179,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

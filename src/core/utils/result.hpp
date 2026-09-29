@@ -4,7 +4,7 @@
 #include <variant>
 #include <stdexcept>
 
-namespace Aura::Core::Utils {
+namespace Hirari::Core::Utils {
 
 /**
  * @struct Error
@@ -42,4 +42,4 @@ private:
     std::variant<T, Error> m_data;
 };
 
-} // namespace Aura::Core::Utils
+} // namespace Hirari::Core::Utils

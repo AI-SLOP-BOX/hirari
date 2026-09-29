@@ -16,7 +16,7 @@
 #endif
 #include "../../io/persistence/wav_writer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class BounceEngine
@@ -26,7 +26,7 @@ namespace Aura::Core::Engine {
 // Legacy callback-based renderer retained for source compatibility. The
 // public export workflow lives in rendering/bounce/bounce_engine.hpp; keeping
 // a distinct name prevents two different BounceEngine classes from colliding
-// in Aura::Core::Engine when both headers are included.
+// in Hirari::Core::Engine when both headers are included.
 class LegacyBounceEngine {
 public:
     struct ExportProgress {
@@ -60,7 +60,7 @@ public:
             prog.isDone.store(true, std::memory_order_release);
             return;
         }
-        ::Aura::IO::Persistence::WavWriter::Pcm16StreamWriter stream(
+        ::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter stream(
             path, totalSamples, static_cast<uint32_t>(sr));
         if (!stream.isOpen()) { prog.isDone.store(true, std::memory_order_release); return; }
         constexpr uint32_t kBlock = 1024;
@@ -86,4 +86,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

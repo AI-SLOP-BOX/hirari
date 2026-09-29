@@ -8,10 +8,10 @@
 
 #if defined(_WIN32)
 #include <process.h>
-#define AURA_GETPID _getpid
+#define HIRARI_GETPID _getpid
 #else
 #include <unistd.h>
-#define AURA_GETPID getpid
+#define HIRARI_GETPID getpid
 #endif
 
 #include "../src/core/recording_engine.hpp"
@@ -19,15 +19,15 @@
 
 int main() {
     const auto root = std::filesystem::temp_directory_path() /
-        ("aura-recording-autosave-" +
-         std::to_string(static_cast<unsigned long>(AURA_GETPID())));
+        ("hirari-recording-autosave-" +
+         std::to_string(static_cast<unsigned long>(HIRARI_GETPID())));
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
     assert(std::filesystem::create_directories(root, ec));
 
     const auto recordingPath = root / "take.wav";
     const auto projectPath = root / "project.json";
-    auto& autosave = Aura::IO::Persistence::AutoSaveEngine::getInstance();
+    auto& autosave = Hirari::IO::Persistence::AutoSaveEngine::getInstance();
     std::atomic<uint64_t> projectGeneration{0};
     autosave.start(projectPath.string(), 1, [&projectGeneration] {
         const uint64_t generation = projectGeneration.load(std::memory_order_acquire);
@@ -38,7 +38,7 @@ int main() {
                std::to_string(generation) + "}";
     });
 
-    Aura::Core::RecordingEngine recorder;
+    Hirari::Core::RecordingEngine recorder;
     assert(recorder.start(recordingPath.string(), 48'000.0));
     std::array<float, 256> left{};
     std::array<float, 256> right{};

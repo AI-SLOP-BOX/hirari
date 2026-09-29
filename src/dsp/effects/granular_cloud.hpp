@@ -9,7 +9,7 @@
 #include "../iprocessor.hpp"
 #include "../utils/dsp_utils.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class GranularCloud
@@ -178,4 +178,4 @@ private:
     float m_spawnAccumulator = 0.0f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

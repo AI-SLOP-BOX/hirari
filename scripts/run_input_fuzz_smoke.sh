@@ -11,7 +11,7 @@ for test_name in \
     recording_stream::tests::metadata_parser_fuzz_corpus_never_panics \
     tests::tests::plugin_state_mutation_corpus_never_panics_or_reports_success_without_storage
 do
-    cargo test -p aura-core-bridge --manifest-path "$ROOT_DIR/Cargo.toml" \
+    cargo test -p hirari-core-bridge --manifest-path "$ROOT_DIR/Cargo.toml" \
         "$test_name" -- --test-threads=1
 done
 

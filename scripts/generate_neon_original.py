@@ -4,7 +4,7 @@ import math, os, wave
 from array import array
 
 SR = 44100; BPM = 172; BEAT = 60.0 / BPM; BARS = 48; N = int(BARS * 4 * BEAT * SR)
-OUT = os.environ.get("AURA_NEON_OUT", "dist/aura_neon_original.wav")
+OUT = os.environ.get("HIRARI_NEON_OUT", "dist/hirari_neon_original.wav")
 
 def hz(n): return 440.0 * 2 ** ((n - 69) / 12)
 def at(t): return max(0, min(N - 1, int(t * SR)))

@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstdint>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief GridSystem: The musical scale of time.
@@ -58,4 +58,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

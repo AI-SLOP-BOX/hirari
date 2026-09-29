@@ -23,7 +23,7 @@
         // from a genuinely invalid plugin path and recover deterministically.
         if (isAlive()) return false;
         std::string helperPath;
-        if (const char* configured = std::getenv("AURA_PLUGIN_HOST_BIN"); configured && *configured != '\0') {
+        if (const char* configured = std::getenv("HIRARI_PLUGIN_HOST_BIN"); configured && *configured != '\0') {
             helperPath = configured;
         }
 #if defined(__APPLE__)
@@ -36,7 +36,7 @@
                     std::string executable(buffer.data());
                     const auto slash = executable.rfind('/');
                     if (slash != std::string::npos) {
-                        const std::string bundled = executable.substr(0, slash + 1) + "aura-plugin-host-worker";
+                        const std::string bundled = executable.substr(0, slash + 1) + "hirari-plugin-host-worker";
                         if (::access(bundled.c_str(), X_OK) == 0) helperPath = bundled;
                     }
                 }
@@ -53,7 +53,7 @@
         m_failure.store(Failure::UnsupportedPlatform, std::memory_order_release);
         return false;
 #else
-        m_sharedName = "/aura_plugin_" + std::to_string(static_cast<unsigned long long>(::getpid())) +
+        m_sharedName = "/hirari_plugin_" + std::to_string(static_cast<unsigned long long>(::getpid())) +
                        "_" + std::to_string(++s_sharedNameCounter);
         m_sharedFd = ::shm_open(m_sharedName.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
         if (m_sharedFd < 0 || ::ftruncate(m_sharedFd, sizeof(SandboxProtocol::SharedAudioBlock)) != 0) {
@@ -211,7 +211,7 @@
         // handshake bounded, but give real VST3 hosts the same cold-start
         // budget as the Rust lifecycle tests (30s).
         int readyTimeoutMs = 30000;
-        if (const char* configured = std::getenv("AURA_PLUGIN_READY_TIMEOUT_MS")) {
+        if (const char* configured = std::getenv("HIRARI_PLUGIN_READY_TIMEOUT_MS")) {
             char* end = nullptr;
             const long value = std::strtol(configured, &end, 10);
             if (end != configured && *end == '\0') {

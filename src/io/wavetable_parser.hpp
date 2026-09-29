@@ -12,7 +12,7 @@
 #include <malloc.h>
 #endif
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @class WavetableParser
@@ -110,4 +110,4 @@ private:
     }
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

@@ -1,0 +1,32 @@
+import { Z_Fx } from "plugin_model.slint";
+import { Z_Clip } from "clip_model.slint";
+import { Z_AutomationLane } from "automation_model.slint";
+import { ZNote } from "midi_model.slint";
+
+export struct Z_Track {
+    id: int, name: string, type: string, color: color, expanded: bool,
+    volume: float, pan: float, solo: bool, mute: bool, armed: bool,
+    is_stereo: bool, phase_invert: bool, auto_rw: int,
+    fx: [Z_Fx], clips: [Z_Clip], auto_lanes: [Z_AutomationLane],
+    show_automation: bool, send_lvl: float, notes: string, width: float, delay_ms: float,
+    filter_lp: float, filter_hp: float, icon: string, pan_law: string, midi_ch: int,
+    group_id: int, input: string, input_first_channel: int, input_bus_name: string, input_endpoint_uid: string, input_endpoint_name: string, output: string, monitor: bool,
+    piano_roll_notes: [ZNote],
+    is_folder: bool, parent_id: int, folded: bool,
+    panner_mode: int,
+    pan3d_x: float, pan3d_y: float, pan3d_z: float,
+    saturate_active: bool,
+    artic_map: string,
+    articulation_switches: [int],
+    articulation_names: [string],
+    articulation_switch_channels: [int],
+    expression_map_json: string,
+    expression_map_pro_json: string,
+    articulation_output_kinds: [int],
+    articulation_output_a: [int],
+    articulation_output_b: [int],
+    correlation: float,
+    eq_low_band: float, eq_low_cut: float, eq_high_band: float, eq_high_cut: float,
+    frozen: bool,
+    frozen_sample_rate: int
+}

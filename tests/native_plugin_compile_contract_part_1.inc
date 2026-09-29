@@ -1,12 +1,12 @@
 int main() {
     {
-        auto& driver = Aura::Core::External::AudioDriverPro::getInstance();
+        auto& driver = Hirari::Core::External::AudioDriverPro::getInstance();
         driver.closeStream();
         bool callbackOpened = false;
         bool callbackClosed = false;
         uint32_t callbackFrames = 0;
         driver.bindExternalBackend(
-            Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+            Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
             [&](double rate, int frames) {
                 callbackOpened = rate == 48'000.0 && frames == 256;
                 return callbackOpened;
@@ -16,7 +16,7 @@ int main() {
                 callbackFrames = frames;
                 if (outputs && outputs[0]) outputs[0][0] = 0.25f;
             });
-        if (!driver.openStream(Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+        if (!driver.openStream(Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
                                0, 48'000.0, 256) || !callbackOpened) return 83;
         float output[2][4]{};
         float input[2][4]{};
@@ -27,47 +27,47 @@ int main() {
         driver.closeStream();
         if (!callbackClosed) return 80;
         driver.bindExternalBackend(
-            Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+            Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
             [](double, int) { return false; }, [] {});
 
-        if (driver.openStream(Aura::Core::External::AudioDriverPro::Backend::WASAPI,
+        if (driver.openStream(Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
                               0, 48'000.0, 256)) return 84;
         if (driver.isOpen() || driver.lastError().empty()) return 85;
-#if !defined(AURA_ENABLE_ASIO_SDK)
-        if (driver.openStream(Aura::Core::External::AudioDriverPro::Backend::ASIO,
+#if !defined(HIRARI_ENABLE_ASIO_SDK)
+        if (driver.openStream(Hirari::Core::External::AudioDriverPro::Backend::ASIO,
                               0, 48'000.0, 256)) return 86;
         if (driver.isOpen() || driver.lastError().find("ASIO SDK") == std::string::npos)
             return 87;
 #endif
-        auto& jack = Aura::Core::External::JackBridgeDeep::getInstance();
+        auto& jack = Hirari::Core::External::JackBridgeDeep::getInstance();
         jack.shutdown();
-#if !defined(AURA_ENABLE_JACK)
-        if (jack.tryInitialize("aura-contract") || jack.isRunning() ||
-            jack.lastError().find("AURA_ENABLE_JACK") == std::string::npos) return 88;
+#if !defined(HIRARI_ENABLE_JACK)
+        if (jack.tryInitialize("hirari-contract") || jack.isRunning() ||
+            jack.lastError().find("HIRARI_ENABLE_JACK") == std::string::npos) return 88;
 #endif
     }
     const std::string xmlProbe = "C:\\Audio & Mix/<take>\"lead\"'";
-    if (Aura::Core::IO::SessionIO::unescapeXmlAttribute(
-            Aura::Core::IO::SessionIO::escapeXmlAttribute(xmlProbe)) != xmlProbe) return 81;
-    const auto sessionProbe = std::filesystem::temp_directory_path() / "aura-session-atomic-contract.xml";
-    Aura::Core::IO::SessionIO::getInstance().saveProject(sessionProbe.string(), {});
-    Aura::Core::IO::SessionIO::getInstance().saveProject(
-        sessionProbe.string(), {std::shared_ptr<Aura::Core::Engine::Track>{}});
+    if (Hirari::Core::IO::SessionIO::unescapeXmlAttribute(
+            Hirari::Core::IO::SessionIO::escapeXmlAttribute(xmlProbe)) != xmlProbe) return 81;
+    const auto sessionProbe = std::filesystem::temp_directory_path() / "hirari-session-atomic-contract.xml";
+    Hirari::Core::IO::SessionIO::getInstance().saveProject(sessionProbe.string(), {});
+    Hirari::Core::IO::SessionIO::getInstance().saveProject(
+        sessionProbe.string(), {std::shared_ptr<Hirari::Core::Engine::Track>{}});
     std::ifstream sessionInput(sessionProbe, std::ios::binary);
     const std::string sessionXml((std::istreambuf_iterator<char>(sessionInput)), {});
     std::error_code sessionCleanup;
     std::filesystem::remove(sessionProbe, sessionCleanup);
-    if (sessionXml.find("<AuraProject") == std::string::npos ||
-        sessionXml.find("</AuraProject>") == std::string::npos) return 82;
+    if (sessionXml.find("<HirariProject") == std::string::npos ||
+        sessionXml.find("</HirariProject>") == std::string::npos) return 82;
     for (const auto& entry : std::filesystem::directory_iterator(sessionProbe.parent_path())) {
         const auto name = entry.path().filename().string();
-        if (name.rfind("aura-session-atomic-contract.xml.tmp-", 0) == 0) return 83;
+        if (name.rfind("hirari-session-atomic-contract.xml.tmp-", 0) == 0) return 83;
     }
     {
         SDKContractFactory factory;
         const auto descriptor = factory.getDescriptor();
-        if (descriptor.sdkVersion != Aura::SDK::kSDKVersion ||
-            descriptor.identifier != "com.aura.sdk.contract" ||
+        if (descriptor.sdkVersion != Hirari::SDK::kSDKVersion ||
+            descriptor.identifier != "com.hirari.sdk.contract" ||
             descriptor.parameters.size() != 1 || !descriptor.supportsSidechain ||
             descriptor.stateSchemaVersion == 0 || descriptor.guiStateSchemaVersion == 0 ||
             !descriptor.isValid()) return 65;
@@ -75,8 +75,8 @@ int main() {
         invalid.parameters[0].defaultValue = 2.0f;
         if (invalid.isValid()) return 69;
         const auto cache_key = descriptor.stateCacheKey();
-        if (cache_key.find("com.aura.sdk.contract@1.0.0") == std::string::npos) return 70;
-        if (Aura::Core::Plugins::PluginCacheManager::stateCacheKey(descriptor) != cache_key) return 72;
+        if (cache_key.find("com.hirari.sdk.contract@1.0.0") == std::string::npos) return 70;
+        if (Hirari::Core::Plugins::PluginCacheManager::stateCacheKey(descriptor) != cache_key) return 72;
         invalid = descriptor;
         invalid.stateSchemaVersion++;
         if (invalid.stateCacheKey() == cache_key) return 71;
@@ -100,7 +100,7 @@ int main() {
         invalid.components.push_back({"other", 1, 1, true});
         invalid.supportsSidechain = false;
         if (invalid.isValid()) return 80;
-        Aura::SDK::ParameterAutomation automation;
+        Hirari::SDK::ParameterAutomation automation;
         if (!automation.setPoints({{100, 1.0f}, {0, 0.0f}, {200, 0.5f}}) ||
             automation.valueAt(50, -1.0f) != 0.5f ||
             automation.valueAt(250, -1.0f) != 0.5f) return 77;
@@ -113,7 +113,7 @@ int main() {
         factory.destroy(std::move(processor));
     }
     {
-        auto& legacySidechain = Aura::Core::DSP::Mixing::SidechainManager::getInstance();
+        auto& legacySidechain = Hirari::Core::DSP::Mixing::SidechainManager::getInstance();
         const float source[4] = {1.0f, 2.0f, 3.0f, 4.0f};
         if (!legacySidechain.writeSource(7, source, 4)) return 63;
         float copy[4] = {};
@@ -122,10 +122,10 @@ int main() {
     }
     // This translation unit intentionally exercises the production native
     // plugin boundary without loading a third-party binary.
-    auto& pool = Aura::Core::Concurrency::ThreadPool::getInstance();
+    auto& pool = Hirari::Core::Concurrency::ThreadPool::getInstance();
     auto poolResult = pool.enqueue([] { return 42; });
     if (poolResult.get() != 42) return 47;
-    const auto peakWav = std::filesystem::temp_directory_path() / "aura-audio-pool-peaks.wav";
+    const auto peakWav = std::filesystem::temp_directory_path() / "hirari-audio-pool-peaks.wav";
     {
         std::vector<uint8_t> wav;
         const auto u16 = [&wav](uint16_t value) {
@@ -146,12 +146,12 @@ int main() {
         std::ofstream output(peakWav, std::ios::binary | std::ios::trunc);
         output.write(reinterpret_cast<const char*>(wav.data()), static_cast<std::streamsize>(wav.size()));
     }
-    auto& audioPool = Aura::Core::AudioPool::getInstance();
+    auto& audioPool = Hirari::Core::AudioPool::getInstance();
     if (audioPool.addSource((peakWav.string() + ".missing")) != nullptr) return 50;
     const auto peakSource = audioPool.addSource(peakWav.string());
     if (!peakSource) return 48;
     const auto peakDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    std::shared_ptr<Aura::Core::PeakData> peaks;
+    std::shared_ptr<Hirari::Core::PeakData> peaks;
     while (std::chrono::steady_clock::now() < peakDeadline) {
         peaks = audioPool.getPeaks(peakWav.string());
         if (peaks && peaks->isReady.load(std::memory_order_acquire)) break;
@@ -165,37 +165,37 @@ int main() {
     // These hosts embed fixed-size realtime mailboxes. Keep them off the
     // test's main stack so the contract remains runnable on macOS's default
     // 8 MiB thread stack even when the sandbox protocol grows.
-    auto vst3 = std::make_unique<Aura::Core::Plugins::VST3HostProcessor>();
-    auto clap = std::make_unique<Aura::Core::Plugins::CLAPHostProcessor>();
+    auto vst3 = std::make_unique<Hirari::Core::Plugins::VST3HostProcessor>();
+    auto clap = std::make_unique<Hirari::Core::Plugins::CLAPHostProcessor>();
     // The built-in compressor is part of the production plugin contract, not
     // merely a header-only type. Exercise prepare/process/parameter/state so
     // a future refactor cannot leave the browser-visible plugin unlinked.
     {
-        Aura::DSP::Effects::DynamicCompressor compressor;
+        Hirari::DSP::Effects::DynamicCompressor compressor;
         compressor.prepareToPlay(48'000.0, 128);
         compressor.setParameter(0, 0.7f);
         compressor.setParameter(1, 0.25f);
-        Aura::Core::AudioBuffer block(2, 128);
+        Hirari::Core::AudioBuffer block(2, 128);
         for (uint32_t i = 0; i < block.getNumSamples(); ++i) {
             block.getWritePointer(0)[i] = 0.9f;
             block.getWritePointer(1)[i] = -0.9f;
         }
-        Aura::Core::MidiBuffer midi;
-        Aura::DSP::ProcessContext context{};
+        Hirari::Core::MidiBuffer midi;
+        Hirari::DSP::ProcessContext context{};
         context.sampleRate = 48'000.0;
         context.blockSize = 128;
         compressor.process(block, midi, context);
         if (block.sanitizeNonFinite() != 0 || compressor.getNumParameters() != 7) return 67;
         const auto state = compressor.getState();
-        Aura::DSP::Effects::DynamicCompressor restored;
+        Hirari::DSP::Effects::DynamicCompressor restored;
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }
     // Procedural Foley must be deterministic for offline renders and must
     // fail closed when a UI/FFI caller supplies non-finite event controls.
     {
-        Aura::Core::DSP::Effects::ProceduralFoleyKernel first;
-        Aura::Core::DSP::Effects::ProceduralFoleyKernel second;
+        Hirari::Core::DSP::Effects::ProceduralFoleyKernel first;
+        Hirari::Core::DSP::Effects::ProceduralFoleyKernel second;
         first.triggerEvent(std::numeric_limits<float>::quiet_NaN(), 0.65f);
         second.triggerEvent(0.5f, 0.65f);
         std::array<float, 512> firstBlock{};
@@ -208,10 +208,10 @@ int main() {
         }
     }
     {
-        auto& assetLibrary = Aura::IO::Assets::AudioAssetLibrary::getInstance();
-        assetLibrary.registerPatch("Contract Bass", "Bass", "/tmp/aura-contract-bass.aura");
-        assetLibrary.registerPatch("Contract Drums", "Drums", "/tmp/aura-contract-drums.aura");
-        assetLibrary.registerPatch("Contract Keys", "Keys", "/tmp/aura-contract-keys.aura");
+        auto& assetLibrary = Hirari::IO::Assets::AudioAssetLibrary::getInstance();
+        assetLibrary.registerPatch("Contract Bass", "Bass", "/tmp/hirari-contract-bass.hirari");
+        assetLibrary.registerPatch("Contract Drums", "Drums", "/tmp/hirari-contract-drums.hirari");
+        assetLibrary.registerPatch("Contract Keys", "Keys", "/tmp/hirari-contract-keys.hirari");
         const auto categories = assetLibrary.categories();
         if (categories.size() < 3 || !std::is_sorted(categories.begin(), categories.end()) ||
             std::find(categories.begin(), categories.end(), "Bass") == categories.end() ||
@@ -223,14 +223,14 @@ int main() {
     {
         static std::array<float, 4096> sample{};
         sample.fill(0.25f);
-        auto sampler = std::make_unique<Aura::DSP::Synthesis::SamplerEngine>(48'000.0);
+        auto sampler = std::make_unique<Hirari::DSP::Synthesis::SamplerEngine>(48'000.0);
         sampler->addZone({60, 0, 127, 1, 127, {sample.data(), sample.size()}});
-        auto block = std::make_unique<Aura::Core::AudioBuffer>(2, 32);
-        auto midi = std::make_unique<Aura::Core::MidiBuffer>();
+        auto block = std::make_unique<Hirari::Core::AudioBuffer>(2, 32);
+        auto midi = std::make_unique<Hirari::Core::MidiBuffer>();
         const uint8_t umpOn[] = {0x40, 0x90, 60, 0, 0x7f, 0, 0, 0,
                                  0, 0, 0, 0, 0, 0, 0, 0};
         midi->addEvent(0, umpOn, sizeof(umpOn));
-        Aura::DSP::ProcessContext context{};
+        Hirari::DSP::ProcessContext context{};
         context.sampleRate = 48'000.0;
         context.blockSize = 32;
         sampler->process(*block, *midi, context);
@@ -253,13 +253,13 @@ int main() {
     {
         static std::array<float, 8> loopSample{};
         for (size_t i = 0; i < loopSample.size(); ++i) loopSample[i] = 0.1f + 0.1f * static_cast<float>(i);
-        auto sampler = std::make_unique<Aura::DSP::Synthesis::SamplerEngine>(48'000.0);
+        auto sampler = std::make_unique<Hirari::DSP::Synthesis::SamplerEngine>(48'000.0);
         sampler->addZone({60, 60, 60, 1, 127, {loopSample.data(), loopSample.size()}, 2, 6, true});
-        auto block = std::make_unique<Aura::Core::AudioBuffer>(1, 32);
-        auto midi = std::make_unique<Aura::Core::MidiBuffer>();
+        auto block = std::make_unique<Hirari::Core::AudioBuffer>(1, 32);
+        auto midi = std::make_unique<Hirari::Core::MidiBuffer>();
         const uint8_t noteOn[] = {0x90, 60, 127};
         midi->addEvent(0, noteOn, sizeof(noteOn));
-        Aura::DSP::ProcessContext context{};
+        Hirari::DSP::ProcessContext context{};
         context.sampleRate = 48'000.0;
         context.blockSize = 32;
         sampler->process(*block, *midi, context);
@@ -270,35 +270,35 @@ int main() {
         if (!hasTail) return 75;
     }
     {
-        Aura::Synthesis::SamplerMap map;
+        Hirari::Synthesis::SamplerMap map;
         map.addZone(-1, 60, 1, 127, "invalid.wav");
         map.addZone(0, 127, 0, 127, "layer-a.wav");
         map.addZone(0, 127, 0, 127, "layer-b.wav");
         if (map.resolveSample(60, 100).empty() || map.resolveSample(60, 100).empty()) return 72;
-        Aura::Synthesis::SamplerMap independent;
+        Hirari::Synthesis::SamplerMap independent;
         independent.addZone(0, 127, 0, 127, "layer-a.wav");
         if (independent.resolveSample(60, 100) != "layer-a.wav") return 73;
     }
-    Aura::Core::PluginHost::ClapHostInterface legacyClap("builtin://compile-contract");
-    Aura::Core::Engine::MIDIOrchestrator midiOrchestrator;
+    Hirari::Core::PluginHost::ClapHostInterface legacyClap("builtin://compile-contract");
+    Hirari::Core::Engine::MIDIOrchestrator midiOrchestrator;
     // The sandbox host owns bounded shared-memory staging arrays sized for
     // the maximum plugin protocol block. Allocate it on the heap to keep
     // this broad native contract below the platform thread-stack limit.
-    auto sandbox = std::make_unique<Aura::Core::Plugins::PluginSandboxHost>("builtin://compile-contract");
-    Aura::Core::EffectChain chain;
-    Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode recovery =
+    auto sandbox = std::make_unique<Hirari::Core::Plugins::PluginSandboxHost>("builtin://compile-contract");
+    Hirari::Core::EffectChain chain;
+    Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode recovery =
         sandbox->isAlive()
-            ? Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock
-            : Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined;
-    static_assert(Aura::Core::Plugins::SandboxProtocol::kStatusHeaderV9 == 0x41555209u);
-    static_assert(Aura::Core::Plugins::SandboxProtocol::kStateProtocolVersion == 1u);
-    static_assert(static_cast<unsigned>(Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock) == 0u);
-    static_assert(static_cast<unsigned>(Aura::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined) == 1u);
-    if (!Aura::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
-            Aura::Core::Plugins::SandboxProtocol::kStateProtocolVersion) ||
-        Aura::Core::Plugins::SandboxProtocol::isSupportedStateVersion(0u) ||
-        Aura::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
-            Aura::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
+            ? Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock
+            : Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined;
+    static_assert(Hirari::Core::Plugins::SandboxProtocol::kStatusHeaderV9 == 0x41555209u);
+    static_assert(Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion == 1u);
+    static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock) == 0u);
+    static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined) == 1u);
+    if (!Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
+            Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion) ||
+        Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(0u) ||
+        Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
+            Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
     (void)vst3;
     (void)clap;
     (void)legacyClap;
@@ -310,12 +310,12 @@ int main() {
     // The legacy structural wrapper must remain ABI-compatible with the
     // current processor interface while refusing to masquerade as a loaded
     // third-party plugin. Real processing is covered by the format adapters.
-    Aura::Core::PluginHost::ExternalPluginWrapper legacyExternal(
-        Aura::Core::PluginHost::ExternalPluginWrapper::Format::VST3,
+    Hirari::Core::PluginHost::ExternalPluginWrapper legacyExternal(
+        Hirari::Core::PluginHost::ExternalPluginWrapper::Format::VST3,
         "builtin://unsupported-compat-wrapper");
     if (legacyExternal.supportsProcessing()) return 65;
 
-    auto& undo = Aura::Core::Undo::UndoManager::getInstance();
+    auto& undo = Hirari::Core::Undo::UndoManager::getInstance();
     undo.clear();
     int transactionValue = 0;
     undo.beginTransaction("partial-operation");
@@ -325,10 +325,10 @@ int main() {
     undo.abortTransaction();
     if (transactionValue != 0 || undo.transactionActive() || undo.getUndoCount() != 0) return 17;
 
-    auto& engineUndo = Aura::Core::Engine::UndoTransactionManager::getInstance();
+    auto& engineUndo = Hirari::Core::Engine::UndoTransactionManager::getInstance();
     engineUndo.clear();
 
-    Aura::Core::AudioBuffer finiteContract(1, 3);
+    Hirari::Core::AudioBuffer finiteContract(1, 3);
     finiteContract.getWritePointer(0)[0] = 1.0f;
     finiteContract.getWritePointer(0)[1] = std::numeric_limits<float>::quiet_NaN();
     finiteContract.getWritePointer(0)[2] = std::numeric_limits<float>::infinity();
@@ -338,12 +338,12 @@ int main() {
 
     // The graph must contain third-party faults: non-finite samples are
     // sanitized without allocation and remain finite on subsequent blocks.
-    Aura::Core::AudioProcessorGraph graphContract;
+    Hirari::Core::AudioProcessorGraph graphContract;
     graphContract.addNode(std::make_shared<NonFiniteProcessor>());
     graphContract.prepare(48'000.0, 8);
-    Aura::Core::AudioBuffer graphBuffer(1, 8);
-    Aura::Core::MidiBuffer graphMidi;
-    Aura::DSP::ProcessContext graphContext{};
+    Hirari::Core::AudioBuffer graphBuffer(1, 8);
+    Hirari::Core::MidiBuffer graphMidi;
+    Hirari::DSP::ProcessContext graphContext{};
     graphContext.sampleRate = 48'000.0;
     graphContext.blockSize = 8;
     graphContext.numOutputChannels = 1;
@@ -380,14 +380,14 @@ int main() {
     engineUndo.clear();
 
     const auto autosavePath = std::filesystem::temp_directory_path() /
-        ("aura-autosave-contract-" + std::to_string(
+        ("hirari-autosave-contract-" + std::to_string(
 #if !defined(_WIN32)
             static_cast<unsigned long long>(::getpid())
 #else
             0ULL
 #endif
         ) + ".json");
-    auto& autosave = Aura::IO::Persistence::AutoSaveEngine::getInstance();
+    auto& autosave = Hirari::IO::Persistence::AutoSaveEngine::getInstance();
     autosave.start(autosavePath.string(), 60, [] { return std::string("{\"ok\":true}"); });
     autosave.markModified();
     if (!autosave.flushNow() || autosave.isDirty()) return 23;
@@ -398,9 +398,9 @@ int main() {
     // A failed DB publication must not remove the last destination. Using a
     // directory as the destination forces rename to fail while making the
     // preservation invariant directly observable.
-    auto& projectDb = Aura::Core::Database::ProjectDB::i();
+    auto& projectDb = Hirari::Core::Database::ProjectDB::i();
     projectDb.recordForensic("contract", "publication", "preserve-last-good");
-    const auto dbDestination = std::filesystem::temp_directory_path() / "aura-project-db-contract-destination";
+    const auto dbDestination = std::filesystem::temp_directory_path() / "hirari-project-db-contract-destination";
     std::error_code dbCleanup;
     std::filesystem::remove_all(dbDestination, dbCleanup);
     std::filesystem::create_directory(dbDestination, dbCleanup);
@@ -410,14 +410,14 @@ int main() {
 
     // A newer asset batch must prevent an older worker from publishing stale
     // results or failure diagnostics into the current project.
-    auto& assets = Aura::IO::ParallelAssetManager::getInstance();
-    assets.loadAssets({"/definitely/missing/aura-old.wav"});
+    auto& assets = Hirari::IO::ParallelAssetManager::getInstance();
+    assets.loadAssets({"/definitely/missing/hirari-old.wav"});
     if (assets.failedPaths().empty()) return 25;
 
     // Native project collection must preserve distinct same-basename assets
     // instead of silently reusing the first destination.
     const auto collectorRoot = std::filesystem::temp_directory_path() /
-                               "aura-project-collector-contract";
+                               "hirari-project-collector-contract";
     std::error_code collectorCleanup;
     std::filesystem::remove_all(collectorRoot, collectorCleanup);
     std::filesystem::create_directories(collectorRoot / "one", collectorCleanup);
@@ -427,7 +427,7 @@ int main() {
     const auto collectorSecond = collectorRoot / "two" / "same.wav";
     std::ofstream(collectorFirst) << "first";
     std::ofstream(collectorSecond) << "second";
-    auto& collector = Aura::IO::Persistence::ProjectCollector::getInstance();
+    auto& collector = Hirari::IO::Persistence::ProjectCollector::getInstance();
     if (!collector.collect(collectorRoot.string(),
                            {collectorFirst.string(), collectorSecond.string()})) return 67;
     size_t collectedCount = 0;
@@ -437,26 +437,26 @@ int main() {
     std::filesystem::remove_all(collectorRoot, collectorCleanup);
     if (collectedCount != 2) return 68;
 
-    auto& telemetryBridge = Aura::Network::SharedMemoryBridge::getInstance();
+    auto& telemetryBridge = Hirari::Network::SharedMemoryBridge::getInstance();
     if (!telemetryBridge.start()) return 26;
     const std::string telemetryName = telemetryBridge.segmentName();
-    if (telemetryName.find("/aura_sovereign_bridge_") != 0) return 27;
+    if (telemetryName.find("/hirari_sovereign_bridge_") != 0) return 27;
     std::array<uint8_t, 300> sharedMidiPayload{};
     sharedMidiPayload.front() = 0xf0;
     sharedMidiPayload.back() = 0xf7;
     if (!telemetryBridge.pushExtendedMidi(24, 3, sharedMidiPayload.data(), sharedMidiPayload.size()) ||
         telemetryBridge.pendingExtendedMidi() != 1) return 59;
-    Aura::Core::Plugins::MidiExtendedMessageRing::Message sharedMidiMessage;
+    Hirari::Core::Plugins::MidiExtendedMessageRing::Message sharedMidiMessage;
     if (!telemetryBridge.popExtendedMidi(sharedMidiMessage) ||
         sharedMidiMessage.size != sharedMidiPayload.size() ||
         sharedMidiMessage.sampleOffset != 24 || sharedMidiMessage.articulationId != 3 ||
         sharedMidiMessage.data.front() != 0xf0 || sharedMidiMessage.data[299] != 0xf7) return 60;
-    for (unsigned slot = 0; slot < Aura::Core::Plugins::MidiExtendedMessageRing::kCapacity; ++slot) {
+    for (unsigned slot = 0; slot < Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity; ++slot) {
         if (!telemetryBridge.pushExtendedMidi(slot, 0, sharedMidiPayload.data(), sharedMidiPayload.size())) return 61;
     }
     if (telemetryBridge.pushExtendedMidi(99, 0, sharedMidiPayload.data(), sharedMidiPayload.size()) ||
-        telemetryBridge.pendingExtendedMidi() != Aura::Core::Plugins::MidiExtendedMessageRing::kCapacity) return 62;
-    Aura::Core::Plugins::MidiExtendedMessageRing::Message drainedMessage;
+        telemetryBridge.pendingExtendedMidi() != Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity) return 62;
+    Hirari::Core::Plugins::MidiExtendedMessageRing::Message drainedMessage;
     while (telemetryBridge.popExtendedMidi(drainedMessage)) {}
     if (telemetryBridge.pendingExtendedMidi() != 0) return 63;
     telemetryBridge.stop();
@@ -468,35 +468,35 @@ int main() {
 
     // Payloads beyond the bounded SysEx/MIDI2 envelope must be observable at
     // ingress rather than silently becoming a truncated channel-voice event.
-    Aura::Core::MidiBuffer midiIngress;
+    Hirari::Core::MidiBuffer midiIngress;
     const uint8_t oversizedMidi[257] = {};
     midiIngress.addEvent(0, oversizedMidi, sizeof(oversizedMidi));
     if (!midiIngress.overflowed() || midiIngress.takeOversizeEvents() != 1 ||
         midiIngress.takeExtendedEvents() != 1 || midiIngress.size() != 0) return 15;
 
-    const auto temp = std::filesystem::temp_directory_path() / "aura-plugin-cache-contract.bin";
+    const auto temp = std::filesystem::temp_directory_path() / "hirari-plugin-cache-contract.bin";
     {
         std::ofstream output(temp, std::ios::binary | std::ios::trunc);
         output << "version-one";
     }
-    const auto first = Aura::Core::Plugins::PluginCacheManager::fingerprintForPath(temp);
+    const auto first = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(temp);
     if (!first || *first == 0) return 2;
     {
         std::ofstream output(temp, std::ios::binary | std::ios::trunc);
         output << "version-two-with-a-different-size";
     }
-    const auto second = Aura::Core::Plugins::PluginCacheManager::fingerprintForPath(temp);
+    const auto second = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(temp);
     std::error_code cleanup;
     std::filesystem::remove(temp, cleanup);
     if (!second || *second == *first) return 3;
-    const auto directoryFingerprint = std::filesystem::temp_directory_path() / "aura-plugin-fingerprint-directory";
+    const auto directoryFingerprint = std::filesystem::temp_directory_path() / "hirari-plugin-fingerprint-directory";
     std::filesystem::remove_all(directoryFingerprint, cleanup);
     std::filesystem::create_directories(directoryFingerprint / "nested", cleanup);
     {
         std::ofstream(directoryFingerprint / "z.bin", std::ios::binary) << "z";
         std::ofstream(directoryFingerprint / "nested" / "a.bin", std::ios::binary) << "a";
     }
-    const auto directoryFirst = Aura::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
+    const auto directoryFirst = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
     std::filesystem::remove_all(directoryFingerprint, cleanup);
     std::filesystem::create_directories(directoryFingerprint / "nested", cleanup);
     {
@@ -505,20 +505,20 @@ int main() {
         std::ofstream(directoryFingerprint / "nested" / "a.bin", std::ios::binary) << "a";
         std::ofstream(directoryFingerprint / "z.bin", std::ios::binary) << "z";
     }
-    const auto directorySecond = Aura::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
+    const auto directorySecond = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
     std::filesystem::remove_all(directoryFingerprint, cleanup);
     if (!directoryFirst || !directorySecond || *directoryFirst != *directorySecond) return 4;
-    const auto admittedPath = std::filesystem::temp_directory_path() / "aura-admission-contract.clap";
+    const auto admittedPath = std::filesystem::temp_directory_path() / "hirari-admission-contract.clap";
     {
         std::ofstream output(admittedPath, std::ios::binary | std::ios::trunc);
         output << "fixture-v1";
     }
-    Aura::Core::Plugins::PluginDescriptor admitted;
+    Hirari::Core::Plugins::PluginDescriptor admitted;
     admitted.uuid = "contract-admission-plugin";
     admitted.name = "Admission Contract";
     admitted.format = "CLAP";
     admitted.binaryPath = admittedPath.string();
-    auto& infrastructure = Aura::Core::Plugins::PluginHostInfrastructure::getInstance();
+    auto& infrastructure = Hirari::Core::Plugins::PluginHostInfrastructure::getInstance();
     if (!infrastructure.registerPlugin(admitted)) return 28;
     std::string admissionError;
     admissionError = "stale diagnostic";
@@ -533,29 +533,29 @@ int main() {
     if (infrastructure.createPlugin(admitted.uuid, &admissionError)) return 36;
     if (admissionError.find("rescan required") == std::string::npos) return 37;
     const auto collisionPath = std::filesystem::temp_directory_path() /
-                               "aura-admission-collision.clap";
+                               "hirari-admission-collision.clap";
     {
         std::ofstream output(collisionPath, std::ios::binary | std::ios::trunc);
         output << "collision";
     }
-    Aura::Core::Plugins::PluginDescriptor collision = admitted;
+    Hirari::Core::Plugins::PluginDescriptor collision = admitted;
     collision.binaryPath = collisionPath.string();
-    collision.binaryFingerprint = Aura::Core::Plugins::PluginCacheManager::fingerprintForPath(
+    collision.binaryFingerprint = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(
         collisionPath).value_or(0);
     if (infrastructure.registerPlugin(collision)) return 35;
     std::filesystem::remove(collisionPath, cleanup);
     std::filesystem::remove(admittedPath, cleanup);
 #if !defined(_WIN32)
     const auto symlinkPath = std::filesystem::temp_directory_path() /
-                             "aura-admission-contract-symlink.clap";
+                             "hirari-admission-contract-symlink.clap";
     const auto symlinkTarget = std::filesystem::temp_directory_path() /
-                               "aura-admission-contract-target.clap";
+                               "hirari-admission-contract-target.clap";
     {
         std::ofstream output(symlinkTarget, std::ios::binary | std::ios::trunc);
         output << "target";
     }
     std::filesystem::create_symlink(symlinkTarget, symlinkPath, cleanup);
-    if (Aura::Core::Plugins::PluginAdmission::isSafeCandidate(symlinkPath, "CLAP")) return 31;
+    if (Hirari::Core::Plugins::PluginAdmission::isSafeCandidate(symlinkPath, "CLAP")) return 31;
     std::filesystem::remove(symlinkPath, cleanup);
     std::filesystem::remove(symlinkTarget, cleanup);
 #endif

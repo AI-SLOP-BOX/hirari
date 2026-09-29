@@ -2,7 +2,7 @@
 #include "undo_manager.hpp"
 #include "../midi_region.hpp"
 
-namespace Aura::Core::Undo {
+namespace Hirari::Core::Undo {
 
 /**
  * @class MoveNoteCommand
@@ -42,4 +42,4 @@ private:
     uint8_t m_oldVel, m_newVel;
 };
 
-} // namespace Aura::Core::Undo
+} // namespace Hirari::Core::Undo

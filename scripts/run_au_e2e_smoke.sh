@@ -22,45 +22,45 @@ if ! auval -v aufx dcmp appl; then
 fi
 
 # The in-process AU contract above proves the Apple host API path.  When an
-# actual component bundle is supplied, also exercise Aura's isolated worker.
+# actual component bundle is supplied, also exercise Hirari's isolated worker.
 # In strict release mode, silently omitting this second path would make an AU
 # release claim too broad, so the fixture is required there.
-if [ -z "${AURA_AU_FIXTURE:-}" ]; then
+if [ -z "${HIRARI_AU_FIXTURE:-}" ]; then
     for candidate in \
         "$HOME/Library/Audio/Plug-Ins/Components"/*.component \
         "/Library/Audio/Plug-Ins/Components"/*.component
     do
         if [ -e "$candidate" ]; then
-            AURA_AU_FIXTURE="$candidate"
+            HIRARI_AU_FIXTURE="$candidate"
             break
         fi
     done
 fi
-if [ -z "${AURA_AU_FIXTURE:-}" ]; then
-    if [ "${AURA_RELEASE_MODE:-0}" = "1" ]; then
-        echo "AURA_AU_FIXTURE must point to a real .component bundle in release mode" >&2
+if [ -z "${HIRARI_AU_FIXTURE:-}" ]; then
+    if [ "${HIRARI_RELEASE_MODE:-0}" = "1" ]; then
+        echo "HIRARI_AU_FIXTURE must point to a real .component bundle in release mode" >&2
         exit 1
     fi
-    echo "AU isolated-worker E2E: SKIPPED (set AURA_AU_FIXTURE to a .component bundle)"
+    echo "AU isolated-worker E2E: SKIPPED (set HIRARI_AU_FIXTURE to a .component bundle)"
 else
-    case "$AURA_AU_FIXTURE" in
+    case "$HIRARI_AU_FIXTURE" in
         *.component) : ;;
-        *) echo "AURA_AU_FIXTURE must point to a .component bundle" >&2; exit 2 ;;
+        *) echo "HIRARI_AU_FIXTURE must point to a .component bundle" >&2; exit 2 ;;
     esac
-    test -e "$AURA_AU_FIXTURE"
+    test -e "$HIRARI_AU_FIXTURE"
 fi
 
-AU_HOST_BIN="${AURA_PLUGIN_HOST_BIN:-$ROOT_DIR/build-tools/aura-plugin-host-worker}"
+AU_HOST_BIN="${HIRARI_PLUGIN_HOST_BIN:-$ROOT_DIR/build-tools/hirari-plugin-host-worker}"
 
-OUT=${TMPDIR:-/tmp}/aura-au-host-e2e
+OUT=${TMPDIR:-/tmp}/hirari-au-host-e2e
 c++ -std=c++20 -Wall -Wextra -I. -Isrc \
     tests/au_host_e2e_contract.cpp \
     -framework AudioToolbox -framework AudioUnit -framework CoreAudio -framework CoreFoundation \
     -o "$OUT"
 
-ROUNDS=${AURA_AU_STRESS_ROUNDS:-1}
-case "$ROUNDS" in ''|*[!0-9]*) echo "AURA_AU_STRESS_ROUNDS must be numeric" >&2; exit 2 ;; esac
-[ "$ROUNDS" -gt 0 ] || { echo "AURA_AU_STRESS_ROUNDS must be positive" >&2; exit 2; }
+ROUNDS=${HIRARI_AU_STRESS_ROUNDS:-1}
+case "$ROUNDS" in ''|*[!0-9]*) echo "HIRARI_AU_STRESS_ROUNDS must be numeric" >&2; exit 2 ;; esac
+[ "$ROUNDS" -gt 0 ] || { echo "HIRARI_AU_STRESS_ROUNDS must be positive" >&2; exit 2; }
 i=1
 while [ "$i" -le "$ROUNDS" ]; do
     "$OUT"
@@ -68,10 +68,10 @@ while [ "$i" -le "$ROUNDS" ]; do
 done
 echo "AU host E2E smoke passed (Apple A Dynamics Processor, mono/stereo, rounds=$ROUNDS)"
 
-if [ -n "${AURA_AU_FIXTURE:-}" ]; then
-    AU_PLUGIN_TEST_BIN=${AURA_PLUGIN_TEST_BIN:-}
+if [ -n "${HIRARI_AU_FIXTURE:-}" ]; then
+    AU_PLUGIN_TEST_BIN=${HIRARI_PLUGIN_TEST_BIN:-}
     if [ -z "$AU_PLUGIN_TEST_BIN" ]; then
-        cargo test -p aura-core-bridge --test plugin_sandbox_workflow --no-run --quiet
+        cargo test -p hirari-core-bridge --test plugin_sandbox_workflow --no-run --quiet
         AU_PLUGIN_TEST_BIN=$(find "$ROOT_DIR/target/debug/deps" -type f -perm -111 \
             -name 'plugin_sandbox_workflow-*' -print0 | xargs -0 ls -t 2>/dev/null | head -n 1)
     fi
@@ -90,23 +90,23 @@ if [ -n "${AURA_AU_FIXTURE:-}" ]; then
     }
     run_plugin_test \
         isolated_plugin_worker_survives_audio_reconfiguration \
-        AURA_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
-        AURA_AU_FIXTURE="$AURA_AU_FIXTURE"
+        HIRARI_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
+        HIRARI_AU_FIXTURE="$HIRARI_AU_FIXTURE"
     run_plugin_test \
         real_instrument_state_restore_keeps_note_audio_finite \
-        AURA_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
-        AURA_INSTRUMENT_FIXTURE="$AURA_AU_FIXTURE"
+        HIRARI_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
+        HIRARI_INSTRUMENT_FIXTURE="$HIRARI_AU_FIXTURE"
     run_plugin_test \
         real_plugin_worker_fault_is_quarantined_without_nonfinite_audio \
-        AURA_PLUGIN_TEST_FAULTS=1 \
-        AURA_PLUGIN_WORKER_CRASH_AFTER_BLOCKS=2 \
-        AURA_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
-        AURA_AU_FIXTURE="$AURA_AU_FIXTURE"
+        HIRARI_PLUGIN_TEST_FAULTS=1 \
+        HIRARI_PLUGIN_WORKER_CRASH_AFTER_BLOCKS=2 \
+        HIRARI_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
+        HIRARI_AU_FIXTURE="$HIRARI_AU_FIXTURE"
     run_plugin_test \
         real_plugin_overruns_quarantine_then_recover_audio_and_midi \
-        AURA_PLUGIN_TEST_FAULTS=1 \
-        AURA_PLUGIN_WORKER_DELAY_MS=100 \
-        AURA_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
-        AURA_AU_FIXTURE="$AURA_AU_FIXTURE"
-    echo "AU isolated-worker E2E passed: $AURA_AU_FIXTURE"
+        HIRARI_PLUGIN_TEST_FAULTS=1 \
+        HIRARI_PLUGIN_WORKER_DELAY_MS=100 \
+        HIRARI_PLUGIN_HOST_BIN="$AU_HOST_BIN" \
+        HIRARI_AU_FIXTURE="$HIRARI_AU_FIXTURE"
+    echo "AU isolated-worker E2E passed: $HIRARI_AU_FIXTURE"
 fi

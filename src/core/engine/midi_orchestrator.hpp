@@ -1,98 +1,91 @@
 #pragma once
 
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <vector>
-#include <string>
-#include <memory>
-#include <atomic>
-#include <array>
-#include <mutex>
 #include "../midi_buffer.hpp"
-#include "../utils/ring_buffer.hpp"
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
-/**
- * @struct MPENoteState
- * @brief State tracking for a single MPE note-per-channel.
- */
-struct MPENoteState {
-    bool active = false;
-    uint8_t noteNumber;
-    uint8_t channel;
-    float pressure;
-    float timbre;
-    float bend;
-};
-
-/**
- * @class MIDIOrchestrator
- * @brief Industrial MIDI orchestration engine.
- * Handles MPE, SysEx handshakes, and Articulation ID mapping at scale.
- */
+// Compatibility facade. MPE state, articulation routing, and SysEx queue
+// ownership all live in the Rust MIDI orchestration runtime.
 class MIDIOrchestrator {
 public:
-    MIDIOrchestrator() : m_mpeEnabled(false) { m_mpeNotes.fill({}); }
-
-    void setMPEEnabled(bool enabled) noexcept {
-        m_mpeEnabled.store(enabled, std::memory_order_release);
-        m_resetMpe.store(true, std::memory_order_release);
-    }
-    /** @brief Clears session-scoped expression, articulation, and SysEx state. */
-    void reset() noexcept {
-        m_mpeEnabled.store(false, std::memory_order_release);
-        m_resetMpe.store(false, std::memory_order_release);
-        m_mpeNotes.fill({});
-        m_artBuffers[0].count = 0;
-        m_artBuffers[1].count = 0;
-        m_activeArtIdx.store(0, std::memory_order_release);
-        std::lock_guard<std::mutex> lock(m_sysExProducerMutex);
-        m_sysExQueue.clear();
-    }
-    bool isMPEEnabled() const noexcept {
-        return m_mpeEnabled.load(std::memory_order_acquire);
-    }
-
-    void processMPE(MidiBuffer& buffer);
-
-    // --- SYSEX ORCHESTRATION ---
     struct SysExBuffer {
-        uint32_t manufacturerId;
+        uint32_t manufacturerId = 0;
         std::vector<uint8_t> data;
     };
-    void sendSysEx(const SysExBuffer& buffer);
-    void handleIncomingSysEx(const uint8_t* data, size_t size);
-    bool tryPopSysEx(SysExBuffer& buffer) noexcept;
 
-    // --- ARTICULATION ORCHESTRATION ---
     struct ArticulationMap {
-        uint32_t id;
-        char name[64];
-        uint32_t triggerChannel;
+        uint32_t id = 0;
+        char name[64]{};
+        uint32_t triggerChannel = 0;
     };
-    void setArticulationMap(const std::vector<ArticulationMap>& maps);
 
-    // --- REAL-TIME DISPATCH ---
-    void processBlock(MidiBuffer& buffer);
+    static_assert(sizeof(ArticulationMap) == 72);
+    static_assert(offsetof(ArticulationMap, triggerChannel) == 68);
+
+    MIDIOrchestrator() : m_state(hirari_mpe_state_create()) {}
+    ~MIDIOrchestrator() { hirari_mpe_state_free(m_state); }
+
+    MIDIOrchestrator(const MIDIOrchestrator&) = delete;
+    MIDIOrchestrator& operator=(const MIDIOrchestrator&) = delete;
+
+    void setMPEEnabled(bool enabled) noexcept {
+        hirari_mpe_state_set_enabled(m_state, enabled);
+    }
+
+    void reset() noexcept { hirari_mpe_state_reset(m_state); }
+
+    bool isMPEEnabled() const noexcept {
+        return hirari_mpe_state_is_enabled(m_state);
+    }
+
+    void processMPE(MidiBuffer& buffer) noexcept {
+        hirari_midi_process_mpe(m_state, buffer.getEvents(), buffer.size());
+    }
+
+    void setArticulationMap(const std::vector<ArticulationMap>& maps) noexcept {
+        hirari_mpe_set_articulation_map(m_state, maps.data(), maps.size());
+    }
+
+    void sendSysEx(const SysExBuffer& message) noexcept {
+        if (message.data.empty() || message.data.size() > 4096) return;
+        (void)hirari_mpe_sysex_send(
+            m_state, message.manufacturerId, message.data.data(), message.data.size());
+    }
+
+    void handleIncomingSysEx(const uint8_t* data, size_t size) noexcept {
+        (void)hirari_mpe_sysex_incoming(m_state, data, size);
+    }
+
+    bool tryPopSysEx(SysExBuffer& message) noexcept {
+        uint32_t manufacturer = 0;
+        const size_t required = hirari_mpe_sysex_pop(
+            m_state, &manufacturer, nullptr, 0);
+        if (required == 0) return false;
+        message.data.resize(required);
+        const size_t copied = hirari_mpe_sysex_pop(
+            m_state, &manufacturer, message.data.data(), message.data.size());
+        if (copied == 0 || copied > required) {
+            message.data.clear();
+            return false;
+        }
+        message.data.resize(copied);
+        message.manufacturerId = manufacturer;
+        return true;
+    }
+
+    void processBlock(MidiBuffer& buffer) noexcept {
+        processMPE(buffer);
+        hirari_midi_apply_articulations_from_state(
+            m_state, buffer.getMutableEvents(), buffer.size());
+    }
 
 private:
-    std::atomic<bool> m_mpeEnabled;
-    std::atomic<bool> m_resetMpe{false};
-    std::array<MPENoteState, 16> m_mpeNotes;
-    
-    // Double-Buffered Articulation Maps for Lock-Free RT Access
-    struct ArticulationBuffer {
-        ArticulationMap maps[64];
-        uint32_t count = 0;
-    };
-    ArticulationBuffer m_artBuffers[2];
-    std::atomic<uint32_t> m_activeArtIdx{0};
-
-    // Lock-Free SysEx Queue
-    ::Aura::Core::RingBuffer<SysExBuffer, 32> m_sysExQueue;
-    // RingBuffer is SPSC; serialize control-side producers (outgoing sends
-    // and incoming-device dispatch) before publishing into it.
-    std::mutex m_sysExProducerMutex;
+    HirariMpeState* m_state = nullptr;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

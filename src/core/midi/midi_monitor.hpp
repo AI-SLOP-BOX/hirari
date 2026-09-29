@@ -5,7 +5,7 @@
 #include <deque>
 #include <vector>
 
-namespace Aura::Core::MIDI {
+namespace Hirari::Core::MIDI {
 
 struct MonitorEvent { uint64_t timestamp = 0; uint8_t status = 0, data1 = 0, data2 = 0; };
 struct ChannelStats { uint64_t messages = 0, notesOn = 0, notesOff = 0, controllers = 0, pitchBends = 0; };

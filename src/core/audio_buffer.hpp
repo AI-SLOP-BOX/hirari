@@ -3,25 +3,17 @@
 #include <vector>
 #include <algorithm>
 #include <memory>
-#include <cstring>
 #include <atomic>
 #include <new>
-#include <cstdlib>
 #include <limits>
 #include <cmath>
 #include "status_queue.hpp"
-#if defined(_WIN32)
-#include <malloc.h>
-#else
+#include "rust_ffi.hpp"
+#if !defined(_WIN32)
 #include <sys/mman.h>
 #endif
-#if defined(__arm64__) || defined(__aarch64__)
-#include <arm_neon.h>
-#elif defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-#endif
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @brief AudioBuffer: The 'Blood' of the DAW.
@@ -31,13 +23,14 @@ class AudioBuffer {
 public:
     static constexpr uint32_t kMaxFastPathChannels = 16;
 
-    AudioBuffer() : m_numChannels(0), m_numSamples(0), m_capacity(0), m_isExternal(false), m_data(nullptr) {}
+    AudioBuffer() : m_numChannels(0), m_numSamples(0), m_capacity(0),
+                    m_isExternal(false), m_data(nullptr) {}
     
     AudioBuffer(uint32_t channels, uint32_t samples) : AudioBuffer() {
         resize(channels, samples);
     }
 
-    ~AudioBuffer() { releaseOwnedData(); }
+    ~AudioBuffer() { hirari_audio_buffer_storage_destroy(m_storage); }
 
     /**
      * @brief Pins the buffer in physical RAM to prevent kernel page-faults.
@@ -55,15 +48,17 @@ public:
     AudioBuffer(AudioBuffer&& other) noexcept : AudioBuffer() { *this = std::move(other); }
     AudioBuffer& operator=(AudioBuffer&& other) noexcept {
         if (this != &other) {
-            releaseOwnedData();
+            hirari_audio_buffer_storage_destroy(m_storage);
             m_numChannels = other.m_numChannels;
             m_numSamples = other.m_numSamples;
             m_capacity = other.m_capacity;
+            m_storage = other.m_storage;
             m_data = other.m_data;
             m_isExternal = other.m_isExternal;
             m_externalData = other.m_externalData;
             m_isDirty = other.m_isDirty;
             m_pointers = std::move(other.m_pointers);
+            other.m_storage = nullptr;
             other.m_data = nullptr;
             other.m_externalData = nullptr;
             other.m_numChannels = 0;
@@ -115,13 +110,12 @@ public:
                 if (required > std::numeric_limits<size_t>::max() / sizeof(float)) {
                     throw std::bad_array_new_length();
                 }
-                void* raw = allocateAligned(required * sizeof(float));
-                if (raw == nullptr) {
+                if (!m_storage) m_storage = hirari_audio_buffer_storage_create();
+                if (!m_storage || !hirari_audio_buffer_storage_reserve(m_storage, required)) {
                     throw std::bad_alloc();
                 }
-                releaseOwnedData();
-                m_data = static_cast<float*>(raw);
-                m_capacity = required;
+                m_data = hirari_audio_buffer_storage_data(m_storage);
+                m_capacity = hirari_audio_buffer_storage_capacity(m_storage);
                 m_isExternal = false;
             }
             if (needsPointerAllocation) {
@@ -226,32 +220,7 @@ public:
     void clear(uint32_t offset, uint32_t samples) {
         if (offset >= m_numSamples || m_numChannels == 0) return;
         uint32_t n = std::min(samples, m_numSamples - offset);
-        if (m_isExternal) {
-            for (uint32_t c = 0; c < m_numChannels; ++c) {
-                float* p = m_externalData[c] + offset;
-                uint32_t i = 0;
-#if defined(__arm64__) || defined(__aarch64__)
-                float32x4_t zero = vdupq_n_f32(0.0f);
-                for (; i + 15 < n; i += 16) {
-                    vst1q_f32(p + i, zero); vst1q_f32(p + i + 4, zero);
-                    vst1q_f32(p + i + 8, zero); vst1q_f32(p + i + 12, zero);
-                }
-#elif defined(__x86_64__) || defined(_M_X64)
-#if defined(__AVX512F__)
-                __m512 zero = _mm512_setzero_ps();
-                for (; i + 15 < n; i += 16) _mm512_storeu_ps(p + i, zero);
-#else
-                __m256 zero = _mm256_setzero_ps();
-                for (; i + 7 < n; i += 8) _mm256_storeu_ps(p + i, zero);
-#endif
-#endif
-                for (; i < n; ++i) p[i] = 0.0f;
-            }
-        } else if (m_data) {
-            for (uint32_t c = 0; c < m_numChannels; ++c) {
-                std::memset(m_data + (static_cast<size_t>(c) * m_numSamples) + offset, 0, static_cast<size_t>(n) * sizeof(float));
-            }
-        }
+        hirari_audio_buffer_clear(getArrayOfWritePointers(), m_numChannels, offset, n);
         m_isDirty = false;
     }
 
@@ -259,42 +228,18 @@ public:
     // poison the rest of the graph with NaN/Inf; keep the operation allocation
     // free so it is safe on the audio thread.
     uint32_t sanitizeNonFinite() noexcept {
-        uint32_t replaced = 0;
-        for (uint32_t channel = 0; channel < m_numChannels; ++channel) {
-            float* samples = getWritePointer(channel);
-            if (!samples) continue;
-            for (uint32_t sample = 0; sample < m_numSamples; ++sample) {
-                if (!std::isfinite(samples[sample])) {
-                    samples[sample] = 0.0f;
-                    ++replaced;
-                }
-            }
-        }
-        return replaced;
+        if (m_numChannels > 0) m_isDirty = true;
+        return hirari_audio_buffer_sanitize_non_finite(
+            getArrayOfWritePointers(), m_numChannels, m_numSamples);
     }
 
     void addFrom(const AudioBuffer& other, uint32_t numSamples) {
         uint32_t channels = std::min(m_numChannels, other.getNumChannels());
         uint32_t n = std::min(numSamples, std::min(m_numSamples, other.getNumSamples()));
 
-        for (uint32_t c = 0; c < channels; ++c) {
-            float* dst = getWritePointer(c);
-            const float* src = other.getReadPointer(c);
-            uint32_t i = 0;
-
-#if defined(__x86_64__) || defined(_M_X64)
-#if defined(__AVX2__)
-            for (; i + 7 < n; i += 8) {
-                _mm256_storeu_ps(dst + i, _mm256_add_ps(_mm256_loadu_ps(dst + i), _mm256_loadu_ps(src + i)));
-            }
-#endif
-#elif defined(__arm64__) || defined(__aarch64__)
-            for (; i + 3 < n; i += 4) {
-                vst1q_f32(dst + i, vaddq_f32(vld1q_f32(dst + i), vld1q_f32(src + i)));
-            }
-#endif
-            for (; i < n; ++i) dst[i] += src[i];
-        }
+        if (channels > 0) m_isDirty = true;
+        hirari_audio_buffer_add_channels(
+            getArrayOfWritePointers(), other.getArrayOfReadPointers(), channels, n);
     }
 
     void addFrom(const float* srcL, const float* srcR, uint32_t numSamples) {
@@ -307,37 +252,9 @@ public:
 
         float* dL = getWritePointer(0);
         float* dR = m_numChannels > 1 ? getWritePointer(1) : nullptr;
-
-        uint32_t i = 0;
-#if defined(__x86_64__) || defined(_M_X64)
-    #if defined(__AVX2__)
-        if (dR) {
-            for (; i + 7 < n; i += 8) {
-                _mm256_storeu_ps(dL + i, _mm256_add_ps(_mm256_loadu_ps(dL + i), _mm256_loadu_ps(srcL + i)));
-                _mm256_storeu_ps(dR + i, _mm256_add_ps(_mm256_loadu_ps(dR + i), _mm256_loadu_ps(srcR + i)));
-            }
-        } else {
-            for (; i + 7 < n; i += 8) {
-                _mm256_storeu_ps(dL + i, _mm256_add_ps(_mm256_loadu_ps(dL + i), _mm256_loadu_ps(srcL + i)));
-            }
-        }
-    #endif
-#elif defined(__arm64__) || defined(__aarch64__)
-        if (dR) {
-            for (; i + 3 < n; i += 4) {
-                vst1q_f32(dL + i, vaddq_f32(vld1q_f32(dL + i), vld1q_f32(srcL + i)));
-                vst1q_f32(dR + i, vaddq_f32(vld1q_f32(dR + i), vld1q_f32(srcR + i)));
-            }
-        } else {
-            for (; i + 3 < n; i += 4) {
-                vst1q_f32(dL + i, vaddq_f32(vld1q_f32(dL + i), vld1q_f32(srcL + i)));
-            }
-        }
-#endif
-        for (; i < n; ++i) {
-            dL[i] += srcL[i];
-            if (dR) dR[i] += srcR[i];
-        }
+        float* destinations[] = {dL, dR};
+        const float* sources[] = {srcL, srcR};
+        hirari_audio_buffer_add_channels(destinations, sources, dR ? 2u : 1u, n);
     }
 
     void applyGain(float gain) {
@@ -345,10 +262,9 @@ public:
         // surface. Reject non-finite values at the buffer boundary instead
         // of spreading NaN/Inf through every downstream processor.
         if (!std::isfinite(gain) || gain == 1.0f) return;
-        for (uint32_t c = 0; c < m_numChannels; ++c) {
-            float* p = getWritePointer(c);
-            for (uint32_t i = 0; i < m_numSamples; ++i) p[i] *= gain;
-        }
+        if (m_numChannels > 0) m_isDirty = true;
+        hirari_audio_buffer_apply_gain(
+            getArrayOfWritePointers(), m_numChannels, m_numSamples, gain);
     }
 
     uint32_t getNumChannels() const { return m_numChannels; }
@@ -361,9 +277,8 @@ public:
             if (!resize(2, numSamples)) return false;
         }
         m_isDirty = true;
-        std::memcpy(getWritePointer(0), l, numSamples * sizeof(float));
-        std::memcpy(getWritePointer(1), r, numSamples * sizeof(float));
-        return true;
+        return hirari_audio_buffer_copy(
+            getWritePointer(0), getWritePointer(1), l, r, numSamples);
     }
 
     float getMagnitude(uint32_t channel) const {
@@ -373,35 +288,7 @@ public:
     float getMagnitude(uint32_t channel, uint32_t start, uint32_t len) const {
         if (isEmpty() || channel >= m_numChannels || start >= m_numSamples) return 0.0f;
         uint32_t n = std::min(len, m_numSamples - start);
-        const float* p = getReadPointer(channel) + start;
-        float maxVal = 0.0f;
-        uint32_t i = 0;
-
-#if defined(__arm64__) || defined(__aarch64__)
-        float32x4_t vMax = vdupq_n_f32(0.0f);
-        for (; i + 15 < n; i += 16) {
-            float32x4_t v0 = vabsq_f32(vld1q_f32(p + i));
-            float32x4_t v1 = vabsq_f32(vld1q_f32(p + i + 4));
-            float32x4_t v2 = vabsq_f32(vld1q_f32(p + i + 8));
-            float32x4_t v3 = vabsq_f32(vld1q_f32(p + i + 12));
-            vMax = vmaxq_f32(vMax, vmaxq_f32(vmaxq_f32(v0, v1), vmaxq_f32(v2, v3)));
-        }
-        maxVal = vmaxvq_f32(vMax);
-#elif defined(__x86_64__) || defined(_M_X64)
-    #if defined(__AVX__)
-        __m256 vMax = _mm256_setzero_ps();
-        __m256 absMask = _mm256_set1_ps(-0.0f);
-        for (; i + 15 < n; i += 16) {
-            __m256 v0 = _mm256_andnot_ps(absMask, _mm256_loadu_ps(p + i));
-            __m256 v1 = _mm256_andnot_ps(absMask, _mm256_loadu_ps(p + i + 8));
-            vMax = _mm256_max_ps(vMax, _mm256_max_ps(v0, v1));
-        }
-        alignas(32) float tmp[8]; _mm256_storeu_ps(tmp, vMax);
-        for(int k=0; k<8; ++k) maxVal = std::max(maxVal, tmp[k]);
-    #endif
-#endif
-        for (; i < n; ++i) maxVal = std::max(maxVal, std::abs(p[i]));
-        return maxVal;
+        return hirari_audio_buffer_magnitude(getReadPointer(channel, start), n);
     }
 
     const float* const* getArrayOfReadPointers() const {
@@ -417,26 +304,8 @@ public:
     }
 
 private:
-    static void* allocateAligned(size_t bytes) noexcept {
-        if (bytes == 0) return nullptr;
-#if defined(_WIN32)
-        return _aligned_malloc(bytes, 4096);
-#else
-        void* raw = nullptr;
-        return posix_memalign(&raw, 4096, bytes) == 0 ? raw : nullptr;
-#endif
-    }
-
-    static void freeAligned(void* data) noexcept {
-#if defined(_WIN32)
-        _aligned_free(data);
-#else
-        std::free(data);
-#endif
-    }
-
     void releaseOwnedData() noexcept {
-        if (!m_isExternal && m_data) freeAligned(m_data);
+        hirari_audio_buffer_storage_release(m_storage);
         m_data = nullptr;
         m_capacity = 0;
     }
@@ -465,6 +334,7 @@ private:
     uint32_t m_numChannels;
     uint32_t m_numSamples;
     size_t m_capacity;
+    void* m_storage = nullptr;
     bool m_isExternal = false;
     bool m_isDirty = true;
     float* m_data = nullptr;
@@ -479,4 +349,4 @@ private:
     static inline std::atomic<size_t> m_lastRtCapacity{0};
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

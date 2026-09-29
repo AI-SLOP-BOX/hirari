@@ -7,11 +7,11 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class GranularSynthesisEngine
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements infinite granular DNA and granular focus profiling.
  */
 class GranularSynthesisEngine {
@@ -60,4 +60,4 @@ private:
     GranularDNA m_activeDNA; // --- PHASE 120: GRANULAR DNA ---
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

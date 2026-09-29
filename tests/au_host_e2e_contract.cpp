@@ -5,19 +5,19 @@
 #include "../src/core/plugins/au_host_processor.hpp"
 
 static void run_format(uint32_t channels) {
-    Aura::Core::Plugins::AUHostProcessor processor;
+    Hirari::Core::Plugins::AUHostProcessor processor;
     assert(processor.loadPlugin(kAudioUnitType_Effect, 'dcmp', 'appl'));
     processor.setNumChannels(channels);
     processor.prepareToPlay(48000.0, 128);
     assert(processor.isOperational());
 
-    Aura::Core::AudioBuffer buffer(channels, 128);
+    Hirari::Core::AudioBuffer buffer(channels, 128);
     for (uint32_t channel = 0; channel < channels; ++channel) {
         for (uint32_t frame = 0; frame < 128; ++frame)
             buffer.getWritePointer(channel)[frame] = frame == 0 ? 0.25f : 0.0f;
     }
-    Aura::Core::MidiBuffer midi;
-    Aura::DSP::ProcessContext context{};
+    Hirari::Core::MidiBuffer midi;
+    Hirari::DSP::ProcessContext context{};
     context.sampleRate = 48000.0;
     context.blockSize = 128;
     // Parameter automation must use AU's realtime scheduling API, never

@@ -11,7 +11,7 @@
 #endif
 
 int main() {
-    using Aura::IO::Media::CliMediaProcessor;
+    using Hirari::IO::Media::CliMediaProcessor;
 
     if (CliMediaProcessor::muxAudioToVideo("", "video.mp4", "out.mp4")) return 1;
     if (CliMediaProcessor::batchTrimSilenceUsingSoX({"/definitely/missing-audio.wav"})) return 2;
@@ -21,14 +21,14 @@ int main() {
     // path. If quoting regresses, the injected `touch` creates the marker.
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() /
-        ("aura-cli-media-contract-" + std::to_string(nonce));
+        ("hirari-cli-media-contract-" + std::to_string(nonce));
     std::filesystem::create_directories(root);
     const auto recorder = root / "ffmpeg";
     const auto argvFile = root / "argv.txt";
     const auto marker = root / "injected-marker";
     {
         std::ofstream script(recorder);
-        script << "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$AURA_CLI_ARGV\"\nexit 0\n";
+        script << "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HIRARI_CLI_ARGV\"\nexit 0\n";
     }
     std::filesystem::permissions(
         recorder,
@@ -40,12 +40,12 @@ int main() {
     const std::string oldPathValue = oldPath ? oldPath : "";
     const std::string malicious = (root / ("voice'; touch " + marker.string() + ";.wav")).string();
     ::setenv("PATH", root.c_str(), 1);
-    ::setenv("AURA_CLI_ARGV", argvFile.c_str(), 1);
+    ::setenv("HIRARI_CLI_ARGV", argvFile.c_str(), 1);
     const bool ran = CliMediaProcessor::muxAudioToVideo(
         malicious, "video file.mp4", (root / "render file.mp4").string());
     if (oldPath) ::setenv("PATH", oldPathValue.c_str(), 1);
     else ::unsetenv("PATH");
-    ::unsetenv("AURA_CLI_ARGV");
+    ::unsetenv("HIRARI_CLI_ARGV");
 
     bool exactPathObserved = false;
     if (ran) {

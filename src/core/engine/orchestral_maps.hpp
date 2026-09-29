@@ -4,7 +4,7 @@
 #include <string>
 #include <map>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct ArticulationMap
@@ -86,4 +86,4 @@ private:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

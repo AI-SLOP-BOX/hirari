@@ -7,7 +7,7 @@
 #include <set>
 #include <mutex>
 
-namespace Aura::Core::Composition {
+namespace Hirari::Core::Composition {
 
 enum class ChordType {
     Unknown = 0,
@@ -106,4 +106,4 @@ private:
     std::shared_ptr<HarmonicState> m_lastState;
 };
 
-} // namespace Aura::Core::Composition
+} // namespace Hirari::Core::Composition

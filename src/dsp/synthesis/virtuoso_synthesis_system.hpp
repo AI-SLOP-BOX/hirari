@@ -5,10 +5,10 @@
 #include <algorithm>
 #include <cmath>
 #include "virtuoso_orchestra.hpp"
-#include "aura_sampler_pro.hpp"
+#include "hirari_sampler_pro.hpp"
 #include "synthesis_core.hpp"
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @brief VirtuosoSynthesisSystem: The master synthesis hub of the DAW.
@@ -18,7 +18,7 @@ class VirtuosoSynthesisSystem {
 public:
     explicit VirtuosoSynthesisSystem(double sr) : m_sampleRate(sr) {
         m_orchestra = std::make_unique<VirtuosoOrchestra>(sr);
-        m_sampler = std::make_unique<AuraSamplerPro>(sr);
+        m_sampler = std::make_unique<HirariSamplerPro>(sr);
         m_synth = std::make_unique<SubtractiveSynth>(sr);
     }
 
@@ -49,8 +49,8 @@ public:
 private:
     double m_sampleRate;
     std::unique_ptr<VirtuosoOrchestra> m_orchestra;
-    std::unique_ptr<AuraSamplerPro> m_sampler;
+    std::unique_ptr<HirariSamplerPro> m_sampler;
     std::unique_ptr<SubtractiveSynth> m_synth;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

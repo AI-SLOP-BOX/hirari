@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class CorrelationAnalyzer
@@ -53,4 +53,4 @@ private:
     uint64_t m_count;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

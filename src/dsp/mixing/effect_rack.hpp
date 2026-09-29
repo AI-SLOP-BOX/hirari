@@ -5,7 +5,7 @@
 #include <string>
 #include <cstdint>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief IAudioEffect: Abstract interface for any processable DSP block.
@@ -49,4 +49,4 @@ private:
     std::vector<std::unique_ptr<IAudioEffect>> m_effects;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

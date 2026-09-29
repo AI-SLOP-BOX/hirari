@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <map>
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 
 /**
  * @struct SpectralProfile
@@ -72,4 +72,4 @@ private:
     NeuralMixerKernel() = default;
 };
 
-} // namespace Aura::Core::Mixing
+} // namespace Hirari::Core::Mixing

@@ -15,7 +15,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <dispatch/dispatch.h>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class VideoSystem
@@ -217,4 +217,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

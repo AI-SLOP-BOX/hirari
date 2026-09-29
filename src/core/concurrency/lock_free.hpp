@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <utility>
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @class MPMCQueue
@@ -124,4 +124,4 @@ private:
     alignas(64) std::atomic<size_t> m_readIdx;
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

@@ -4,33 +4,35 @@
         m_volume.store(next,
                        std::memory_order_release);
         m_strip.setGain(v);
+        markProjectLayoutChanged();
     }
     void setPan(float p) {
         invalidateFrozenForEdit();
         const float next = std::isfinite(p) ? std::clamp(p, -1.0f, 1.0f) : 0.0f;
         m_pan.store(next, std::memory_order_release);
         m_strip.setPan(next);
+        markProjectLayoutChanged();
     }
     virtual bool addPlugin(uint32_t pluginType) {
-        // The only currently operational insertion is the built-in Aura
+        // The only currently operational insertion is the built-in Hirari
         // limiter. External formats must fail explicitly; retaining metadata
         // for an instance that cannot process audio is misleading.
         if (pluginType > 10) return false;
 
-        const char* pluginPath = "Aura/Limiter";
-        if (pluginType == 1) pluginPath = "Aura/Compressor";
-        else if (pluginType == 2) pluginPath = "Aura/Gate";
-        else if (pluginType == 3) pluginPath = "Aura/Saturation";
-        else if (pluginType == 4) pluginPath = "Aura/Transient";
-        else if (pluginType == 5) pluginPath = "Aura/DeEsser";
-        else if (pluginType == 6) pluginPath = "Aura/Delay";
-        else if (pluginType == 7) pluginPath = "Aura/Reverb";
-        else if (pluginType == 8) pluginPath = "Aura/DynamicEQ";
-        else if (pluginType == 9) pluginPath = "Aura/MidSide";
-        else if (pluginType == 10) pluginPath = "Aura/Width";
-        auto processor = std::make_shared<Aura::Core::Plugin::ExternalPluginHost>(
+        const char* pluginPath = "Hirari/Limiter";
+        if (pluginType == 1) pluginPath = "Hirari/Compressor";
+        else if (pluginType == 2) pluginPath = "Hirari/Gate";
+        else if (pluginType == 3) pluginPath = "Hirari/Saturation";
+        else if (pluginType == 4) pluginPath = "Hirari/Transient";
+        else if (pluginType == 5) pluginPath = "Hirari/DeEsser";
+        else if (pluginType == 6) pluginPath = "Hirari/Delay";
+        else if (pluginType == 7) pluginPath = "Hirari/Reverb";
+        else if (pluginType == 8) pluginPath = "Hirari/DynamicEQ";
+        else if (pluginType == 9) pluginPath = "Hirari/MidSide";
+        else if (pluginType == 10) pluginPath = "Hirari/Width";
+        auto processor = std::make_shared<Hirari::Core::Plugin::ExternalPluginHost>(
             pluginPath,
-            Aura::Core::Plugin::ExternalPluginHost::Format::Internal);
+            Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);
         if (!processor->isOperational()) return false;
 
         m_effectChain.addProcessor(std::move(processor));
@@ -39,6 +41,7 @@
         if (m_isPrepared) {
             m_effectChain.setSampleRate(m_sampleRate, m_blockSize);
         }
+        markProjectLayoutChanged();
         return true;
     }
 
@@ -47,6 +50,7 @@
         std::shared_ptr<DSP::IProcessor> processor;
         bool bypassed = false;
         bool parallel = false;
+        bool midiInstrument = false;
         std::string sandboxPath;
     };
 
@@ -54,11 +58,14 @@
         if (pluginIndex >= m_pluginTypes.size()) return false;
         EffectChain::Entry removed{};
         if (!m_effectChain.removeProcessor(pluginIndex, &removed)) return false;
+        const bool removedMidiInstrument = removed.processor &&
+            removed.processor->isMidiInstrument();
         if (snapshot) {
             snapshot->type = m_pluginTypes[pluginIndex];
             snapshot->processor = removed.processor;
             snapshot->bypassed = removed.bypassed;
             snapshot->parallel = removed.parallel;
+            snapshot->midiInstrument = removedMidiInstrument;
             if (snapshot->type == 0xFFFFFFFFu) {
                 for (size_t i = 0; i < m_sandboxedPluginIndices.size(); ++i) {
                     if (m_sandboxedPluginIndices[i] == pluginIndex && i < m_sandboxedPluginPaths.size()) {
@@ -69,6 +76,8 @@
             }
         }
         m_pluginTypes.erase(m_pluginTypes.begin() + pluginIndex);
+        if (removedMidiInstrument)
+            m_midiInstrumentPluginCount.fetch_sub(1, std::memory_order_release);
         invalidateFrozenForEdit();
         for (size_t i = 0; i < m_sandboxedPluginIndices.size();) {
             auto& sandboxIndex = m_sandboxedPluginIndices[i];
@@ -81,6 +90,7 @@
             if (sandboxIndex > pluginIndex) --sandboxIndex;
             ++i;
         }
+        markProjectLayoutChanged();
         return true;
     }
 
@@ -91,6 +101,8 @@
         for (auto& sandboxIndex : m_sandboxedPluginIndices)
             if (sandboxIndex >= pluginIndex) ++sandboxIndex;
         m_pluginTypes.insert(m_pluginTypes.begin() + pluginIndex, snapshot.type);
+        if (snapshot.midiInstrument)
+            m_midiInstrumentPluginCount.fetch_add(1, std::memory_order_release);
         if (snapshot.type == 0xFFFFFFFFu) {
             size_t offset = 0;
             while (offset < m_sandboxedPluginIndices.size() &&
@@ -99,6 +111,7 @@
             m_sandboxedPluginPaths.insert(m_sandboxedPluginPaths.begin() + offset, snapshot.sandboxPath);
         }
         invalidateFrozenForEdit();
+        markProjectLayoutChanged();
         return true;
     }
 
@@ -129,6 +142,7 @@
             m_sandboxedPluginPaths.push_back(std::move(entry.second));
         }
         invalidateFrozenForEdit();
+        markProjectLayoutChanged();
         return true;
     }
 
@@ -166,7 +180,7 @@
             m_lastSandboxFailureText = "duplicate-plugin-path";
             return false;
         }
-        auto processor = std::make_shared<Aura::Core::Plugins::ProcessSandboxProcessor>(
+        auto processor = std::make_shared<Hirari::Core::Plugins::ProcessSandboxProcessor>(
             pluginPath, m_sampleRate, std::max<uint32_t>(m_blockSize, 1u));
         bool started = false;
         // Worker creation is a control-thread operation. On macOS, a worker
@@ -181,9 +195,9 @@
             if (started || attempt + 1 == kMaxTransportRetries) break;
             const auto failure = processor->failure();
             const bool transient =
-                failure == Aura::Core::Plugins::PluginSandboxHost::Failure::SpawnFailed ||
-                failure == Aura::Core::Plugins::PluginSandboxHost::Failure::ProcessExited ||
-                failure == Aura::Core::Plugins::PluginSandboxHost::Failure::HandshakeTimeout;
+                failure == Hirari::Core::Plugins::PluginSandboxHost::Failure::SpawnFailed ||
+                failure == Hirari::Core::Plugins::PluginSandboxHost::Failure::ProcessExited ||
+                failure == Hirari::Core::Plugins::PluginSandboxHost::Failure::HandshakeTimeout;
             if (!transient) break;
             processor->stop();
             const auto backoff = std::chrono::milliseconds(25u << static_cast<unsigned>(attempt));
@@ -194,20 +208,25 @@
             m_lastSandboxFailureText = processor->failureCode() == 0
                 ? "sandbox-start-failed"
                 : processor->failureText();
-            Aura::Core::Plugins::PluginCacheManager::getInstance().recordScanFailure(
+            Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanFailure(
                 pluginPath, processor->failureCode());
             return false;
         }
-        Aura::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(pluginPath);
+        Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(pluginPath);
         m_lastSandboxFailure.store(0, std::memory_order_release);
         m_lastSandboxFailureText = "none";
+        const bool midiInstrument = processor->isMidiInstrument();
         const uint32_t processorIndex = static_cast<uint32_t>(m_pluginTypes.size());
         if (m_isPrepared) processor->prepareToPlay(m_sampleRate, m_blockSize);
         m_effectChain.addProcessor(processor);
         m_pluginTypes.push_back(0xFFFFFFFFu);
+        if (midiInstrument)
+            m_midiInstrumentPluginCount.fetch_add(1, std::memory_order_release);
         m_sandboxedPluginPaths.push_back(pluginPath);
         m_sandboxedPluginIndices.push_back(processorIndex);
         if (m_isPrepared) m_effectChain.setSampleRate(m_sampleRate, m_blockSize);
+        invalidateFrozenForEdit();
+        markProjectLayoutChanged();
         return true;
     }
 
@@ -217,11 +236,11 @@
     // plugin output is not merely a readiness signal.
     bool processSandboxedPluginBlock(size_t sandboxIndex, float* left, float* right,
                                      uint32_t frames) {
-        if (!left || !right || frames == 0 || frames > Aura::Core::Plugins::SandboxProtocol::kMaxFrames ||
+        if (!left || !right || frames == 0 || frames > Hirari::Core::Plugins::SandboxProtocol::kMaxFrames ||
             sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
         const uint32_t pluginIndex = m_sandboxedPluginIndices[sandboxIndex];
         auto processor = m_effectChain.getProcessor(pluginIndex);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         if (!sandbox) return false;
         float* channels[2] = {left, right};
         AudioBuffer buffer;
@@ -234,13 +253,13 @@
                                                          const uint8_t* midiData,
                                                          uint32_t midiSize) {
         if (!midiData || midiSize == 0 || frames == 0 ||
-            frames > Aura::Core::Plugins::SandboxProtocol::kMaxFrames ||
+            frames > Hirari::Core::Plugins::SandboxProtocol::kMaxFrames ||
             sandboxIndex >= m_sandboxedPluginIndices.size()) return {};
         const uint32_t pluginIndex = m_sandboxedPluginIndices[sandboxIndex];
         auto processor = m_effectChain.getProcessor(pluginIndex);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         if (!sandbox) return {};
-        if (midiSize > sizeof(Aura::Core::Plugins::SandboxProtocol::MidiEvent::data)) {
+        if (midiSize > sizeof(Hirari::Core::Plugins::SandboxProtocol::MidiEvent::data)) {
             sandbox->recordInputMidiRejection();
             return {};
         }
@@ -275,7 +294,10 @@
     }
     bool setPluginState(size_t pluginIndex, const std::vector<uint8_t>& state) {
         const bool changed = m_effectChain.setProcessorState(static_cast<uint32_t>(pluginIndex), state);
-        if (changed) invalidateFrozenForEdit();
+        if (changed) {
+            invalidateFrozenForEdit();
+            markProjectLayoutChanged();
+        }
         return changed;
     }
     std::vector<std::vector<uint8_t>> getPluginGuiStates() const {
@@ -286,7 +308,9 @@
     }
     bool setPluginGuiState(size_t pluginIndex, const std::vector<uint8_t>& state) {
         if (pluginIndex >= m_pluginTypes.size() || state.size() > 1024u * 1024u) return false;
-        return m_effectChain.setProcessorGuiState(static_cast<uint32_t>(pluginIndex), state);
+        const bool changed = m_effectChain.setProcessorGuiState(static_cast<uint32_t>(pluginIndex), state);
+        if (changed) markProjectLayoutChanged();
+        return changed;
     }
     const std::vector<std::string>& getSandboxedPluginPaths() const { return m_sandboxedPluginPaths; }
     std::vector<std::vector<uint8_t>> getSandboxedPluginStates() const {
@@ -302,19 +326,25 @@
     }
     bool setSandboxedPluginState(size_t sandboxIndex, const std::vector<uint8_t>& state) {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
-        return m_effectChain.setProcessorState(m_sandboxedPluginIndices[sandboxIndex], state);
+        const bool changed = m_effectChain.setProcessorState(
+            m_sandboxedPluginIndices[sandboxIndex], state);
+        if (changed) {
+            invalidateFrozenForEdit();
+            markProjectLayoutChanged();
+        }
+        return changed;
     }
     uint8_t sandboxedPluginStateError(size_t sandboxIndex) const noexcept {
         if (sandboxIndex >= m_sandboxedPluginIndices.size())
-            return Aura::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
+            return Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
         auto processor = m_effectChain.getProcessor(m_sandboxedPluginIndices[sandboxIndex]);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
-        return sandbox ? sandbox->stateErrorCode() : Aura::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        return sandbox ? sandbox->stateErrorCode() : Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
     }
     const char* sandboxedPluginStateErrorText(size_t sandboxIndex) const noexcept {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return "state-unavailable";
         auto processor = m_effectChain.getProcessor(m_sandboxedPluginIndices[sandboxIndex]);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         return sandbox ? sandbox->stateErrorText() : "state-unavailable";
     }
     bool pollSandboxedPluginHealth(size_t sandboxIndex) noexcept {
@@ -324,36 +354,43 @@
         // The sandbox processor is owned by the effect chain. Health checks
         // are control-thread maintenance and never run from processBlock().
         auto processor = m_effectChain.getProcessor(index);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         return sandbox && sandbox->pollHealth();
     }
     bool restartSandboxedPlugin(size_t sandboxIndex) {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
         const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
         auto processor = m_effectChain.getProcessor(index);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         // This entry point is an explicit user/control action, not the
         // background maintenance retry.  It must be allowed to recover a
         // quarantined plugin and reset the bounded automatic-restart budget.
-        return sandbox && sandbox->restart(true);
+        const bool restarted = sandbox && sandbox->restart(true);
+        if (restarted) markProjectLayoutChanged();
+        return restarted;
     }
     bool resetSandboxedPlugin(size_t sandboxIndex) {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
         const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
         auto processor = m_effectChain.getProcessor(index);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         if (!sandbox) return false;
         sandbox->reset();
-        return sandbox->resetPluginControlPlane();
+        const bool reset = sandbox->resetPluginControlPlane();
+        // reset() may already have changed the processor's serialized state,
+        // even when rebuilding its control plane fails.
+        markProjectLayoutChanged();
+        return reset;
     }
     bool retrySandboxedPlugin(size_t sandboxIndex) {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
         const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
         auto processor = m_effectChain.getProcessor(index);
-        auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         const bool restarted = sandbox && sandbox->restart(true);
+        if (restarted) markProjectLayoutChanged();
         if (restarted && sandboxIndex < m_sandboxedPluginPaths.size()) {
-            Aura::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(
+            Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(
                 m_sandboxedPluginPaths[sandboxIndex]);
         }
         return restarted;
@@ -363,17 +400,18 @@
         for (size_t sandboxIndex = 0; sandboxIndex < m_sandboxedPluginIndices.size(); ++sandboxIndex) {
             const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
             auto processor = m_effectChain.getProcessor(index);
-            auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+            auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
             if (!sandbox) continue;
             if (sandbox->pollHealth()) continue;
             if (autoRestart && sandbox->canAutoRetry() && sandbox->autoRestart()) {
                 if (sandboxIndex < m_sandboxedPluginPaths.size()) {
-                    Aura::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(
+                    Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(
                         m_sandboxedPluginPaths[sandboxIndex]);
                 }
                 ++recovered;
             }
         }
+        if (recovered > 0) markProjectLayoutChanged();
         return recovered;
     }
     struct SandboxStatus {
@@ -392,7 +430,7 @@
     const char* lastSandboxFailureText() const noexcept {
         for (const uint32_t index : m_sandboxedPluginIndices) {
             auto processor = m_effectChain.getProcessor(index);
-            auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+            auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
             if (sandbox && sandbox->failureCode() != 0) return sandbox->failureText();
         }
         return m_lastSandboxFailureText.c_str();
@@ -402,7 +440,7 @@
         result.reserve(m_sandboxedPluginIndices.size());
         for (const uint32_t index : m_sandboxedPluginIndices) {
             auto processor = m_effectChain.getProcessor(index);
-            auto* sandbox = dynamic_cast<Aura::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+            auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
             if (!sandbox) continue;
             result.push_back({index, sandbox->isAlive(), sandbox->canRetry(),
                               sandbox->failureCode(), sandbox->takeDroppedOutputMidi(),
@@ -414,7 +452,10 @@
     }
     virtual bool setPluginParameter(uint32_t pluginIndex, uint32_t parameterId, float value) {
         const bool changed = m_effectChain.setParameter(pluginIndex, parameterId, value);
-        if (changed) invalidateFrozenForEdit();
+        if (changed) {
+            invalidateFrozenForEdit();
+            markProjectLayoutChanged();
+        }
         return changed;
     }
     virtual float getPluginParameter(uint32_t pluginIndex, uint32_t parameterId) const noexcept {
@@ -448,6 +489,7 @@
         if (pluginIndex >= m_pluginTypes.size()) return false;
         m_effectChain.setBypass(pluginIndex, bypassed);
         invalidateFrozenForEdit();
+        markProjectLayoutChanged();
         return true;
     }
     bool getPluginBypass(uint32_t pluginIndex) const {

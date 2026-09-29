@@ -8,7 +8,7 @@
 #include "../src/dsp/analysis/drum_replacer.hpp"
 
 int main() {
-    using Aura::DSP::Library::DSPStandardPro;
+    using Hirari::DSP::Library::DSPStandardPro;
 
     // Invalid and even-length FIR requests must fail instead of producing a
     // malformed centre tap or dividing by zero in the Blackman window.
@@ -26,8 +26,8 @@ int main() {
     assert(DSPStandardPro::softClipPro(std::numeric_limits<float>::quiet_NaN(), 1.0f) == 0.0f);
     assert(std::isfinite(DSPStandardPro::softClipPro(0.5f, 2.0f)));
 
-    auto& modulators = Aura::Core::Engine::ModulatorSystem::getInstance();
-    modulators.addModulator(17, std::make_shared<Aura::Core::Engine::LFO>(2.0f), 0.5f);
+    auto& modulators = Hirari::Core::Engine::ModulatorSystem::getInstance();
+    modulators.addModulator(17, std::make_shared<Hirari::Core::Engine::LFO>(2.0f), 0.5f);
     const float value = modulators.getModulatedValue(17, 1.0f, 48000.0);
     assert(std::isfinite(value));
     assert(std::abs(modulators.getModulatedValue(999, 0.25f, 48000.0) - 0.25f) < 1.0e-6f);
@@ -35,10 +35,10 @@ int main() {
     // Drum replacement accepts only sane audio rates/profiles and clamps
     // emitted MIDI values to the 7-bit wire contract.
     const float drum[4] = {0.0f, 1.0f, 0.0f, 0.0f};
-    const auto rejected = Aura::DSP::Analysis::DrumReplacer::convertToMidiWithConfig(
+    const auto rejected = Hirari::DSP::Analysis::DrumReplacer::convertToMidiWithConfig(
         drum, 4, 48000.0, 36, 1.5f, 256);
     assert(rejected.empty());
-    const auto stream = Aura::DSP::Analysis::DrumReplacer::generateMidiStream({
+    const auto stream = Hirari::DSP::Analysis::DrumReplacer::generateMidiStream({
         {0, 240.0f, 200},
     });
     assert(stream.size() == 14);

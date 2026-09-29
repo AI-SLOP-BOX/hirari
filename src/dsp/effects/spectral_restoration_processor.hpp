@@ -1,56 +1,51 @@
 #pragma once
 
 #include "../iprocessor.hpp"
-#include "../analysis/spectral_editor.hpp"
 #include "../analysis/spectral_processor.hpp"
 #include "../../core/concurrency/status_queue.hpp"
 #include <array>
 #include <cstdio>
 #include <cstring>
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class SpectralRestorationProcessor
- * @brief Industrial Surgical Repair Processor (Aura Studio Pro).
+ * @brief Industrial Surgical Repair Processor (Hirari Studio Pro).
  * Integrates the SpectralEditor kernel into the real-time processing chain.
  */
 class SpectralRestorationProcessor : public IProcessor {
 public:
-    SpectralRestorationProcessor(double sr = 44100.0) 
-        : m_sampleRate(std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0),
-          m_editors{} {
-        reset();
-    }
+    SpectralRestorationProcessor(double sr = 44100.0)
+        : m_runtimeState(hirari_spectral_restoration_create(sr)) { reset(); }
+    ~SpectralRestorationProcessor() override { hirari_spectral_restoration_destroy(m_runtimeState); }
+    SpectralRestorationProcessor(const SpectralRestorationProcessor&) = delete;
+    SpectralRestorationProcessor& operator=(const SpectralRestorationProcessor&) = delete;
+    SpectralRestorationProcessor(SpectralRestorationProcessor&&) = delete;
+    SpectralRestorationProcessor& operator=(SpectralRestorationProcessor&&) = delete;
 
     std::string getName() const override { return "Spectral Restoration"; }
 
-    uint32_t getLatencySamples() const noexcept override { return m_editors.front().latencySamples(); }
-    uint32_t getTailSamples() const noexcept override { return m_editors.front().tailSamples(); }
+    uint32_t getLatencySamples() const noexcept override { return hirari_spectral_restoration_latency(m_runtimeState); }
+    uint32_t getTailSamples() const noexcept override { return hirari_spectral_restoration_tail(m_runtimeState); }
 
     // Drain per-channel OLA tails for offline export. Real-time processing
     // remains block-based and does not invoke this path.
     void flushOffline(Core::AudioBuffer& buffer, uint32_t offset, uint32_t samples) {
         if (buffer.getNumChannels() == 0 || samples == 0 || offset >= buffer.getNumSamples()) return;
         samples = std::min(samples, buffer.getNumSamples() - offset);
-        const uint32_t count = std::min<uint32_t>(
-            buffer.getNumChannels(), static_cast<uint32_t>(m_editors.size()));
-        for (uint32_t ch = 0; ch < count; ++ch) {
-            float* data = buffer.getWritePointer(ch, offset);
-            if (data) m_editors[ch].flush(data, samples);
-        }
+        std::array<float*, 12> channels{};
+        const uint32_t count = std::min<uint32_t>(buffer.getNumChannels(), channels.size());
+        for (uint32_t ch = 0; ch < count; ++ch) channels[ch] = buffer.getWritePointer(ch, offset);
+        hirari_spectral_restoration_flush(m_runtimeState, channels.data(), count, samples);
     }
 
     void setParameter(uint32_t id, float value) noexcept override {
-        if (!std::isfinite(value)) return;
-        if (id == 0) setRestorationActive(value >= 0.5f);
-        else if (id == 1) setDenoiseThreshold(value * 8.0f);
+        hirari_spectral_restoration_set_parameter(m_runtimeState, id, value);
     }
 
     float getParameter(uint32_t id) const noexcept override {
-        if (id == 0) return m_restorationActive ? 1.0f : 0.0f;
-        if (id == 1) return std::clamp(m_denoiseThreshold / 8.0f, 0.0f, 1.0f);
-        return 0.0f;
+        return hirari_spectral_restoration_get_parameter(m_runtimeState, id);
     }
 
     uint32_t getNumParameters() const noexcept override { return 2; }
@@ -71,42 +66,23 @@ public:
 
     std::vector<uint8_t> getState() const override {
         std::vector<uint8_t> state(24u, 0u);
-        const uint32_t magic = 0x41555253u; // AURS
-        const uint16_t version = 1u;
-        const uint16_t flags = static_cast<uint16_t>(isBypassed() ? 1u : 0u);
-        const uint32_t sidechain = getSidechainBus();
-        const float values[2] = {getParameter(0), getParameter(1)};
-        std::memcpy(state.data(), &magic, sizeof(magic));
-        std::memcpy(state.data() + 4, &version, sizeof(version));
-        std::memcpy(state.data() + 6, &flags, sizeof(flags));
-        std::memcpy(state.data() + 8, &sidechain, sizeof(sidechain));
-        std::memcpy(state.data() + 12, values, sizeof(values));
+        hirari_spectral_restoration_write_state(
+            m_runtimeState, isBypassed(), getSidechainBus(), state.data(), state.size());
         return state;
     }
 
     bool setState(const std::vector<uint8_t>& state) override {
-        if (state.size() != 24u) return false;
-        uint32_t magic = 0, sidechain = 0;
-        uint16_t version = 0, flags = 0;
-        float values[2]{};
-        std::memcpy(&magic, state.data(), sizeof(magic));
-        std::memcpy(&version, state.data() + 4, sizeof(version));
-        std::memcpy(&flags, state.data() + 6, sizeof(flags));
-        std::memcpy(&sidechain, state.data() + 8, sizeof(sidechain));
-        std::memcpy(values, state.data() + 12, sizeof(values));
-        if (magic != 0x41555253u || version != 1u || (flags & ~1u) != 0u) return false;
-        if (!std::isfinite(values[0]) || !std::isfinite(values[1]) ||
-            values[0] < 0.0f || values[0] > 1.0f || values[1] < 0.0f || values[1] > 1.0f) return false;
-        setBypassed((flags & 1u) != 0u);
+        bool bypassed = false;
+        uint32_t sidechain = 0;
+        if (!hirari_spectral_restoration_restore_state(
+                m_runtimeState, state.data(), state.size(), &bypassed, &sidechain)) return false;
+        setBypassed(bypassed);
         setSidechainBus(sidechain);
-        setParameter(0, values[0]);
-        setParameter(1, values[1]);
         return true;
     }
 
     void prepareToPlay(double sr, uint32_t /*blockSize*/) noexcept override {
-        m_sampleRate = std::isfinite(sr) && sr >= 8'000.0 && sr <= 384'000.0 ? sr : 44'100.0;
-        reset();
+        hirari_spectral_restoration_prepare(m_runtimeState, sr);
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& /*midi*/, const ProcessContext& /*context*/) noexcept override {
@@ -115,25 +91,20 @@ public:
         const uint32_t numSamples = buffer.getNumSamples();
         const uint32_t numChannels = buffer.getNumChannels();
 
-        // One independent editor is preallocated per immersive channel. Do
-        // not reuse the last editor for channels beyond that capacity: its
-        // OLA/noise-profile state would otherwise bleed between channels.
-        const uint32_t processChannels = std::min<uint32_t>(
-            numChannels, static_cast<uint32_t>(m_editors.size()));
-        for (uint32_t ch = 0; ch < processChannels; ++ch) {
-            float* data = buffer.getWritePointer(ch);
-            if (data) m_editors[ch].process(data, data, numSamples);
-        }
+        std::array<float*, 12> channels{};
+        const uint32_t count = std::min<uint32_t>(numChannels, channels.size());
+        for (uint32_t ch = 0; ch < count; ++ch) channels[ch] = buffer.getWritePointer(ch);
+        hirari_spectral_restoration_process(m_runtimeState, channels.data(), count, numSamples);
     }
 
-    void setLearnMode(bool active) { for (auto& editor : m_editors) editor.setLearnMode(active); }
-    void clearNoiseProfile() noexcept { for (auto& editor : m_editors) editor.clearNoiseProfile(); }
-    bool noiseProfileReady() const noexcept { return m_editors.front().noiseProfileReady(); }
-    void setRestorationActive(bool active) { m_restorationActive = active; for (auto& editor : m_editors) editor.setRestorationActive(active); }
-    void setDenoiseThreshold(float t) { m_denoiseThreshold = std::isfinite(t) ? std::clamp(t, 0.0f, 8.0f) : 1.0f; for (auto& editor : m_editors) editor.setDenoiseThreshold(m_denoiseThreshold); }
+    void setLearnMode(bool active) { hirari_spectral_restoration_set_learn(m_runtimeState, active); }
+    void clearNoiseProfile() noexcept { hirari_spectral_restoration_clear_profile(m_runtimeState); }
+    bool noiseProfileReady() const noexcept { return hirari_spectral_restoration_profile_ready(m_runtimeState); }
+    void setRestorationActive(bool active) { setParameter(0, active ? 1.0f : 0.0f); }
+    void setDenoiseThreshold(float t) { setParameter(1, std::isfinite(t) ? t / 8.0f : 0.125f); }
     
     void eraseHarmonics(float fund, float bw) {
-        for (auto& editor : m_editors) editor.requestEraseHarmonics(fund, (float)m_sampleRate, bw);
+        hirari_spectral_restoration_set_harmonics(m_runtimeState, fund, bw);
     }
 
     // Offline selected-region harmonic removal. The real-time editor keeps
@@ -143,7 +114,7 @@ public:
                         const Analysis::SpectralProcessor::Rect& selection,
                         uint32_t harmonics = 8, float bandwidthHz = 3.0f) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.removeHum(buffer, m_sampleRate, fundamentalHz,
+        m_offlineProcessor.removeHum(buffer, sampleRate(), fundamentalHz,
                                      selection, harmonics, bandwidthHz);
     }
 
@@ -159,7 +130,7 @@ public:
                           const Analysis::SpectralProcessor::Rect& selection,
                           float threshold = 0.65f, uint32_t radius = 8) {
         if (buffer.getNumChannels() == 0) return 0;
-        return m_offlineProcessor.removeClicks(buffer, m_sampleRate, selection,
+        return m_offlineProcessor.removeClicks(buffer, sampleRate(), selection,
                                                threshold, radius);
     }
 
@@ -172,20 +143,20 @@ public:
                            const Analysis::SpectralProcessor::Rect& selection,
                            float ceiling = 0.999f) {
         if (buffer.getNumChannels() == 0) return 0;
-        return m_offlineProcessor.repairClipped(buffer, m_sampleRate, selection, ceiling);
+        return m_offlineProcessor.repairClipped(buffer, sampleRate(), selection, ceiling);
     }
 
     void removeHum(Core::AudioBuffer& buffer, float fundamentalHz,
                    uint32_t harmonics = 8, float bandwidthHz = 3.0f) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.removeHum(buffer, m_sampleRate, fundamentalHz, harmonics, bandwidthHz);
+        m_offlineProcessor.removeHum(buffer, sampleRate(), fundamentalHz, harmonics, bandwidthHz);
     }
 
     void removeHum(Core::AudioBuffer& buffer, float fundamentalHz,
                    const Analysis::SpectralProcessor::Rect& selection,
                    uint32_t harmonics = 8, float bandwidthHz = 3.0f) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.removeHum(buffer, m_sampleRate, fundamentalHz,
+        m_offlineProcessor.removeHum(buffer, sampleRate(), fundamentalHz,
                                      selection, harmonics, bandwidthHz);
     }
 
@@ -193,47 +164,47 @@ public:
                            const Analysis::SpectralProcessor::Rect& target,
                            float gain) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.applySpectralGain(buffer, m_sampleRate, target, gain);
+        m_offlineProcessor.applySpectralGain(buffer, sampleRate(), target, gain);
     }
 
     void applySpectralGain(Core::AudioBuffer& buffer,
                            const std::vector<Analysis::SpectralProcessor::Rect>& regions,
                            float gain) {
         if (buffer.getNumChannels() == 0 || regions.empty()) return;
-        m_offlineProcessor.applySpectralGain(buffer, m_sampleRate, regions, gain);
+        m_offlineProcessor.applySpectralGain(buffer, sampleRate(), regions, gain);
     }
 
     void applySpectralMask(
         Core::AudioBuffer& buffer,
         const std::vector<Analysis::SpectralProcessor::RegionGain>& mask) {
         if (buffer.getNumChannels() == 0 || mask.empty()) return;
-        m_offlineProcessor.applySpectralMask(buffer, m_sampleRate, mask);
+        m_offlineProcessor.applySpectralMask(buffer, sampleRate(), mask);
     }
 
     void healRegion(Core::AudioBuffer& buffer,
                     const Analysis::SpectralProcessor::Rect& target,
                     float amount = 1.0f) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.healRegion(buffer, m_sampleRate, target, amount);
+        m_offlineProcessor.healRegion(buffer, sampleRate(), target, amount);
     }
 
     void reduceNoise(Core::AudioBuffer& buffer, float amount = 1.0f,
                      float profileSeconds = 0.5f) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.reduceNoise(buffer, m_sampleRate, amount, profileSeconds);
+        m_offlineProcessor.reduceNoise(buffer, sampleRate(), amount, profileSeconds);
     }
 
     void reduceNoise(Core::AudioBuffer& buffer,
                      const Analysis::SpectralProcessor::Rect& target,
                      float amount = 1.0f, float profileSeconds = 0.5f) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.reduceNoise(buffer, m_sampleRate, amount, profileSeconds, target);
+        m_offlineProcessor.reduceNoise(buffer, sampleRate(), amount, profileSeconds, target);
     }
 
     void interpolateRegion(Core::AudioBuffer& buffer, const Analysis::SpectralProcessor::Rect& target,
                            float blend = 1.0f) {
         if (buffer.getNumChannels() == 0) return;
-        m_offlineProcessor.interpolateRegion(buffer, m_sampleRate, target, blend);
+        m_offlineProcessor.interpolateRegion(buffer, sampleRate(), target, blend);
     }
 
     // History controls for offline surgical edits. These remain separate from
@@ -259,23 +230,14 @@ public:
     }
 
     void reset() noexcept override {
-        m_restorationActive = false;
-        m_denoiseThreshold = 1.0f;
+        hirari_spectral_restoration_reset(m_runtimeState);
         m_offlineProcessor.clearHistory();
-        for (auto& editor : m_editors) {
-            editor.reset();
-            editor.setLearnMode(false);
-            editor.setRestorationActive(false);
-            editor.setDenoiseThreshold(m_denoiseThreshold);
-        }
     }
 
 private:
-    double m_sampleRate;
-    std::array<Analysis::SpectralEditor, 12> m_editors;
+    double sampleRate() const noexcept { return hirari_spectral_restoration_sample_rate(m_runtimeState); }
+    void* m_runtimeState = nullptr;
     Analysis::SpectralProcessor m_offlineProcessor;
-    bool m_restorationActive = false;
-    float m_denoiseThreshold = 1.0f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

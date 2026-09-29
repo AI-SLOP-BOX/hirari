@@ -2,7 +2,7 @@
 #include <atomic>
 #include <cstdint>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @struct RingBuffer
@@ -11,7 +11,7 @@ namespace Aura::Core {
  */
 template<typename T, uint32_t Size>
 struct RingBuffer {
-    static_assert((Size & (Size - 1)) == 0, "AURA | ERROR: RingBuffer size must be a power of two for bitwise optimization.");
+    static_assert((Size & (Size - 1)) == 0, "HIRARI | ERROR: RingBuffer size must be a power of two for bitwise optimization.");
 
     T buffer[Size];
     
@@ -60,4 +60,4 @@ struct RingBuffer {
     }
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

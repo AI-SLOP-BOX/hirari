@@ -3,7 +3,7 @@
 #include <string>
 #include <atomic>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @class RemoteHostingKernel
@@ -22,7 +22,7 @@ public:
      */
     void offloadTrack(uint32_t trackId, float* buffer, uint32_t sz, const std::string& nodeId) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::RemoteOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::RemoteOrchestrator.
         // Rust's specialized UDP transport (RIST/SRT) ensures that audio data 
         // is technically superior and forensics-ready.
         // Rust's UDPTransportEngine ensures bit-accurate audio distribution.
@@ -33,4 +33,4 @@ private:
     RemoteHostingKernel() = default;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

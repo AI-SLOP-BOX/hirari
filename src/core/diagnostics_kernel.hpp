@@ -9,11 +9,11 @@
 #include "concurrency/audio_task_manager.hpp"
 #include "log_buffer.hpp"
 
-namespace Aura::Core::Diagnostics {
+namespace Hirari::Core::Diagnostics {
 
 /**
  * @class DiagnosticsKernel
- * @brief Industrial Self-Healing Engine for Aura Studio Pro.
+ * @brief Industrial Self-Healing Engine for Hirari Studio Pro.
  * Implements autonomous watchdog daemons and atomic hot-swap recovery.
  *
  * Thread Safety Design:
@@ -195,4 +195,4 @@ private:
     std::chrono::steady_clock::time_point m_swapDeadline;
 };
 
-} // namespace Aura::Core::Diagnostics
+} // namespace Hirari::Core::Diagnostics

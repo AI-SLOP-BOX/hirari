@@ -6,7 +6,7 @@
 #include <functional>
 #include <utility>
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @brief IAudioDriver: Physical hardware communication layer.
@@ -59,7 +59,7 @@ protected:
  */
 class DummyAudioDriver : public IAudioDriver {
 public:
-    static constexpr const char* deviceName() noexcept { return "Aura Silent Engine"; }
+    static constexpr const char* deviceName() noexcept { return "Hirari Silent Engine"; }
 
     bool initialize(double sr, uint32_t bs) override {
         stop();
@@ -139,4 +139,4 @@ public:
     }
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

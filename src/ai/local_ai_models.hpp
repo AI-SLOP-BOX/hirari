@@ -10,7 +10,7 @@
 #include "../core/concurrency/thread_pool.hpp"
 #include "../io/wav_loader_utils.hpp"
 
-namespace Aura::SCAE::Intelligence {
+namespace Hirari::SCAE::Intelligence {
 
 /**
  * @class LocalAIModels
@@ -35,17 +35,17 @@ public:
      * Open-source Spleeter/DemucsモデルをCoreMLへ変換し、ゼロレイテンシーで実行します。
      */
     static std::future<StemResult> startStemSeparation(const std::string& inputPath) {
-        return Aura::Core::Concurrency::ThreadPool::getInstance().enqueue([inputPath]() {
+        return Hirari::Core::Concurrency::ThreadPool::getInstance().enqueue([inputPath]() {
             StemResult result;
             std::error_code ec;
             if (inputPath.empty() || !std::filesystem::is_regular_file(inputPath, ec) || ec) {
                 result.error = "stem separation input is unavailable";
                 return result;
             }
-            ::Aura::IO::WavLoader::WavInfo info{};
+            ::Hirari::IO::WavLoader::WavInfo info{};
             std::vector<std::vector<float>> input;
             try {
-                input = ::Aura::IO::WavLoader::load(inputPath, info);
+                input = ::Hirari::IO::WavLoader::load(inputPath, info);
             } catch (const std::exception& exception) {
                 result.error = std::string("unable to decode input: ") + exception.what();
                 return result;
@@ -101,4 +101,4 @@ public:
     }
 };
 
-} // namespace Aura::SCAE::Intelligence
+} // namespace Hirari::SCAE::Intelligence

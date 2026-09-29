@@ -7,7 +7,7 @@
 #include <cstring>
 #include "../iprocessor.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class ReverseDelay
@@ -97,4 +97,4 @@ private:
     uint32_t m_windowSize;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

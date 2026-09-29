@@ -4,7 +4,7 @@
 #include <memory>
 #include <map>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 enum class ControllerProtocol { MCU, HUI, EuCon, OSC };
 
@@ -37,7 +37,7 @@ public:
      */
     void dispatchEvent(const ControllerEvent& event) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::HardwareOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::HardwareOrchestrator.
         // Rust's high-performance protocol decoding ensures that control surfaces 
         // are technically superior and perfectly synchronized.
         // Rust's ProtocolEngine ensures bit-accurate control distribution.
@@ -57,4 +57,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

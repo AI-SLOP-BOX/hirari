@@ -3,7 +3,7 @@
 #include <vector>
 #include "audio_buffer.hpp"
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @class MetalAudioKernel
@@ -37,4 +37,4 @@ private:
     std::unique_ptr<Implementation> m_impl;
 };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

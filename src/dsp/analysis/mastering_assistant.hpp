@@ -4,7 +4,7 @@
 #include <vector>
 #include <complex>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class MasteringAssistant
@@ -68,4 +68,4 @@ private:
     std::vector<std::complex<float>> m_freq;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

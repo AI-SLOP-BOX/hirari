@@ -1,6 +1,6 @@
-# Building Aura DAW
+# Building Hirari DAW
 
-Aura is currently developed and released on macOS. Linux is used for portable
+Hirari is currently developed and released on macOS. Linux is used for portable
 Rust and native contract checks, but the production GUI, CoreAudio device path,
 Audio Units, signing, and app bundle require macOS.
 
@@ -29,7 +29,7 @@ On a disposable or freshly provisioned machine, the same command can install
 the minimal Rust toolchain automatically:
 
 ```sh
-AURA_AUTO_INSTALL_RUST=1 scripts/setup_dev.sh
+HIRARI_AUTO_INSTALL_RUST=1 scripts/setup_dev.sh
 ```
 
 The installer is opt-in and uses the official rustup endpoint over TLS; without
@@ -39,7 +39,7 @@ the variable, the script never changes the host toolchain.
 
 ```sh
 cargo build --workspace --locked
-AURA_NATIVE_TEST_ISOLATION=1 RUST_TEST_THREADS=1 cargo test --workspace --locked
+HIRARI_NATIVE_TEST_ISOLATION=1 RUST_TEST_THREADS=1 cargo test --workspace --locked
 ```
 
 The workspace suite is serialized because several integration contracts own
@@ -61,13 +61,13 @@ scripts/run_app_launch_smoke.sh
 For device- and display-dependent acceptance, use
 [`docs/MANUAL_E2E_CHECKLIST.md`](docs/MANUAL_E2E_CHECKLIST.md).
 
-The result is written to `packaging/Aura DAW.app`. Generated bundles, plugins,
+The result is written to `packaging/Hirari DAW.app`. Generated bundles, plugins,
 rendered audio, logs, and local SDKs are intentionally excluded from Git.
 
 Generate release SBOMs and a checksum for the complete app bundle:
 
 ```sh
-scripts/generate_release_metadata.sh release-metadata "packaging/Aura DAW.app"
+scripts/generate_release_metadata.sh release-metadata "packaging/Hirari DAW.app"
 ```
 
 This writes CycloneDX SBOMs, `SHA256SUMS`, and a portable app ZIP under
@@ -93,7 +93,7 @@ For a release candidate, run the strict gate:
 
 ```sh
 cmake -S . -B build
-cmake --build build --target aura-verify-release
+cmake --build build --target hirari-verify-release
 ```
 
 For a lightweight packaged-app smoke (build, headless readiness, signature,
@@ -107,6 +107,33 @@ VST3, third-party plugin, hardware-device, signing, and notarization checks need
 their corresponding local SDKs, fixtures, devices, and credentials. A missing
 capability must be reported as unavailable, never as a successful test.
 
+## Test boundaries
+
+CTest labels separate portable contracts from tests that require external
+devices or plug-in SDKs. After configuring with CMake, run the portable suite
+with:
+
+```sh
+ctest --test-dir build -L portable --output-on-failure
+```
+
+The native plug-in compile contract uses repository-owned fixtures and is
+portable. Real VST3/AU and CoreAudio checks are explicit targets and are not
+included in the portable CTest set:
+
+```sh
+cmake --build build --target hirari-test-vst3
+# macOS only:
+cmake --build build --target hirari-test-au
+cmake --build build --target hirari-test-macos-device
+```
+
+For a capability-by-capability report that records missing SDKs, fixtures, or
+devices as `SKIPPED`, run `hirari-test-real-device-matrix`. Set
+`HIRARI_REAL_DEVICE_STRICT=1` to fail when any capability is skipped. Release
+verification remains stricter and requires its configured real plug-in and
+hardware paths.
+
 ## Distribution signing and notarization
 
 Local development bundles are ad-hoc signed. For distribution, provide a
@@ -115,12 +142,12 @@ macOS Keychain (never commit credentials):
 
 ```sh
 codesign --force --deep --options runtime \
-  --sign "Developer ID Application: YOUR TEAM" "packaging/Aura DAW.app"
+  --sign "Developer ID Application: YOUR TEAM" "packaging/Hirari DAW.app"
 ditto -c -k --sequesterRsrc --keepParent \
-  "packaging/Aura DAW.app" "Aura-DAW.zip"
-xcrun notarytool submit "Aura-DAW.zip" --keychain-profile "aura-notary" --wait
-xcrun stapler staple "packaging/Aura DAW.app"
-spctl --assess --type execute --verbose=4 "packaging/Aura DAW.app"
+  "packaging/Hirari DAW.app" "Hirari-DAW.zip"
+xcrun notarytool submit "Hirari-DAW.zip" --keychain-profile "hirari-notary" --wait
+xcrun stapler staple "packaging/Hirari DAW.app"
+spctl --assess --type execute --verbose=4 "packaging/Hirari DAW.app"
 ```
 
 Replace the certificate and Keychain profile with values owned by the release

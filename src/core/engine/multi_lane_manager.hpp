@@ -7,7 +7,7 @@
 #include <atomic>
 #include <algorithm>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct Lane
@@ -62,4 +62,4 @@ private:
     std::vector<Lane> m_lanes;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

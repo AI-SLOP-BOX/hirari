@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cmath>
 
-namespace Aura::Core::MIDI {
+namespace Hirari::Core::MIDI {
 enum class MmcCommand : uint8_t { Stop=1, Play=2, RecordPunchIn=6, RecordPunchOut=7, Locate=68 };
 struct MtcTime { uint8_t hours=0, minutes=0, seconds=0, frames=0; uint8_t fps=30; };
 class ExternalSync {

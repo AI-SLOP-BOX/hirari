@@ -2,7 +2,7 @@
 #include <vector>
 #include <random>
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class SoundscapeGeneratorKernel
@@ -32,4 +32,4 @@ private:
     std::mt19937 m_gen;
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

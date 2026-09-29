@@ -1,0 +1,16 @@
+                for p in 24 : Rectangle {
+                    y: p * 20px; width: 100%; height: 1px; background: Math.mod(p, 12) == 0 ? Style.border : Style.grid-subbeat;
+                    Text { text: "" + (83 - p); x: -52px; width: 44px; height: 20px; font-size: 8px; color: Style.text-muted; horizontal-alignment: right; vertical-alignment: center; }
+                }
+                for b in 32 : Rectangle {
+                    x: b * Style.grid-step * root.z_lvl; width: 1px; height: 100%; background: Math.mod(b, 4) == 0 ? Style.grid-bar : Style.grid-subbeat;
+                }
+                for note in root.tracks[root.sel_idx].piano_roll_notes : Rectangle {
+                    x: note.start_beat * Style.grid-step * root.z_lvl; y: (83 - note.pitch) * 20px + 2px;
+                    width: (note.length_beats * Style.grid-step * root.z_lvl).max(8px); height: 16px;
+                    background: note.selected ? Style.text-primary : Style.brand; border-radius: 2px;
+                    Text { text: "" + note.pitch; x: 4px; font-size: Style.font-xxs; color: Style.text-primary; vertical-alignment: center; }
+                }
+            }
+        }
+}}

@@ -9,27 +9,27 @@
 #include "core/io/audio_decoder.hpp"
 
 int main() {
-    const auto invalidPath = std::filesystem::temp_directory_path() / "aura-wav-invalid-input-contract.wav";
-    assert(!Aura::IO::WavSaver::save(invalidPath.string(), {{}}, 48000));
-    assert(!Aura::IO::WavSaver::save(invalidPath.string(), {{0.0f}, {0.0f, 1.0f}}, 48000));
+    const auto invalidPath = std::filesystem::temp_directory_path() / "hirari-wav-invalid-input-contract.wav";
+    assert(!Hirari::IO::WavSaver::save(invalidPath.string(), {{}}, 48000));
+    assert(!Hirari::IO::WavSaver::save(invalidPath.string(), {{0.0f}, {0.0f, 1.0f}}, 48000));
 
-    const auto path = std::filesystem::temp_directory_path() / "aura-wav-contract.wav";
+    const auto path = std::filesystem::temp_directory_path() / "hirari-wav-contract.wav";
     std::vector<std::vector<float>> source(2, std::vector<float>(4));
     source[0] = {0.0f, 0.5f, std::numeric_limits<float>::quiet_NaN(), -1.2f};
     source[1] = {0.0f, -0.5f, std::numeric_limits<float>::infinity(), 1.2f};
-    assert(Aura::IO::WavSaver::save(path.string(), source, 48000));
+    assert(Hirari::IO::WavSaver::save(path.string(), source, 48000));
 
-    Aura::IO::WavLoader::WavInfo info{};
-    const auto decoded = Aura::IO::WavLoader::load(path.string(), info);
+    Hirari::IO::WavLoader::WavInfo info{};
+    const auto decoded = Hirari::IO::WavLoader::load(path.string(), info);
     assert(info.numChannels == 2);
     assert(info.numSamples == 4);
     for (const auto& channel : decoded) {
         for (float sample : channel) assert(std::isfinite(sample));
     }
 
-    Aura::Core::IO::WavDecoder canonical;
+    Hirari::Core::IO::WavDecoder canonical;
     assert(canonical.open(path.string()));
-    Aura::Core::AudioBuffer canonicalBuffer;
+    Hirari::Core::AudioBuffer canonicalBuffer;
     canonical.decodeFull(canonicalBuffer);
     assert(canonicalBuffer.getNumChannels() == 2);
     assert(canonicalBuffer.getNumSamples() == 4);
@@ -37,12 +37,12 @@ int main() {
         for (uint32_t sample = 0; sample < canonicalBuffer.getNumSamples(); ++sample)
             assert(std::isfinite(canonicalBuffer.getReadPointer(channel)[sample]));
 
-    Aura::IO::WavReader reader(path.string());
+    Hirari::IO::WavReader reader(path.string());
     assert(reader.getNumChannels() == 2);
     assert(reader.getNumSamples() == 4);
     std::filesystem::remove(path);
 
-    const auto oddChunk = std::filesystem::temp_directory_path() / "aura-wav-odd-chunk-contract.wav";
+    const auto oddChunk = std::filesystem::temp_directory_path() / "hirari-wav-odd-chunk-contract.wav";
     {
         std::ofstream file(oddChunk, std::ios::binary);
         const uint32_t riffSize = 52;
@@ -66,15 +66,15 @@ int main() {
         file.write("data", 4); file.write(reinterpret_cast<const char*>(&dataSize), 4);
         file.write(reinterpret_cast<const char*>(&sample), 2);
     }
-    Aura::Core::IO::WavDecoder oddDecoder;
+    Hirari::Core::IO::WavDecoder oddDecoder;
     assert(oddDecoder.open(oddChunk.string()));
-    Aura::Core::AudioBuffer oddBuffer;
+    Hirari::Core::AudioBuffer oddBuffer;
     oddDecoder.decodeFull(oddBuffer);
     assert(oddBuffer.getNumChannels() == 1 && oddBuffer.getNumSamples() == 1);
     assert(std::abs(oddBuffer.getReadPointer(0)[0] - 0.5f) < 1.0e-5f);
     std::filesystem::remove(oddChunk);
 
-    const auto rf64 = std::filesystem::temp_directory_path() / "aura-wav-rf64-contract.wav";
+    const auto rf64 = std::filesystem::temp_directory_path() / "hirari-wav-rf64-contract.wav";
     {
         std::ofstream file(rf64, std::ios::binary);
         const uint32_t ds64Size = 28;
@@ -100,16 +100,16 @@ int main() {
         file.write("data", 4); file.write(reinterpret_cast<const char*>(&unknown), 4);
         file.write(reinterpret_cast<const char*>(samples), sizeof(samples));
     }
-    Aura::Core::IO::WavDecoder rf64Decoder;
+    Hirari::Core::IO::WavDecoder rf64Decoder;
     assert(rf64Decoder.open(rf64.string()));
-    Aura::Core::AudioBuffer rf64Buffer;
+    Hirari::Core::AudioBuffer rf64Buffer;
     rf64Decoder.decodeFull(rf64Buffer);
     assert(rf64Buffer.getNumChannels() == 1 && rf64Buffer.getNumSamples() == 2);
     assert(std::abs(rf64Buffer.getReadPointer(0)[0] - 0.5f) < 1.0e-5f);
     assert(std::abs(rf64Buffer.getReadPointer(0)[1] + 0.5f) < 1.0e-5f);
     std::filesystem::remove(rf64);
 
-    const auto truncatedRiff = std::filesystem::temp_directory_path() / "aura-wav-truncated-riff-contract.wav";
+    const auto truncatedRiff = std::filesystem::temp_directory_path() / "hirari-wav-truncated-riff-contract.wav";
     {
         std::ofstream file(truncatedRiff, std::ios::binary);
         const uint32_t riffSize = 20;
@@ -120,11 +120,11 @@ int main() {
         file.write("JUNK", 4);
         file.write(reinterpret_cast<const char*>(&oversizedChunk), 4);
     }
-    Aura::Core::IO::WavDecoder truncatedDecoder;
+    Hirari::Core::IO::WavDecoder truncatedDecoder;
     assert(!truncatedDecoder.open(truncatedRiff.string()));
     std::filesystem::remove(truncatedRiff);
 
-    const auto corrupt = std::filesystem::temp_directory_path() / "aura-wav-corrupt.wav";
+    const auto corrupt = std::filesystem::temp_directory_path() / "hirari-wav-corrupt.wav";
     {
         std::ofstream file(corrupt, std::ios::binary);
         file.write("RIFF", 4);
@@ -144,8 +144,8 @@ int main() {
     }
     bool rejected = false;
     try {
-        Aura::IO::WavLoader::WavInfo corruptInfo{};
-        (void)Aura::IO::WavLoader::load(corrupt.string(), corruptInfo);
+        Hirari::IO::WavLoader::WavInfo corruptInfo{};
+        (void)Hirari::IO::WavLoader::load(corrupt.string(), corruptInfo);
     } catch (const std::runtime_error&) {
         rejected = true;
     }

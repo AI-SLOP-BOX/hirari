@@ -2,8 +2,8 @@ import json, os, struct, pathlib
 # Leave enough room for the final two-bar lyric phrase instead of clipping it
 # and relying on a repeated accompaniment tail during the release mix.
 PPQ=480; BPM=110; BARS=99
-out=pathlib.Path("dist/aura_three_hour_release");out.mkdir(exist_ok=True)
-preserve_phrase_onsets = os.environ.get("AURA_PRESERVE_PHRASE_ONSETS") == "1"
+out=pathlib.Path("dist/hirari_three_hour_release");out.mkdir(exist_ok=True)
+preserve_phrase_onsets = os.environ.get("HIRARI_PRESERVE_PHRASE_ONSETS") == "1"
 def vlq(n):
  b=[n&127];n>>=7
  while n:b.append((n&127)|128);n>>=7
@@ -104,7 +104,7 @@ for i,line in enumerate(lines):
   dur=step-18 if j<len(chars)-1 else PPQ+PPQ//2
   mel.append((pos,dur,pitch,112 if i>=8 else 96,chv))
 midi=b"MThd"+struct.pack(">IHHH",6,1,5,PPQ)+tr(meta)+nt(D,9)+nt(B,1)+nt(P,2)+nt(mel,0)
-p=out/"aura_three_hour_chisa.mid";p.write_bytes(midi)
+p=out/"hirari_three_hour_chisa.mid";p.write_bytes(midi)
 tracks=[]
 for track_id, source in enumerate((D, B, P, mel)):
     tracks.append({"track_id": track_id, "notes": [
@@ -113,7 +113,7 @@ for track_id, source in enumerate((D, B, P, mel)):
          "lyric": lyric or ""}
         for start, duration, pitch, velocity, lyric in source
     ]})
-(out / "aura_three_hour_chisa.midi.json").write_text(json.dumps(tracks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+(out / "hirari_three_hour_chisa.midi.json").write_text(json.dumps(tracks, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 max_end_tick = max(
     (start + duration for source in (D, B, P, mel) for start, duration, *_ in source),
     default=BARS * 4 * PPQ,

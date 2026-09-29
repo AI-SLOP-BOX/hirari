@@ -5,12 +5,12 @@
 #include <limits>
 #include <utility>
 #include <cmath>
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
 #include <vulkan/vulkan.h>
 #include "../../rendering/vulkan/vulkan_context.hpp"
 #endif
 
-namespace Aura::Graphics::Platform {
+namespace Hirari::Graphics::Platform {
 #include "vulkan_kernel_part_1.inc"
 #include "vulkan_kernel_part_2.inc"
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform

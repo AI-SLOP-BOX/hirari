@@ -5,7 +5,7 @@
 #include <atomic>
 #include <algorithm>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @class MasterMixingProcessor
@@ -59,4 +59,4 @@ private:
     float m_envelope = 0.0f;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

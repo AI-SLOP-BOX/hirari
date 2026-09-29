@@ -40,18 +40,18 @@ struct clap_process_t {
     void* events_out; // Pointer to event list
 };
 
-namespace Aura::Core::PluginHost {
+namespace Hirari::Core::PluginHost {
 
 /**
  * @class ClapHostInterface
  * @brief Next-generation open standard "CLAP (CLever Audio Plugin)" host module.
  * Integrates sample-accurate parameter modulations and MIDI-to-CLAP events.
  */
-class ClapHostInterface : public ::Aura::DSP::IProcessor {
+class ClapHostInterface : public ::Hirari::DSP::IProcessor {
 public:
     explicit ClapHostInterface(const std::string& clapPath) : m_binaryPath(clapPath) {
         if (!clapPath.empty()) {
-            m_processor = std::make_unique<::Aura::Core::Plugins::ProcessSandboxProcessor>(clapPath);
+            m_processor = std::make_unique<::Hirari::Core::Plugins::ProcessSandboxProcessor>(clapPath);
         }
     }
 
@@ -70,7 +70,7 @@ public:
         }
     }
 
-    void process(AudioBuffer& b, MidiBuffer& midi, const ::Aura::DSP::ProcessContext& context) noexcept override {
+    void process(AudioBuffer& b, MidiBuffer& midi, const ::Hirari::DSP::ProcessContext& context) noexcept override {
         (void)context;
         if (!m_processor || !m_processor->isAlive() || m_processor->processFailed()) {
             b.clear();
@@ -125,9 +125,9 @@ public:
 
 private:
     std::string m_binaryPath;
-    std::unique_ptr<::Aura::Core::Plugins::ProcessSandboxProcessor> m_processor;
+    std::unique_ptr<::Hirari::Core::Plugins::ProcessSandboxProcessor> m_processor;
     double m_sampleRate = 44100.0;
     uint32_t m_blockSize = 512;
 };
 
-} // namespace Aura::Core::PluginHost
+} // namespace Hirari::Core::PluginHost

@@ -5,7 +5,7 @@
 #include <vector>
 #include <fstream>
 
-namespace Aura::Core::Collaboration {
+namespace Hirari::Core::Collaboration {
 struct ReviewNote { uint64_t id=0, sample=0; std::string author, text; bool resolved=false; };
 struct ChangeRecord { uint64_t revision=0; std::string author, action; };
 class ReviewLog {

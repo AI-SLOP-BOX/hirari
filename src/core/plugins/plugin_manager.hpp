@@ -12,14 +12,14 @@
 #include "plugin_admission.hpp"
 #include "plugin_cache_manager.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @class PluginScanner
  * @brief High-performance 3rd-party Plugin Discovery Engine.
  * HONEST FIX: Implements standard macOS paths for AudioUnits (/Library/Audio/Plug-Ins/Components).
  * Necessary for professional DAWs to integrate user-owned VST/AU instruments 
- * into the Aura signal path.
+ * into the Hirari signal path.
  */
 class PluginScanner {
 public:
@@ -176,4 +176,4 @@ private:
     }
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

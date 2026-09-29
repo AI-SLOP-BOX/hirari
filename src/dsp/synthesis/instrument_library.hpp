@@ -7,7 +7,7 @@
 #include <cmath>
 #include <limits>
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @brief InstrumentPatch: Metadata-driven preset for synthesis engines.
@@ -21,7 +21,7 @@ struct InstrumentPatch {
 
 /**
  * @brief InstrumentLibrary: High-performance repository for all engine patches.
- * Allows AuraAssistant and SynthesisConductor to query sounds by musical character.
+ * Allows HirariAssistant and SynthesisConductor to query sounds by musical character.
  */
 class InstrumentLibrary {
 public:
@@ -68,4 +68,4 @@ private:
     std::map<uint32_t, InstrumentPatch> m_patches;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

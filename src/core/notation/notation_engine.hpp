@@ -9,7 +9,7 @@
 #include "../../core/engine/track.hpp"
 #include "../../scae/notation_intelligence.hpp"
 
-namespace Aura::Core::Notation {
+namespace Hirari::Core::Notation {
 
 /**
  * @class NotationEngine
@@ -146,4 +146,4 @@ private:
     uint64_t m_editGeneration = 0;
 };
 
-} // namespace Aura::Core::Notation
+} // namespace Hirari::Core::Notation

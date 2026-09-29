@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @struct MusicalTime
@@ -24,4 +24,4 @@ struct MusicalTime {
     double  totalBeats; // Floating-point beats for display/interpolation only
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

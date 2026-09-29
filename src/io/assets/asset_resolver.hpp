@@ -5,7 +5,7 @@
 #include <mutex>
 #include "../mmap_audio_source.hpp"
 
-namespace Aura::IO::Assets {
+namespace Hirari::IO::Assets {
 
 /**
  * @class AssetResolver
@@ -41,4 +41,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::IO::Assets
+} // namespace Hirari::IO::Assets

@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief LinkwitzRileyFilter: 4th-order (24dB/oct) phase-aligned crossover.

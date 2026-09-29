@@ -5,7 +5,7 @@
 #include "../../composition/harmonic_context_tracker.hpp"
 #include "../../mixing/aesthetic_evaluator_kernel.hpp"
 
-namespace Aura::Core::DSP::Effects {
+namespace Hirari::Core::DSP::Effects {
 
 /**
  * @class AtmosphericProcessorKernel
@@ -79,4 +79,4 @@ private:
     std::vector<float> m_delayTimes;
 };
 
-} // namespace Aura::Core::DSP::Effects
+} // namespace Hirari::Core::DSP::Effects

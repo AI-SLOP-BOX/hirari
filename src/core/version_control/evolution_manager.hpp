@@ -5,13 +5,13 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 
-namespace Aura::Core::VersionControl {
+namespace Hirari::Core::VersionControl {
 
 /**
  * @class ProjectEvolutionManager
  * @brief 【OSS独自の最強プラットフォーム化：音声データ特化型Gitエンジン】
  * 
- * 従来のDAWが「巨大なバイナリファイル」を扱うのに対し、Auraはプロジェクトの状態を
+ * 従来のDAWが「巨大なバイナリファイル」を扱うのに対し、Hirariはプロジェクトの状態を
  * 高密度なJSONとデルタ（差分）で管理します。これにより、複数人での同時編集や
  * 「昨日、エフェクトをかける前の音に戻したい」といった変更履歴を完璧にトレースします。
  */
@@ -74,4 +74,4 @@ private:
     nlohmann::json m_lastFullState;
 };
 
-} // namespace Aura::Core::VersionControl
+} // namespace Hirari::Core::VersionControl

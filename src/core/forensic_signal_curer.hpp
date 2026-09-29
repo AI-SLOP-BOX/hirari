@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @brief ForensicSignalCurer: Centralized signal integrity auditor.
@@ -42,4 +42,4 @@ public:
     }
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

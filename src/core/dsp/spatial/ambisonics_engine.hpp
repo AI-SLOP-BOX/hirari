@@ -3,7 +3,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @struct BFormat
@@ -49,14 +49,14 @@ public:
     }
 
     /**
-     * @brief Decodes B-format into a bounded binaural approximation.
+     * @brief Decodes B-format into a bounded binhiraril approximation.
      *
      * This is intentionally an allocation-free first-order decoder.  The
-     * lateral component controls interaural level difference while the
+     * lateral component controls interhiraril level difference while the
      * vertical component slightly narrows the image, giving a stable fallback
      * when an external HRTF renderer is not present.
      */
-    void decodeBinaural(const BFormat& b, float& l, float& r) {
+    void decodeBinhiraril(const BFormat& b, float& l, float& r) {
         const float w = std::isfinite(b.w) ? b.w : 0.0f;
         const float x = std::isfinite(b.x) ? b.x : 0.0f;
         const float y = std::isfinite(b.y) ? b.y : 0.0f;
@@ -70,4 +70,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

@@ -1,8 +1,8 @@
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
 bool VulkanGraphicsKernel::initializeWithSurface(VkInstance instance, VkSurfaceKHR surface,
                                                  uint32_t width, uint32_t height) {
     cleanup();
-    auto& context = Aura::Rendering::Vulkan::VulkanContext::getInstance();
+    auto& context = Hirari::Rendering::Vulkan::VulkanContext::getInstance();
     if (!context.initialize(instance, surface)) {
         m_lastError = context.lastError();
         return false;
@@ -21,9 +21,9 @@ bool VulkanGraphicsKernel::initializeWithSurface(VkInstance instance, VkSurfaceK
 #endif
 
 void VulkanGraphicsKernel::beginFrame() {
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
     if (m_contextReady) {
-        Aura::Rendering::Vulkan::VulkanContext::getInstance().beginUiFrame();
+        Hirari::Rendering::Vulkan::VulkanContext::getInstance().beginUiFrame();
     }
 #endif
     m_drawCallCount.store(0, std::memory_order_relaxed);
@@ -32,9 +32,9 @@ void VulkanGraphicsKernel::beginFrame() {
 }
 
 void VulkanGraphicsKernel::endFrame() {
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
-    if (m_contextReady && !Aura::Rendering::Vulkan::VulkanContext::getInstance().drawEmptyFrame()) {
-        m_lastError = Aura::Rendering::Vulkan::VulkanContext::getInstance().lastError();
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
+    if (m_contextReady && !Hirari::Rendering::Vulkan::VulkanContext::getInstance().drawEmptyFrame()) {
+        m_lastError = Hirari::Rendering::Vulkan::VulkanContext::getInstance().lastError();
     }
 #endif
     const auto now = std::chrono::steady_clock::now();
@@ -154,9 +154,9 @@ void VulkanGraphicsKernel::drawTriangle(float x1, float y1, float x2, float y2,
 }
 
 void VulkanGraphicsKernel::pushSDF(const SDFPushConstants& push) {
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
     if (!m_available || !m_contextReady) return;
-    Aura::Rendering::Vulkan::VulkanContext::getInstance().setUiRectPixels(
+    Hirari::Rendering::Vulkan::VulkanContext::getInstance().setUiRectPixels(
         push.x, push.y, push.w, push.h, static_cast<uint32_t>(push.colorL));
     m_drawCallCount.fetch_add(1, std::memory_order_relaxed);
     m_vertexCount.fetch_add(4, std::memory_order_relaxed);
@@ -211,9 +211,9 @@ void VulkanGraphicsKernel::pushScissor(float x, float y, float w, float h) {
         next.h = std::max(0.0f, bottom - next.y);
     }
     m_scissors[m_scissorDepth++] = next;
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
     if (m_contextReady) {
-        Aura::Rendering::Vulkan::VulkanContext::getInstance().setUiScissor(
+        Hirari::Rendering::Vulkan::VulkanContext::getInstance().setUiScissor(
             next.x, next.y, next.w, next.h);
     }
 #endif
@@ -221,9 +221,9 @@ void VulkanGraphicsKernel::pushScissor(float x, float y, float w, float h) {
 
 void VulkanGraphicsKernel::popScissor() {
     if (m_scissorDepth > 0) --m_scissorDepth;
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
     if (m_contextReady) {
-        auto& context = Aura::Rendering::Vulkan::VulkanContext::getInstance();
+        auto& context = Hirari::Rendering::Vulkan::VulkanContext::getInstance();
         if (m_scissorDepth > 0) {
             const Scissor& current = m_scissors[m_scissorDepth - 1];
             context.setUiScissor(current.x, current.y, current.w, current.h);
@@ -387,9 +387,9 @@ void VulkanGraphicsKernel::drawGoniometer(float x, float y, float w, float h, co
 }
 
 void VulkanGraphicsKernel::cleanup() {
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
     if (m_contextReady) {
-        Aura::Rendering::Vulkan::VulkanContext::getInstance().shutdown();
+        Hirari::Rendering::Vulkan::VulkanContext::getInstance().shutdown();
     }
     if (m_surface != VK_NULL_HANDLE && m_instance != VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(m_instance, m_surface, nullptr);

@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace Aura::Core::Video {
+namespace Hirari::Core::Video {
 
 /**
  * @struct OverlayCue
@@ -108,4 +108,4 @@ private:
     std::vector<OverlayCue> m_cues;
 };
 
-} // namespace Aura::Core::Video
+} // namespace Hirari::Core::Video

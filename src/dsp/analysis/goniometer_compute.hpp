@@ -6,7 +6,7 @@
 #include <string>
 #include <atomic>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 class GoniometerCompute {
 public:
@@ -137,4 +137,4 @@ private:
     mutable std::atomic<float> m_atomicPointsY[1024];
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

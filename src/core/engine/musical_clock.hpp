@@ -3,7 +3,7 @@
 #include <atomic>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief MusicalClock: The 'Conductor' of the DAW.
@@ -45,4 +45,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

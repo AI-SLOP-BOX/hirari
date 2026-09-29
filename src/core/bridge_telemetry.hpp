@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Aura::Core::Bridge {
+namespace Hirari::Core::Bridge {
 
 struct BridgeClash {
     float frequency;
@@ -15,4 +15,4 @@ struct BridgeLoudness {
     float correlation;
 };
 
-} // namespace Aura::Core::Bridge
+} // namespace Hirari::Core::Bridge

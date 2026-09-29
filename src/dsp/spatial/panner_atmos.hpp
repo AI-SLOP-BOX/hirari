@@ -5,7 +5,7 @@
 #include <array>
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @brief AtmosObjectPanner: 7.1.4 Object-Based Spatializer.
@@ -45,4 +45,4 @@ private:
     std::array<Vec3, 12> m_speakers;
 };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

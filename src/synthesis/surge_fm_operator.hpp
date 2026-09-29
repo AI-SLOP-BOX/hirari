@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
 
-namespace Aura::Synthesis {
+namespace Hirari::Synthesis {
 
 /**
  * @class SurgeFmOperator
@@ -54,4 +54,4 @@ private:
     float m_ratio = 1.0f; // オペレーターの周波数比率（例：キャリア=1、モジュレータ=2 など）
 };
 
-} // namespace Aura::Synthesis
+} // namespace Hirari::Synthesis

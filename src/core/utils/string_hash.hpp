@@ -3,7 +3,7 @@
 #include <string_view>
 #include <cstdint>
 
-namespace Aura::Core::Utils {
+namespace Hirari::Core::Utils {
 
 /**
  * @brief StringHash: Compile-time and Runtime FNV-1a Hash generator.
@@ -33,4 +33,4 @@ constexpr uint32_t operator""_id(const char* str, size_t size) {
     return StringHash::get(std::string_view(str, size));
 }
 
-} // namespace Aura::Core::Utils
+} // namespace Hirari::Core::Utils

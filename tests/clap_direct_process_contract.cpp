@@ -7,14 +7,14 @@
 int main(int argc, char** argv) {
     assert(argc == 2);
 
-    Aura::Core::Plugins::CLAPHostProcessor processor;
+    Hirari::Core::Plugins::CLAPHostProcessor processor;
     processor.prepareToPlay(48000.0, 16);
     assert(processor.loadClap(argv[1], 0));
     assert(processor.isOperational());
     assert(processor.hasProcessFunction());
 
-    Aura::Core::AudioBuffer audio(2, 16);
-    Aura::Core::MidiBuffer midi;
+    Hirari::Core::AudioBuffer audio(2, 16);
+    Hirari::Core::MidiBuffer midi;
     const uint8_t ump[] = {
         0x40, 0x90, 0x3c, 0x7f, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
             audio.getWritePointer(channel)[frame] = 1.0f;
     }
 
-    Aura::DSP::ProcessContext context{};
+    Hirari::DSP::ProcessContext context{};
     processor.process(audio, midi, context);
     assert(!processor.processFailed());
     assert(midi.size() == 4);

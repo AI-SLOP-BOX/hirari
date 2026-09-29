@@ -4,7 +4,7 @@
 #include <map>
 #include <algorithm>
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @enum ArticulationType
@@ -80,4 +80,4 @@ private:
     std::vector<Rule> m_rules;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

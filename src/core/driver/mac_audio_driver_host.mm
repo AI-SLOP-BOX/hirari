@@ -1,11 +1,12 @@
 #include "mac_audio_driver_host.hpp"
 #include "mac_audio_driver.hpp"
-#include "aura_unified_engine.hpp"
+#include "hirari_unified_engine.hpp"
 #include "../log_buffer.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <sstream>
+#include <vector>
 
 namespace {
 
@@ -14,7 +15,7 @@ constexpr uint32_t kFallbackBufferSize = 512;
 constexpr uint32_t kAudioLogComponent = 0xA001;
 
 void logAudioMessage(uint32_t level, const char* message) {
-    Aura::Core::Diagnostics::LogBuffer::post(level, kAudioLogComponent, message);
+    Hirari::Core::Diagnostics::LogBuffer::post(level, kAudioLogComponent, message);
 }
 
 bool readDeviceProperty(AudioDeviceID device,
@@ -30,6 +31,80 @@ bool readDeviceProperty(AudioDeviceID device,
     UInt32 size = valueSize;
     return AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, value) == noErr &&
            size >= valueSize;
+}
+
+std::vector<std::string> channelNamesForScope(AudioDeviceID device,
+                                              AudioObjectPropertyScope scope,
+                                              uint32_t channelCount,
+                                              const char* fallbackPrefix) {
+    std::vector<std::string> names;
+    names.reserve(channelCount);
+    for (uint32_t channel = 1; channel <= channelCount; ++channel) {
+        AudioObjectPropertyAddress address = {
+            kAudioObjectPropertyElementName,
+            scope,
+            static_cast<AudioObjectPropertyElement>(channel)
+        };
+        CFStringRef channelName = nullptr;
+        UInt32 size = sizeof(channelName);
+        if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &channelName) == noErr &&
+            channelName) {
+            char buffer[512] = {};
+            const bool converted = CFStringGetCString(channelName, buffer, sizeof(buffer), kCFStringEncodingUTF8);
+            CFRelease(channelName);
+            if (converted && buffer[0] != '\0') {
+                names.emplace_back(buffer);
+                continue;
+            }
+        }
+        names.emplace_back(std::string(fallbackPrefix) + " " + std::to_string(channel));
+    }
+    return names;
+}
+
+void appendJsonString(std::ostringstream& json, const std::string& value) {
+    json << '\"';
+    for (const unsigned char character : value) {
+        switch (character) {
+            case '\"': json << "\\\""; break;
+            case '\\': json << "\\\\"; break;
+            case '\n': json << "\\n"; break;
+            case '\r': json << "\\r"; break;
+            case '\t': json << "\\t"; break;
+            default:
+                if (character < 0x20) {
+                    constexpr char hex[] = "0123456789abcdef";
+                    json << "\\u00" << hex[character >> 4] << hex[character & 0x0f];
+                } else {
+                    json << static_cast<char>(character);
+                }
+        }
+    }
+    json << '\"';
+}
+
+uint32_t channelCountForScope(AudioDeviceID device, AudioObjectPropertyScope scope) {
+    AudioObjectPropertyAddress address = {
+        kAudioDevicePropertyStreamConfiguration,
+        scope,
+        kAudioObjectPropertyElementMain
+    };
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(device, &address, 0, nullptr, &size) != noErr ||
+        size < offsetof(AudioBufferList, mBuffers) || size > 64u * 1024u) return 0;
+    std::vector<uint64_t> storage((size + sizeof(uint64_t) - 1) / sizeof(uint64_t));
+    if (AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, storage.data()) != noErr ||
+        size < offsetof(AudioBufferList, mBuffers)) return 0;
+    const auto* buffers = reinterpret_cast<const AudioBufferList*>(storage.data());
+    const size_t capacity = (size - offsetof(AudioBufferList, mBuffers)) / sizeof(AudioBuffer);
+    if (buffers->mNumberBuffers > capacity) return 0;
+    uint32_t channels = 0;
+    for (UInt32 index = 0; index < buffers->mNumberBuffers; ++index) {
+        const uint32_t count = buffers->mBuffers[index].mNumberChannels;
+        if (count > 256u - channels) return 0;
+        channels += count;
+    }
+    return channels;
 }
 
 struct AudioDeviceSettings {
@@ -94,7 +169,7 @@ AudioDeviceSettings getDefaultOutputSettings() {
 
 } // namespace
 
-namespace Aura::Core::Driver {
+namespace Hirari::Core::Driver {
 
 struct MacAudioDriverHost::Impl {
     struct CallbackState {
@@ -200,18 +275,18 @@ bool MacAudioDriverHost::start_locked(double sampleRate, uint32_t bufferSize) {
         const auto callbackState = m_impl->callbackState;
         const auto processCallback = m_impl->processCallback;
         void* const processContext = m_impl->processContext;
-        m_impl->driver = std::make_unique<MacAudioDriver>([callbackState, processCallback, processContext](float* l, float* r, uint32_t len) {
-            float* channels[2] = { l, r };
+        m_impl->driver = std::make_unique<MacAudioDriver>([callbackState, processCallback, processContext](const float* const* inputs, uint32_t inputChannelCount, float* const* outputs, uint32_t outputChannelCount, uint32_t len) {
             if (processCallback) {
-                processCallback(nullptr, channels, len, processContext);
+                processCallback(inputs, inputChannelCount, outputs, outputChannelCount, len, processContext);
             } else {
-                std::fill_n(l, len, 0.0f);
-                std::fill_n(r, len, 0.0f);
+                for (uint32_t channel = 0; channel < outputChannelCount; ++channel)
+                    if (outputs && outputs[channel]) std::fill_n(outputs[channel], len, 0.0f);
             }
             float peak = 0.0f;
-            for (uint32_t i = 0; i < len; ++i) {
-                peak = std::max(peak, std::max(std::fabs(l[i]), std::fabs(r[i])));
-            }
+            for (uint32_t channel = 0; outputs && channel < outputChannelCount; ++channel)
+                if (outputs[channel])
+                    for (uint32_t i = 0; i < len; ++i)
+                        peak = std::max(peak, std::fabs(outputs[channel][i]));
             callbackState->outputPeak.store(peak, std::memory_order_release);
             callbackState->callbackCount.fetch_add(1, std::memory_order_relaxed);
         });
@@ -268,6 +343,17 @@ uint32_t MacAudioDriverHost::buffer_size() const noexcept {
     return m_impl && m_impl->driver ? m_impl->driver->buffer_size() : kFallbackBufferSize;
 }
 
+uint32_t MacAudioDriverHost::input_channel_count() const {
+    if (!m_impl) return 0;
+    std::lock_guard<std::mutex> lock(m_impl->lifecycleMutex);
+    return m_impl->driver ? m_impl->driver->input_channel_count() : 0;
+}
+
+uint32_t MacAudioDriverHost::output_channel_count() const noexcept {
+    return m_impl && m_impl->driver && m_impl->driver->is_running()
+        ? m_impl->driver->output_channel_count() : 0;
+}
+
 void MacAudioDriverHost::try_reconnect() {
     if (!m_impl) return;
     std::lock_guard<std::mutex> lock(m_impl->lifecycleMutex);
@@ -314,25 +400,66 @@ std::string MacAudioDriverHost::list_devices_json() const {
         const bool converted = CFStringGetCString(name, nameBuffer, sizeof(nameBuffer), kCFStringEncodingUTF8);
         CFRelease(name);
         if (!converted) continue;
-        auto hasScope = [device](AudioObjectPropertyScope scope) {
-            AudioObjectPropertyAddress streamAddress = {
-                kAudioDevicePropertyStreams, scope, kAudioObjectPropertyElementMain
-            };
-            UInt32 streamSize = 0;
-            return AudioObjectGetPropertyDataSize(device, &streamAddress, 0, nullptr, &streamSize) == noErr && streamSize > 0;
-        };
         if (!first) json << ',';
         first = false;
-        json << "{\"id\":" << device << ",\"name\":\"";
+        CFStringRef uid = nullptr;
+        const bool hasUid = readDeviceProperty(device, kAudioDevicePropertyDeviceUID,
+                                                kAudioObjectPropertyScopeGlobal,
+                                                &uid, sizeof(uid)) && uid;
+        char uidBuffer[512] = {};
+        const bool uidConverted = hasUid && CFStringGetCString(uid, uidBuffer, sizeof(uidBuffer), kCFStringEncodingUTF8);
+        if (uid) CFRelease(uid);
+        json << "{\"id\":" << device << ",\"uid\":\"";
+        if (uidConverted) {
+            for (const char* c = uidBuffer; *c; ++c) {
+                if (*c == '\\' || *c == '"') json << '\\';
+                json << *c;
+            }
+        }
+        json << "\",\"name\":\"";
         for (const char* c = nameBuffer; *c; ++c) {
             if (*c == '\\' || *c == '"') json << '\\';
             json << *c;
         }
-        json << "\",\"input\":" << (hasScope(kAudioObjectPropertyScopeInput) ? "true" : "false")
-             << ",\"output\":" << (hasScope(kAudioObjectPropertyScopeOutput) ? "true" : "false") << '}';
+        const uint32_t inputChannels = channelCountForScope(device, kAudioObjectPropertyScopeInput);
+        const uint32_t outputChannels = channelCountForScope(device, kAudioObjectPropertyScopeOutput);
+        const auto inputNames = channelNamesForScope(
+            device, kAudioObjectPropertyScopeInput, inputChannels, "Input");
+        const auto outputNames = channelNamesForScope(
+            device, kAudioObjectPropertyScopeOutput, outputChannels, "Output");
+        json << "\",\"input\":" << (inputChannels > 0 ? "true" : "false")
+             << ",\"input_channels\":" << inputChannels
+             << ",\"input_channel_names\":[";
+        for (size_t channel = 0; channel < inputNames.size(); ++channel) {
+            if (channel) json << ',';
+            appendJsonString(json, inputNames[channel]);
+        }
+        json << "],\"output\":" << (outputChannels > 0 ? "true" : "false")
+             << ",\"output_channels\":" << outputChannels
+             << ",\"output_channel_names\":[";
+        for (size_t channel = 0; channel < outputNames.size(); ++channel) {
+            if (channel) json << ',';
+            appendJsonString(json, outputNames[channel]);
+        }
+        json << "]}";
     }
     json << ']';
     return json.str();
+}
+
+std::string MacAudioDriverHost::selected_device_uid() const {
+    if (!m_impl) return {};
+    std::lock_guard<std::mutex> lock(m_impl->lifecycleMutex);
+    const AudioDeviceID device = m_impl->driver && m_impl->driver->is_running()
+        ? m_impl->driver->device_id() : m_impl->selectedDevice;
+    if (device == kAudioObjectUnknown) return {};
+    CFStringRef uid = nullptr;
+    if (!readDeviceProperty(device, kAudioDevicePropertyDeviceUID,
+                            kAudioObjectPropertyScopeGlobal, &uid, sizeof(uid)) || !uid) return {};
+    char buffer[512] = {};
+    const bool converted = CFStringGetCString(uid, buffer, sizeof(buffer), kCFStringEncodingUTF8);
+    CFRelease(uid);
+    return converted ? std::string(buffer) : std::string{};
 }
 
 void MacAudioDriverHost::stop() {
@@ -408,6 +535,10 @@ bool MacAudioDriverHost::poll_input_block(float* const* destination,
                                    destinationFrameCapacity, info, droppedBlocks);
 }
 
+void MacAudioDriverHost::discard_pending_input_blocks() noexcept {
+    if (m_impl) m_impl->inputQueue.discard_pending();
+}
+
 uint64_t MacAudioDriverHost::dropped_input_blocks() const noexcept {
     return m_impl ? m_impl->inputQueue.dropped_blocks() : 0;
 }
@@ -433,4 +564,4 @@ void MacAudioDriverHost::unregister_input_capture_sink() noexcept {
         m_impl->driver->register_input_capture_sink(&m_impl->queueSink);
 }
 
-} // namespace Aura::Core::Driver
+} // namespace Hirari::Core::Driver

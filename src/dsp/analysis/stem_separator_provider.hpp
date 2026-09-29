@@ -11,7 +11,7 @@
 
 #include "stem_splitter.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 enum class StemSeparatorBackend : uint8_t {
     Heuristic = 0,
@@ -219,4 +219,4 @@ private:
     std::shared_ptr<IStemSeparatorProvider> m_provider;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

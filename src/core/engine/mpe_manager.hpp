@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct MPEVoice
@@ -92,4 +92,4 @@ private:
     std::unordered_map<uint8_t, std::vector<uint8_t>> m_noteToChannel;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

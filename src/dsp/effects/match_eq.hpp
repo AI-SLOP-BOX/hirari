@@ -7,7 +7,7 @@
 #include "../iprocessor.hpp"
 #include "../utils/fft_utils.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class MatchEQ
@@ -93,4 +93,4 @@ private:
     uint32_t m_writeIdx;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

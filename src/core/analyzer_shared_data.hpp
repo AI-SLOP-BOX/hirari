@@ -2,7 +2,7 @@
 #include <array>
 #include <memory>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class AnalyzerSharedData
@@ -60,4 +60,4 @@ private:
     std::atomic<Snapshot*> m_spareBuffer;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

@@ -9,7 +9,7 @@
 #include <mutex>
 #include <thread>
 
-namespace Aura::Platform {
+namespace Hirari::Platform {
 
 class CoreAudioDevice final : public AudioDevice {
 public:
@@ -200,5 +200,5 @@ std::unique_ptr<AudioDevice> createAudioDevice() {
     return std::make_unique<CoreAudioDevice>();
 }
 
-} // namespace Aura::Platform
+} // namespace Hirari::Platform
 #endif

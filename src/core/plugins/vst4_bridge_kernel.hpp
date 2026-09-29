@@ -5,7 +5,7 @@
 
 #include <unordered_map>
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 struct VST4Parameter {
     uint32_t id;
@@ -42,4 +42,4 @@ private:
     std::unordered_map<uint32_t, VST4Parameter> m_params;
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

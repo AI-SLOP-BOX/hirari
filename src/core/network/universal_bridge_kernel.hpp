@@ -5,11 +5,11 @@
 #include <vector>
 #include <string>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @class UniversalBridgeKernel
- * @brief Industrial Quantum Communication Engine for Aura Studio Pro.
+ * @brief Industrial Quantum Communication Engine for Hirari Studio Pro.
  * Implements instantaneous state entanglement and CRDT reconciliation.
  */
 class UniversalBridgeKernel {
@@ -71,4 +71,4 @@ private:
     std::atomic<uint32_t> m_exportCount{0};
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

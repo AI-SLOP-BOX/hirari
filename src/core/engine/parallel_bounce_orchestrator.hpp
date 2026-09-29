@@ -10,7 +10,7 @@
 #include "../audio_buffer.hpp"
 #include "../concurrency/thread_pool.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ParallelBounceOrchestrator
@@ -49,7 +49,7 @@ public:
         std::vector<std::future<bool>> jobs;
         jobs.reserve(trackIds.size());
         for (uint32_t id : trackIds) {
-            jobs.emplace_back(Aura::Core::Concurrency::ThreadPool::getInstance().enqueue([renderer, id]() {
+            jobs.emplace_back(Hirari::Core::Concurrency::ThreadPool::getInstance().enqueue([renderer, id]() {
                 try { return renderer(id); } catch (...) { return false; }
             }));
         }
@@ -82,4 +82,4 @@ private:
     std::vector<std::pair<uint32_t, bool>> m_lastResults;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -2,8 +2,9 @@
 #include <algorithm>
 #include <vector>
 #include <utility>
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @struct DeltaChunk
@@ -61,17 +62,10 @@ public:
 
 private:
     static uint32_t checksum(const uint8_t* data, size_t size) {
-        uint32_t crc = 0xFFFFFFFFu;
-        for (size_t i = 0; i < size; ++i) {
-            crc ^= data[i];
-            for (int bit = 0; bit < 8; ++bit) {
-                crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
-            }
-        }
-        return ~crc;
+        return hirari_crc32_bytes(data, size);
     }
 
     AssetDeltaEngine() = default;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

@@ -1,69 +1,54 @@
 #pragma once
-#include <atomic>
-#include <cmath>
-#include <algorithm>
 
-namespace Aura::Core {
+#include <cstdint>
+#include "rust_ffi.hpp"
+
+namespace Hirari::Core {
 
 /**
- * @class ParameterSmoother
- * @brief High-precision parameter smoothing engine (anti-zipper filter).
- * Implements a one-pole low-pass filter to smooth parameters.
+ * @brief Native API adapter for the Rust-owned lock-free parameter smoother.
+ *
+ * The target can be updated from a control thread while the audio thread
+ * advances the current value. The audio operations perform no allocation.
  */
 class ParameterSmoother {
 public:
-    explicit ParameterSmoother(float initialValue = 0.0f) {
-        m_target.store(initialValue);
-        m_current.store(initialValue);
-        m_a.store(0.01f);
+    explicit ParameterSmoother(float initialValue = 0.0f)
+        : m_state(hirari_parameter_smoother_create(initialValue)) {}
+
+    ~ParameterSmoother() { hirari_parameter_smoother_destroy(m_state); }
+
+    ParameterSmoother(const ParameterSmoother&) = delete;
+    ParameterSmoother& operator=(const ParameterSmoother&) = delete;
+    ParameterSmoother(ParameterSmoother&&) = delete;
+    ParameterSmoother& operator=(ParameterSmoother&&) = delete;
+
+    void setTarget(float value) {
+        hirari_parameter_smoother_set_target(m_state, value);
     }
 
-    void setTarget(float value) { m_target.store(value, std::memory_order_relaxed); }
-    
     void reset(float value) {
-        m_target.store(value, std::memory_order_relaxed);
-        m_current.store(value, std::memory_order_relaxed);
+        hirari_parameter_smoother_reset(m_state, value);
     }
 
-    void setSmoothingTime(float ms, float sr) {
-        if (ms <= 0.0f || sr <= 0.0f) {
-            m_a.store(1.0f, std::memory_order_relaxed);
-            return;
-        }
-        float tau = ms / 1000.0f;
-        float coef = 1.0f - std::exp(-1.0f / (sr * tau));
-        m_a.store(coef, std::memory_order_relaxed);
+    void setSmoothingTime(float milliseconds, float sampleRate) {
+        hirari_parameter_smoother_set_time(m_state, milliseconds, sampleRate);
     }
 
-    void process(float* buffer, uint32_t len) {
-        float current = m_current.load(std::memory_order_relaxed);
-        float target = m_target.load(std::memory_order_relaxed);
-        float a = m_a.load(std::memory_order_relaxed);
-        
-        for (uint32_t i = 0; i < len; ++i) {
-            current = current + a * (target - current);
-            buffer[i] = current;
-        }
-        m_current.store(current, std::memory_order_relaxed);
+    void process(float* buffer, uint32_t length) {
+        hirari_parameter_smoother_process(m_state, buffer, length);
     }
 
     float getNextValue() {
-        float current = m_current.load(std::memory_order_relaxed);
-        float target = m_target.load(std::memory_order_relaxed);
-        float a = m_a.load(std::memory_order_relaxed);
-        current = current + a * (target - current);
-        m_current.store(current, std::memory_order_relaxed);
-        return current;
+        return hirari_parameter_smoother_next(m_state);
     }
 
     float getCurrentValue() const {
-        return m_current.load(std::memory_order_relaxed);
+        return hirari_parameter_smoother_current(m_state);
     }
 
 private:
-    std::atomic<float> m_target;
-    std::atomic<float> m_current;
-    std::atomic<float> m_a;
+    void* m_state;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

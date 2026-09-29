@@ -4,7 +4,7 @@
 #include <atomic>
 #include <string>
 
-namespace Aura::Core::Security {
+namespace Hirari::Core::Security {
 
 /**
  * @class SystemAuditManager
@@ -46,4 +46,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Security
+} // namespace Hirari::Core::Security

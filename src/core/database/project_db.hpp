@@ -15,7 +15,7 @@
 #include <unistd.h>
 #endif
 
-namespace Aura::Core::Database {
+namespace Hirari::Core::Database {
 
 /**
  * @struct DBRecord
@@ -153,4 +153,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Database
+} // namespace Hirari::Core::Database

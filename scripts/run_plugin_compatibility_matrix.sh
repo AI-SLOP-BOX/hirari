@@ -3,18 +3,18 @@ set -eu
 
 # Produce an auditable inventory before running format-specific smoke tests.
 # Missing vendors are reported as SKIP rather than being mistaken for passes.
-OUT=${AURA_PLUGIN_MATRIX_REPORT:-artifacts/plugin-compatibility.tsv}
+OUT=${HIRARI_PLUGIN_MATRIX_REPORT:-artifacts/plugin-compatibility.tsv}
 mkdir -p "$(dirname "$OUT")"
 printf 'format\tkind\tpath\tarchitecture\tpreset_state\taudio_process\tgui\trecovery\tstatus\n' >"$OUT"
-if [ "${AURA_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] && [ -z "${AURA_PLUGIN_TEST_BIN:-}" ]; then
-  cargo test -p aura-core-bridge --test plugin_sandbox_workflow --no-run --quiet
-  AURA_PLUGIN_TEST_BIN=$(find target/debug/deps -type f -perm -111 \
+if [ "${HIRARI_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] && [ -z "${HIRARI_PLUGIN_TEST_BIN:-}" ]; then
+  cargo test -p hirari-core-bridge --test plugin_sandbox_workflow --no-run --quiet
+  HIRARI_PLUGIN_TEST_BIN=$(find target/debug/deps -type f -perm -111 \
     -name 'plugin_sandbox_workflow-*' -print0 | xargs -0 ls -t 2>/dev/null | head -n 1)
-  export AURA_PLUGIN_TEST_BIN
+  export HIRARI_PLUGIN_TEST_BIN
 fi
-if [ "${AURA_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] && [ -z "${AURA_PLUGIN_HOST_BIN:-}" ]; then
-  AURA_PLUGIN_HOST_BIN="$PWD/build-tools/aura-plugin-host-worker"
-  export AURA_PLUGIN_HOST_BIN
+if [ "${HIRARI_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] && [ -z "${HIRARI_PLUGIN_HOST_BIN:-}" ]; then
+  HIRARI_PLUGIN_HOST_BIN="$PWD/build-tools/hirari-plugin-host-worker"
+  export HIRARI_PLUGIN_HOST_BIN
 fi
 host_arch=$(uname -m)
 bundle_kind() {
@@ -74,11 +74,11 @@ binary_arch() {
 run_fixture_smoke() {
   format=$1
   path=$2
-  [ "${AURA_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] || return 0
-  [ -x "${AURA_PLUGIN_TEST_BIN:-}" ] || return 0
-  if env AURA_COMPAT_FIXTURE="$path" AURA_PLUGIN_HOST_BIN="${AURA_PLUGIN_HOST_BIN:-}" \
-      AURA_PLUGIN_PATHS="$(dirname "$path")" \
-      "$AURA_PLUGIN_TEST_BIN" third_party_fixture_compatibility_smoke --exact --ignored --test-threads=1 >/dev/null 2>&1; then
+  [ "${HIRARI_PLUGIN_MATRIX_RUN_E2E:-0}" = "1" ] || return 0
+  [ -x "${HIRARI_PLUGIN_TEST_BIN:-}" ] || return 0
+  if env HIRARI_COMPAT_FIXTURE="$path" HIRARI_PLUGIN_HOST_BIN="${HIRARI_PLUGIN_HOST_BIN:-}" \
+      HIRARI_PLUGIN_PATHS="$(dirname "$path")" \
+      "$HIRARI_PLUGIN_TEST_BIN" third_party_fixture_compatibility_smoke --exact --ignored --test-threads=1 >/dev/null 2>&1; then
     awk -F '\t' -v OFS='\t' -v p="$path" -v f="$format" \
       'NR == 1 { print; next } { if ($1 == f && $3 == p) { $5="PASS"; $6="PASS"; $8="PASS"; $9="PASS" } print }' "$OUT" >"$OUT.tmp"
     mv "$OUT.tmp" "$OUT"
@@ -108,7 +108,7 @@ for root in "$HOME/Library/Audio/Plug-Ins/CLAP" /Library/Audio/Plug-Ins/CLAP; do
 done
 
 printf 'plugin compatibility inventory written: %s\n' "$OUT"
-MARKDOWN_OUT=${AURA_PLUGIN_MATRIX_MARKDOWN:-${OUT%.tsv}.md}
+MARKDOWN_OUT=${HIRARI_PLUGIN_MATRIX_MARKDOWN:-${OUT%.tsv}.md}
 {
   printf '| Format | Kind | Path | Architecture | Preset/state | Audio process | GUI | Recovery | Status |\n'
   printf '|---|---|---|---|---|---|---|---|---|\n'

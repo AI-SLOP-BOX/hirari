@@ -3,7 +3,7 @@
 #include <iostream>
 #include <dispatch/dispatch.h>
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 static constexpr int kMaxInflightBuffers = 3;
 
@@ -106,4 +106,4 @@ void MetalAudioKernel::sync() {
     // In a real Atmos buss, this might wait for the last buffer
 }
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

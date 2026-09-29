@@ -8,7 +8,7 @@
 #include <cctype>
 #include <mutex>
 
-namespace Aura::IO::Assets {
+namespace Hirari::IO::Assets {
 
 /**
  * @brief AssetPatch: A high-quality Logic Pro-style instrument preset.
@@ -129,4 +129,4 @@ private:
     std::unordered_map<std::string, std::vector<AssetPatch>> m_categoryMap;
 };
 
-} // namespace Aura::IO::Assets
+} // namespace Hirari::IO::Assets

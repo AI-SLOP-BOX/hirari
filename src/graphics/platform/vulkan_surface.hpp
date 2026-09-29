@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
 #if defined(__APPLE__)
 #define VK_USE_PLATFORM_METAL_EXT 1
 #elif defined(_WIN32)
@@ -11,7 +11,7 @@
 #include <vulkan/vulkan.h>
 #include <string>
 
-namespace Aura::Graphics::Platform {
+namespace Hirari::Graphics::Platform {
 
 #if defined(__linux__)
 struct VulkanX11Window {
@@ -25,5 +25,5 @@ struct VulkanX11Window {
 bool createVulkanSurfaceForNativeView(VkInstance instance, void* nativeView,
                                       VkSurfaceKHR* surface, std::string& error);
 
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform
 #endif

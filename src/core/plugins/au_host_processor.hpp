@@ -19,7 +19,7 @@
 
 #include "../log_buffer.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @class SiloedAllocator
@@ -60,10 +60,10 @@ private:
  * @brief AUv2 Plugin Host implementation.
  * Provides a wrapper for AudioUnit instances with parameter scheduling.
  */
-class AUHostProcessor : public ::Aura::DSP::IProcessor {
+class AUHostProcessor : public ::Hirari::DSP::IProcessor {
 #include "au_host_processor_public.inc"
 #include "au_host_processor_private.inc"
 
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

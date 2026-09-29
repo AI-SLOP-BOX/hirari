@@ -1,0 +1,233 @@
+//! Optional cross-media session sidecar for Project/VFX workflows.
+//!
+//! The main `.hirari` document remains backward compatible. This sidecar stores
+//! shared timeline, VFX bindings, cues, and production revision metadata so
+//! older Audio projects can be opened without knowing about VFX features.
+
+use crate::production_timeline::{ParameterBinding, TempoMap, TimelineRate};
+use crate::vfx_bindings::VfxBindingGraph;
+use crate::vfx_timeline_bridge::VfxCue;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+
+pub const PRODUCTION_SESSION_VERSION: u32 = 1;
+const MAX_PRODUCTION_SIDECAR_BYTES: u64 = 32 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProductionRevision {
+    pub revision: u64,
+    pub message: String,
+    pub author: String,
+    pub timestamp_unix: i64,
+    pub audio_snapshot: Option<String>,
+    pub visual_snapshot: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProductionSession {
+    pub schema_version: u32,
+    pub project_id: String,
+    pub rate: TimelineRate,
+    pub tempo_map: TempoMap,
+    #[serde(default)]
+    pub bindings: VfxBindingGraph,
+    #[serde(default)]
+    pub cues: Vec<VfxCue>,
+    #[serde(default)]
+    pub revisions: Vec<ProductionRevision>,
+    #[serde(default)]
+    pub external_bindings: Vec<ParameterBinding>,
+}
+
+impl ProductionSession {
+    pub fn new(
+        project_id: impl Into<String>,
+        rate: TimelineRate,
+        initial_bpm: f64,
+    ) -> Option<Self> {
+        if !rate.validate() {
+            return None;
+        }
+        Some(Self {
+            schema_version: PRODUCTION_SESSION_VERSION,
+            project_id: project_id.into(),
+            rate,
+            tempo_map: TempoMap::new(initial_bpm)?,
+            bindings: VfxBindingGraph::default(),
+            cues: Vec::new(),
+            revisions: Vec::new(),
+            external_bindings: Vec::new(),
+        })
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != PRODUCTION_SESSION_VERSION {
+            anyhow::bail!(
+                "unsupported production session schema {}",
+                self.schema_version
+            );
+        }
+        if self.project_id.trim().is_empty() || self.project_id.len() > 256 {
+            anyhow::bail!("production project id is invalid");
+        }
+        if !self.rate.validate()
+            || self.tempo_map.points.is_empty()
+            || self.tempo_map.points[0].beat != 0.0
+        {
+            anyhow::bail!("production timeline is invalid");
+        }
+        if self.cues.len() > 4_000_000
+            || self.revisions.len() > 1_000_000
+            || self.external_bindings.len() > 65_536
+        {
+            anyhow::bail!("production session exceeds bounds");
+        }
+        if !self.bindings.curves.iter().all(|curve| curve.validate()) {
+            anyhow::bail!("production binding graph is invalid");
+        }
+        Ok(())
+    }
+
+    pub fn sidecar_path(project_path: impl AsRef<Path>) -> PathBuf {
+        let path = project_path.as_ref();
+        PathBuf::from(format!("{}.production.json", path.to_string_lossy()))
+    }
+
+    pub fn save_sidecar(&self, project_path: impl AsRef<Path>) -> Result<PathBuf> {
+        self.validate()?;
+        let path = Self::sidecar_path(project_path);
+        let bytes = serde_json::to_vec_pretty(self)?;
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or_default();
+        let temp = path.with_file_name(format!(
+            ".{}.tmp-{}-{}",
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("production"),
+            std::process::id(),
+            nonce
+        ));
+        let write_result = (|| -> Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .with_context(|| format!("write production sidecar {}", temp.display()))?;
+            file.write_all(&bytes)
+                .with_context(|| format!("write production sidecar {}", temp.display()))?;
+            file.sync_all()
+                .with_context(|| format!("flush production sidecar {}", temp.display()))?;
+            std::fs::rename(&temp, &path)
+                .with_context(|| format!("publish production sidecar {}", path.display()))?;
+            if let Some(parent) = path.parent() {
+                if let Ok(directory) = std::fs::File::open(parent) {
+                    directory.sync_all().ok();
+                }
+            }
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = std::fs::remove_file(&temp);
+        }
+        write_result?;
+        Ok(path)
+    }
+
+    pub fn load_sidecar(project_path: impl AsRef<Path>) -> Result<Option<Self>> {
+        let path = Self::sidecar_path(project_path);
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let file = std::fs::File::open(&path)
+            .with_context(|| format!("read production sidecar {}", path.display()))?;
+        let size = file
+            .metadata()
+            .with_context(|| format!("stat production sidecar {}", path.display()))?
+            .len();
+        if size > MAX_PRODUCTION_SIDECAR_BYTES {
+            anyhow::bail!(
+                "production sidecar exceeds {} byte limit",
+                MAX_PRODUCTION_SIDECAR_BYTES
+            );
+        }
+        let mut bytes = Vec::with_capacity(size as usize);
+        file.take(MAX_PRODUCTION_SIDECAR_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .with_context(|| format!("read production sidecar {}", path.display()))?;
+        if bytes.len() as u64 > MAX_PRODUCTION_SIDECAR_BYTES {
+            anyhow::bail!(
+                "production sidecar exceeds {} byte limit",
+                MAX_PRODUCTION_SIDECAR_BYTES
+            );
+        }
+        let session: Self = serde_json::from_slice(&bytes).context("decode production sidecar")?;
+        session.validate()?;
+        Ok(Some(session))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidecar_round_trip_preserves_cross_media_state() {
+        let root =
+            std::env::temp_dir().join(format!("hirari-production-session-{}", std::process::id()));
+        let project = root.join("song.hirari");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut session = ProductionSession::new(
+            "song",
+            TimelineRate {
+                sample_rate: 48_000.0,
+                frame_rate: 23.976,
+            },
+            120.0,
+        )
+        .unwrap();
+        session.revisions.push(ProductionRevision {
+            revision: 1,
+            message: "initial audio+visual lock".into(),
+            author: "test".into(),
+            timestamp_unix: 0,
+            audio_snapshot: Some("audio-hash".into()),
+            visual_snapshot: Some("vfx-hash".into()),
+        });
+        let path = session.save_sidecar(&project).unwrap();
+        let restored = ProductionSession::load_sidecar(&project).unwrap().unwrap();
+        assert_eq!(restored, session);
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn missing_sidecar_is_backward_compatible() {
+        let project = std::env::temp_dir().join(format!(
+            "hirari-no-production-{}.hirari",
+            std::process::id()
+        ));
+        assert!(ProductionSession::load_sidecar(project).unwrap().is_none());
+    }
+
+    #[test]
+    fn oversized_sidecar_is_rejected_before_decode() {
+        let root = std::env::temp_dir().join(format!(
+            "hirari-production-session-oversized-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("song.hirari");
+        let sidecar = ProductionSession::sidecar_path(&project);
+        let file = std::fs::File::create(&sidecar).unwrap();
+        file.set_len(MAX_PRODUCTION_SIDECAR_BYTES + 1).unwrap();
+
+        let result = ProductionSession::load_sidecar(&project);
+
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+}

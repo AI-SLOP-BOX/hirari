@@ -4,9 +4,9 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
-#include "aura_unified_engine.hpp"
+#include "hirari_unified_engine.hpp"
 
-namespace Aura::Core::BridgeFFI {
+namespace Hirari::Core::BridgeFFI {
 
 /**
  * @class ProjectManager
@@ -34,11 +34,11 @@ public:
     }
 
     rust::Vec<uint8_t> serialize_project_bytes() const {
-        return ::Aura::Core::Engine::getInstance().serialize_project();
+        return ::Hirari::Core::Engine::getInstance().serialize_project();
     }
 
-    void undo() const { ::Aura::Core::Engine::getInstance().undo(); }
-    void redo() const { ::Aura::Core::Engine::getInstance().redo(); }
+    void undo() const { ::Hirari::Core::Engine::getInstance().undo(); }
+    void redo() const { ::Hirari::Core::Engine::getInstance().redo(); }
 
     size_t get_undo_history_count() const {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -62,4 +62,4 @@ private:
 
 inline const ProjectManager& get_project_manager() { return ProjectManager::getInstance(); }
 
-} // namespace Aura::Core::BridgeFFI
+} // namespace Hirari::Core::BridgeFFI

@@ -6,7 +6,7 @@
 #include <atomic>
 #include <chrono>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 class CrashRecoveryStore {
 public:
     explicit CrashRecoveryStore(std::filesystem::path path):m_path(std::move(path)){}

@@ -8,7 +8,7 @@
 #include "../../core/engine/vca_control_system.hpp"
 #include "../../core/audio_processor_graph.hpp"
 
-namespace Aura::IO::Persistence {
+namespace Hirari::IO::Persistence {
 
 /**
  * @class ProjectEncoder
@@ -22,7 +22,7 @@ public:
         std::ostringstream json;
         json << "{\n";
         json << "  \"version\": \"2026.03.22\",\n";
-        json << "  \"project_name\": \"Aura Session\",\n";
+        json << "  \"project_name\": \"Hirari Session\",\n";
         
         // 1. Tracks Serialization
         json << "  \"tracks\": [\n";
@@ -95,7 +95,7 @@ private:
               << "\", \"start\": " << region->getStartBeat()
               << ", \"length\": " << region->getLengthBeats()
               << ", \"notes\": [";
-            std::vector<Aura::Core::MIDINote> notes;
+            std::vector<Hirari::Core::MIDINote> notes;
             region->copyProcessedNotes(notes);
             for (size_t n = 0; n < notes.size(); ++n) {
                 if (n != 0) t << ", ";
@@ -148,4 +148,4 @@ private:
     }
 };
 
-} // namespace Aura::IO::Persistence
+} // namespace Hirari::IO::Persistence

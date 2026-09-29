@@ -10,7 +10,7 @@
 #include <immintrin.h>
 #endif
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 enum class ModSource : uint32_t { LFO1, LFO2, ENV1, ENV2, MIDI_CC, VELOCITY, COUNT };
 enum class ModTarget : uint32_t { VOLUME, PAN, CUTOFF, RESONANCE, DRIVE, PITCH, COUNT };
@@ -83,4 +83,4 @@ private:
     std::array<ModEntry, kMaxEntries> m_entries;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

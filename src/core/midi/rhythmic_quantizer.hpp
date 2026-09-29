@@ -6,7 +6,7 @@
 #include <algorithm>
 #include "../midi_buffer.hpp"
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @struct GrooveTemplate
@@ -66,4 +66,4 @@ private:
     std::map<std::string, GrooveTemplate> m_templates;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

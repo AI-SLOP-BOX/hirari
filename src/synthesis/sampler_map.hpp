@@ -4,7 +4,7 @@
 #include <string>
 #include <map>
 
-namespace Aura::Synthesis {
+namespace Hirari::Synthesis {
 
 /**
  * @brief SamplerZone: A single mapping for a multi-sample instrument.
@@ -54,4 +54,4 @@ private:
     uint32_t m_roundRobinCounter = 0;
 };
 
-} // namespace Aura::Synthesis
+} // namespace Hirari::Synthesis

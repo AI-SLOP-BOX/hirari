@@ -9,11 +9,11 @@
 #include "../diagnostics/engine_diagnostics.hpp"
 #include "../composition/harmony_engine.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class EngineOrchestrator
- * @brief Main maintenance and synchronization hub for the Aura Engine.
+ * @brief Main maintenance and synchronization hub for the Hirari Engine.
  * HONEST FIX: Replaced 'Singularity' nonsense with professional maintenance logic.
  */
 class EngineOrchestrator {
@@ -39,4 +39,4 @@ private:
     EngineOrchestrator() = default;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

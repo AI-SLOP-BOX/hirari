@@ -1,6 +1,6 @@
 /*
- * Aura DAW Ultimate - High-Performance Digital Audio Workstation
- * Copyright (c) 2024-2026 Aura DAW Project. All rights reserved.
+ * Hirari DAW Ultimate - High-Performance Digital Audio Workstation
+ * Copyright (c) 2024-2026 Hirari DAW Project. All rights reserved.
  * Licensed under the MIT License.
  */
 
@@ -11,7 +11,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class NeuralInference
@@ -76,4 +76,4 @@ private:
     std::array<float, HiddenSize> m_hiddenState;
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

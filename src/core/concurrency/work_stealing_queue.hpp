@@ -8,7 +8,7 @@
 #include <thread>
 #include <new>
 
-namespace Aura::Concurrency {
+namespace Hirari::Concurrency {
 
 /**
  * @class WorkStealingQueue
@@ -130,4 +130,4 @@ private:
     std::vector<std::unique_ptr<Deque>> m_queues;
 };
 
-} // namespace Aura::Concurrency
+} // namespace Hirari::Concurrency

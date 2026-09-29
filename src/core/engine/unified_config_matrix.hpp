@@ -7,7 +7,7 @@
 #include <fstream>
 #include "../../external/nlohmann/json.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 using json = nlohmann::json;
 
@@ -31,7 +31,7 @@ public:
         set("gui.refresh_rate", 120.0f);
 
         // --- 2. DYNAMIC OVERRIDE (INDUSTRIAL SOVEREIGNTY) ---
-        loadFromFile("aura_config.json");
+        loadFromFile("hirari_config.json");
     }
 
     void set(const std::string& key, ConfigValue val) {
@@ -62,4 +62,4 @@ private:
     std::map<std::string, ConfigValue> m_configs;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

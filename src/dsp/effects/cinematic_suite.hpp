@@ -8,7 +8,7 @@
 #include "../iprocessor.hpp"
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class AllPassFilter
@@ -37,7 +37,7 @@ private:
 };
 
 // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-// DivineReverb, MasterLimitPro, and AnalogCloner are now shims to Aura::Core::Bridge::CinematicSuiteEngine.
+// DivineReverb, MasterLimitPro, and AnalogCloner are now shims to Hirari::Core::Bridge::CinematicSuiteEngine.
 // Rust's SIMD-optimized calculations ensure that cinematic effects are always perfectly smooth and technically superior.
 
 class DivineReverb : public IProcessor {
@@ -104,4 +104,4 @@ private: std::atomic<float> m_drive{1.0f};
 };
 
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

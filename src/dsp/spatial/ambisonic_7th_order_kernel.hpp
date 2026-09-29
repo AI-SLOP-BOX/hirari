@@ -3,7 +3,7 @@
 #include <cmath>
 #include <vector>
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @class Ambisonic7thOrderKernel
@@ -65,4 +65,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

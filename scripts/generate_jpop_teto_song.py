@@ -14,7 +14,7 @@ BEAT = 60.0 / BPM
 BARS = 96
 N = int(BARS * 4 * BEAT * SR)
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OUT = os.environ.get("AURA_JPOP_OUT", str(REPO_ROOT / "dist" / "aura_jpop_teto_instrumental.wav"))
+OUT = os.environ.get("HIRARI_JPOP_OUT", str(REPO_ROOT / "dist" / "hirari_jpop_teto_instrumental.wav"))
 random.seed(2408)
 
 

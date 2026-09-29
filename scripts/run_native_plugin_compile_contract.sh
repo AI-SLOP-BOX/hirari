@@ -11,29 +11,29 @@ cd "$ROOT_DIR"
 
 # The worker is an external-process trust boundary. Invalid option values and
 # unknown options must fail before any fd, shared-memory, or plugin setup.
-if "$ROOT_DIR/build-tools/aura-plugin-host-worker" \
+if "$ROOT_DIR/build-tools/hirari-plugin-host-worker" \
     --plugin builtin://passthrough --control-fd not-a-number; then
     echo "worker accepted a malformed file descriptor" >&2
     exit 1
 fi
-if "$ROOT_DIR/build-tools/aura-plugin-host-worker" \
+if "$ROOT_DIR/build-tools/hirari-plugin-host-worker" \
     --plugin builtin://passthrough --unknown-option value; then
     echo "worker accepted an unknown option" >&2
     exit 1
 fi
-if "$ROOT_DIR/build-tools/aura-plugin-host-worker" \
+if "$ROOT_DIR/build-tools/hirari-plugin-host-worker" \
     --plugin builtin://passthrough --control-fd 0 --status-fd 1 --shared-fd 2 \
     --sample-rate nan --min-frames 1 --max-frames 64 --channels 2; then
     echo "worker accepted a non-finite sample rate" >&2
     exit 1
 fi
-if "$ROOT_DIR/build-tools/aura-plugin-host-worker" \
+if "$ROOT_DIR/build-tools/hirari-plugin-host-worker" \
     --plugin builtin://passthrough --control-fd 0 --status-fd 1 --shared-fd 2 \
     --sample-rate 48000 --min-frames 0 --max-frames 64 --channels 2; then
     echo "worker accepted a zero minimum frame count" >&2
     exit 1
 fi
-if "$ROOT_DIR/build-tools/aura-plugin-host-worker" \
+if "$ROOT_DIR/build-tools/hirari-plugin-host-worker" \
     --plugin builtin://passthrough --control-fd 0 --status-fd 1 --shared-fd 2 \
     --sample-rate 48000 --min-frames 128 --max-frames 64 --channels 2; then
     echo "worker accepted an inverted frame range" >&2
@@ -41,7 +41,7 @@ if "$ROOT_DIR/build-tools/aura-plugin-host-worker" \
 fi
 
 CXX=${CXX:-c++}
-OUT_DIR=${TMPDIR:-/tmp}/aura-native-contract
+OUT_DIR=${TMPDIR:-/tmp}/hirari-native-contract
 mkdir -p "$OUT_DIR"
 
 LINK_FLAGS=""
@@ -51,7 +51,7 @@ fi
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
     tests/native_plugin_compile_contract.cpp src/io/coreaudio_driver.cpp \
-    src/core/engine/midi_orchestrator.cpp $LINK_FLAGS \
+    $LINK_FLAGS \
     -o "$OUT_DIR/native-plugin-compile"
 # This translation unit intentionally exercises the complete native surface in
 # one process.  Its aggregate RAII locals are larger than macOS's default
@@ -91,7 +91,7 @@ fi
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
     tests/recording_engine_stress.cpp $LINK_FLAGS \
     -o "$OUT_DIR/recording-engine-stress"
-AURA_RECORDING_STRESS_ROUNDS="${AURA_RECORDING_STRESS_ROUNDS:-250}" \
+HIRARI_RECORDING_STRESS_ROUNDS="${HIRARI_RECORDING_STRESS_ROUNDS:-250}" \
     "$OUT_DIR/recording-engine-stress"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
@@ -116,9 +116,9 @@ AURA_RECORDING_STRESS_ROUNDS="${AURA_RECORDING_STRESS_ROUNDS:-250}" \
 "$OUT_DIR/clap-direct-process-contract" "$ROOT_DIR/build-tools/minimal-gain.clap"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/aura_omni_contract.cpp \
-    -o "$OUT_DIR/aura-omni-contract"
-"$OUT_DIR/aura-omni-contract"
+    tests/hirari_omni_contract.cpp \
+    -o "$OUT_DIR/hirari-omni-contract"
+"$OUT_DIR/hirari-omni-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
     tests/vocal_restoration_contract.cpp $LINK_FLAGS \

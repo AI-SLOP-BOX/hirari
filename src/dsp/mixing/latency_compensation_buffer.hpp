@@ -3,7 +3,7 @@
 #include <vector>
 #include <atomic>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief LatencyCompensationBuffer: Synchronizes all tracks for phase-perfect playback.
@@ -39,4 +39,4 @@ private:
     size_t m_writePos = 0;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

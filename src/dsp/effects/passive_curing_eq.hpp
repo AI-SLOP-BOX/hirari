@@ -8,7 +8,7 @@
 #include <cstring>
 #include "../iprocessor.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class PassiveCuringEQ
@@ -214,4 +214,4 @@ private:
     float m_stateL[32], m_stateR[32];
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

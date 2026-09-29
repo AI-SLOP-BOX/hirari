@@ -1,0 +1,14 @@
+export struct Z_AutomationPoint {
+    beat: float,
+    value: float,
+    curve: float,
+}
+
+export struct Z_AutomationLane {
+    name: string,
+    color: color,
+    active: bool,
+    plugin_index: int,
+    parameter_id: int,
+    points: [Z_AutomationPoint],
+}

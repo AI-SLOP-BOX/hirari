@@ -6,8 +6,8 @@
 #include "../src/platform/audio_device.hpp"
 
 int main() {
-    using Aura::Platform::AudioDevice;
-    using Aura::Platform::SilentAudioDevice;
+    using Hirari::Platform::AudioDevice;
+    using Hirari::Platform::SilentAudioDevice;
 
     SilentAudioDevice device;
     AudioDevice::Config first{48'000.0, 128, 2, 2};

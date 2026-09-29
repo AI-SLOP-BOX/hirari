@@ -12,7 +12,7 @@
 #include "../driver/mac_audio_driver_host.hpp"
 #endif
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /**
  * @class AudioDriverPro
@@ -60,7 +60,7 @@ public:
         m_renderCallback = render;
         m_inputCallback = input;
         m_callbackUser = user;
-#if defined(AURA_ENABLE_ASIO_SDK)
+#if defined(HIRARI_ENABLE_ASIO_SDK)
         if (m_currentBackend == Backend::ASIO && m_open.load(std::memory_order_acquire)) {
             auto& asio = ASIOBridgePro::getInstance();
             asio.setInputCallback(input);
@@ -91,10 +91,10 @@ public:
             if (!opened) m_lastError = "external audio backend rejected configuration";
         }
         if (b == Backend::ASIO) {
-#if defined(AURA_ENABLE_ASIO_SDK)
+#if defined(HIRARI_ENABLE_ASIO_SDK)
             auto& asio = ASIOBridgePro::getInstance();
             if (!opened) {
-                opened = asio.initialize("Aura ASIO") && asio.prepare(static_cast<uint32_t>(bufferSize), 2);
+                opened = asio.initialize("Hirari ASIO") && asio.prepare(static_cast<uint32_t>(bufferSize), 2);
             }
             if (opened && !asio.setSampleRate(sr)) {
                 asio.shutdown();
@@ -130,7 +130,7 @@ public:
 
 private:
     void closeStreamLocked() noexcept {
-#if defined(AURA_ENABLE_ASIO_SDK)
+#if defined(HIRARI_ENABLE_ASIO_SDK)
         if (m_currentBackend == Backend::ASIO) ASIOBridgePro::getInstance().shutdown();
 #endif
         if (m_currentBackend == m_externalBackend && m_externalClose)
@@ -174,7 +174,7 @@ private:
         // deviceId==0 means the system default device; a non-zero value is an
         // AudioDeviceID returned by MacAudioDriverHost::list_devices_json().
         if (!m_coreAudioHost)
-            m_coreAudioHost = std::make_unique<::Aura::Core::Driver::MacAudioDriverHost>();
+            m_coreAudioHost = std::make_unique<::Hirari::Core::Driver::MacAudioDriverHost>();
         const bool started = deviceId == 0
             ? m_coreAudioHost->reconfigure(sampleRate, static_cast<uint32_t>(bufferSize))
             : m_coreAudioHost->select_device(static_cast<uint32_t>(deviceId), sampleRate,
@@ -213,8 +213,8 @@ private:
     ASIOBridgePro::InputCallback m_inputCallback = nullptr;
     void* m_callbackUser = nullptr;
 #if defined(__APPLE__)
-    std::unique_ptr<::Aura::Core::Driver::MacAudioDriverHost> m_coreAudioHost;
+    std::unique_ptr<::Hirari::Core::Driver::MacAudioDriverHost> m_coreAudioHost;
 #endif
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

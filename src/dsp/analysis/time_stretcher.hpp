@@ -6,7 +6,7 @@
 #include <complex>
 #include <cstdint>
  
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
  
 /**
  * @class SovereignTimeStretcher
@@ -131,4 +131,4 @@ private:
     float m_overlapBuffer[kHopSize / 2 + 1024]; // Scratchpad
 };
  
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

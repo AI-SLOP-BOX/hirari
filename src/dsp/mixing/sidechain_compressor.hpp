@@ -4,7 +4,7 @@
 #include <cmath>
 #include <atomic>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief SidechainCompressor: External signal dynamic range processor.
@@ -50,4 +50,4 @@ private:
     float m_envelope = 0;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

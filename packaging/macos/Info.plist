@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Hirari</string>
+	<string>Hirari DAW</string>
 	<key>CFBundleExecutable</key>
-	<string>Aura DAW</string>
+	<string>Hirari DAW</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.aura-daw.studio</string>
+	<string>io.hirari-daw.studio</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Hirari</string>
+	<string>Hirari DAW</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>0.1.0</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>14.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>

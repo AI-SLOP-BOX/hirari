@@ -4,7 +4,7 @@
 #include <string>
 #include <memory>
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /**
  * @class MultiPlatformDrivers
@@ -48,4 +48,4 @@ private:
     // [Managing 5000+ lines of OS-specific clock-sync and buffer management logic]
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

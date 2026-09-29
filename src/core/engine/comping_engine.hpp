@@ -1,11 +1,10 @@
 #pragma once
-#include <vector>
-#include <string>
-#include <algorithm>
-#include <cstdint>
-#include <unordered_map>
 
-namespace Aura::Core::Engine {
+#include <cstdint>
+#include <string>
+#include "../rust_ffi.hpp"
+
+namespace Hirari::Core::Engine {
 
 struct Take {
     uint32_t id;
@@ -14,11 +13,7 @@ struct Take {
     uint64_t endSample;
 };
 
-/**
- * @class CompingEngine
- * @brief High-performance multi-lane take management.
- * HONEST FIX: Removed hardcoded limits and implemented O(log N) lookup.
- */
+/** C++ compatibility facade; take and comp-segment state lives in Rust. */
 class CompingEngine {
 public:
     struct CompSegment {
@@ -26,52 +21,52 @@ public:
         uint64_t start;
         uint64_t len;
         uint32_t crossfadeSamples = 256;
-        
+
         bool operator<(const CompSegment& other) const { return start < other.start; }
     };
 
-    /**
-     * @brief Adds a new take lane with industrial precision and arrangement sovereignty.
-     * INDUSTRIAL: Delegating take storage and indexing to the Rust 'CompingOrchestrator'.
-     */
-    void addTake(const Take& t) {
-        if (t.id == 0 || t.endSample <= t.startSample) return;
-        m_takes[t.id] = t;
+    CompingEngine() : m_state(hirari_comping_legacy_create()) {}
+    ~CompingEngine() { hirari_comping_legacy_destroy(m_state); }
+
+    CompingEngine(const CompingEngine& other)
+        : m_state(hirari_comping_legacy_clone(other.m_state)) {}
+    CompingEngine& operator=(const CompingEngine& other) {
+        if (this == &other) return *this;
+        void* replacement = hirari_comping_legacy_clone(other.m_state);
+        hirari_comping_legacy_destroy(m_state);
+        m_state = replacement;
+        return *this;
     }
 
-    /**
-     * @brief Identifies the active take at a given position with industrial-grade efficiency and arrangement sovereignty.
-     * INDUSTRIAL: Delegating segment resolution and crossfade synthesis to the Rust 'CompingOrchestrator'.
-     */
-    uint32_t getActiveTakeAt(uint64_t pos) const {
-        auto it = std::upper_bound(m_segments.begin(), m_segments.end(), pos,
-            [](uint64_t value, const CompSegment& segment) { return value < segment.start; });
-        while (it != m_segments.begin()) {
-            --it;
-            const uint64_t end = it->start > UINT64_MAX - it->len
-                ? UINT64_MAX : it->start + it->len;
-            if (pos >= it->start && pos < end && m_takes.count(it->takeId) != 0)
-                return it->takeId;
-        }
-        return 0;
+    CompingEngine(CompingEngine&& other) noexcept : m_state(other.m_state) {
+        other.m_state = nullptr;
+    }
+    CompingEngine& operator=(CompingEngine&& other) noexcept {
+        if (this == &other) return *this;
+        hirari_comping_legacy_destroy(m_state);
+        m_state = other.m_state;
+        other.m_state = nullptr;
+        return *this;
+    }
+
+    void addTake(const Take& take) {
+        (void)hirari_comping_legacy_add_take(
+            m_state, take.id, take.startSample, take.endSample);
+    }
+
+    uint32_t getActiveTakeAt(uint64_t sample) const {
+        return hirari_comping_legacy_active_take_at(m_state, sample);
     }
 
     void setCompSegment(const CompSegment& segment) {
-        if (segment.takeId == 0 || segment.len == 0 ||
-            m_takes.count(segment.takeId) == 0) return;
-        auto it = std::lower_bound(m_segments.begin(), m_segments.end(), segment);
-        if (it != m_segments.end() && it->start == segment.start) *it = segment;
-        else m_segments.insert(it, segment);
+        (void)hirari_comping_legacy_set_segment(
+            m_state, segment.takeId, segment.start, segment.len);
     }
 
-    void clear() noexcept {
-        m_takes.clear();
-        m_segments.clear();
-    }
+    void clear() noexcept { hirari_comping_legacy_clear(m_state); }
 
 private:
-    std::unordered_map<uint32_t, Take> m_takes;
-    std::vector<CompSegment> m_segments;
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

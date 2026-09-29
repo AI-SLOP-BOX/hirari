@@ -26,8 +26,13 @@ jobs:
       - name: Run the serialized workspace suite
         env:
           RUST_TEST_THREADS: "1"
-          AURA_NATIVE_TEST_ISOLATION: "1"
+          HIRARI_NATIVE_TEST_ISOLATION: "1"
         run: cargo test --workspace --all-targets --locked -- --test-threads=1
+      - name: Compare Rust DSP output with frozen C++ references
+        run: >-
+          cargo test -p hirari-core-bridge --lib --locked
+          --features dsp-differential-reference differential_tests
+          -- --test-threads=1
 
   macos-bundle:
     runs-on: macos-14
@@ -41,16 +46,16 @@ jobs:
       - name: Build the application bundle
         run: ./scripts/build_app.sh
       - name: Verify headless readiness
-        run: AURA_HEADLESS=1 "packaging/Aura DAW.app/Contents/MacOS/Aura DAW"
+        run: HIRARI_HEADLESS=1 "packaging/Hirari DAW.app/Contents/MacOS/Hirari DAW"
       - name: Verify bundle signature
-        run: codesign --verify --deep --strict "packaging/Aura DAW.app"
+        run: codesign --verify --deep --strict "packaging/Hirari DAW.app"
       - name: Generate and verify release metadata
         run: |
-          ./scripts/generate_release_metadata.sh release-metadata "packaging/Aura DAW.app"
+          ./scripts/generate_release_metadata.sh release-metadata "packaging/Hirari DAW.app"
           ./scripts/verify_release_metadata.sh release-metadata
       - name: Upload release metadata for review
         uses: actions/upload-artifact@v4
         with:
-          name: aura-release-metadata
+          name: hirari-release-metadata
           path: release-metadata/
           if-no-files-found: error

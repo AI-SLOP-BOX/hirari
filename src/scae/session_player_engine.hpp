@@ -9,9 +9,9 @@
 #include <limits>
 #include "core/midi_buffer.hpp"
 #include "core/engine/scale_system.hpp"
-#include "scae/AuraAISuite.hpp"
+#include "scae/HirariAISuite.hpp"
 
-namespace Aura::SCAE::Intelligence {
+namespace Hirari::SCAE::Intelligence {
 
 /**
  * @class SessionPlayerEngine
@@ -166,4 +166,4 @@ private:
     float m_complexity = 0.5f;
 };
 
-} // namespace Aura::SCAE::Intelligence
+} // namespace Hirari::SCAE::Intelligence

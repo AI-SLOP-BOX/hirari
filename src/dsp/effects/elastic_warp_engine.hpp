@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class ElasticWarpEngine
@@ -160,4 +160,4 @@ private:
     std::vector<float> m_window, m_olaBufferL, m_olaBufferR;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

@@ -8,7 +8,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace Aura::DSP::Synthesis {
+namespace Hirari::DSP::Synthesis {
 
 /**
  * @class VoiceManager
@@ -49,25 +49,11 @@ public:
 
     void render(float* l, float* r, size_t numFrames, Core::MidiBuffer& midi) noexcept {
         if (!l || !r || numFrames == 0) return;
-        std::fill(l, l + numFrames, 0.0f);
-        std::fill(r, r + numFrames, 0.0f);
-        midi.sort();
-
-        size_t cursor = 0;
-        for (const auto& event : midi) {
-            const size_t eventOffset = std::min<size_t>(event.sampleOffset, numFrames);
-            if (eventOffset > cursor) {
-                renderRange(l + cursor, r + cursor, eventOffset - cursor);
-                cursor = eventOffset;
-            }
-            if (event.size < 2) continue;
-            const uint8_t status = static_cast<uint8_t>(event.data[0] & 0xF0u);
-            const uint8_t note = event.data[1] & 0x7Fu;
-            const uint8_t value = event.size >= 3 ? event.data[2] & 0x7Fu : 0;
-            if (status == 0x90u && value != 0) triggerVoice(note, value);
-            else if (status == 0x80u || (status == 0x90u && value == 0)) releaseVoice(note);
-        }
-        if (cursor < numFrames) renderRange(l + cursor, r + cursor, numFrames - cursor);
+        hirari_voice_manager_render_midi(
+            midi.rustStateHandle(), this, l, r, numFrames,
+            &VoiceManager::triggerVoiceCallback,
+            &VoiceManager::releaseVoiceCallback,
+            &VoiceManager::renderRangeCallback);
     }
 
     void releaseVoice(uint8_t note) {
@@ -80,6 +66,19 @@ public:
     }
 
 private:
+    static void triggerVoiceCallback(void* context, uint8_t note, uint8_t velocity) noexcept {
+        if (context) static_cast<VoiceManager*>(context)->triggerVoice(note, velocity);
+    }
+
+    static void releaseVoiceCallback(void* context, uint8_t note) noexcept {
+        if (context) static_cast<VoiceManager*>(context)->releaseVoice(note);
+    }
+
+    static void renderRangeCallback(void* context, float* left, float* right,
+                                    size_t frames) noexcept {
+        if (context) static_cast<VoiceManager*>(context)->renderRange(left, right, frames);
+    }
+
     void renderRange(float* l, float* r, size_t numFrames) noexcept {
         if (!l || !r || numFrames == 0) return;
         std::array<float, 4096> scratch{};
@@ -105,4 +104,4 @@ private:
     uint32_t m_maxBlockSize = 0;
 };
 
-} // namespace Aura::DSP::Synthesis
+} // namespace Hirari::DSP::Synthesis

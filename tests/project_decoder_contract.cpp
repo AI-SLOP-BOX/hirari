@@ -3,9 +3,9 @@
 #include <cassert>
 
 int main() {
-    Aura::Core::Engine::TimelineSystem timeline;
-    auto existing = std::make_shared<Aura::Core::Engine::Track>(
-        77, "Existing", Aura::Core::Engine::Track::Type::Audio);
+    Hirari::Core::Engine::TimelineSystem timeline;
+    auto existing = std::make_shared<Hirari::Core::Engine::Track>(
+        77, "Existing", Hirari::Core::Engine::Track::Type::Audio);
     timeline.addTrack(existing);
 
     const std::string malformed = R"({
@@ -30,7 +30,7 @@ int main() {
         }
       ]
     })";
-    assert(!Aura::IO::Persistence::ProjectDecoder::decode(malformed, timeline));
+    assert(!Hirari::IO::Persistence::ProjectDecoder::decode(malformed, timeline));
     assert(timeline.getTracks().size() == 1);
     assert(timeline.getTracks().front()->getId() == 77);
 
@@ -58,12 +58,12 @@ int main() {
         }
       ]
     })";
-    assert(Aura::IO::Persistence::ProjectDecoder::decode(valid, timeline));
+    assert(Hirari::IO::Persistence::ProjectDecoder::decode(valid, timeline));
     assert(timeline.getTracks().size() == 2);
     assert(timeline.getTracks()[0]->getId() == 12);
     assert(timeline.getTracks()[1]->getId() == 13);
     assert(timeline.getTracks()[0]->getName() == "Lead \"Vocal\"");
-    assert(timeline.getTracks()[0]->getType() == Aura::Core::Engine::Track::Type::Midi);
+    assert(timeline.getTracks()[0]->getType() == Hirari::Core::Engine::Track::Type::Midi);
     assert(timeline.getTracks()[0]->isMuted());
     assert(timeline.getTracks()[0]->getRegions().size() == 1);
     assert(timeline.getTracks()[0]->getRegions()[0].id == 9001);
@@ -75,7 +75,7 @@ int main() {
     const std::string wrongRegionType = R"({
       "tracks": [{"id": 21, "name": "Broken", "audio_regions": {"id": 1}}]
     })";
-    assert(!Aura::IO::Persistence::ProjectDecoder::decode(wrongRegionType, timeline));
+    assert(!Hirari::IO::Persistence::ProjectDecoder::decode(wrongRegionType, timeline));
     assert(timeline.getTracks().size() == 2);
     assert(timeline.getTracks()[0]->getId() == 12);
 
@@ -84,11 +84,11 @@ int main() {
         {"id": 2, "start": 0, "length": 8, "clip_gain": "not-a-number"}
       ]}]
     })";
-    assert(!Aura::IO::Persistence::ProjectDecoder::decode(invalidRegionValue, timeline));
+    assert(!Hirari::IO::Persistence::ProjectDecoder::decode(invalidRegionValue, timeline));
     assert(timeline.getTracks().size() == 2);
 
-    auto duplicateA = std::make_shared<Aura::Core::Engine::Track>(31, "A", Aura::Core::Engine::Track::Type::Audio);
-    auto duplicateB = std::make_shared<Aura::Core::Engine::Track>(31, "B", Aura::Core::Engine::Track::Type::Audio);
+    auto duplicateA = std::make_shared<Hirari::Core::Engine::Track>(31, "A", Hirari::Core::Engine::Track::Type::Audio);
+    auto duplicateB = std::make_shared<Hirari::Core::Engine::Track>(31, "B", Hirari::Core::Engine::Track::Type::Audio);
     assert(!timeline.replaceTracks({duplicateA, duplicateB}));
     assert(timeline.getTracks().size() == 2);
     return 0;

@@ -2,7 +2,7 @@
 #include <atomic>
 #include <cstdint>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class IDGenerator
@@ -47,4 +47,4 @@ private:
     }
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

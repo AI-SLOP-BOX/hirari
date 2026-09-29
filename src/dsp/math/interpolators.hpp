@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace Aura::DSP::Math {
+namespace Hirari::DSP::Math {
 
 /**
  * @brief Interpolators: High-fidelity sample reconstruction utilities.
@@ -34,4 +34,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Math
+} // namespace Hirari::DSP::Math

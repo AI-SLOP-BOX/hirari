@@ -7,6 +7,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -16,7 +17,7 @@
 
 #include "plugin_sandbox_protocol.hpp"
 
-namespace Aura::Core::Plugins::SandboxAU {
+namespace Hirari::Core::Plugins::SandboxAU {
 
 class Runtime final {
 public:
@@ -108,9 +109,12 @@ private:
         AURenderCallbackStruct callback{&Runtime::inputCallback, this};
         if ((hasAudioInput && AudioUnitSetProperty(m_unit, kAudioUnitProperty_SetRenderCallback,
                                  kAudioUnitScope_Input, 0, &callback, sizeof(callback)) != noErr) ||
-            AudioUnitInitialize(m_unit) != noErr)
+        AudioUnitInitialize(m_unit) != noErr)
             return false;
         m_initialized = true;
+        if (AudioUnitAddRenderNotify(m_unit, &Runtime::renderNotify, this) != noErr)
+            return false;
+        m_renderNotifyRegistered = true;
         return true;
     }
 
@@ -132,24 +136,23 @@ public:
             output->mBuffers[channel].mDataByteSize = frames * sizeof(float);
             output->mBuffers[channel].mData = shared.output[channel];
         }
-        // Parameter changes are consumed inside the sandbox worker, immediately
-        // before the AU render call.  The host audio callback only appends to a
-        // bounded mailbox; it never calls AudioUnitSetParameter directly.
-        // AudioUnitSetParameter has no sample-offset argument, so AU changes
-        // are applied at the start of this block.  The offset is intentionally
-        // validated here and retained in the protocol for formats that support
-        // sample-accurate scheduling.
+        // Parameter changes are copied into a fixed buffer here. The render
+        // notification schedules them at their exact offsets immediately
+        // before AudioUnitRender; the host callback never calls an AU API.
         const uint32_t parameterCount = std::min<uint32_t>(
             shared.parameterChanges.load(std::memory_order_acquire),
             SandboxProtocol::kMaxParameterChanges);
+        m_parameterEventCount = 0;
         for (uint32_t index = 0; index < parameterCount; ++index) {
             const auto& change = shared.parameterChange[index];
-            if (change.sampleOffset > frames || !std::isfinite(change.value)) continue;
-            if (AudioUnitSetParameter(m_unit, static_cast<AudioUnitParameterID>(change.parameterId),
-                                      kAudioUnitScope_Global, 0, static_cast<AudioUnitParameterValue>(change.value),
-                                      0) != noErr) {
-                m_parameterError = true;
-            }
+            if (change.sampleOffset >= frames || !std::isfinite(change.value)) continue;
+            auto& event = m_parameterEvents[m_parameterEventCount++];
+            event.scope = kAudioUnitScope_Global;
+            event.element = 0;
+            event.parameter = static_cast<AudioUnitParameterID>(change.parameterId);
+            event.eventType = kParameterEvent_Immediate;
+            event.eventValues.immediate.bufferOffset = change.sampleOffset;
+            event.eventValues.immediate.value = static_cast<AudioUnitParameterValue>(change.value);
         }
         // AU instruments receive MIDI through the MusicDevice API rather
         // than the audio render callback.  Forward the bounded mailbox before
@@ -182,6 +185,9 @@ public:
     }
 
     bool ready() const noexcept { return m_ready; }
+    bool isMidiInstrument() const noexcept {
+        return m_componentType == kAudioUnitType_MusicDevice;
+    }
     OSType componentType() const noexcept { return m_componentType; }
     OSType componentSubType() const noexcept { return m_componentSubType; }
     OSType componentManufacturer() const noexcept { return m_componentManufacturer; }
@@ -291,8 +297,37 @@ private:
         return noErr;
     }
 
+    static OSStatus renderNotify(void* refCon, AudioUnitRenderActionFlags* flags,
+                                 const AudioTimeStamp*, UInt32, UInt32,
+                                 AudioBufferList*) noexcept {
+        auto* self = static_cast<Runtime*>(refCon);
+        if (!self || !flags || ((*flags & kAudioUnitRenderAction_PreRender) == 0) ||
+            self->m_parameterEventCount == 0) {
+            return noErr;
+        }
+        if (AudioUnitScheduleParameters(self->m_unit, self->m_parameterEvents.data(),
+                                        self->m_parameterEventCount) == noErr) {
+            return noErr;
+        }
+        // Some legacy AUs do not advertise support for scheduled parameter
+        // events. Keep audio flowing and apply their final value at the block
+        // boundary; schedulable AUs retain exact intra-block timing.
+        for (uint32_t index = 0; index < self->m_parameterEventCount; ++index) {
+            const auto& event = self->m_parameterEvents[index];
+            if (AudioUnitSetParameter(self->m_unit, event.parameter,
+                    event.scope, event.element, event.eventValues.immediate.value, 0) != noErr) {
+                self->m_parameterError = true;
+            }
+        }
+        return noErr;
+    }
+
     void shutdownUnitOnly() noexcept {
         if (m_unit) {
+            if (m_renderNotifyRegistered) {
+                AudioUnitRemoveRenderNotify(m_unit, &Runtime::renderNotify, this);
+                m_renderNotifyRegistered = false;
+            }
             if (m_initialized) AudioUnitUninitialize(m_unit);
             AudioComponentInstanceDispose(m_unit);
             m_unit = nullptr;
@@ -329,6 +364,10 @@ private:
     bool m_initialized = false;
     bool m_ready = false;
     bool m_parameterError = false;
+    bool m_renderNotifyRegistered = false;
+    std::array<AudioUnitParameterEvent, SandboxProtocol::kMaxParameterChanges>
+        m_parameterEvents{};
+    uint32_t m_parameterEventCount = 0;
     static_assert(SandboxProtocol::kMaxChannels >= 1, "AU adapter requires at least one channel");
     // AudioBufferList contains one AudioBuffer inline; reserve the remaining
     // channel descriptors explicitly so stereo/multichannel access is bounded.
@@ -336,6 +375,6 @@ private:
         sizeof(AudioBufferList) + sizeof(AudioBuffer) * (SandboxProtocol::kMaxChannels - 1)];
 };
 
-} // namespace Aura::Core::Plugins::SandboxAU
+} // namespace Hirari::Core::Plugins::SandboxAU
 
 #endif

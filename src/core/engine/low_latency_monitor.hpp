@@ -2,7 +2,7 @@
 #include <atomic>
 #include <vector>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class LowLatencyMonitor
@@ -19,7 +19,7 @@ public:
      */
     void updateTrackMonitoring(uint32_t trackId, bool isArmed, double sr) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::MonitoringOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::MonitoringOrchestrator.
         // Rust's high-performance monitoring engine ensures that latency shedding is 
         // technically superior, forensics-ready, and perfectly secure.
         // Rust's SignalEngine ensures bit-accurate monitoring distribution.
@@ -38,4 +38,4 @@ private:
     std::atomic<bool> m_isActive{false};
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

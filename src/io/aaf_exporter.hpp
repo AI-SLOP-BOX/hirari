@@ -5,7 +5,7 @@
 #include <memory>
 #include "../core/engine/timeline_system.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @brief ProjectClip: Metadata for a single audio/MIDI clip in a project interchange.
@@ -20,7 +20,7 @@ struct ProjectClip {
 
 /**
  * @brief AAFExporter: Professional Project Interchange (AAF / OMF style).
- * Essential for moving projects between Aura DAW and Pro Tools/Logic.
+ * Essential for moving projects between Hirari DAW and Pro Tools/Logic.
  */
 class AAFExporter {
 public:
@@ -48,4 +48,4 @@ private:
     AAFExporter() = default;
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

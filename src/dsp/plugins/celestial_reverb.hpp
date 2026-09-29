@@ -5,12 +5,12 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Plugins {
+namespace Hirari::DSP::Plugins {
 
 class CelestialReverb : public Core::Sanctuary::ISanctuaryPlugin {
 public:
     void getPluginInfo(Core::Sanctuary::PluginInfo& info) override { 
-        info = {"Celestial Reverb", "Aura SAW", 100, 0xCE11}; 
+        info = {"Celestial Reverb", "Hirari SAW", 100, 0xCE11};
     }
     
     void prepareToPlay(double, uint32_t) override {
@@ -91,4 +91,4 @@ private:
     float m_wet = 0.5f;
 };
 
-} // namespace Aura::DSP::Plugins
+} // namespace Hirari::DSP::Plugins

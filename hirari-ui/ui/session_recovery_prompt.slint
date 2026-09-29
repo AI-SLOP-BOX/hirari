@@ -1,0 +1,49 @@
+import { Button } from "std-widgets.slint";
+import { Style } from "style.slint";
+
+export component Z_SessionRecoveryPrompt inherits Rectangle {
+    callback recover();
+    callback discard();
+    callback later();
+    in property <string> status: "";
+
+    background: #00000099;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 500px;
+            background: Style.surface-1;
+            border-width: 1px;
+            border-color: Style.brand;
+            border-radius: 6px;
+            VerticalLayout {
+                padding: 24px;
+                spacing: 14px;
+                Text {
+                    text: "An unsaved Hirari session is available";
+                    color: Style.text-primary;
+                    font-size: 18px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "Choose whether to restore it, discard its recovery files, or leave it for later.";
+                    color: Style.text-secondary;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button { text: "Recover session"; clicked => { root.recover(); } }
+                    Button { text: "Discard recovery"; clicked => { root.discard(); } }
+                    Button { text: "Later"; clicked => { root.later(); } }
+                }
+                Text {
+                    text: root.status;
+                    color: Style.text-tertiary;
+                    font-size: 10px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

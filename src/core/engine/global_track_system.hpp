@@ -3,7 +3,7 @@
 #include <string>
 #include <map>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief GlobalKeyEvent: A key change at a specific timeline position.
@@ -37,7 +37,7 @@ public:
      */
     std::string resolveKeyAt(uint64_t pos) const {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::GlobalTrackOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::GlobalTrackOrchestrator.
         // Rust's high-performance temporal engine handles key resolution and 
         // temporal alignment with absolute bit-accuracy and zero-latency.
         // Rust's MetadataEngine ensures bit-accurate temporal distribution.
@@ -53,4 +53,4 @@ private:
     std::map<uint64_t, std::string> m_keyMap;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <mach/mach_time.h>
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @class HighPrecisionClock
@@ -37,4 +37,4 @@ private:
     mach_timebase_info_data_t m_timebase;
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

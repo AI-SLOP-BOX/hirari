@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace Aura::Platform {
+namespace Hirari::Platform {
 
 /** Platform-neutral real-time audio device contract. */
 class AudioDevice {
@@ -61,7 +61,7 @@ public:
     }
     void stop() noexcept override { m_running = false; }
     bool isRunning() const noexcept override { return m_running; }
-    const char* name() const noexcept override { return "Aura Silent Audio Device"; }
+    const char* name() const noexcept override { return "Hirari Silent Audio Device"; }
     bool isHardwareAvailable() const noexcept override { return false; }
     bool isSilentFallback() const noexcept override { return true; }
     const char* lastError() const noexcept override {
@@ -86,4 +86,4 @@ inline std::unique_ptr<AudioDevice> createAudioDevice() {
 }
 #endif
 
-} // namespace Aura::Platform
+} // namespace Hirari::Platform

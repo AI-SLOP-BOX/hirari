@@ -20,7 +20,7 @@
 extern char** environ;
 #endif
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @class FFmpegEngine
@@ -74,7 +74,7 @@ private:
         argv.push_back(nullptr);
         const int status = _spawnvp(_P_WAIT, argv[0], argv.data());
         if (status != 0) {
-            std::cerr << "[Aura | FFmpeg] ffmpeg process failed: " << status << "\n";
+            std::cerr << "[Hirari | FFmpeg] ffmpeg process failed: " << status << "\n";
             return false;
         }
         return true;
@@ -89,7 +89,7 @@ private:
         const int spawnStatus = ::posix_spawnp(&pid, arguments.front().c_str(), nullptr, nullptr,
                                                argv.data(), ::environ);
         if (spawnStatus != 0) {
-            std::cerr << "[Aura | FFmpeg] failed to launch ffmpeg: " << spawnStatus << "\n";
+            std::cerr << "[Hirari | FFmpeg] failed to launch ffmpeg: " << spawnStatus << "\n";
             return false;
         }
         int status = 0;
@@ -106,7 +106,7 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
         if (waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-            std::cerr << "[Aura | FFmpeg] ffmpeg process exited unsuccessfully\n";
+            std::cerr << "[Hirari | FFmpeg] ffmpeg process exited unsuccessfully\n";
             return false;
         }
         return true;
@@ -114,4 +114,4 @@ private:
     }
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

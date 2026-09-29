@@ -4,7 +4,7 @@
 #include <chrono>
 #include <deque>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct HistoryEntry
@@ -31,7 +31,7 @@ public:
      */
     void recordState(const std::string& action, uint64_t currentHash) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::HistoryOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::HistoryOrchestrator.
         // Rust's memory-safe collections handle thousands of history entries with 
         // 100% safety and persistent storage support.
         // Rust's HistoryEngine ensures bit-accurate history distribution.
@@ -54,4 +54,4 @@ private:
     const size_t m_maxHistory = 100;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

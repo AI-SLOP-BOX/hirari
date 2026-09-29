@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct MusicalTime
@@ -52,4 +52,4 @@ struct EngineContext {
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -29,7 +29,7 @@ def main() -> int:
     if not shutil.which("rubberband") or not shutil.which("ffmpeg"):
         raise SystemExit("rubberband and ffmpeg are required")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="aura-vocal-harmony-") as temp:
+    with tempfile.TemporaryDirectory(prefix="hirari-vocal-harmony-") as temp:
         harmony = Path(temp) / "octave.wav"
         run(["rubberband", "-p", "12", "-t", "1.0", str(args.source), str(harmony)])
         run([

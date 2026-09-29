@@ -2,7 +2,7 @@
 #include <map>
 #include <string>
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 
 /**
  * @class QualitativeMetricEngine
@@ -31,4 +31,4 @@ private:
     QualitativeMetricEngine() = default;
 };
 
-} // namespace Aura::Core::Mixing
+} // namespace Hirari::Core::Mixing

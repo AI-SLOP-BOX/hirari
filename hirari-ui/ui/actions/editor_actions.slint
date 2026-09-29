@@ -1,0 +1,45 @@
+// Non-destructive audio-region editing contract.
+export global EditorActions {
+    callback select_clip(int, int);
+    callback select_all_clips();
+    callback clear_clip_selection();
+    callback copy_selected_clips();
+    callback paste_clips(float);
+    callback split_clip(int, float);
+    callback split_clip_with_crossfade(int, float, float);
+    callback split_clip_at_silence(int, float, int);
+    callback clip_moved(int, float);
+    callback sync_group_changed(int, string);
+    callback clip_gain_changed(int, float);
+    callback apply_gain_staging(int, float);
+    callback fade_changed(int, float, float);
+    callback reverse_clip(int, bool);
+    callback trim_clip(int, float, float);
+    callback trim_clip_by_beats(int, bool, float);
+    callback warp_clip(int, float);
+    callback pitch_preserve_warp_changed(int, bool);
+    callback quantize_sync_group(int, float, int, float);
+    callback align_selected_audio(int);
+    callback pitch_clip(int, float);
+    callback analyze_audio_pitch(int, int);
+    callback adjust_audio_pitch_segment(int, int, float, float, float, float);
+    callback extract_audio_pitch_to_midi(int, int);
+    callback set_audio_pitch_anchor(int, int, float, float, float, float);
+    callback set_audio_formant_anchor(int, int, float, float, float);
+    callback move_audio_note_anchor(int, int, float, float, float, float, bool);
+    callback warp_audio_pitch_segment(int, int, float, float, float);
+    callback loop_clip(int, int);
+    callback duplicate_clip(int);
+    callback remove_clip(int);
+    callback repair_waveform(int);
+    callback declip_waveform(int);
+    callback reduce_noise_waveform(int);
+    callback normalize_waveform(int);
+    callback soft_clip_waveform(int);
+    callback declick_waveform(int);
+    callback stereo_width_waveform(int);
+    callback detect_transients_waveform(int);
+    callback mute_selection(int);
+    callback normalize_selection_peak(int);
+    callback normalize_selection_rms(int);
+}

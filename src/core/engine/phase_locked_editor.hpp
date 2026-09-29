@@ -5,7 +5,7 @@
 #include <set>
 #include "region_manager.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief PhaseLockedEditor: Professional Logic Pro-style multi-track sync.
@@ -24,7 +24,7 @@ public:
      */
     void createEditGroup(uint32_t groupId, const std::vector<uint32_t>& trackIds) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::GroupOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::GroupOrchestrator.
         // Rust's memory-safe collections ensure that group memberships are technically superior.
     }
 
@@ -39,4 +39,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

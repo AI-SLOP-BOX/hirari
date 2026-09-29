@@ -18,9 +18,9 @@
 #include "../audio_buffer.hpp"
 #include "clap_abi_minimal.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
-class CLAPHostProcessor : public ::Aura::DSP::IProcessor {
+class CLAPHostProcessor : public ::Hirari::DSP::IProcessor {
 public:
     enum class LoadState : uint8_t {
         Unloaded,
@@ -33,7 +33,7 @@ public:
     using ProcessFunction = void (CLAPHostProcessor::*)(
         Core::AudioBuffer&,
         Core::MidiBuffer&,
-        const ::Aura::DSP::ProcessContext&) noexcept;
+        const ::Hirari::DSP::ProcessContext&) noexcept;
     static constexpr const char* kNoProcessFunctionDiagnostic =
         "CLAP process function is not connected";
 
@@ -73,7 +73,7 @@ public:
         m_processFailed.store(false, std::memory_order_release);
     }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& /*context*/) noexcept override {
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Hirari::DSP::ProcessContext& /*context*/) noexcept override {
         const auto* plugin = m_plugin;
         const uint32_t channels = buffer.getNumChannels();
         const uint32_t frames = buffer.getNumSamples();
@@ -142,16 +142,16 @@ public:
                 std::memcpy(converted.midi.data, event.data, event.size);
             }
         }
-        for (uint32_t parameterId = 0; parameterId < kMaxParameters &&
-             m_inputEventCount < m_inputEvents.size(); ++parameterId) {
-            if (!m_parameterValid[parameterId].load(std::memory_order_acquire)) continue;
+        for (const auto& parameter : m_parameterValues) {
+            if (m_inputEventCount >= m_inputEvents.size()) break;
+            if (parameter.state.load(std::memory_order_acquire) != 2) continue;
             auto& converted = m_inputEvents[m_inputEventCount++];
             converted.param.header = {sizeof(ClapAbi::EventParamValue), 0,
                                       ClapAbi::kCoreEventSpaceId,
                                       ClapAbi::kEventParamValue, 0};
-            converted.param.param_id = parameterId;
+            converted.param.param_id = parameter.parameterId.load(std::memory_order_relaxed);
             converted.param.cookie = nullptr;
-            converted.param.value = m_parameterValues[parameterId].load(std::memory_order_acquire);
+            converted.param.value = parameter.value.load(std::memory_order_acquire);
             converted.param.note_id = -1;
             converted.param.port_index = -1;
             converted.param.channel = -1;
@@ -188,7 +188,7 @@ public:
         }
         // A CLAP plugin may emit output events in a different order from the
         // input events (the ABI does not make producer order a timestamp
-        // guarantee). Keep Aura's sample-accurate MIDI contract monotonic at
+        // guarantee). Keep Hirari's sample-accurate MIDI contract monotonic at
         // the boundary while preserving producer order for equal timestamps.
         midi.sort();
         // A third-party plugin must not be allowed to poison the rest of the
@@ -212,9 +212,39 @@ public:
     }
 
     void setParameter(uint32_t id, float value) noexcept override {
-        if (id >= kMaxParameters || !std::isfinite(value)) return;
-        m_parameterValues[id].store(static_cast<double>(value), std::memory_order_release);
-        m_parameterValid[id].store(true, std::memory_order_release);
+        if (!std::isfinite(value)) return;
+        // CLAP parameter IDs are opaque 32-bit identifiers, not dense array
+        // indices. Keep a bounded sparse snapshot so IDs above 127 (or very
+        // large vendor IDs) survive the direct host path and are replayed as
+        // their original IDs on the next process block.
+        const size_t start = parameterSlotStart(id);
+        for (size_t probe = 0; probe < kMaxParameters; ++probe) {
+            auto& slot = m_parameterValues[(start + probe) & (kMaxParameters - 1)];
+            uint8_t state = slot.state.load(std::memory_order_acquire);
+            if (state == 1) {
+                for (uint32_t retry = 0; retry < 8 && state == 1; ++retry) {
+                    state = slot.state.load(std::memory_order_acquire);
+                }
+                if (state == 1) return;
+            }
+            if (state == 2) {
+                if (slot.parameterId.load(std::memory_order_relaxed) == id) {
+                    slot.value.store(static_cast<double>(value), std::memory_order_release);
+                    return;
+                }
+                continue;
+            }
+            if (state != 0) continue;
+            uint8_t empty = 0;
+            if (!slot.state.compare_exchange_strong(
+                    empty, 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                continue;
+            }
+            slot.parameterId.store(id, std::memory_order_relaxed);
+            slot.value.store(static_cast<double>(value), std::memory_order_relaxed);
+            slot.state.store(2, std::memory_order_release);
+            return;
+        }
     }
 
     std::vector<uint8_t> getState() const override {
@@ -359,7 +389,18 @@ public:
 
 private:
     static constexpr uint32_t kMaxChannels = 16;
-    static constexpr uint32_t kMaxParameters = 128;
+    static constexpr size_t kMaxParameters = 4096;
+    struct ParameterValueSlot {
+        // 0 = empty, 1 = being initialized, 2 = published.
+        std::atomic<uint8_t> state{0};
+        std::atomic<uint32_t> parameterId{0};
+        std::atomic<double> value{0.0};
+    };
+    static constexpr size_t parameterSlotStart(uint32_t parameterId) noexcept {
+        static_assert((kMaxParameters & (kMaxParameters - 1)) == 0);
+        return (static_cast<uint64_t>(parameterId) * 2654435761u) &
+               (kMaxParameters - 1);
+    }
     static constexpr size_t kMaxStateBytes = 4u * 1024u * 1024u;
     struct StateWriteContext { std::vector<uint8_t>* bytes; };
     struct StateReadContext { const uint8_t* data; size_t size; size_t offset; };
@@ -494,14 +535,13 @@ private:
     bool m_entryInitialized = false;
     bool m_processing = false;
     ClapAbi::Host m_host{
-        {1, 0, 0}, "aura-direct", "Aura", "Aura", "", "1",
+        {1, 0, 0}, "hirari-direct", "Hirari", "Hirari", "", "1",
         &requestRestart, &requestProcess, &requestCallback, &noExtension};
     std::array<float*, kMaxChannels> m_channelPointers{};
     std::array<InputEvent, Core::MidiBuffer::kMaxEventsPerBlock> m_inputEvents{};
     InputEventContext m_inputEventsContext{};
     uint32_t m_inputEventCount = 0;
-    std::array<std::atomic<double>, kMaxParameters> m_parameterValues{};
-    std::array<std::atomic<bool>, kMaxParameters> m_parameterValid{};
+    std::array<ParameterValueSlot, kMaxParameters> m_parameterValues{};
     // Valid only while the synchronous CLAP process callback is executing.
     Core::MidiBuffer* m_activeMidi = nullptr;
     uint32_t m_activeFrames = 0;
@@ -512,4 +552,4 @@ private:
     std::atomic<bool> m_processFailed{false};
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

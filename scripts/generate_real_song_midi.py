@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a deterministic 64-bar Aura MIDI sidecar for real-device smoke runs."""
+"""Generate a deterministic 64-bar Hirari MIDI sidecar for real-device smoke runs."""
 
 import json
 import sys
@@ -76,7 +76,7 @@ def make_song():
 
 def main():
     if len(sys.argv) != 2:
-        raise SystemExit("usage: generate_real_song_midi.py PROJECT.aura")
+        raise SystemExit("usage: generate_real_song_midi.py PROJECT.hirari")
     project = Path(sys.argv[1]).expanduser().resolve()
     sidecar = Path(f"{project}.midi.json")
     sidecar.write_text(json.dumps(make_song(), indent=2) + "\n", encoding="utf-8")

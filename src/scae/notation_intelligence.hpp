@@ -3,10 +3,10 @@
 #include <string>
 #include <memory>
 
-namespace Aura::Core::Engine { class Track; }
-namespace Aura::Core { class MidiRegion; }
+namespace Hirari::Core::Engine { class Track; }
+namespace Hirari::Core { class MidiRegion; }
 
-namespace Aura::SCAE::Intelligence {
+namespace Hirari::SCAE::Intelligence {
 
 /**
  * @class NotationIntelligence
@@ -27,11 +27,11 @@ public:
         uint32_t sourceNoteIndex = 0;
     };
 
-    static std::vector<ScoreGlyph> generateScoreManifest(const ::Aura::Core::Engine::Track& track);
+    static std::vector<ScoreGlyph> generateScoreManifest(const ::Hirari::Core::Engine::Track& track);
     static std::vector<ScoreGlyph> generateMidiManifest(
-        const std::vector<std::shared_ptr<::Aura::Core::MidiRegion>>& regions);
+        const std::vector<std::shared_ptr<::Hirari::Core::MidiRegion>>& regions);
 
-    static std::string conductHarmonicAudit(const std::vector<std::shared_ptr<::Aura::Core::Engine::Track>>& tracks);
+    static std::string conductHarmonicAudit(const std::vector<std::shared_ptr<::Hirari::Core::Engine::Track>>& tracks);
 };
 
-} // namespace Aura::SCAE::Intelligence
+} // namespace Hirari::SCAE::Intelligence

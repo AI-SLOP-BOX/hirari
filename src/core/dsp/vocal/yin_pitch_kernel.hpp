@@ -3,7 +3,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Vocal {
+namespace Hirari::DSP::Vocal {
 
 /**
  * @class YinPitchKernel
@@ -79,4 +79,4 @@ private:
     std::vector<float> m_yinBuffer;
 };
 
-} // namespace Aura::DSP::Vocal
+} // namespace Hirari::DSP::Vocal

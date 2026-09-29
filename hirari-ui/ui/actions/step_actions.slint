@@ -1,0 +1,13 @@
+// Step-sequencer edits are converted into normal MIDI notes by the UI/Core
+// bridge, so they share project persistence, undo, and rendering.
+export global StepActions {
+    callback load_pattern(int);
+    callback set_step_resolution(int);
+    callback set_step_feel(int);
+    callback set_lane_pitch(int, int, int);
+    callback reverse_lane(int, int);
+    callback step_toggled(int, int, int, bool);
+    callback set_velocity(int, int, int, float);
+    callback set_probability(int, int, int, float);
+    callback set_gate_percent(int, int, int, float);
+}

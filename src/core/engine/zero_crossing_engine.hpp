@@ -3,7 +3,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ZeroCrossingEngine
@@ -46,4 +46,4 @@ public:
 
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

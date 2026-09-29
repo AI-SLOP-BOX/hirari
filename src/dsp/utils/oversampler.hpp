@@ -4,7 +4,7 @@
 #include <cmath>
 #include "../mixing/state_variable_filter.hpp"
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class 2xOversampler
@@ -46,4 +46,4 @@ private:
     Mixing::StateVariableFilter m_upLP, m_downLP;
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

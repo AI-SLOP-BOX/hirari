@@ -6,7 +6,7 @@
 #include <algorithm>
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class MasterMeterPro
@@ -115,4 +115,4 @@ private:
     uint64_t m_gatedWindows = 0;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

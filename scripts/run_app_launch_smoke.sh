@@ -2,11 +2,11 @@
 set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-app_path=${AURA_APP_PATH:-"$repository_root/packaging/Aura DAW.app"}
-binary="$app_path/Contents/MacOS/Aura DAW"
+app_path=${HIRARI_APP_PATH:-"$repository_root/packaging/Hirari DAW.app"}
+binary="$app_path/Contents/MacOS/Hirari DAW"
 
 if [ ! -x "$binary" ]; then
-    echo "error: packaged Aura executable is missing: $binary" >&2
+    echo "error: packaged Hirari executable is missing: $binary" >&2
     exit 1
 fi
 
@@ -34,12 +34,12 @@ while [ "$attempt" -lt 30 ]; do
 done
 
 if [ -z "$found_pid" ]; then
-    echo "error: Aura app did not appear after 30 seconds" >&2
+    echo "error: Hirari app did not appear after 30 seconds" >&2
     exit 1
 fi
 
 if ! kill -0 "$found_pid" 2>/dev/null; then
-    echo "error: Aura app exited before launch smoke completed" >&2
+    echo "error: Hirari app exited before launch smoke completed" >&2
     exit 1
 fi
 

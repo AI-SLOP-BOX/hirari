@@ -8,7 +8,7 @@
 #include <fstream>
 #include <filesystem>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct AssetMetadata
@@ -62,4 +62,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

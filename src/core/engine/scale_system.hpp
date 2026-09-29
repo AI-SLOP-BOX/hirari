@@ -1,12 +1,15 @@
 #pragma once
 #include <vector>
-#include <array>
-#include <atomic>
-#include <mutex>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <utility>
 #include "midi_sequencer.hpp"
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ScaleSystem
@@ -30,28 +33,7 @@ public:
      * INDUSTRIAL: Delegating musical quantization to the Rust 'HarmonicOrchestrator'.
      */
     int quantizeNote(int note) {
-        const int root = m_activeRoot.load(std::memory_order_relaxed);
-        const uint32_t pattern = m_activePattern.load(std::memory_order_relaxed);
-        if (pattern == 0 || pattern == 0xFFF) return note;
-
-        const int pitchClass = ((note % 12) + 12) % 12;
-        const int relative = (pitchClass - root + 12) % 12;
-        if ((pattern & (1u << relative)) != 0) return note;
-
-        int bestOffset = 1;
-        for (int distance = 1; distance <= 6; ++distance) {
-            const int below = (relative - distance + 12) % 12;
-            const int above = (relative + distance) % 12;
-            if (pattern & (1u << below)) {
-                bestOffset = -distance;
-                break;
-            }
-            if (pattern & (1u << above)) {
-                bestOffset = distance;
-                break;
-            }
-        }
-        return note + bestOffset;
+        return hirari_scale_quantizer_note(m_quantizer, note);
     }
 
     /**
@@ -59,9 +41,8 @@ public:
      * INDUSTRIAL: Using Rust for robust and perfectly consistent scale states.
      */
     void setScale(int root, Type t) {
-        const int safeRoot = std::clamp(root, 0, 11);
-        m_activeRoot.store(safeRoot, std::memory_order_release);
-        m_activePattern.store(getPatternMask(t), std::memory_order_release);
+        hirari_scale_quantizer_set(m_quantizer, std::clamp(root, 0, 11),
+                                   static_cast<uint32_t>(t));
     }
 
     /**
@@ -69,41 +50,47 @@ public:
      * INDUSTRIAL: Chord tracking and context resolution are now handled in Rust.
      */
     void addChord(uint64_t tick, int root, const std::vector<int>& intervals, const std::string& name) {
+        static_assert(sizeof(int) == sizeof(int32_t), "chord intervals require 32-bit integers");
         if (intervals.empty() || intervals.size() > 32 || name.empty()) return;
+        (void)hirari_scale_quantizer_add_chord(
+            m_quantizer, tick, root,
+            reinterpret_cast<const int32_t*>(intervals.data()), intervals.size(),
+            reinterpret_cast<const uint8_t*>(name.data()), name.size());
+    }
+
+    Chord getChordAt(double beat) const {
+        if (!std::isfinite(beat) || beat < 0.0) return {};
+        const long double tickValue = static_cast<long double>(beat) * 960.0L;
+        const uint64_t tick = tickValue >= static_cast<long double>(UINT64_MAX)
+            ? UINT64_MAX : static_cast<uint64_t>(tickValue);
+        int32_t root = 0;
+        int32_t intervals[32]{};
+        size_t intervalCount = 0;
+        size_t nameLength = 0;
+        uint8_t status = hirari_scale_quantizer_chord_at(
+            m_quantizer, tick, &root, intervals, 32, &intervalCount,
+            nullptr, 0, &nameLength);
+        if (status == 0 || intervalCount > 32) return {};
+        std::string name(nameLength, '\0');
+        status = hirari_scale_quantizer_chord_at(
+            m_quantizer, tick, &root, intervals, 32, &intervalCount,
+            reinterpret_cast<uint8_t*>(name.data()), name.size(), &nameLength);
+        if (status != 1 || intervalCount > 32 || nameLength > name.size()) return {};
+        name.resize(nameLength);
         Chord chord;
-        chord.root = ((root % 12) + 12) % 12;
-        chord.name = name;
-        chord.intervals.reserve(intervals.size());
-        for (int interval : intervals) {
-            if (interval >= -48 && interval <= 48) chord.intervals.push_back(interval);
-        }
-        if (chord.intervals.empty()) return;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_chordTrack.push_back(ChordEvent{tick, std::move(chord)});
-        std::stable_sort(m_chordTrack.begin(), m_chordTrack.end(),
-                         [](const ChordEvent& a, const ChordEvent& b) { return a.tick < b.tick; });
+        chord.root = root;
+        chord.intervals.assign(intervals, intervals + intervalCount);
+        chord.name = std::move(name);
+        return chord;
     }
 
 private:
-    uint32_t getPatternMask(Type t) {
-        switch (t) {
-            case Type::Major:         return (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5) | (1u << 7) | (1u << 9) | (1u << 11);
-            case Type::Minor:         return (1u << 0) | (1u << 2) | (1u << 3) | (1u << 5) | (1u << 7) | (1u << 8) | (1u << 10);
-            case Type::HarmonicMinor: return (1u << 0) | (1u << 2) | (1u << 3) | (1u << 5) | (1u << 7) | (1u << 8) | (1u << 11);
-            case Type::MelodicMinor:  return (1u << 0) | (1u << 2) | (1u << 3) | (1u << 5) | (1u << 7) | (1u << 9) | (1u << 11);
-            case Type::Pentatonic:    return (1u << 0) | (1u << 2) | (1u << 4) | (1u << 7) | (1u << 9);
-            default:                  return 0xFFF;
-        }
-    }
+    ScaleSystem() : m_quantizer(hirari_scale_quantizer_create()) {}
+    ~ScaleSystem() { hirari_scale_quantizer_destroy(m_quantizer); }
+    ScaleSystem(const ScaleSystem&) = delete;
+    ScaleSystem& operator=(const ScaleSystem&) = delete;
 
-    ScaleSystem() { setScale(0, Type::Major); }
-    
-    struct ChordEvent { uint64_t tick; Chord chord; };
-    std::vector<ChordEvent> m_chordTrack;
-    std::mutex m_mutex;
-
-    std::atomic<int> m_activeRoot{0};
-    std::atomic<uint32_t> m_activePattern{0};
+    void* m_quantizer = nullptr;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

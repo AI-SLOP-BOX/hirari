@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief PsychoacousticModel: Simulated human hearing for DSP resource skipping.
@@ -70,4 +70,4 @@ private:
     std::vector<float> m_athTable;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

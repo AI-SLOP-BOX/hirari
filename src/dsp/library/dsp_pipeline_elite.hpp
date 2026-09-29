@@ -6,7 +6,7 @@
 #include <complex>
 #include <algorithm>
 
-namespace Aura::DSP::Library {
+namespace Hirari::DSP::Library {
 
 /**
  * @class DSPPipelineElite
@@ -55,4 +55,4 @@ public:
     // [Implementing 2000s of lines of windowing, FFT, Convolution, and Physical Modeling logic]
 };
 
-} // namespace Aura::DSP::Library
+} // namespace Hirari::DSP::Library

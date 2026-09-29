@@ -1,8 +1,8 @@
-# Aura UI / Hallmark study
+# Hirari UI / Hallmark study
 
 参照: [Nutlope/hallmark](https://github.com/Nutlope/hallmark)
 
-この文書は、Hallmarkの「AI生成UIらしさを避ける」設計原則をAura DAWの既存UIへ適用するための実装基準です。HallmarkはWeb向けの設計スキルなので、Slint固有の記法ではなく、原則だけを移植します。
+この文書は、Hallmarkの「AI生成UIらしさを避ける」設計原則をHirari DAWの既存UIへ適用するための実装基準です。HallmarkはWeb向けの設計スキルなので、Slint固有の記法ではなく、原則だけを移植します。
 
 ## 適用する原則
 

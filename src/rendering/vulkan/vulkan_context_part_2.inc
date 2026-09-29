@@ -252,11 +252,11 @@
     }
 
     bool createUiShaderModules() {
-#if AURA_HAS_EMBEDDED_VULKAN_UI_SPV
+#if HIRARI_HAS_EMBEDDED_VULKAN_UI_SPV
         VkShaderModuleCreateInfo vertexInfo{};
         vertexInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        vertexInfo.codeSize = sizeof(Aura::Graphics::VulkanShaders::kVertex);
-        vertexInfo.pCode = Aura::Graphics::VulkanShaders::kVertex;
+        vertexInfo.codeSize = sizeof(Hirari::Graphics::VulkanShaders::kVertex);
+        vertexInfo.pCode = Hirari::Graphics::VulkanShaders::kVertex;
         if (vkCreateShaderModule(m_device, &vertexInfo, nullptr, &m_vertexShaderModule) != VK_SUCCESS) {
             m_error = "Vulkan vertex shader module creation failed";
             return false;
@@ -264,8 +264,8 @@
 
         VkShaderModuleCreateInfo fragmentInfo{};
         fragmentInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        fragmentInfo.codeSize = sizeof(Aura::Graphics::VulkanShaders::kFragment);
-        fragmentInfo.pCode = Aura::Graphics::VulkanShaders::kFragment;
+        fragmentInfo.codeSize = sizeof(Hirari::Graphics::VulkanShaders::kFragment);
+        fragmentInfo.pCode = Hirari::Graphics::VulkanShaders::kFragment;
         if (vkCreateShaderModule(m_device, &fragmentInfo, nullptr, &m_fragmentShaderModule) != VK_SUCCESS) {
             m_error = "Vulkan fragment shader module creation failed";
             vkDestroyShaderModule(m_device, m_vertexShaderModule, nullptr);

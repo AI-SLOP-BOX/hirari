@@ -1,7 +1,7 @@
 #import "video_system_bridge.hpp"
 #import "video_system.hpp"
 
-namespace Aura::Core::Engine::VideoBridge {
+namespace Hirari::Core::Engine::VideoBridge {
 
 bool requestFrameAt(double seconds) noexcept {
     try {

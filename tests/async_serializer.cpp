@@ -7,8 +7,8 @@
 
 int main() {
     const auto path = std::filesystem::temp_directory_path() /
-        ("aura-serializer-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
-    auto& serializer = Aura::IO::Persistence::AsyncSerializer::getInstance();
+        ("hirari-serializer-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+    auto& serializer = Hirari::IO::Persistence::AsyncSerializer::getInstance();
     auto result = serializer.serializeAsync(path.string(), "{\"ok\":true}");
     assert(result.valid());
     assert(result.get());

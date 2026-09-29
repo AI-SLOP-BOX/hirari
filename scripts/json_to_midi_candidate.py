@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert a candidate Aura note JSON file to a compact Type-1 MIDI file."""
+"""Convert a candidate Hirari note JSON file to a compact Type-1 MIDI file."""
 
 import json
 import struct

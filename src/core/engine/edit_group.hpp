@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include "track.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class EditGroup
@@ -138,4 +138,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

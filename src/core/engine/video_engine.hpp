@@ -9,7 +9,7 @@
 #include <deque>
 #include <cmath>
 
-namespace Aura::Core::Scheduler {
+namespace Hirari::Core::Scheduler {
 
 /**
  * @brief VideoFrame: Memory-aligned visual data for frame-locked scoring.
@@ -104,4 +104,4 @@ private:
     std::atomic<double> m_prefetchTarget{-1.0};
 };
 
-} // namespace Aura::Core::Scheduler
+} // namespace Hirari::Core::Scheduler

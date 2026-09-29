@@ -6,7 +6,7 @@
 #include <array>
 #include <cstring>
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @struct EngineStatus
@@ -67,4 +67,4 @@ private:
     std::atomic<uint32_t> m_head{0}, m_tail{0};
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

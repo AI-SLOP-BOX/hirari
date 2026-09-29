@@ -2,7 +2,7 @@
 
 #include <atomic>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief MSProcessor: Mid-Side encoding and decoding for mastering imaging.
@@ -44,4 +44,4 @@ private:
     float m_currentMid = 1.0f, m_currentSide = 1.0f;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

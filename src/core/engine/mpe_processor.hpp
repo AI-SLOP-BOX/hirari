@@ -5,7 +5,7 @@
 #include "midi_sequencer.hpp"
 #include "../midi_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 struct MPEState {
     float pitchBend = 0.0f;
@@ -29,7 +29,7 @@ public:
      * @brief Processes MPE MIDI stream with industrial precision and per-note sovereignty.
      * INDUSTRIAL: Delegating per-note expression tracking and channel management to the Rust 'MPEOrchestrator'.
      */
-    void handleMidi(const std::vector<::Aura::Core::MidiEvent>& events) {
+    void handleMidi(const std::vector<::Hirari::Core::MidiEvent>& events) {
         for (const auto& event : events) {
             if (event.size < 2) continue;
             const uint8_t status = event.data[0] & 0xF0;
@@ -66,4 +66,4 @@ private:
     std::array<uint8_t, 16> m_channelToNote{};
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

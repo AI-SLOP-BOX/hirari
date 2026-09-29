@@ -1,7 +1,7 @@
 #pragma once
 #include <atomic>
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 
 /**
  * @class GlobalNormalizer
@@ -25,4 +25,4 @@ private:
     GlobalNormalizer() = default;
 };
 
-} // namespace Aura::Core::Mixing
+} // namespace Hirari::Core::Mixing

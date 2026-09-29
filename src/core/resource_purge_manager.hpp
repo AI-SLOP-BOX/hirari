@@ -8,9 +8,9 @@
 #include <stop_token>
 #include <condition_variable>
 #include <mutex>
-#include "aura_unified_engine.hpp"
+#include "hirari_unified_engine.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ResourcePurgeManager
@@ -41,7 +41,7 @@ public:
 
 private:
     void performOptimization() {
-        auto& engine = AuraUnifiedEngine::getInstance();
+        auto& engine = HirariUnifiedEngine::getInstance();
         auto tracks = engine.getTracksSafe(); 
         
         uint64_t playhead = engine.get_playhead();
@@ -87,4 +87,4 @@ private:
     std::mutex m_waitMutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

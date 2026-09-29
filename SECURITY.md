@@ -1,6 +1,6 @@
 # Security policy
 
-Aura processes untrusted project files, audio files, extension manifests, and
+Hirari processes untrusted project files, audio files, extension manifests, and
 third-party plugins. The application is not a security boundary: use normal
 endpoint protection and do not open untrusted plugin binaries in a production
 session.

@@ -5,7 +5,7 @@
 #include <memory>
 #include <functional>
 
-namespace Aura::IO::Drivers {
+namespace Hirari::IO::Drivers {
 
 /**
  * @brief IDriver: Professional Hardware Abstraction Layer (HAL) for audio devices.
@@ -45,4 +45,4 @@ public:
     }
 };
 
-} // namespace Aura::IO::Drivers
+} // namespace Hirari::IO::Drivers

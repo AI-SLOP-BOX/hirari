@@ -1,0 +1,363 @@
+                            step-resolution: root.sequencer_step_resolution;
+                            step-feel: root.sequencer_step_feel;
+                        }
+                        if (bot_view == ViewModes.openutau) : Z_OpenUtauEditor {
+                            score-path <=> root.openutau_score_path;
+                            render-path <=> root.openutau_render_path;
+                            status: root.openutau_status;
+                            scoop <=> root.openutau_scoop;
+                            vibrato <=> root.openutau_vibrato; vibrato-rate <=> root.openutau_vibrato_rate;
+                            dynamics <=> root.openutau_dynamics;
+                            consonants <=> root.openutau_consonants;
+                            notes: root.openutau_notes;
+                            open-score => { CommandActions.palette_exec("OPENUTAU EDIT"); }
+                            launch-editor => { CommandActions.palette_exec("OPENUTAU LAUNCH"); }
+                            render-score => { CommandActions.palette_exec("OPENUTAU RENDER"); }
+                            import-render => { CommandActions.palette_exec("OPENUTAU IMPORT RENDER"); }
+                            apply-tuning => { CommandActions.palette_exec("OPENUTAU APPLY TUNING"); }
+                        }
+                        if (bot_view == 1 && !production_mode && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_SampleEditorAdapter {
+                            gpu-waveform-image: root.gpu-waveform-image;
+                            gpu-spectrum-image: root.gpu-spectrum-image;
+                            samples: root.is_rec ? root.recording_waveform : [];
+                            wave_col: root.tracks[selected_row].color;
+                            track-id: root.tracks[selected_row].id;
+                            clips: root.tracks[selected_row].clips;
+                            playhead-beat: root.ph;
+                            clip-id: root.sel_cid;
+                            reversed: root.selected_clip_reversed;
+                                trim-start: root.selected_clip_trim_start;
+                                trim-end: root.selected_clip_trim_end;
+                                flex-ratio: root.selected_clip_warp_ratio;
+                                pitch-semitones: root.selected_clip_pitch_semitones;
+                                loop-count: root.selected_clip_loop_count;
+                            apply-gain(value) => { if (root.sel_cid >= 0) { EditorActions.clip_gain_changed(root.sel_cid, value); } }
+                            select-clip(id) => { EditorActions.select_clip(root.tracks[selected_row].id, id); }
+                            scrub-to-beat(beat) => { TransportActions.scrub(beat); }
+                            apply-fades(fade-in, fade-out) => { if (root.sel_cid >= 0) { EditorActions.fade_changed(root.sel_cid, fade-in, fade-out); } }
+                            apply-reverse(value) => { if (root.sel_cid >= 0) { EditorActions.reverse_clip(root.sel_cid, value); } }
+                            apply-trim(start, end) => { if (root.sel_cid >= 0) { EditorActions.trim_clip(root.sel_cid, start, end); } }
+                            apply-warp(ratio) => { if (root.sel_cid >= 0) { EditorActions.warp_clip(root.sel_cid, ratio); } }
+                            apply-pitch(semitones) => { if (root.sel_cid >= 0) { EditorActions.pitch_clip(root.sel_cid, semitones); } }
+                            analyze-audio-pitch => { if (root.sel_cid >= 0) { EditorActions.analyze_audio_pitch(root.tracks[selected_row].id, root.sel_cid); } }
+                            adjust-audio-pitch-segment(start, end, pitch, formant) => { if (root.sel_cid >= 0) { EditorActions.adjust_audio_pitch_segment(root.tracks[selected_row].id, root.sel_cid, start, end, pitch, formant); } }
+                            extract-audio-pitch-to-midi => { if (root.sel_cid >= 0) { EditorActions.extract_audio_pitch_to_midi(root.tracks[selected_row].id, root.sel_cid); } }
+                            set-audio-pitch-anchor(segment-start, position, pitch, formant) => {
+                                if (root.sel_cid >= 0) {
+                                    EditorActions.set_audio_pitch_anchor(
+                                        root.tracks[selected_row].id, root.sel_cid,
+                                        segment-start, position, pitch, formant);
+                                }
+                            }
+                            set-audio-formant-anchor(segment-start, position, formant) => {
+                                if (root.sel_cid >= 0) {
+                                    EditorActions.set_audio_formant_anchor(
+                                        root.tracks[selected_row].id, root.sel_cid,
+                                        segment-start, position, formant);
+                                }
+                            }
+                            move-audio-anchor(segment-start, old-position, position, value, formant) => {
+                                if (root.sel_cid >= 0) {
+                                    EditorActions.move_audio_note_anchor(
+                                        root.tracks[selected_row].id, root.sel_cid,
+                                        segment-start, old-position, position, value, formant);
+                                }
+                            }
+                            warp-audio-pitch-segment(segment-start, new-start, new-end) => {
+                                if (root.sel_cid >= 0) {
+                                    EditorActions.warp_audio_pitch_segment(
+                                        root.tracks[selected_row].id, root.sel_cid,
+                                        segment-start, new-start, new-end);
+                                }
+                            }
+                            apply-loop(count) => { if (root.sel_cid >= 0) { EditorActions.loop_clip(root.sel_cid, count); } }
+                            duplicate-clip => { if (root.sel_cid >= 0) { EditorActions.duplicate_clip(root.sel_cid); } }
+                            remove-clip => { if (root.sel_cid >= 0) { EditorActions.remove_clip(root.sel_cid); } }
+                            repair-waveform => { if (root.sel_cid >= 0) { EditorActions.repair_waveform(root.sel_cid); } } declip-waveform => { if (root.sel_cid >= 0) { EditorActions.declip_waveform(root.sel_cid); } } reduce-noise-waveform => { if (root.sel_cid >= 0) { EditorActions.reduce_noise_waveform(root.sel_cid); } }
+                            normalize-waveform => { if (root.sel_cid >= 0) { EditorActions.normalize_waveform(root.sel_cid); } }
+                            soft-clip-waveform => { if (root.sel_cid >= 0) { EditorActions.soft_clip_waveform(root.sel_cid); } }
+                            declick-waveform => { if (root.sel_cid >= 0) { EditorActions.declick_waveform(root.sel_cid); } } stereo-width-waveform => { if (root.sel_cid >= 0) { EditorActions.stereo_width_waveform(root.sel_cid); } } detect-transients-waveform => { if (root.sel_cid >= 0) { EditorActions.detect_transients_waveform(root.sel_cid); } }
+                            mute-selection => { if (root.sel_cid >= 0) { EditorActions.mute_selection(root.sel_cid); } } normalize-selection-peak => { if (root.sel_cid >= 0) { EditorActions.normalize_selection_peak(root.sel_cid); } } normalize-selection-rms => { if (root.sel_cid >= 0) { EditorActions.normalize_selection_rms(root.sel_cid); } }
+                        }
+                        if (bot_view == 2 && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_PianoRollView {
+                            trk_id: root.tracks[root.selected_row].id;
+                            track-number: root.selected_row;
+                            ui_timer: ui_timer;
+                            gpu-piano-image: root.gpu-piano-image;
+                            zoom_lvl: root.z_lvl;
+                            ph: root.ph;
+                            notes: root.tracks[selected_row].piano_roll_notes;
+                            articulation-switches: root.tracks[selected_row].articulation_switches;
+                            articulation-names: root.tracks[selected_row].articulation_names;
+                            articulation-switch-channels: root.tracks[selected_row].articulation_switch_channels;
+                            articulation-output-kinds: root.tracks[selected_row].articulation_output_kinds;
+                            articulation-output-a: root.tracks[selected_row].articulation_output_a;
+                            articulation-output-b: root.tracks[selected_row].articulation_output_b;
+                            snap_division: root.snap_division;
+                            project-changed => { project_save_status = "Unsaved changes"; }
+                            quantize => { MidiActions.quantize_notes(root.tracks[root.selected_row].id, 0.25); }
+                            ramp-velocities => { MidiActions.ramp_selected_velocities(root.tracks[root.selected_row].id); }
+                            insert-chord(root_note, beat, quality, length, inversion) => { MidiActions.insert_chord(root.tracks[root.selected_row].id, root_note, beat, quality, length, inversion); }
+                            insert-progression(root_note, beat, preset, length, inversion) => { MidiActions.insert_progression(root.tracks[root.selected_row].id, root_note, beat, preset, length, inversion); }
+                            delete-all => { MidiActions.piano_roll_delete(); }
+                            add-note(pitch, beat, length, velocity) => { MidiActions.add_note(root.tracks[root.selected_row].id, pitch, beat, length, velocity); }
+                            select-note(pitch, beat, note_index) => { MidiActions.select_note(root.tracks[root.selected_row].id, pitch, beat, note_index); }
+                            move-note(pitch, beat, delta, pitch_delta, note_index) => { MidiActions.move_note(root.tracks[root.selected_row].id, pitch, beat, delta, pitch_delta, note_index); }
+                            resize-note(pitch, beat, length, note_index) => { MidiActions.resize_note(root.tracks[root.selected_row].id, pitch, beat, length, note_index); }
+                            note-edit-finished => { MidiActions.commit_note_edit(root.tracks[root.selected_row].id) }
+                            set-velocity(track_id, note_index, velocity) => { MidiActions.set_note_velocity(track_id, note_index, velocity); }
+                            set-articulation(note_index, articulation) => { MidiActions.set_note_articulation(root.tracks[root.selected_row].id, note_index, articulation); }
+                            set-articulation-map(articulation_id, pitch) => { MidiActions.set_articulation_map(root.tracks[root.selected_row].id, articulation_id, pitch); }
+                            set-articulation-name(articulation_id, name) => { MidiActions.set_articulation_map_name(root.tracks[root.selected_row].id, articulation_id, name); }
+                            set-articulation-output(articulation_id, kind, a, b, channel) => { MidiActions.set_articulation_map_output(root.tracks[root.selected_row].id, articulation_id, kind, a, b, channel); }
+                            import-expression-map-pro => { MidiActions.import_expression_map_pro(root.tracks[root.selected_row].id) }
+                            set-lyric(pitch, beat, lyric) => { MidiActions.set_note_lyric(root.tracks[root.selected_row].id, pitch, beat, lyric); }
+                        }
+                        if (bot_view == 3) : Rectangle {
+                            background: Style.surface;
+                            HorizontalLayout {
+                                padding: 12px; spacing: 16px;
+                                ScrollView {
+                                    horizontal-stretch: 1;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                    for trk[idx] in root.tracks : Z_MixerStrip {
+                                        property <float> safe_peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;
+                                        property <float> safe_hold: pks_h.length > idx + 1 ? pks_h[idx + 1] : 0.0;
+                                        name: trk.name; color: trk.color; volume: trk.volume; pan: trk.pan;
+                                        peak: safe_peak; pk_h: safe_hold; tid: trk.id;
+                                            is_mute: trk.mute; is_solo: trk.solo; is_phase: trk.phase_invert; low_b: trk.eq_low_band; low_c: trk.eq_low_cut; high_b: trk.eq_high_band; high_c: trk.eq_high_cut;
+                                            delay_ms: trk.delay_ms;
+                                            fx: trk.fx; compact: false; send_lvl: trk.send_lvl;
+                                            filter_lp: trk.filter_lp; filter_hp: trk.filter_hp; track_idx: idx;
+                                            meter_mode: meter_mode; group_id: trk.group_id;
+                                        }
+                                    }
+                                }
+                                Rectangle { width: 2px; background: Style.border; }
+                                // --- DIVINE MASTER CONSOLE (SSL PARITY) ---
+                                VerticalLayout {
+                                    width: 420px; spacing: 12px;
+                                    Text { text: "Master Bus"; font-size: 10px; color: Style.brand; font-weight: 700; horizontal-alignment: center; }
+                                    Rectangle {
+                                        height: 120px; background: Style.surface-0; border_radius: 2px; border_width: 1px; border_color: Style.border;
+                                        HorizontalLayout {
+                                            padding: 8px; spacing: 12px;
+                                            VerticalLayout {
+                                                alignment: center; spacing: 4px;
+                                                Text { text: "LUFS"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                                Rectangle { property <float> lufs_fill: ((root.lufs_integrated + 60.0) / 60.0).clamp(0.0, 1.0); height: 80px; width: 30px; background: Style.surface; Rectangle { y: (1.0 - lufs_fill) * parent.height; height: lufs_fill * parent.height; width: 100%; background: Style.ok; } }
+                                                Text { text: Math.round(root.lufs_integrated * 10.0) / 10.0 + " LUFS"; font-size: Style.font-xxs; color: Style.ok; font-weight: 700; horizontal-alignment: center; }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center; spacing: 4px;
+                                                Text { text: "Peak L/R"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                                HorizontalLayout { spacing: 2px; for peak_db in [root.master_true_peak_l, root.master_true_peak_r] : Rectangle { property <float> safe_peak: Math.pow(10.0, peak_db / 20.0).clamp(0.0, 1.2); height: 80px; width: 8px; background: Style.surface; Rectangle { y: (1.0 - (safe_peak / 1.2)) * parent.height; height: (safe_peak / 1.2) * parent.height; width: 100%; background: @linear-gradient(180deg, Style.record 0%, Style.solo 100%); } } }
+                                                Text { text: Math.round(root.master_true_peak_l * 10.0) / 10.0 + " / " + Math.round(root.master_true_peak_r * 10.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: Style.text-primary; horizontal-alignment: center; }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center; horizontal-stretch: 1;
+                                                Text { text: "Stereo Phase"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                                                Z_PhaseMeter { correlation: root.phase_correlation; }
+                                            }
+                                        }
+                                    }
+                                    // --- INDUSTRIAL SPECTRAL BUSS VISUALIZER ---
+                                    Rectangle {
+                                        height: 100px; background: Style.surface-0; border_radius: 2px; border_width: 1px; border_color: Style.border; clip: true;
+                                        HorizontalLayout {
+                                            padding: 4px; spacing: 1.5px; alignment: center;
+                                            for i in 64 : Rectangle {
+                                                property <float> safe_fft: fft_data.length > 0 ? fft_data[Math.mod(i, fft_data.length)] : 0.0;
+                                                width: 4px; height: (safe_fft * 0.95 + 0.05) * parent.height;
+                                                background: @linear-gradient(0deg, Style.brand 0%, Style.solo 100%);
+                                                opacity: 0.7 + 0.3 * (i / 64.0);
+                                                border_radius: 0.5px;
+                                                y: (parent.height - self.height) / 2.0;
+                                            }
+                                        }
+                                        Text { text: "Master Spectrum"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 6px; y: 4px; font-weight: 600; }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Z_LargeVU { val: root.pks.length > tracks.length ? root.pks[tracks.length] : 0.0; label: "MASTER L/R"; }
+                                        Rectangle {
+                                            height: 125px; background: Style.surface; border_radius: 2px; border_width: 1.5px; border_color: Style.line-subtle; horizontal-stretch: 1;
+                                            VerticalLayout {
+                                                padding: 10px; spacing: 8px;
+                                                HorizontalLayout {
+                                                    Text { text: "Master Dynamics"; font-size: Style.font-xxs; color: Style.text-secondary; font-weight: 600; horizontal-stretch: 1; }
+                                                    Button {
+                                                        text: "ASSIST"; enabled: root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0;
+                                                        clicked => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.apply_dynamics_suggestion(root.tracks[root.selected_row].id, root.fx_active_id); } }
+                                                    }
+                                                }
+                                                HorizontalLayout {
+                                                    spacing: 12px; alignment: center;
+                                                    Z_Knob { label: "THR"; value: root.plugin-parameter-values.length > 0 ? root.plugin-parameter-values[0] : 0.0; accent-col: Style.brand; changed(v) => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 0, v); } } }
+                                                    Z_Knob { label: "RAT"; value: root.plugin-parameter-values.length > 1 ? root.plugin-parameter-values[1] : 0.0; accent-col: Style.record; changed(v) => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 1, v); } } }
+                                                    Z_Knob { label: "ATT"; value: root.plugin-parameter-values.length > 2 ? root.plugin-parameter-values[2] : 0.0; accent-col: Style.solo; changed(v) => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 2, v); } } }
+                                                    Z_Knob { label: "REL"; value: root.plugin-parameter-values.length > 3 ? root.plugin-parameter-values[3] : 0.0; accent-col: Style.ok; changed(v) => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 3, v); } } }
+                                                }
+                                                Rectangle { height: 18px; background: Style.surface-0; border_radius: 1px; Text { text: "Gain Reduction: " + Math.round(root.master_gain_reduction * 10.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: Style.record; horizontal-alignment: center; vertical-alignment: center; font-weight: 600; } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (bot_view == 4) : Rectangle {
+                            background: Style.surface;
+                            VerticalLayout {
+                                padding: 20px; spacing: 12px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: root.send-routing-mode ? "Aux Sends" : "Audio Routing"; font-size: 14px; color: Style.brand; font-weight: 700; vertical-alignment: center; }
+                                    Button { text: root.send-routing-mode ? "PRIMARY ROUTES" : "AUX SENDS"; clicked => { root.send-routing-mode = !root.send-routing-mode; root.route-source-id = -1; root.route-destination-id = -1; } }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    Button {
+                                        text: root.send-pre-fader ? "PRE-FADER" : "POST-FADER";
+                                        enabled: root.send-routing-mode && root.route-source-id >= 0 && root.route-destination-id >= 0;
+                                        clicked => { root.send-pre-fader = !root.send-pre-fader; PluginActions.set_send_route(root.route-source-id, root.route-destination-id, root.route-gain, root.send-pre-fader, root.route-enabled); }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 16px;
+                                    // Routing Grid (Hardened)
+                                    Rectangle {
+                                        horizontal-stretch: 1; background: Style.surface-0; border_width: 1px; border_color: Style.border;
+                                        VerticalLayout {
+                                            padding: 10px; spacing: 1px;
+                                            HorizontalLayout {
+                                                spacing: 1px;
+                                                Rectangle { width: 80px; height: 20px; } // Header corner
+                                                for b in 10 : Rectangle {
+                                                    width: 33px; height: 20px; background: Style.surface;
+                                                    Text {
+                                                        text: b < root.tracks.length ? root.tracks[b].name : "DEST " + (b + 1);
+                                                        font-size: Style.font-xxs; color: #6E6E73;
+                                                        vertical-alignment: center; horizontal-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                            for t_idx in 8 : HorizontalLayout {
+                                                spacing: 1px;
+                                                if t_idx < root.tracks.length : Button {
+                                                    width: 80px; height: 22px;
+                                                    text: root.tracks[t_idx].name;
+                                                    enabled: root.selected_row < root.tracks.length && root.tracks[t_idx].id != root.tracks[root.selected_row].id;
+                                                    clicked => { root.sidechain-source-id = root.tracks[t_idx].id; root.sidechain-source-name = root.tracks[t_idx].name; }
+                                                }
+                                                if t_idx >= root.tracks.length : Rectangle {
+                                                    width: 80px; height: 22px; background: Style.surface;
+                                                    Text { text: "TRACK " + (t_idx+1); font-size: Style.font-xxs; color: #888; x: 8px; vertical-alignment: center; }
+                                                }
+                                                for b_idx in 10 : Rectangle {
+                                                    // The matrix is refreshed from Core's canonical route snapshot.
+                                                    // Do not retain a second UI-only routing state.
+                                                    property <int> route_index: t_idx * 10 + b_idx;
+                                                    property <bool> route_active: root.send-routing-mode
+                                                        ? (root.active-send-matrix.length > route_index ? root.active-send-matrix[route_index] : false)
+                                                        : (root.active-route-matrix.length > route_index ? root.active-route-matrix[route_index] : false);
+                                                    width: 33px; height: 22px; background: route_active ? Style.brand.with-alpha(0.2) : Style.surface;
+                                                    Rectangle { width: 6px; height: 6px; border_radius: 3px; background: route_active ? Style.brand : Style.border; x: 13.5px; y: 8px; }
+                                                    TouchArea { enabled: t_idx < root.tracks.length && b_idx < root.tracks.length
+                                                        && root.tracks[t_idx].id != root.tracks[b_idx].id
+                                                        && (!root.send-routing-mode || root.tracks[b_idx].type == "Bus");
+                                                        clicked => {
+                                                        if (t_idx < root.tracks.length && b_idx < root.tracks.length
+                                                            && root.tracks[t_idx].id != root.tracks[b_idx].id) {
+                                                            root.route-source-id = root.tracks[t_idx].id;
+                                                            root.route-destination-id = root.tracks[b_idx].id;
+                                                            root.route-enabled = !route_active;
+                                                            if (root.send-routing-mode) {
+                                                                root.route-gain = route_active && root.active-send-gains.length > route_index ? root.active-send-gains[route_index] : 1.0;
+                                                                root.send-pre-fader = route_active && root.active-send-pre-matrix.length > route_index ? root.active-send-pre-matrix[route_index] : false;
+                                                                PluginActions.set_send_route(root.tracks[t_idx].id, root.tracks[b_idx].id, root.route-gain, root.send-pre-fader, !route_active);
+                                                            } else {
+                                                                root.route-gain = 1.0;
+                                                                PluginActions.set_route(root.tracks[t_idx].id, root.tracks[b_idx].id, !route_active);
+                                                            }
+                                                        }
+                                                    } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Neural Brain Overlay
+                                    VerticalLayout {
+                                        width: 300px; spacing: 12px;
+                                        Rectangle {
+                                            height: 180px; background: #000; border_radius: 4px; border_width: 1px; border_color: Style.brand;
+                                            Z_AudioEngineStatus { ready: true; time: root.ui_timer; }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px; alignment: center;
+                                        }
+                                        Rectangle {
+                                            height: 86px; background: Style.surface-0;
+                                            VerticalLayout {
+                                                padding: 8px; spacing: 4px;
+                                                Text {
+                                                    text: root.route-source-id >= 0 && root.route-destination-id >= 0
+                                                        ? (root.send-routing-mode ? "SEND " : "ROUTE ") + root.route-source-id + " → " + root.route-destination-id
+                                                        : (root.send-routing-mode ? "SELECT A BUS SEND" : "SELECT A ROUTE");
+                                                    font-size: 9px; color: Style.text-secondary;
+                                                }
+                                                HorizontalLayout {
+                                                    spacing: 6px;
+                                                    Slider {
+                                                        horizontal-stretch: 1;
+                                                        enabled: root.route-source-id >= 0 && root.route-destination-id >= 0;
+                                                        value: root.send-routing-mode
+                                                            ? ((20.0 * Math.log(root.route-gain.clamp(0.001, 2.0), 10.0) + 60.0) / 66.0).clamp(0.0, 1.0)
+                                                            : root.route-gain / 2.0;
+                                                        changed(v) => {
+                                                            if (root.send-routing-mode) {
+                                                                root.route-gain = Math.pow(10.0, (-60.0 + v * 66.0) / 20.0);
+                                                                PluginActions.set_send_route(root.route-source-id, root.route-destination-id, root.route-gain, root.send-pre-fader, root.route-enabled);
+                                                            } else {
+                                                                root.route-gain = v * 2.0;
+                                                                PluginActions.set_route_gain(root.route-source-id, root.route-destination-id, root.route-gain, root.route-enabled);
+                                                            }
+                                                        }
+                                                    }
+                                                    Text {
+                                                        text: root.send-routing-mode
+                                                            ? (root.route-gain <= 0.000001 ? "-∞ dB" : Math.round(20.0 * Math.log(root.route-gain, 10.0) * 10.0) / 10.0 + " dB")
+                                                            : Math.round(root.route-gain * 100.0) / 100.0 + "x";
+                                                        width: 48px; color: Style.brand; vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Text { text: "ROUTING ACTIVE | SAMPLE-ACCURATE PROCESSING"; font-size: Style.font-xxs; color: #333; horizontal-alignment: center; }
+                            }
+                        }
+                        if (bot_view == 5) : Z_HirariSynth { accent-col: Style.brand; ui_timer: root.ui_timer; gpu-waveform-image: root.gpu-waveform-image; gpu-spectrum-image: root.gpu-spectrum-image; parameter-changed(index, value) => { PluginActions.macro_changed(index, value); } engine-changed(index) => { PluginActions.set_synth_engine(index); } }
+                        if (bot_view == 6) : HorizontalLayout {
+                            Z_StageViewCore { tracks: root.tracks; pan-3d-moved(id, x, y, z) => { SpatialActions.pan_3d_moved(id, x, y, z); } }
+                        }
+                        if (bot_view == 7) : Z_FullMixer {
+                            input_channels: root.audio_input_channel_count;
+                            tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode;
+                            gpu-meter-image: root.gpu-meter-image; gpu-spectrum-image: root.gpu-spectrum-image;
+                            close => { root.mx_open = false; }
+                        }
+                        if (bot_view == 8 && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_NotationHubView {
+                            notes: root.tracks[selected_row].piano_roll_notes;
+                            track-id: root.tracks[selected_row].id;
+                            project-changed => { project_save_status = "Unsaved changes"; }
+                            add-note(pitch, beat, length, velocity) => { MidiActions.add_note(root.tracks[root.selected_row].id, pitch, beat, length, velocity); }
+                            select-note(pitch, beat, index) => { MidiActions.select_note(root.tracks[root.selected_row].id, pitch, beat, index); }
+                            move-note(pitch, beat, delta, pitch_delta, index) => { MidiActions.move_note(root.tracks[root.selected_row].id, pitch, beat, delta, pitch_delta, index); }
+                            resize-note(pitch, beat, length, index) => { MidiActions.resize_note(root.tracks[root.selected_row].id, pitch, beat, length, index); }
+                            note-edit-finished => { MidiActions.commit_note_edit(root.tracks[root.selected_row].id) }
+                        }
+                    }
+                }
+            // --- OMNIPRESENT TIMELINE NAVIGATOR (FINAL OVERVIEW) ---
+            Rectangle {
+                height: 14px; background: Style.surface; border_width: 0.5px; border_color: Style.border;

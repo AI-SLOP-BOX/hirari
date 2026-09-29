@@ -6,7 +6,7 @@
 #include <memory>
 #include "../midi_buffer.hpp"
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @class ScripterOrchestrator
@@ -73,4 +73,4 @@ private:
     std::map<std::string, std::string> m_scriptRegistry;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

@@ -3,13 +3,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <algorithm>
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
-/// Bounded native transport for SysEx and other MIDI payloads that do not fit
-/// in the legacy 256-byte realtime event slot. It deliberately owns no heap
-/// memory and never accepts out-of-order or mixed-message fragments.
+/// C++ compatibility handle for the Rust-owned bounded SysEx/MIDI reassembler.
 class MidiFragmentReassembler final {
 public:
     static constexpr std::size_t kFragmentPayloadBytes = 240;
@@ -33,64 +31,28 @@ public:
         Oversize,
     };
 
-    void reset() noexcept {
-        m_messageId = 0;
-        m_nextIndex = 0;
-        m_total = 0;
-        m_size = 0;
-        m_sampleOffset = 0;
-        m_articulationId = 0;
-        m_complete = false;
-    }
+    MidiFragmentReassembler() : m_state(hirari_midi_fragment_reassembler_create()) {}
+    ~MidiFragmentReassembler() { hirari_midi_fragment_reassembler_destroy(m_state); }
+    MidiFragmentReassembler(const MidiFragmentReassembler&) = delete;
+    MidiFragmentReassembler& operator=(const MidiFragmentReassembler&) = delete;
+
+    void reset() noexcept { hirari_midi_fragment_reassembler_reset(m_state); }
 
     Result push(const Fragment& fragment) noexcept {
-        const bool shapeValid = fragment.total != 0 &&
-            fragment.index < fragment.total && fragment.size != 0 &&
-            fragment.size <= kFragmentPayloadBytes;
-        if (!shapeValid) { reset(); return Result::Invalid; }
-
-        if (fragment.index == 0) {
-            reset();
-            m_messageId = fragment.messageId;
-            m_total = fragment.total;
-            m_sampleOffset = fragment.sampleOffset;
-            m_articulationId = fragment.articulationId;
-        }
-        if (fragment.messageId != m_messageId || fragment.total != m_total ||
-            fragment.index != m_nextIndex) {
-            reset();
-            return Result::OutOfOrder;
-        }
-        if (m_size > kMaximumMessageBytes - fragment.size) {
-            reset();
-            return Result::Oversize;
-        }
-        std::copy_n(fragment.payload.data(), fragment.size, m_bytes.data() + m_size);
-        m_size += fragment.size;
-        ++m_nextIndex;
-        if (m_nextIndex == m_total) {
-            m_complete = true;
-            return Result::Complete;
-        }
-        return Result::Accepted;
+        return static_cast<Result>(hirari_midi_fragment_reassembler_push(
+            m_state, fragment.messageId, fragment.index, fragment.total,
+            fragment.sampleOffset, fragment.articulationId, fragment.payload.data(), fragment.size));
     }
 
-    bool complete() const noexcept { return m_complete; }
-    std::size_t size() const noexcept { return m_size; }
-    uint32_t messageId() const noexcept { return m_messageId; }
-    uint64_t sampleOffset() const noexcept { return m_sampleOffset; }
-    uint8_t articulationId() const noexcept { return m_articulationId; }
-    const uint8_t* data() const noexcept { return m_bytes.data(); }
+    bool complete() const noexcept { return hirari_midi_fragment_reassembler_complete(m_state); }
+    std::size_t size() const noexcept { return hirari_midi_fragment_reassembler_size(m_state); }
+    uint32_t messageId() const noexcept { return hirari_midi_fragment_reassembler_message_id(m_state); }
+    uint64_t sampleOffset() const noexcept { return hirari_midi_fragment_reassembler_sample_offset(m_state); }
+    uint8_t articulationId() const noexcept { return hirari_midi_fragment_reassembler_articulation_id(m_state); }
+    const uint8_t* data() const noexcept { return hirari_midi_fragment_reassembler_data(m_state); }
 
 private:
-    uint32_t m_messageId = 0;
-    uint16_t m_nextIndex = 0;
-    uint16_t m_total = 0;
-    std::size_t m_size = 0;
-    uint64_t m_sampleOffset = 0;
-    uint8_t m_articulationId = 0;
-    bool m_complete = false;
-    std::array<uint8_t, kMaximumMessageBytes> m_bytes{};
+    void* m_state = nullptr;
 };
 
 /// SPSC bounded transport for completed SysEx/MIDI 2.0 messages that cannot
@@ -101,6 +63,10 @@ public:
     static constexpr std::size_t kCapacity = 4;
     static constexpr std::size_t kMaximumMessageBytes =
         MidiFragmentReassembler::kMaximumMessageBytes;
+    // Rust's repr(C, align(64)) ring state: four fixed message slots followed
+    // by separate cache lines for producer and consumer sequence counters.
+    static constexpr std::size_t kStorageBytes =
+        kCapacity * (16 + kMaximumMessageBytes) + 2 * 64;
 
     struct Message {
         uint64_t sampleOffset = 0;
@@ -109,39 +75,32 @@ public:
         std::array<uint8_t, kMaximumMessageBytes> data{};
     };
 
+    MidiExtendedMessageRing() noexcept {
+        hirari_midi_extended_ring_init(m_storage.data(), m_storage.size());
+    }
+    MidiExtendedMessageRing(const MidiExtendedMessageRing&) = delete;
+    MidiExtendedMessageRing& operator=(const MidiExtendedMessageRing&) = delete;
+
     bool push(uint64_t sampleOffset, uint8_t articulationId,
               const uint8_t* bytes, std::size_t size) noexcept {
-        if (bytes == nullptr || size == 0 || size > kMaximumMessageBytes) return false;
-        const auto head = m_head.load(std::memory_order_relaxed);
-        const auto tail = m_tail.load(std::memory_order_acquire);
-        if (head - tail >= kCapacity) return false;
-        auto& slot = m_slots[head % kCapacity];
-        std::copy_n(bytes, size, slot.data.data());
-        slot.sampleOffset = sampleOffset;
-        slot.articulationId = articulationId;
-        slot.size = static_cast<uint32_t>(size);
-        m_head.store(head + 1, std::memory_order_release);
-        return true;
+        return hirari_midi_extended_ring_push(
+            m_storage.data(), sampleOffset, articulationId, bytes, size);
     }
 
     bool pop(Message& destination) noexcept {
-        const auto tail = m_tail.load(std::memory_order_relaxed);
-        const auto head = m_head.load(std::memory_order_acquire);
-        if (tail == head) return false;
-        destination = m_slots[tail % kCapacity];
-        m_tail.store(tail + 1, std::memory_order_release);
-        return true;
+        return hirari_midi_extended_ring_pop(m_storage.data(), &destination);
     }
 
     std::size_t size() const noexcept {
-        return static_cast<std::size_t>(m_head.load(std::memory_order_acquire) -
-                                        m_tail.load(std::memory_order_acquire));
+        return hirari_midi_extended_ring_size(m_storage.data());
     }
 
 private:
-    std::array<Message, kCapacity> m_slots{};
-    alignas(64) std::atomic<uint64_t> m_head{0};
-    alignas(64) std::atomic<uint64_t> m_tail{0};
+    alignas(64) std::array<std::byte, kStorageBytes> m_storage{};
 };
 
-} // namespace Aura::Core::Plugins
+static_assert(sizeof(MidiExtendedMessageRing::Message) ==
+              16 + MidiExtendedMessageRing::kMaximumMessageBytes);
+static_assert(sizeof(MidiExtendedMessageRing) == MidiExtendedMessageRing::kStorageBytes);
+
+} // namespace Hirari::Core::Plugins

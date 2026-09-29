@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <algorithm>
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @class BufferInterleaver
@@ -48,4 +48,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

@@ -12,7 +12,7 @@
 #include "../core/audio_buffer.hpp"
 #include "../dsp/analysis/fft_engine.hpp"
 
-namespace Aura::SCAE::Intelligence {
+namespace Hirari::SCAE::Intelligence {
 
 /**
  * @class VocalRestorationMaster
@@ -267,7 +267,7 @@ public:
 
 private:
     uint32_t m_fftSize;
-    Aura::DSP::Analysis::FFTEngine m_fft;
+    Hirari::DSP::Analysis::FFTEngine m_fft;
     std::vector<float> m_window;
     std::vector<float> m_noiseFloor;
     std::vector<float> m_frameScratch;
@@ -276,4 +276,4 @@ private:
     std::vector<float> m_overlapNorm;
 };
 
-} // namespace Aura::SCAE::Intelligence
+} // namespace Hirari::SCAE::Intelligence

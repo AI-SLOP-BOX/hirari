@@ -8,7 +8,7 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 
 /**
  * @class MasteringKernel
@@ -112,4 +112,4 @@ private:
     float m_prevR = 0.0f;
 };
 
-} // namespace Aura::Core::Mixing
+} // namespace Hirari::Core::Mixing

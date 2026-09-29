@@ -7,8 +7,8 @@
 #include <thread>
 
 int main() {
-    using Aura::Core::Engine::SidechainLink;
-    using Aura::Core::Engine::SidechainManager;
+    using Hirari::Core::Engine::SidechainLink;
+    using Hirari::Core::Engine::SidechainManager;
 
     SidechainManager manager;
     float leftA[4] = {1.0f, 2.0f, 3.0f, 4.0f};
@@ -21,13 +21,13 @@ int main() {
     assert(manager.takeLegacyApiMisuse());
     assert(!manager.registerLink(10, 0, SidechainLink{
         leftA, rightA, 3, 0.5f,
-        Aura::Core::Engine::SidechainTapPoint::PostFX, 4, 0, 1}));
+        Hirari::Core::Engine::SidechainTapPoint::PostFX, 4, 0, 1}));
     assert(!manager.registerLink(10, 0, SidechainLink{
         leftA, rightA, 3, 0.5f,
-        Aura::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 0}));
+        Hirari::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 0}));
     assert(manager.registerLink(10, 0, SidechainLink{
         leftA, rightA, 3, 0.5f,
-        Aura::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 1}));
+        Hirari::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 1}));
 
     SidechainManager::LinkSnapshot snapshot{};
     float snapshotLeft[4]{};
@@ -53,7 +53,7 @@ int main() {
 
     assert(manager.registerLink(11, 1, SidechainLink{
         leftA, rightA, 3, -4.0f,
-        Aura::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 1}));
+        Hirari::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 1}));
     SidechainManager::LinkSnapshot clamped{};
     float clampedLeft[4]{};
     float clampedRight[4]{};
@@ -61,7 +61,7 @@ int main() {
     assert(clamped.level == 0.0f);
     assert(!manager.registerLink(12, 1, SidechainLink{
         leftA, rightA, 3, std::numeric_limits<float>::quiet_NaN(),
-        Aura::Core::Engine::SidechainTapPoint::PostFX, 4}));
+        Hirari::Core::Engine::SidechainTapPoint::PostFX, 4}));
 
     assert(manager.hasLink(10, 0, 3));
     assert(manager.removeLink(10, 0));
@@ -76,7 +76,7 @@ int main() {
     float ownedRight[4] = {-9.0f, -8.0f, -7.0f, -6.0f};
     assert(ownedManager.registerLink(20, 0,
         SidechainLink{ownedLeft, ownedRight, 4, 1.0f,
-                      Aura::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 1}));
+                      Hirari::Core::Engine::SidechainTapPoint::PostFX, 4, 48000, 1}));
     SidechainManager::LinkSnapshot ownedSnapshot{};
     float ownedCopyLeft[4]{};
     float ownedCopyRight[4]{};
@@ -119,14 +119,14 @@ int main() {
         for (int i = 0; i < 100; ++i) {
             assert(ownedManager.registerLink(30, 0,
                 SidechainLink{writerAL, writerAR, 30, 1.0f,
-                              Aura::Core::Engine::SidechainTapPoint::PostFX, 8, 48000, 1}));
+                              Hirari::Core::Engine::SidechainTapPoint::PostFX, 8, 48000, 1}));
         }
     });
     std::thread writerB([&] {
         for (int i = 0; i < 100; ++i) {
             assert(ownedManager.registerLink(30, 0,
                 SidechainLink{writerBL, writerBR, 31, 0.75f,
-                              Aura::Core::Engine::SidechainTapPoint::PostFX, 16, 48000, 1}));
+                              Hirari::Core::Engine::SidechainTapPoint::PostFX, 16, 48000, 1}));
         }
     });
     writerA.join();

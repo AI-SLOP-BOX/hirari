@@ -6,7 +6,7 @@
 #include <algorithm>
 #include "tempo_analyzer.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief SmartTempoDetector: Logic Pro-style automatic BPM recognition.
@@ -29,4 +29,4 @@ private:
     double m_sampleRate;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

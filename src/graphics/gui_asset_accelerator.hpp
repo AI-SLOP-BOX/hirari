@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <cmath>
 
-namespace Aura::Graphics {
+namespace Hirari::Graphics {
 
 /**
  * @struct WaveformCache
@@ -116,4 +116,4 @@ private:
     mutable std::mutex m_mutex;
 };
 
-} // namespace Aura::Graphics
+} // namespace Hirari::Graphics

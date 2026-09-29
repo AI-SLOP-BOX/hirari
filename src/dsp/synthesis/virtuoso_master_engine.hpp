@@ -8,7 +8,7 @@
 #include "../utils/dsp_utils.hpp"
 #include "../utils/zdf_filter.hpp"
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @class VirtuosoMasterEngine
@@ -88,7 +88,7 @@ private:
         float velocity = 0.0f;
         float phase = 0.0f;
         float env = 0.0f;
-        ::Aura::DSP::Utils::ZDFFilter filter;
+        ::Hirari::DSP::Utils::ZDFFilter filter;
     };
 
     float renderRetroSynth(Voice& v) {
@@ -104,28 +104,28 @@ private:
         static const float weights[] = { 1.0f, 1.0f, 0.8f, 0.7f, 0.6f, 0.5f, 0.4f, 0.3f, 0.2f };
         float out = 0;
         for (int i = 0; i < 9; ++i) {
-            out += std::sin(v.phase * harmonics[i] * Aura::Utils::DSPUtils::TWO_PI) * weights[i];
+            out += std::sin(v.phase * harmonics[i] * Hirari::Utils::DSPUtils::TWO_PI) * weights[i];
         }
         return out * 0.15f;
     }
 
     float renderVintageEP(Voice& v) {
         // Tine/Reed bell emulation: Main fundamental + metallic bell 
-        float main = std::sin(v.phase * Aura::Utils::DSPUtils::TWO_PI);
-        float bell = std::sin(v.phase * 4.31f * Aura::Utils::DSPUtils::TWO_PI) * std::exp(-v.phase * 10.0f);
+        float main = std::sin(v.phase * Hirari::Utils::DSPUtils::TWO_PI);
+        float bell = std::sin(v.phase * 4.31f * Hirari::Utils::DSPUtils::TWO_PI) * std::exp(-v.phase * 10.0f);
         return (main * 0.8f + bell * 0.3f) * 0.7f;
     }
 
     float renderFMSynth(Voice& v) {
         // 2-Operator FM: Carrier modulated by Modulator
-        float mod = std::sin(v.phase * 3.5f * Aura::Utils::DSPUtils::TWO_PI) * 2.0f;
-        return std::sin((v.phase + mod) * Aura::Utils::DSPUtils::TWO_PI);
+        float mod = std::sin(v.phase * 3.5f * Hirari::Utils::DSPUtils::TWO_PI) * 2.0f;
+        return std::sin((v.phase + mod) * Hirari::Utils::DSPUtils::TWO_PI);
     }
 
-    float renderSubtractive(Voice& v) { return std::sin(v.phase * Aura::Utils::DSPUtils::TWO_PI); }
+    float renderSubtractive(Voice& v) { return std::sin(v.phase * Hirari::Utils::DSPUtils::TWO_PI); }
 
     double m_sampleRate;
     Voice m_voices[kMaxVoices];
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Aura::Platform {
+namespace Hirari::Platform {
 
 enum class GraphicsBackend { Auto, Metal, Vulkan, Cpu };
 
@@ -12,4 +12,4 @@ inline GraphicsBackend preferredGraphicsBackend() noexcept {
 #endif
 }
 
-} // namespace Aura::Platform
+} // namespace Hirari::Platform

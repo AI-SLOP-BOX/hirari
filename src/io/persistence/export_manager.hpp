@@ -10,7 +10,7 @@
 #include <thread>
 #include "../../rendering/bounce/bounce_engine.hpp"
 
-namespace Aura::Core::IO::Persistence {
+namespace Hirari::Core::IO::Persistence {
 
 /**
  * @class ExportManager
@@ -110,4 +110,4 @@ private:
     std::string m_lastError;
 };
 
-} // namespace Aura::Core::IO::Persistence
+} // namespace Hirari::Core::IO::Persistence

@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class ZDFFilter
@@ -91,4 +91,4 @@ private:
     Type m_type = Type::LowPass;
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

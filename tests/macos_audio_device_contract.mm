@@ -30,13 +30,13 @@ void render(void* user, float** outputs, const float**, uint32_t frames) noexcep
 }
 
 int main() {
-    auto device = Aura::Platform::createAudioDevice();
+    auto device = Hirari::Platform::createAudioDevice();
     assert(device);
     CallbackState callbackState;
 
     // Exercise the mono callback shape first. The CoreAudio backend must not
     // assume that every non-interleaved AudioBufferList has two buffers.
-    const Aura::Platform::AudioDevice::Config first{48'000.0, 128, 0, 1};
+    const Hirari::Platform::AudioDevice::Config first{48'000.0, 128, 0, 1};
     if (!device->initialize(first, &render, &callbackState)) {
         return 2;
     }
@@ -64,7 +64,7 @@ int main() {
     device->stop();
     assert(!device->isRunning());
 
-    const Aura::Platform::AudioDevice::Config second{96'000.0, 512, 0, 2};
+    const Hirari::Platform::AudioDevice::Config second{96'000.0, 512, 0, 2};
     assert(device->initialize(second, &render, &callbackState));
     assert(device->config().sampleRate == second.sampleRate);
     assert(device->config().bufferSize == second.bufferSize);

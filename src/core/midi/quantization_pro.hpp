@@ -8,7 +8,7 @@
 #include <array>
 #include "../midi_buffer.hpp"
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @class QuantizationPro
@@ -85,4 +85,4 @@ private:
     // [Auxiliary math for non-linear swing and micro-timing preservation]
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

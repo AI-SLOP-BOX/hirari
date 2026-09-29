@@ -4,9 +4,39 @@
 #include <cmath>
 #include <atomic>
 #include <algorithm>
+#include <memory>
+#include <limits>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
+
+extern "C" {
+void* hirari_region_stretch_create();
+void hirari_region_stretch_destroy(void* handle);
+bool hirari_region_stretch_prepare(void* handle, double sampleRate, uint32_t maxBlockSize);
+bool hirari_region_processor_apply_gain_fade(
+    float* samples, uint32_t frames, uint64_t regionRelativePos,
+    float gain, uint32_t fadeInSamples, uint8_t fadeType);
+}
+
+// Rust owns the streaming state, scratch buffers, source preparation and seek
+// decisions. This RAII adapter preserves the current Track-facing API.
+class RegionTimeStretch {
+public:
+    RegionTimeStretch() : m_rustState(hirari_region_stretch_create()) {}
+    ~RegionTimeStretch() { hirari_region_stretch_destroy(m_rustState); }
+    RegionTimeStretch(const RegionTimeStretch&) = delete;
+    RegionTimeStretch& operator=(const RegionTimeStretch&) = delete;
+
+    bool prepare(double sampleRate, uint32_t maxBlockSize) {
+        return m_rustState && hirari_region_stretch_prepare(m_rustState, sampleRate, maxBlockSize);
+    }
+
+    void* rustState() const noexcept { return m_rustState; }
+
+private:
+    void* m_rustState = nullptr;
+};
 
 /**
  * @class RegionProcessor
@@ -47,42 +77,18 @@ public:
         const float gain = m_gain.load(std::memory_order_acquire);
         if (!std::isfinite(gain)) return;
 
-        for (uint32_t i = 0; i < count; ++i) {
-            const uint64_t relative = regionRelativePos + i;
-            float envelope = 1.0f;
-            if (m_fadeIn.durationSamples > 0 && relative < m_fadeIn.durationSamples) {
-                envelope *= curve(static_cast<float>(relative) /
-                                      static_cast<float>(m_fadeIn.durationSamples), m_fadeIn.type);
-            }
-            // Fade-out is applied by callers that know the region length. This
-            // processor keeps the reusable block operation allocation-free.
-            for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
-                float* samples = buffer.getWritePointer(channel, offset);
-                const float input = samples[i];
-                const float output = (std::isfinite(input) ? input : 0.0f) * gain * envelope;
-                samples[i] = std::isfinite(output) ? output : 0.0f;
-            }
+        const auto fadeType = static_cast<uint8_t>(m_fadeIn.type);
+        for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
+            hirari_region_processor_apply_gain_fade(
+                buffer.getWritePointer(channel, offset), count, regionRelativePos,
+                gain, m_fadeIn.durationSamples, fadeType);
         }
     }
 
 private:
-    /**
-     * @brief RAMP: Generates a vectorized fade curve with industrial precision.
-     * INDUSTRIAL: Using Rust for robust and perfectly timed curve generation.
-     */
-    static float curve(float value, FadeType type) noexcept {
-        const float t = std::clamp(value, 0.0f, 1.0f);
-        switch (type) {
-            case FadeType::Linear: return t;
-            case FadeType::SCurve: return t * t * (3.0f - 2.0f * t);
-            case FadeType::Exponential: return t * t;
-        }
-        return t;
-    }
-
     std::atomic<float> m_gain;
     FadeInfo m_fadeIn;
     FadeInfo m_fadeOut;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -5,7 +5,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
 CXX=${CXX:-c++}
-OUT_DIR=${TMPDIR:-/tmp}/aura-tsan
+OUT_DIR=${TMPDIR:-/tmp}/hirari-tsan
 mkdir -p "$OUT_DIR"
 
 if ! "$CXX" -std=c++20 -fsanitize=thread -x c++ -o "$OUT_DIR/probe" - <<'EOF'

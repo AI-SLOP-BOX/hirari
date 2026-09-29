@@ -3,7 +3,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @brief IVoice: The universal polymorphic base for all sound generators.
@@ -24,4 +24,4 @@ public:
     virtual uint8_t getNote() const = 0;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

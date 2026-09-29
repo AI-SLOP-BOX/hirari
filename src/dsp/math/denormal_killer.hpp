@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace Aura::DSP::Math {
+namespace Hirari::DSP::Math {
 
 /**
  * @class DenormalNumberKiller
@@ -31,4 +31,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Math
+} // namespace Hirari::DSP::Math

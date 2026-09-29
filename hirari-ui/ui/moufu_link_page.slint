@@ -1,0 +1,108 @@
+import { Button, ComboBox, LineEdit } from "std-widgets.slint";
+import { MoufuActions } from "actions/moufu_actions.slint";
+import { Style } from "style.slint";
+
+export component Z_MoufuLinkPage inherits Rectangle {
+    background: Style.surface-1;
+    border-width: 1px;
+    border-color: Style.border;
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+        HorizontalLayout {
+            Text { text: "MOUFU PROJECT LINKS"; font-size: 16px; color: Style.brand; font-weight: 700; }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Refresh"; clicked => { MoufuActions.refresh(); } }
+        }
+        Text {
+            text: MoufuActions.status;
+            color: MoufuActions.status == "MOUFU CONNECTED" ? Style.ok : Style.text-secondary;
+            font-size: 10px;
+        }
+        Text {
+            text: "Link to any app publishing Moufu's shared project data type. Incoming data stays read-only and never replaces the open project.";
+            color: Style.text-dim;
+            font-size: 10px;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "Moufu Hub"; color: Style.text-secondary; vertical-alignment: center; }
+            LineEdit {
+                text <=> MoufuActions.address;
+                placeholder-text: "127.0.0.1:9478";
+                horizontal-stretch: 1;
+            }
+            Button { text: "Connect"; enabled: MoufuActions.address != ""; clicked => { MoufuActions.configure(MoufuActions.address); } }
+            Button { text: "Disconnect"; clicked => { MoufuActions.configure(""); } }
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        Text { text: "AVAILABLE PROJECT ENTITIES"; font-size: 10px; color: Style.text-tertiary; font-weight: 700; }
+        HorizontalLayout {
+            spacing: 8px;
+            ComboBox {
+                model: MoufuActions.entity-options;
+                current-index <=> MoufuActions.selected-entity-index;
+                enabled: MoufuActions.entity-options.length > 0;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Share Current Project";
+                enabled: MoufuActions.entity-ids.length > 0 && MoufuActions.selected-entity-index >= 0 && MoufuActions.selected-entity-index < MoufuActions.entity-ids.length;
+                clicked => { MoufuActions.share(MoufuActions.entity-ids[MoufuActions.selected-entity-index]); }
+            }
+            Button {
+                text: "Receive Project Updates";
+                enabled: MoufuActions.entity-ids.length > 0 && MoufuActions.selected-entity-index >= 0 && MoufuActions.selected-entity-index < MoufuActions.entity-ids.length;
+                clicked => { MoufuActions.receive(MoufuActions.entity-ids[MoufuActions.selected-entity-index]); }
+            }
+        }
+        if (MoufuActions.entity-options.length == 0) : Text {
+            text: "No other Moufu project entities are available. Connect another project app to the same Hub, then refresh.";
+            color: Style.text-muted;
+            font-size: 10px;
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        Text { text: "LINKS FOR THIS PROJECT"; font-size: 10px; color: Style.text-tertiary; font-weight: 700; }
+        HorizontalLayout {
+            spacing: 8px;
+            ComboBox {
+                model: MoufuActions.link-options;
+                current-index <=> MoufuActions.selected-link-index;
+                enabled: MoufuActions.link-options.length > 0;
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Remove Link";
+                enabled: MoufuActions.link-ids.length > 0 && MoufuActions.selected-link-index >= 0 && MoufuActions.selected-link-index < MoufuActions.link-ids.length;
+                clicked => { MoufuActions.unlink(MoufuActions.link-ids[MoufuActions.selected-link-index]); }
+            }
+        }
+        if (MoufuActions.link-options.length == 0) : Text {
+            text: "No links are connected to this project.";
+            color: Style.text-muted;
+            font-size: 10px;
+        }
+        Rectangle { height: 1px; background: Style.border; }
+        Text { text: "READ-ONLY LINKED PROJECT PREVIEW"; font-size: 10px; color: Style.text-tertiary; font-weight: 700; }
+        if (MoufuActions.remote-source != "") : Text {
+            text: MoufuActions.remote-source;
+            color: Style.brand;
+            font-size: 9px;
+        }
+        Text {
+            text: MoufuActions.remote-preview;
+            color: Style.text-secondary;
+            font-size: 10px;
+            wrap: word-wrap;
+            vertical-stretch: 1;
+        }
+        Rectangle { vertical-stretch: 1; }
+        Text {
+            text: "Project, track and marker names, arrangement, MIDI notes and lyrics, tempo, and mixer values are shared with this Hub. File paths and serialized plug-in state are excluded; connect only to a Hub you trust.";
+            color: Style.text-muted;
+            font-size: 9px;
+            wrap: word-wrap;
+        }
+    }
+}

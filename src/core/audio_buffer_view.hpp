@@ -2,7 +2,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class AudioBufferView
@@ -33,4 +33,4 @@ private:
     uint32_t m_channels, m_offset, m_numSamples;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

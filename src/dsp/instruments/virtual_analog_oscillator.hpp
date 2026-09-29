@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace Aura::DSP::Instruments {
+namespace Hirari::DSP::Instruments {
 
 /**
  * @class VirtualAnalogOscillator
@@ -90,4 +90,4 @@ private:
     }
 };
 
-} // namespace Aura::DSP::Instruments
+} // namespace Hirari::DSP::Instruments

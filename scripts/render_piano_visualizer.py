@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared deterministic falling-note renderer used by Aura UI and CLI."""
+"""Shared deterministic falling-note renderer used by Hirari UI and CLI."""
 import argparse, json, shutil, subprocess, tempfile, wave
 from pathlib import Path
 from PIL import Image, ImageDraw
@@ -8,7 +8,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--notes', required=True); ap.add_argument('--audio', required=True); ap.add_argument('--output', required=True); ap.add_argument('--fps', type=int, default=30); ap.add_argument('--width', type=int, default=1280); ap.add_argument('--height', type=int, default=720); a = ap.parse_args()
     notes = json.loads(Path(a.notes).read_text());
     with wave.open(a.audio, 'rb') as f: duration = f.getnframes() / max(1, f.getframerate())
-    frames = Path(tempfile.mkdtemp(prefix='aura-piano-')); lo, hi = 36, 96
+    frames = Path(tempfile.mkdtemp(prefix='hirari-piano-')); lo, hi = 36, 96
     try:
         total = int(duration * a.fps)
         for k in range(total):
@@ -37,7 +37,7 @@ def main():
                     fill = (235, 238, 245) if pitch % 12 in (0, 2, 4, 5, 7, 9, 11) else (24, 30, 48)
                 x = (pitch - lo) * key_w; d.rectangle((x, keyboard_top + 8, x + key_w - 1, a.height), fill=fill, outline=(55, 70, 100))
             d.line((0, keyboard_top - 1, a.width, keyboard_top - 1), fill=(255, 255, 255), width=2)
-            d.text((30, 28), 'AURA / PIANO VISUALIZER', fill=(230, 240, 255)); d.text((32, 62), 'MIDI-synchronized performance', fill=(145, 170, 205)); im.save(frames / f'frame_{k:06d}.jpg', quality=88)
+            d.text((30, 28), 'HIRARI / PIANO VISUALIZER', fill=(230, 240, 255)); d.text((32, 62), 'MIDI-synchronized performance', fill=(145, 170, 205)); im.save(frames / f'frame_{k:06d}.jpg', quality=88)
         subprocess.run(['ffmpeg', '-y', '-framerate', str(a.fps), '-i', str(frames / 'frame_%06d.jpg'), '-i', a.audio, '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart', a.output], check=True)
     finally: shutil.rmtree(frames, ignore_errors=True)
 

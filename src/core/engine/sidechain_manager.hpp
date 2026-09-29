@@ -1,16 +1,32 @@
 #pragma once
-#include <array>
-#include <algorithm>
+#include <bit>
 #include <atomic>
-#include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <memory>
 #include <mutex>
-#include <thread>
+#include <utility>
 #include <vector>
 
-namespace Aura::Core::Engine {
+extern "C" void* hirari_sidechain_publication_gate_create();
+extern "C" void hirari_sidechain_publication_gate_destroy(void* gate);
+extern "C" bool hirari_sidechain_publication_gate_enter_reader(const void* gate);
+extern "C" void hirari_sidechain_publication_gate_leave_reader(const void* gate);
+extern "C" void hirari_sidechain_publication_gate_begin_control(const void* gate);
+extern "C" void hirari_sidechain_publication_gate_end_control(const void* gate);
+extern "C" bool hirari_sidechain_publication_gate_try_begin_audio(const void* gate);
+extern "C" void hirari_sidechain_publication_gate_end_audio(const void* gate);
+extern "C" bool hirari_sidechain_register_link(const void*, uint32_t, uint32_t, uint32_t, const float*, const float*, uint32_t, uint32_t, uint64_t, float, uint8_t);
+extern "C" bool hirari_sidechain_register_silent_link(const void*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint64_t, float, uint8_t);
+extern "C" bool hirari_sidechain_remove_link(const void*, uint32_t, uint32_t);
+extern "C" bool hirari_sidechain_has_link(const void*, uint32_t, uint32_t, uint32_t);
+extern "C" float hirari_sidechain_level(const void*, uint32_t, uint32_t);
+extern "C" void hirari_sidechain_remove_track(const void*, uint32_t);
+extern "C" void hirari_sidechain_reset(const void*);
+extern "C" uint32_t hirari_sidechain_copy_link(const void*, uint32_t, uint32_t, float*, float*, uint32_t, uint64_t*);
+extern "C" bool hirari_sidechain_refresh_source(const void*, uint32_t, const float*, const float*, uint32_t, uint32_t, uint64_t);
+extern "C" void hirari_sidechain_publish_source(const void*, uint32_t, const float*, const float*, const float*, const float*, const float*, const float*, uint32_t, uint32_t, uint64_t);
+using HirariSidechainCaptureCallback = bool (*)(void*, uint32_t, uint32_t, uint32_t, float, uint8_t, uint32_t, uint64_t, const float*, const float*, uint32_t);
+extern "C" bool hirari_sidechain_capture_track(const void*, uint32_t, void*, HirariSidechainCaptureCallback);
+namespace Hirari::Core::Engine {
 
 enum class SidechainTapPoint { PreFX, PostFX, PostFader };
 
@@ -40,8 +56,7 @@ struct SidechainLink {
  */
 class SidechainManager {
 #include "sidechain_manager_public_part_1.inc"
-#include "sidechain_manager_private_part_1.inc"
 #include "sidechain_manager_public_part_2.inc"
 #include "sidechain_manager_private_part_2.inc"
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

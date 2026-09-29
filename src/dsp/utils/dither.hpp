@@ -1,134 +1,46 @@
 #pragma once
-#include <cmath>
-#include <random>
-#include <array>
+
 #include <cstdint>
+#include "../../core/rust_ffi.hpp"
 
-#if defined(__arm64__) || defined(__aarch64__)
-#include <arm_neon.h>
-#elif defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-#endif
+namespace Hirari::DSP::Utils {
 
-namespace Aura::DSP::Utils {
-
-/**
- * @class TPDFDither
- * @brief High-precision Triangular Probability Density Function Dither.
- * Optimized with Xorshift32 for real-time audio threads.
- */
+/** C++ compatibility handle for the Rust TPDF dither engine. */
 class TPDFDither {
 public:
-    TPDFDither() {
-        std::random_device rd;
-        m_state = rd();
-        if (m_state == 0) m_state = 0x12345678;
-    }
+    TPDFDither() : m_state(hirari_tpdf_dither_create()) {}
+    ~TPDFDither() { hirari_tpdf_dither_destroy(m_state); }
 
-    /**
-     * @brief Generate 1 LSB of TPDF noise at 24-bit level.
-     */
-    inline float process() {
-        uint32_t r1 = xorshift32();
-        uint32_t r2 = xorshift32();
-        // Summing two uniform dists gives TPDF.
-        // Scale to [-1, 1] then to 24-bit LSB.
-        float n = (static_cast<float>(r1) * kScale + static_cast<float>(r2) * kScale - 1.0f);
-        return n * (1.0f / 8388608.0f);
-    }
+    TPDFDither(const TPDFDither&) = delete;
+    TPDFDither& operator=(const TPDFDither&) = delete;
 
+    float process() { return hirari_tpdf_dither_next(m_state); }
     void processBlock(float* buffer, uint32_t numSamples) {
-        for (uint32_t i = 0; i < numSamples; ++i) {
-            buffer[i] += process();
-        }
+        if (buffer) hirari_tpdf_dither_process(m_state, buffer, numSamples);
     }
 
 private:
-    inline uint32_t xorshift32() {
-        m_state ^= m_state << 13;
-        m_state ^= m_state >> 17;
-        m_state ^= m_state << 5;
-        return m_state;
-    }
-
-    uint32_t m_state;
-    static constexpr float kScale = 1.0f / 4294967295.0f;
+    void* m_state = nullptr;
 };
 
-/**
- * @class NoiseShapingDither
- * @brief Mastering-Grade Psychoacoustic Noise-Shaping Dither.
- * Optimized for high-throughput block processing.
- */
+/** C++ compatibility handle for the Rust noise-shaped dither engine. */
 class NoiseShapingDither {
 public:
-    NoiseShapingDither() {
-        m_state = 0x12345678;
-        m_errorHistory.fill(0.0f);
+    NoiseShapingDither() : m_state(hirari_noise_shaping_dither_create()) {}
+    ~NoiseShapingDither() { hirari_noise_shaping_dither_destroy(m_state); }
+
+    NoiseShapingDither(const NoiseShapingDither&) = delete;
+    NoiseShapingDither& operator=(const NoiseShapingDither&) = delete;
+
+    float process(float sample, int bits = 16) {
+        return hirari_noise_shaping_dither_process_sample(m_state, sample, bits);
     }
-
-    inline float process(float sample, int bits = 16) {
-        float bitStep = 1.0f / static_cast<float>(1 << (bits - 1));
-        
-        uint32_t r1 = xorshift32();
-        uint32_t r2 = xorshift32();
-        float noise = (static_cast<float>(r1) * kScale + static_cast<float>(r2) * kScale - 1.0f) * bitStep;
-        
-        float filteredError = m_errorHistory[0] * 2.033f 
-                            - m_errorHistory[1] * 2.165f 
-                            + m_errorHistory[2] * 1.259f 
-                            - m_errorHistory[3] * 0.304f;
-                            
-        float input = sample + filteredError + noise;
-        
-        // Fast rounding
-        float quantized = std::floor(input / bitStep + 0.5f) * bitStep;
-        
-        m_errorHistory[3] = m_errorHistory[2];
-        m_errorHistory[2] = m_errorHistory[1];
-        m_errorHistory[1] = m_errorHistory[0];
-        m_errorHistory[0] = input - quantized;
-
-        return quantized;
-    }
-
     void processBlock(float* buffer, uint32_t numSamples, int bits = 16) {
-        float bitStep = 1.0f / static_cast<float>(1 << (bits - 1));
-        float invBitStep = static_cast<float>(1 << (bits - 1));
-
-        for (uint32_t i = 0; i < numSamples; ++i) {
-            uint32_t r1 = xorshift32();
-            uint32_t r2 = xorshift32();
-            float noise = (static_cast<float>(r1) * kScale + static_cast<float>(r2) * kScale - 1.0f) * bitStep;
-
-            float filteredError = m_errorHistory[0] * 2.033f 
-                                - m_errorHistory[1] * 2.165f 
-                                + m_errorHistory[2] * 1.259f 
-                                - m_errorHistory[3] * 0.304f;
-                                
-            float input = buffer[i] + filteredError + noise;
-            float quantized = std::floor(input * invBitStep + 0.5f) * bitStep;
-            
-            m_errorHistory[3] = m_errorHistory[2];
-            m_errorHistory[2] = m_errorHistory[1];
-            m_errorHistory[1] = m_errorHistory[0];
-            m_errorHistory[0] = input - quantized;
-            
-            buffer[i] = quantized;
-        }
+        if (buffer) hirari_noise_shaping_dither_process(m_state, buffer, numSamples, bits);
     }
 
 private:
-    inline uint32_t xorshift32() {
-        m_state ^= m_state << 13;
-        m_state ^= m_state >> 17;
-        m_state ^= m_state << 5;
-        return m_state;
-    }
-
-    uint32_t m_state;
-    std::array<float, 4> m_errorHistory{0.0f, 0.0f, 0.0f, 0.0f};
-    static constexpr float kScale = 1.0f / 4294967295.0f;
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

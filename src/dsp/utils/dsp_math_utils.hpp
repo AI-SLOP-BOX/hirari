@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <immintrin.h>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @brief DSPMathUtils: High-performance mathematical helpers for real-time audio.
@@ -62,4 +62,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

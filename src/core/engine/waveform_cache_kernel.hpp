@@ -7,7 +7,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct PeakPair
@@ -86,4 +86,4 @@ private:
     mutable std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

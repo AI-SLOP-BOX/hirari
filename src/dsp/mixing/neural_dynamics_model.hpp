@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @brief NeuralDynamicsModel: The 'AI-Cloned' Analog Soul.
@@ -52,4 +52,4 @@ private:
     std::vector<float> m_state;
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class AutomationController
@@ -99,4 +99,4 @@ private:
     bool m_latchActive; // Track latch trigger across block boundaries
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <array>
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @struct UniversalMidiPacket
@@ -80,4 +80,4 @@ private:
     MIDI2Kernel() = default;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

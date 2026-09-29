@@ -6,7 +6,7 @@
 #include "bus_router.hpp"
 #include "pdc_graph.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class LatencyManager
@@ -56,4 +56,4 @@ private:
     std::unordered_map<uint32_t, uint32_t> m_compensation;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

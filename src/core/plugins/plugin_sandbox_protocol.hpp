@@ -4,8 +4,9 @@
 #include <cstdint>
 #include <atomic>
 #include "midi_fragment_transport.hpp"
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Plugins::SandboxProtocol {
+namespace Hirari::Core::Plugins::SandboxProtocol {
 
 inline constexpr uint8_t kReady = 0xA1;
 inline constexpr uint8_t kShutdown = 0xA2;
@@ -20,13 +21,13 @@ inline constexpr uint8_t kErrorUnsupported = 0xB4;
 inline constexpr uint32_t kMaxFrames = 8192;
 inline constexpr uint32_t kMaxChannels = 2;
 inline constexpr uint32_t kMaxMidiEvents = 1024;
-inline constexpr uint32_t kMaxParameterChanges = 256;
+inline constexpr uint32_t kMaxParameterChanges = 4096;
 inline constexpr uint32_t kMaxMidiPayloadBytes = 256;
 inline constexpr uint32_t kMaxStateBytes = 4u * 1024u * 1024u;
 inline constexpr uint32_t kStateProtocolVersion = 1u;
-// SharedAudioBlock contains the 64-bit state checksum below. Bump the ABI
-// version so an older worker cannot interpret the shared layout incorrectly.
-inline constexpr uint32_t kAudioBlockProtocolVersion = 3u;
+// SharedAudioBlock contains the 64-bit state checksum and a bounded queue of
+// timed parameter events. Bump the ABI whenever that shared layout changes.
+inline constexpr uint32_t kAudioBlockProtocolVersion = 5u;
 inline constexpr uint8_t kStateErrorNone = 0u;
 inline constexpr uint8_t kStateErrorOversize = 1u;
 inline constexpr uint8_t kStateErrorVersion = 2u;
@@ -38,23 +39,6 @@ inline constexpr uint8_t kStateErrorTimeout = 7u;
 inline constexpr uint32_t kStatusHeaderV9 = 0x41555209u;
 inline constexpr uint32_t kRecoveryClearBlock = 0u;
 inline constexpr uint32_t kRecoveryQuarantined = 1u;
-
-inline uint64_t stateChecksum(const uint8_t* data, size_t size) noexcept {
-    uint64_t hash = 14695981039346656037ull;
-    for (size_t index = 0; index < size; ++index) {
-        hash ^= data[index];
-        hash *= 1099511628211ull;
-    }
-    return hash;
-}
-
-// Plugin state is opaque to the host. Until a plugin-specific migration
-// callback exists, accepting any other version would silently feed bytes from
-// an incompatible schema into the plugin. Keep the policy centralized so
-// host and worker cannot drift.
-inline bool isSupportedStateVersion(uint32_t version) noexcept {
-    return version == kStateProtocolVersion;
-}
 
 // Modular comparison remains correct when a uint64 sequence wraps. Never
 // compare mailbox sequence numbers with plain >= or <=.
@@ -93,6 +77,7 @@ struct SharedAudioBlock {
     std::atomic<uint32_t> mailboxOverruns{0};
     std::atomic<uint32_t> inputMidiTruncations{0};
     std::atomic<uint32_t> processErrors{0};
+    std::atomic<uint8_t> midiInstrument{0};
     std::atomic<uint64_t> stateRequestSequence{0};
     std::atomic<uint64_t> stateCompletedSequence{0};
     // State is valid only for the exact project/plugin/audio generation that
@@ -119,4 +104,4 @@ struct SharedAudioBlock {
     alignas(64) uint8_t state[kMaxStateBytes]{};
 };
 
-} // namespace Aura::Core::Plugins::SandboxProtocol
+} // namespace Hirari::Core::Plugins::SandboxProtocol

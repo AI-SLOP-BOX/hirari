@@ -7,7 +7,7 @@
 #include "../../core/audio_buffer.hpp"
 #include "../../core/log_buffer.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @class PluginSandboxHost
@@ -64,11 +64,11 @@ public:
 private:
     void markFailed(const char* message) noexcept {
         m_hasCrashed.store(true, std::memory_order_release);
-        ::Aura::Core::Diagnostics::LogBuffer::post(0, 0, message);
+        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, message);
     }
 
     std::shared_ptr<DSP::IProcessor> m_inner;
     std::atomic<bool> m_hasCrashed{false};
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

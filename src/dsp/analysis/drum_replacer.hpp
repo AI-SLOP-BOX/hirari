@@ -6,7 +6,7 @@
 #include <vector>
 #include "transient_detector.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief DrumReplacer: Audio-to-MIDI Trigger System.
@@ -37,7 +37,7 @@ public:
         }
 
         const uint8_t note = std::min<uint8_t>(targetNote, 127);
-        Aura::Core::DSP::Analysis::TransientDetector detector(sr);
+        Hirari::Core::DSP::Analysis::TransientDetector detector(sr);
         const auto transients = detector.analyze(buffer, size, sensitivity);
         result.reserve(transients.size());
         uint64_t lastPosition = 0;
@@ -90,4 +90,4 @@ public:
 };
 
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

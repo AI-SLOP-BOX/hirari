@@ -4,11 +4,11 @@
 #include <cmath>
 
 int main() {
-    Aura::Core::AudioBuffer sample(1, 64);
+    Hirari::Core::AudioBuffer sample(1, 64);
     for (uint32_t i = 0; i < sample.getNumSamples(); ++i)
         sample.getWritePointer(0)[i] = 0.25f;
 
-    Aura::DSP::Synthesis::SamplerEngine engine;
+    Hirari::DSP::Synthesis::SamplerEngine engine;
     engine.prepareToPlay(48'000.0, 32);
 
     // Exercise the fixed free-voice stack through both allocation and
@@ -16,7 +16,7 @@ int main() {
     for (uint32_t i = 0; i < 64; ++i)
         engine.noteOn(static_cast<uint8_t>(48 + (i % 24)), 100, &sample);
 
-    Aura::Core::AudioBuffer output(2, 128);
+    Hirari::Core::AudioBuffer output(2, 128);
     engine.process(output);
     for (uint32_t channel = 0; channel < output.getNumChannels(); ++channel)
         for (uint32_t frame = 0; frame < output.getNumSamples(); ++frame)

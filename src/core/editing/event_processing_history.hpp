@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace aura::editing {
+namespace hirari::editing {
 struct EventProcessingStep {
     uint32_t id = 0;
     std::string operation;

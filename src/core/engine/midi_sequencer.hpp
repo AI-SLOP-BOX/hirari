@@ -1,12 +1,12 @@
 #pragma once
-#include <unordered_map>
-#include <vector>
-#include <memory>
-#include <mutex>
-#include <algorithm>
-#include "midi_quantizer.hpp"
 
-namespace Aura::Core::Engine {
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
+#include "../rust_ffi.hpp"
+
+namespace Hirari::Core::Engine {
 
 struct MidiNote {
     uint8_t pitch = 0;
@@ -15,59 +15,46 @@ struct MidiNote {
     uint64_t length = 0;
 };
 
+static_assert(sizeof(MidiNote) == 24, "MidiNote must match the Rust sequencer ABI");
+static_assert(offsetof(MidiNote, startTick) == 8 && offsetof(MidiNote, length) == 16,
+              "MidiNote field offsets must match the Rust sequencer ABI");
+
 /**
- * @class MidiSequencer
- * @brief Industrial MIDI Performance Orchestrator.
- * HONEST FIX: Implemented tick-based sequencing and note chasing.
+ * @brief C++ compatibility facade for the Rust MIDI note sequencer.
+ * Region storage, ordering, locking, and note chasing live in Rust.
  */
 class MidiSequencer {
 public:
-    static MidiSequencer& getInstance() { static MidiSequencer i; return i; }
+    static MidiSequencer& getInstance() { static MidiSequencer instance; return instance; }
 
-    /**
-     * @brief Records a MIDI event with industrial tick precision and sequencing sovereignty.
-     * INDUSTRIAL: Delegating note storage and indexing to the Rust 'MidiOrchestrator'.
-     */
-    void recordNote(uint32_t regionId, uint8_t pitch, uint8_t velocity, uint64_t startTick, uint64_t length) {
-        if (pitch > 127 || velocity > 127 || length == 0) return;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto& notes = m_regions[regionId];
-        if (notes.size() >= kMaxNotesPerRegion) return;
-        notes.push_back(MidiNote{pitch, velocity, startTick, length});
-        std::stable_sort(notes.begin(), notes.end(), [](const MidiNote& a, const MidiNote& b) {
-            return a.startTick < b.startTick;
-        });
+    void recordNote(uint32_t regionId, uint8_t pitch, uint8_t velocity,
+                    uint64_t startTick, uint64_t length) {
+        (void)hirari_midi_sequencer_record(
+            m_state, regionId, pitch, velocity, startTick, length);
     }
 
-    /**
-     * @brief NOTE CHASE: Identifies notes that should be active at the given tick with forensic precision.
-     * INDUSTRIAL: Using Rust for robust and perfectly timed note chasing.
-     */
-    std::vector<MidiNote> chaseNotes(uint64_t currentTick) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        std::vector<MidiNote> active;
-        for (const auto& [regionId, notes] : m_regions) {
-            (void)regionId;
-            for (const MidiNote& note : notes) {
-                if (note.startTick > currentTick) break;
-                const uint64_t end = note.startTick > UINT64_MAX - note.length
-                    ? UINT64_MAX : note.startTick + note.length;
-                if (currentTick < end) active.push_back(note);
-            }
+    std::vector<MidiNote> chaseNotes(uint64_t currentTick) const {
+        void* snapshot = hirari_midi_sequencer_chase_snapshot(m_state, currentTick);
+        if (!snapshot) return {};
+        std::unique_ptr<void, decltype(&hirari_midi_sequencer_snapshot_destroy)>
+            snapshotGuard(snapshot, &hirari_midi_sequencer_snapshot_destroy);
+        const size_t count = hirari_midi_sequencer_snapshot_count(snapshot);
+        std::vector<MidiNote> active(count);
+        if (!hirari_midi_sequencer_snapshot_copy(snapshot, active.data(), active.size())) {
+            return {};
         }
         return active;
     }
 
-    void clear() noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_regions.clear();
-    }
+    void clear() noexcept { hirari_midi_sequencer_clear(m_state); }
 
 private:
-    static constexpr size_t kMaxNotesPerRegion = 1'000'000;
-    MidiSequencer() = default;
-    std::unordered_map<uint32_t, std::vector<MidiNote>> m_regions;
-    mutable std::mutex m_mutex;
+    MidiSequencer() : m_state(hirari_midi_sequencer_create()) {}
+    ~MidiSequencer() { hirari_midi_sequencer_destroy(m_state); }
+    MidiSequencer(const MidiSequencer&) = delete;
+    MidiSequencer& operator=(const MidiSequencer&) = delete;
+
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -7,13 +7,13 @@ import wave
 
 
 REQUIRED_FILES = (
-    "aura_three_hour_chisa.mid",
-    "aura_three_hour_chisa.midi.json",
-    "aura_three_hour_chisa_vocal.wav",
-    "aura_three_hour_surge.wav",
-    "aura_three_hour_surge_extended.wav",
-    "aura_three_hour_mix_cli.wav",
-    "aura_three_hour_song.aura",
+    "hirari_three_hour_chisa.mid",
+    "hirari_three_hour_chisa.midi.json",
+    "hirari_three_hour_chisa_vocal.wav",
+    "hirari_three_hour_surge.wav",
+    "hirari_three_hour_surge_extended.wav",
+    "hirari_three_hour_mix_cli.wav",
+    "hirari_three_hour_song.hirari",
     "audio_verify.json",
     "song_quality.json",
     "join_quality.json",
@@ -78,8 +78,8 @@ def main() -> int:
     provenance = read_json(root, "vocal_render_provenance.json") if not missing else {}
     tail_manifest = read_json(root, "tail_render_manifest.json") if not missing else {}
     lyric_lines = [line for line in (root / "lyrics.txt").read_text(encoding="utf-8").splitlines() if line.strip()] if not missing else []
-    pcm24 = audio_shape(root / "aura_three_hour_mix.wav")
-    pcm16 = audio_shape(root / "aura_three_hour_mix_cli.wav")
+    pcm24 = audio_shape(root / "hirari_three_hour_mix.wav")
+    pcm16 = audio_shape(root / "hirari_three_hour_mix_cli.wav")
     delivery_shape_match = (
         pcm24 is not None
         and pcm16 is not None
@@ -103,7 +103,7 @@ def main() -> int:
         and bool(provenance.get("vocal_wav_sha256"))
         and provenance.get("vocal_note_count") == song.get("vocal_notes"),
         "project_gate": project.get("ok") is True and project.get("track_count", 0) >= 4,
-        "release_is_pcm16": is_pcm16(root / "aura_three_hour_mix_cli.wav"),
+        "release_is_pcm16": is_pcm16(root / "hirari_three_hour_mix_cli.wav"),
         "delivery_shape_gate": delivery_shape_match,
         "tail_render_gate": tail_manifest.get("method") == "midi_tail_render_crossfade"
         and tail_manifest.get("extension_seconds", 0.0) > 0.0

@@ -3,7 +3,7 @@
 #include <random>
 #include "midi_sequencer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 struct DrumEvent {
     uint64_t startTick;
@@ -52,4 +52,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

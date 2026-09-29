@@ -4,7 +4,7 @@
 #include "../src/core/driver/mac_audio_driver_host.hpp"
 
 int main() {
-    using Aura::Core::Driver::MacAudioInputBlockQueue;
+    using Hirari::Core::Driver::MacAudioInputBlockQueue;
 
     MacAudioInputBlockQueue queue;
     float inputLeft[4] = {1.0f, 2.0f, 3.0f, 4.0f};

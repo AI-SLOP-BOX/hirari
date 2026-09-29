@@ -1,0 +1,18 @@
+export struct ZNote {
+    region_id: int,
+    pitch: int,
+    midi_channel: int,
+    start_beat: float,
+    length_beats: float,
+    velocity: int,
+    articulation: int,
+    vibrato_amount: float,
+    vibrato_rate_millihz: int,
+    phoneme: string,
+    pitch_curve_cents: [int],
+    portamento_samples: int,
+    probability: int,
+    repeat_count: int,
+    selected: bool,
+    lyric: string,
+}

@@ -7,7 +7,7 @@
 #include "../src/dsp/effects/auto_pitch_corrector.hpp"
 
 int main() {
-    using Aura::Core::AudioBuffer;
+    using Hirari::Core::AudioBuffer;
     AudioBuffer::resetRealtimeResizeStats();
     AudioBuffer buffer(2, 16);
     AudioBuffer::setRTThread(true);
@@ -16,17 +16,17 @@ int main() {
     assert(AudioBuffer::realtimeResizeAttempts() == 1);
     assert(AudioBuffer::lastRealtimeRequestedCapacity() >= 128);
 
-    auto& automation = Aura::Core::Engine::AutomationManager::getInstance();
+    auto& automation = Hirari::Core::Engine::AutomationManager::getInstance();
     automation.prepareToPlay(48000.0);
     assert(automation.setTarget(3, 11, 1.0f));
     assert(std::abs(automation.getTarget(3, 11) - 1.0f) < 1.0e-6f);
     automation.process(64);
     assert(std::isfinite(automation.getValue(0, 0)));
 
-    Aura::Core::DSP::Effects::AutoPitchCorrector corrector(48000.0, 256);
+    Hirari::Core::DSP::Effects::AutoPitchCorrector corrector(48000.0, 256);
     corrector.prepareToPlay(48000.0, 64);
-    Aura::Core::MidiBuffer midi;
-    Aura::DSP::ProcessContext context{};
+    Hirari::Core::MidiBuffer midi;
+    Hirari::DSP::ProcessContext context{};
     context.sampleRate = 48000.0;
     context.blockSize = 64;
     AudioBuffer mono(1, 64);

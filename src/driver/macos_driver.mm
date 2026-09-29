@@ -1,9 +1,9 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AudioUnit/AudioUnit.h>
 #include <iostream>
-#include "../AuraUltimate.hpp"
+#include "../HirariUltimate.hpp"
 
-namespace Aura::Driver {
+namespace Hirari::Driver {
 
 /**
  * @class macOSDriver
@@ -27,19 +27,19 @@ public:
 
         AudioComponent comp = AudioComponentFindNext(NULL, &desc);
         if (!comp) {
-            std::cerr << "AURA | DRIVER | ERROR: Could not find Default Output Component." << std::endl;
+            std::cerr << "HIRARI | DRIVER | ERROR: Could not find Default Output Component." << std::endl;
             return false;
         }
 
         OSStatus err = AudioComponentInstanceNew(comp, &m_audioUnit);
         if (err != noErr) {
-            std::cerr << "AURA | DRIVER | ERROR: AudioComponentInstanceNew failed (" << err << ")" << std::endl;
+            std::cerr << "HIRARI | DRIVER | ERROR: AudioComponentInstanceNew failed (" << err << ")" << std::endl;
             return false;
         }
 
         err = AudioUnitInitialize(m_audioUnit);
         if (err != noErr) {
-            std::cerr << "AURA | DRIVER | ERROR: AudioUnitInitialize failed (" << err << ")" << std::endl;
+            std::cerr << "HIRARI | DRIVER | ERROR: AudioUnitInitialize failed (" << err << ")" << std::endl;
             return false;
         }
 
@@ -49,7 +49,7 @@ public:
         input.inputProcRefCon = this;
         err = AudioUnitSetProperty(m_audioUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &input, sizeof(input));
         if (err != noErr) {
-            std::cerr << "AURA | DRIVER | ERROR: Could not set render callback (" << err << ")" << std::endl;
+            std::cerr << "HIRARI | DRIVER | ERROR: Could not set render callback (" << err << ")" << std::endl;
             return false;
         }
 
@@ -65,17 +65,17 @@ public:
         format.mBitsPerChannel = 32;
         err = AudioUnitSetProperty(m_audioUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof(format));
         if (err != noErr) {
-            std::cerr << "AURA | DRIVER | ERROR: Could not set stream format (" << err << ")" << std::endl;
+            std::cerr << "HIRARI | DRIVER | ERROR: Could not set stream format (" << err << ")" << std::endl;
             return false;
         }
 
         err = AudioOutputUnitStart(m_audioUnit);
         if (err != noErr) {
-            std::cerr << "AURA | DRIVER | ERROR: AudioOutputUnitStart failed (" << err << ")" << std::endl;
+            std::cerr << "HIRARI | DRIVER | ERROR: AudioOutputUnitStart failed (" << err << ")" << std::endl;
             return false;
         }
 
-        std::cout << "AURA | DRIVER | SUCCESS: Core Audio Started (" << sr << "Hz / " << bs << " samples)" << std::endl;
+        std::cout << "HIRARI | DRIVER | SUCCESS: Core Audio Started (" << sr << "Hz / " << bs << " samples)" << std::endl;
         return true;
     }
 
@@ -88,7 +88,7 @@ private:
         float* outR = static_cast<float*>(ioData->mBuffers[1].mData);
 
         // --- REAL-TIME THREAD: ZERO-ALLOCATION PATH ---
-        ::Aura::AuraEngine::getInstance().process(outL, outR, inNumberFrames);
+        ::Hirari::HirariEngine::getInstance().process(outL, outR, inNumberFrames);
         return noErr;
     }
 
@@ -97,4 +97,4 @@ private:
     uint32_t m_blockSize;
 };
 
-} // namespace Aura::Driver
+} // namespace Hirari::Driver

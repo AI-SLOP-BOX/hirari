@@ -1,112 +1,107 @@
 #pragma once
 
-#include <cmath>
 #include <algorithm>
-#include <cstring>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <vector>
+
 #include "../iprocessor.hpp"
+#include "../../core/rust_ffi.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
-/**
- * @class TubeSaturation
- * @brief Professional Vacuum Tube Emulation (Analog Warmth).
- * HONEST FIX: Implements a non-linear transfer function (Asymmetrical soft-clipping) 
- * to generate even-order harmonics characteristic of Triode and Pentode tubes.
- * It adds 'Glow' and 'Weight' to digital tracks without harsh digital clipping.
- */
-class TubeSaturation : public IProcessor {
+/** C++ host and session-state adapter for Rust tube saturation DSP. */
+class TubeSaturation final : public IProcessor {
 public:
-    TubeSaturation() : m_drive(0.0f), m_bias(0.0f), m_dryWet(1.0f) {}
+    TubeSaturation() : m_state(hirari_tube_saturation_create()) {}
+    ~TubeSaturation() override { hirari_tube_saturation_destroy(m_state); }
+
+    TubeSaturation(const TubeSaturation&) = delete;
+    TubeSaturation& operator=(const TubeSaturation&) = delete;
 
     std::string getName() const override { return "Tube Saturation"; }
     uint32_t getLatencySamples() const noexcept override { return 0; }
     uint32_t getNumParameters() const noexcept override { return 3; }
+
     void setParameter(uint32_t id, float value) noexcept override {
-        if (!std::isfinite(value)) return;
-        if (id == 0) setDrive(-24.0f + std::clamp(value, 0.0f, 1.0f) * 60.0f);
-        else if (id == 1) setBias(-1.0f + std::clamp(value, 0.0f, 1.0f) * 2.0f);
-        else if (id == 2) setDryWet(value);
+        hirari_tube_saturation_set_parameter(m_state, id, value);
     }
     float getParameter(uint32_t id) const noexcept override {
-        if (id == 0) return std::clamp((m_drive + 24.0f) / 60.0f, 0.0f, 1.0f);
-        if (id == 1) return std::clamp((m_bias + 1.0f) * 0.5f, 0.0f, 1.0f);
-        if (id == 2) return m_dryWet;
-        return 0.0f;
+        return hirari_tube_saturation_get_parameter(m_state, id);
     }
     bool getParameterDescriptor(uint32_t id, ParameterDescriptor& out) const noexcept override {
-        if (id >= 3) return false; out = {0.0f, 1.0f, false}; return true;
+        if (id >= getNumParameters()) return false;
+        out = {0.0f, 1.0f, false};
+        return true;
     }
     void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
-        if (outName && maxSize > 0) std::snprintf(outName, maxSize, "%s", id == 0 ? "Drive" : (id == 1 ? "Bias" : (id == 2 ? "Dry/Wet" : "")));
-    }
-    std::vector<uint8_t> getState() const override {
-        std::vector<uint8_t> state(32, 0); const uint32_t magic = 0x41555241u; const uint16_t version = 1;
-        const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u); const float values[] = {getParameter(0), getParameter(1), getParameter(2)};
-        std::memcpy(state.data(), &magic, 4); std::memcpy(state.data()+4, &version, 2); std::memcpy(state.data()+6, &flags, 2);
-        std::memcpy(state.data()+8, &m_mix, 4); std::memcpy(state.data()+12, &m_sidechainBusId, 4); std::memcpy(state.data()+16, values, sizeof(values)); return state;
-    }
-    bool setState(const std::vector<uint8_t>& state) override {
-        if (state.size() != 32) return false;
-        uint32_t magic = 0, sidechain = 0; uint16_t version = 0, flags = 0; float mix = 0.0f, values[3]{};
-        std::memcpy(&magic, state.data(), 4); std::memcpy(&version, state.data()+4, 2); std::memcpy(&flags, state.data()+6, 2);
-        std::memcpy(&mix, state.data()+8, 4); std::memcpy(&sidechain, state.data()+12, 4); std::memcpy(values, state.data()+16, sizeof(values));
-        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 || !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
-        for (float value : values) if (!std::isfinite(value) || value < 0.0f || value > 1.0f) return false;
-        m_bypassed = (flags & 1u) != 0; m_mix = mix; m_sidechainBusId = sidechain;
-        for (uint32_t i = 0; i < 3; ++i) setParameter(i, values[i]); return true;
-    }
-
-    void prepareToPlay(double sr, uint32_t bs) noexcept override {
-        (void)bs;
-        (void)sr;
-        reset();
-    }
-
-    /**
-     * @brief PROCESS: Applies the non-linear transfer function.
-     */
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ProcessContext& context) noexcept override {
-        (void)midi;
-        (void)context;
-        if (m_bypassed || buffer.getNumChannels() == 0) return;
-        const uint32_t n = buffer.getNumSamples();
-        float* left = buffer.getWritePointer(0);
-        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
-        if (!left) return;
-        const float drive = std::clamp(std::isfinite(m_drive) ? m_drive : 0.0f, -24.0f, 36.0f);
-        const float bias = std::clamp(std::isfinite(m_bias) ? m_bias : 0.0f, -1.0f, 1.0f);
-        const float mix = std::clamp(std::isfinite(m_dryWet) ? m_dryWet : 1.0f, 0.0f, 1.0f);
-        const float gain = std::pow(10.0f, drive / 20.0f);
-        const auto shape = [bias](float input) noexcept {
-            const float x = std::clamp(input + bias * 0.15f, -8.0f, 8.0f);
-            const float wet = std::tanh(x) + 0.08f * std::tanh(x * 2.0f) * (1.0f + bias);
-            return std::clamp(wet * 0.88f - bias * 0.04f, -1.0f, 1.0f);
-        };
-        for (uint32_t i = 0; i < n; ++i) {
-            const float dryL = std::isfinite(left[i]) ? left[i] : 0.0f;
-            const float wetL = shape(dryL * gain);
-            left[i] = dryL + mix * (wetL - dryL);
-            if (right) {
-                const float dryR = std::isfinite(right[i]) ? right[i] : 0.0f;
-                const float wetR = shape(dryR * gain);
-                right[i] = dryR + mix * (wetR - dryR);
-            }
+        if (outName && maxSize > 0) {
+            std::snprintf(outName, maxSize, "%s",
+                          id == 0 ? "Drive" : (id == 1 ? "Bias" : (id == 2 ? "Dry/Wet" : "")));
         }
     }
 
+    std::vector<uint8_t> getState() const override {
+        std::vector<uint8_t> state(32, 0);
+        const uint32_t magic = 0x41555241u;
+        const uint16_t version = 1;
+        const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
+        const float values[] = {getParameter(0), getParameter(1), getParameter(2)};
+        std::memcpy(state.data(), &magic, sizeof(magic));
+        std::memcpy(state.data() + 4, &version, sizeof(version));
+        std::memcpy(state.data() + 6, &flags, sizeof(flags));
+        std::memcpy(state.data() + 8, &m_mix, sizeof(m_mix));
+        std::memcpy(state.data() + 12, &m_sidechainBusId, sizeof(m_sidechainBusId));
+        std::memcpy(state.data() + 16, values, sizeof(values));
+        return state;
+    }
 
-    void reset() noexcept override {}
+    bool setState(const std::vector<uint8_t>& state) override {
+        if (state.size() != 32) return false;
+        uint32_t magic = 0, sidechain = 0;
+        uint16_t version = 0, flags = 0;
+        float mix = 0.0f, values[3]{};
+        std::memcpy(&magic, state.data(), 4);
+        std::memcpy(&version, state.data() + 4, 2);
+        std::memcpy(&flags, state.data() + 6, 2);
+        std::memcpy(&mix, state.data() + 8, 4);
+        std::memcpy(&sidechain, state.data() + 12, 4);
+        std::memcpy(values, state.data() + 16, sizeof(values));
+        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 ||
+            !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
+        for (float value : values) {
+            if (!std::isfinite(value) || value < 0.0f || value > 1.0f) return false;
+        }
+        m_bypassed = (flags & 1u) != 0;
+        m_mix = mix;
+        m_sidechainBusId = sidechain;
+        for (uint32_t id = 0; id < 3; ++id) setParameter(id, values[id]);
+        return true;
+    }
+    bool restoreStateChecked(const std::vector<uint8_t>& state) override { return setState(state); }
 
-    // Parameters
-    void setDrive(float db) { if (std::isfinite(db)) m_drive = std::clamp(db, -24.0f, 36.0f); }
-    void setBias(float b) { if (std::isfinite(b)) m_bias = std::clamp(b, -1.0f, 1.0f); }
-    void setDryWet(float mix) { if (std::isfinite(mix)) m_dryWet = std::clamp(mix, 0.0f, 1.0f); }
+    void prepareToPlay(double /*sampleRate*/, uint32_t /*blockSize*/) noexcept override { reset(); }
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer&,
+                 const ProcessContext&) noexcept override {
+        if (isBypassed() || buffer.getNumChannels() == 0) return;
+        float* left = buffer.getWritePointer(0);
+        if (!left) return;
+        float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+        hirari_tube_saturation_process(m_state, left, right, buffer.getNumSamples());
+    }
+    void reset() noexcept override { hirari_tube_saturation_reset(m_state); }
+
+    void setDrive(float db) { setControl(0, db); }
+    void setBias(float bias) { setControl(1, bias); }
+    void setDryWet(float mix) { setControl(2, mix); }
 
 private:
-    float m_drive;   // Gain in dB
-    float m_bias;    // Asymmetry bias
-    float m_dryWet;  // 0.0 to 1.0
+    void setControl(uint32_t control, float value) {
+        hirari_tube_saturation_set_control(m_state, control, value);
+    }
+
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

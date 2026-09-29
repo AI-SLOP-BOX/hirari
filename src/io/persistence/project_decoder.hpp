@@ -9,7 +9,7 @@
 #include "../../external/nlohmann/json.hpp"
 #include "../../core/engine/timeline_system.hpp"
 
-namespace Aura::IO::Persistence {
+namespace Hirari::IO::Persistence {
 
 /**
  * @class ProjectDecoder
@@ -85,6 +85,17 @@ public:
                         region.muted = regionValue.value("muted", false);
                         region.clipGain = valueOrFinite(regionValue, "clip_gain", 1.0f);
                         region.warpRatio = valueOrFinite(regionValue, "warp_ratio", 1.0);
+                        region.pitchPreserveWarp = valueOrBool(regionValue, "pitch_preserve_warp", false);
+                        if (regionValue.contains("source_length")) {
+                            region.sourceLength = valueOrUnsigned(regionValue, "source_length", 0);
+                        } else {
+                            region.sourceLength = length;
+                            const long double duration = std::ceil(
+                                static_cast<long double>(region.sourceLength) / region.warpRatio);
+                            if (!std::isfinite(static_cast<double>(duration)) || duration < 1.0L ||
+                                duration > static_cast<long double>(UINT64_MAX)) return false;
+                            region.len = static_cast<uint64_t>(duration);
+                        }
                         region.pitchSemitones = valueOrFinite(regionValue, "pitch_semitones", 0.0f);
                         region.loopCount = regionValue.value("loop_count", 1u);
                         if (region.loopCount == 0 || region.loopCount > 1'000'000u) return false;
@@ -116,6 +127,11 @@ private:
         return value.get<uint64_t>();
     }
 
+    static uint64_t valueOrUnsigned(const Json& object, const char* key, uint64_t fallback) {
+        if (!object.contains(key)) return fallback;
+        return requireUnsigned(object.at(key));
+    }
+
     template <typename T>
     static T requireFinite(const Json& value) {
         if (!value.is_number()) throw std::invalid_argument("expected number");
@@ -131,6 +147,12 @@ private:
         // would silently turn a corrupted project into a different one.
         return requireFinite<T>(object.at(key));
     }
+
+    static bool valueOrBool(const Json& object, const char* key, bool fallback) {
+        if (!object.contains(key)) return fallback;
+        if (!object.at(key).is_boolean()) throw std::invalid_argument("expected boolean");
+        return object.at(key).get<bool>();
+    }
 };
 
-} // namespace Aura::IO::Persistence
+} // namespace Hirari::IO::Persistence

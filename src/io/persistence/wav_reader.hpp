@@ -5,7 +5,7 @@
 // channel order, or non-finite sample handling.
 #include "../../core/io/audio_decoder.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 class WavReader {
 public:
@@ -15,4 +15,4 @@ public:
     }
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

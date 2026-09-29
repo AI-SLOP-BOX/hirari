@@ -12,4 +12,4 @@ target/** export-ignore
 build/** export-ignore
 dist/** export-ignore
 artifacts/** export-ignore
-"packaging/Aura DAW.app/" export-ignore
+"packaging/Hirari DAW.app/" export-ignore

@@ -3,7 +3,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @class LanczosResampler
@@ -81,4 +81,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

@@ -6,7 +6,7 @@
 #include <memory>
 #include <array>
 
-namespace Aura::Core::Security {
+namespace Hirari::Core::Security {
 
 /**
  * @class LicenseVault
@@ -48,4 +48,4 @@ private:
     std::map<std::string, bool> m_authorizedAssets;
 };
 
-} // namespace Aura::Core::Security
+} // namespace Hirari::Core::Security

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class SnapManager
@@ -32,4 +32,4 @@ public:
 
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

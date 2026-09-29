@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <mutex>
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @class PluginSandboxKernel
@@ -72,4 +72,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

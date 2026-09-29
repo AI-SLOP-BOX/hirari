@@ -3,7 +3,7 @@
 #include <vector>
 // #include <sqlite3.h> // 実際の環境ではSQLiteランタイムをリンクします
 
-namespace Aura::Core::Database {
+namespace Hirari::Core::Database {
 
 /**
  * @class SqliteAssetDatabase
@@ -28,7 +28,7 @@ public:
 
     SqliteAssetDatabase() {
         // [SQLite初期化]
-        // sqlite3_open("aura_assets.db", &db);
+        // sqlite3_open("hirari_assets.db", &db);
         
         // 【テーブル定義例】
         // "CREATE TABLE IF NOT EXISTS loop_assets ("
@@ -66,4 +66,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Database
+} // namespace Hirari::Core::Database

@@ -6,7 +6,7 @@
 #include <mutex>
 #include <chrono>
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /**
  * @class DriverHardeningPro
@@ -47,4 +47,4 @@ private:
     std::atomic<uint32_t> m_dropoutCount{0};
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

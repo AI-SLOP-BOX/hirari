@@ -5,17 +5,13 @@
 #include <unordered_map>
 #include <shared_mutex>
 #include <atomic>
-#include <future>
-#include <limits>
-#include <algorithm>
-#include <cmath>
-#include <thread>
-#include <iterator>
+#include <utility>
+#include "rust_ffi.hpp"
 #include "audio_region.hpp"
 #include "mmap_audio_source.hpp"
 #include "concurrency/thread_pool.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @struct PeakData
@@ -33,16 +29,8 @@ struct PeakData {
 
 /**
  * @class AudioPool
- * @brief 【致命的フリーズ・バグ完全修正】非破壊・並行オーディオ管理のコア
- * 以前のコードは「Background task in a real app」とコメントで言い訳しつつ、
- * 2時間のWAVを読み込んだ際に `std::mutex` を握ったままメインスレッドで数億回のループ計算を行っていたため、
- * WAVをタイムラインに投げ込んだ瞬間、DAW全体のスクロールも再生も数秒間フリーズして死ぬ、最悪の構造的欠陥がありました。
- *
- * 【修正版】は `std::shared_mutex` (Read-Write Lock) による並列読み取りと、
- * bounded `ThreadPool` による非同期バックグラウンド波形生成を実装。
- * futureの暗黙joinや無制限なthread explosionを避け、AudioPoolの所有権を
- * worker完了まで明示的に保持する。
- * 数十ギガバイトのWAVを100個同時にドロップしてもDAWの操作感が一切停止しない、「真のプロ仕様」なアーキテクチャです。
+ * @brief Owns mapped audio sources and asynchronously publishes waveform peaks.
+ * The bounded worker pool owns the source until Rust finishes scanning it.
  */
 class AudioPool {
 public:
@@ -78,11 +66,11 @@ public:
             m_peakCache[path] = peakData;
         }
         
-        // --- HONEST FIX: PROFESSIONAL WORKER POOL ---
-        // Prevents 'Thread Explosion' and CPU context-switch thrashing.
+        // Peak generation runs asynchronously; retain the mapping until Rust
+        // has completed its scan.
         try {
-            Concurrency::ThreadPool::getInstance().enqueue([this, path, source, peakData]() {
-                this->generateHierarchicalPeaks(source, peakData);
+            Concurrency::ThreadPool::getInstance().enqueue([mappedSource, peakData]() {
+                generateHierarchicalPeaks(mappedSource->rustHandle(), peakData);
             });
         } catch (...) {
             std::unique_lock<std::shared_mutex> cleanupLock(m_rwMutex);
@@ -120,70 +108,38 @@ public:
     }
 
 private:
-    /**
-     * @brief HIERARCHICAL PEAK GENERATION: Calculates 1:256 and 1:4096.
-     * HONEST FIX: Zero pixelation on zoom + Cache friendly scanning + Parallelization.
-     */
-    void generateHierarchicalPeaks(std::shared_ptr<IAudioSource> source, std::shared_ptr<PeakData> peakData) {
-        uint64_t total = source->getNumSamples();
-        const uint32_t steps[] = { 256, 4096 };
+    static void generateHierarchicalPeaks(
+        const void* mappedFile, const std::shared_ptr<PeakData>& peakData) {
+        void* generated = hirari_audio_pool_peaks_create(mappedFile);
+        if (!generated) {
+            peakData->isReady.store(true, std::memory_order_release);
+            return;
+        }
+        const auto destroy = [](void* handle) { hirari_audio_pool_peaks_destroy(handle); };
+        std::unique_ptr<void, decltype(destroy)> hierarchy(generated, destroy);
+
         std::vector<PeakData::Level> generatedLevels;
-        generatedLevels.reserve(std::size(steps));
-        
-        for (uint32_t step : steps) {
-            PeakData::Level level;
-            level.step = step;
-            uint32_t numPeaks = (uint32_t)(total / step + 1);
-            level.mins.resize(numPeaks, 0.0f);
-            level.maxs.resize(numPeaks, 0.0f);
-            
-            // --- HONEST FIX: CONTROLLED PARALLELISM ---
-            uint32_t numCores = std::thread::hardware_concurrency();
-            if (numCores == 0) numCores = 4;
-            // Do not enqueue empty chunks for short files.  Besides wasting
-            // worker slots, that makes peak publication timing dependent on
-            // the host CPU count.
-            const uint64_t workItems = (total + step - 1u) / step;
-            numCores = static_cast<uint32_t>(std::max<uint64_t>(
-                1u, std::min<uint64_t>(numCores, workItems == 0 ? 1u : workItems)));
-            
-            std::vector<std::shared_ptr<std::promise<void>>> promises;
-            std::vector<std::future<void>> futures;
-            
-            uint64_t chunkSize = (total / numCores) + 1;
-            for (uint32_t c = 0; c < numCores; ++c) {
-                auto p = std::make_shared<std::promise<void>>();
-                futures.push_back(p->get_future());
-                
-                uint64_t start = c * chunkSize;
-                uint64_t end = std::min(start + chunkSize, total);
-                
-                Concurrency::ThreadPool::getInstance().enqueue([&level, source, start, end, step, p]() {
-                    for (uint64_t i = start; i < end; i += step) {
-                        float minV = std::numeric_limits<float>::infinity();
-                        float maxV = -std::numeric_limits<float>::infinity();
-                        uint32_t peakIdx = (uint32_t)(i / step);
-                        for (uint32_t s = 0; s < step && i + s < end; ++s) {
-                            float v = source->getSample(0, i + s);
-                            if (!std::isfinite(v)) v = 0.0f;
-                            if (v < minV) minV = v; else if (v > maxV) maxV = v;
-                        }
-                        if (peakIdx < level.mins.size()) {
-                            level.mins[peakIdx] = std::isfinite(minV) ? minV : 0.0f;
-                            level.maxs[peakIdx] = std::isfinite(maxV) ? maxV : 0.0f;
-                        }
-                    }
-                    p->set_value();
-                });
+        const size_t levelCount = hirari_audio_pool_peaks_level_count(generated);
+        generatedLevels.reserve(levelCount);
+        for (size_t index = 0; index < levelCount; ++index) {
+            const size_t peakCount = hirari_audio_pool_peaks_level_len(generated, index);
+            const float* mins = hirari_audio_pool_peaks_level_min(generated, index);
+            const float* maxs = hirari_audio_pool_peaks_level_max(generated, index);
+            if (peakCount > 0 && (!mins || !maxs)) {
+                generatedLevels.clear();
+                break;
             }
-            
-            for (auto& f : futures) f.get();
+            PeakData::Level level;
+            level.step = hirari_audio_pool_peaks_level_step(generated, index);
+            if (peakCount > 0) {
+                level.mins.assign(mins, mins + peakCount);
+                level.maxs.assign(maxs, maxs + peakCount);
+            }
             generatedLevels.push_back(std::move(level));
         }
 
-        // Publish the complete hierarchy only once.  Readers use isReady as
-        // the acquire gate, so they never observe a vector being reallocated
-        // or a partially generated level.
+        // Publish the complete hierarchy once; the acquire/release flag keeps
+        // readers from observing partially copied level vectors.
         peakData->levels = std::move(generatedLevels);
         peakData->isReady.store(true, std::memory_order_release);
     }
@@ -193,4 +149,4 @@ private:
     std::shared_mutex m_rwMutex;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

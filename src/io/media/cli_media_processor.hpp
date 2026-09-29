@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <cctype>
 
-namespace Aura::IO::Media {
+namespace Hirari::IO::Media {
 
 /**
  * @class CliMediaProcessor
@@ -96,4 +96,4 @@ private:
     }
 };
 
-} // namespace Aura::IO::Media
+} // namespace Hirari::IO::Media

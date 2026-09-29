@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <cmath>
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 class TrackPresetStore {
 public:
     bool save(const std::string& name,const ChannelConfiguration& c){
@@ -25,7 +25,7 @@ public:
         const auto temp = path.string() + ".tmp";
         std::ofstream f(temp, std::ios::binary | std::ios::trunc);
         if (!f) return false;
-        f << "AURA_TRACK_PRESET_V2\n";
+        f << "HIRARI_TRACK_PRESET_V2\n";
         for (const auto& [name, c] : m_presets) {
             if (!valid_name(name) || !valid(c)) {
                 f.close();
@@ -49,7 +49,7 @@ public:
         if (error) { std::filesystem::remove(temp); return false; }
         return true;
     }
-    bool loadFile(const std::filesystem::path& path){if(!std::filesystem::is_regular_file(path))return false;std::ifstream f(path);if(!f)return false;std::unordered_map<std::string,ChannelConfiguration> next;std::string line;bool first=true;while(std::getline(f,line)){if(line.size()>65536)return false;if(first&&line=="AURA_TRACK_PRESET_V2"){first=false;continue;}first=false;std::vector<std::string>x;size_t p=0,q;while((q=line.find('\t',p))!=std::string::npos){x.push_back(line.substr(p,q-p));p=q+1;}x.push_back(line.substr(p));if(x.size()<6||!valid_name(x[0])||next.size()>=kMaxPresets)return false;try{ChannelConfiguration c;c.gainDb=std::stof(x[1]);c.faderDb=std::stof(x[2]);c.pan=std::stof(x[3]);c.mute=std::stoi(x[4])!=0;c.solo=std::stoi(x[5])!=0;if(x.size()>=9){c.phaseInvert=std::stoi(x[6])!=0;c.groupId=static_cast<uint32_t>(std::stoul(x[7]));c.vcaId=static_cast<uint32_t>(std::stoul(x[8]));}if(x.size()>=10){const size_t count=std::stoul(x[9]);if(count>64||x.size()!=10+count*5)return false;for(size_t i=0;i<count;++i){ChannelSend s;s.bus=static_cast<uint32_t>(std::stoul(x[10+i*5]));s.level=std::stof(x[11+i*5]);s.pan=std::stof(x[12+i*5]);s.tap=static_cast<SendTap>(std::min(2u,static_cast<unsigned>(std::stoul(x[13+i*5]))));s.enabled=std::stoi(x[14+i*5])!=0;c.sends.push_back(s);}}if(!valid(c)||!next.emplace(x[0],std::move(c)).second)return false;}catch(...){return false;}}m_presets.swap(next);return true;}
+    bool loadFile(const std::filesystem::path& path){if(!std::filesystem::is_regular_file(path))return false;std::ifstream f(path);if(!f)return false;std::unordered_map<std::string,ChannelConfiguration> next;std::string line;bool first=true;while(std::getline(f,line)){if(line.size()>65536)return false;if(first&&line=="HIRARI_TRACK_PRESET_V2"){first=false;continue;}first=false;std::vector<std::string>x;size_t p=0,q;while((q=line.find('\t',p))!=std::string::npos){x.push_back(line.substr(p,q-p));p=q+1;}x.push_back(line.substr(p));if(x.size()<6||!valid_name(x[0])||next.size()>=kMaxPresets)return false;try{ChannelConfiguration c;c.gainDb=std::stof(x[1]);c.faderDb=std::stof(x[2]);c.pan=std::stof(x[3]);c.mute=std::stoi(x[4])!=0;c.solo=std::stoi(x[5])!=0;if(x.size()>=9){c.phaseInvert=std::stoi(x[6])!=0;c.groupId=static_cast<uint32_t>(std::stoul(x[7]));c.vcaId=static_cast<uint32_t>(std::stoul(x[8]));}if(x.size()>=10){const size_t count=std::stoul(x[9]);if(count>64||x.size()!=10+count*5)return false;for(size_t i=0;i<count;++i){ChannelSend s;s.bus=static_cast<uint32_t>(std::stoul(x[10+i*5]));s.level=std::stof(x[11+i*5]);s.pan=std::stof(x[12+i*5]);s.tap=static_cast<SendTap>(std::min(2u,static_cast<unsigned>(std::stoul(x[13+i*5]))));s.enabled=std::stoi(x[14+i*5])!=0;c.sends.push_back(s);}}if(!valid(c)||!next.emplace(x[0],std::move(c)).second)return false;}catch(...){return false;}}m_presets.swap(next);return true;}
 private:std::unordered_map<std::string,ChannelConfiguration>m_presets;
     static constexpr size_t kMaxPresets = 4096;
     static bool valid_name(const std::string& name){return !name.empty()&&name.size()<=256&&name.find_first_of("\t\r\n\0")==std::string::npos;}

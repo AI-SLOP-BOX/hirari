@@ -7,7 +7,7 @@
 #include <thread>
 
 int main() {
-    using Aura::Core::Engine::PDCGraphSolver;
+    using Hirari::Core::Engine::PDCGraphSolver;
     PDCGraphSolver solver;
     std::map<uint32_t, PDCGraphSolver::Node> graph{
         {1, {1, 1, 0, 0, true, {3}}},
@@ -38,7 +38,7 @@ int main() {
 
     // The production routing graph must use the shared solver rather than a
     // second latency algorithm with subtly different semantics.
-    Aura::Core::Engine::RoutingGraphPDC routing;
+    Hirari::Core::Engine::RoutingGraphPDC routing;
     routing.addNode(1, 1);
     routing.addNode(2, 5);
     routing.addNode(3, 7);
@@ -49,7 +49,7 @@ int main() {
     assert(routing.getDelayForNode(2) == 0);
     assert(routing.getDelayForNode(3) == 5);
 
-    Aura::Core::Engine::RoutingGraphPDC cyclicRouting;
+    Hirari::Core::Engine::RoutingGraphPDC cyclicRouting;
     cyclicRouting.addNode(1, 1);
     cyclicRouting.addNode(2, 1);
     cyclicRouting.connect(1, 2);
@@ -73,7 +73,7 @@ int main() {
     place(pathB, impulse + impulseGraph.at(2).totalLatency + impulseGraph.at(2).compensation);
     assert(pathA == pathB);
 
-    auto& manager = Aura::Core::Engine::PDCManager::getInstance();
+    auto& manager = Hirari::Core::Engine::PDCManager::getInstance();
     assert(manager.bindControlThread());
     manager.resetForProject();
     const auto initialConfiguration = manager.configurationGeneration();
@@ -88,7 +88,7 @@ int main() {
     assert(manager.auditAgainstSharedSolver());
     // Repair the route and prove the same manager can leave the fault state.
     // This guards against a sticky cycle flag and stale zeroed offsets.
-    manager.setTrackDest(2, Aura::Core::Engine::PDCManager::kMasterID);
+    manager.setTrackDest(2, Hirari::Core::Engine::PDCManager::kMasterID);
     manager.recalculate();
     assert(manager.configurationGeneration() > initialConfiguration);
     assert(!manager.hasCycle());
@@ -104,7 +104,7 @@ int main() {
     assert(manager.hasCycle());
     assert(manager.getCompensationOffset(2) == validTrackOffset);
     assert(manager.getGlobalMaxLatency() == validGlobalLatency);
-    manager.setTrackDest(2, Aura::Core::Engine::PDCManager::kMasterID);
+    manager.setTrackDest(2, Hirari::Core::Engine::PDCManager::kMasterID);
     manager.recalculate();
     assert(!manager.hasCycle());
     assert(manager.getCompensationOffset(2) == validTrackOffset);

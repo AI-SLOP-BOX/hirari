@@ -5,7 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief MixNode: Represents either a Track, Bus, or Master output.
@@ -59,4 +59,4 @@ private:
     std::map<uint32_t, MixNode> m_nodes;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

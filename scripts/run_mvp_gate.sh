@@ -8,10 +8,10 @@ echo "[mvp] build"
 cmake --build build --parallel 4
 
 echo "[mvp] workspace tests"
-AURA_NATIVE_TEST_ISOLATION=1 RUST_TEST_THREADS=1 cargo test --workspace --quiet
+HIRARI_NATIVE_TEST_ISOLATION=1 RUST_TEST_THREADS=1 cargo test --workspace --quiet
 
 echo "[mvp] cli capabilities"
-capabilities="$(cargo run -q -p aura-core-bridge --bin aura -- capabilities)"
+capabilities="$(cargo run -q -p hirari-core-bridge --bin hirari -- capabilities)"
 printf '%s\n' "$capabilities" | rg -q '"audio_|"midi_|"project\.'
 
 echo "[mvp] source hygiene"

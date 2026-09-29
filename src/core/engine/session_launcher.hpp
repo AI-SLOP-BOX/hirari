@@ -7,7 +7,7 @@
 #include "../audio_region.hpp"
 #include <map>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief SessionClip: A single musical block for non-linear performance.
@@ -77,4 +77,4 @@ private:
     std::vector<SessionClip> m_activeClips;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

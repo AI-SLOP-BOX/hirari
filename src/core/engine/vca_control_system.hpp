@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief VCAGroup: A collection of tracks controlled by a single master fader.
@@ -90,4 +90,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

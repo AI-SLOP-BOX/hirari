@@ -5,7 +5,7 @@
 #include <memory>
 #include "../audio_types.hpp"
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @struct EngineCommand
@@ -76,4 +76,4 @@ private:
     std::atomic<size_t> m_readPos;
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

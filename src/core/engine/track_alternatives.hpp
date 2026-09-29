@@ -5,7 +5,7 @@
 #include <memory>
 #include <mutex>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct PlaylistEntry
@@ -87,4 +87,4 @@ private:
     mutable std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

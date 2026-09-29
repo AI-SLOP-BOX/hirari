@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build a canonical Aura project from the overnight MIDI sidecar.
+"""Build a canonical Hirari project from the overnight MIDI sidecar.
 
 The command-line project is intentionally the source of truth for note timing;
 the external renderers consume the same MIDI file and the resulting project can
-be inspected or rendered by the normal Aura CLI.
+be inspected or rendered by the normal Hirari CLI.
 """
 
 import json
@@ -22,13 +22,13 @@ def main() -> None:
         # The release mix is rendered at 44.1 kHz for broad video/distribution
         # compatibility; keep the project timeline at the same rate so the
         # generated sample positions remain directly auditable.
-        ["target/debug/aura", "project", "init", str(project), "Aura Overnight", "44100"],
+        ["target/debug/hirari", "project", "init", str(project), "Hirari Overnight", "44100"],
         check=True,
         stdout=subprocess.DEVNULL,
     )
     for name, track_type in (("Drums", "Audio"), ("Bass", "Midi"), ("Harmony", "Midi"), ("Vocal", "Midi")):
         subprocess.run(
-            ["target/debug/aura", "track", "add", str(project), name, track_type],
+            ["target/debug/hirari", "track", "add", str(project), name, track_type],
             check=True,
             stdout=subprocess.DEVNULL,
         )

@@ -7,7 +7,7 @@
 #include <CoreAudio/CoreAudio.h>
 #include <AudioUnit/AudioUnit.h>
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /**
  * @class CoreAudioHAL
@@ -43,7 +43,7 @@ public:
                                       AudioBufferList* outOutputData,
                                       const AudioTimeStamp* /*inOutputTime*/,
                                       void* /*inClientData*/) {
-        // [Industrial Render: Fetching samples from the Aura Unified Engine]
+        // [Industrial Render: Fetching samples from the Hirari Unified Engine]
         // [Zero-copy mapping of mBuffer data to the output stream]
         return noErr;
     }
@@ -60,4 +60,4 @@ private:
     std::atomic<bool> m_isRunning{false};
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

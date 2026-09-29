@@ -9,7 +9,7 @@
 #include "../../core/midi_buffer.hpp"
 #include "../iprocessor.hpp"
 
-namespace Aura::DSP::Instruments {
+namespace Hirari::DSP::Instruments {
 
 /**
  * @struct SampleZone
@@ -141,4 +141,4 @@ private:
     uint32_t m_currentArtic = 0;
 };
 
-} // namespace Aura::DSP::Instruments
+} // namespace Hirari::DSP::Instruments

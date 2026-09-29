@@ -13,7 +13,7 @@
 #include <unistd.h>
 #endif
 
-namespace Aura::IO::Persistence {
+namespace Hirari::IO::Persistence {
 
 /**
  * @brief ProjectCollector: Ensures project portability.
@@ -132,4 +132,4 @@ private:
     ProjectCollector() = default;
 };
 
-} // namespace Aura::IO::Persistence
+} // namespace Hirari::IO::Persistence

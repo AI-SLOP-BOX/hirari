@@ -6,7 +6,7 @@
 #include <algorithm>
 #include "lock_free.hpp"
 
-namespace Aura::Core::Concurrency {
+namespace Hirari::Core::Concurrency {
 
 /**
  * @struct Command
@@ -66,4 +66,4 @@ private:
     SPSCQueue<T, 4096> m_queue;
 };
 
-} // namespace Aura::Core::Concurrency
+} // namespace Hirari::Core::Concurrency

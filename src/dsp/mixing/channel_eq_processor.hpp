@@ -4,7 +4,7 @@
 #include <cmath>
 #include <numbers>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief High-Fidelity Biquad Filter: Professional RBJ implementation.
@@ -57,4 +57,4 @@ private:
     float m_z1L = 0.0f, m_z2L = 0.0f, m_z1R = 0.0f, m_z2R = 0.0f;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

@@ -1,0 +1,181 @@
+import { ScrollView } from "std-widgets.slint";
+import { Style } from "style.slint";
+import { Z_IconButton } from "primitives/icon_button.slint";
+import { Z_Recent_Project } from "model/models.slint";
+
+export component Z_HomePage inherits Rectangle {
+    callback template-selected(string);
+    callback tutorial-requested();
+    callback project-requested(string);
+    in property <[Z_Recent_Project]> recent-projects: [];
+    background: Style.surface-0;
+
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 52px;
+            background: Style.surface-0;
+            border-width: 1px;
+            border-color: Style.border;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                spacing: 10px;
+                Image { source: @image-url("assets/hirari-logo.svg"); width: 28px; height: 28px; }
+                Text { text: "Hirari"; color: Style.text-primary; font-size: 16px; font-weight: 700; vertical-alignment: center; }
+                Text { text: "START PAGE"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Z_IconButton { icon: "?"; compact: true; button-width: 32px; clicked => { root.tutorial-requested(); } }
+            }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 24px;
+                spacing: 22px;
+
+                HorizontalLayout {
+                    spacing: 14px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 5px;
+                        Text { text: "Start a session"; font-size: 28px; color: Style.text-primary; font-weight: 700; }
+                        Text { text: "Create a working session or open a saved project."; font-size: 11px; color: Style.text-secondary; }
+                    }
+                    Z_IconButton {
+                        icon: "OPEN PROJECT";
+                        compact: false;
+                        button-width: 122px;
+                        clicked => { root.project-requested(""); }
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 142px;
+                    spacing: 12px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: #2457C5.with-alpha(0.62);
+                        border-width: 1px;
+                        border-color: #4C8DFF;
+                        border-radius: 10px;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 8px;
+                            Text { text: "New electronic session"; font-size: 17px; color: Style.text-primary; font-weight: 700; }
+                            Text { text: "Start with editable instrument and rhythm tracks."; font-size: 10px; color: Style.text-secondary; }
+                            Rectangle { vertical-stretch: 1; }
+                            Z_IconButton {
+                                icon: "CREATE SESSION";
+                                button-width: 136px;
+                                active-col: #4C8DFF;
+                                clicked => { root.template-selected("ELECTRONIC"); }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: Style.surface-1;
+                        border-width: 1px;
+                        border-color: Style.border;
+                        border-radius: 10px;
+                        VerticalLayout {
+                            padding: 18px;
+                            spacing: 8px;
+                            Text { text: "Open a saved project"; font-size: 17px; color: Style.text-primary; font-weight: 700; }
+                            Text { text: "Choose a Hirari project from your files or open one from Recent Projects."; font-size: 10px; color: Style.text-secondary; }
+                            Rectangle { vertical-stretch: 1; }
+                            Z_IconButton {
+                                icon: "BROWSE PROJECTS";
+                                button-width: 148px;
+                                active-col: Style.brand;
+                                clicked => { root.project-requested(""); }
+                            }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 10px;
+                    HorizontalLayout {
+                        Text { text: "Templates"; font-size: 16px; color: Style.text-primary; font-weight: 650; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: "4 project setups"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+                    }
+                    HorizontalLayout {
+                        height: 130px;
+                        spacing: 10px;
+                        for template in ["CINEMATIC SCORE", "ELECTRONIC", "VOICE-OVER PRO", "ATMOS MASTERING"] : Rectangle {
+                            horizontal-stretch: 1;
+                            background: Style.surface-1;
+                            border-width: 1px;
+                            border-color: Style.border;
+                            border-radius: 7px;
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 8px;
+                                if (template == "CINEMATIC SCORE") : Image { source: @image-url("assets/synth.svg"); height: 72px; width: 100%; }
+                                if (template == "ELECTRONIC") : Image { source: @image-url("assets/waveform.svg"); height: 72px; width: 100%; }
+                                if (template == "VOICE-OVER PRO") : Image { source: @image-url("assets/mixer.svg"); height: 72px; width: 100%; }
+                                if (template == "ATMOS MASTERING") : Image { source: @image-url("assets/mastering.svg"); height: 72px; width: 100%; }
+                                Text { text: template; font-size: 9px; color: Style.text-primary; horizontal-alignment: center; overflow: elide; }
+                            }
+                            TouchArea { mouse-cursor: pointer; clicked => { root.template-selected(template); } }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 10px;
+                    HorizontalLayout {
+                        Text { text: "Recent Projects"; font-size: 16px; color: Style.text-primary; font-weight: 650; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: root.recent-projects.length + " saved projects"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+                    }
+                    if (root.recent-projects.length == 0) : Rectangle {
+                        height: 62px;
+                        background: Style.surface-1;
+                        border-width: 1px;
+                        border-color: Style.border;
+                        border-radius: 6px;
+                        Text {
+                            text: "No recent projects yet. Open or save a project and it will appear here.";
+                            x: 14px;
+                            width: parent.width - 28px;
+                            height: parent.height;
+                            font-size: 10px;
+                            color: Style.text-secondary;
+                            vertical-alignment: center;
+                        }
+                    }
+                    for project in root.recent-projects : Rectangle {
+                        height: 58px;
+                        background: row_area.has-hover ? Style.panel-h : Style.surface-1;
+                        border-width: 1px;
+                        border-color: Style.border;
+                        border-radius: 6px;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            spacing: 12px;
+                            Image { source: @image-url("assets/waveform.svg"); width: 34px; height: 34px; }
+                            VerticalLayout {
+                                vertical-stretch: 1;
+                                spacing: 3px;
+                                Text { text: project.name; font-size: 11px; color: Style.text-primary; overflow: elide; }
+                                Text { text: project.folder; font-size: 9px; color: Style.text-tertiary; overflow: elide; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: "OPEN"; font-size: 9px; color: Style.brand; vertical-alignment: center; }
+                        }
+                        row_area := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.project-requested(project.path); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

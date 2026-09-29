@@ -19,7 +19,7 @@ being called finished.
   lyric tokens from the rendered MIDI (for example, `ぬれた` is emitted as
   `れた`); the next Chis-A pass must preserve those consonant onsets while
   moving the rest to an earlier note or a separate breath.
-- The generator exposes `AURA_PRESERVE_PHRASE_ONSETS=1` for that next candidate
+- The generator exposes `HIRARI_PRESERVE_PHRASE_ONSETS=1` for that next candidate
   pass; it is off by default so the signed current Chis-A render remains bound
   to its existing vocal MIDI.
 - A non-adopted candidate pass is reproducible with
@@ -32,11 +32,11 @@ being called finished.
   vocal notes, 6 remaining sokuon splits, 21 final-section notes, and the same
   beat-396 landing. It is the current preferred candidate, pending Chis-A.
 - `run_three_hour_release.sh` now accepts a paired
-  `AURA_THREE_HOUR_MIDI`/`AURA_THREE_HOUR_MIDI_JSON` override, so a freshly
+  `HIRARI_THREE_HOUR_MIDI`/`HIRARI_THREE_HOUR_MIDI_JSON` override, so a freshly
   rendered candidate can enter the same provenance and release gates without
   overwriting the canonical generator output.
 - Candidate override mode now refuses to run without a preverified
-  `AURA_CHISA_PROVENANCE` file, preventing an old WAV from being silently
+  `HIRARI_CHISA_PROVENANCE` file, preventing an old WAV from being silently
   rebound to a new MIDI; the refusal happens before the Surge render starts.
 - The current automated contrast check measures 8-bar RMS; it does not judge
   arrangement taste, lyric meaning, or emotional delivery.
@@ -59,4 +59,4 @@ being called finished.
 - `tail_render_manifest.json` records the dedicated MIDI-tail render and its
   calculated start beat, and the release audit verifies it.
 - Chis-A WAV to vocal-MIDI provenance binding
-- Aura project inspect/manifest and 874 sequential Rust tests
+- Hirari project inspect/manifest and 874 sequential Rust tests

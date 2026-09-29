@@ -16,7 +16,7 @@
 #include <cerrno>
 #include <condition_variable>
 
-namespace Aura::IO::Persistence {
+namespace Hirari::IO::Persistence {
 
 /**
  * @class JournalSystem
@@ -83,7 +83,7 @@ public:
 
 private:
     JournalSystem()
-        : m_journalPath("AuraSession.journal")
+        : m_journalPath("HirariSession.journal")
         , m_socketFd(-1)
         , m_running(true)
     {
@@ -161,4 +161,4 @@ private:
     std::atomic<int> m_lastSocketError{0};
 };
 
-} // namespace Aura::IO::Persistence
+} // namespace Hirari::IO::Persistence

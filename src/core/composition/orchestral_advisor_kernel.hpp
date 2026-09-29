@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 
-namespace Aura::Core::Composition {
+namespace Hirari::Core::Composition {
 
 /**
  * @struct OrchestrationSuggestion
@@ -40,4 +40,4 @@ private:
     OrchestralAdvisorKernel() = default;
 };
 
-} // namespace Aura::Core::Composition
+} // namespace Hirari::Core::Composition

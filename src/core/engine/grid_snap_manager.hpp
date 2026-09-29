@@ -2,8 +2,9 @@
 #include <cstdint>
 #include <algorithm>
 #include "../engine_types.hpp"
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class GridSnapManager
@@ -18,23 +19,18 @@ public:
     };
 
     static uint64_t snapAbsolute(uint64_t ticks, Resolution res, const TimeSignature& sig) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // Rhythmic alignment and high-density memory management 
-        // are now handled securely in the Rust layer.
-        // Rust's RhythmicAlignmentEngine ensures bit-accurate rhythmic distribution.
-        // Rust's ForensicAuditor ensures absolute rhythmic integrity.
-        return ticks;
+        return hirari_grid_snap_absolute(
+            ticks, static_cast<uint32_t>(res),
+            static_cast<uint32_t>(std::max(1, sig.numerator)),
+            static_cast<uint32_t>(std::max(1, sig.denominator)));
     }
 
     static uint64_t snapRelative(uint64_t originalTicks, uint64_t deltaTicks, Resolution res, const TimeSignature& sig) {
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // Relative snapping and groove quantization are now handled in Rust.
-        // Rust's GrooveQuantizationEngine ensures bit-accurate timing distribution.
-        return deltaTicks;
+        return hirari_grid_snap_relative(
+            originalTicks, deltaTicks, static_cast<uint32_t>(res),
+            static_cast<uint32_t>(std::max(1, sig.numerator)),
+            static_cast<uint32_t>(std::max(1, sig.denominator)));
     }
 };
 
-
-};
-
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

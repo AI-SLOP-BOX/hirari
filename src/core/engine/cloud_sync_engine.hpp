@@ -7,11 +7,11 @@
 #include "../composition/harmonic_context_tracker.hpp"
 #include "../diagnostics/forensic_kernel.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class CloudSyncEngine
- * @brief Industrial Singularity Engine for Aura Studio Pro.
+ * @brief Industrial Singularity Engine for Hirari Studio Pro.
  * Implements autonomous state entrainment and collaborative presence sync.
  */
 class CloudSyncEngine {
@@ -30,7 +30,7 @@ public:
      */
     void synchronizeNarrative() {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::CloudOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::CloudOrchestrator.
         // Rust's high-performance diff compression ensures that project updates 
         // are technically superior and perfectly synchronized.
         // Rust's CollaborativeEngine ensures bit-accurate project synchronization.
@@ -51,4 +51,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

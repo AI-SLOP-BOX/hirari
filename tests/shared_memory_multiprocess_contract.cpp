@@ -12,10 +12,10 @@ constexpr const char* kConsumerMode = "--consumer";
 
 int main(int argc, char** argv) {
     if (argc == 3 && std::strcmp(argv[1], kConsumerMode) == 0) {
-        auto& bridge = Aura::Network::SharedMemoryBridge::getInstance();
+        auto& bridge = Hirari::Network::SharedMemoryBridge::getInstance();
         if (!bridge.openExisting(argv[2])) return 10;
 
-        Aura::Core::Plugins::MidiExtendedMessageRing::Message message;
+        Hirari::Core::Plugins::MidiExtendedMessageRing::Message message;
         if (!bridge.popExtendedMidi(message) || message.size != 300 ||
             message.sampleOffset != 1234 || message.articulationId != 7 ||
             message.data.front() != 0xf0 || message.data[299] != 0xf7) return 11;
@@ -27,27 +27,27 @@ int main(int argc, char** argv) {
     }
 
     if (argc != 1) return 1;
-    auto& bridge = Aura::Network::SharedMemoryBridge::getInstance();
+    auto& bridge = Hirari::Network::SharedMemoryBridge::getInstance();
 
     // A same-sized but stale segment must not be accepted as a current
     // SharedState. The consumer also must not unlink a segment it did not
     // create.
-    const std::string staleName = "/aura_shared_state_stale_" +
+    const std::string staleName = "/hirari_shared_state_stale_" +
         std::to_string(static_cast<unsigned long long>(::getpid()));
     const int staleFd = shm_open(staleName.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
-    if (staleFd == -1 || ftruncate(staleFd, sizeof(Aura::Network::SharedMemoryBridge::SharedState)) != 0) {
+    if (staleFd == -1 || ftruncate(staleFd, sizeof(Hirari::Network::SharedMemoryBridge::SharedState)) != 0) {
         if (staleFd >= 0) close(staleFd);
         shm_unlink(staleName.c_str());
         return 8;
     }
-    void* staleMap = mmap(nullptr, sizeof(Aura::Network::SharedMemoryBridge::SharedState),
+    void* staleMap = mmap(nullptr, sizeof(Hirari::Network::SharedMemoryBridge::SharedState),
                           PROT_READ | PROT_WRITE, MAP_SHARED, staleFd, 0);
     if (staleMap == MAP_FAILED) {
         close(staleFd);
         shm_unlink(staleName.c_str());
         return 9;
     }
-    auto* staleState = ::new (staleMap) Aura::Network::SharedMemoryBridge::SharedState{};
+    auto* staleState = ::new (staleMap) Hirari::Network::SharedMemoryBridge::SharedState{};
     if (staleState->protocolVersion.load(std::memory_order_acquire) != 0 ||
         bridge.openExisting(staleName)) {
         staleState->~SharedState();
@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
         return value;
     }();
     unsigned rounds = 32;
-    if (const char* configured = std::getenv("AURA_SHARED_MEMORY_ROUNDS")) {
+    if (const char* configured = std::getenv("HIRARI_SHARED_MEMORY_ROUNDS")) {
         const unsigned parsed = static_cast<unsigned>(std::strtoul(configured, nullptr, 10));
         if (parsed > 0) rounds = parsed;
     }
@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
             return 5;
         }
 
-        Aura::Core::Plugins::MidiExtendedMessageRing::Message ack;
+        Hirari::Core::Plugins::MidiExtendedMessageRing::Message ack;
         if (!bridge.popExtendedMidi(ack) || ack.size != 2 || ack.sampleOffset != 5678 ||
             ack.articulationId != 9 || ack.data[0] != 0x90 || ack.data[1] != 0x7f) {
             bridge.stop();

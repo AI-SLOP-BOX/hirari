@@ -1,10 +1,10 @@
-/* Aura DAW Ultimate - Sanctuary Plugin SDK - (c) 2026 Aura DAW Project */
+/* Hirari DAW Ultimate - Sanctuary Plugin SDK - (c) 2026 Hirari DAW Project */
 #pragma once
 #include "audio_buffer.hpp"
 #include <string>
 #include <vector>
 
-namespace Aura::Core::Sanctuary {
+namespace Hirari::Core::Sanctuary {
 
 enum class ParamScaling { Linear, Logarithmic, Exponential };
 enum class ParamUnit { Generic, Decibels, Hertz, Milliseconds, Percentage };
@@ -46,4 +46,4 @@ public:
 // Entry point for external shared libraries
 typedef ISanctuaryPlugin* (*CreateSanctuaryPluginFunc)();
 
-} // namespace Aura::Core::Sanctuary
+} // namespace Hirari::Core::Sanctuary

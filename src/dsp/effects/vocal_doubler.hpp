@@ -9,7 +9,7 @@
 #include "../iprocessor.hpp"
 #include "../effects/delay_line.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @brief VocalDoubler: Industrial-standard vocal thickening.
@@ -107,4 +107,4 @@ private:
     DelayLine m_delayR{44102};
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

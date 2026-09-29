@@ -4,7 +4,7 @@
 #include <cmath>
 #include <atomic>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief SpatialTextureSuite: Unified Creative Processing (Logic Pro-style).
@@ -40,4 +40,4 @@ private:
     float m_bitDepth = 16.0f;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

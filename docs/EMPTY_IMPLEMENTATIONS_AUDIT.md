@@ -1,6 +1,11 @@
 # Empty / Stub Implementation Audit
 
-更新日: 2026-08-09
+調査日: 2026-08-09
+
+> **履歴資料です。現行の未実装一覧としては使わないでください。**
+> UI/Coreの接続状況が変わり、この監査にある `delete_track` などのP0指摘は
+> 現行経路と一致しません。現状の確認先は[`UNIMPLEMENTED_GAPS.md`](UNIMPLEMENTED_GAPS.md)です。
+> ここから個別の実装を選ぶ場合は、対象コードが現在も同じ状態かを先に確認してください。
 
 ## 概要
 
@@ -19,11 +24,11 @@
 
 ### P0 — UIとエンジンの状態不一致
 
-- [slint_ui.rs:132-139](../aura-ui/src/slint_ui.rs:132)
+- [slint_ui.rs:132-139](../hirari-ui/src/slint_ui.rs:132)
   - `delete_track` がUIモデルだけを削除し、`core.remove_track()`を呼ばない。
-- [slint_ui.rs:224-233](../aura-ui/src/slint_ui.rs:224)
+- [slint_ui.rs:224-233](../hirari-ui/src/slint_ui.rs:224)
   - `toggle_cloner` がUI状態だけを変更し、エンジン呼び出しがコメントアウトされている。
-- [slint_ui.rs:214-216](../aura-ui/src/slint_ui.rs:214)
+- [slint_ui.rs:214-216](../hirari-ui/src/slint_ui.rs:214)
   - UI clip IDをそのままengine region IDとして渡している。
 
 推奨: UIモデルのIDとengine IDを分離し、Core操作の成功後にUIを更新する。失敗時のrollbackも追加する。
@@ -78,74 +83,74 @@
 
 ### P1
 
-- [unified_engine.rs:18-30](../aura-core-bridge/src/unified_engine.rs:18)
+- [unified_engine.rs:18-30](../hirari-core-bridge/src/unified_engine.rs:18)
   - 統合renderが各サブシステムを接続していない。
-- [professional_suite.rs:78-98](../aura-core-bridge/src/professional_suite.rs:78)
+- [professional_suite.rs:78-98](../hirari-core-bridge/src/professional_suite.rs:78)
   - Dynamic EQ / Tape Saturationが入力を変更しない。
-- [loudness.rs:24-29](../aura-core-bridge/src/loudness.rs:24)
+- [loudness.rs:24-29](../hirari-core-bridge/src/loudness.rs:24)
   - Loudness処理が入力を無視し、初期値のまま。
-- [voice_manager.rs:68-78](../aura-core-bridge/src/voice_manager.rs:68)
+- [voice_manager.rs:68-78](../hirari-core-bridge/src/voice_manager.rs:68)
   - Voice renderが出力バッファへ書き込まない。
-- [sequencer.rs:22-28](../aura-core-bridge/src/sequencer.rs:22)
+- [sequencer.rs:22-28](../hirari-core-bridge/src/sequencer.rs:22)
   - MIDIイベントを生成しない。
-- [bus_system.rs:20-30](../aura-core-bridge/src/bus_system.rs:20)
+- [bus_system.rs:20-30](../hirari-core-bridge/src/bus_system.rs:20)
   - bus加算・processが状態を変更しない。
-- [pdc.rs:15-25](../aura-core-bridge/src/pdc.rs:15)
+- [pdc.rs:15-25](../hirari-core-bridge/src/pdc.rs:15)
   - PDCが全て0。
-- [resource_manager.rs:21-36](../aura-core-bridge/src/resource_manager.rs:21)
+- [resource_manager.rs:21-36](../hirari-core-bridge/src/resource_manager.rs:21)
   - asset scan / recovery / consolidationが空。
-- [advanced_export_engine.rs:33-38](../aura-core-bridge/src/advanced_export_engine.rs:33)
+- [advanced_export_engine.rs:33-38](../hirari-core-bridge/src/advanced_export_engine.rs:33)
   - Export jobを実行しない。
-- [track_freeze_manager.rs:12-22](../aura-core-bridge/src/track_freeze_manager.rs:12)
+- [track_freeze_manager.rs:12-22](../hirari-core-bridge/src/track_freeze_manager.rs:12)
   - Freeze状態を変更しない。
 
 ### P2
 
-- [smart_controls_manager.rs:30-35](../aura-core-bridge/src/smart_controls_manager.rs:30)
+- [smart_controls_manager.rs:30-35](../hirari-core-bridge/src/smart_controls_manager.rs:30)
   - mappingを参照せず値を適用しない。
-- [sidechain_manager.rs:29-34](../aura-core-bridge/src/sidechain_manager.rs:29)
+- [sidechain_manager.rs:29-34](../hirari-core-bridge/src/sidechain_manager.rs:29)
   - link解決を行わない。
-- [marker_types.rs:49-54](../aura-core-bridge/src/marker_types.rs:49)
+- [marker_types.rs:49-54](../hirari-core-bridge/src/marker_types.rs:49)
   - tempo同期位置が更新されない。
-- [mixer_telemetry.rs:33-37](../aura-core-bridge/src/mixer_telemetry.rs:33)
+- [mixer_telemetry.rs:33-37](../hirari-core-bridge/src/mixer_telemetry.rs:33)
   - meter値が更新されない。
-- [auto_save_manager.rs:27-32](../aura-core-bridge/src/auto_save_manager.rs:27)
+- [auto_save_manager.rs:27-32](../hirari-core-bridge/src/auto_save_manager.rs:27)
   - startしても保存処理が動かない。
-- [notification_system.rs:27-38](../aura-core-bridge/src/notification_system.rs:27)
+- [notification_system.rs:27-38](../hirari-core-bridge/src/notification_system.rs:27)
   - event内容を破棄する。
-- [smart_file_classifier.rs:20-30](../aura-core-bridge/src/smart_file_classifier.rs:20)
+- [smart_file_classifier.rs:20-30](../hirari-core-bridge/src/smart_file_classifier.rs:20)
   - Unknown / 0 / 120 BPM / Cを固定返却。
-- [selection_based_processor.rs:10-17](../aura-core-bridge/src/selection_based_processor.rs:10)
+- [selection_based_processor.rs:10-17](../hirari-core-bridge/src/selection_based_processor.rs:10)
   - offline処理入力を破棄。
-- [shared_memory_ipc.rs:22-27](../aura-core-bridge/src/shared_memory_ipc.rs:22)
+- [shared_memory_ipc.rs:22-27](../hirari-core-bridge/src/shared_memory_ipc.rs:22)
   - IPCフレーム本体を破棄。
 
 追加のRust監査項目：
 
-- [vintage_eq.rs:79](../aura-core-bridge/src/vintage_eq.rs:79)
+- [vintage_eq.rs:79](../hirari-core-bridge/src/vintage_eq.rs:79)
   - 係数が単位ゲイン固定で、パラメータ変更が音に反映されない。
-- [mastering.rs:72](../aura-core-bridge/src/mastering.rs:72)
+- [mastering.rs:72](../hirari-core-bridge/src/mastering.rs:72)
   - DDP exportは入力検証のみで、実DDPパッケージ生成は未接続。成功を偽装しない。
-- [persistence.rs:47](../aura-core-bridge/src/persistence.rs:47)
+- [persistence.rs:47](../hirari-core-bridge/src/persistence.rs:47)
   - バックアップtimestampが固定値。
-- [persistence.rs:73](../aura-core-bridge/src/persistence.rs:73)
+- [persistence.rs:73](../hirari-core-bridge/src/persistence.rs:73)
   - checksumがデータ内容ではなく長さのみ。
-- [lib.rs:401](../aura-core-bridge/src/lib.rs:401)
+- [lib.rs:401](../hirari-core-bridge/src/lib.rs:401)
   - FFI公開メソッドに`unwrap()`が多く、初期化失敗・破棄後アクセスでpanicする。
-- [cinematic_suite.rs:25](../aura-core-bridge/src/cinematic_suite.rs:25)
+- [cinematic_suite.rs:25](../hirari-core-bridge/src/cinematic_suite.rs:25)
   - サイズ0のAllPassFilterでゼロ除算/範囲外アクセスの可能性。
-- [routing_graph_pdc.rs:43](../aura-core-bridge/src/routing_graph_pdc.rs:43)
+- [routing_graph_pdc.rs:43](../hirari-core-bridge/src/routing_graph_pdc.rs:43)
   - 未登録ノードを指定するとunwrapでpanicする。
-- [templates.rs:41](../aura-core-bridge/src/templates.rs:41)
+- [templates.rs:41](../hirari-core-bridge/src/templates.rs:41)
   - テンプレート名を破棄し、検索・生成しない。
-- [master_suite.rs:51](../aura-core-bridge/src/master_suite.rs:51)
+- [master_suite.rs:51](../hirari-core-bridge/src/master_suite.rs:51)
   - 複数の`audit_*` APIが状態を検査せず無条件にtrue。
-- [video.rs:64](../aura-core-bridge/src/video.rs:64)
+- [video.rs:64](../hirari-core-bridge/src/video.rs:64)
   - FPSの0・NaN・負値を拒否しない。
 
 未接続の代表的なRust API：
 
-- `AuraUnifiedOrchestrator::render_block`
+- `HirariUnifiedOrchestrator::render_block`
 - `BusSystemOrchestrator::add_samples/process`
 - `BounceCoreOrchestrator::execute_professional_batch_render`
 - `TemplateOrchestrator::instantiate_template`
@@ -157,37 +162,37 @@
 
 ### P1
 
-- [aura_studio.slint:67-131](../aura-ui/ui/aura_studio.slint:67)
+- [hirari_studio.slint:67-131](../hirari-ui/ui/hirari_studio.slint:67)
   - set_bpm、rename_clip、duplicate_track、toggle_record、set_filter、set_route、automation_point_moved、add_note、delete_note、quantize_notes等のcallbackが未接続。
-- [slint_ui.rs:374-385](../aura-ui/src/slint_ui.rs:374)
+- [slint_ui.rs:374-385](../hirari-ui/src/slint_ui.rs:374)
   - latency表示が0固定。
-- [slint_ui.rs:22-26](../aura-ui/src/slint_ui.rs:22)
+- [slint_ui.rs:22-26](../hirari-ui/src/slint_ui.rs:22)
   - 波形を乱数生成。
-- [slint_ui.rs:48-85](../aura-ui/src/slint_ui.rs:48)
+- [slint_ui.rs:48-85](../hirari-ui/src/slint_ui.rs:48)
   - Track / marker / sample catalogが固定データ。
-- [slint_ui.rs:110-112](../aura-ui/src/slint_ui.rs:110)
+- [slint_ui.rs:110-112](../hirari-ui/src/slint_ui.rs:110)
   - Track type変換がマジックナンバー。
-- [lib.rs:230-241](../aura-core-bridge/src/lib.rs:230)
+- [lib.rs:230-241](../hirari-core-bridge/src/lib.rs:230)
   - FFI event labelの固定128byte契約が脆い。
 
 ### P2
 
-- [build.rs:18-25](../aura-core-bridge/build.rs:18)
+- [build.rs:18-25](../hirari-core-bridge/build.rs:18)
   - globによるCPP自動収集が環境依存。
-- [build.rs:31-50](../aura-core-bridge/build.rs:31)
+- [build.rs:31-50](../hirari-core-bridge/build.rs:31)
   - 最適化フラグとCPU featureが常時/環境変数依存。
-- [aura-ui/build.rs:1-3](../aura-ui/build.rs:1)
+- [hirari-ui/build.rs:1-3](../hirari-ui/build.rs:1)
   - Slint入力のrerun-if-changedがない。
-- [lib.rs:624-749](../aura-core-bridge/src/lib.rs:624)
+- [lib.rs:624-749](../hirari-core-bridge/src/lib.rs:624)
   - テストがDSP smoke testに集中し、UI/FFI/ID/単位を検証しない。
-- [lib.rs:727-748](../aura-core-bridge/src/lib.rs:727)
+- [lib.rs:727-748](../hirari-core-bridge/src/lib.rs:727)
   - Bounceテストが戻り値と一意な出力ファイルを検証しない。
 
 ## Build / documentation / licensing
 
 ### P0
 
-- `aura-core-bridge` / `aura-ui` のGit管理・submodule構成がクリーンcloneで再現できない可能性がある。
+- `hirari-core-bridge` / `hirari-ui` のGit管理・submodule構成がクリーンcloneで再現できない可能性がある。
 
 ### P1/P2
 

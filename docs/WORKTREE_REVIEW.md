@@ -12,7 +12,7 @@ The classifier emits a TSV path manifest and counts four categories:
 
 | Category | Meaning | Review treatment |
 | --- | --- | --- |
-| `product_source` | Aura engine, UI, project model, tests, and owned resources | Review for behavior and API changes |
+| `product_source` | Hirari engine, UI, project model, tests, and owned resources | Review for behavior and API changes |
 | `tooling` | Build, packaging, CI, audit, and developer scripts | Review for reproducibility and release safety |
 | `documentation` | User, contributor, security, and release documentation | Review for accuracy and completeness |
 | `generated` | Bundles, logs, build products, and other derived files | Do not include in source commits |

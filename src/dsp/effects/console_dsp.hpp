@@ -1,9 +1,9 @@
-/* Aura DAW Ultimate - Divine Console (Master Buss Core) - (c) 2026 Aura DAW Project */
+/* Hirari DAW Ultimate - Divine Console (Master Buss Core) - (c) 2026 Hirari DAW Project */
 #pragma once
 #include "../../core/audio_buffer.hpp"
 #include <cmath>
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class DivineConsole
@@ -24,7 +24,7 @@ public:
         m_gainEnv = 1.0f;
     }
 
-    void process(::Aura::Core::AudioBuffer& buffer, uint32_t samples, const float* sidechain = nullptr) {
+    void process(::Hirari::Core::AudioBuffer& buffer, uint32_t samples, const float* sidechain = nullptr) {
         const uint32_t count = std::min(samples, buffer.getNumSamples());
         const uint32_t channels = buffer.getNumChannels();
         if (count == 0 || channels == 0) return;
@@ -85,4 +85,4 @@ private:
     float m_drive = 1.0f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

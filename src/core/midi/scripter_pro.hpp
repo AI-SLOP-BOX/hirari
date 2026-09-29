@@ -7,7 +7,7 @@
 #include <memory>
 #include "../midi_buffer.hpp"
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @class ScripterPro
@@ -59,4 +59,4 @@ private:
     ScripterPro() = default;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

@@ -5,7 +5,7 @@
 #include <fstream>
 #include "param_tree.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class PresetManager
@@ -24,7 +24,7 @@ public:
      */
     void savePluginPreset(const std::string& name, uint32_t pluginId, const std::vector<uint32_t>& ids) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::PresetOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::PresetOrchestrator.
         // Rust's high-performance binary serialization ensures that presets 
         // are technically superior and forensics-ready.
     }
@@ -39,4 +39,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

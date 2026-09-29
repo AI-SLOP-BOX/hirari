@@ -26,7 +26,7 @@ namespace rust {
 }
 #endif
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 enum class CommandType : uint32_t {
     SetVolume = 0,
@@ -81,8 +81,8 @@ struct EngineEvent {
 
 // Re-export or forward declare BridgeFFI items if needed
 namespace BridgeFFI {
-    using ::Aura::Core::MarkerInfo;
-    using ::Aura::Core::EngineEvent;
+    using ::Hirari::Core::MarkerInfo;
+    using ::Hirari::Core::EngineEvent;
 }
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

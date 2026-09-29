@@ -10,9 +10,9 @@
 #import <Metal/Metal.h>
 #endif
 
-namespace Aura::Core { class AudioBuffer; }
+namespace Hirari::Core { class AudioBuffer; }
 
-namespace Aura::Core::GPU {
+namespace Hirari::Core::GPU {
 
 /**
  * @class MetalAudioKernel
@@ -30,7 +30,7 @@ public:
     void processFXChain(float* buffer, uint32_t len) {
         if (buffer) sumBuffers(buffer, buffer, len);
     }
-    void processFXChain(::Aura::Core::AudioBuffer* buffer, uint32_t len);
+    void processFXChain(::Hirari::Core::AudioBuffer* buffer, uint32_t len);
 
     void setEnabled(bool e) { m_enabled = e; }
     bool isEnabled() const { return m_enabled; }
@@ -41,4 +41,4 @@ private:
     MetalSummingContext* m_ctx = nullptr;
 };
 
-} // namespace Aura::Core::GPU
+} // namespace Hirari::Core::GPU

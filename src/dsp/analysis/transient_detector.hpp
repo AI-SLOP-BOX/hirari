@@ -1,67 +1,44 @@
 #pragma once
+
+#include "../../core/rust_ffi.hpp"
+
+#include <cstddef>
+#include <cstdint>
 #include <vector>
-#include <cmath>
-#include <algorithm>
 
-namespace Aura::Core::DSP::Analysis {
+namespace Hirari::Core::DSP::Analysis {
 
-/**
- * @struct Transient
- * @brief Represents a sudden start of a sound (Beat, Kick, Snare).
- */
 struct Transient {
     uint64_t sampleIndex;
     float strength;
 };
 
-/**
- * @class HighPrecisionTransientDetector
- * @brief Logic Pro 'Smart Tempo' Engine Foundation.
- * HONEST FIX: Replaced simple zero-crossing with an Energy Envelope Difference 
- * calculation. Identifies transient peaks for Flex-Time and Warping.
- */
 class TransientDetector {
 public:
-    explicit TransientDetector(double sr, float lookaheadMs = 2.0f) : m_sampleRate(sr) {
-        m_envFast = 0.0f; m_envSlow = 0.0f;
-        m_lookaheadSamples = static_cast<uint64_t>(m_sampleRate * (lookaheadMs / 1000.0f));
-        
-        // --- HONEST FIX: PRECOMPUTED COEFFICIENTS ---
-        m_alphaFast = std::exp(-1.0f / (m_sampleRate * 0.005f)); // 5ms
-        m_alphaSlow = std::exp(-1.0f / (m_sampleRate * 0.050f)); // 50ms
-    }
+    explicit TransientDetector(double sample_rate, float lookahead_ms = 2.0f)
+        : m_state(hirari_transient_detector_create(sample_rate, lookahead_ms)) {}
+    ~TransientDetector() { hirari_transient_detector_destroy(m_state); }
 
-    /**
-     * @brief ANALYZE: Performs transient analysis with industrial precision and transient sovereignty.
-     * INDUSTRIAL: Delegating envelope analysis and look-ahead detection to the Rust 'TransientOrchestrator'.
-     */
-    std::vector<Transient> analyze(const float* data, size_t numSamples, float threshold = 0.15f) {
-        std::vector<Transient> result;
-        if (data == nullptr || numSamples < 2) return result;
+    TransientDetector(const TransientDetector&) = delete;
+    TransientDetector& operator=(const TransientDetector&) = delete;
 
-        const float limit = std::clamp(std::isfinite(threshold) ? threshold : 0.15f, 0.0f, 1.0f);
-        float previousFlux = 0.0f;
-        for (size_t i = 0; i < numSamples; ++i) {
-            const float level = std::abs(data[i]);
-            m_envFast = m_alphaFast * m_envFast + (1.0f - m_alphaFast) * level;
-            m_envSlow = m_alphaSlow * m_envSlow + (1.0f - m_alphaSlow) * level;
-            const float flux = std::max(0.0f, m_envFast - m_envSlow);
-
-            if (i > m_lookaheadSamples && flux > limit && flux >= previousFlux &&
-                (result.empty() || i - result.back().sampleIndex > m_lookaheadSamples)) {
-                result.push_back({static_cast<uint64_t>(i), flux});
+    std::vector<Transient> analyze(const float* data, size_t sample_count,
+                                   float threshold = 0.15f) {
+        hirari_transient_detector_analyze(m_state, data, sample_count, threshold);
+        const size_t count = hirari_transient_detector_result_count(m_state);
+        std::vector<Transient> results(count);
+        for (size_t index = 0; index < count; ++index) {
+            if (!hirari_transient_detector_get_result(
+                    m_state, index, &results[index].sampleIndex, &results[index].strength)) {
+                results.resize(index);
+                break;
             }
-            previousFlux = flux;
         }
-        return result;
+        return results;
     }
 
 private:
-    double m_sampleRate;
-    float m_envFast, m_envSlow;
-    float m_alphaFast, m_alphaSlow;
-    uint64_t m_lookaheadSamples;
-    size_t m_lastTransientIdx = 0;
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::Core::DSP::Analysis
+} // namespace Hirari::Core::DSP::Analysis

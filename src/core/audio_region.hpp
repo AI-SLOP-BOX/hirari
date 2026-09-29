@@ -19,9 +19,9 @@
 #include "../io/mmap_audio_file.hpp"
 #include "id_generator.hpp"
 
-namespace Aura::Rendering { class WaveformOverview; }
+namespace Hirari::Rendering { class WaveformOverview; }
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @interface IAudioSource
@@ -92,7 +92,7 @@ public:
             return m_source->getSample(c, std::clamp<int64_t>(idx, 0, n - 1)); 
         };
 
-        return ::Aura::DSP::Utils::DSPUtils::interpolateHermite(getS(p1-1), getS(p1), getS(p1+1), getS(p1+2), t);
+        return ::Hirari::DSP::Utils::DSPUtils::interpolateHermite(getS(p1-1), getS(p1), getS(p1+1), getS(p1+2), t);
     }
     
     uint64_t getNumSamples() const override {
@@ -307,7 +307,7 @@ public:
             return m_source->getSample(chan, safeIdx);
         };
 
-        return ::Aura::DSP::Utils::DSPUtils::interpolateHermite(getS(p-1), getS(p), getS(p+1), getS(p+2), t);
+        return ::Hirari::DSP::Utils::DSPUtils::interpolateHermite(getS(p-1), getS(p), getS(p+1), getS(p+2), t);
     }
 
     uint32_t getId() const { return m_meta.id; }
@@ -357,8 +357,9 @@ public:
 
     // VariAudio-style non-destructive note edits live with the region so they
     // follow trims, duplication and project saves without rewriting source.
-    bool upsertAudioNoteSegment(::aura::editing::AudioNoteSegment segment) {
+    bool upsertAudioNoteSegment(::hirari::editing::AudioNoteSegment segment) {
         if (!segment.valid()) return false;
+        segment.rebuildPitchRatioIntegral();
         for (const auto& current : m_audioNoteSegments) {
             const bool sameStart = std::abs(current.startSeconds - segment.startSeconds) < 1e-9;
             const bool overlaps = segment.startSeconds < current.endSeconds &&
@@ -366,40 +367,43 @@ public:
             if (overlaps && !sameStart) return false;
         }
         auto it = std::find_if(m_audioNoteSegments.begin(), m_audioNoteSegments.end(),
-            [&](const ::aura::editing::AudioNoteSegment& current) {
+            [&](const ::hirari::editing::AudioNoteSegment& current) {
                 return std::abs(current.startSeconds - segment.startSeconds) < 1e-9;
             });
         if (it == m_audioNoteSegments.end()) m_audioNoteSegments.push_back(std::move(segment));
         else *it = std::move(segment);
         std::sort(m_audioNoteSegments.begin(), m_audioNoteSegments.end(),
             [](const auto& a, const auto& b) { return a.startSeconds < b.startSeconds; });
+        ::hirari::editing::rebuildAudioNotePhasePrefixes(m_audioNoteSegments);
         publishAudioNoteSnapshot();
         return true;
     }
 
     void clearAudioNoteSegments() { m_audioNoteSegments.clear(); publishAudioNoteSnapshot(); }
 
-    const std::vector<::aura::editing::AudioNoteSegment>& getAudioNoteSegments() const noexcept {
+    const std::vector<::hirari::editing::AudioNoteSegment>& getAudioNoteSegments() const noexcept {
         return m_audioNoteSegments;
     }
-    std::vector<::aura::editing::AudioNoteSegment> getAudioNoteSegmentsSnapshot() const {
+    std::vector<::hirari::editing::AudioNoteSegment> getAudioNoteSegmentsSnapshot() const {
         const auto snapshot = std::atomic_load_explicit(&m_audioNoteSnapshot,
                                                          std::memory_order_acquire);
-        return snapshot ? *snapshot : std::vector<::aura::editing::AudioNoteSegment>{};
+        return snapshot ? *snapshot : std::vector<::hirari::editing::AudioNoteSegment>{};
     }
 
     // Run analysis off the audio callback and replace only the analysis layer;
     // source samples and ordinary clip edits remain untouched.
     bool analyzeAudioNotes(const float* monoSamples, std::size_t sampleCount,
                            double sampleRate,
-                           ::aura::editing::AudioPitchAnalyzer::Config config) {
+                           ::hirari::editing::AudioPitchAnalyzer::Config config) {
         if ((sampleCount > 0 && monoSamples == nullptr) ||
             sampleCount > 16'000'000 || !std::isfinite(sampleRate) ||
             sampleRate < 8'000.0 || sampleRate > 384'000.0) {
             return false;
         }
-        auto detected = ::aura::editing::AudioPitchAnalyzer::analyze(
+        auto detected = ::hirari::editing::AudioPitchAnalyzer::analyze(
             monoSamples, sampleCount, sampleRate, config);
+        for (auto& segment : detected) segment.rebuildPitchRatioIntegral();
+        ::hirari::editing::rebuildAudioNotePhasePrefixes(detected);
         m_audioNoteSegments = std::move(detected);
         publishAudioNoteSnapshot();
         return true;
@@ -408,24 +412,24 @@ public:
     bool analyzeAudioNotes(const float* monoSamples, std::size_t sampleCount,
                            double sampleRate) {
         return analyzeAudioNotes(monoSamples, sampleCount, sampleRate,
-            ::aura::editing::AudioPitchAnalyzer::Config{});
+            ::hirari::editing::AudioPitchAnalyzer::Config{});
     }
 
 private:
     void publishAudioNoteSnapshot() const {
-        auto snapshot = std::make_shared<const std::vector<::aura::editing::AudioNoteSegment>>(m_audioNoteSegments);
+        auto snapshot = std::make_shared<const std::vector<::hirari::editing::AudioNoteSegment>>(m_audioNoteSegments);
         std::atomic_store_explicit(&m_audioNoteSnapshot, std::move(snapshot), std::memory_order_release);
     }
     std::shared_ptr<IAudioSource> m_source;
     Meta m_meta;
     double m_warpRatio = 1.0;
-    mutable ::Aura::DSP::Analysis::SovereignTimeStretcher m_stretcher;
+    mutable ::Hirari::DSP::Analysis::SovereignTimeStretcher m_stretcher;
     std::shared_ptr<Rendering::WaveformOverview> m_waveOverview;
-    std::vector<::aura::editing::AudioNoteSegment> m_audioNoteSegments;
-    mutable std::shared_ptr<const std::vector<::aura::editing::AudioNoteSegment>> m_audioNoteSnapshot;
+    std::vector<::hirari::editing::AudioNoteSegment> m_audioNoteSegments;
+    mutable std::shared_ptr<const std::vector<::hirari::editing::AudioNoteSegment>> m_audioNoteSnapshot;
     std::vector<std::pair<uint64_t, uint64_t>> m_mutedRanges;
     std::vector<GainRange> m_gainRanges;
     std::vector<FadeRange> m_fadeRanges;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

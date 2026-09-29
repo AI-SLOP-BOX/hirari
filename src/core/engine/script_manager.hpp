@@ -6,7 +6,7 @@
 #include <atomic>
 #include "../diagnostics/engine_diagnostics.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ScriptManager
@@ -29,7 +29,7 @@ public:
      */
     void registerScript(uint32_t /*id*/, const std::string& /*source*/, bool /*rtSafe*/) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::ScriptOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::ScriptOrchestrator.
         // Rust's memory-safe collections and validation handle custom scripts 
         // with 100% safety and deterministic logic.
         // Rust's ValidationEngine ensures bit-accurate script analysis.
@@ -48,4 +48,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

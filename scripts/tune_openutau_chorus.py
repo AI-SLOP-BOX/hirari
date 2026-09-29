@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a more natural OpenUtau USTX from the simple Aura chorus draft."""
+"""Create a more natural OpenUtau USTX from the simple Hirari chorus draft."""
 
 import re
 import sys
@@ -33,7 +33,7 @@ def tuned_pitch(index, tone, next_tone, scoop_amount):
     # sound like a machine.  Keep stepwise notes nearly straight and reserve
     # the larger gesture for leaps.
     leap = next_tone - tone
-    diagnostic = os.environ.get("AURA_TUNING_DIAGNOSTIC") == "1"
+    diagnostic = os.environ.get("HIRARI_TUNING_DIAGNOSTIC") == "1"
     scoop_cap = 16 if diagnostic else 8
     settle_cap = 16 if diagnostic else 8
     scoop = 0
@@ -53,7 +53,7 @@ def tuned_pitch(index, tone, next_tone, scoop_amount):
 
 def tune(text, scoop_amount=8, vibrato_depth=10, vibrato_length=28, dynamics=0.6, consonants=0.5, vibrato_period=190):
     # Match the singer identifier installed by OpenUtau on macOS.  Keeping
-    # this normalization here prevents old Aura drafts from opening as
+    # this normalization here prevents old Hirari drafts from opening as
     # [Missing] even when the Teto voicebank is installed.
     # Preserve the singer identifier from the source USTX. OpenUtau installs
     # can expose different display names for the same voicebank; replacing
@@ -150,11 +150,11 @@ def main():
         lyrics = ["ひ", "か", "り", "ほ", "ど", "け", "る", "よ", "る", "に", "き", "み", "と", "み", "つ", "け"]
         tones = [60, 62, 64, 64, 62, 60, 62, 64, 65, 64, 67, 65, 64, 62, 60, 60]
         voice_dir = os.environ.get(
-            "AURA_TETO_VOICE_DIR",
+            "HIRARI_TETO_VOICE_DIR",
             str(Path.home() / "Library" / "Application Support" / "OpenUtau" / "Singers" / "KasaneTeto"),
         )
-        tempo = os.environ.get("AURA_VOCAL_TEMPO", "120")
-        lines = ["[#SETTING]", f"Tempo={tempo}", "ProjectName=Aura Teto Tuned", f"VoiceDir={voice_dir}", "", "[#VERSION]", "UST Version1.2", ""]
+        tempo = os.environ.get("HIRARI_VOCAL_TEMPO", "120")
+        lines = ["[#SETTING]", f"Tempo={tempo}", "ProjectName=Hirari Teto Tuned", f"VoiceDir={voice_dir}", "", "[#VERSION]", "UST Version1.2", ""]
         for index, (lyric, tone) in enumerate(zip(lyrics, tones)):
             scoop = -max(1, int(args[0] if args else 8)) if index % 3 else -max(1, int((args[0] if args else 8) * 0.5))
             depth = int(args[1] if len(args) > 1 else 10)
@@ -190,7 +190,7 @@ def main():
             next_tone = tones[index + 1] if index + 1 < len(tones) else tone
             leap = next_tone - tone
             scoop = 0 if abs(leap) < 3 else (-max(2, min(8, int(args[0]))) if leap > 0 else max(1, min(4, int(args[0] * 0.45))))
-            diagnostic = os.environ.get("AURA_TUNING_DIAGNOSTIC") == "1"
+            diagnostic = os.environ.get("HIRARI_TUNING_DIAGNOSTIC") == "1"
             settle = max(-16 if diagnostic else -8, min(16 if diagnostic else 8, int(leap * (2.0 if diagnostic else 1.5))))
             scoop = scoop * 100
             settle = settle * 100

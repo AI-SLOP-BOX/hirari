@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class Modulator
@@ -134,4 +134,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

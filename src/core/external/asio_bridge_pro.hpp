@@ -10,7 +10,7 @@
 #include <cmath>
 #include <thread>
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /**
  * @class ASIOBridgePro
@@ -177,4 +177,4 @@ private:
     std::atomic<uint32_t> m_callbacksInFlight{0};
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

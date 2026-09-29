@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct AutomationLane
@@ -86,4 +86,4 @@ private:
     std::map<uint32_t, std::vector<AutomationLane>> m_tracks;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

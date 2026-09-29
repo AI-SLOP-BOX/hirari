@@ -5,7 +5,7 @@
 #include <atomic>
 #include <chrono>
 
-namespace Aura::Core::Network {
+namespace Hirari::Core::Network {
 
 /**
  * @class SovereignCloudKernel
@@ -65,4 +65,4 @@ private:
     std::mutex m_queueMutex;
 };
 
-} // namespace Aura::Core::Network
+} // namespace Hirari::Core::Network

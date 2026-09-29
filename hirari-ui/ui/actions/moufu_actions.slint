@@ -1,0 +1,18 @@
+// Moufu's explicit entity and link management actions.
+export global MoufuActions {
+    in-out property <string> status: "MOUFU NOT CONFIGURED";
+    in-out property <string> address: "127.0.0.1:9478";
+    in-out property <[string]> entity-options: [];
+    in-out property <[string]> entity-ids: [];
+    in-out property <[string]> link-options: [];
+    in-out property <[string]> link-ids: [];
+    in-out property <string> remote-source: "";
+    in-out property <string> remote-preview: "No linked project state received.";
+    in-out property <int> selected-entity-index: -1;
+    in-out property <int> selected-link-index: -1;
+    callback refresh();
+    callback configure(string);
+    callback share(string);
+    callback receive(string);
+    callback unlink(string);
+}

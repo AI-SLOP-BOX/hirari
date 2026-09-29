@@ -7,7 +7,7 @@
 #include <cmath>
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Synthesis {
+namespace Hirari::DSP::Synthesis {
 
 /**
  * @class ModularGridEngine
@@ -127,4 +127,4 @@ private:
     std::vector<size_t> m_executionOrder;
 };
 
-} // namespace Aura::DSP::Synthesis
+} // namespace Hirari::DSP::Synthesis

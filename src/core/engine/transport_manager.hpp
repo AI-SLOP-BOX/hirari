@@ -3,7 +3,7 @@
 #include <cstdint>
 #include "../engine_types.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class TransportManager
@@ -51,4 +51,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

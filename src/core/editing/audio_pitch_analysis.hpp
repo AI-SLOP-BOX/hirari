@@ -1,117 +1,81 @@
 #pragma once
 
 #include "audio_note_segment.hpp"
+#include "../rust_ffi.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <vector>
 
-namespace aura::editing {
+namespace hirari::editing {
 
-// Bounded, offline monophonic F0 analysis. This intentionally does not run in
-// the audio callback; callers can schedule it on the analysis worker and then
-// store the resulting non-destructive segments in an AudioRegion.
+// Bounded, offline monophonic F0 analysis. The FFT, autocorrelation, note
+// boundary tracking, and pitch-anchor generation run in the Rust core.
 class AudioPitchAnalyzer {
 public:
+    static constexpr std::size_t kMaxSegments = 4096;
+
     struct Config {
         double minHz = 65.0;
         double maxHz = 1200.0;
         std::size_t window = 2048;
         std::size_t hop = 512;
         double threshold = 0.82;
+        double noteChangeThresholdCents = 90.0;
+        std::size_t noteChangeConfirmationFrames = 2;
     };
 
-    static std::vector<AudioNoteSegment> analyze(const float* samples, std::size_t count,
-                                                  double sampleRate, Config config) {
-        std::vector<AudioNoteSegment> result;
-        if (!samples || count == 0 || !std::isfinite(sampleRate) || sampleRate <= 0.0) return result;
-        config.minHz = std::clamp(config.minHz, 20.0, 2000.0);
-        config.maxHz = std::clamp(config.maxHz, config.minHz + 1.0, 4000.0);
-        config.window = std::clamp<std::size_t>(config.window, 256, 8192);
-        config.hop = std::clamp<std::size_t>(config.hop, 64, config.window);
-        config.threshold = std::clamp(config.threshold, 0.5, 0.99);
-        const std::size_t minLag = std::max<std::size_t>(1, static_cast<std::size_t>(sampleRate / config.maxHz));
-        const std::size_t maxLag = std::min<std::size_t>(config.window - 1,
-            static_cast<std::size_t>(sampleRate / config.minHz));
-        bool active = false;
-        AudioNoteSegment current{};
-        // Analyze a final partial frame with zero padding. Short recordings
-        // (including one-shot vocal takes) should still produce an editable
-        // segment instead of being silently discarded.
-        for (std::size_t offset = 0; offset < count; offset += config.hop) {
-            const auto sampleAt = [&](std::size_t index) noexcept -> double {
-                if (index >= count) return 0.0;
-                const float value = samples[index];
-                return std::isfinite(value) ? static_cast<double>(value) : 0.0;
-            };
-            double energy = 0.0;
-            for (std::size_t i = 0; i < config.window; ++i) {
-                const double s = sampleAt(offset + i);
-                energy += s * s;
+    static std::vector<AudioNoteSegment> analyze(
+        const float* samples, std::size_t count, double sample_rate, Config config) {
+        std::vector<AudioNoteSegment> output;
+        if (!samples || count == 0 || count > 16'000'000
+            || !std::isfinite(sample_rate) || sample_rate <= 0.0) {
+            return output;
+        }
+
+        void* raw = hirari_audio_pitch_analyze(
+            samples, count, sample_rate, config.minHz, config.maxHz,
+            config.window, config.hop, config.threshold,
+            config.noteChangeThresholdCents, config.noteChangeConfirmationFrames);
+        if (!raw) return output;
+        const auto release = [](void* state) { hirari_audio_pitch_result_destroy(state); };
+        std::unique_ptr<void, decltype(release)> state(raw, release);
+
+        const std::size_t segment_count = std::min(
+            hirari_audio_pitch_segment_count(state.get()), kMaxSegments);
+        output.reserve(segment_count);
+        for (std::size_t index = 0; index < segment_count; ++index) {
+            AudioNoteSegment segment{};
+            if (!hirari_audio_pitch_get_segment(
+                    state.get(), index, &segment.startSeconds,
+                    &segment.endSeconds, &segment.detectedPitchCents)) {
+                continue;
             }
-            if (energy < 1e-8) { if (active) { result.push_back(current); active = false; } continue; }
-            std::size_t bestLag = 0; double best = -1.0;
-            for (std::size_t lag = minLag; lag <= maxLag; ++lag) {
-                double corr = 0.0;
-                for (std::size_t i = lag; i < config.window; ++i) {
-                    const double a = sampleAt(offset + i);
-                    const double b = sampleAt(offset + i - lag);
-                    corr += a * b;
-                }
-                corr /= energy;
-                if (corr > best) { best = corr; bestLag = lag; }
-            }
-            const bool voiced = bestLag > 0 && best >= config.threshold;
-            if (!voiced) { if (active) { result.push_back(current); active = false; } continue; }
-            // Parabolic interpolation around the correlation peak improves F0
-            // resolution without requiring a larger analysis window.
-            double refinedLag = static_cast<double>(bestLag);
-            if (bestLag > minLag && bestLag < maxLag) {
-                auto correlationAt = [&](std::size_t lag) {
-                    double value = 0.0;
-                    for (std::size_t i = lag; i < config.window; ++i) {
-                        const double a = sampleAt(offset + i);
-                        const double b = sampleAt(offset + i - lag);
-                        value += a * b;
-                    }
-                    return value / energy;
-                };
-                const double ym = correlationAt(bestLag - 1);
-                const double y0 = best;
-                const double yp = correlationAt(bestLag + 1);
-                const double denom = ym - 2.0 * y0 + yp;
-                if (std::isfinite(denom) && std::abs(denom) > 1e-12) {
-                    refinedLag += 0.5 * (ym - yp) / denom;
+            const std::size_t anchor_count = std::min<std::size_t>(
+                hirari_audio_pitch_anchor_count(state.get(), index), 4096);
+            segment.anchors.reserve(anchor_count);
+            for (std::size_t anchor_index = 0; anchor_index < anchor_count; ++anchor_index) {
+                AudioNoteAnchor anchor{};
+                if (hirari_audio_pitch_get_anchor(
+                        state.get(), index, anchor_index, &anchor.positionSeconds,
+                        &anchor.pitchCents, &anchor.formantCents)) {
+                    segment.anchors.push_back(anchor);
                 }
             }
-            refinedLag = std::clamp(refinedLag, static_cast<double>(minLag), static_cast<double>(maxLag));
-            const double time = static_cast<double>(offset) / sampleRate;
-            const double hz = sampleRate / refinedLag;
-            const double cents = std::isfinite(hz) && hz > 0.0
-                ? 1200.0 * std::log2(hz / 440.0) + 6900.0 : 0.0;
-            if (!active) {
-                current = AudioNoteSegment{}; current.startSeconds = time;
-                current.endSeconds = std::min(static_cast<double>(count) / sampleRate,
-                                              time + static_cast<double>(config.window) / sampleRate);
-                current.detectedPitchCents = cents; active = true;
-                current.anchors.push_back({time, 0.0, 0.0});
-            } else {
-                current.endSeconds = std::min(static_cast<double>(count) / sampleRate,
-                                              time + static_cast<double>(config.window) / sampleRate);
-                current.detectedPitchCents = 0.5 * (current.detectedPitchCents + cents);
-                const double delta = cents - current.detectedPitchCents;
-                current.anchors.push_back({time, std::clamp(delta, -2400.0, 2400.0), 0.0});
+            if (segment.valid()) {
+                segment.rebuildPitchRatioIntegral();
+                output.push_back(std::move(segment));
             }
         }
-        if (active) result.push_back(current);
-        result.erase(std::remove_if(result.begin(), result.end(), [](const auto& s) { return !s.valid(); }), result.end());
-        return result;
+        return output;
     }
 
-    static std::vector<AudioNoteSegment> analyze(const float* samples, std::size_t count,
-                                                  double sampleRate) {
-        return analyze(samples, count, sampleRate, Config{});
+    static std::vector<AudioNoteSegment> analyze(
+        const float* samples, std::size_t count, double sample_rate) {
+        return analyze(samples, count, sample_rate, Config{});
     }
 };
 
-} // namespace aura::editing
+} // namespace hirari::editing

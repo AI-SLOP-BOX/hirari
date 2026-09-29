@@ -10,7 +10,7 @@
 #include "../../core/engine/track.hpp"
 #include "../../core/mixing/aesthetic_evaluator_kernel.hpp"
 
-namespace Aura::Core::Patch {
+namespace Hirari::Core::Patch {
 
 /**
  * @struct PatchDNA
@@ -23,7 +23,7 @@ struct PatchDNA {
 
 /**
  * @class SmartChannelStrip
- * @brief Industrial Neural Synthesis Engine for Aura Studio Pro.
+ * @brief Industrial Neural Synthesis Engine for Hirari Studio Pro.
  * Implements autonomous patch evolution and latent-space morphing.
  */
 class SmartChannelStrip {
@@ -120,4 +120,4 @@ private:
     std::map<std::string, PatchDNA> m_genePool;
 };
 
-} // namespace Aura::Core::Patch
+} // namespace Hirari::Core::Patch

@@ -2,11 +2,12 @@
 
 #include <vector>
 #include <cstdint>
+#include <cstddef>
 #include <algorithm>
-#include <atomic>
 #include "plugins/midi_fragment_transport.hpp"
+#include "rust_ffi.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @struct MidiEvent
@@ -22,6 +23,12 @@ struct MidiEvent {
     uint8_t articulationId = 0; // 0 = Default, 1+ = Technique ID
 };
 
+static_assert(offsetof(MidiEvent, sampleOffset) == 0);
+static_assert(offsetof(MidiEvent, size) == 8);
+static_assert(offsetof(MidiEvent, data) == 12);
+static_assert(offsetof(MidiEvent, articulationId) == 268);
+static_assert(sizeof(MidiEvent) == 272);
+
 /**
  * @class MidiBuffer
  * @brief High-performance collection of timestamped MIDI events.
@@ -31,7 +38,10 @@ class MidiBuffer {
 public:
     static constexpr size_t kMaxEventsPerBlock = 1024;
 
-    MidiBuffer() : m_count(0) {}
+    MidiBuffer() : m_state(hirari_midi_buffer_create()) {}
+    ~MidiBuffer() { hirari_midi_buffer_destroy(m_state); }
+    MidiBuffer(const MidiBuffer&) = delete;
+    MidiBuffer& operator=(const MidiBuffer&) = delete;
 
     /**
      * @brief RT-SAFE: No dynamic allocation.
@@ -39,29 +49,7 @@ public:
      * the allocator from triggering a 'Page Fault' spike in the audio thread.
      */
     void addEvent(uint64_t sampleOffset, const uint8_t* data, uint32_t size, uint8_t articulationId = 0) {
-        if (size > sizeof(MidiEvent::data)) {
-            m_oversizeEvents.fetch_add(1, std::memory_order_relaxed);
-            if (data && size > 0 && (data[0] == 0xf0 || size >= 4))
-                m_extendedEvents.fetch_add(1, std::memory_order_relaxed);
-            m_overflowed.store(true, std::memory_order_release);
-            return;
-        }
-        if (size != 0 && data == nullptr) return;
-        if (m_count >= kMaxEventsPerBlock) {
-            // Dropping is still the only RT-safe fallback once the preallocated
-            // block is full, but it must be observable by the host/UI.
-            m_droppedEvents.fetch_add(1, std::memory_order_relaxed);
-            m_overflowed.store(true, std::memory_order_release);
-            return;
-        }
-        
-        MidiEvent& ev = m_events[m_count++];
-        ev.sampleOffset = sampleOffset;
-        ev.size = size;
-        ev.articulationId = articulationId;
-        if (size > 0) std::copy(data, data + size, ev.data);
-        if (size < sizeof(ev.data))
-            std::fill(ev.data + size, ev.data + sizeof(ev.data), uint8_t{0});
+        hirari_midi_buffer_add(m_state, sampleOffset, data, size, articulationId);
     }
 
     void addNoteOn(uint8_t channel, uint8_t pitch, uint8_t velocity, uint64_t sampleOffset, uint8_t articulationId = 0) {
@@ -76,81 +64,60 @@ public:
         addEvent(sampleOffset, data, 3, 0);
     }
 
+    void addAllNotesOff(uint8_t channel, uint64_t sampleOffset) {
+        if (channel == 0 || channel > 16) return;
+        uint8_t data[3] = { static_cast<uint8_t>(0xB0 | (channel - 1)), 123, 0 };
+        addEvent(sampleOffset, data, 3, 0);
+    }
+
     /**
-     * @brief Stable, in-place timestamp sort.
+     * @brief Stable, in-place timestamp sort with safe same-sample note order.
      *
      * Insertion sort is intentional here: the block is already nearly sorted
      * in normal playback, it performs no allocation on the audio thread, and
-     * (unlike an unstable Shell sort) preserves producer order for events at
-     * the same sample. That ordering is observable for note-off/note-on and
-     * articulation changes sharing a boundary.
+     * preserves producer order among events with the same priority. At an
+     * identical sample, All Notes Off precedes Note Off, other MIDI events,
+     * and Note On. This prevents a boundary Note Off from killing a newly
+     * retriggered note while retaining stable order for controllers and other
+     * events within their priority class.
      */
     void sort() {
-        if (m_count < 2) return;
-        for (size_t i = 1; i < m_count; ++i) {
-            MidiEvent current = m_events[i];
-            size_t j = i;
-            while (j > 0 && m_events[j - 1].sampleOffset > current.sampleOffset) {
-                m_events[j] = m_events[j - 1];
-                --j;
-            }
-            m_events[j] = current;
-        }
+        hirari_midi_buffer_sort_owned(m_state);
     }
 
     void clear() {
-        m_count = 0;
-        m_droppedEvents.store(0, std::memory_order_relaxed);
-        m_oversizeEvents.store(0, std::memory_order_relaxed);
-        m_extendedEvents.store(0, std::memory_order_relaxed);
-        m_overflowed.store(false, std::memory_order_release);
+        hirari_midi_buffer_clear(m_state);
     }
 
     bool overflowed() const noexcept {
-        return m_overflowed.load(std::memory_order_acquire);
+        return hirari_midi_buffer_overflowed(m_state);
     }
 
     uint64_t droppedEvents() const noexcept {
-        return m_droppedEvents.load(std::memory_order_relaxed);
+        // A non-destructive telemetry snapshot is returned by the Rust owner.
+        return hirari_midi_buffer_dropped_count(m_state);
     }
 
     uint64_t takeDroppedEvents() noexcept {
-        return m_droppedEvents.exchange(0, std::memory_order_acq_rel);
+        return hirari_midi_buffer_take_dropped(m_state);
     }
 
     uint64_t takeOversizeEvents() noexcept {
-        return m_oversizeEvents.exchange(0, std::memory_order_acq_rel);
+        return hirari_midi_buffer_take_oversize(m_state);
     }
 
     // Counts rejected SysEx/MIDI 2.0-shaped payloads separately from ordinary
     // malformed oversized events. This is telemetry, not silent truncation.
     uint64_t takeExtendedEvents() noexcept {
-        return m_extendedEvents.exchange(0, std::memory_order_acq_rel);
+        return hirari_midi_buffer_take_extended(m_state);
     }
 
     size_t remainingCapacity() const noexcept {
-        return m_count < kMaxEventsPerBlock ? kMaxEventsPerBlock - m_count : 0;
+        return hirari_midi_buffer_remaining_capacity(m_state);
     }
 
     bool tryAddEvent(const MidiEvent& event) {
-        if (event.size > sizeof(event.data)) {
-            m_oversizeEvents.fetch_add(1, std::memory_order_relaxed);
-            if (event.size >= 4 || (event.size > 0 && event.data[0] == 0xf0))
-                m_extendedEvents.fetch_add(1, std::memory_order_relaxed);
-            m_overflowed.store(true, std::memory_order_release);
-            return false;
-        }
-        if (m_count >= kMaxEventsPerBlock) {
-            m_droppedEvents.fetch_add(1, std::memory_order_relaxed);
-            m_overflowed.store(true, std::memory_order_release);
-            return false;
-        }
-        MidiEvent& stored = m_events[m_count++];
-        stored = event;
-        if (stored.size < sizeof(stored.data))
-            std::fill(stored.data + stored.size,
-                      stored.data + sizeof(stored.data), uint8_t{0});
-        return true;
+        return hirari_midi_buffer_copy(m_state, &event);
     }
 
     /// Completes a fragmented SysEx/UMP message into the realtime mailbox
@@ -168,9 +135,7 @@ public:
                     reassembler.data(), reassembler.size())) {
                 return result;
             }
-            m_oversizeEvents.fetch_add(1, std::memory_order_relaxed);
-            m_extendedEvents.fetch_add(1, std::memory_order_relaxed);
-            m_overflowed.store(true, std::memory_order_release);
+            hirari_midi_buffer_reject_extended(m_state);
             return Plugins::MidiFragmentReassembler::Result::Oversize;
         }
         addEvent(reassembler.sampleOffset(), reassembler.data(),
@@ -179,21 +144,27 @@ public:
     }
 
     bool takeOverflowed() noexcept {
-        return m_overflowed.exchange(false, std::memory_order_acq_rel);
+        return hirari_midi_buffer_take_overflowed(m_state);
     }
     
-    const MidiEvent* getEvents() const { return m_events; }
-    MidiEvent* getMutableEvents() { return m_events; }
-    size_t size() const { return m_count; }
-    const MidiEvent* begin() const { return m_events; }
-    const MidiEvent* end() const { return m_events + m_count; }
+    const MidiEvent* getEvents() const {
+        return static_cast<const MidiEvent*>(hirari_midi_buffer_event_data(m_state));
+    }
+    MidiEvent* getMutableEvents() {
+        return static_cast<MidiEvent*>(hirari_midi_buffer_event_data(m_state));
+    }
+    size_t size() const { return hirari_midi_buffer_event_count(m_state); }
+    void* rustStateHandle() noexcept { return m_state; }
+    const void* rustStateHandle() const noexcept { return m_state; }
+    const MidiEvent* begin() const { return getEvents(); }
+    const MidiEvent* end() const { return getEvents() + size(); }
 
     class Iterator {
     public:
         explicit Iterator(const MidiBuffer& buffer) : m_buffer(buffer) {}
         bool getNextEvent(uint32_t& offset, uint8_t* data, uint32_t& size) {
-            if (m_index >= m_buffer.m_count) return false;
-            const auto& event = m_buffer.m_events[m_index++];
+            if (m_index >= m_buffer.size()) return false;
+            const auto& event = m_buffer.getEvents()[m_index++];
             offset = event.sampleOffset > UINT32_MAX
                 ? UINT32_MAX : static_cast<uint32_t>(event.sampleOffset);
             size = std::min<uint32_t>(event.size, static_cast<uint32_t>(sizeof(event.data)));
@@ -208,12 +179,7 @@ public:
     };
 
 private:
-    MidiEvent m_events[kMaxEventsPerBlock];
-    size_t m_count;
-    std::atomic<uint64_t> m_droppedEvents{0};
-    std::atomic<uint64_t> m_oversizeEvents{0};
-    std::atomic<uint64_t> m_extendedEvents{0};
-    std::atomic<bool> m_overflowed{false};
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

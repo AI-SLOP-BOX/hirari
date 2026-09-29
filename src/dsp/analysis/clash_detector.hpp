@@ -5,7 +5,7 @@
 #include <algorithm>
 #include "../utils/fft_utils.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class MixClashDetector
@@ -58,4 +58,4 @@ public:
 
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include "../graphics/graphics_kernel.hpp"
 
-namespace Aura::Rendering {
+namespace Hirari::Rendering {
 
 /**
  * @class LiveWaveformRenderer
@@ -41,7 +41,7 @@ public:
     /**
      * @brief RENDER: Draws the rolling waveform path.
      */
-    void render(::Aura::Graphics::Platform::IGraphicsKernel& kernel, float x, float y, float w, float h, uint32_t color) {
+    void render(::Hirari::Graphics::Platform::IGraphicsKernel& kernel, float x, float y, float w, float h, uint32_t color) {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_count == 0) return;
         using namespace Graphics;
@@ -75,4 +75,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Rendering
+} // namespace Hirari::Rendering

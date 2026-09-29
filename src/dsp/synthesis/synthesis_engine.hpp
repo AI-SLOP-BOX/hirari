@@ -5,7 +5,6 @@
 #include <atomic>
 #include "../iprocessor.hpp"
 #include "../../core/audio_buffer.hpp"
-#include "aura_sampler_pro.hpp"
 #include "drum_synth_bass.hpp"
 #include "ivoice.hpp"
 #include "../../core/worker_thread_pool.hpp"
@@ -17,7 +16,7 @@
 #include <arm_neon.h>
 #endif
 
-namespace Aura::DSP::Synthesis {
+namespace Hirari::DSP::Synthesis {
 
 /**
  * @class SynthesisEngine
@@ -28,7 +27,7 @@ class SynthesisEngine : public IProcessor {
 public:
     SynthesisEngine() : m_voices() {}
 
-    std::string getName() const override { return "Aura Synthesis Engine"; }
+    std::string getName() const override { return "Hirari Synthesis Engine"; }
 
     void prepareToPlay(double sr, uint32_t maxBlockSize) noexcept override {
         m_voices.prepareToPlay(sr, maxBlockSize);
@@ -56,4 +55,4 @@ public:
     std::atomic<float> m_masterGain{1.0f};
 };
 
-} // namespace Aura::DSP::Synthesis
+} // namespace Hirari::DSP::Synthesis

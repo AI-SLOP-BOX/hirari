@@ -3,7 +3,7 @@
 #include <vector>
 #include <cmath>
 
-namespace Aura::DSP::Mixing {
+namespace Hirari::DSP::Mixing {
 
 /**
  * @brief LookaheadDelay: Independent high-performance delay for future-peeking.
@@ -33,4 +33,4 @@ private:
     size_t m_writeIdx;
 };
 
-} // namespace Aura::DSP::Mixing
+} // namespace Hirari::DSP::Mixing

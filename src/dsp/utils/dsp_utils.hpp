@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace Aura::DSP::Utils {
+namespace Hirari::DSP::Utils {
 
 /**
  * @brief DSP Utils: High-performance bitwise and mathematical helpers.
@@ -67,4 +67,4 @@ public:
 };
 
 
-} // namespace Aura::DSP::Utils
+} // namespace Hirari::DSP::Utils

@@ -4,7 +4,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @brief ElasticAudioEngine: Professional Logic Pro-style 'Flex Time'.
@@ -49,4 +49,4 @@ private:
     std::vector<float> m_overlapBuf;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

@@ -2,36 +2,36 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-if [ "${AURA_RELEASE_MODE:-0}" = "1" ]; then
-    : "${AURA_EXPECTED_ARCH:?AURA_EXPECTED_ARCH is required in release mode}"
-    AURA_REQUIRE_ARCH=1
-    AURA_REQUIRE_APP_SMOKE=1
-    AURA_REQUIRE_PLUGIN_SMOKE=1
-    AURA_REQUIRE_CODESIGN=1
-    AURA_FAIL_ON_RETRY=1
-    export AURA_REQUIRE_ARCH AURA_REQUIRE_APP_SMOKE AURA_REQUIRE_PLUGIN_SMOKE AURA_REQUIRE_CODESIGN
-    export AURA_FAIL_ON_RETRY
-    AURA_STRICT_SOURCE_HYGIENE=1 "$ROOT_DIR/scripts/audit_repository_hygiene.sh"
+if [ "${HIRARI_RELEASE_MODE:-0}" = "1" ]; then
+    : "${HIRARI_EXPECTED_ARCH:?HIRARI_EXPECTED_ARCH is required in release mode}"
+    HIRARI_REQUIRE_ARCH=1
+    HIRARI_REQUIRE_APP_SMOKE=1
+    HIRARI_REQUIRE_PLUGIN_SMOKE=1
+    HIRARI_REQUIRE_CODESIGN=1
+    HIRARI_FAIL_ON_RETRY=1
+    export HIRARI_REQUIRE_ARCH HIRARI_REQUIRE_APP_SMOKE HIRARI_REQUIRE_PLUGIN_SMOKE HIRARI_REQUIRE_CODESIGN
+    export HIRARI_FAIL_ON_RETRY
+    HIRARI_STRICT_SOURCE_HYGIENE=1 "$ROOT_DIR/scripts/audit_repository_hygiene.sh"
 fi
-APP_DIR="${1:-$ROOT_DIR/packaging/Aura DAW.app}"
+APP_DIR="${1:-$ROOT_DIR/packaging/Hirari DAW.app}"
 case "$APP_DIR" in
     /*) : ;;
     *) APP_DIR="$ROOT_DIR/$APP_DIR" ;;
 esac
 CONTENTS="$APP_DIR/Contents"
-MAIN="$CONTENTS/MacOS/Aura DAW"
-WORKER="$CONTENTS/MacOS/aura-plugin-host-worker"
+MAIN="$CONTENTS/MacOS/Hirari DAW"
+WORKER="$CONTENTS/MacOS/hirari-plugin-host-worker"
 
 test -d "$APP_DIR"
 test -x "$MAIN"
 test -x "$WORKER"
 test -f "$CONTENTS/Info.plist"
 test -d "$CONTENTS/Resources"
-test -s "$CONTENTS/Resources/aura-resources.manifest" || {
+test -s "$CONTENTS/Resources/hirari-resources.manifest" || {
     echo "release bundle resource manifest is missing or empty" >&2
     exit 1
 }
-BUILD_MANIFEST="$CONTENTS/Resources/aura-build.manifest"
+BUILD_MANIFEST="$CONTENTS/Resources/hirari-build.manifest"
 test -s "$BUILD_MANIFEST" || {
     echo "release bundle build manifest is missing or empty" >&2
     exit 1
@@ -78,7 +78,7 @@ hash_file() {
     # macOS, codesign embeds its signature in the Mach-O, so normalize only a
     # disposable copy before comparing the recorded build identity.
     if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
-        normalized=$(mktemp "${TMPDIR:-/tmp}/aura-hash.XXXXXX")
+        normalized=$(mktemp "${TMPDIR:-/tmp}/hirari-hash.XXXXXX")
         cp "$file" "$normalized"
         codesign --remove-signature "$normalized" >/dev/null 2>&1 || true
         cleanup_normalized=1
@@ -117,13 +117,13 @@ esac
     exit 1
 }
 
-if [ "${AURA_REQUIRE_ARCH:-0}" = "1" ] && [ -z "${AURA_EXPECTED_ARCH:-}" ]; then
-    echo "AURA_EXPECTED_ARCH is required when AURA_REQUIRE_ARCH=1" >&2
+if [ "${HIRARI_REQUIRE_ARCH:-0}" = "1" ] && [ -z "${HIRARI_EXPECTED_ARCH:-}" ]; then
+    echo "HIRARI_EXPECTED_ARCH is required when HIRARI_REQUIRE_ARCH=1" >&2
     exit 1
 fi
-if [ -n "${AURA_EXPECTED_ARCH:-}" ]; then
+if [ -n "${HIRARI_EXPECTED_ARCH:-}" ]; then
     if ! command -v lipo >/dev/null 2>&1; then
-        if [ "${AURA_REQUIRE_ARCH:-0}" = "1" ]; then
+        if [ "${HIRARI_REQUIRE_ARCH:-0}" = "1" ]; then
             echo "architecture verification requires lipo" >&2
             exit 1
         fi
@@ -133,7 +133,7 @@ if [ -n "${AURA_EXPECTED_ARCH:-}" ]; then
             binary="$1"
             label="$2"
             actual=$(lipo -archs "$binary")
-            if [ "${AURA_EXPECTED_ARCH}" = "universal2" ]; then
+            if [ "${HIRARI_EXPECTED_ARCH}" = "universal2" ]; then
                 case " $actual " in
                     *" arm64 "*) : ;;
                     *) echo "release bundle $label is not universal2: $actual" >&2; exit 1 ;;
@@ -144,8 +144,8 @@ if [ -n "${AURA_EXPECTED_ARCH:-}" ]; then
                 esac
             else
                 case " $actual " in
-                    *" ${AURA_EXPECTED_ARCH} "*) : ;;
-                    *) echo "release bundle $label lacks ${AURA_EXPECTED_ARCH}: ${actual}" >&2; exit 1 ;;
+                    *" ${HIRARI_EXPECTED_ARCH} "*) : ;;
+                    *) echo "release bundle $label lacks ${HIRARI_EXPECTED_ARCH}: ${actual}" >&2; exit 1 ;;
                 esac
             fi
         }
@@ -183,7 +183,7 @@ PY
 }
 
 executable=$(plist_value CFBundleExecutable)
-test "$executable" = "Aura DAW"
+test "$executable" = "Hirari DAW"
 test -x "$CONTENTS/MacOS/$executable"
 bundle_identifier=$(plist_value CFBundleIdentifier)
 test -n "$bundle_identifier"
@@ -198,11 +198,11 @@ if [ -n "$bundle_type" ] && [ "$bundle_type" != "APPL" ]; then
 fi
 
 # Debug-only smoke code must not be present in the production executable.
-if strings "$MAIN" | grep -q 'AURA_UI_SMOKE'; then
+if strings "$MAIN" | grep -q 'HIRARI_UI_SMOKE'; then
     echo "release bundle contains debug smoke entry point" >&2
     exit 1
 fi
-if strings "$WORKER" | grep -q 'AURA_UI_SMOKE'; then
+if strings "$WORKER" | grep -q 'HIRARI_UI_SMOKE'; then
     echo "release bundle worker contains debug smoke entry point" >&2
     exit 1
 fi
@@ -212,12 +212,12 @@ fi
 # sandbox handshake. Keep the fixture optional for release environments that
 # intentionally omit test assets.
 FIXTURE="$ROOT_DIR/build-tools/minimal-gain.clap"
-if [ "${AURA_REQUIRE_PLUGIN_SMOKE:-0}" = "1" ] && [ ! -f "$FIXTURE" ]; then
+if [ "${HIRARI_REQUIRE_PLUGIN_SMOKE:-0}" = "1" ] && [ ! -f "$FIXTURE" ]; then
     echo "required release plugin smoke fixture is missing: $FIXTURE" >&2
     exit 1
 fi
 if [ -f "$FIXTURE" ] && command -v cargo >/dev/null 2>&1; then
-    cargo test -p aura-core-bridge --test plugin_sandbox_workflow --no-run --quiet
+    cargo test -p hirari-core-bridge --test plugin_sandbox_workflow --no-run --quiet
     PLUGIN_TEST_BIN=$(find "$ROOT_DIR/target/debug/deps" -type f -perm -111 \
         -name 'plugin_sandbox_workflow-*' -print0 | xargs -0 ls -t 2>/dev/null | head -n 1)
     test -x "$PLUGIN_TEST_BIN"
@@ -233,15 +233,15 @@ if [ -f "$FIXTURE" ] && command -v cargo >/dev/null 2>&1; then
     passed=0
     attempt=1
     while [ "$attempt" -le 3 ]; do
-        if AURA_PLUGIN_HOST_BIN="$WORKER" \
-            AURA_CLAP_FIXTURE="$FIXTURE" \
-            AURA_PLUGIN_PATHS="$(dirname "$FIXTURE")" \
+        if HIRARI_PLUGIN_HOST_BIN="$WORKER" \
+            HIRARI_CLAP_FIXTURE="$FIXTURE" \
+            HIRARI_PLUGIN_PATHS="$(dirname "$FIXTURE")" \
             "$PLUGIN_TEST_BIN" minimal_clap_fixture_instantiates_in_the_isolated_worker \
                 --exact --ignored --test-threads=1 >/dev/null 2>&1; then
             passed=1
             if [ "$attempt" -gt 1 ]; then
                 echo "warning: packaged worker smoke passed on retry $attempt" >&2
-                if [ "${AURA_FAIL_ON_RETRY:-0}" = "1" ]; then
+                if [ "${HIRARI_FAIL_ON_RETRY:-0}" = "1" ]; then
                     echo "release smoke is flaky: retry success is not accepted in strict mode" >&2
                     exit 1
                 fi
@@ -257,45 +257,45 @@ if [ -f "$FIXTURE" ] && command -v cargo >/dev/null 2>&1; then
         repeated_mailbox_overruns_quarantine_then_recover_to_audio
     do
         run_packaged_plugin_test "$smoke_test" \
-            AURA_PLUGIN_HOST_BIN="$WORKER" \
-            AURA_CLAP_FIXTURE="$FIXTURE" \
-            AURA_PLUGIN_PATHS="$(dirname "$FIXTURE")" >/dev/null 2>&1
+            HIRARI_PLUGIN_HOST_BIN="$WORKER" \
+            HIRARI_CLAP_FIXTURE="$FIXTURE" \
+            HIRARI_PLUGIN_PATHS="$(dirname "$FIXTURE")" >/dev/null 2>&1
     done
 fi
 
 if command -v codesign >/dev/null 2>&1; then
     codesign --verify --deep --strict "$APP_DIR"
-elif [ "${AURA_REQUIRE_CODESIGN:-0}" = "1" ]; then
+elif [ "${HIRARI_REQUIRE_CODESIGN:-0}" = "1" ]; then
     echo "codesign is required but unavailable" >&2
     exit 1
 else
     echo "warning: codesign unavailable; signature verification skipped" >&2
 fi
 
-if [ "${AURA_REQUIRE_APP_SMOKE:-0}" = "1" ]; then
-    before_workers=$(pgrep -f '/aura-plugin-host-worker(-vst3)?([[:space:]]|$)' 2>/dev/null || true)
+if [ "${HIRARI_REQUIRE_APP_SMOKE:-0}" = "1" ]; then
+    before_workers=$(pgrep -f '/hirari-plugin-host-worker(-vst3)?([[:space:]]|$)' 2>/dev/null || true)
     if [ -d /dev/shm ]; then
-        before_shared_memory=$(find /dev/shm -maxdepth 1 -type f -name 'aura_plugin_*' -print 2>/dev/null | wc -l | tr -d ' ')
+        before_shared_memory=$(find /dev/shm -maxdepth 1 -type f -name 'hirari_plugin_*' -print 2>/dev/null | wc -l | tr -d ' ')
     elif command -v lsof >/dev/null 2>&1; then
-        before_shared_memory=$(lsof -n -c aura-plugin-host-worker 2>/dev/null | grep -c '/aura_plugin_' || true)
+        before_shared_memory=$(lsof -n -c hirari-plugin-host-worker 2>/dev/null | grep -c '/hirari_plugin_' || true)
     else
         before_shared_memory=0
     fi
-    perl -e '$ENV{AURA_HEADLESS}=1; alarm 30; my $program=shift @ARGV; exec {$program} $program, @ARGV' "$MAIN" >/tmp/aura-release-headless-smoke.$$.log 2>&1 || {
-        cat /tmp/aura-release-headless-smoke.$$.log >&2
-        rm -f /tmp/aura-release-headless-smoke.$$.log
+    perl -e '$ENV{HIRARI_HEADLESS}=1; alarm 30; my $program=shift @ARGV; exec {$program} $program, @ARGV' "$MAIN" >/tmp/hirari-release-headless-smoke.$$.log 2>&1 || {
+        cat /tmp/hirari-release-headless-smoke.$$.log >&2
+        rm -f /tmp/hirari-release-headless-smoke.$$.log
         exit 1
     }
-    grep -Eq '^AURA_HEADLESS_READY .*native_engine=ready .*bridge=ready .*project_layout=valid .*resources=ready .*audio_device_ready=(true|false) .*audio_driver=[^ ]+ ' /tmp/aura-release-headless-smoke.$$.log || {
-        cat /tmp/aura-release-headless-smoke.$$.log >&2
-        rm -f /tmp/aura-release-headless-smoke.$$.log
+    grep -Eq '^HIRARI_HEADLESS_READY .*native_engine=ready .*bridge=ready .*project_layout=valid .*resources=ready .*audio_device_ready=(true|false) .*audio_driver=[^ ]+ ' /tmp/hirari-release-headless-smoke.$$.log || {
+        cat /tmp/hirari-release-headless-smoke.$$.log >&2
+        rm -f /tmp/hirari-release-headless-smoke.$$.log
         echo "headless app did not report readiness" >&2
         exit 1
     }
-    if [ "${AURA_RELEASE_MODE:-0}" = "1" ]; then
-        grep -Eq '^AURA_HEADLESS_READY .*audio_device_ready=true .*audio_driver=(initialized|running) ' /tmp/aura-release-headless-smoke.$$.log || {
-            cat /tmp/aura-release-headless-smoke.$$.log >&2
-            rm -f /tmp/aura-release-headless-smoke.$$.log
+    if [ "${HIRARI_RELEASE_MODE:-0}" = "1" ]; then
+        grep -Eq '^HIRARI_HEADLESS_READY .*audio_device_ready=true .*audio_driver=(initialized|running) ' /tmp/hirari-release-headless-smoke.$$.log || {
+            cat /tmp/hirari-release-headless-smoke.$$.log >&2
+            rm -f /tmp/hirari-release-headless-smoke.$$.log
             echo "release headless app did not prove an active audio device" >&2
             exit 1
         }
@@ -303,16 +303,16 @@ if [ "${AURA_REQUIRE_APP_SMOKE:-0}" = "1" ]; then
     cleanup_attempt=1
     while [ "$cleanup_attempt" -le 10 ]; do
         leaked_worker=0
-        for pid in $(pgrep -f '/aura-plugin-host-worker(-vst3)?([[:space:]]|$)' 2>/dev/null || true); do
+        for pid in $(pgrep -f '/hirari-plugin-host-worker(-vst3)?([[:space:]]|$)' 2>/dev/null || true); do
             case " $before_workers " in
                 *" $pid "*) ;;
                 *) leaked_worker=1 ;;
             esac
         done
         if [ -d /dev/shm ]; then
-            after_shared_memory=$(find /dev/shm -maxdepth 1 -type f -name 'aura_plugin_*' -print 2>/dev/null | wc -l | tr -d ' ')
+            after_shared_memory=$(find /dev/shm -maxdepth 1 -type f -name 'hirari_plugin_*' -print 2>/dev/null | wc -l | tr -d ' ')
         elif command -v lsof >/dev/null 2>&1; then
-            after_shared_memory=$(lsof -n -c aura-plugin-host-worker 2>/dev/null | grep -c '/aura_plugin_' || true)
+            after_shared_memory=$(lsof -n -c hirari-plugin-host-worker 2>/dev/null | grep -c '/hirari_plugin_' || true)
         else
             after_shared_memory=0
         fi
@@ -328,6 +328,6 @@ if [ "${AURA_REQUIRE_APP_SMOKE:-0}" = "1" ]; then
         echo "headless app left shared-memory resources: before=$before_shared_memory after=$after_shared_memory" >&2
         exit 1
     fi
-    rm -f /tmp/aura-release-headless-smoke.$$.log
+    rm -f /tmp/hirari-release-headless-smoke.$$.log
 fi
 echo "release bundle verified: $APP_DIR"

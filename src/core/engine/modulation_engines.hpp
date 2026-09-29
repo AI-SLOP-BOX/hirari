@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class LFOEngine
@@ -102,4 +102,4 @@ private:
     double m_aCoeff, m_dCoeff, m_sLevel, m_rCoeff;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

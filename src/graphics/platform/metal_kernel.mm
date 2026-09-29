@@ -9,7 +9,7 @@
 #include <array>
 #include "../graphics_kernel.hpp"
 
-namespace Aura::Graphics::Platform {
+namespace Hirari::Graphics::Platform {
 
 struct Uniforms {
     simd_float4 pos;     // xy, zw

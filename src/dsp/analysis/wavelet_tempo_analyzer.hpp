@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <array>
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class WaveletTempoAnalyzer
@@ -53,9 +53,9 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis
 
-namespace Aura::Graphics::Shaders {
+namespace Hirari::Graphics::Shaders {
 
 /**
  * @namespace SDF
@@ -78,4 +78,4 @@ inline float sdBoxShadow(float px, float py, float bX, float bY, float sigma) {
 
 } // namespace SDF
 
-} // namespace Aura::Graphics::Shaders
+} // namespace Hirari::Graphics::Shaders

@@ -3,7 +3,7 @@
 #include <cmath>
 #include <atomic>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief BitcrusherClassic: Iconic Logic Pro-style lo-fi processor.
@@ -40,4 +40,4 @@ private:
     float m_lastSampleL = 0, m_lastSampleR = 0;
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

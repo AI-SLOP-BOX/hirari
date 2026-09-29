@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 struct MediaCatalogEntry {
     std::filesystem::path path;

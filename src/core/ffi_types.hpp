@@ -9,7 +9,7 @@
  * These types are shared between C++ and Rust without relying on generated headers.
  */
 
-namespace Aura::Core::FFI {
+namespace Hirari::Core::FFI {
 
 struct MixingAdvice {
     rust::String title;
@@ -48,4 +48,4 @@ struct AutomationPoint {
     float value;
 };
 
-} // namespace Aura::Core::FFI
+} // namespace Hirari::Core::FFI

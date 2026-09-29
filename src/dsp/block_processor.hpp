@@ -5,7 +5,7 @@
 #include <memory>
 #include "iprocessor.hpp"
 
-namespace Aura::DSP {
+namespace Hirari::DSP {
 
 /**
  * @brief BlockProcessor: Architecture for fixed-size DSP (FFT/STFT).
@@ -82,4 +82,4 @@ private:
     uint32_t m_writePos, m_readPos;
 };
 
-} // namespace Aura::DSP
+} // namespace Hirari::DSP

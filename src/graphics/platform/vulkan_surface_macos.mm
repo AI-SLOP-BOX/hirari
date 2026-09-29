@@ -4,8 +4,8 @@
 
 #include "vulkan_surface.hpp"
 
-#if defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
-namespace Aura::Graphics::Platform {
+#if defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
+namespace Hirari::Graphics::Platform {
 
 bool createVulkanSurfaceForNativeView(VkInstance instance, void* nativeView,
                                       VkSurfaceKHR* surface, std::string& error) {
@@ -41,5 +41,5 @@ bool createVulkanSurfaceForNativeView(VkInstance instance, void* nativeView,
     return true;
 }
 
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform
 #endif

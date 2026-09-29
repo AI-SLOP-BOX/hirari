@@ -8,7 +8,7 @@
 #include "../utils/pitch_shifter.hpp"
 #include "../../core/engine/scale_system.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @brief PitchCorrector: Professional 'Autotune-style' vocal processing.
@@ -91,4 +91,4 @@ private:
     float m_lpState = 0.0f;
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

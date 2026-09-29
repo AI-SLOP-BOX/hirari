@@ -15,12 +15,12 @@
 #include <spawn.h>
 extern char** environ;
 #endif
-#include "../../AuraUltimate.hpp"
-#include "../../scae/AuraAISuite.hpp"
+#include "../../HirariUltimate.hpp"
+#include "../../scae/HirariAISuite.hpp"
 #include "../../core/io/ffmpeg_engine.hpp"
 #include "../../io/persistence/wav_writer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class BounceEngine
@@ -70,8 +70,8 @@ public:
             static std::atomic<uint64_t> sequence{0};
             const auto id = sequence.fetch_add(1, std::memory_order_relaxed);
             const std::filesystem::path output(config.outputPath);
-            const auto stagingWav = output.string() + ".tmp-aura-encode-source-" + std::to_string(id) + ".wav";
-            const auto stagingEncoded = output.string() + ".tmp-aura-encoded-" + std::to_string(id);
+            const auto stagingWav = output.string() + ".tmp-hirari-encode-source-" + std::to_string(id) + ".wav";
+            const auto stagingEncoded = output.string() + ".tmp-hirari-encoded-" + std::to_string(id);
             BounceConfig wavConfig = config;
             wavConfig.outputPath = stagingWav;
             wavConfig.format = Format::WAV_32F;
@@ -84,7 +84,7 @@ public:
                 return rendered;
             }
             const char* codec = config.format == Format::MP3 ? "libmp3lame" : "flac";
-            if (!::Aura::Core::IO::FFmpegEngine::getInstance().exportToFormat(
+            if (!::Hirari::Core::IO::FFmpegEngine::getInstance().exportToFormat(
                     stagingWav, stagingEncoded, codec, config.cancellation)) {
                 std::filesystem::remove(stagingWav, cleanup);
                 std::filesystem::remove(stagingEncoded, cleanup);
@@ -101,7 +101,7 @@ public:
             return rendered;
         }
         // ★注意：この機能はオーディオスレッドとは別の「バックグラウンド・ワーカー・スレッド」で実行されます。
-        auto& engine = ::Aura::AuraEngine::getInstance();
+        auto& engine = ::Hirari::HirariEngine::getInstance();
 
         // The normal WAV/WAVE64 delivery path is streamed.  Keeping an entire
         // song in two vectors made a long bounce scale linearly with duration
@@ -124,22 +124,22 @@ public:
                 analysisR.reserve(analysisL.capacity());
             }
 
-            std::unique_ptr<::Aura::IO::Persistence::WavWriter::Pcm16StreamWriter> pcm16;
-            std::unique_ptr<::Aura::IO::Persistence::WavWriter::Pcm24StreamWriter> pcm24;
-            std::unique_ptr<::Aura::IO::Persistence::WavWriter::Float32StreamWriter> float32;
-            std::unique_ptr<::Aura::IO::Persistence::WavWriter::Wave64FloatStreamWriter> wave64;
+            std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter> pcm16;
+            std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter> pcm24;
+            std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Float32StreamWriter> float32;
+            std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Wave64FloatStreamWriter> wave64;
             if (config.format == Format::WAV_16) {
-                pcm16 = std::make_unique<::Aura::IO::Persistence::WavWriter::Pcm16StreamWriter>(
+                pcm16 = std::make_unique<::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter>(
                     config.outputPath, config.totalSamples, config.sampleRate, 2);
             } else if (config.format == Format::WAV_24) {
-                pcm24 = std::make_unique<::Aura::IO::Persistence::WavWriter::Pcm24StreamWriter>(
+                pcm24 = std::make_unique<::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter>(
                     config.outputPath, config.totalSamples, config.sampleRate, false, 2);
             } else {
                 if (config.format == Format::WAVE64_32F) {
-                    wave64 = std::make_unique<::Aura::IO::Persistence::WavWriter::Wave64FloatStreamWriter>(
+                    wave64 = std::make_unique<::Hirari::IO::Persistence::WavWriter::Wave64FloatStreamWriter>(
                         config.outputPath, config.totalSamples, config.sampleRate, 2);
                 } else {
-                float32 = std::make_unique<::Aura::IO::Persistence::WavWriter::Float32StreamWriter>(
+                float32 = std::make_unique<::Hirari::IO::Persistence::WavWriter::Float32StreamWriter>(
                     config.outputPath, config.sampleRate, 2);
                 }
             }
@@ -200,7 +200,7 @@ public:
 
             std::string advice;
             if (config.runAIMasteringReview && !analysisL.empty()) {
-                ::Aura::SCAE::Intelligence::SCAEAdvisor advisor(config.sampleRate);
+                ::Hirari::SCAE::Intelligence::SCAEAdvisor advisor(config.sampleRate);
                 advice = advisor.analyzeMaster(analysisL.data(), analysisR.data(), analysisL.size());
             }
             if (onProgress) onProgress(1.0f);
@@ -236,16 +236,16 @@ public:
         
         // フォーマットに応じた書き出し (ここではWAVを代表として処理)
         const bool writeSuccess = config.format == Format::WAVE64_32F
-            ? ::Aura::IO::Persistence::WavWriter::writeWave64(
+            ? ::Hirari::IO::Persistence::WavWriter::writeWave64(
                 config.outputPath, exportL.data(), exportR.data(), config.totalSamples, config.sampleRate)
-            : ::Aura::IO::Persistence::WavWriter::write(
+            : ::Hirari::IO::Persistence::WavWriter::write(
                 config.outputPath, exportL.data(), exportR.data(), config.totalSamples, config.sampleRate);
         if (!writeSuccess) return {false, 0.0, "", "Disk write failed."};
 
         // 【AI マスタリング・レビュー】
         std::string advice = "";
         if (config.runAIMasteringReview) {
-            ::Aura::SCAE::Intelligence::SCAEAdvisor advisor(config.sampleRate);
+            ::Hirari::SCAE::Intelligence::SCAEAdvisor advisor(config.sampleRate);
             advice = advisor.analyzeMaster(exportL.data(), exportR.data(), config.totalSamples);
         }
 
@@ -271,4 +271,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

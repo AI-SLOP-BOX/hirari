@@ -8,7 +8,7 @@
 #include <cstdint>
 #include "../../dsp/analysis/loudness_meter.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class SmartFileClassifier
@@ -115,4 +115,4 @@ private:
 };
 
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

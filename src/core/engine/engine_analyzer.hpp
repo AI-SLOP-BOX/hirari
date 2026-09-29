@@ -10,10 +10,10 @@
 #include <cstdio>
 #include <cmath>
 #include "track.hpp"
-#include "../../scae/AuraAISuite.hpp"
+#include "../../scae/HirariAISuite.hpp"
 #include "../../dsp/analysis/master_meter.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class EngineAnalyzer
@@ -46,7 +46,7 @@ public:
     template<typename Meter>
     void updateAdvice(const std::vector<Track*>& tracks, const Meter& meter) {
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::EngineAnalyzerOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::EngineAnalyzerOrchestrator.
         // Rust's high-precision diagnostic engine ensures that clash detection 
         // and headroom advice are technically superior and perfectly synchronized.
         // Rust's ClashDetectionEngine ensures bit-accurate masking identification.
@@ -110,4 +110,4 @@ private:
     // std::chrono::steady_clock::time_point m_lastUpdate;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

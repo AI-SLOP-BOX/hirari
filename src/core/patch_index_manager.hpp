@@ -10,7 +10,7 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @enum CategoryId
@@ -136,7 +136,7 @@ private:
         m_index.clear();
         
         // Example "Factory" patches
-        m_index.push_back({"Celestial Pad", "/factory/pads/celestial.fxp", "Aura Team", "aura_01", CategoryId::Pad, "Atmospheric", "MIT", true, true, 1});
+        m_index.push_back({"Celestial Pad", "/factory/pads/celestial.fxp", "Hirari Team", "hirari_01", CategoryId::Pad, "Atmospheric", "MIT", true, true, 1});
         m_index.push_back({"Turbo Lead", "/factory/leads/turbo.fxp", "Surge Devs", "surge_xt", CategoryId::Lead, "Sync", "GPL-3.0", false, true, 2});
         rebuildInvertedIndex();
     }
@@ -176,7 +176,7 @@ private:
 
     std::vector<PatchMetadata> m_index;
     std::unordered_map<std::string, std::vector<size_t>> m_invertedIndex;
-    std::string m_cachePath = "~/.aura_daw/patch_cache.bin";
+    std::string m_cachePath = "~/.hirari_daw/patch_cache.bin";
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

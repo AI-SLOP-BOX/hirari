@@ -7,7 +7,7 @@
 #include <algorithm>
 #include "param_tree.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @brief MixSnapshot: A complete state of the mixing console.
@@ -56,4 +56,4 @@ private:
     size_t m_activeSnapshot{static_cast<size_t>(-1)};
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

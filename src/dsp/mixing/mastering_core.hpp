@@ -5,7 +5,7 @@
 #include <numbers>
 #include "../analysis/analysis_engine.hpp"
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief MasteringCore: High-fidelity master output processor.
@@ -53,4 +53,4 @@ private:
     float m_releaseCoeff = 0.999f; // Dynamically calculated
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

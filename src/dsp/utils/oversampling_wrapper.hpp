@@ -4,7 +4,7 @@
 #include "../iprocessor.hpp"
 #include "../dsp/utils/oversampler.hpp"
 
-namespace Aura::Core::DSP {
+namespace Hirari::Core::DSP {
 
 /**
  * @class OversamplingWrapper
@@ -58,4 +58,4 @@ private:
     Utils::Oversampler2x m_oversampler;
 };
 
-} // namespace Aura::Core::DSP
+} // namespace Hirari::Core::DSP

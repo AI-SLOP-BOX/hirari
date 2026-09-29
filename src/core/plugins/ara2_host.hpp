@@ -10,7 +10,7 @@
 #include <functional>
 #include "../audio_region.hpp"
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 /**
  * @class ARA2Host
@@ -26,7 +26,7 @@ public:
         std::function<void(uint32_t, uint32_t)> cancelAnalysis;
         std::function<bool(uint32_t, uint32_t)> bindRegion;
         std::function<void(uint32_t, uint32_t)> unbindRegion;
-        std::function<bool(uint32_t, const ::aura::editing::AudioNoteSegment&)> setNoteSegment;
+        std::function<bool(uint32_t, const ::hirari::editing::AudioNoteSegment&)> setNoteSegment;
     };
     static ARA2Host& getInstance() { static ARA2Host i; return i; }
 
@@ -185,7 +185,7 @@ public:
         return it != m_analysisState.end() && it->second.ready;
     }
 
-    bool setNoteSegment(uint32_t regionId, ::aura::editing::AudioNoteSegment segment) {
+    bool setNoteSegment(uint32_t regionId, ::hirari::editing::AudioNoteSegment segment) {
         if (!segment.valid()) return false;
         std::shared_ptr<AudioRegion> region;
         {
@@ -195,7 +195,7 @@ public:
             region = it->second.lock();
         }
         if (!region || !region->upsertAudioNoteSegment(segment)) return false;
-        std::function<bool(uint32_t, const ::aura::editing::AudioNoteSegment&)> submit;
+        std::function<bool(uint32_t, const ::hirari::editing::AudioNoteSegment&)> submit;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             submit = m_externalProvider.setNoteSegment;
@@ -216,12 +216,12 @@ public:
         return true;
     }
 
-    std::vector<::aura::editing::AudioNoteSegment> noteSegments(uint32_t regionId) const {
+    std::vector<::hirari::editing::AudioNoteSegment> noteSegments(uint32_t regionId) const {
         std::lock_guard<std::mutex> lock(m_mutex);
         const auto it = m_syncedRegions.find(regionId);
         if (it == m_syncedRegions.end()) return {};
         const auto region = it->second.lock();
-        return region ? region->getAudioNoteSegmentsSnapshot() : std::vector<::aura::editing::AudioNoteSegment>{};
+        return region ? region->getAudioNoteSegmentsSnapshot() : std::vector<::hirari::editing::AudioNoteSegment>{};
     }
 
     /**
@@ -303,4 +303,4 @@ private:
     ExternalProvider m_externalProvider;
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

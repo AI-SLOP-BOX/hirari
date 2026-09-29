@@ -5,7 +5,7 @@
 #include <vector>
 #include <fstream>
 
-namespace Aura::Core::UI {
+namespace Hirari::Core::UI {
 struct PanelLayout { std::string id; int x=0,y=0,width=1,height=1; bool visible=true; };
 struct KeyBinding { std::string command, key; };
 class WorkspaceLayout {

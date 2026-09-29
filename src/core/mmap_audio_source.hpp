@@ -4,7 +4,7 @@
 #include "audio_region.hpp"
 #include "../io/mmap_audio_file.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class MMapAudioSource
@@ -36,9 +36,11 @@ public:
         return m_path;
     }
 
+    const void* rustHandle() const noexcept { return m_file->rustHandle(); }
+
 private:
     std::string m_path;
     std::shared_ptr<IO::MMapAudioFile> m_file;
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

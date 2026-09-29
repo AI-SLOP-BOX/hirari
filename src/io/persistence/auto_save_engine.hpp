@@ -13,7 +13,7 @@
 #include <optional>
 #include "async_serializer.hpp"
 
-namespace Aura::IO::Persistence {
+namespace Hirari::IO::Persistence {
 
 /**
  * @class AutoSaveEngine
@@ -140,7 +140,7 @@ private:
         // Wait on the autosave worker, not the audio/UI thread.  Clearing the
         // dirty flag before the atomic rename completes can silently lose the
         // latest edit when the disk is full or the destination is locked.
-        auto result = Aura::IO::Persistence::AsyncSerializer::getInstance()
+        auto result = Hirari::IO::Persistence::AsyncSerializer::getInstance()
                           .serializeAsync(autoSavePath, std::move(realData));
         return result.valid() && result.get();
     }
@@ -161,4 +161,4 @@ private:
     std::function<std::string()> m_snapshotProvider;
 };
 
-} // namespace Aura::IO::Persistence
+} // namespace Hirari::IO::Persistence

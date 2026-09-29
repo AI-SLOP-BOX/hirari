@@ -3,7 +3,7 @@
 ## 2026-09-04
 
 Manual Computer Use pass completed against the freshly rebuilt
-`packaging/Aura DAW.app` on macOS. The app launched with the Quick Start
+`packaging/Hirari DAW.app` on macOS. The app launched with the Quick Start
 surface, the Electronic template produced its five-track project, and the
 Piano Roll and Mixer views opened without leaving a blank canvas. The Help
 route opened Diagnostics and displayed the Slint `AboutSlint` attribution.
@@ -15,7 +15,7 @@ does not certify every audio device, plug-in vendor, or multi-hour session.
 ## 2026-08-29
 
 The manual UI pass was attempted against the freshly built
-`packaging/Aura DAW.app`, but the host Mac was locked and Computer Use could
+`packaging/Hirari DAW.app`, but the host Mac was locked and Computer Use could
 not unlock it. No UI assertion is marked as passed from that attempt.
 
 After unlocking the Mac, run the checklist in

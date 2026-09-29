@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <cmath>
 
-namespace Aura::Graphics::Text {
+namespace Hirari::Graphics::Text {
 
 /**
  * @struct MSDFGlyph
@@ -110,4 +110,4 @@ private:
     std::unordered_map<uint32_t, MSDFGlyph> m_atlas; 
 };
 
-} // namespace Aura::Graphics::Text
+} // namespace Hirari::Graphics::Text

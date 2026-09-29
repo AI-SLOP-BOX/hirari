@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class Node
@@ -82,4 +82,4 @@ private:
     std::map<uint32_t, std::shared_ptr<GraphNode>> m_nodes;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

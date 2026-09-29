@@ -7,7 +7,7 @@
 #include "../midi_buffer.hpp"
 #include "../../dsp/iprocessor.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class EffectChain
@@ -73,4 +73,4 @@ private:
     std::vector<std::shared_ptr<DSP::IProcessor>> m_processors;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

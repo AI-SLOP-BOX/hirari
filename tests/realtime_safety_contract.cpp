@@ -6,7 +6,7 @@
 #include "../src/platform/audio_device.hpp"
 
 int main() {
-    using namespace Aura::Core;
+    using namespace Hirari::Core;
 
     // Drain notifications left by other contract tests in the same process.
     StatusQueue::Message message{};
@@ -25,14 +25,14 @@ int main() {
     assert(!midi.overflowed());
 
     MidiBuffer emptyPayload;
-    Aura::Core::MidiEvent emptyEvent{};
+    Hirari::Core::MidiEvent emptyEvent{};
     emptyEvent.size = 0;
     assert(emptyPayload.tryAddEvent(emptyEvent));
     assert(emptyPayload.size() == 1);
     assert(emptyPayload.getEvents()[0].data[0] == 0);
 
-    Aura::Platform::SilentAudioDevice device;
-    Aura::Platform::AudioDevice::Config config;
+    Hirari::Platform::SilentAudioDevice device;
+    Hirari::Platform::AudioDevice::Config config;
     config.sampleRate = 48000.0;
     config.bufferSize = 128;
     assert(device.initialize(config, nullptr, nullptr));

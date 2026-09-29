@@ -20,7 +20,7 @@ bool VulkanGraphicsKernel::initialize(void* nativeWindowHandle) {
         return false;
     }
 
-#if !defined(AURA_ENABLE_VULKAN) || !AURA_ENABLE_VULKAN
+#if !defined(HIRARI_ENABLE_VULKAN) || !HIRARI_ENABLE_VULKAN
     (void)nativeWindowHandle;
     m_lastError = "Vulkan backend disabled at build time; use Metal or CPU fallback";
     return false;
@@ -40,9 +40,9 @@ bool VulkanGraphicsKernel::initialize(void* nativeWindowHandle) {
 
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Aura";
+    appInfo.pApplicationName = "Hirari";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "Aura Engine";
+    appInfo.pEngineName = "Hirari Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 4, 0);
     appInfo.apiVersion = requestedApiVersion;
 
@@ -127,7 +127,7 @@ bool VulkanGraphicsKernel::initialize(void* nativeWindowHandle) {
         cleanup();
         return false;
     }
-    auto& context = Aura::Rendering::Vulkan::VulkanContext::getInstance();
+    auto& context = Hirari::Rendering::Vulkan::VulkanContext::getInstance();
     if (!context.initialize(m_instance, m_surface) || !context.createSwapchain(1280, 800)) {
         m_lastError = context.lastError();
         cleanup();
@@ -148,7 +148,7 @@ bool VulkanGraphicsKernel::initialize(void* nativeWindowHandle) {
         cleanup();
         return false;
     }
-    auto& context = Aura::Rendering::Vulkan::VulkanContext::getInstance();
+    auto& context = Hirari::Rendering::Vulkan::VulkanContext::getInstance();
     if (!context.initialize(m_instance, m_surface) ||
         !context.createSwapchain(1280, 800)) {
         m_lastError = context.lastError();

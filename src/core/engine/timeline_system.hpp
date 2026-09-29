@@ -11,7 +11,7 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct TimelineMarker
@@ -70,7 +70,7 @@ public:
             return lhs.samplePos < rhs.samplePos;
         });
         // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Aura::Core::Bridge::TimelineOrchestrator.
+        // The implementation here is now a shim to Hirari::Core::Bridge::TimelineOrchestrator.
         // Rust's memory-safe collections ensure that project markers are perfectly
         // managed, forensics-ready, and perfectly secure.
         // Rust's ArrangementEngine ensures bit-accurate marker distribution.
@@ -301,4 +301,4 @@ private:
     mutable std::mutex m_trackMutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

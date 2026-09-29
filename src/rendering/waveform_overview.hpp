@@ -1,160 +1,124 @@
 #pragma once
-#include <vector>
-#include <memory>
+
+#include <chrono>
 #include <algorithm>
-#include <cmath>
-#include <mutex>
-#include <thread>
-#include <atomic>
-#include <limits>
-#include <exception>
+#include <cstdint>
+#include <memory>
 #include <string>
-#include <condition_variable>
+#include <vector>
 #include "../core/audio_region.hpp"
+#include "../core/rust_ffi.hpp"
 
-namespace Aura::Rendering {
+namespace Hirari::Rendering {
 
-/**
- * @class WaveformOverview
- * @brief Professional multi-resolution peak cache.
- * Fixed: Actually stores and returns peak data for GPU acceleration.
- */
 class WaveformOverview {
 public:
     struct Peak { float min = 0.0f; float max = 0.0f; };
-    struct LOD { uint32_t ratio; std::vector<float> minData; std::vector<float> maxData; };
+    struct LOD { uint32_t ratio = 0; std::vector<float> minData; std::vector<float> maxData; };
 
-    WaveformOverview(std::shared_ptr<::Aura::Core::IAudioSource> source) 
-        : m_source(source) {
-        if (m_source) {
-            generateAsync({64, 512, 4096}); 
-        }
-    }
-
-    ~WaveformOverview() {
-        m_stop.store(true, std::memory_order_release);
-        if (m_worker.joinable()) m_worker.join();
-    }
+    explicit WaveformOverview(std::shared_ptr<::Hirari::Core::IAudioSource> source)
+        : m_source(std::move(source)),
+          m_state(m_source ? hirari_waveform_overview_create(
+              m_source.get(), &sourceSampleCount, &sourceSample) : nullptr) {}
+    ~WaveformOverview() { hirari_waveform_overview_destroy(m_state); }
 
     WaveformOverview(const WaveformOverview&) = delete;
     WaveformOverview& operator=(const WaveformOverview&) = delete;
 
-    // Pointer access cannot be made safe across a lock release because the
-    // worker may publish another vector immediately afterwards. Keep these
-    // legacy symbols inert and require copyLOD()/copyBestLOD() for rendering.
     [[deprecated("Use copyLOD or copyBestLOD")]]
     const float* getMinData() const noexcept { return nullptr; }
     [[deprecated("Use copyLOD or copyBestLOD")]]
     const float* getMaxData() const noexcept { return nullptr; }
+
     size_t getNumPeaks() const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_lods.empty() ? 0 : m_lods.front().minData.size();
+        uint32_t ratio = 0;
+        size_t count = 0;
+        return hirari_waveform_overview_lod_info(m_state, 0, &ratio, &count) ? count : 0;
     }
 
     bool copyLOD(uint32_t ratio, LOD& destination) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        const auto it = std::find_if(m_lods.begin(), m_lods.end(),
-                                     [ratio](const LOD& lod) { return lod.ratio == ratio; });
-        if (it == m_lods.end()) return false;
-        destination = *it;
-        return true;
+        for (uint32_t i = 0; i < hirari_waveform_overview_lod_count(m_state); ++i) {
+            uint32_t candidateRatio = 0;
+            size_t count = 0;
+            if (hirari_waveform_overview_lod_info(m_state, i, &candidateRatio, &count) &&
+                candidateRatio == ratio) return copyLODAt(i, destination);
+        }
+        return false;
     }
 
     bool copyLODs(std::vector<LOD>& destination) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        destination = m_lods;
+        destination.clear();
+        const uint32_t count = hirari_waveform_overview_lod_count(m_state);
+        destination.reserve(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            LOD lod;
+            if (!copyLODAt(i, lod)) { destination.clear(); return false; }
+            destination.push_back(std::move(lod));
+        }
         return !destination.empty();
     }
 
     bool copyBestLOD(uint32_t pixels, LOD& destination) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_lods.empty()) return false;
-        const LOD* best = &m_lods.front();
-        uint64_t bestDistance = std::numeric_limits<uint64_t>::max();
-        for (const auto& lod : m_lods) {
+        std::vector<LOD> lods;
+        if (!copyLODs(lods)) return false;
+        const LOD* best = &lods.front();
+        uint64_t bestDistance = UINT64_MAX;
+        for (const auto& lod : lods) {
             const uint64_t points = lod.minData.size();
             const uint64_t distance = points > pixels ? points - pixels : pixels - points;
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = &lod;
-            }
+            if (distance < bestDistance) { bestDistance = distance; best = &lod; }
         }
         destination = *best;
         return true;
     }
 
-    bool failed() const noexcept { return m_failed.load(std::memory_order_acquire); }
+    bool failed() const noexcept { return hirari_waveform_overview_failed(m_state); }
     bool waitUntilReady(std::chrono::milliseconds timeout) const {
-        std::unique_lock<std::mutex> lock(m_readyMutex);
-        return m_ready.wait_for(lock, timeout, [this] {
-            std::lock_guard<std::mutex> cacheLock(m_mutex);
-            return m_failed.load(std::memory_order_acquire) ||
-                   m_lods.size() >= 3 || m_stop.load(std::memory_order_acquire);
-        }) && !m_failed.load(std::memory_order_acquire);
+        return hirari_waveform_overview_wait(
+            m_state, static_cast<uint64_t>(std::max<int64_t>(0, timeout.count())));
     }
     std::string lastError() const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_error;
+        const size_t size = hirari_waveform_overview_copy_error(m_state, nullptr, 0);
+        if (size == 0) return {};
+        std::vector<char> buffer(size + 1, '\0');
+        hirari_waveform_overview_copy_error(m_state,
+            reinterpret_cast<uint8_t*>(buffer.data()), buffer.size());
+        return buffer.data();
     }
 
 private:
-    void generateAsync(std::vector<uint32_t> ratios) {
-        m_worker = std::thread([this, ratios = std::move(ratios)]() {
-          try {
-            for (auto ratio : ratios) {
-                if (m_stop.load(std::memory_order_acquire)) return;
-                LOD lodLevel; lodLevel.ratio = ratio;
-                uint64_t totalS = m_source->getNumSamples();
-                const uint64_t pointCount = (totalS + ratio - 1) / ratio;
-                if (pointCount > std::numeric_limits<uint32_t>::max()) continue;
-                uint32_t numPoints = static_cast<uint32_t>(pointCount);
-                if (numPoints == 0) continue;
-                lodLevel.minData.resize(numPoints);
-                lodLevel.maxData.resize(numPoints);
-                
-                for (uint32_t i = 0; i < numPoints; ++i) {
-                    float minV = std::numeric_limits<float>::infinity();
-                    float maxV = -std::numeric_limits<float>::infinity();
-                    for (uint32_t s = 0; s < ratio && i * ratio + s < totalS; ++s) {
-                        float v = m_source->getSample(0, i * ratio + s);
-                        if (!std::isfinite(v)) continue;
-                        minV = std::min(minV, v); maxV = std::max(maxV, v);
-                    }
-                    if (!std::isfinite(minV)) minV = 0.0f;
-                    if (!std::isfinite(maxV)) maxV = 0.0f;
-                    lodLevel.minData[i] = minV;
-                    lodLevel.maxData[i] = maxV;
-                }
-                
-                if (m_stop.load(std::memory_order_acquire)) return;
-                std::lock_guard<std::mutex> lock(m_mutex);
-                m_lods.push_back(std::move(lodLevel));
-                m_ready.notify_all();
-            }
-          } catch (const std::exception& error) {
-              std::lock_guard<std::mutex> lock(m_mutex);
-              m_error = error.what();
-              m_failed.store(true, std::memory_order_release);
-              m_ready.notify_all();
-          } catch (...) {
-              std::lock_guard<std::mutex> lock(m_mutex);
-              m_error = "waveform overview generation failed";
-              m_failed.store(true, std::memory_order_release);
-              m_ready.notify_all();
-          }
-        });
+    static bool sourceSampleCount(void* opaque, uint64_t* destination) noexcept {
+        if (!destination) return false;
+        auto* source = static_cast<::Hirari::Core::IAudioSource*>(opaque);
+        if (!source) return false;
+        try { *destination = source->getNumSamples(); return true; }
+        catch (...) { return false; }
     }
 
-private:
-    std::shared_ptr<::Aura::Core::IAudioSource> m_source;
-    std::vector<LOD> m_lods;
-    mutable std::mutex m_mutex;
-    std::atomic<bool> m_stop{false};
-    std::atomic<bool> m_failed{false};
-    std::string m_error;
-    std::thread m_worker;
-    mutable std::condition_variable m_ready;
-    mutable std::mutex m_readyMutex;
+    static bool sourceSample(void* opaque, uint64_t index, float* destination) noexcept {
+        if (!destination) return false;
+        auto* source = static_cast<::Hirari::Core::IAudioSource*>(opaque);
+        if (!source) return false;
+        try { *destination = source->getSample(0, index); return true; }
+        catch (...) { return false; }
+    }
+
+    bool copyLODAt(uint32_t index, LOD& destination) const {
+        uint32_t ratio = 0;
+        size_t count = 0;
+        if (!hirari_waveform_overview_lod_info(m_state, index, &ratio, &count)) return false;
+        LOD result;
+        result.ratio = ratio;
+        result.minData.resize(count);
+        result.maxData.resize(count);
+        if (!hirari_waveform_overview_copy_lod(m_state, index,
+                result.minData.data(), result.maxData.data(), count)) return false;
+        destination = std::move(result);
+        return true;
+    }
+
+    std::shared_ptr<::Hirari::Core::IAudioSource> m_source;
+    void* m_state = nullptr;
 };
 
-} // namespace Aura::Rendering
+} // namespace Hirari::Rendering

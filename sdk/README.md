@@ -1,7 +1,7 @@
-# Aura Plugin SDK
+# Hirari Plugin SDK
 
-Aura plugins are loaded through the stable C++ interface in
-`src/external/aura_sdk.hpp`.  A plugin exports one C symbol:
+Hirari plugins are loaded through the stable C++ interface in
+`src/external/hirari_sdk.hpp`.  A plugin exports one C symbol:
 `createInstance()`.  The host owns the returned instance and calls
 `initialize`, `process`, and the parameter methods from the realtime-safe
 adapter.

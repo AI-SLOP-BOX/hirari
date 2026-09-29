@@ -6,7 +6,7 @@
 #include <complex>
 #include <algorithm>
 
-namespace Aura::DSP::Library {
+namespace Hirari::DSP::Library {
 
 /**
  * @class AdvancedAudioDSPDeep
@@ -65,4 +65,4 @@ public:
     // [Implementing 1000s of lines of convolution, phase-vocoder, and impulse response logic]
 };
 
-} // namespace Aura::DSP::Library
+} // namespace Hirari::DSP::Library

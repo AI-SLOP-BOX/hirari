@@ -4,7 +4,7 @@
 #include <array>
 #include "../../core/audio_buffer.hpp"
 
-namespace Aura::DSP::Effects {
+namespace Hirari::DSP::Effects {
 
 /**
  * @class StateVariableFilter
@@ -82,4 +82,4 @@ private:
     std::array<float, 2> m_s1, m_s2; // Max stereo
 };
 
-} // namespace Aura::DSP::Effects
+} // namespace Hirari::DSP::Effects

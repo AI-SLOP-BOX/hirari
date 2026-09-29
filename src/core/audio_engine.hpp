@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include "rust/cxx.h"
-#include "aura_unified_engine.hpp"
+#include "hirari_unified_engine.hpp"
 #include "plugins/native_editor_host.hpp"
 #include "dsp/vocal/psola_pitch_shifter.hpp"
 #include "dsp/analysis/spectral_processor.hpp"
@@ -21,26 +21,26 @@
 #include "driver/mac_audio_driver_host.hpp" // also provides the bounded input queue
 #if defined(__APPLE__)
 #include "driver/mac_midi_device_host.hpp"
-#elif defined(AURA_ENABLE_JACK)
+#elif defined(HIRARI_ENABLE_JACK)
 #include "external/jack_bridge_deep.hpp"
 #endif
 
-namespace Aura::Core::BridgeFFI {
+namespace Hirari::Core::BridgeFFI {
 
 #if defined(__APPLE__)
-using AudioDriverHost = ::Aura::Core::Driver::MacAudioDriverHost;
-#elif defined(AURA_ENABLE_JACK)
+using AudioDriverHost = ::Hirari::Core::Driver::MacAudioDriverHost;
+#elif defined(HIRARI_ENABLE_JACK)
 // JACK is opt-in at compile time.  When enabled, this adapter is the driver
 // owned by the same AudioEngine session as the macOS CoreAudio host; the JACK
-// realtime callback therefore enters the production AuraUnifiedEngine graph
+// realtime callback therefore enters the production HirariUnifiedEngine graph
 // instead of a parallel test-only graph.
 class JackAudioDriverHost final {
 public:
-    using ProcessCallback = ::Aura::Core::External::JackBridgeDeep::ProcessCallback;
+    using ProcessCallback = ::Hirari::Core::External::JackBridgeDeep::ProcessCallback;
 
     bool start() {
-        auto& jack = ::Aura::Core::External::JackBridgeDeep::getInstance();
-        if (!jack.tryInitialize("Aura")) {
+        auto& jack = ::Hirari::Core::External::JackBridgeDeep::getInstance();
+        if (!jack.tryInitialize("Hirari")) {
             m_status = "start-failed";
             m_error = jack.lastError();
             return false;
@@ -54,20 +54,22 @@ public:
 
     void stop() noexcept {
         m_running = false;
-        auto& jack = ::Aura::Core::External::JackBridgeDeep::getInstance();
+        auto& jack = ::Hirari::Core::External::JackBridgeDeep::getInstance();
         jack.setProcessCallback(nullptr, nullptr);
         jack.shutdown();
         m_status = "stopped";
     }
 
     bool is_running() const noexcept { return m_running &&
-        ::Aura::Core::External::JackBridgeDeep::getInstance().isRunning(); }
+        ::Hirari::Core::External::JackBridgeDeep::getInstance().isRunning(); }
     double sample_rate() const noexcept {
-        return ::Aura::Core::External::JackBridgeDeep::getInstance().sampleRate();
+        return ::Hirari::Core::External::JackBridgeDeep::getInstance().sampleRate();
     }
     uint32_t buffer_size() const noexcept {
-        return ::Aura::Core::External::JackBridgeDeep::getInstance().bufferSize();
+        return ::Hirari::Core::External::JackBridgeDeep::getInstance().bufferSize();
     }
+    uint32_t input_channel_count() const noexcept { return 0; }
+    uint32_t output_channel_count() const noexcept { return is_running() ? 2u : 0u; }
     bool isSilentFallback() const noexcept { return false; }
     void try_reconnect() { if (!is_running()) (void)start(); }
 
@@ -82,7 +84,7 @@ public:
         // restart; this avoids claiming a graph/device match that is false.
         stop();
         if (!start()) return false;
-        const auto& jack = ::Aura::Core::External::JackBridgeDeep::getInstance();
+        const auto& jack = ::Hirari::Core::External::JackBridgeDeep::getInstance();
         if (std::abs(jack.sampleRate() - sampleRate) > 0.5 ||
             jack.bufferSize() != bufferSize) {
             m_error = "JACK server rejected the requested sample rate or buffer size";
@@ -99,10 +101,12 @@ public:
     float output_peak() const noexcept { return m_outputPeak.load(std::memory_order_acquire); }
     uint64_t callback_count() const noexcept { return m_callbackCount.load(std::memory_order_acquire); }
     uint64_t dropped_input_blocks() const noexcept { return m_inputQueue.dropped_blocks(); }
+    void discard_pending_input_blocks() noexcept { m_inputQueue.discard_pending(); }
+    uint32_t input_channel_count() const noexcept { return 0; }
     bool poll_input_block(float* const* destination,
                           uint32_t destinationChannelCapacity,
                           uint32_t destinationFrameCapacity,
-                          ::Aura::Core::Driver::MacAudioInputBlockQueue::BlockInfo& info,
+                          ::Hirari::Core::Driver::MacAudioInputBlockQueue::BlockInfo& info,
                           uint64_t& droppedBlocks) noexcept {
         return m_inputQueue.poll(destination, destinationChannelCapacity,
                                  destinationFrameCapacity, info, droppedBlocks);
@@ -121,7 +125,7 @@ public:
         m_callback = callback;
         m_context = context;
         if (is_running()) {
-            ::Aura::Core::External::JackBridgeDeep::getInstance().setProcessCallback(callback, context);
+            ::Hirari::Core::External::JackBridgeDeep::getInstance().setProcessCallback(callback, context);
         }
     }
 
@@ -137,7 +141,7 @@ private:
     std::atomic<bool> m_running{false};
     std::atomic<uint64_t> m_callbackCount{0};
     std::atomic<float> m_outputPeak{0.0f};
-    ::Aura::Core::Driver::MacAudioInputBlockQueue m_inputQueue;
+    ::Hirari::Core::Driver::MacAudioInputBlockQueue m_inputQueue;
     std::string m_status = "stopped";
     std::string m_error;
 };
@@ -153,7 +157,9 @@ public:
     bool is_running() const noexcept { return false; }
     bool isSilentFallback() const noexcept { return true; }
     void try_reconnect() const noexcept { m_error = "native audio backend unavailable"; }
-    using ProcessCallback = void (*)(const float* const*, float* const*, uint32_t, void*) noexcept;
+    using ProcessCallback = void (*)(const float* const*, uint32_t,
+                                     float* const*, uint32_t, uint32_t,
+                                     void*) noexcept;
     void set_process_callback(ProcessCallback callback, void* context) noexcept {
         m_callback = callback;
         m_context = context;
@@ -165,10 +171,10 @@ public:
     bool dispatch_process_callback(float* left, float* right, uint32_t frames) const noexcept {
         if (!m_callback || !left || !right || frames == 0) return false;
         float* outputs[2] = {left, right};
-        m_callback(nullptr, outputs, frames, m_context);
+        m_callback(nullptr, 0, outputs, 2, frames, m_context);
         return true;
     }
-    using InputBlockInfo = ::Aura::Core::Driver::MacAudioInputBlockQueue::BlockInfo;
+    using InputBlockInfo = ::Hirari::Core::Driver::MacAudioInputBlockQueue::BlockInfo;
     bool poll_input_block(float* const*, uint32_t, uint32_t, InputBlockInfo&, uint64_t& dropped) noexcept {
         dropped = 0;
         return false;
@@ -177,6 +183,9 @@ public:
     float output_peak() const noexcept { return 0.0f; }
     uint64_t callback_count() const noexcept { return 0; }
     uint64_t dropped_input_blocks() const noexcept { return 0; }
+    void discard_pending_input_blocks() noexcept {}
+    uint32_t input_channel_count() const noexcept { return 0; }
+    uint32_t output_channel_count() const noexcept { return 0; }
     const char* last_error() const noexcept { return m_error.c_str(); }
     const char* status() const noexcept { return "unavailable"; }
 private:
@@ -196,11 +205,11 @@ struct BridgeScoreGlyph {
 
 /**
  * @class AudioEngine
- * @brief Industrial-grade Audio Engine wrapper for Aura Studio Pro.
+ * @brief Industrial-grade Audio Engine wrapper for Hirari Studio Pro.
  */
 class AudioEngine {
 #include "audio_engine_public_part_1.inc"
 #include "audio_engine_public_part_2.inc"
 #include "audio_engine_private.inc"
 
-} // namespace Aura::Core::BridgeFFI
+} // namespace Hirari::Core::BridgeFFI

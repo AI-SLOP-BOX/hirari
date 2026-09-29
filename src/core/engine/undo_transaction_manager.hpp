@@ -1,235 +1,148 @@
 #pragma once
-#include <deque>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
-#include <string>
 #include <memory>
-#include <vector>
+#include <string>
 #include <utility>
-#include <chrono>
 #include "../log_buffer.hpp"
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
-/**
- * @struct UndoAction
- * @brief Lambda-based Command Pattern for professional DAW undo/redo.
- */
-struct UndoAction {
-    std::string name;
-    std::function<void()> undo;
-    std::function<void()> redo;
-    uint64_t timestampMs = 0;
-};
-
-/**
- * @class UndoTransactionManager
- * @brief Non-blocking, deque-backed Undo/Redo history stack.
- *
- * Design improvements:
- * - std::deque instead of std::vector: O(1) front eviction (no shift copies).
- * - LogBuffer::post instead of std::cout: lock-free, non-blocking logging.
- * - kMaxHistoryDepth enforced via pop_front on deque (O(1) vs O(N) vector erase).
- */
+// Rust owns history, callback IDs, grouping, coalescing, eviction, and dispatch.
+// The native closures remain here because they mutate the C++ engine graph.
 class UndoTransactionManager {
 public:
     static constexpr size_t kMaxHistoryDepth = 128;
+
+    UndoTransactionManager() : m_rustState(hirari_undo_manager_create(kMaxHistoryDepth, 300)) {}
+    ~UndoTransactionManager() { hirari_undo_manager_destroy(m_rustState); }
+    UndoTransactionManager(const UndoTransactionManager&) = delete;
+    UndoTransactionManager& operator=(const UndoTransactionManager&) = delete;
 
     static UndoTransactionManager& getInstance() {
         static UndoTransactionManager instance;
         return instance;
     }
 
-    /**
-     * @brief Executes an action and pushes it onto the undo stack.
-     * UI/message thread only.
-     */
     void performAction(const std::string& name, std::function<void()> undo,
                        std::function<void()> redo) {
-        if (!redo || !undo) return;
-
-        const uint64_t now = timestamp();
-        redo();
-
-        if (m_transactionActive) {
-            // Transactions deliberately bypass knob coalescing: every command
-            // must remain available for an all-or-nothing rollback.
-            m_transactionActions.push_back({name, std::move(undo), std::move(redo), now});
+        if (!undo || !redo) return;
+        const auto [undoId, redoId] = storeCallbacks(std::move(undo), std::move(redo));
+        if (!undoId || !redoId) {
+            discard(undoId);
+            discard(redoId);
             return;
         }
-
-        // A knob drag emits many values, but users expect one undo step. Keep
-        // the original undo closure and replace only the redo closure while
-        // the same semantic action continues within the coalescing window.
-        if (!m_undoStack.empty()) {
-            auto& previous = m_undoStack.back();
-            if (previous.name == name && now >= previous.timestampMs &&
-                now - previous.timestampMs <= kCoalesceWindowMs) {
-                previous.redo = std::move(redo);
-                previous.timestampMs = now;
-                m_redoStack.clear();
-                return;
-            }
+        if (!hirari_undo_manager_invoke_native_callback(m_rustState, redoId)) {
+            discard(undoId);
+            discard(redoId);
+            return;
         }
-
-        m_undoStack.push_back({name, std::move(undo), std::move(redo), now});
-
-        // O(1) eviction via deque::pop_front
-        if (m_undoStack.size() > kMaxHistoryDepth) {
-            m_undoStack.pop_front();
+        if (!record(name, undoId, redoId, true)) {
+            discard(undoId);
+            discard(redoId);
+            return;
         }
-
-        // New action invalidates the redo stack
-        m_redoStack.clear();
-
-        Diagnostics::LogBuffer::post(0, 0xA001,
-            ("UNDO | PERFORMED | " + name).substr(0, Diagnostics::LogBuffer::kMaxLogLen - 1));
+        postActionLog("UNDO | PERFORMED | ", name);
     }
 
-    /**
-     * @brief Records an already-applied mutation without executing it again.
-     *
-     * Useful for operations that must publish their state while holding a
-     * different engine lock. Calling performAction() after such a mutation
-     * would execute redo a second time and duplicate the side effect.
-     */
     void recordAppliedAction(const std::string& name, std::function<void()> undo,
-                             std::function<void()> redo) {
-        if (!redo || !undo) return;
-        const uint64_t now = timestamp();
-        if (m_transactionActive) {
-            m_transactionActions.push_back({name, std::move(undo), std::move(redo), now});
+                             std::function<void()> redo, bool coalesce = false) {
+        if (!undo || !redo) return;
+        const auto [undoId, redoId] = storeCallbacks(std::move(undo), std::move(redo));
+        if (!undoId || !redoId || !record(name, undoId, redoId, coalesce)) {
+            discard(undoId);
+            discard(redoId);
             return;
         }
-        pushCompletedAction({name, std::move(undo), std::move(redo), now});
-        Diagnostics::LogBuffer::post(0, 0xA001,
-            ("UNDO | RECORDED | " + name).substr(0, Diagnostics::LogBuffer::kMaxLogLen - 1));
+        postActionLog("UNDO | RECORDED | ", name);
     }
 
     void beginTransaction(const std::string& name) {
-        if (m_transactionActive) {
-            abortTransaction();
-        }
-        m_transactionActive = true;
-        m_transactionName = name.empty() ? "transaction" : name;
-        m_transactionActions.clear();
+        if (transactionActive()) abortTransaction();
+        (void)hirari_undo_manager_begin_transaction(
+            m_rustState, reinterpret_cast<const uint8_t*>(name.data()), name.size());
     }
 
-    bool transactionActive() const { return m_transactionActive; }
-
-    bool endTransaction() {
-        if (!m_transactionActive) return false;
-        m_transactionActive = false;
-        if (m_transactionActions.empty()) {
-            m_transactionName.clear();
-            return true;
-        }
-
-        auto actions = std::make_shared<std::vector<UndoAction>>(
-            std::move(m_transactionActions));
-        const std::string name = std::move(m_transactionName);
-        const auto undo = [actions]() {
-            for (auto it = actions->rbegin(); it != actions->rend(); ++it) {
-                if (it->undo) it->undo();
-            }
-        };
-        const auto redo = [actions]() {
-            for (auto& action : *actions) {
-                if (action.redo) action.redo();
-            }
-        };
-        m_transactionActions.clear();
-        m_transactionName.clear();
-        pushCompletedAction({name, undo, redo, timestamp()});
-        return true;
+    bool transactionActive() const {
+        return hirari_undo_manager_transaction_active(m_rustState);
     }
 
-    bool abortTransaction() {
-        if (!m_transactionActive) return false;
-        for (auto it = m_transactionActions.rbegin();
-             it != m_transactionActions.rend(); ++it) {
-            if (it->undo) it->undo();
-        }
-        m_transactionActions.clear();
-        m_transactionName.clear();
-        m_transactionActive = false;
-        return true;
-    }
+    bool endTransaction() { return hirari_undo_manager_end_transaction(m_rustState); }
+    bool abortTransaction() { return hirari_undo_manager_abort_and_invoke(m_rustState); }
+    void undo() { applyHistory(false); }
+    void redo() { applyHistory(true); }
 
-    /**
-     * @brief Reverts the last action.
-     */
-    void undo() {
-        if (m_undoStack.empty()) {
-            Diagnostics::LogBuffer::post(1, 0xA001, "UNDO | STACK_EMPTY");
-            return;
-        }
+    void clear() { hirari_undo_manager_clear(m_rustState); }
 
-        UndoAction action = std::move(m_undoStack.back());
-        m_undoStack.pop_back();
-
-        action.undo();
-
-        Diagnostics::LogBuffer::post(0, 0xA001,
-            ("UNDO | UNDONE | " + action.name).substr(0, Diagnostics::LogBuffer::kMaxLogLen - 1));
-
-        m_redoStack.push_back(std::move(action));
-    }
-
-    /**
-     * @brief Restores the last undone action.
-     */
-    void redo() {
-        if (m_redoStack.empty()) {
-            Diagnostics::LogBuffer::post(1, 0xA001, "UNDO | REDO_STACK_EMPTY");
-            return;
-        }
-
-        UndoAction action = std::move(m_redoStack.back());
-        m_redoStack.pop_back();
-
-        action.redo();
-
-        Diagnostics::LogBuffer::post(0, 0xA001,
-            ("UNDO | REDONE | " + action.name).substr(0, Diagnostics::LogBuffer::kMaxLogLen - 1));
-
-        m_undoStack.push_back(std::move(action));
-    }
-
-    void clear() {
-        m_transactionActions.clear();
-        m_transactionName.clear();
-        m_transactionActive = false;
-        m_undoStack.clear();
-        m_redoStack.clear();
-    }
-
-    size_t getUndoCount() const { return m_undoStack.size(); }
-    size_t getRedoCount() const { return m_redoStack.size(); }
-
-public:
-    UndoTransactionManager() = default;
+    size_t getUndoCount() const { return hirari_undo_manager_undo_count(m_rustState); }
+    size_t getRedoCount() const { return hirari_undo_manager_redo_count(m_rustState); }
 
 private:
-
-    static uint64_t timestamp() {
-        const auto now = std::chrono::steady_clock::now().time_since_epoch();
-        return static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+    static void invokeNative(void* context) noexcept {
+        auto* callback = static_cast<std::function<void()>*>(context);
+        try { (*callback)(); } catch (...) { /* Never unwind across the Rust ABI. */ }
     }
 
-    static constexpr uint64_t kCoalesceWindowMs = 300;
-
-    void pushCompletedAction(UndoAction action) {
-        m_undoStack.push_back(std::move(action));
-        if (m_undoStack.size() > kMaxHistoryDepth) m_undoStack.pop_front();
-        m_redoStack.clear();
+    static void destroyNative(void* context) noexcept {
+        delete static_cast<std::function<void()>*>(context);
     }
 
-    std::deque<UndoAction> m_undoStack;
-    std::deque<UndoAction> m_redoStack;
-    std::vector<UndoAction> m_transactionActions;
-    std::string m_transactionName;
-    bool m_transactionActive = false;
+    uint64_t registerCallback(std::function<void()> callback) {
+        auto owned = std::make_unique<std::function<void()>>(std::move(callback));
+        const uint64_t id = hirari_undo_manager_register_native_callback(
+            m_rustState, owned.get(), &invokeNative, &destroyNative);
+        if (id) owned.release();
+        return id;
+    }
+
+    std::pair<uint64_t, uint64_t> storeCallbacks(
+        std::function<void()> undo, std::function<void()> redo) {
+        return {registerCallback(std::move(undo)), registerCallback(std::move(redo))};
+    }
+
+    void discard(uint64_t id) {
+        if (id) hirari_undo_manager_discard_native_callback(m_rustState, id);
+    }
+
+    bool record(const std::string& name, uint64_t undoId, uint64_t redoId, bool coalesce) {
+        return hirari_undo_manager_record(m_rustState,
+            reinterpret_cast<const uint8_t*>(name.data()), name.size(),
+            undoId, redoId, hirari_undo_manager_timestamp_ms(), coalesce);
+    }
+
+    void applyHistory(bool redoDirection) {
+        const std::string name = topName(redoDirection);
+        if (!hirari_undo_manager_apply_and_invoke(m_rustState, redoDirection)) {
+            Diagnostics::LogBuffer::post(1, 0xA001,
+                redoDirection ? "UNDO | REDO_STACK_EMPTY" : "UNDO | STACK_EMPTY");
+            return;
+        }
+        postActionLog(redoDirection ? "UNDO | REDONE | " : "UNDO | UNDONE | ", name);
+    }
+
+    std::string topName(bool redoDirection) const {
+        const size_t required = hirari_undo_manager_top_name(
+            m_rustState, redoDirection, nullptr, 0);
+        if (required == 0) return {};
+        std::string name(required, '\0');
+        const size_t count = hirari_undo_manager_top_name(
+            m_rustState, redoDirection, reinterpret_cast<uint8_t*>(name.data()), name.size());
+        name.resize(std::min(count, name.size()));
+        return name;
+    }
+
+    static void postActionLog(const char* prefix, const std::string& name) {
+        const std::string message = prefix + name;
+        Diagnostics::LogBuffer::post(0, 0xA001,
+            message.substr(0, Diagnostics::LogBuffer::kMaxLogLen - 1));
+    }
+
+    void* m_rustState = nullptr;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

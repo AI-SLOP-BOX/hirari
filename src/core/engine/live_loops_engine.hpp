@@ -4,7 +4,7 @@
 #include <memory>
 #include "midi_sequencer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 enum class QuantizationMode { None, Bar, Beat, Q1_16 };
 
@@ -129,4 +129,4 @@ private:
     Cell m_cells[kRows][kCols];
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

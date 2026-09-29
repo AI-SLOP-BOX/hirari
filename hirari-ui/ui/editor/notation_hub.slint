@@ -1,0 +1,169 @@
+import { Style } from "../style.slint";
+import { ZNote } from "../model/midi_model.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Button } from "std-widgets.slint";
+import { CommandActions } from "../actions/command_actions.slint";
+
+export component Z_NotationHub {
+    in property <[ZNote]> notes;
+    in property <int> track-id;
+    property <float> beat-pixels: 52.0;
+    property <int> selected-index: -1;
+    property <int> selected-pitch: 60;
+    property <float> selected-beat: 0.0;
+    property <float> selected-length: 1.0;
+    callback project-changed();
+    callback add-note(int, float, float, int);
+    callback select-note(int, float, int);
+    callback move-note(int, float, float, int, int);
+    callback resize-note(int, float, float, int);
+    callback note-edit-finished() -> bool;
+
+    Rectangle {
+        background: Style.surface-1;
+        border-width: 1.5px;
+        border-color: Style.border;
+        VerticalLayout {
+            spacing: 7px;
+            Rectangle {
+                height: 34px;
+                background: Style.surface-0;
+                HorizontalLayout {
+                    padding-left: 10px; padding-right: 8px; spacing: 6px;
+                    Text { text: "SCORE EDITOR"; font-size: Style.font-xs; font-weight: 700; color: Style.brand; vertical-alignment: center; }
+                    Text { text: notes.length + " notes · treble staff · MIDI-linked"; font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "− Pitch"; enabled: selected-index >= 0; clicked => {
+                        move-note(selected-pitch, selected-beat, 0.0, -1, selected-index);
+                        selected-pitch = Math.max(0, selected-pitch - 1);
+                        if (note-edit-finished()) { project-changed(); }
+                    } }
+                    Button { text: "+ Pitch"; enabled: selected-index >= 0; clicked => {
+                        move-note(selected-pitch, selected-beat, 0.0, 1, selected-index);
+                        selected-pitch = Math.min(127, selected-pitch + 1);
+                        if (note-edit-finished()) { project-changed(); }
+                    } }
+                    Button { text: "← Beat"; enabled: selected-index >= 0; clicked => {
+                        let delta = Math.max(-selected-beat, -0.25);
+                        move-note(selected-pitch, selected-beat, delta, 0, selected-index);
+                        selected-beat = selected-beat + delta;
+                        if (note-edit-finished()) { project-changed(); }
+                    } }
+                    Button { text: "Beat →"; enabled: selected-index >= 0; clicked => {
+                        move-note(selected-pitch, selected-beat, 0.25, 0, selected-index);
+                        selected-beat = selected-beat + 0.25;
+                        if (note-edit-finished()) { project-changed(); }
+                    } }
+                    Button { text: "− Length"; enabled: selected-index >= 0; clicked => {
+                        selected-length = Math.max(0.0625, selected-length - 0.25);
+                        resize-note(selected-pitch, selected-beat, selected-length, selected-index);
+                        if (note-edit-finished()) { project-changed(); }
+                    } }
+                    Button { text: "+ Length"; enabled: selected-index >= 0; clicked => {
+                        selected-length = Math.min(64.0, selected-length + 0.25);
+                        resize-note(selected-pitch, selected-beat, selected-length, selected-index);
+                        if (note-edit-finished()) { project-changed(); }
+                    } }
+                    Button { text: "Zoom −"; clicked => { beat-pixels = Math.max(24.0, beat-pixels - 8.0); } }
+                    Button { text: "Zoom +"; clicked => { beat-pixels = Math.min(120.0, beat-pixels + 8.0); } }
+                    Button { text: "Import XML"; clicked => { CommandActions.palette_exec("IMPORT MUSICXML"); } }
+                    Button { text: "Export XML"; clicked => { CommandActions.palette_exec("EXPORT MUSICXML"); } }
+                }
+            }
+            Text {
+                text: "Click a staff position to add a quarter note. Select a note, then use the score controls to change pitch, timing, or length.";
+                x: 10px; height: 20px; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center;
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                Rectangle {
+                    width: 15000px;
+                    height: 480px;
+                    background: #F7F5EF;
+                    border-width: 1px;
+                    border-color: #B9B4A7;
+
+                    // Five-line treble staff, bar guides and a fixed C-major
+                    // diatonic grid. MIDI notes remain the source of truth.
+                    for staff-line in 5 : Rectangle {
+                        x: 54px; y: 180px + staff-line * 10px;
+                        width: parent.width - 72px; height: 1px;
+                        background: #59564F;
+                    }
+                    for bar in 72 : Rectangle {
+                        x: 54px + bar * 4 * beat-pixels * 1px; y: 180px;
+                        width: 1px; height: 41px;
+                        background: #BBB7AD;
+                    }
+                    Text { text: "𝄞"; x: 10px; y: 174px; width: 34px; height: 60px; font-size: 44px; color: #292722; }
+                    Text { text: "4"; x: 40px; y: 183px; font-size: 13px; color: #292722; }
+                    Text { text: "4"; x: 40px; y: 200px; font-size: 13px; color: #292722; }
+                    TouchArea {
+                        x: 54px; y: 0px; width: parent.width - 72px; height: parent.height;
+                        clicked => {
+                            let staff_step = Math.round((220.0 - self.mouse_y / 1px) / 5.0);
+                            let octave = Math.floor(staff_step / 7.0);
+                            let degree = staff_step - octave * 7.0;
+                            let semitone = degree == 0 ? 0 : (degree == 1 ? 1 : (degree == 2 ? 3 : (degree == 3 ? 5 : (degree == 4 ? 7 : (degree == 5 ? 8 : 10)))));
+                            let pitch = Math.round(64 + octave * 12 + semitone).clamp(0, 127);
+                            let beat = Math.max(0.0, Math.round((self.mouse_x / (beat-pixels * 1px)) * 4.0) / 4.0);
+                            add-note(pitch, beat, 1.0, 100);
+                            project-changed();
+                        }
+                    }
+
+                    // Ledger lines follow notes outside the five-line staff.
+                    for note[index] in notes : Rectangle {
+                        property <int> pitch_class: Math.mod(note.pitch, 12);
+                        property <int> octave: Math.floor(note.pitch / 12) - 1;
+                        property <int> degree: pitch_class <= 1 ? 0 : (pitch_class <= 3 ? 1 : (pitch_class == 4 ? 2 : (pitch_class <= 6 ? 3 : (pitch_class <= 8 ? 4 : (pitch_class <= 10 ? 5 : 6)))));
+                        property <int> natural_semitone: degree == 0 ? 0 : (degree == 1 ? 2 : (degree == 2 ? 4 : (degree == 3 ? 5 : (degree == 4 ? 7 : (degree == 5 ? 9 : 11)))));
+                        property <int> natural_pitch: (octave + 1) * 12 + natural_semitone;
+                        property <int> staff_step: (octave - 4) * 7 + degree - 2;
+                        property <int> alteration: note.pitch - natural_pitch;
+                        property <length> head_y: 220px - staff_step * 5px;
+                        x: 54px + note.start_beat * beat-pixels * 1px - 10px;
+                        y: head_y - 8px;
+                        width: 28px; height: 22px;
+                        background: transparent;
+
+                        if (staff_step <= -2) : Rectangle { x: 3px; y: 230px - parent.y; width: 22px; height: 1px; background: #4C4943; }
+                        if (staff_step <= -4) : Rectangle { x: 3px; y: 240px - parent.y; width: 22px; height: 1px; background: #4C4943; }
+                        if (staff_step <= -6) : Rectangle { x: 3px; y: 250px - parent.y; width: 22px; height: 1px; background: #4C4943; }
+                        if (staff_step >= 10) : Rectangle { x: 3px; y: 170px - parent.y; width: 22px; height: 1px; background: #4C4943; }
+                        if (staff_step >= 12) : Rectangle { x: 3px; y: 160px - parent.y; width: 22px; height: 1px; background: #4C4943; }
+                        if (staff_step >= 14) : Rectangle { x: 3px; y: 150px - parent.y; width: 22px; height: 1px; background: #4C4943; }
+                        if (alteration != 0) : Text {
+                            x: 0px; y: 1px; width: 11px; height: 18px;
+                            text: alteration > 0 ? "♯" : "♭";
+                            font-size: 13px; color: #292722; horizontal-alignment: center;
+                        }
+                        Rectangle {
+                            x: 9px; y: 3.5px; width: 12px; height: 9px;
+                            border-radius: 5px;
+                            background: note.selected ? Style.brand : (note.length_beats >= 2.0 ? #F7F5EF : #292722);
+                            border-width: 1.5px;
+                            border-color: note.selected ? Style.brand : #292722;
+                        }
+                        if (note.length_beats < 4.0) : Rectangle {
+                            x: staff_step < 4 ? 20px : 8px;
+                            y: staff_step < 4 ? 7px - 29px : 7px;
+                            width: 1px; height: 30px; background: #292722;
+                        }
+                        TouchArea {
+                            x: 0px; y: 0px; width: 28px; height: 22px;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                selected-index = index;
+                                selected-pitch = note.pitch;
+                                selected-beat = note.start_beat;
+                                selected-length = note.length_beats;
+                                select-note(note.pitch, note.start_beat, index);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

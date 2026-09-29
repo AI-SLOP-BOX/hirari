@@ -5,7 +5,7 @@
 #include <string>
 #include <algorithm>
 
-namespace Aura::DSP::Spatial {
+namespace Hirari::DSP::Spatial {
 
 /**
  * @brief SurroundPanner: Professional High-End Spatialization.
@@ -105,4 +105,4 @@ private:
     Format m_format;
 };
 
-} // namespace Aura::DSP::Spatial
+} // namespace Hirari::DSP::Spatial

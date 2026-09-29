@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert Aura vocal note JSON into a classic OpenUtau UST candidate."""
+"""Convert Hirari vocal note JSON into a classic OpenUtau UST candidate."""
 
 import json
 import sys
@@ -17,8 +17,8 @@ def main() -> int:
     notes = sorted(vocal, key=lambda note: float(note["start_beat"]))
     voice_dir = Path(sys.argv[3]).expanduser() if len(sys.argv) == 4 else VOICE_DIR
     lines = [
-        "[#SETTING]", "Tempo=110", "ProjectName=Aura Candidate Teto",
-        f"VoiceDir={voice_dir}", "OutFile=aura_candidate_teto.wav", "Mode2=True",
+        "[#SETTING]", "Tempo=110", "ProjectName=Hirari Candidate Teto",
+        f"VoiceDir={voice_dir}", "OutFile=hirari_candidate_teto.wav", "Mode2=True",
         "[#VERSION]", "UST Version1.2",
     ]
     for index, note in enumerate(notes):

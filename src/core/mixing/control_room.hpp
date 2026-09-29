@@ -1,194 +1,155 @@
 #pragma once
 
 #include <algorithm>
-#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <atomic>
-#include <mutex>
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
+
+static_assert(sizeof(HirariControlRoomSpeakerSnapshot) == 140);
+static_assert(sizeof(HirariControlRoomCueSnapshot) == 24);
 
 class ControlRoom {
 public:
     struct SpeakerSet { std::string name; float gain = 1.0f; bool enabled = true; };
-    struct CueMix { uint32_t id = 0; float gain = 1.0f; bool enabled = true; };
+    struct CueMix {
+        uint32_t id = 0;
+        float gain = 1.0f;
+        bool enabled = true;
+        uint32_t busTrackId = 0;
+        uint32_t outputChannel = 0;
+        bool clickEnabled = false;
+    };
+    static constexpr uint32_t kMaxCueMixes = 32;
 
-    // A fresh engine must remain audible before the UI creates custom
-    // monitor sets.  The built-in Main output mirrors a conventional DAW's
-    // default Control Room monitor and avoids an accidental -inf output.
-    ControlRoom() {
-        m_speakers.push_back({"Main", 1.0f, true});
-        publishMonitorGain();
-    }
-    void resetForProject() {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        m_speakers.clear();
-        m_speakers.push_back({"Main", 1.0f, true});
-        m_cues.clear();
-        m_activeSpeaker = 0;
-        m_dim = false;
-        m_talkback = false;
-        m_talkbackGain = 1.0f;
-        m_rtTalkbackEnabled.store(false, std::memory_order_release);
-        m_rtTalkbackGain.store(1.0f, std::memory_order_release);
-        publishMonitorGain();
-    }
+    ControlRoom() : m_state(hirari_control_room_state_create()) {}
+    ~ControlRoom() { hirari_control_room_state_destroy(m_state); }
+    ControlRoom(const ControlRoom&) = delete;
+    ControlRoom& operator=(const ControlRoom&) = delete;
+    ControlRoom(ControlRoom&&) = delete;
+    ControlRoom& operator=(ControlRoom&&) = delete;
 
+    void resetForProject() { hirari_control_room_reset(m_state); }
     bool addSpeakerSet(std::string name, float gain = 1.0f) {
-        if (name.empty() || name.size() > 128 || name.find('\0') != std::string::npos ||
-            !std::isfinite(gain) || gain < 0.0f || gain > 4.0f) return false;
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        m_speakers.push_back({std::move(name), gain, true});
-        if (m_activeSpeaker >= m_speakers.size()) m_activeSpeaker = m_speakers.size() - 1;
-        publishMonitorGain();
-        return true;
+        return hirari_control_room_add_speaker(
+            m_state, reinterpret_cast<const uint8_t*>(name.data()), name.size(), gain);
     }
     bool selectSpeakerSet(std::size_t index) noexcept {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        if (index >= m_speakers.size()) return false;
-        m_activeSpeaker = index; publishMonitorGain(); return true;
+        return hirari_control_room_select_speaker(m_state, index);
     }
     bool removeSpeakerSet(std::size_t index) {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        if (index >= m_speakers.size() || m_speakers.size() <= 1) return false;
-        m_speakers.erase(m_speakers.begin() + static_cast<std::ptrdiff_t>(index));
-        if (m_activeSpeaker > index) --m_activeSpeaker;
-        else if (m_activeSpeaker >= m_speakers.size()) m_activeSpeaker = m_speakers.size() - 1;
-        publishMonitorGain();
-        return true;
+        return hirari_control_room_remove_speaker(m_state, index);
     }
     bool renameSpeakerSet(std::size_t index, std::string name) {
-        if (name.empty() || name.size() > 128 || name.find('\0') != std::string::npos) return false;
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        if (index >= m_speakers.size()) return false;
-        m_speakers[index].name = std::move(name);
-        return true;
+        return hirari_control_room_rename_speaker(
+            m_state, index, reinterpret_cast<const uint8_t*>(name.data()), name.size());
     }
     bool setSpeakerGain(std::size_t index, float gain) {
-        if (!std::isfinite(gain) || gain < 0.0f || gain > 4.0f) return false;
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        if (index >= m_speakers.size()) return false;
-        m_speakers[index].gain = gain;
-        publishMonitorGain();
-        return true;
+        return hirari_control_room_set_speaker_gain(m_state, index, gain);
     }
     bool setSpeakerEnabled(std::size_t index, bool enabled) {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        if (index >= m_speakers.size()) return false;
-        m_speakers[index].enabled = enabled;
-        publishMonitorGain();
-        return true;
+        return hirari_control_room_set_speaker_enabled(m_state, index, enabled);
     }
-    void setDim(bool enabled) noexcept { std::lock_guard<std::mutex> lock(m_stateMutex); m_dim = enabled; publishMonitorGain(); }
-    bool isDimmed() const noexcept { std::lock_guard<std::mutex> lock(m_stateMutex); return m_dim; }
+    void setDim(bool enabled) noexcept { hirari_control_room_set_dim(m_state, enabled); }
+    bool setDimReductionDb(float db) noexcept { return hirari_control_room_set_dim_db(m_state, db); }
+    float dimReductionDb() const noexcept { return hirari_control_room_dim_db(m_state); }
+    bool isDimmed() const noexcept { return hirari_control_room_is_dimmed(m_state); }
     void setTalkback(bool enabled, float gain = 1.0f) noexcept {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        m_talkback = enabled;
-        if (std::isfinite(gain)) m_talkbackGain = std::clamp(gain, 0.0f, 4.0f);
-        m_rtTalkbackEnabled.store(enabled, std::memory_order_release);
-        m_rtTalkbackGain.store(m_talkbackGain, std::memory_order_release);
+        hirari_control_room_set_talkback(m_state, enabled, gain);
     }
-    bool talkbackEnabled() const noexcept { return m_rtTalkbackEnabled.load(std::memory_order_acquire); }
-    float monitorGain() const noexcept {
-        return m_rtMonitorGain.load(std::memory_order_acquire);
+    bool talkbackEnabled() const noexcept { return hirari_control_room_talkback_enabled(m_state); }
+    bool setTalkbackInputChannel(uint32_t channel) noexcept {
+        return hirari_control_room_set_talkback_channel(m_state, channel);
     }
+    uint32_t talkbackInputChannel() const noexcept {
+        return hirari_control_room_talkback_channel(m_state);
+    }
+    float monitorGain() const noexcept { return hirari_control_room_monitor_gain(m_state); }
     void processMonitor(float* left, float* right, std::size_t frames) const noexcept {
-        if (!left || !right) return;
-        // The audio callback only reads this atomic; speaker-set vectors are
-        // control-plane state and may be edited concurrently by the UI.
-        const float gain = std::clamp(m_rtMonitorGain.load(std::memory_order_acquire), 0.0f, 4.0f);
-        for (std::size_t i = 0; i < frames; ++i) {
-            const float inL = std::isfinite(left[i]) ? left[i] : 0.0f;
-            const float inR = std::isfinite(right[i]) ? right[i] : 0.0f;
-            left[i] = std::clamp(inL * gain, -16.0f, 16.0f);
-            right[i] = std::clamp(inR * gain, -16.0f, 16.0f);
-        }
+        hirari_control_room_process_monitor_state(
+            m_state, left, right, nullptr, static_cast<uint32_t>(frames));
     }
-
-    // Optional talkback source is mixed only into the monitor path. The
-    // rendered master remains untouched, matching a dedicated control-room
-    // talkback circuit.
     void processMonitorWithTalkback(float* left, float* right, const float* talkback,
                                     std::size_t frames) const noexcept {
-        processMonitor(left, right, frames);
-        if (!left || !right || !talkback ||
-            !m_rtTalkbackEnabled.load(std::memory_order_acquire)) return;
-        const float gain = std::clamp(m_rtTalkbackGain.load(std::memory_order_acquire), 0.0f, 4.0f);
-        for (std::size_t i = 0; i < frames; ++i) {
-            const float sample = std::isfinite(talkback[i]) ? std::clamp(talkback[i], -16.0f, 16.0f) * gain : 0.0f;
-            left[i] = std::clamp((std::isfinite(left[i]) ? left[i] : 0.0f) + sample, -16.0f, 16.0f);
-            right[i] = std::clamp((std::isfinite(right[i]) ? right[i] : 0.0f) + sample, -16.0f, 16.0f);
-        }
+        hirari_control_room_process_monitor_state(
+            m_state, left, right, talkback, static_cast<uint32_t>(frames));
     }
     bool upsertCueMix(uint32_t id, float gain, bool enabled = true) {
-        if (id == 0 || !std::isfinite(gain) || gain < 0.0f || gain > 4.0f) return false;
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        for (auto& cue : m_cues) if (cue.id == id) { cue = {id, gain, enabled}; return true; }
-        m_cues.push_back({id, gain, enabled}); return true;
+        return hirari_control_room_upsert_cue(m_state, id, gain, enabled);
     }
-    bool removeCueMix(uint32_t id) {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        const auto before = m_cues.size();
-        m_cues.erase(std::remove_if(m_cues.begin(), m_cues.end(),
-                                    [id](const CueMix& cue) { return cue.id == id; }),
-                     m_cues.end());
-        return m_cues.size() != before;
-    }
+    bool removeCueMix(uint32_t id) { return hirari_control_room_remove_cue(m_state, id); }
     bool setCueMixEnabled(uint32_t id, bool enabled) {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        for (auto& cue : m_cues) if (cue.id == id) { cue.enabled = enabled; return true; }
-        return false;
+        return hirari_control_room_set_cue_enabled(m_state, id, enabled);
     }
-    float cueGain(uint32_t id) const noexcept {
-        // Cue reads are control-plane by design; callers that need RT audio
-        // should publish the selected gain into their own atomic snapshot.
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        for (const auto& cue : m_cues)
-            if (cue.id == id) return cue.enabled ? cue.gain : 0.0f;
-        return 0.0f;
+    bool setCueMixBusTrack(uint32_t id, uint32_t busTrackId) {
+        return hirari_control_room_set_cue_bus(m_state, id, busTrackId);
     }
-    bool validate() const noexcept {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        if (m_speakers.empty() || m_activeSpeaker >= m_speakers.size()) return false;
-        for (const auto& speaker : m_speakers)
-            if (speaker.name.empty() || speaker.name.size() > 128 ||
-                !std::isfinite(speaker.gain) || speaker.gain < 0.0f || speaker.gain > 4.0f)
-                return false;
-        for (const auto& cue : m_cues)
-            if (cue.id == 0 || !std::isfinite(cue.gain) || cue.gain < 0.0f || cue.gain > 4.0f)
-                return false;
-        return true;
+    bool setCueMixOutputChannel(uint32_t id, uint32_t outputChannel) {
+        return hirari_control_room_set_cue_output(m_state, id, outputChannel);
     }
-    const std::vector<SpeakerSet>& speakerSets() const noexcept { return m_speakers; }
-    std::vector<SpeakerSet> speakerSetsSnapshot() const { std::lock_guard<std::mutex> lock(m_stateMutex); return m_speakers; }
-    const std::vector<CueMix>& cueMixes() const noexcept { return m_cues; }
-    std::vector<CueMix> cueMixesSnapshot() const { std::lock_guard<std::mutex> lock(m_stateMutex); return m_cues; }
-    std::size_t activeSpeakerSet() const noexcept {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        return m_activeSpeaker;
+    bool setCueMixClickEnabled(uint32_t id, bool enabled) {
+        return hirari_control_room_set_cue_click(m_state, id, enabled);
     }
+    bool selectCueMix(uint32_t id) noexcept { return hirari_control_room_select_cue(m_state, id); }
+    uint32_t activeCueMixId() const noexcept { return hirari_control_room_active_cue_id(m_state); }
+    uint32_t activeCueMixBusTrackId() const noexcept { return hirari_control_room_active_cue_bus(m_state); }
+    uint32_t cueBusTrackId(uint32_t id) const noexcept { return hirari_control_room_cue_bus(m_state, id); }
+    float activeCueMixGain() const noexcept { return hirari_control_room_active_cue_gain(m_state); }
+    uint32_t activeCueMixOutputChannel() const noexcept { return hirari_control_room_active_cue_output(m_state); }
+    bool activeCueMixClickEnabled() const noexcept { return hirari_control_room_active_cue_click(m_state); }
+    bool isCueBus(uint32_t id) const noexcept { return hirari_control_room_is_cue_bus(m_state, id); }
+    float cueGain(uint32_t id) const noexcept { return hirari_control_room_cue_gain(m_state, id); }
+    bool validate() const noexcept { return hirari_control_room_validate(m_state); }
+
+    const std::vector<SpeakerSet>& speakerSets() const {
+        m_speakerSnapshot = loadSpeakerSnapshot();
+        return m_speakerSnapshot;
+    }
+    std::vector<SpeakerSet> speakerSetsSnapshot() const { return loadSpeakerSnapshot(); }
+    const std::vector<CueMix>& cueMixes() const {
+        m_cueSnapshot = loadCueSnapshot();
+        return m_cueSnapshot;
+    }
+    std::vector<CueMix> cueMixesSnapshot() const { return loadCueSnapshot(); }
+    std::size_t activeSpeakerSet() const noexcept { return hirari_control_room_active_speaker(m_state); }
 
 private:
-    void publishMonitorGain() noexcept {
-        float gain = 0.0f;
-        if (!m_speakers.empty() && m_activeSpeaker < m_speakers.size() &&
-            m_speakers[m_activeSpeaker].enabled) {
-            gain = m_speakers[m_activeSpeaker].gain * (m_dim ? 0.1f : 1.0f);
+    std::vector<SpeakerSet> loadSpeakerSnapshot() const {
+        const size_t count = hirari_control_room_speaker_snapshot(m_state, nullptr, 0);
+        std::vector<HirariControlRoomSpeakerSnapshot> raw(count);
+        if (count != 0) {
+            raw.resize(hirari_control_room_speaker_snapshot(m_state, raw.data(), raw.size()));
         }
-        m_rtMonitorGain.store(gain, std::memory_order_release);
+        std::vector<SpeakerSet> result;
+        result.reserve(raw.size());
+        for (const auto& item : raw) {
+            const auto length = std::min<std::size_t>(item.name_length, sizeof(item.name));
+            result.push_back({std::string(reinterpret_cast<const char*>(item.name), length),
+                              item.gain, item.enabled != 0});
+        }
+        return result;
     }
-    std::vector<SpeakerSet> m_speakers;
-    std::vector<CueMix> m_cues;
-    std::size_t m_activeSpeaker = 0;
-    float m_talkbackGain = 1.0f;
-    bool m_dim = false;
-    bool m_talkback = false;
-    std::atomic<float> m_rtMonitorGain{0.0f};
-    std::atomic<float> m_rtTalkbackGain{1.0f};
-    std::atomic<bool> m_rtTalkbackEnabled{false};
-    mutable std::mutex m_stateMutex;
+    std::vector<CueMix> loadCueSnapshot() const {
+        const size_t count = hirari_control_room_cue_snapshot(m_state, nullptr, 0);
+        std::vector<HirariControlRoomCueSnapshot> raw(count);
+        if (count != 0) {
+            raw.resize(hirari_control_room_cue_snapshot(m_state, raw.data(), raw.size()));
+        }
+        std::vector<CueMix> result;
+        result.reserve(raw.size());
+        for (const auto& item : raw) {
+            result.push_back({item.id, item.gain, item.enabled != 0, item.bus_track_id,
+                              item.output_channel, item.click_enabled != 0});
+        }
+        return result;
+    }
+
+    void* m_state = nullptr;
+    mutable std::vector<SpeakerSet> m_speakerSnapshot;
+    mutable std::vector<CueMix> m_cueSnapshot;
 };
 
-} // namespace Aura::Core::Mixing
+} // namespace Hirari::Core::Mixing

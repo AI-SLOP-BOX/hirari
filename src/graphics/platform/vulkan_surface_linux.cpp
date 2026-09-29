@@ -5,8 +5,8 @@
 
 #include "vulkan_surface.hpp"
 
-#if defined(__linux__) && defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN && defined(VK_USE_PLATFORM_XLIB_KHR)
-namespace Aura::Graphics::Platform {
+#if defined(__linux__) && defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN && defined(VK_USE_PLATFORM_XLIB_KHR)
+namespace Hirari::Graphics::Platform {
 
 bool createVulkanSurfaceForNativeView(VkInstance instance, void* nativeView,
                                       VkSurfaceKHR* surface, std::string& error) {
@@ -32,17 +32,17 @@ bool createVulkanSurfaceForNativeView(VkInstance instance, void* nativeView,
     return true;
 }
 
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform
 #else
 // Linux builds without X11 headers still provide a deterministic fallback so
 // the backend links cleanly. A future Wayland host can pass its own surface
 // through initializeWithSurface().
-#if defined(__linux__) && defined(AURA_ENABLE_VULKAN) && AURA_ENABLE_VULKAN
-namespace Aura::Graphics::Platform {
+#if defined(__linux__) && defined(HIRARI_ENABLE_VULKAN) && HIRARI_ENABLE_VULKAN
+namespace Hirari::Graphics::Platform {
 bool createVulkanSurfaceForNativeView(VkInstance, void*, VkSurfaceKHR*, std::string& error) {
     error = "Linux Vulkan native surface requires X11 or an explicit Wayland surface";
     return false;
 }
-} // namespace Aura::Graphics::Platform
+} // namespace Hirari::Graphics::Platform
 #endif
 #endif

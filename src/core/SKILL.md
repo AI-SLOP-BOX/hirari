@@ -1,4 +1,4 @@
-# 🏎️ SKILL: Aura Core Engine Architecture
+# 🏎️ SKILL: Hirari Core Engine Architecture
 
 ## 🤖 AI Role: Support Only (補助)
 **AIのエージェント化・自動化の禁止**: 本プロジェクトにおいてAIの役割は「補助の補助」であり、設計の最終決定権は常に人間にあります。AIが勝手に大規模な構造変更を行ったり、自律的にエージェントを構築することは許可されません。

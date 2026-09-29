@@ -6,7 +6,7 @@
 #include <memory>
 #include <map>
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @brief VirtuosoConductor: High-level polyphonic Note Dispatcher.
@@ -48,4 +48,4 @@ private:
     std::unique_ptr<SynthesisEngine> m_engine;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

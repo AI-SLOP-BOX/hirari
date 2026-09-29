@@ -6,12 +6,12 @@ set -euo pipefail
 # processBlock must be reviewed explicitly instead of silently entering the RT
 # path through a refactor.
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-callback_file="$root_dir/src/core/aura_unified_engine_part_1.inc"
+callback_file="$root_dir/src/core/hirari_unified_engine_part_1.inc"
 chain_file="$root_dir/src/core/effect_chain.hpp"
 sandbox_file="$root_dir/src/core/plugins/plugin_sandbox_host.hpp"
 
 callback_body="$(awk '
-  /void AuraUnifiedEngine::processBlock\(/ {inside=1}
+  /void HirariUnifiedEngine::processBlock\(/ {inside=1}
   inside {print}
   inside && /^    }$/ {exit}
 ' "$callback_file")"
@@ -23,7 +23,7 @@ if printf '%s\n' "$callback_body" | rg -n "$forbidden"; then
 fi
 
 direct_callback_body="$(awk '
-  /void AuraUnifiedEngine::processBlockDirect\(/ {inside=1}
+  /void HirariUnifiedEngine::processBlockDirect\(/ {inside=1}
   inside {print}
   inside && /^}$/ {exit}
 ' "$callback_file")"

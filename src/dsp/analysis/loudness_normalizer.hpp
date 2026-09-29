@@ -5,7 +5,7 @@
 #include <algorithm>
 #include "loudness_meter.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief LoudnessNormalizer: Professional Mastering Output normalization.
@@ -33,4 +33,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

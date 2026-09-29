@@ -1,316 +1,292 @@
     static ProjectState load(const std::string& path) {
         ProjectState state{};
-        std::ifstream input(path, std::ios::binary | std::ios::ate);
-        if (!input.is_open()) return state;
-        const auto fileSize = input.tellg();
-        if (fileSize < static_cast<std::streamoff>(sizeof(uint32_t) * 2u)) return {};
-        if (static_cast<uint64_t>(fileSize) > kMaxProjectBytes) return {};
-        input.seekg(0, std::ios::beg);
-        std::vector<uint8_t> bytes(static_cast<size_t>(fileSize));
-        input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        if (!input) return {};
-        if (bytes.size() < sizeof(uint32_t) * 2u) return {};
-        uint32_t magic = 0;
-        uint32_t version = 0;
-        std::memcpy(&magic, bytes.data(), sizeof(magic));
-        std::memcpy(&version, bytes.data() + sizeof(magic), sizeof(version));
-        if (magic != 0x41555241u || version == 0 || version > 36) return {};
-        size_t payloadSize = bytes.size();
-        if (version >= 27) {
-            if (bytes.size() < sizeof(uint32_t) * 3u) return {};
-            payloadSize -= sizeof(uint32_t);
-            uint32_t storedChecksum = 0;
-            std::memcpy(&storedChecksum, bytes.data() + payloadSize, sizeof(storedChecksum));
-            if (calculateCRC32(bytes.data(), payloadSize) != storedChecksum) return {};
-        }
-        std::string payload(reinterpret_cast<const char*>(bytes.data()), payloadSize);
-        std::istringstream file(payload, std::ios::binary | std::ios::in);
-        // Consume the header that was already inspected above; the existing
-        // parser expects the stream cursor immediately after magic/version.
-        (void)readLE<uint32_t>(file);
-        (void)readLE<uint32_t>(file);
-        state.version = version;
-        state.sampleRate = readLE<uint32_t>(file); state.bpm = readLE<double>(file);
-        if (version >= 14) {
-            state.rootNote = readLE<int32_t>(file);
-            state.scaleType = readLE<int32_t>(file);
-        }
-        if (!file || state.sampleRate == 0 || !std::isfinite(state.bpm) ||
-            state.bpm < 20.0 || state.bpm > 300.0 || state.rootNote < 0 ||
-            state.rootNote > 11 || state.scaleType < 0 || state.scaleType > 32) return {};
+        size_t byteCount = 0;
+        HirariNativeProjectHeader header{};
+        uint8_t* loadedBytes = hirari_load_project_payload(
+            path.data(), path.size(), &byteCount, &header);
+        if (!loadedBytes) return state;
+        struct LoadedBytesGuard {
+            uint8_t* data;
+            size_t size;
+            ~LoadedBytesGuard() { hirari_free_loaded_project_bytes(data, size); }
+        } loadedBytesGuard{loadedBytes, byteCount};
+        if (byteCount > kMaxProjectBytes || header.version == 0 || header.version > 42 ||
+            header.header_size > byteCount) return {};
+        state.version = header.version;
+        state.sampleRate = header.sample_rate;
+        state.bpm = header.bpm;
+        state.rootNote = header.root_note;
+        state.scaleType = header.scale_type;
+        const uint32_t version = header.version;
         size_t totalStringBytes = 0;
-        size_t totalPluginDataBytes = 0;
-        size_t totalPluginStateBytes = 0;
-        uint64_t totalAutomationPoints = 0;
-        uint64_t totalPluginStateEntries = 0;
         const auto addBudget = [](size_t& total, size_t amount, size_t limit) -> bool {
             if (amount > limit || total > limit - amount) return false;
             total += amount;
             return true;
         };
-        const auto addCount = [](uint64_t& total, uint64_t amount, uint64_t limit) -> bool {
-            if (amount > limit || total > limit - amount) return false;
-            total += amount;
-            return true;
-        };
-        auto readString = [&file, &totalStringBytes, &addBudget](std::string& out) -> bool {
-            uint32_t len = readLE<uint32_t>(file);
-            if (!file || len > 16u * 1024u * 1024u) return false;
-            if (!addBudget(totalStringBytes, len, kMaxStringBytes)) return false;
-            out.resize(len); file.read(out.data(), len); return static_cast<bool>(file);
-        };
-        uint32_t trackCount = readLE<uint32_t>(file);
-        if (!file || trackCount > 100000) return {};
-        state.tracks.resize(trackCount);
         std::unordered_set<uint32_t> trackIds;
-        for (auto& t : state.tracks) {
-            t.id = readLE<uint32_t>(file);
-            // Track zero is the native engine's first valid track ID. Older
-            // loads rejected it even though the template/bootstrap path
-            // legitimately serializes the first track as ID 0, making a
-            // freshly saved template impossible to reopen. Uniqueness and
-            // the reserved uint32 max sentinel are enforced by the hydrate
-            // layer; zero itself is valid.
-            if (!file || !trackIds.insert(t.id).second) return {};
-            if (version >= 12) t.type = readLE<uint32_t>(file);
-            t.volume = readLE<float>(file); t.pan = readLE<float>(file);
-            t.pan3d_x = readLE<float>(file); t.pan3d_y = readLE<float>(file); t.pan3d_z = readLE<float>(file);
-            if (version >= 12) {
-                t.muted = readLE<uint8_t>(file) != 0;
-                t.solo = readLE<uint8_t>(file) != 0;
-                if (version >= 15) t.phaseInvert = readLE<uint8_t>(file) != 0;
-                if (version >= 23) t.recordArmed = readLE<uint8_t>(file) != 0;
-                if (version >= 29) t.trackDelaySamples = readLE<uint32_t>(file);
+        state.tracks.reserve(header.track_count);
+        size_t trackSectionOffset = 0;
+        const auto consumeTrack = [](void* context, const HirariProjectTrackView* view) -> bool {
+            if (!context || !view) return false;
+            try {
+            auto& tracks = *static_cast<std::vector<TrackState>*>(context);
+            TrackState track{};
+            track.id = view->id;
+            track.type = view->track_type;
+            track.volume = view->volume;
+            track.pan = view->pan;
+            track.pan3d_x = view->pan3d_x;
+            track.pan3d_y = view->pan3d_y;
+            track.pan3d_z = view->pan3d_z;
+            track.muted = view->muted != 0;
+            track.solo = view->solo != 0;
+            track.phaseInvert = view->phase_invert != 0;
+            track.recordArmed = view->record_armed != 0;
+            track.trackDelaySamples = view->track_delay_samples;
+            if (view->plugin_name_size != 0) {
+                if (!view->plugin_name) return false;
+                track.pluginName.assign(reinterpret_cast<const char*>(view->plugin_name),
+                                         view->plugin_name_size);
             }
-            if (!file || !std::isfinite(t.volume) || t.volume < 0.0f || t.volume > 2.0f ||
-                !std::isfinite(t.pan) || t.pan < -1.0f || t.pan > 1.0f ||
-                !std::isfinite(t.pan3d_x) || !std::isfinite(t.pan3d_y) || !std::isfinite(t.pan3d_z) ||
-                t.trackDelaySamples > 8192 ||
-                (version >= 12 && t.type > 4)) return {};
-            if (!readString(t.pluginName)) return {};
-            uint32_t dataLen = readLE<uint32_t>(file);
-            if (!file || dataLen > 64u * 1024u * 1024u) return {};
-            if (!addBudget(totalPluginDataBytes, dataLen, kMaxPluginDataBytes)) return {};
-            t.pluginData.resize(dataLen);
-            if (dataLen) file.read(reinterpret_cast<char*>(t.pluginData.data()), dataLen);
-            if (!file) return {};
-            if (version >= 24) {
-                const uint32_t pluginStateCount = readLE<uint32_t>(file);
-                if (!file || pluginStateCount > 4096) return {};
-                if (!addCount(totalPluginStateEntries, pluginStateCount, kMaxPluginStateEntries)) return {};
-                t.pluginStates.resize(pluginStateCount);
-                for (auto& blob : t.pluginStates) {
-                    const uint32_t blobLen = readLE<uint32_t>(file);
-                    if (!file || blobLen > 16u * 1024u * 1024u) return {};
-                    if (!addBudget(totalPluginStateBytes, blobLen, kMaxPluginStateBytes)) return {};
-                    blob.resize(blobLen);
-                    if (blobLen) file.read(reinterpret_cast<char*>(blob.data()), blobLen);
-                    if (!file) return {};
+            const auto copyBytes = [](std::vector<uint8_t>& destination,
+                                      const uint8_t* source, size_t count) -> bool {
+                if (count == 0) { destination.clear(); return true; }
+                if (!source) return false;
+                destination.assign(source, source + count);
+                return true;
+            };
+            if (!copyBytes(track.pluginData, view->plugin_data, view->plugin_data_size) ||
+                !copyBytes(track.pluginBypass, view->plugin_bypass, view->plugin_bypass_count)) {
+                return false;
+            }
+            const auto copyBlobs = [&copyBytes](auto& destination,
+                                                const HirariProjectBlobView* source,
+                                                size_t count) -> bool {
+                if (count != 0 && !source) return false;
+                destination.reserve(count);
+                for (size_t index = 0; index < count; ++index) {
+                    std::vector<uint8_t> blob;
+                    if (!copyBytes(blob, source[index].data, source[index].size)) return false;
+                    destination.push_back(std::move(blob));
                 }
-                if (version >= 25) {
-                    const uint32_t bypassCount = readLE<uint32_t>(file);
-                    if (!file || bypassCount > 4096) return {};
-                    t.pluginBypass.resize(bypassCount);
-                    for (auto& bypassed : t.pluginBypass) {
-                        bypassed = readLE<uint8_t>(file);
-                        if (!file || bypassed > 1) return {};
+                return true;
+            };
+            if (!copyBlobs(track.pluginStates, view->plugin_states, view->plugin_state_count) ||
+                !copyBlobs(track.pluginGuiStates, view->plugin_gui_states,
+                           view->plugin_gui_state_count) ||
+                !copyBlobs(track.sandboxedPluginStates, view->sandboxed_plugin_states,
+                           view->sandboxed_plugin_state_count)) return false;
+            if (view->sandboxed_plugin_path_count != 0 && !view->sandboxed_plugin_paths) {
+                return false;
+            }
+            track.sandboxedPluginPaths.reserve(view->sandboxed_plugin_path_count);
+            for (size_t index = 0; index < view->sandboxed_plugin_path_count; ++index) {
+                const auto& path = view->sandboxed_plugin_paths[index];
+                if (path.size != 0 && !path.data) return false;
+                track.sandboxedPluginPaths.emplace_back(
+                    reinterpret_cast<const char*>(path.data), path.size);
+            }
+            const auto copyAutomation = [](auto& destination,
+                                           const HirariProjectAutomationPoint* source,
+                                           size_t count) -> bool {
+                if (count != 0 && !source) return false;
+                destination.reserve(count);
+                for (size_t index = 0; index < count; ++index) {
+                    destination.push_back({source[index].time, source[index].value,
+                                           source[index].curve});
+                }
+                return true;
+            };
+            if (!copyAutomation(track.volumeAutomation, view->volume_automation,
+                                view->volume_automation_count) ||
+                !copyAutomation(track.panAutomation, view->pan_automation,
+                                view->pan_automation_count) ||
+                !copyAutomation(track.trackDelayAutomation, view->track_delay_automation,
+                                view->track_delay_automation_count)) return false;
+            if (view->plugin_automation_count != 0 && !view->plugin_automation) return false;
+            track.pluginAutomation.reserve(view->plugin_automation_count);
+            for (size_t index = 0; index < view->plugin_automation_count; ++index) {
+                const auto& source = view->plugin_automation[index];
+                if (source.point_count != 0 && !source.points) return false;
+                PluginAutomationLane lane{};
+                lane.pluginIndex = source.plugin_index;
+                lane.parameterId = source.parameter_id;
+                if (!copyAutomation(lane.points, source.points, source.point_count)) return false;
+                track.pluginAutomation.push_back(std::move(lane));
+            }
+            tracks.push_back(std::move(track));
+            return true;
+            } catch (...) {
+                return false;
+            }
+        };
+        if (!hirari_project_decode_tracks(
+                loadedBytes, byteCount, header.header_size, header.version,
+                header.track_count, &state.tracks, consumeTrack,
+                &trackSectionOffset, &totalStringBytes) ||
+            trackSectionOffset > byteCount) return {};
+        for (const auto& track : state.tracks) {
+            if (!trackIds.insert(track.id).second) return {};
+        }
+        std::vector<uint32_t> trackIdList;
+        trackIdList.reserve(state.tracks.size());
+        for (const auto& track : state.tracks) trackIdList.push_back(track.id);
+        size_t regionSectionOffset = 0;
+        state.regions.reserve(1024);
+        const auto consumeRegion = [](void* context, const HirariProjectRegionView* view) -> bool {
+            if (!context || !view) return false;
+            try {
+                auto& regions = *static_cast<std::vector<RegionState>*>(context);
+                RegionState region{};
+                region.id = view->id;
+                region.trackId = view->track_id;
+                region.samplePosition = view->sample_position;
+                region.sampleLength = view->sample_length;
+                region.sourceLength = view->source_length;
+                region.sourceSampleRate = view->source_sample_rate;
+                region.sourceOffset = view->source_offset;
+                region.baseStart = view->base_start;
+                region.baseSourceOffset = view->base_source_offset;
+                region.baseLength = view->base_length;
+                region.isMuted = view->muted != 0;
+                if (view->file_path_size != 0) {
+                    if (!view->file_path) return false;
+                    region.filePath.assign(reinterpret_cast<const char*>(view->file_path),
+                                           view->file_path_size);
+                }
+                if (view->name_size != 0) {
+                    if (!view->name) return false;
+                    region.name.assign(reinterpret_cast<const char*>(view->name), view->name_size);
+                }
+                region.clipGain = view->clip_gain;
+                region.fadeInSamples = view->fade_in_samples;
+                region.fadeOutSamples = view->fade_out_samples;
+                region.reverse = view->reverse != 0;
+                region.warpRatio = view->warp_ratio;
+                region.pitchPreserveWarp = view->pitch_preserve_warp != 0;
+                region.pitchSemitones = view->pitch_semitones;
+                region.loopCount = view->loop_count;
+                region.locked = view->locked != 0;
+                region.syncGroup = view->sync_group;
+                if (view->range_edit_count != 0 && !view->range_edits) return false;
+                region.rangeEdits.reserve(view->range_edit_count);
+                for (size_t index = 0; index < view->range_edit_count; ++index) {
+                    const auto& source = view->range_edits[index];
+                    region.rangeEdits.push_back({source.start, source.end, source.gain,
+                                                 source.fade_in, source.fade_out});
+                }
+                if (view->processing_history_count != 0 && !view->processing_history) return false;
+                region.processingHistory.reserve(view->processing_history_count);
+                for (size_t index = 0; index < view->processing_history_count; ++index) {
+                    const auto& source = view->processing_history[index];
+                    if (source.operation_size != 0 && !source.operation) return false;
+                    ::hirari::editing::EventProcessingStep step{};
+                    step.id = source.id;
+                    step.parameter = source.parameter;
+                    step.enabled = source.enabled != 0;
+                    step.operation.assign(reinterpret_cast<const char*>(source.operation),
+                                          source.operation_size);
+                    region.processingHistory.push_back(std::move(step));
+                }
+                if (view->audio_note_segment_count != 0 && !view->audio_note_segments) {
+                    return false;
+                }
+                region.audioNoteSegments.reserve(view->audio_note_segment_count);
+                for (size_t index = 0; index < view->audio_note_segment_count; ++index) {
+                    const auto& source = view->audio_note_segments[index];
+                    if (source.anchor_count != 0 && !source.anchors) return false;
+                    ::hirari::editing::AudioNoteSegment segment{};
+                    segment.startSeconds = source.start_seconds;
+                    segment.endSeconds = source.end_seconds;
+                    segment.detectedPitchCents = source.detected_pitch_cents;
+                    segment.pitchOffsetCents = source.pitch_offset_cents;
+                    segment.formantOffsetCents = source.formant_offset_cents;
+                    segment.anchors.reserve(source.anchor_count);
+                    for (size_t anchorIndex = 0; anchorIndex < source.anchor_count; ++anchorIndex) {
+                        const auto& anchor = source.anchors[anchorIndex];
+                        segment.anchors.push_back({anchor.position_seconds, anchor.pitch_cents,
+                                                   anchor.formant_cents});
                     }
+                    region.audioNoteSegments.push_back(std::move(segment));
                 }
-                if (version >= 32) {
-                    const uint32_t guiCount = readLE<uint32_t>(file);
-                    if (!file || guiCount > 4096 || guiCount != pluginStateCount) return {};
-                    t.pluginGuiStates.resize(guiCount);
-                    for (auto& blob : t.pluginGuiStates) { const uint32_t len = readLE<uint32_t>(file); if (!file || len > 1024u * 1024u) return {}; blob.resize(len); if (len) file.read(reinterpret_cast<char*>(blob.data()), len); if (!file) return {}; }
+                if (view->warp_marker_count != 0 && !view->warp_markers) return false;
+                region.warpMarkers.reserve(view->warp_marker_count);
+                for (size_t index = 0; index < view->warp_marker_count; ++index) {
+                    const auto& source = view->warp_markers[index];
+                    region.warpMarkers.push_back(
+                        {source.source_sample, source.timeline_sample, source.transient != 0});
                 }
+                regions.push_back(std::move(region));
+                return true;
+            } catch (...) {
+                return false;
             }
-            if (version >= 16) {
-                const uint32_t sandboxCount = readLE<uint32_t>(file);
-                if (!file || sandboxCount > 4096) return {};
-                t.sandboxedPluginPaths.resize(sandboxCount);
-                for (auto& path : t.sandboxedPluginPaths) {
-                    if (!readString(path)) return {};
-                    if (path.empty() || path.size() > 16u * 1024u * 1024u) return {};
+        };
+        if (!hirari_project_decode_regions(
+                loadedBytes, byteCount, trackSectionOffset, version, state.sampleRate,
+                trackIdList.data(), trackIdList.size(), totalStringBytes, &state.regions,
+                consumeRegion, &regionSectionOffset) ||
+            regionSectionOffset > byteCount) return {};
+        size_t tailSectionOffset = 0;
+        const auto consumeTail = [](void* context, const HirariProjectTailView* view) -> bool {
+            if (!context || !view) return false;
+            try {
+                auto& project = *static_cast<ProjectState*>(context);
+                if ((view->sidechain_count && !view->sidechains) ||
+                    (view->route_count && !view->routes) ||
+                    (view->marker_count && !view->markers) ||
+                    (view->arranger_part_count && !view->arranger_parts) ||
+                    (view->tempo_event_count && !view->tempo_events)) return false;
+                project.sidechains.reserve(view->sidechain_count);
+                for (size_t i = 0; i < view->sidechain_count; ++i) {
+                    const auto& source = view->sidechains[i];
+                    project.sidechains.push_back({source.source_id, source.destination_id,
+                                                  source.plugin_index, source.tap_point});
                 }
-                if (version >= 17) {
-                    const uint32_t stateCount = readLE<uint32_t>(file);
-                    if (!file || stateCount > 4096 || stateCount != sandboxCount) return {};
-                    if (!addCount(totalPluginStateEntries, stateCount, kMaxPluginStateEntries)) return {};
-                    t.sandboxedPluginStates.resize(stateCount);
-                    for (auto& blob : t.sandboxedPluginStates) {
-                        const uint32_t blobLen = readLE<uint32_t>(file);
-                        if (!file || blobLen > 16u * 1024u * 1024u) return {};
-                        if (!addBudget(totalPluginStateBytes, blobLen, kMaxPluginStateBytes)) return {};
-                        blob.resize(blobLen);
-                        if (blobLen) file.read(reinterpret_cast<char*>(blob.data()), blobLen);
-                        if (!file) return {};
-                    }
+                project.routes.reserve(view->route_count);
+                for (size_t i = 0; i < view->route_count; ++i) {
+                    const auto& source = view->routes[i];
+                    project.routes.push_back({source.source_id, source.destination_id,
+                                              source.gain, source.send != 0,
+                                              source.pre_fader != 0});
                 }
-            }
-            if (version >= 13) {
-                const auto readAutomation = [&file, &totalAutomationPoints, &addCount, version](auto& points) -> bool {
-                    const uint32_t count = readLE<uint32_t>(file);
-                    if (!file || count > 100000) return false;
-                    if (!addCount(totalAutomationPoints, count, kMaxAutomationPoints)) return false;
-                    points.resize(count);
-                    for (auto& point : points) {
-                        point.time = readLE<double>(file);
-                        point.value = readLE<float>(file);
-                        point.curve = readLE<float>(file);
-                        if (!file || !std::isfinite(point.time) || point.time < 0.0 ||
-                            (version >= 30 && std::trunc(point.time) != point.time) ||
-                            !std::isfinite(point.value) || !std::isfinite(point.curve)) return false;
-                    }
-                    return true;
-                };
-                if (!readAutomation(t.volumeAutomation) || !readAutomation(t.panAutomation)) return {};
-                if (version >= 30 && !readAutomation(t.trackDelayAutomation)) return {};
-            }
-        }
-        uint32_t regionCount = readLE<uint32_t>(file);
-        if (!file || regionCount > 1000000) return {};
-        state.regions.resize(regionCount);
-        std::unordered_set<uint32_t> regionIds;
-        for (auto& r : state.regions) {
-            if (version >= 28) {
-                r.id = readLE<uint32_t>(file);
-                if (!file || r.id == 0 || !regionIds.insert(r.id).second) return {};
-            }
-            r.trackId = readLE<uint32_t>(file); r.samplePosition = readLE<uint64_t>(file); r.sampleLength = readLE<uint64_t>(file);
-            if (!file || !trackIds.contains(r.trackId)) return {};
-            if (version >= 19) {
-                r.sourceOffset = readLE<uint64_t>(file);
-                r.baseStart = readLE<uint64_t>(file);
-                r.baseSourceOffset = readLE<uint64_t>(file);
-                r.baseLength = readLE<uint64_t>(file);
-                if (!file || r.sourceOffset > std::numeric_limits<uint64_t>::max() - r.sampleLength ||
-                    r.baseSourceOffset > std::numeric_limits<uint64_t>::max() - r.baseLength) return {};
-            }
-            r.isMuted = readLE<uint8_t>(file) != 0;
-            if (!readString(r.filePath) || !readString(r.name)) return {};
-            if (r.filePath.empty() || r.sampleLength == 0 ||
-                r.samplePosition > std::numeric_limits<uint64_t>::max() - r.sampleLength) return {};
-            if (version >= 11) {
-                r.clipGain = readLE<float>(file);
-                r.fadeInSamples = readLE<uint64_t>(file);
-                r.fadeOutSamples = readLE<uint64_t>(file);
-                if (!file || !std::isfinite(r.clipGain) || r.clipGain < 0.0f || r.clipGain > 2.0f ||
-                    r.fadeInSamples > r.sampleLength || r.fadeOutSamples > r.sampleLength) return {};
-                if (version >= 18) {
-                    r.reverse = readLE<uint8_t>(file) != 0;
-                    if (!file) return {};
+                project.markers.reserve(view->marker_count);
+                for (size_t i = 0; i < view->marker_count; ++i) {
+                    const auto& source = view->markers[i];
+                    if (source.name_size && !source.name) return false;
+                    MarkerState marker{};
+                    marker.sample = source.sample;
+                    marker.color = source.color;
+                    marker.name.assign(reinterpret_cast<const char*>(source.name),
+                                       source.name_size);
+                    project.markers.push_back(std::move(marker));
                 }
-                if (version >= 20) {
-                    r.warpRatio = readLE<double>(file);
-                    if (!file || !std::isfinite(r.warpRatio) || r.warpRatio < 0.5 || r.warpRatio > 2.0) return {};
+                project.arrangerParts.reserve(view->arranger_part_count);
+                for (size_t i = 0; i < view->arranger_part_count; ++i) {
+                    const auto& source = view->arranger_parts[i];
+                    if (source.name_size && !source.name) return false;
+                    ArrangerPartState part{};
+                    part.start = source.start;
+                    part.length = source.length;
+                    part.repeats = source.repeats;
+                    part.name.assign(reinterpret_cast<const char*>(source.name),
+                                     source.name_size);
+                    project.arrangerParts.push_back(std::move(part));
                 }
-                if (version >= 21) {
-                    r.pitchSemitones = readLE<float>(file);
-                    if (!file || !std::isfinite(r.pitchSemitones) || r.pitchSemitones < -24.0f || r.pitchSemitones > 24.0f) return {};
+                project.tempoEvents.reserve(view->tempo_event_count);
+                for (size_t i = 0; i < view->tempo_event_count; ++i) {
+                    const auto& source = view->tempo_events[i];
+                    project.tempoEvents.push_back({source.sample, source.bpm, source.ramp});
                 }
-                if (version >= 22) {
-                    r.loopCount = readLE<uint32_t>(file);
-                    if (!file || r.loopCount == 0 || r.loopCount > 1024 ||
-                        r.sampleLength > std::numeric_limits<uint64_t>::max() / r.loopCount ||
-                        r.samplePosition > std::numeric_limits<uint64_t>::max() - r.sampleLength * r.loopCount) return {};
-                }
-                if (version >= 33) {
-                    const uint32_t segmentCount = readLE<uint32_t>(file);
-                    if (!file || segmentCount > 100000) return {};
-                    r.audioNoteSegments.resize(segmentCount);
-                    for (auto& segment : r.audioNoteSegments) {
-                        segment.startSeconds = readLE<double>(file); segment.endSeconds = readLE<double>(file);
-                        segment.detectedPitchCents = readLE<double>(file); segment.pitchOffsetCents = readLE<double>(file);
-                        segment.formantOffsetCents = readLE<double>(file);
-                        const uint32_t anchorCount = readLE<uint32_t>(file);
-                        if (!file || anchorCount > 10000 || !segment.valid()) return {};
-                        segment.anchors.resize(anchorCount);
-                        for (auto& anchor : segment.anchors) {
-                            anchor.positionSeconds = readLE<double>(file); anchor.pitchCents = readLE<double>(file); anchor.formantCents = readLE<double>(file);
-                            if (!file || !std::isfinite(anchor.positionSeconds) || !std::isfinite(anchor.pitchCents) || !std::isfinite(anchor.formantCents) ||
-                                anchor.positionSeconds < segment.startSeconds || anchor.positionSeconds > segment.endSeconds) return {};
-                        }
-                    }
-                }
-                if (version >= 35) { r.locked = readLE<uint8_t>(file) != 0; r.syncGroup = readLE<uint32_t>(file); if (!file) return {}; }
-                if (version >= 35) {
-                    const uint32_t count = readLE<uint32_t>(file); if (!file || count > 4096) return {};
-                    r.processingHistory.resize(count);
-                    for (auto& step : r.processingHistory) { step.id = readLE<uint32_t>(file); step.parameter = readLE<float>(file); step.enabled = readLE<uint8_t>(file) != 0; const uint32_t len = readLE<uint32_t>(file); if (!file || len > 256) return {}; step.operation.resize(len); if (len) file.read(step.operation.data(), len); if (!file || step.operation.empty()) return {}; }
-                }
-                if (version >= 36) {
-                    const uint32_t count = readLE<uint32_t>(file); if (!file || count > 4096) return {};
-                    r.rangeEdits.resize(count);
-                    for (auto& edit : r.rangeEdits) { edit.start = readLE<uint64_t>(file); edit.end = readLE<uint64_t>(file); edit.gain = readLE<float>(file); edit.fadeIn = readLE<uint64_t>(file); edit.fadeOut = readLE<uint64_t>(file); if (!file || edit.start >= edit.end || !std::isfinite(edit.gain) || edit.gain < 0.0f || edit.gain > 16.0f || edit.fadeIn > edit.end - edit.start || edit.fadeOut > edit.end - edit.start) return {}; }
-                }
+                return true;
+            } catch (...) {
+                return false;
             }
-        }
-        if (version >= 26) {
-            const uint32_t sidechainCount = readLE<uint32_t>(file);
-            if (!file || sidechainCount > 100000) return {};
-            state.sidechains.resize(sidechainCount);
-            std::unordered_set<uint64_t> sidechainDestinations;
-            for (auto& sidechain : state.sidechains) {
-                sidechain.sourceId = readLE<uint32_t>(file);
-                sidechain.destinationId = readLE<uint32_t>(file);
-                sidechain.pluginIndex = readLE<uint32_t>(file);
-                sidechain.tapPoint = readLE<uint32_t>(file);
-                const uint64_t destinationKey =
-                    (static_cast<uint64_t>(sidechain.destinationId) << 32) |
-                    static_cast<uint64_t>(sidechain.pluginIndex);
-                if (!file || sidechain.sourceId == sidechain.destinationId ||
-                    sidechain.tapPoint > 2 ||
-                    !sidechainDestinations.insert(destinationKey).second) return {};
-            }
-        }
-        if (version >= 31) {
-            const uint32_t routeCount = readLE<uint32_t>(file);
-            if (!file || routeCount > 100000) return {};
-            state.routes.resize(routeCount);
-            std::unordered_set<uint64_t> routeKeys;
-            for (auto& route : state.routes) {
-                route.sourceId = readLE<uint32_t>(file);
-                route.destinationId = readLE<uint32_t>(file);
-                route.gain = readLE<float>(file);
-                const uint64_t key = (static_cast<uint64_t>(route.sourceId) << 32) |
-                                     static_cast<uint64_t>(route.destinationId);
-                if (!file || route.sourceId == route.destinationId ||
-                    !std::isfinite(route.gain) || route.gain <= 0.0f || route.gain > 2.0f ||
-                    !routeKeys.insert(key).second) return {};
-            }
-        }
-        if (version >= 34) {
-            const uint32_t markerCount = readLE<uint32_t>(file);
-            if (!file || markerCount > 100000) return {};
-            state.markers.resize(markerCount);
-            std::unordered_set<uint64_t> markerPositions;
-            for (auto& marker : state.markers) {
-                marker.sample = readLE<uint64_t>(file); marker.color = readLE<uint32_t>(file);
-                const uint32_t len = readLE<uint32_t>(file);
-                if (!file || len > 1024 || !markerPositions.insert(marker.sample).second) return {};
-                marker.name.resize(len); if (len) file.read(marker.name.data(), len);
-                if (!file || marker.name.empty()) return {};
-            }
-            const uint32_t partCount = readLE<uint32_t>(file);
-            if (!file || partCount > 100000) return {};
-            state.arrangerParts.resize(partCount);
-            for (auto& part : state.arrangerParts) {
-                part.start = readLE<uint64_t>(file); part.length = readLE<uint64_t>(file); part.repeats = readLE<uint32_t>(file);
-                const uint32_t len = readLE<uint32_t>(file);
-                if (!file || part.length == 0 || part.repeats == 0 || len == 0 || len > 1024) return {};
-                part.name.resize(len); file.read(part.name.data(), len);
-                if (!file) return {};
-            }
-            const uint32_t tempoCount = readLE<uint32_t>(file);
-            if (!file || tempoCount > 100000) return {};
-            state.tempoEvents.resize(tempoCount);
-            uint64_t previousSample = 0;
-            for (auto& event : state.tempoEvents) {
-                event.sample = readLE<uint64_t>(file); event.bpm = readLE<double>(file); event.ramp = readLE<uint8_t>(file);
-                if (!file || !std::isfinite(event.bpm) || event.bpm < 20.0 || event.bpm > 300.0 || event.ramp > 1 || (event.sample < previousSample)) return {};
-                previousSample = event.sample;
-            }
-        }
-        if (!file || file.peek() != std::char_traits<char>::eof()) return {};
+        };
+        if (!hirari_project_decode_tail(loadedBytes, byteCount, regionSectionOffset,
+                                        version, &state, consumeTail, &tailSectionOffset) ||
+            tailSectionOffset != byteCount) return {};
         state.valid = true;
         return state;
     }

@@ -5,9 +5,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DIST = REPO_ROOT / "dist"
-INSTRUMENTAL = os.environ.get("AURA_TETO_INSTRUMENTAL", str(DIST / "aura_demo_song.wav"))
-VOCAL = os.environ.get("AURA_TETO_VOCAL", str(Path.home() / "Documents" / "aura_teto_vocal.wav"))
-OUT = os.environ.get("AURA_TETO_MIX", str(DIST / "aura_demo_song_teto.wav"))
+INSTRUMENTAL = os.environ.get("HIRARI_TETO_INSTRUMENTAL", str(DIST / "hirari_demo_song.wav"))
+VOCAL = os.environ.get("HIRARI_TETO_VOCAL", str(Path.home() / "Documents" / "hirari_teto_vocal.wav"))
+OUT = os.environ.get("HIRARI_TETO_MIX", str(DIST / "hirari_demo_song_teto.wav"))
 SR = 44100
 
 def read_mono(path):

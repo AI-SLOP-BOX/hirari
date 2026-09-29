@@ -6,7 +6,7 @@
 #include <mutex>
 #include "../audio_buffer.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @class ParallelBounceEngine
@@ -40,4 +40,4 @@ private:
     std::mutex m_mutex;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

@@ -4,7 +4,7 @@
 #include "../../dsp/iprocessor.hpp"
 #include "../plugins/plugin_host.hpp"
 
-namespace Aura::Core::PluginHost {
+namespace Hirari::Core::PluginHost {
 
 /**
  * @class ExternalPluginWrapper
@@ -22,12 +22,12 @@ public:
 
     ExternalPluginWrapper(Format fmt, const std::string& pluginPath)
         : m_path(pluginPath) {
-        const auto description = ::Aura::Core::Plugins::PluginDescription{
+        const auto description = ::Hirari::Core::Plugins::PluginDescription{
             pluginPath.empty() ? std::string{} : pluginPath,
             "Unknown",
             toPluginFormat(fmt),
             pluginPath};
-        m_processor = std::make_unique<::Aura::Core::Plugins::ExternalPluginProcessor>(description);
+        m_processor = std::make_unique<::Hirari::Core::Plugins::ExternalPluginProcessor>(description);
         if (!m_processor->load()) m_error = m_processor->lastError();
     }
 
@@ -69,20 +69,20 @@ public:
     const std::string& errorMessage() const noexcept { return m_error; }
 
 private:
-    static ::Aura::Core::Plugins::PluginFormat toPluginFormat(Format format) noexcept {
+    static ::Hirari::Core::Plugins::PluginFormat toPluginFormat(Format format) noexcept {
         switch (format) {
-            case Format::VST3: return ::Aura::Core::Plugins::PluginFormat::VST3;
-            case Format::AudioUnit: return ::Aura::Core::Plugins::PluginFormat::AU;
-            case Format::CLAP: return ::Aura::Core::Plugins::PluginFormat::CLAP;
-            case Format::LV2: return ::Aura::Core::Plugins::PluginFormat::Internal;
+            case Format::VST3: return ::Hirari::Core::Plugins::PluginFormat::VST3;
+            case Format::AudioUnit: return ::Hirari::Core::Plugins::PluginFormat::AU;
+            case Format::CLAP: return ::Hirari::Core::Plugins::PluginFormat::CLAP;
+            case Format::LV2: return ::Hirari::Core::Plugins::PluginFormat::Internal;
         }
-        return ::Aura::Core::Plugins::PluginFormat::Internal;
+        return ::Hirari::Core::Plugins::PluginFormat::Internal;
     }
 
     std::string m_path;
-    std::unique_ptr<::Aura::Core::Plugins::ExternalPluginProcessor> m_processor;
+    std::unique_ptr<::Hirari::Core::Plugins::ExternalPluginProcessor> m_processor;
     std::string m_error;
     uint32_t m_reportedLatency = 0; // プラグインから通知されたレイテンシー
 };
 
-} // namespace Aura::Core::PluginHost
+} // namespace Hirari::Core::PluginHost

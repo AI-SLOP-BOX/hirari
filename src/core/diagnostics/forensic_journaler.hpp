@@ -6,11 +6,11 @@
 #include <vector>
 #include "../utils/ring_buffer.hpp"
 
-namespace Aura::Core::Diagnostics {
+namespace Hirari::Core::Diagnostics {
 
 /**
  * @class ForensicJournaler
- * @brief Industrial-grade session transaction logger for Aura DAW.
+ * @brief Industrial-grade session transaction logger for Hirari DAW.
  * INDUSTRIAL: Records every engine command to a binary journal in real-time to ensure zero data loss.
  * This singleton runs a dedicated background thread for high-priority disk I/O.
  */
@@ -113,4 +113,4 @@ private:
     std::atomic<uint64_t> m_wakeSequence{0};
 };
 
-} // namespace Aura::Core::Diagnostics
+} // namespace Hirari::Core::Diagnostics

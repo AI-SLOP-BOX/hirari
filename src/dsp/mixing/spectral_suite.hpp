@@ -4,7 +4,7 @@
 #include <cmath>
 #include <numbers>
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief SpectralSuite: Unified Filtering and EQ (Logic Pro-style).
@@ -62,4 +62,4 @@ private:
     float m_z1[2] = {0, 0};
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

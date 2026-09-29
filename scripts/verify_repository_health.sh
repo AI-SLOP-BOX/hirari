@@ -28,7 +28,7 @@ check_source_directory_tracked() {
     fi
 }
 
-printf '%s\n' '== Aura repository health =='
+printf '%s\n' '== Hirari repository health =='
 check_file Cargo.toml
 check_file Cargo.lock
 check_file rust-toolchain.toml
@@ -37,14 +37,14 @@ check_file INSTALL.md
 check_file CONTRIBUTING.md
 check_file SECURITY.md
 check_file CODE_OF_CONDUCT.md
-check_file aura-core-bridge/Cargo.toml
-check_file aura-core-bridge/src/lib.rs
-check_file aura-core-bridge/src/bin/aura.rs
-check_file aura-ui/Cargo.toml
-check_file aura-ui/src/main.rs
+check_file hirari-core-bridge/Cargo.toml
+check_file hirari-core-bridge/src/lib.rs
+check_file hirari-core-bridge/src/bin/hirari.rs
+check_file hirari-ui/Cargo.toml
+check_file hirari-ui/src/main.rs
 check_file src/core/audio_engine.hpp
-check_source_directory_tracked aura-core-bridge
-check_source_directory_tracked aura-ui
+check_source_directory_tracked hirari-core-bridge
+check_source_directory_tracked hirari-ui
 check_file scripts/build_app.sh
 check_file scripts/build_plugin_worker.sh
 check_file scripts/verify_release_bundle.sh
@@ -56,17 +56,17 @@ else
     printf '%s\n' 'CMake entrypoint: absent (Cargo is the active build path)'
 fi
 
-if [ -e "Aura DAW.app" ]; then
+if [ -e "Hirari DAW.app" ]; then
     printf '%s\n' 'Root app bundle: present'
 else
-    printf '%s\n' 'Root app bundle: absent (packaging/Aura DAW.app is checked instead)'
+    printf '%s\n' 'Root app bundle: absent (packaging/Hirari DAW.app is checked instead)'
 fi
 
-if [ -x packaging/"Aura DAW.app"/Contents/MacOS/Aura\ DAW ]; then
+if [ -x packaging/"Hirari DAW.app"/Contents/MacOS/Hirari\ DAW ]; then
     printf '%s\n' 'Release executable: present'
 else
     printf '%s\n' 'Release executable: absent (run scripts/build_app.sh to create it)'
-    if [ "${AURA_REQUIRE_RELEASE_BUNDLE:-0}" = "1" ]; then
+    if [ "${HIRARI_REQUIRE_RELEASE_BUNDLE:-0}" = "1" ]; then
         failures=$((failures + 1))
     fi
 fi

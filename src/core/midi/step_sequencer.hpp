@@ -4,7 +4,7 @@
 #include <random>
 #include <memory>
 
-namespace Aura::Core::Midi {
+namespace Hirari::Core::Midi {
 
 /**
  * @struct Step
@@ -65,4 +65,4 @@ private:
     std::mt19937 m_rng;
 };
 
-} // namespace Aura::Core::Midi
+} // namespace Hirari::Core::Midi

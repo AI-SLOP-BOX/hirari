@@ -1,11 +1,11 @@
 #!/bin/sh
 set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-CLI_BIN=${AURA_CLI_BIN:-$ROOT_DIR/target/debug/aura}
-cargo build -q -p aura-core-bridge --bin aura
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aura-cli-e2e.XXXXXX")
+CLI_BIN=${HIRARI_CLI_BIN:-$ROOT_DIR/target/debug/hirari}
+cargo build -q -p hirari-core-bridge --bin hirari
+TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/hirari-cli-e2e.XXXXXX")
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
-PROJECT="$TMP_DIR/Song.aura"
+PROJECT="$TMP_DIR/Song.hirari"
 "$CLI_BIN" project init "$PROJECT" "CLI E2E" 48000 >"$TMP_DIR/init.json"
 "$CLI_BIN" track add "$PROJECT" "E2E Vocal" Audio >"$TMP_DIR/track.json"
 TRACK_ID=$(python3 - "$TMP_DIR/track.json" <<'PY'

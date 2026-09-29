@@ -5,7 +5,7 @@
 #include <atomic>
 #include <mutex>
 
-namespace Aura::Core::External {
+namespace Hirari::Core::External {
 
 /**
  * @class ASIOBridgeDeep
@@ -33,7 +33,7 @@ public:
      * @brief CALLBACK: The high-priority hardware buffer request.
      */
     static void bufferSwitch(long doubleIndex, bool /*directProcess*/) {
-        // [Industrial Render: Mapping the Aura Audio Engine to the ASIO hardware buffer]
+        // [Industrial Render: Mapping the Hirari Audio Engine to the ASIO hardware buffer]
         // [Applying sample rate conversion and bit-depth dithering if needed]
     }
 
@@ -48,4 +48,4 @@ private:
     std::atomic<double> m_sampleRate{44100.0};
 };
 
-} // namespace Aura::Core::External
+} // namespace Hirari::Core::External

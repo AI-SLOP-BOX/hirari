@@ -5,10 +5,12 @@
 #include <string>
 #include <memory>
 #include <atomic>
+#include <array>
 #include <mutex>
 #include "../audio_buffer.hpp"
+#include "../rust_ffi.hpp"
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct LoudnessMetrics
@@ -30,9 +32,11 @@ struct LoudnessMetrics {
 class MasteringOrchestrator {
 public:
     MasteringOrchestrator() 
-        : m_hasTargetProfile(false) 
-        , m_cachedGains(8, 1.0f) {
+        : m_hasTargetProfile(false), m_cachedGains{1,1,1,1,1,1,1,1},
+          m_rustProcessor(hirari_mastering_processor_create()) {
+        m_metrics = {-24.0f, -24.0f, -24.0f, 0.0f, -1.0f};
     }
+    ~MasteringOrchestrator() { hirari_mastering_processor_free(m_rustProcessor); }
 
     void process(AudioBuffer& buffer);
     LoudnessMetrics getMetrics() const { return m_metrics; }
@@ -60,12 +64,8 @@ private:
     mutable std::mutex m_mutex;
 
     // Pre-allocated cache to ensure RT-safety and avoid mutex blockages
-    std::vector<float> m_cachedGains;
-
-    // Overlap-Add persistent buffers to prevent edge click distortions
-    std::vector<std::vector<float>> m_inputFifo;
-    std::vector<std::vector<float>> m_outputFifo;
-    std::vector<std::vector<float>> m_outputAccum;
+    std::array<float, 8> m_cachedGains;
+    void* m_rustProcessor;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

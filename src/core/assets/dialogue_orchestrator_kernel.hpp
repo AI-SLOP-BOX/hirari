@@ -3,7 +3,7 @@
 #include <string>
 #include <map>
 
-namespace Aura::Core::Assets {
+namespace Hirari::Core::Assets {
 
 /**
  * @struct DialogueState
@@ -41,4 +41,4 @@ private:
     DialogueOrchestratorKernel() = default;
 };
 
-} // namespace Aura::Core::Assets
+} // namespace Hirari::Core::Assets

@@ -1,4 +1,4 @@
-# Aura DAW Ultimate - Professional Git Hygiene
+# Hirari DAW Ultimate - Professional Git Hygiene
 # HONEST FIX: Privacy Guard (Ignores local paths and build artifacts)
 
 # Build system
@@ -17,7 +17,7 @@ Makefile
 # Rust (Cargo)
 target/
 **/*.rs.bk
-# Aura ships applications, so Cargo.lock is intentionally versioned to keep
+# Hirari ships applications, so Cargo.lock is intentionally versioned to keep
 # developer, CI, and release dependency resolution reproducible.
 
 # OS-specific
@@ -36,8 +36,8 @@ Temporary Items
 *.swo
 
 # Project artifacts
-AuraIcon.iconset/
-AuraUltimate.app/
+HirariIcon.iconset/
+HirariUltimate.app/
 dist/
 packaging/
 build-tools/
@@ -51,9 +51,9 @@ target/
 *_build_output.txt
 /app_output*.txt
 /build_log*.txt
-/aura-core-bridge/build*.txt
-/aura-ui/*build*.txt
-/aura-ui/*errors*.txt
+/hirari-core-bridge/build*.txt
+/hirari-ui/*build*.txt
+/hirari-ui/*errors*.txt
 
 # Local applications, plugins, voicebanks and rendered audio
 *.app/
@@ -80,6 +80,6 @@ artifacts/
 release-metadata/
 
 # Optional local vendor checkouts.  These are fetched for development or
-# contract tests and must not become part of the Aura source distribution.
+# contract tests and must not become part of the Hirari source distribution.
 third_party/
 third_party_synths/

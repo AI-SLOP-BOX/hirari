@@ -2,7 +2,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace Aura::DSP::Synthesis {
+namespace Hirari::DSP::Synthesis {
 
 /**
  * @class LFO
@@ -60,4 +60,4 @@ private:
     float m_sampleRate;
 };
 
-} // namespace Aura::DSP::Synthesis
+} // namespace Hirari::DSP::Synthesis

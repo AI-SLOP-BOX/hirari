@@ -8,7 +8,7 @@
 #include <cmath>
 #include "spectrum_analyzer.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @brief AI_IQ_Equalizer: Intelligent spectral balance advisor.
@@ -81,4 +81,4 @@ private:
     std::map<uint32_t, std::array<float, 31>> m_profiles;
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

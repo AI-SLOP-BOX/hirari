@@ -5,7 +5,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace Aura::Core::Plugins {
+namespace Hirari::Core::Plugins {
 
 // Platform UI code (Cocoa/Win32/Wayland/Qt/etc.) binds these callbacks at
 // application startup.  The audio core only owns lifecycle and never touches
@@ -99,4 +99,4 @@ private:
     std::unordered_map<uint64_t, uint64_t> m_sessions;
 };
 
-} // namespace Aura::Core::Plugins
+} // namespace Hirari::Core::Plugins

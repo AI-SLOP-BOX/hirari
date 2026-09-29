@@ -30,7 +30,7 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 if ! command -v rustup >/dev/null 2>&1; then
-    if [ "${AURA_AUTO_INSTALL_RUST:-0}" = "1" ]; then
+    if [ "${HIRARI_AUTO_INSTALL_RUST:-0}" = "1" ]; then
         if ! command -v curl >/dev/null 2>&1; then
             echo "error: curl is required for automatic Rust installation" >&2
             exit 1
@@ -43,7 +43,7 @@ if ! command -v rustup >/dev/null 2>&1; then
         export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
     else
         echo "error: rustup is required; install it from https://rustup.rs" >&2
-        echo "      or rerun with AURA_AUTO_INSTALL_RUST=1" >&2
+        echo "      or rerun with HIRARI_AUTO_INSTALL_RUST=1" >&2
         exit 1
     fi
 fi
@@ -76,11 +76,11 @@ cargo fmt --all -- --check
 cargo check --workspace --locked
 
 if ! command -v cargo-audit >/dev/null 2>&1 || ! command -v cargo-deny >/dev/null 2>&1; then
-    if [ "${AURA_AUTO_INSTALL_SECURITY:-0}" = "1" ]; then
+    if [ "${HIRARI_AUTO_INSTALL_SECURITY:-0}" = "1" ]; then
         cargo install --locked cargo-audit cargo-deny
     else
-        echo "warning: security tools are not installed; run 'AURA_AUTO_INSTALL_SECURITY=1 scripts/setup_dev.sh' or install 'cargo-audit cargo-deny' for local dependency gates" >&2
+        echo "warning: security tools are not installed; run 'HIRARI_AUTO_INSTALL_SECURITY=1 scripts/setup_dev.sh' or install 'cargo-audit cargo-deny' for local dependency gates" >&2
     fi
 fi
 
-echo "Aura development environment is ready."
+echo "Hirari development environment is ready."

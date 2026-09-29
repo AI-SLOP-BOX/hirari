@@ -1,0 +1,19 @@
+// Mixer and channel-strip control contract.
+export global MixerActions {
+    callback toggle_mute(int);
+    callback toggle_solo(int);
+    callback toggle_phase(int);
+    callback toggle_saturation(int);
+    callback fader_changed(int, float);
+    callback pan_changed(int, float);
+    callback delay_changed(int, float);
+    callback toggle_fx(int, int);
+    callback eq_changed(int, float, float, float, float);
+    callback reset_all_mute_solo();
+    callback reset_peaks();
+    callback toggle_monitor(int);
+    callback step_input_channel(int, int);
+    callback select_input_channel(int, string);
+    callback toggle_input_width(int);
+    callback open_send_routing();
+}

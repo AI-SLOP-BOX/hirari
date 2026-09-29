@@ -14,13 +14,13 @@ done
 
 # `packaging/macos/Info.plist` is tracked source metadata; only generated
 # bundles under packaging are forbidden from a source publication.
-forbidden_re='(^|/)(target|build|dist|build-tools|\.openutau-review)(/|$)|^packaging/Aura DAW\.app(/|$)'
+forbidden_re='(^|/)(target|build|dist|build-tools|\.openutau-review)(/|$)|^packaging/Hirari DAW\.app(/|$)'
 if git ls-files | grep -E "$forbidden_re"; then
   echo "FORBIDDEN_TRACKED_PATH" >&2
   exit 1
 fi
 
-forbidden_media=$(git ls-files -z | xargs -0 -r file --mime-type | awk -F': *' '$2 ~ /^(application\/(x-dosexec|zip)|audio\/|video\/)/ && $1 !~ /^examples\/reference\/aura_codex_original\.wav$/ {print}')
+forbidden_media=$(git ls-files -z | xargs -0 -r file --mime-type | awk -F': *' '$2 ~ /^(application\/(x-dosexec|zip)|audio\/|video\/)/ && $1 !~ /^examples\/reference\/hirari_codex_original\.wav$/ {print}')
 if [[ -n "$forbidden_media" ]]; then
   printf '%s\n' "$forbidden_media"
   echo "GENERATED_BINARY_OR_MEDIA_TRACKED" >&2

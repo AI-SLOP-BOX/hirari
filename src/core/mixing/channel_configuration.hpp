@@ -7,7 +7,7 @@
 #include <vector>
 #include <cmath>
 
-namespace Aura::Core::Mixing {
+namespace Hirari::Core::Mixing {
 
 enum class SendTap : uint8_t { PreFader, PostFader, PrePan };
 struct ChannelSend { uint32_t bus = 0; float level = 0.0f; float pan = 0.0f; SendTap tap = SendTap::PostFader; bool enabled = true; };

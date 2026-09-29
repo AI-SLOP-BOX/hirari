@@ -3,13 +3,13 @@
 #include <deque>
 #include <cstdint>
 #include <string>
+#include <memory>
 #include <iterator>
 #include <cmath>
-#include <complex>
-#include "../utils/fft_utils.hpp"
 #include "../../core/audio_buffer.hpp"
+#include "../../core/rust_ffi.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class SpectralProcessor
@@ -19,8 +19,16 @@ namespace Aura::DSP::Analysis {
  * frequencies at specific times.
  */
 class SpectralProcessor {
+public:
+    SpectralProcessor() = default;
+    ~SpectralProcessor() { hirari_spectral_history_destroy(m_history); }
+    SpectralProcessor(const SpectralProcessor&) = delete;
+    SpectralProcessor& operator=(const SpectralProcessor&) = delete;
+    SpectralProcessor(SpectralProcessor&&) = delete;
+    SpectralProcessor& operator=(SpectralProcessor&&) = delete;
+
 #include "spectral_processor_public_part_1.inc"
 #include "spectral_processor_public_part_2.inc"
 #include "spectral_processor_private.inc"
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

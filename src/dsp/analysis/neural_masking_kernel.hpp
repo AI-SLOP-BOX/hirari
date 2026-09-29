@@ -5,7 +5,7 @@
 #include <iostream>
 #include "spectrum_analyzer.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class NeuralMaskingKernel
@@ -51,4 +51,4 @@ public:
     }
 };
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

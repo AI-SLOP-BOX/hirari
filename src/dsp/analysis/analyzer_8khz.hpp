@@ -1,10 +1,8 @@
 #pragma once
 
-#include <atomic>
-#include <cmath>
-#include <algorithm>
+#include "../../core/rust_ffi.hpp"
 
-namespace Aura::DSP::Analysis {
+namespace Hirari::DSP::Analysis {
 
 /**
  * @class Analyzer8kHz
@@ -12,25 +10,26 @@ namespace Aura::DSP::Analysis {
  */
 class Analyzer8kHz {
 public:
-    Analyzer8kHz(double sr = 44100.0);
+    explicit Analyzer8kHz(double sr = 44100.0)
+        : m_state(hirari_analyzer_8khz_create(sr)) {}
+    ~Analyzer8kHz() { hirari_analyzer_8khz_destroy(m_state); }
+    Analyzer8kHz(const Analyzer8kHz&) = delete;
+    Analyzer8kHz& operator=(const Analyzer8kHz&) = delete;
 
-    void setSampleRate(double sr);
+    void setSampleRate(double sr) { hirari_analyzer_8khz_set_sample_rate(m_state, sr); }
 
     /**
      * @brief ACCELERATED BPF ANALYSIS.
      */
-    void analyze(const float* buffer, size_t numFrames);
+    void analyze(const float* buffer, size_t numFrames) {
+        hirari_analyzer_8khz_analyze(m_state, buffer, numFrames);
+    }
 
-    float getEnergy() const;
+    float getEnergy() const { return hirari_analyzer_8khz_get_energy(m_state); }
 
 private:
-    std::atomic<float> m_highFreqEnergy{0.0f};
-    std::atomic<float> m_rms{0.0f};
-    std::atomic<float> m_peak{0.0f};
-    double m_sampleRate = 44100.0;
-    float m_highPassState = 0.0f;
-    float m_lowPassState = 0.0f;
+    void* m_state = nullptr;
 };
 
 
-} // namespace Aura::DSP::Analysis
+} // namespace Hirari::DSP::Analysis

@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace Aura::Core::Engine {
+namespace Hirari::Core::Engine {
 
 /**
  * @struct ProfilingEvent
@@ -93,4 +93,4 @@ private:
     std::chrono::time_point<std::chrono::high_resolution_clock> m_start;
 };
 
-} // namespace Aura::Core::Engine
+} // namespace Hirari::Core::Engine

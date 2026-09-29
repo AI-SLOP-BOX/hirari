@@ -5,7 +5,7 @@
 #include "virtuoso_orchestra.hpp"
 #include "synthesis_core.hpp"
 
-namespace Aura::Core::DSP::Synthesis {
+namespace Hirari::Core::DSP::Synthesis {
 
 /**
  * @brief SynthesisConductor: Master dispatcher for all synthesis engines.
@@ -46,4 +46,4 @@ private:
     std::unique_ptr<SubtractiveSynth> m_subtractive;
 };
 
-} // namespace Aura::Core::DSP::Synthesis
+} // namespace Hirari::Core::DSP::Synthesis

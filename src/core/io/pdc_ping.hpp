@@ -2,7 +2,7 @@
 #include <vector>
 #include <chrono>
 
-namespace Aura::Core::IO {
+namespace Hirari::Core::IO {
 
 /**
  * @class LatencyPing
@@ -53,4 +53,4 @@ private:
     uint64_t m_measuredLatencyMicros;
 };
 
-} // namespace Aura::Core::IO
+} // namespace Hirari::Core::IO

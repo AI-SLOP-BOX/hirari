@@ -4,7 +4,7 @@
 #include <random>
 #include <vector>
 
-namespace Aura::Core::MIDI {
+namespace Hirari::Core::MIDI {
 struct TransformNote { uint64_t start=0,length=1; uint8_t pitch=0,velocity=0; float probability=1.0f; };
 class NoteTransformer {
 public:

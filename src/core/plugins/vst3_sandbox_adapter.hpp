@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(AURA_ENABLE_VST3_SDK)
+#if defined(HIRARI_ENABLE_VST3_SDK)
 
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/module.h"
@@ -9,9 +9,9 @@
 #include "public.sdk/source/vst/hosting/eventlist.h"
 #if __has_include("public.sdk/source/vst/utility/parameterchanges.h")
 #include "public.sdk/source/vst/utility/parameterchanges.h"
-#define AURA_HAS_VST3_PARAMETER_CHANGES 1
+#define HIRARI_HAS_VST3_PARAMETER_CHANGES 1
 #else
-#define AURA_HAS_VST3_PARAMETER_CHANGES 0
+#define HIRARI_HAS_VST3_PARAMETER_CHANGES 0
 #endif
 #include "public.sdk/source/common/memorystream.h"
 #include "pluginterfaces/base/funknownimpl.h"
@@ -31,7 +31,7 @@
 
 #include "plugin_sandbox_protocol.hpp"
 
-namespace Aura::Core::Plugins::SandboxVST3 {
+namespace Hirari::Core::Plugins::SandboxVST3 {
 
 class Runtime final {
 public:
@@ -98,6 +98,13 @@ public:
         if (!view) return false;
         view->release();
         return true;
+    }
+
+    bool isMidiInstrument() const noexcept {
+        return m_component &&
+            m_component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput) == 0 &&
+            m_component->getBusCount(Steinberg::Vst::kEvent, Steinberg::Vst::kInput) > 0 &&
+            m_component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kOutput) > 0;
     }
 
     // Creates and attaches the vendor editor on the UI thread. The returned
@@ -169,7 +176,7 @@ public:
             shared.parameterChanges.load(std::memory_order_acquire),
             SandboxProtocol::kMaxParameterChanges);
         bool parameterOk = true;
-#if AURA_HAS_VST3_PARAMETER_CHANGES
+#if HIRARI_HAS_VST3_PARAMETER_CHANGES
         m_parameterChanges.clear();
         for (uint32_t index = 0; index < parameterCount; ++index) {
             const auto& change = shared.parameterChange[index];
@@ -273,7 +280,7 @@ public:
         m_processData.inputEvents = &m_events;
         m_outputEvents.clear();
         m_processData.outputEvents = &m_outputEvents;
-#if AURA_HAS_VST3_PARAMETER_CHANGES
+#if HIRARI_HAS_VST3_PARAMETER_CHANGES
         m_processData.inputParameterChanges = &m_parameterChanges;
 #else
         m_processData.inputParameterChanges = nullptr;
@@ -494,7 +501,7 @@ private:
     Steinberg::FUnknownPtr<Steinberg::Vst::IEditController> m_controller;
     Steinberg::Vst::IPlugView* m_editorView = nullptr;
     Steinberg::Vst::HostProcessData m_processData;
-#if AURA_HAS_VST3_PARAMETER_CHANGES
+#if HIRARI_HAS_VST3_PARAMETER_CHANGES
     Steinberg::Vst::ParameterChanges m_parameterChanges{SandboxProtocol::kMaxParameterChanges};
 #endif
     Steinberg::Vst::EventList m_events{SandboxProtocol::kMaxMidiEvents};
@@ -505,6 +512,6 @@ private:
     std::string m_error;
 };
 
-} // namespace Aura::Core::Plugins::SandboxVST3
+} // namespace Hirari::Core::Plugins::SandboxVST3
 
 #endif

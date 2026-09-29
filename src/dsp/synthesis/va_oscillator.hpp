@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace Aura::DSP::Synthesis {
+namespace Hirari::DSP::Synthesis {
 
 /**
  * @class PolyBLEPOscillator
@@ -81,4 +81,4 @@ private:
     Waveform m_waveform = Waveform::Saw;
 };
 
-} // namespace Aura::DSP::Synthesis
+} // namespace Hirari::DSP::Synthesis

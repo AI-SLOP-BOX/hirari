@@ -19,8 +19,9 @@
 #include "engine/automation_curve.hpp"
 #include "editing/audio_note_segment.hpp"
 #include "editing/event_processing_history.hpp"
+#include "rust_ffi.hpp"
 
-namespace Aura::Core {
+namespace Hirari::Core {
 
 /**
  * @class ProjectCipher
@@ -48,4 +49,4 @@ class ProjectSerializer {
 #include "project_serializer_part_4.inc"
 };
 
-} // namespace Aura::Core
+} // namespace Hirari::Core

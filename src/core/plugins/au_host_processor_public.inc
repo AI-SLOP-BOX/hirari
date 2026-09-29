@@ -182,7 +182,7 @@ public:
         m_state.store(LoadState::Operational, std::memory_order_release);
     }
 
-    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Aura::DSP::ProcessContext& context) noexcept override {
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const ::Hirari::DSP::ProcessContext& context) noexcept override {
         m_activeProcesses.fetch_add(1, std::memory_order_acq_rel);
         struct ProcessGuard {
             std::atomic<uint32_t>& count;

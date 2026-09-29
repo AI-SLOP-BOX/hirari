@@ -9,13 +9,13 @@
 #include <vector>
 #include <AudioUnit/AudioUnit.h>
 #include <AudioToolbox/AudioToolbox.h>
-#include "../core/aura_unified_engine.hpp"
+#include "../core/hirari_unified_engine.hpp"
 
-namespace Aura::IO {
+namespace Hirari::IO {
 
 /**
  * @brief AudioDriverMac: Native macOS CoreAudio Integration.
- * Bridges the high-level Aura engine with Apple's Hardware Abstraction Layer (HAL).
+ * Bridges the high-level Hirari engine with Apple's Hardware Abstraction Layer (HAL).
  */
 class AudioDriverMac {
 public:
@@ -98,7 +98,7 @@ public:
 
 private:
     /**
-     * @brief THE REAL-TIME CALLBACK: Bridges HAL hardware buffers to the Aura Kernel.
+     * @brief THE REAL-TIME CALLBACK: Bridges HAL hardware buffers to the Hirari Kernel.
      * HONEST FIX: Implements actual hardware input rendering.
      */
     static OSStatus audioCallback(void* inRefCon, AudioUnitRenderActionFlags* ioActionFlags,
@@ -156,7 +156,7 @@ private:
         }
         
         (void)inputs;
-        Core::Engine::AuraUnifiedEngine::getInstance().processBlockDirect(
+        Core::Engine::HirariUnifiedEngine::getInstance().processBlockDirect(
             outputs, std::min<uint32_t>(12, ioData->mNumberBuffers), inNumberFrames);
         
         return noErr;
@@ -177,4 +177,4 @@ private:
     std::recursive_mutex m_lifecycleMutex;
 };
 
-} // namespace Aura::IO
+} // namespace Hirari::IO

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace Aura::Core::MIDI {
+namespace Hirari::Core::MIDI {
 struct MpeNote { uint64_t start=0,length=0; uint8_t channel=0,note=0,velocity=0; int16_t pitchCents=0; uint16_t pressure=0,timbre=0; };
 struct Articulation { std::string name; uint8_t program=0; int16_t transpose=0; uint8_t channel=0; };
 class ExpressionMap {

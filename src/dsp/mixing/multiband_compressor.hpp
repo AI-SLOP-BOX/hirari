@@ -4,9 +4,9 @@
 #include <cmath>
 #include <atomic>
 #include <array>
-#include "../../core/aura_bridge_proxy.hpp"
+#include "../../core/hirari_bridge_proxy.hpp"
 
-namespace Aura::Core::DSP::Mixing {
+namespace Hirari::Core::DSP::Mixing {
 
 /**
  * @brief MultibandCompressor: Professional 3-band dynamics processor.
@@ -16,7 +16,7 @@ namespace Aura::Core::DSP::Mixing {
  */
 class MultibandCompressor {
 public:
-    AURA_INDUSTRIAL_SHIM(MultibandCompressor, Dynamics, MultibandCompressor)
+    HIRARI_INDUSTRIAL_SHIM(MultibandCompressor, Dynamics, MultibandCompressor)
 
     struct Band {
         float threshold_db   = -20.0f;
@@ -150,4 +150,4 @@ public:
     }
 };
 
-} // namespace Aura::Core::DSP::Mixing
+} // namespace Hirari::Core::DSP::Mixing

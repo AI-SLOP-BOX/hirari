@@ -4,7 +4,7 @@
 #include <cmath>
 
 int main() {
-    Aura::Core::AudioBuffer stereo(2, 4);
+    Hirari::Core::AudioBuffer stereo(2, 4);
     stereo.getWritePointer(0)[0] = 0.25f;
     stereo.getWritePointer(1)[0] = -0.25f;
 

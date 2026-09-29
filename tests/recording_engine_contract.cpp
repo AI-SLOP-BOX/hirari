@@ -21,11 +21,11 @@ uint32_t readU32(const std::array<uint8_t, N>& header, size_t offset) {
 
 int main() {
     const auto path = std::filesystem::temp_directory_path() /
-                      "aura-recording-session-isolation-contract.wav";
+                      "hirari-recording-session-isolation-contract.wav";
     std::error_code ec;
     std::filesystem::remove(path, ec);
 
-    Aura::Core::RecordingEngine recorder;
+    Hirari::Core::RecordingEngine recorder;
     assert(!recorder.start("", 48'000.0));
     assert(recorder.start(path.string(), 48'000.0));
     const float firstLeft[] = {0.1f, 0.2f, 0.3f, 0.4f};
@@ -53,8 +53,8 @@ int main() {
     assert(std::string(reinterpret_cast<const char*>(header.data() + 72), 4) == "data");
     assert(readU32(header, 76) == 2u * 2u * sizeof(float));
     assert(std::filesystem::file_size(path) == 80u + 2u * 2u * sizeof(float));
-    Aura::IO::WavLoader::WavInfo info{};
-    const auto decoded = Aura::IO::WavLoader::load(path.string(), info);
+    Hirari::IO::WavLoader::WavInfo info{};
+    const auto decoded = Hirari::IO::WavLoader::load(path.string(), info);
     assert(info.numChannels == 2 && info.numSamples == 2 && decoded.size() == 2);
 
     // The writer drains in bounded batches. A stop must still flush every

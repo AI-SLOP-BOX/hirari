@@ -6,9 +6,9 @@
 #include <memory>
 
 int main() {
-    using Aura::Core::AudioBuffer;
-    using Aura::Core::Engine::Region;
-    using Aura::Core::Engine::Track;
+    using Hirari::Core::AudioBuffer;
+    using Hirari::Core::Engine::Region;
+    using Hirari::Core::Engine::Track;
 
     auto audio = std::make_shared<AudioBuffer>(2, 8);
     for (uint32_t i = 0; i < 8; ++i) {

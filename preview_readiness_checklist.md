@@ -1,4 +1,4 @@
-# Aura DAW プレビュー版リリースチェックリスト
+# Hirari DAW プレビュー版リリースチェックリスト
 
 ## リリース判定
 
@@ -428,9 +428,9 @@
 - `cargo build --workspace`：成功
 - C++17主要ヘッダー構文チェック：成功
 - C++20主要ソース構文チェック：成功（engine_clock / MIDI / mastering / FFI / DSP / CoreAudio）
-- `AuraUltimate.hpp` C++20構文チェック：成功
+- `HirariUltimate.hpp` C++20構文チェック：成功
 - C++旧統合層のTimeline／AudioBuffer／MIDI API互換修正：完了
-- 開発用`aura-ui`実機起動：画像デコードエラーと空ピーク配列panicを修正後、プロセス継続を確認
+- 開発用`hirari-ui`実機起動：画像デコードエラーと空ピーク配列panicを修正後、プロセス継続を確認
 - Metal compute pipeline：欠落function時の安全なフォールバックガードを追加
 - `TEST TONE`：コマンドパレットから440Hz検証音を出力する経路を追加
 - CMake全体ビルド：`CMakeLists.txt`が削除状態のため未実行
@@ -502,7 +502,7 @@ cargo test --workspace
 ### 3. 起動時にプロジェクトを開く
 
 ```bash
-cargo run -p aura-ui -- /path/to/project.aura
+cargo run -p hirari-ui -- /path/to/project.hirari
 ```
 
 ### 4. 実機スモークテスト
@@ -539,7 +539,7 @@ cargo run -p aura-ui -- /path/to/project.aura
 
 - [x] Open Project用のネイティブファイル選択ダイアログ
 - [x] Audio Import用のネイティブファイル選択ダイアログ
-- [x] `.aura` / `.json`プロジェクトフィルター
+- [x] `.hirari` / `.json`プロジェクトフィルター
 - [x] WAV / AIFF / FLAC音声フィルター
 - [x] ファイル選択後のCore読み込み・UI再同期
 - [x] CLI第1引数による起動時プロジェクトOpen

@@ -8,7 +8,7 @@
 #include <condition_variable>
 #include "streaming_source.hpp"
 
-namespace Aura::Core::Assets {
+namespace Hirari::Core::Assets {
 
 /**
  * @brief StreamingEngine: High-performance, low-latency disk I/O orchestrator.
@@ -98,4 +98,4 @@ private:
     std::mutex m_cvMutex;
 };
 
-} // namespace Aura::Core::Assets
+} // namespace Hirari::Core::Assets
