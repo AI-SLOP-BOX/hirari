@@ -115,12 +115,30 @@ public:
         }
         m_config = config;
         
-        m_driver = std::make_unique<::Hirari::Core::Driver::MacAudioDriver>([this](float* l, float* r, uint32_t len) {
-            if (m_callback) {
-                float* outChans[2] = { l, r };
-                m_callback(nullptr, outChans, len);
-            }
-        });
+        // MacAudioDriver's callback carries the channel arrays and their counts,
+        // whereas AudioDriverBase::ProcessCallback takes plain (in, out, len).
+        // The configuration above caps numOutputs at 2, so the fixed two-element
+        // staging arrays are sufficient. They are rebuilt per call because
+        // `const float* const*` does not convert to `const float**`.
+        m_driver = std::make_unique<::Hirari::Core::Driver::MacAudioDriver>(
+            [this](const float* const* inputs, uint32_t inputChannelCount,
+                   float* const* outputs, uint32_t outputChannelCount, uint32_t len) {
+                const float* inChans[2] = {nullptr, nullptr};
+                float* outChans[2] = {nullptr, nullptr};
+                if (inputs != nullptr) {
+                    for (uint32_t channel = 0; channel < inputChannelCount && channel < 2; ++channel) {
+                        inChans[channel] = inputs[channel];
+                    }
+                }
+                if (outputs != nullptr) {
+                    for (uint32_t channel = 0; channel < outputChannelCount && channel < 2; ++channel) {
+                        outChans[channel] = outputs[channel];
+                    }
+                }
+                if (m_callback) {
+                    m_callback(inChans, outChans, len);
+                }
+            });
         return m_driver != nullptr;
     }
 

@@ -44,6 +44,18 @@ CXX=${CXX:-c++}
 OUT_DIR=${TMPDIR:-/tmp}/hirari-native-contract
 mkdir -p "$OUT_DIR"
 
+# The native surface is backed by the Rust core bridge. Without the staticlib,
+# every hirari_* symbol in the contract below is undefined at link time.
+if ! cargo rustc -p hirari-core-bridge --lib --crate-type staticlib; then
+    echo "failed to build the hirari-core-bridge staticlib" >&2
+    exit 1
+fi
+BRIDGE_LIB=target/debug/libhirari_core_bridge.a
+if [ ! -f "$BRIDGE_LIB" ]; then
+    echo "hirari-core-bridge staticlib not found at $BRIDGE_LIB" >&2
+    exit 1
+fi
+
 LINK_FLAGS=""
 if [ "$(uname -s)" = "Darwin" ]; then
     LINK_FLAGS="-framework AudioToolbox -framework CoreAudio"
@@ -51,7 +63,7 @@ fi
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
     tests/native_plugin_compile_contract.cpp src/io/coreaudio_driver.cpp \
-    $LINK_FLAGS \
+    "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/native-plugin-compile"
 # This translation unit intentionally exercises the complete native surface in
 # one process.  Its aggregate RAII locals are larger than macOS's default
@@ -64,7 +76,7 @@ else
 fi
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/wav_io_contract.cpp $LINK_FLAGS \
+    tests/wav_io_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/wav-io-contract"
 "$OUT_DIR/wav-io-contract"
 

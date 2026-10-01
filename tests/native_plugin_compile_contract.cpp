@@ -104,18 +104,12 @@ public:
     }
 };
 
-// UndoContractCommand was removed from this file because its base class,
-// Hirari::Core::Undo::Command, no longer exists: the Rust migration deleted
-// src/core/undo/undo_manager.hpp (commit b6c5e68). It *was* exercised, via the
-// UndoManager transaction block in native_plugin_compile_contract_part_1.inc,
-// but that block tests a subsystem that no longer exists either. Restoring the
-// class is therefore not meaningful on its own - see the note in that part file.
-//
-// NOTE: this contract test no longer compiles, because it still references
-// several APIs the Rust migration removed: Hirari::Core::Undo::UndoManager,
-// WavWriter::reserveTemporary, and the MacAudioDriver constructor signature.
-// Deciding whether to restore those subsystems or retire this test is a scope
-// call, so the remaining breakage is left visible rather than papered over.
+// The UndoContractCommand scaffolding that used to live here derived from
+// Hirari::Core::Undo::Command, which the Rust migration deleted
+// (src/core/undo/undo_manager.hpp was removed in b6c5e68). The transactional
+// undo guarantee it covered still exists and is now exercised against the
+// Rust-owned manager in native_plugin_compile_contract_part_1.inc, so no
+// coverage was dropped.
 
 class NonFiniteProcessor final : public Hirari::DSP::IProcessor {
 public:
