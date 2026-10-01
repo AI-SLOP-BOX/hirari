@@ -471,9 +471,9 @@ mod tests {
                 dispatch: noop_dispatch,
             }));
         }
-        assert_eq!(queue.pop(true).unwrap().0 as usize, 1);
-        assert_eq!(queue.pop(false).unwrap().0 as usize, 3);
-        assert_eq!(queue.pop(false).unwrap().0 as usize, 2);
+        assert_eq!(queue.pop(true).unwrap().data as usize, 1);
+        assert_eq!(queue.pop(false).unwrap().data as usize, 3);
+        assert_eq!(queue.pop(false).unwrap().data as usize, 2);
         assert!(queue.pop(false).is_none());
     }
 

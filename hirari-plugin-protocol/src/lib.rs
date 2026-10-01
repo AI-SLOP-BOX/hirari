@@ -14,7 +14,7 @@ pub const STATE_ERROR_CHECKSUM: u8 = 3;
 const RING_CAPACITY: usize = 4;
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 const SLOT_BYTES: usize = 16 + MAX_MESSAGE_BYTES;
-const RING_STORAGE_BYTES: usize = RING_CAPACITY * SLOT_BYTES + 128;
+pub const RING_STORAGE_BYTES: usize = RING_CAPACITY * SLOT_BYTES + 128;
 
 #[repr(C)]
 struct MessageSlot {
@@ -159,12 +159,25 @@ pub unsafe extern "C" fn hirari_midi_extended_ring_push(
     true
 }
 
+/// # Safety
+/// `state` must point at storage initialized by `hirari_midi_extended_ring_init`
+/// and still owned by a live ring. `destination_message` must be writable for
+/// exactly `destination_bytes` bytes, and this call must be the sole consumer
+/// of the ring.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_midi_extended_ring_pop(
     state: *mut c_void,
     destination_message: *mut c_void,
+    destination_bytes: usize,
 ) -> bool {
     if state.is_null() || destination_message.is_null() {
+        return false;
+    }
+    // SLOT_BYTES is a fixed property of the ABI, but the caller's buffer size
+    // is not knowable from this side of the boundary. Copying SLOT_BYTES
+    // unconditionally would overflow any undersized destination, so refuse
+    // rather than trust the caller.
+    if destination_bytes < SLOT_BYTES {
         return false;
     }
     // SAFETY: The C++ handle points to an initialized ring; the SPSC sequence
@@ -177,7 +190,8 @@ pub unsafe extern "C" fn hirari_midi_extended_ring_pop(
     }
     // SAFETY: The consumer owns this slot until it publishes the new tail.
     let slot = unsafe { &*ring.slots[(tail as usize) % RING_CAPACITY].get() };
-    // SAFETY: C++ destination is the exact fixed Message layout in the ABI.
+    // SAFETY: The capacity check above guarantees the destination is large
+    // enough for the whole slot.
     unsafe {
         core::ptr::copy_nonoverlapping(
             (slot as *const MessageSlot).cast::<u8>(),
@@ -189,6 +203,13 @@ pub unsafe extern "C" fn hirari_midi_extended_ring_pop(
         .value
         .store(tail.wrapping_add(1), Ordering::Release);
     true
+}
+
+/// Report the exact destination capacity `hirari_midi_extended_ring_pop`
+/// requires, so callers stop hardcoding the slot geometry.
+#[no_mangle]
+pub extern "C" fn hirari_midi_extended_ring_slot_bytes() -> usize {
+    SLOT_BYTES
 }
 
 #[no_mangle]

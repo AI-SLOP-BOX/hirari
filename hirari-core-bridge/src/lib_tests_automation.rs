@@ -242,9 +242,23 @@
         .expect("diagnostic JSON");
         assert_eq!(value["ok"], false);
         assert_eq!(value["format"], "WAVE64");
-        assert!(value["error"]
-            .as_str()
-            .is_some_and(|error| error.contains("not found")));
+        // The point of this test is that the native reason survives the FFI
+        // boundary instead of collapsing to a generic failure. Match the
+        // platform spellings of "the file does not exist" and additionally
+        // require the echoed path, which proves the decoder's own error text
+        // was carried through rather than synthesised by the caller.
+        let error = value["error"].as_str().expect("error must be a string");
+        let missing = error.contains("not found")
+            || error.contains("No such file")
+            || error.contains("cannot find the file");
+        assert!(
+            missing,
+            "expected a missing-file reason, got: {error}"
+        );
+        assert!(
+            error.contains("hirari-missing-native-wave64.w64"),
+            "diagnostic must echo the failing path, got: {error}"
+        );
     }
 
     #[test]

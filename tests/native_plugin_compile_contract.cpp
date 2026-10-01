@@ -26,7 +26,6 @@
 #include "src/core/engine/latency_manager.hpp"
 #include "src/core/engine/midi_orchestrator.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"
-#include "src/core/undo/undo_manager.hpp"
 #include "src/core/engine/undo_transaction_manager.hpp"
 #include "src/core/midi_buffer.hpp"
 #include "src/core/plugins/midi_fragment_transport.hpp"
@@ -105,18 +104,18 @@ public:
     }
 };
 
-class UndoContractCommand final : public Hirari::Core::Undo::Command {
-public:
-    UndoContractCommand(int& value, int delta, std::string name)
-        : m_value(value), m_delta(delta), m_name(std::move(name)) {}
-    void execute() override { m_value += m_delta; }
-    void undo() override { m_value -= m_delta; }
-    std::string getName() const override { return m_name; }
-private:
-    int& m_value;
-    int m_delta;
-    std::string m_name;
-};
+// UndoContractCommand was removed from this file because its base class,
+// Hirari::Core::Undo::Command, no longer exists: the Rust migration deleted
+// src/core/undo/undo_manager.hpp (commit b6c5e68). It *was* exercised, via the
+// UndoManager transaction block in native_plugin_compile_contract_part_1.inc,
+// but that block tests a subsystem that no longer exists either. Restoring the
+// class is therefore not meaningful on its own - see the note in that part file.
+//
+// NOTE: this contract test no longer compiles, because it still references
+// several APIs the Rust migration removed: Hirari::Core::Undo::UndoManager,
+// WavWriter::reserveTemporary, and the MacAudioDriver constructor signature.
+// Deciding whether to restore those subsystems or retire this test is a scope
+// call, so the remaining breakage is left visible rather than papered over.
 
 class NonFiniteProcessor final : public Hirari::DSP::IProcessor {
 public:

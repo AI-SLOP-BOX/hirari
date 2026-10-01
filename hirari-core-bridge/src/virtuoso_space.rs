@@ -160,6 +160,30 @@ impl VirtuosoSpaceEngine {
         }
     }
 
+    /// Process a block in place. Mirrors the C++/FFI entry point so in-crate
+    /// tests and callers can drive the reverb without raw channel pointers.
+    pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let frames = left.len().min(right.len()) as u32;
+        // SAFETY: both slices are valid for `frames` elements and the engine
+        // only reads and writes within them.
+        unsafe { self.process_raw(left.as_mut_ptr(), right.as_mut_ptr(), frames) };
+    }
+
+    /// Consistency check for the reverb's tuning and delay geometry.
+    pub fn audit_virtuoso_space(&self) -> bool {
+        self.sample_rate.is_finite()
+            && (SAMPLE_RATE_MIN..=SAMPLE_RATE_MAX).contains(&self.sample_rate)
+            && self.decay.is_finite()
+            && (0.0..=0.999).contains(&self.decay)
+            && self.damping.is_finite()
+            && (0.0..=0.99).contains(&self.damping)
+            && self.size.is_finite()
+            && self.mix.is_finite()
+            && (0.0..=1.0).contains(&self.mix)
+            && self.delay_lines.len() == LINES
+            && self.delay_lines.iter().all(|line| !line.is_empty())
+    }
+
     fn set_state(&mut self, bytes: &[u8]) -> bool {
         if bytes.len() != 32 {
             return false;

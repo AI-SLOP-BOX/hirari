@@ -59,7 +59,7 @@ public:
     // never treat a successful audio instance as proof that a native view can
     // be embedded.
     bool hasNativeEditor() const noexcept override {
-#if defined(__APPLE__)
+#if defined(HIRARI_HAS_AU_COCOA_UI)
         if (!m_auInstance) return false;
         UInt32 dataSize = 0;
         Boolean writable = false;
@@ -73,7 +73,7 @@ public:
     }
 
     uint64_t openNativeEditor(uintptr_t parent) noexcept override {
-#if defined(__APPLE__)
+#if defined(HIRARI_HAS_AU_COCOA_UI)
         if (!m_auInstance || parent == 0 || m_nativeEditorView) return 0;
         UInt32 propertySize = 0;
         Boolean writable = false;
@@ -84,14 +84,14 @@ public:
         UInt32 actualSize = sizeof(info);
         if (AudioUnitGetProperty(m_auInstance, kAudioUnitProperty_CocoaUI,
                                  kAudioUnitScope_Global, 0, &info, &actualSize) != noErr ||
-            !info.mCocoaViewBundleLocation || !info.mCocoaViewClass) return 0;
-        m_cocoaBundle = CFBundleCreate(nullptr, info.mCocoaViewBundleLocation);
+            !info.mCocoaAUViewBundleLocation || !info.mCocoaAUViewClass[0]) return 0;
+        m_cocoaBundle = CFBundleCreate(nullptr, info.mCocoaAUViewBundleLocation);
         if (!m_cocoaBundle || !CFBundleLoadExecutable(m_cocoaBundle)) {
             if (m_cocoaBundle) { CFRelease(m_cocoaBundle); m_cocoaBundle = nullptr; }
             return 0;
         }
         char className[256]{};
-        if (!CFStringGetCString(info.mCocoaViewClass, className, sizeof(className), kCFStringEncodingUTF8)) {
+        if (!CFStringGetCString(info.mCocoaAUViewClass[0], className, sizeof(className), kCFStringEncodingUTF8)) {
             closeNativeEditor(0);
             return 0;
         }

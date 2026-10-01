@@ -13,17 +13,34 @@ if ! command -v "$CXX" >/dev/null 2>&1; then
     exit 1
 fi
 
+# The engine's C++ surface links against the Rust runtime. Build the staticlib
+# first; without it every contract test below fails to link on undefined
+# hirari_* symbols.
+if ! cargo rustc -p hirari-core-bridge --lib --crate-type staticlib; then
+    echo "failed to build the hirari-core-bridge staticlib" >&2
+    exit 1
+fi
+BRIDGE_LIB=target/debug/libhirari_core_bridge.a
+if [ ! -f "$BRIDGE_LIB" ]; then
+    echo "hirari-core-bridge staticlib not found at $BRIDGE_LIB" >&2
+    exit 1
+fi
+
 SANITIZER_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 COMMON_FLAGS="-std=c++20 -Wall -Wextra -I. -Isrc"
 
 "$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
-    tests/pdc_dry_delay_contract.cpp -o "$OUT_DIR/pdc-dry-delay"
+    tests/pdc_dry_delay_contract.cpp -o "$OUT_DIR/pdc-dry-delay" "$BRIDGE_LIB"
 "$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
-    tests/graph_focus_waveform_contract.cpp -o "$OUT_DIR/graph-focus"
+    tests/graph_focus_waveform_contract.cpp -o "$OUT_DIR/graph-focus" "$BRIDGE_LIB"
 "$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
-    tests/effect_chain_watchdog_contract.cpp -o "$OUT_DIR/effect-chain-watchdog"
+    tests/effect_chain_watchdog_contract.cpp -o "$OUT_DIR/effect-chain-watchdog" "$BRIDGE_LIB"
 "$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
-    tests/waveform_generation_contract.cpp -o "$OUT_DIR/waveform-generation"
+    tests/waveform_generation_contract.cpp -o "$OUT_DIR/waveform-generation" "$BRIDGE_LIB"
+"$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
+    tests/block_processor_stft_contract.cpp -o "$OUT_DIR/block-processor-stft" "$BRIDGE_LIB"
+"$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
+    tests/rt_dsp_contract.cpp -o "$OUT_DIR/rt-dsp" "$BRIDGE_LIB"
 
 if [ "$(uname -s)" = "Darwin" ]; then
     DEFAULT_ASAN_OPTIONS='detect_leaks=0:halt_on_error=1'

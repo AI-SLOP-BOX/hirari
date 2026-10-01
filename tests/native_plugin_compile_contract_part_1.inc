@@ -294,6 +294,13 @@ int main() {
     static_assert(Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion == 1u);
     static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock) == 0u);
     static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined) == 1u);
+    // NOTE: this block no longer compiles. Hirari::Core::Undo::UndoManager was
+    // deleted by the Rust migration (commit b6c5e68 removed
+    // src/core/undo/undo_manager.hpp), so the transaction contract it covered
+    // cannot be exercised. UndoContractCommand was removed from
+    // native_plugin_compile_contract.cpp for the same reason. Restoring the
+    // undo subsystem, or retiring this coverage, is a deliberate scope call
+    // rather than a mechanical fix, so it is left visible here.
     if (!Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
             Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion) ||
         Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(0u) ||

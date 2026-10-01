@@ -515,17 +515,54 @@ fn redact_private_fields(value: &mut Value) {
     }
 }
 
+/// Normalized (alphanumeric, lowercased) key names that must never leave the
+/// machine in a published project snapshot.
+///
+/// This is deliberately an explicit allow-list rather than a substring test:
+/// `normalized.contains("path")` also destroyed legitimate public data such as
+/// `graph_path` and turned `patch_name` into `patchname`-shaped noise. Only
+/// names whose *entire* normalized form is listed here are stripped.
+const PRIVATE_PROJECT_FIELD_NAMES: [&str; 22] = [
+    // Absolute filesystem locations.
+    "path",
+    "filepath",
+    "absolutepath",
+    "fullpath",
+    "directory",
+    "dirpath",
+    "folder",
+    "folderpath",
+    "frozenpath",
+    "frozenfilepath",
+    "sourcepath",
+    "targetpath",
+    "projectpath",
+    "userpath",
+    "filepathhint",
+    "pathhint",
+    // Opaque serialized plugin / GUI state.
+    "pluginstate",
+    "pluginstatehex",
+    "pluginstateblob",
+    "pluginstatestring",
+    "stateblob",
+    "guistate",
+];
+
 fn is_private_project_field(key: &str) -> bool {
     // Normalize separators so old snake_case keys and future camelCase keys
-    // receive the same treatment (e.g. plugin_state_hex/pluginStateHex).
-    let normalized = key
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect::<String>();
-    normalized.contains("path")
-        || (normalized.contains("plugin") && normalized.contains("state"))
-        || matches!(normalized.as_str(), "stateblob" | "guistate")
+    // receive the same treatment (e.g. plugin_state_hex/pluginStateHex), then
+    // require an exact allow-list match so public keys that merely mention
+    // "path" (graph_path) or "name" (patch_name) survive redaction.
+    let mut normalized = String::with_capacity(key.len());
+    for character in key.chars() {
+        if character.is_ascii_alphanumeric() {
+            normalized.extend(character.to_lowercase());
+        }
+    }
+    PRIVATE_PROJECT_FIELD_NAMES
+        .iter()
+        .any(|name| *name == normalized)
 }
 
 fn resolve_addresses(address: &str) -> io::Result<Vec<SocketAddr>> {
@@ -880,6 +917,8 @@ fn connect_and_publish(
     write_message(&mut writer, &serde_json::json!({"type": "ListLinks"}))?;
 
     let mut last_sent_version = 0;
+    let mut publish_attempts: u32 = 0;
+    let mut next_publish_at = Instant::now();
     let mut last_ping = Instant::now();
     let mut last_pong = Instant::now();
     let mut inbound_links = HashMap::new();
@@ -897,7 +936,10 @@ fn connect_and_publish(
             return Ok(());
         }
         write_queued_requests(&mut writer, requests, generation)?;
-        let snapshot = if outbound_links.is_empty() {
+        // While a publish is backing off, skip re-reading the same snapshot so a
+        // permanently invalid or oversize payload cannot spin this loop.
+        let publish_backoff_active = Instant::now() < next_publish_at;
+        let snapshot = if outbound_links.is_empty() || publish_backoff_active {
             None
         } else {
             latest
@@ -911,10 +953,27 @@ fn connect_and_publish(
             let mut payload = match serde_json::from_str::<Value>(&snapshot.layout_json) {
                 Ok(payload) => payload,
                 Err(error) => {
+                    // The marker is deliberately NOT advanced: a snapshot whose
+                    // JSON is temporarily unreadable (for example a layout
+                    // captured mid-write) must be retried, not silently lost.
                     log::warn!(
-                        "Hirari could not publish invalid project layout JSON to Moufu: {error}"
+                        "Hirari could not publish invalid project layout JSON to Moufu \
+                         (version {}, attempt {}/{}): {error}",
+                        snapshot.version,
+                        publish_attempts + 1,
+                        MAX_PUBLISH_ATTEMPTS
                     );
-                    last_sent_version = snapshot.version;
+                    defer_publish(&mut publish_attempts, &mut next_publish_at, Instant::now());
+                    if publish_attempts >= MAX_PUBLISH_ATTEMPTS {
+                        log::error!(
+                            "Hirari gave up publishing project layout version {} after {} failed \
+                             attempts; later versions will be published instead",
+                            snapshot.version,
+                            publish_attempts
+                        );
+                        last_sent_version = snapshot.version;
+                        reset_publish_backoff(&mut publish_attempts, &mut next_publish_at);
+                    }
                     continue;
                 }
             };
@@ -928,8 +987,39 @@ fn connect_and_publish(
                 payload: PayloadTransport::Inline(payload),
                 delta: None,
             };
-            write_change_event(&mut writer, events, generation, event)?;
-            last_sent_version = snapshot.version;
+            match write_change_event(&mut writer, events, generation, event)? {
+                PublishOutcome::Sent => {
+                    last_sent_version = snapshot.version;
+                    reset_publish_backoff(&mut publish_attempts, &mut next_publish_at);
+                }
+                PublishOutcome::Rejected(reason) => {
+                    // Oversize payloads are surfaced to the user as a
+                    // ServerNotice by write_change_event and must stay visible
+                    // here, but they are not sent, so the marker stays put and
+                    // the bounded backoff below keeps a permanently oversized
+                    // project from spinning the publish loop forever.
+                    log::warn!(
+                        "Hirari could not publish project layout version {} to Moufu \
+                         (attempt {}/{}): {reason}",
+                        snapshot.version,
+                        publish_attempts + 1,
+                        MAX_PUBLISH_ATTEMPTS
+                    );
+                    defer_publish(&mut publish_attempts, &mut next_publish_at, Instant::now());
+                    if publish_attempts >= MAX_PUBLISH_ATTEMPTS {
+                        log::error!(
+                            "Hirari gave up publishing project layout version {} after {} failed \
+                             attempts; later versions will be published instead",
+                            snapshot.version,
+                            publish_attempts
+                        );
+                        last_sent_version = snapshot.version;
+                        reset_publish_backoff(&mut publish_attempts, &mut next_publish_at);
+                    }
+                }
+            }
+        } else {
+            reset_publish_backoff(&mut publish_attempts, &mut next_publish_at);
         }
 
         if last_ping.elapsed() >= Duration::from_secs(3) {
@@ -1140,12 +1230,42 @@ impl Write for BoundedMessageBuffer {
     }
 }
 
+/// How many times a single project snapshot version is retried after a failed
+/// publish before the adapter gives up on it and moves on to newer versions.
+const MAX_PUBLISH_ATTEMPTS: u32 = 5;
+/// First retry delay after a failed publish; doubles up to `PUBLISH_BACKOFF_MAX`.
+const PUBLISH_BACKOFF_BASE: Duration = Duration::from_millis(250);
+/// Upper bound on the retry delay so a recovered project republishes promptly.
+const PUBLISH_BACKOFF_MAX: Duration = Duration::from_secs(5);
+
+/// Outcome of one publish attempt, so the caller can keep the version marker
+/// in place for anything that was not actually written to the socket.
+enum PublishOutcome {
+    Sent,
+    Rejected(String),
+}
+
+/// Record a failed attempt and schedule the next retry with exponential backoff.
+fn defer_publish(attempts: &mut u32, next_publish_at: &mut Instant, now: Instant) {
+    *attempts = attempts.saturating_add(1);
+    let shift = (*attempts).saturating_sub(1).min(8);
+    let delay = PUBLISH_BACKOFF_BASE
+        .saturating_mul(1u32 << shift)
+        .min(PUBLISH_BACKOFF_MAX);
+    *next_publish_at = now + delay;
+}
+
+fn reset_publish_backoff(attempts: &mut u32, next_publish_at: &mut Instant) {
+    *attempts = 0;
+    *next_publish_at = Instant::now();
+}
+
 fn write_change_event(
     writer: &mut TcpStream,
     events: &MoufuEventQueue,
     generation: u64,
     event: ChangeEvent,
-) -> io::Result<()> {
+) -> io::Result<PublishOutcome> {
     let mut message = BoundedMessageBuffer {
         bytes: Vec::with_capacity(64 * 1024),
         limit: MAX_CLIENT_MESSAGE_BYTES.saturating_sub(1),
@@ -1155,21 +1275,24 @@ fn write_change_event(
         Ok(()) => {
             message.bytes.push(b'\n');
             writer.write_all(&message.bytes)?;
-            writer.flush()
+            writer.flush()?;
+            Ok(PublishOutcome::Sent)
         }
         Err(_) if message.exceeded => {
+            let reason = format!(
+                "Project snapshot exceeds Moufu's {} MiB message limit",
+                MAX_CLIENT_MESSAGE_BYTES / (1024 * 1024)
+            );
+            log::error!("Hirari {reason} and was not sent");
             publish_event(
                 events,
                 generation,
                 MoufuEvent::ServerNotice {
                     code: "PROJECT_SNAPSHOT_TOO_LARGE".to_owned(),
-                    message: format!(
-                        "Project snapshot exceeds Moufu's {} MiB message limit and was not sent",
-                        MAX_CLIENT_MESSAGE_BYTES / (1024 * 1024)
-                    ),
+                    message: format!("{reason} and was not sent"),
                 },
             );
-            Ok(())
+            Ok(PublishOutcome::Rejected(reason))
         }
         Err(error) => Err(io::Error::other(error)),
     }
@@ -1193,10 +1316,71 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc::channel;
 
+    /// Catalog frames the pinned protocol rev does not define. The adapter
+    /// emits them deliberately as a forward-compatibility probe, and the Hub's
+    /// read loop drops unparseable frames without closing the session, so the
+    /// test server must tolerate exactly these and nothing else.
+    const EXPECTED_UNSUPPORTED_PROBES: [&str; 2] = ["ListEntities", "ListLinks"];
+
+    /// Public keys that merely mention a private word must not be redacted,
+    /// while genuine filesystem locations and opaque plugin state must be.
+    #[test]
+    fn redaction_uses_an_exact_key_allow_list() {
+        let mut value = serde_json::json!({
+            "graph_path": "/nodes/0/2",
+            "patch_name": "Intro Verse",
+            "graph_node_path": "sine/partials",
+            "name": "Vocal",
+            "tracks": [{
+                "name": "Vocal",
+                "path": "/Users/private/voice.wav",
+                "frozen_path": "/Users/private/frozen.wav",
+                "plugin_state_hex": ["secret"],
+                "pluginStateHex": ["secret"],
+                "graph_path": "/tracks/0/1",
+                "patch_name": "Take 3",
+                "volume": 0.8,
+            }],
+        });
+        redact_private_fields(&mut value);
+        let track = &value["tracks"][0];
+        assert_eq!(track["graph_path"], "/tracks/0/1");
+        assert_eq!(track["patch_name"], "Take 3");
+        assert_eq!(value["graph_path"], "/nodes/0/2");
+        assert_eq!(value["patch_name"], "Intro Verse");
+        assert_eq!(value["graph_node_path"], "sine/partials");
+        assert!(track.get("path").is_none());
+        assert!(track.get("frozen_path").is_none());
+        assert!(track.get("plugin_state_hex").is_none());
+        assert!(track.get("pluginStateHex").is_none());
+        assert_eq!(track["name"], "Vocal");
+        assert_eq!(track["volume"], 0.8);
+    }
+
     fn read_client_message(reader: &mut BufReader<TcpStream>) -> ClientMessage {
-        let mut line = String::new();
-        reader.read_line(&mut line).unwrap();
-        serde_json::from_str(&line).unwrap()
+        loop {
+            let mut line = String::new();
+            let bytes = reader.read_line(&mut line).unwrap();
+            assert_ne!(bytes, 0, "server closed before a client message arrived");
+            match serde_json::from_str(&line) {
+                Ok(message) => return message,
+                Err(error) => {
+                    let tag = serde_json::from_str::<serde_json::Value>(&line)
+                        .ok()
+                        .and_then(|value| {
+                            value
+                                .get("type")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned)
+                        })
+                        .unwrap_or_default();
+                    assert!(
+                        EXPECTED_UNSUPPORTED_PROBES.contains(&tag.as_str()),
+                        "unexpected client frame {tag:?} ({error}): {line}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1263,6 +1447,26 @@ mod tests {
             let link_status = ServerMessage::LinkStatusChanged(link);
             writeln!(socket, "{}", serde_json::to_string(&link_status).unwrap()).unwrap();
 
+            // The adapter is a pull-only app (it advertises
+            // supports_push_edits: false), and it only publishes a project
+            // snapshot once a link points *out* of Hirari
+            // (moufu-source -> hirari-target is the inbound direction and
+            // never populates `outbound_links`). A real session therefore has
+            // both directions registered; model the outbound one so the
+            // publish path is reachable.
+            let outbound_link = ServerMessage::LinkStatusChanged(LinkInfo {
+                link_id: moufu_protocol::LinkId::new(),
+                source_app: "Hirari".to_owned(),
+                source_entity: EntityId::from(HIRARI_PROJECT_ENTITY),
+                target_app: "Companion".to_owned(),
+                target_entity: source_id.clone(),
+                data_type: HIRARI_PROJECT_DATA_TYPE.to_owned(),
+                status: LinkStatus::Active,
+                last_synced_version: 0,
+                created_at: chrono::Utc::now(),
+            });
+            writeln!(socket, "{}", serde_json::to_string(&outbound_link).unwrap()).unwrap();
+
             let mut received_pull = false;
             let mut received_live_snapshot = false;
             while !received_pull || !received_live_snapshot {
@@ -1285,6 +1489,18 @@ mod tests {
                                     && value["tracks"][0].get("plugin_state_hex").is_none()
                         ));
                         received_live_snapshot = true;
+                    }
+                    // The real Hub answers every heartbeat with a bare Pong
+                    // (moufu-core/src/server.rs, ClientMessage::Ping arm).
+                    // Without this the adapter's 3s ping reaches the strict
+                    // match below and fails an otherwise healthy session.
+                    ClientMessage::Ping => {
+                        writeln!(
+                            socket,
+                            "{}",
+                            serde_json::to_string(&ServerMessage::Pong).unwrap()
+                        )
+                        .unwrap();
                     }
                     other => panic!("unexpected client message: {other:?}"),
                 }

@@ -802,7 +802,16 @@ mod tests {
         assert_eq!(&data[..4], b"MThd");
         assert_eq!(&data[10..12], &[0, 3]);
         assert!(data.windows(4).filter(|chunk| *chunk == b"MTrk").count() == 3);
-        assert!(data.windows(3).any(|chunk| chunk == [0x91, 60, 37]));
+        // midi_channel 0 encodes as status 0x90 (0x90 | channel); the previous
+        // expectation of 0x91 described a channel that these notes do not use.
+        assert!(
+            data.windows(3).any(|chunk| chunk == [0x90, 60, 37]),
+            "expected note-on ch0 pitch 60 velocity 37"
+        );
+        assert!(
+            data.windows(3).any(|chunk| chunk == [0x80, 60, 0]),
+            "expected the matching note-off ch0"
+        );
         assert!(data
             .windows(5)
             .any(|chunk| chunk == [0xff, 0x05, 2, b'l', b'a']));

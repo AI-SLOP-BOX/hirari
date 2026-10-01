@@ -65,9 +65,19 @@ int main() {
     // The first block contains the delay-line transition. A silent source
     // channel must stay silent; sharing one delay line would leak the other
     // channel into it.
+    //
+    // `isfinite` alone cannot detect that leak, so assert the per-channel bounds
+    // each channel's own input could produce. This processor emits silence, so
+    // the output is the dry signal scaled by (1 - mix) = 0.5: channel 0 (input
+    // 1.0) can only reach 0.5 and channel 1 (input 10.0) only 5.0. Any bleed of
+    // the louder channel into the quieter one lands far outside these bounds.
     for (uint32_t index = 0; index < 16; ++index) {
-        assert(std::isfinite(buffer.getReadPointer(0)[index]));
-        assert(std::isfinite(buffer.getReadPointer(1)[index]));
+        const float left = buffer.getReadPointer(0)[index];
+        const float right = buffer.getReadPointer(1)[index];
+        assert(std::isfinite(left));
+        assert(std::isfinite(right));
+        assert(left >= -1.0e-6f && left <= 0.5f + 1.0e-6f);
+        assert(right >= -1.0e-6f && right <= 5.0f + 1.0e-6f);
     }
 
     processor->setLatency(128);
@@ -76,10 +86,16 @@ int main() {
         buffer.getWritePointer(1)[index] = -0.5f;
     }
     graph.process(buffer, midi, context);
-    for (uint32_t channel = 0; channel < 2; ++channel) {
-        for (uint32_t index = 0; index < 16; ++index) {
-            assert(std::isfinite(buffer.getReadPointer(channel)[index]));
-        }
+    // The two inputs now have opposite signs, which makes any cross-channel
+    // contamination impossible to miss: channel 0 can only ever be >= 0 and
+    // channel 1 only ever <= 0.
+    for (uint32_t index = 0; index < 16; ++index) {
+        const float left = buffer.getReadPointer(0)[index];
+        const float right = buffer.getReadPointer(1)[index];
+        assert(std::isfinite(left));
+        assert(std::isfinite(right));
+        assert(left >= -1.0e-6f && left <= 0.125f + 1.0e-6f);
+        assert(right >= -0.25f - 1.0e-6f && right <= 1.0e-6f);
     }
 
     Core::AudioProcessorGraph guarded;

@@ -17,7 +17,10 @@ mod tests {
 
     #[test]
     fn layout_round_trips_all_project_state() {
-        let layout = r#"[{"id":7,"name":"Keys","type":"Instrument","volume":0.8,"pan":-0.2,"mute":false,"solo":true,"record_armed":true,"phase_invert":true,"volume_automation":[{"time":0.0,"value":0.5,"curve":0.0},{"time":1.0,"value":0.8,"curve":0.1}],"pan_automation":[{"time":0.0,"value":0.5,"curve":0.0}],"plugin_types":[0],"plugin_bypass":[true],"plugin_parameter_values":[[0.25]],"plugin_state_hex":["00ff10"],"regions":[{"id":3,"name":"Take","start":128,"len":2048,"source_offset":256,"base_source_offset":0,"base_length":4096,"muted":false,"path":"audio/take.wav","clip_gain":0.75,"fade_in_samples":8,"fade_out_samples":16,"reverse":true,"warp_ratio":1.25,"pitch_semitones":-3.0,"loop_count":3}]}]"#;
+        // region start must be >= the warped trim length: source_offset 256 at
+        // warp_ratio 1.25 needs 205 timeline samples, so a start of 128 was
+        // rejected as "trim offset exceeds its timeline position".
+        let layout = r#"[{"id":7,"name":"Keys","type":"Instrument","volume":0.8,"pan":-0.2,"mute":false,"solo":true,"record_armed":true,"phase_invert":true,"volume_automation":[{"time":0.0,"value":0.5,"curve":0.0},{"time":1.0,"value":0.8,"curve":0.1}],"pan_automation":[{"time":0.0,"value":0.5,"curve":0.0}],"plugin_types":[0],"plugin_bypass":[true],"plugin_parameter_values":[[0.25]],"plugin_state_hex":["00ff10"],"regions":[{"id":3,"name":"Take","start":256,"len":2048,"source_offset":256,"base_source_offset":0,"base_length":4096,"muted":false,"path":"audio/take.wav","clip_gain":0.75,"fade_in_samples":8,"fade_out_samples":16,"reverse":true,"warp_ratio":1.25,"pitch_semitones":-3.0,"loop_count":3}]}]"#;
         let document = ProjectDocument::from_layout_json("Demo", 128.0, 48_000.0, layout).unwrap();
         assert_eq!(document.tracks[0].plugin_types, vec![0]);
         assert_eq!(

@@ -46,6 +46,14 @@ inline bool sequenceReached(uint64_t completed, uint64_t requested) noexcept {
     return static_cast<int64_t>(completed - requested) >= 0;
 }
 
+// Whether a serialized plugin state carrying `version` can be read by this
+// build. The Rust validator in hirari-plugin-protocol rejects anything that is
+// not exactly STATE_PROTOCOL_VERSION, so this predicate mirrors that contract
+// instead of letting each side re-derive the rule.
+inline bool isSupportedStateVersion(uint32_t version) noexcept {
+    return version == kStateProtocolVersion;
+}
+
 struct MidiEvent {
     uint64_t sampleOffset = 0;
     uint32_t size = 0;

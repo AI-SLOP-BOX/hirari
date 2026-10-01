@@ -157,6 +157,11 @@ impl RealtimeSampler {
         source_rate: f64,
         sample: RealtimeSample,
     ) {
+        // The render loop indexes volume[]/expression[] by the stored channel,
+        // so clamp here as the single choke point for every allocation path.
+        let note = note & 0x7f;
+        let channel = channel & 0x0f;
+        let root = root & 0x7f;
         let rate_ratio = if source_rate.is_finite()
             && (8_000.0..=384_000.0).contains(&source_rate)
             && self.sample_rate > 0.0
@@ -204,7 +209,12 @@ impl RealtimeSampler {
             .sort_by_key(|item| (item.low_key, item.high_key, item.low_velocity));
     }
 
-    fn note_on_zone(&mut self, note: u8, velocity: u8, channel: u8) {
+    fn note_on_zone(&mut self, raw_note: u8, velocity: u8, channel: u8) {
+        // The zone round-robin table is indexed by raw note number, so an
+        // out-of-range note from a direct FFI caller would otherwise index
+        // past the array on the audio thread. MIDI callers already mask, but
+        // the C++ entry points do not.
+        let note = raw_note & 0x7f;
         let mut best_velocity_span = u16::MAX;
         let mut best_key_span = u16::MAX;
         let mut equally_specific = 0usize;
@@ -270,7 +280,11 @@ impl RealtimeSampler {
         );
     }
 
-    fn note_off(&mut self, note: u8, channel: u8) {
+    fn note_off(&mut self, raw_note: u8, raw_channel: u8) {
+        let note = raw_note & 0x7f;
+        // 0xff is the documented "any channel" wildcard. Preserve it; every
+        // other value is a real channel index into sustain[].
+        let channel = if raw_channel == 0xff { 0xff } else { raw_channel & 0x0f };
         let any_sustain = self.sustain.iter().any(|held| *held);
         for voice in &mut self.voices {
             if !voice.active || voice.note != note || (channel != 0xff && voice.channel != channel)
@@ -1264,6 +1278,69 @@ mod tests {
         invalid.source_sample_rate = 1_000.0;
         engine.set_sample(Some(invalid));
         assert!(engine.sample.is_none());
+    }
+
+    /// Out-of-range note/channel values reaching the extern "C" entry points
+    /// used to index `zone_round_robin` ([u32; 128]) and `volume`/`expression`
+    /// ([f32; 16]) out of bounds, panicking on the audio thread. A panic
+    /// inside `extern "C"` aborts the process, so this exercises the real FFI
+    /// surface and then renders a block to reach the indexing sites.
+    #[test]
+    fn out_of_range_midi_values_do_not_panic_across_the_ffi_boundary() {
+        let mut sampler = RealtimeSampler::new(48_000.0, None);
+        let sampler = &mut sampler as *mut RealtimeSampler as *mut c_void;
+        let samples: Vec<f32> = (0..64).map(|index| 1.0 - index as f32 * 0.01).collect();
+
+        unsafe {
+            hirari_sampler_add_zone(
+                sampler,
+                samples.as_ptr(),
+                samples.len() as u64,
+                48_000.0,
+                60,
+                0,
+                127,
+                0,
+                127,
+                0,
+                0,
+                false,
+            );
+            // note = 0xff indexes past zone_round_robin; channel = 0xff
+            // would index past volume[]/expression[] in the render loop.
+            hirari_sampler_note_on_zone(sampler, 0xff, 100, 0xff);
+            hirari_sampler_note_on_raw(
+                sampler,
+                0xff,
+                100,
+                samples.as_ptr(),
+                samples.len() as u32,
+                0xff,
+                0xff,
+                0,
+                0,
+                false,
+                48_000.0,
+            );
+            hirari_sampler_set_sustain(sampler, 0xff, true);
+            hirari_sampler_pitch_bend(sampler, 0xff, 0.5);
+            hirari_sampler_channel_expression(sampler, 0xff, 7, 0x7f);
+            hirari_sampler_channel_pressure(sampler, 0xff, 0x7f);
+            hirari_sampler_voice_pressure(sampler, 0xff, 0xff, 0x7f);
+            // 0xff is the "any channel" wildcard and must survive masking.
+            hirari_sampler_note_off(sampler, 0xff, 0xff);
+
+            let mut left = [0.0f32; 64];
+            let mut right = [0.0f32; 64];
+            hirari_sampler_process(
+                sampler,
+                left.as_mut_ptr(),
+                right.as_mut_ptr(),
+                left.len() as u32,
+            );
+            assert!(left.iter().all(|sample| sample.is_finite()));
+            assert!(right.iter().all(|sample| sample.is_finite()));
+        }
     }
 
     #[test]

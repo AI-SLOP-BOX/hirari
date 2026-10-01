@@ -15,6 +15,15 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
+#include <TargetConditionals.h>
+#endif
+
+// AudioUnitCocoaViewInfo (kAudioUnitProperty_CocoaUI) only exists on macOS.
+// The modern SDK declares it under `#if !TARGET_OS_IPHONE`, so a plain
+// `defined(__APPLE__)` guard is not enough: on an iOS SDK the type is absent
+// and every reference below is a hard compile error.
+#if defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)
+#define HIRARI_HAS_AU_COCOA_UI 1
 #endif
 
 #include "../log_buffer.hpp"

@@ -272,7 +272,16 @@ pub unsafe extern "C" fn hirari_wave64_decode(
             1
         }
         Err(error) => {
-            let message = format!("{error:?}").into_bytes().into_boxed_slice();
+            // `WavExportError` is a plain enum, so Debug on it yields
+            // `Io("...")` with an escaped inner string. That double-escaping
+            // made the native "No such file or directory" reason unreadable to
+            // the diagnostic callers that surface this text verbatim.
+            let message = match error {
+                WavExportError::Io(detail) => detail,
+                other => format!("{other:?}"),
+            }
+            .into_bytes()
+            .into_boxed_slice();
             (*output).error_size = message.len();
             (*output).error = Box::into_raw(message) as *mut u8;
             0

@@ -441,11 +441,15 @@
                 .expect("bounce diagnostics must be JSON");
         assert_eq!(diagnostic["code"], "invalid_render_path");
         assert_eq!(diagnostic["retryable"], false);
+        // Formats 0..=3 are the supported render formats; anything above that
+        // must be rejected as unsupported. (This test previously passed 2, which
+        // is a valid format, so it never reached the rejection branch.)
         let unsupported_format: serde_json::Value = serde_json::from_str(
-            &engine_ref.bounce_project_diagnostic_json("/tmp/hirari-output.wav", 2),
+            &engine_ref.bounce_project_diagnostic_json("/tmp/hirari-output.wav", 4),
         )
         .expect("format diagnostics must be JSON");
         assert_eq!(unsupported_format["code"], "unsupported_render_format");
+        assert_eq!(unsupported_format["retryable"], false);
 
         let core = crate::HirariCore::new().expect("core must initialize");
         let region_add: serde_json::Value = serde_json::from_str(&core.add_region_diagnostic_json(

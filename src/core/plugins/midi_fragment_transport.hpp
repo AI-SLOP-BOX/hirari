@@ -88,7 +88,11 @@ public:
     }
 
     bool pop(Message& destination) noexcept {
-        return hirari_midi_extended_ring_pop(m_storage.data(), &destination);
+        // Pass the destination capacity explicitly: the Rust side refuses to
+        // copy a full slot into a buffer it cannot verify, which is what turns
+        // a caller/ABI size mismatch into a `false` instead of an overflow.
+        return hirari_midi_extended_ring_pop(
+            m_storage.data(), &destination, sizeof(Message));
     }
 
     std::size_t size() const noexcept {

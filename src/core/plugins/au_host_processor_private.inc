@@ -90,4 +90,9 @@ private:
     RTQueue<ParameterCmd, 256> m_paramQueue;
 
     alignas(AudioBufferList) uint8_t m_ablStorage[sizeof(AudioBufferList) + (sizeof(AudioBuffer) * (MaxChannels - 1))];
-};
+
+// The enclosing class is closed by au_host_processor.hpp after this file is
+// included. The stray `};` that used to terminate this file closed the class
+// twice, so the header only failed to compile once the AudioUnitCocoaViewInfo
+// field names below were corrected and parsing reached this point.
+

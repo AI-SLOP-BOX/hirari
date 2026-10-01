@@ -2601,7 +2601,9 @@ extern "C" bool hirari_midi_extended_ring_init(void* storage, size_t bytes);
 extern "C" bool hirari_midi_extended_ring_push(
     void* state, uint64_t sample_offset, uint8_t articulation_id,
     const uint8_t* bytes, size_t size);
-extern "C" bool hirari_midi_extended_ring_pop(void* state, void* destination_message);
+extern "C" bool hirari_midi_extended_ring_pop(
+    void* state, void* destination_message, size_t destination_bytes);
+extern "C" size_t hirari_midi_extended_ring_slot_bytes(void);
 extern "C" size_t hirari_midi_extended_ring_size(const void* state);
 extern "C" void* hirari_analog_saturator_create(double sample_rate);
 extern "C" void hirari_analog_saturator_destroy(void* state);

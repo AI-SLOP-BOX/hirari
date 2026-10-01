@@ -5,6 +5,11 @@ pub use hirari_plugin_protocol::{
     hirari_midi_extended_ring_push, hirari_midi_extended_ring_size,
 };
 
+/// Storage size the shared-memory ring needs. The constant moved into
+/// hirari-plugin-protocol during the Rust migration; re-export it under the
+/// name this module's tests and callers already use.
+pub use hirari_plugin_protocol::RING_STORAGE_BYTES as MIDI_EXTENDED_RING_STORAGE_BYTES;
+
 pub const MIDI_FRAGMENT_PAYLOAD_BYTES: usize = 240;
 pub const MIDI_FRAGMENT_MAXIMUM_MESSAGE_BYTES: usize = 1024 * 1024;
 #[repr(u8)]
@@ -296,7 +301,13 @@ mod tests {
         assert!(!message.is_null());
         for index in 0..4u64 {
             // SAFETY: ring contains the queued message and output points to writable message storage.
-            assert!(unsafe { hirari_midi_extended_ring_pop(storage.cast(), message.cast()) });
+            assert!(unsafe {
+                hirari_midi_extended_ring_pop(
+                    storage.cast(),
+                    message.cast(),
+                    message_layout.size(),
+                )
+            });
             // SAFETY: pop copied a complete fixed-layout Message into this buffer.
             let copied = unsafe { std::slice::from_raw_parts(message, message_layout.size()) };
             assert_eq!(
@@ -313,12 +324,40 @@ mod tests {
             hirari_midi_extended_ring_push(storage.cast(), 999, 7, first.as_ptr(), first.len())
         });
         // SAFETY: ring contains one message and output has full capacity.
-        assert!(unsafe { hirari_midi_extended_ring_pop(storage.cast(), message.cast()) });
+        assert!(unsafe {
+            hirari_midi_extended_ring_pop(storage.cast(), message.cast(), message_layout.size())
+        });
         // SAFETY: pop copied the complete message.
         let copied = unsafe { std::slice::from_raw_parts(message, message_layout.size()) };
         assert_eq!(u64::from_ne_bytes(copied[0..8].try_into().unwrap()), 999);
+        // An undersized destination must be refused rather than overflowed.
+        // SAFETY: both allocations are live and use the matching layouts.
+        let scratch = unsafe { alloc_zeroed(message_layout) };
+        assert!(!scratch.is_null());
+        // SAFETY: the ring was just drained, so the push succeeds and leaves
+        // one message queued for the undersized pop attempt below.
+        assert!(unsafe {
+            hirari_midi_extended_ring_push(storage.cast(), 555, 9, first.as_ptr(), first.len())
+        });
+        // SAFETY: deliberately passes a capacity one byte short of SLOT_BYTES.
+        assert!(!unsafe {
+            hirari_midi_extended_ring_pop(
+                storage.cast(),
+                scratch.cast(),
+                message_layout.size() - 1,
+            )
+        });
+        // The rejected pop must not have consumed the message.
+        // SAFETY: full capacity, and the message is still queued.
+        assert!(unsafe {
+            hirari_midi_extended_ring_pop(storage.cast(), scratch.cast(), message_layout.size())
+        });
+        // SAFETY: pop copied the complete message.
+        let copied = unsafe { std::slice::from_raw_parts(scratch, message_layout.size()) };
+        assert_eq!(u64::from_ne_bytes(copied[0..8].try_into().unwrap()), 555);
         // SAFETY: both allocations are live and use the matching layouts.
         unsafe {
+            dealloc(scratch, message_layout);
             dealloc(message, message_layout);
             dealloc(storage, layout);
         }

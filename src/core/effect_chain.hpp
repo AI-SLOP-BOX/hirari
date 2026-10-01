@@ -109,10 +109,19 @@ public:
     // processors accumulate their tails; parallel sends only extend the
     // longest branch.  This is intentionally a control-thread query so the
     // renderer can append enough silence without touching the RT list.
+    //
+    // The lock is acquired with try_to_lock and the last sampled value is
+    // returned on contention.  These metrics are polled on a timer by the
+    // engine-health overlay, so blocking here would contend directly with
+    // parameter edits on the control thread; a `noexcept` signature must not
+    // be able to stall behind a descheduled lock holder either.
     uint32_t getTotalTailSamples() const noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return static_cast<uint32_t>(hirari_effect_chain_runtime_metric(
+        std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) return m_lastTailSamples.load(std::memory_order_relaxed);
+        const auto value = static_cast<uint32_t>(hirari_effect_chain_runtime_metric(
             m_rustState, 2, &EffectChain::readProcessorMetric));
+        m_lastTailSamples.store(value, std::memory_order_relaxed);
+        return value;
     }
 
     // Control-thread only: drains processor watchdog edges without touching
@@ -123,10 +132,16 @@ public:
             m_rustState, 0, &EffectChain::readProcessorMetric));
     }
 
+    // Non-finite output is a diagnostic counter, so returning the most recent
+    // sample under contention is correct and keeps this polling path free of
+    // any blocking wait.  See getTotalTailSamples() for the rationale.
     uint64_t nonFiniteSampleCount() const noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return hirari_effect_chain_runtime_metric(
+        std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) return m_lastNonFiniteSamples.load(std::memory_order_relaxed);
+        const auto value = hirari_effect_chain_runtime_metric(
             m_rustState, 1, &EffectChain::readProcessorMetric);
+        m_lastNonFiniteSamples.store(value, std::memory_order_relaxed);
+        return value;
     }
 
     /**
@@ -486,6 +501,10 @@ private:
     uint32_t m_maxBlockSize = 0;
     AudioBuffer m_parallelBuffer;
     mutable std::mutex m_mutex;
+    // Last sampled values for the lock-free diagnostic readers above, so a
+    // contended poll returns a real measurement instead of blocking.
+    mutable std::atomic<uint32_t> m_lastTailSamples{0};
+    mutable std::atomic<uint64_t> m_lastNonFiniteSamples{0};
     std::vector<Entry> m_pendingProcessors;  // Owned by UI thread (under mutex)
     std::vector<Entry> m_retiredProcessorOwners; // Keep removed processors alive for old RT snapshots
     void* m_rustState = nullptr;
