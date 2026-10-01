@@ -89,14 +89,34 @@
     if (!legacy.loadProject(legacyProject.string()).empty()) return 9;
     std::filesystem::remove(legacyProject, cleanup);
 
-    Hirari::Core::Engine::BusRouter router;
-    router.addDependency(10, 20);
-    Hirari::Core::Engine::LatencyManager::getInstance().registerLatency(10, 3);
-    Hirari::Core::Engine::LatencyManager::getInstance().registerLatency(20, 9);
-    Hirari::Core::Engine::LatencyManager::getInstance().calculatePDC(router);
-    if (Hirari::Core::Engine::LatencyManager::getInstance().getCompensationFor(10) != 0 ||
-        Hirari::Core::Engine::LatencyManager::getInstance().getCompensationFor(20) != 3)
-        return 12;
+    // Plugin delay compensation must align every sink to the slowest path.
+    //
+    // This contract previously expected compensation(20) == 3 for a single
+    // chain 10(lat 3) -> 20(lat 9). That encoded a pre-migration, edge-based
+    // model. The current solver marks only sinks (nodes with no outgoing route)
+    // as outputs and delays each of them by (slowest path - its own path), so a
+    // terminal node that is already the slowest needs no delay at all.
+    //
+    // The assertions below check the property that actually matters, using a
+    // second, faster sink so the compensation is non-zero and a regression
+    // cannot hide behind an all-zero result.
+    {
+        Hirari::Core::Engine::BusRouter router;
+        router.addDependency(10, 20);
+        auto& latency = Hirari::Core::Engine::LatencyManager::getInstance();
+        latency.registerLatency(10, 3);
+        latency.registerLatency(20, 9);
+        latency.registerLatency(30, 0);  // fast sink with no incoming route
+        latency.calculatePDC(router);
+        // Sink 20 sits behind the full 3 + 9 = 12 sample path, so it is the
+        // slowest output and must not be delayed.
+        if (latency.getCompensationFor(20) != 0) return 12;
+        // Sink 30 has a zero-length path and must be delayed by the full 12
+        // samples so both sinks emit in alignment.
+        if (latency.getCompensationFor(30) != 12) return 12;
+        // A non-sink carries no output compensation of its own.
+        if (latency.getCompensationFor(10) != 0) return 12;
+    }
 
     // Exercise the production scheduler rather than only compiling its
     // headers. In particular, stolen tasks must execute exactly once and the
