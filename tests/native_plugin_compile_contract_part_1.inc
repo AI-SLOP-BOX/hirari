@@ -495,7 +495,16 @@ int main() {
     auto& telemetryBridge = Hirari::Network::SharedMemoryBridge::getInstance();
     if (!telemetryBridge.start()) return 26;
     const std::string telemetryName = telemetryBridge.segmentName();
-    if (telemetryName.find("/hirari_sovereign_bridge_") != 0) return 27;
+    // The auto-generated name must stay inside the smallest POSIX shm budget
+    // we support. It previously used "/hirari_sovereign_bridge_<pid>_<seq>",
+    // which is 35 characters for a 5-digit pid and failed shm_open with
+    // ENAMETOOLONG on macOS (31 character limit), so the bridge never started.
+    if (telemetryName.empty() ||
+        telemetryName.size() > Hirari::Network::SharedMemoryBridge::kMaxSegmentNameLength) {
+        return 27;
+    }
+    if (telemetryName[0] != '/' ||
+        telemetryName.find('/', 1) != std::string::npos) return 27;
     std::array<uint8_t, 300> sharedMidiPayload{};
     sharedMidiPayload.front() = 0xf0;
     sharedMidiPayload.back() = 0xf7;

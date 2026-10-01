@@ -45,14 +45,36 @@ public:
     /**
      * @brief Initializes the shared memory segment.
      */
+    /// POSIX shared-memory name budget, including the leading '/'.
+    ///
+    /// macOS caps shm_open names at 31 characters (PSHMNAMLEN); anything longer
+    /// fails with ENAMETOOLONG. Linux and Windows allow far more, but keeping
+    /// inside the smallest supported limit keeps the auto-generated name valid
+    /// everywhere.
+    static constexpr std::size_t kMaxSegmentNameLength = 31;
+
+    /// Compact prefix for the auto-generated name. "/hirari_sovereign_bridge_"
+    /// plus a pid and a sequence counter exceeded the macOS budget, so
+    /// start() failed with ENAMETOOLONG on every macOS build and the telemetry
+    /// bridge never came up.
+    static constexpr const char* kSegmentNamePrefix = "/hb_";
+
     bool start(const std::string& segmentName = {}) {
         if (m_state || m_fd != -1) stop();
         static std::atomic<uint64_t> sequence{0};
         m_segmentName = segmentName.empty()
-            ? "/hirari_sovereign_bridge_" + std::to_string(
-                  static_cast<unsigned long long>(::getpid())) + "_" +
+            ? std::string(kSegmentNamePrefix) +
+                  std::to_string(static_cast<unsigned long long>(::getpid())) + "_" +
                   std::to_string(sequence.fetch_add(1, std::memory_order_relaxed) + 1)
             : segmentName;
+        // A caller-supplied name is subject to the same platform limit; reject
+        // it explicitly instead of surfacing an opaque shm_open errno.
+        if (m_segmentName.empty() || m_segmentName.size() > kMaxSegmentNameLength ||
+            m_segmentName[0] != '/' ||
+            m_segmentName.find('/', 1) != std::string::npos) {
+            m_segmentName.clear();
+            return false;
+        }
         m_fd = shm_open(m_segmentName.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
         if (m_fd == -1) return false;
 
