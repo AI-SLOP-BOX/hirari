@@ -578,6 +578,19 @@ impl HirariCore {
         else {
             return false;
         };
+        // Preserve the currently open project before any restore is attempted.
+        // A restore request can fail after this point (an unreadable or
+        // unrecognized candidate, a sidecar that will not parse, or a failure
+        // inside the native loader), and the user must always be able to get
+        // back to the project they had open. Take the snapshot before the
+        // candidate is inspected so it exists for every restore attempt that
+        // reaches this point, not only for the ones that get far enough to
+        // mutate engine state.
+        let current_path = std::path::Path::new(path);
+        if current_path.is_file() {
+            let before_restore = std::path::PathBuf::from(format!("{path}.before-restore"));
+            let _ = std::fs::copy(current_path, before_restore);
+        }
         if first_non_whitespace_byte(&candidate.path) == Some(b'{') {
             return self
                 .load_project_v2(candidate.path.to_string_lossy().as_ref())
@@ -620,11 +633,6 @@ impl HirariCore {
         if !engine.save_project(&rollback_path_text) {
             let _ = std::fs::remove_file(&rollback_path);
             return false;
-        }
-        let current_path = std::path::Path::new(path);
-        if current_path.is_file() {
-            let before_restore = std::path::PathBuf::from(format!("{path}.before-restore"));
-            let _ = std::fs::copy(current_path, before_restore);
         }
         let previous_comping = self.comping_snapshot_json();
         let previous_midi = self.midi_events_json();
