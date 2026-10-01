@@ -324,19 +324,43 @@ fn install_selected_plugin(ui: &AppWindow) {
         ui.set_last_action("PLUGIN INSTALL REJECTED · EXISTING FILE NOT OVERWRITTEN".into());
         return;
     }
-    let install_result = std::fs::create_dir_all(&destination_dir)
-        .and_then(|()| copy_plugin_bundle(&source, &temporary))
-        .and_then(|()| std::fs::rename(&temporary, &target));
-    if let Err(error) = install_result {
-        let _ = std::fs::remove_dir_all(&temporary);
-        let _ = std::fs::remove_file(&temporary);
-        ui.set_last_action(format!("PLUGIN INSTALL FAILED · {error}").into());
-        return;
+    // The recursive bundle copy and the final rename can take seconds for a
+    // large plugin, which froze the window while it ran. Everything above is
+    // cheap validation and stays on the UI thread; only the filesystem work
+    // moves to a worker, which reports back through a Weak handle so a closed
+    // window is simply ignored.
+    let weak = ui.as_weak();
+    ui.set_last_action("PLUGIN INSTALLING…".into());
+    let worker_source = source.clone();
+    let worker_temporary = temporary.clone();
+    let worker_target = target.clone();
+    let worker_destination = destination_dir.clone();
+    let spawn = std::thread::Builder::new()
+        .name("hirari-plugin-install".to_owned())
+        .spawn(move || {
+            let _permit = crate::ui::worker_budget::WorkerPermit::acquire();
+            let outcome = std::fs::create_dir_all(&worker_destination)
+                .and_then(|()| copy_plugin_bundle(&worker_source, &worker_temporary))
+                .and_then(|()| std::fs::rename(&worker_temporary, &worker_target));
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = weak.upgrade() else {
+                    return;
+                };
+                if let Err(error) = outcome {
+                    let _ = std::fs::remove_dir_all(&worker_temporary);
+                    let _ = std::fs::remove_file(&worker_temporary);
+                    ui.set_last_action(format!("PLUGIN INSTALL FAILED · {error}").into());
+                    return;
+                }
+                ui.global::<PluginActions>().invoke_rescan_plugins();
+                ui.set_bot_view(16);
+                ui.set_mx_open(true);
+                ui.set_last_action("PLUGIN INSTALLED · REFRESHING CATALOG…".into());
+            });
+        });
+    if spawn.is_err() {
+        ui.set_last_action("PLUGIN INSTALL FAILED · COULD NOT START WORKER".into());
     }
-    ui.global::<PluginActions>().invoke_rescan_plugins();
-    ui.set_bot_view(16);
-    ui.set_mx_open(true);
-    ui.set_last_action("PLUGIN INSTALLED · REFRESHING CATALOG…".into());
 }
 
 pub fn handle_command(
