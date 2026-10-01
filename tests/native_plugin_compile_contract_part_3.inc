@@ -365,10 +365,16 @@
         malformedWave64Path.string(), true);
     if (malformedWaveDiagnostic.find("\"ok\":false") == std::string::npos ||
         malformedWaveDiagnostic.find("\"error\":\"") == std::string::npos) return 57;
+    // A missing WAVE64 file must be reported as a failure, and the diagnostic must
+    // identify which file was missing. The exact wording of the error text is an
+    // implementation detail (it currently embeds the OS error and the resolved
+    // path), so assert the behaviour rather than a literal string.
     const auto missingWaveDiagnostic = Hirari::IO::WavLoader::loadDiagnosticJson(
         (wave64Path.parent_path() / "hirari-wav-does-not-exist.w64").string(), true);
     if (missingWaveDiagnostic.find("\"ok\":false") == std::string::npos ||
-        missingWaveDiagnostic.find("WAVE64 file not found") == std::string::npos) return 58;
+        missingWaveDiagnostic.find("\"error\":\"") == std::string::npos ||
+        missingWaveDiagnostic.find("No such file or directory") == std::string::npos ||
+        missingWaveDiagnostic.find("hirari-wav-does-not-exist.w64") == std::string::npos) return 58;
     std::error_code wave64Cleanup;
     std::filesystem::remove(wave64Path, wave64Cleanup);
     std::filesystem::remove(wave64MultiPath, wave64Cleanup);

@@ -250,10 +250,22 @@
         oversized.seekp(static_cast<std::streamoff>(44ull + expansionDataBytes - 1ull));
         oversized.put('\0');
     }
+    // A sparse/expanded WAV must never be turned into a file-sized buffer.
+    //
+    // This contract previously required open() to succeed and then yield an
+    // empty buffer. That encoded the old architecture where open() only parsed
+    // the RIFF header and decodeFull did the work. open() now performs the whole
+    // decode itself (decodeFull just copies the result), so the meaningful
+    // guarantee is stronger: a file whose decoded PCM would exceed the 512 MiB
+    // limit is refused outright rather than silently accepted and truncated.
+    //
+    // 300 MiB of 16-bit stereo PCM decodes to roughly 629 MB of f32, which is
+    // over that limit, so open() must fail and must not publish any channels.
     Hirari::Core::IO::WavDecoder oversizedDecoder;
     Hirari::Core::AudioBuffer oversizedBuffer;
     const bool openedOversized = oversizedDecoder.open(oversizedExpansionPath.string());
-    if (!openedOversized) return 35;
+    if (openedOversized) return 35;
+    // A refused decode must leave the decoder with no buffer at all.
     oversizedDecoder.decodeFull(oversizedBuffer);
     std::filesystem::remove(oversizedExpansionPath, offlineCleanup);
     if (oversizedBuffer.getNumChannels() != 0 || oversizedBuffer.getNumSamples() != 0) return 36;
