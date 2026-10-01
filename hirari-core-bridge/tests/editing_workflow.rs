@@ -261,3 +261,101 @@ fn flex_and_pitch_each_change_rendered_audio_and_survive_reload() {
     let _ = std::fs::remove_file(pitch_path);
     let _ = std::fs::remove_file(reloaded_path);
 }
+
+/// A Track bakes its sample rate into the published region snapshot that the
+/// region renderer consumes. prepareToPlay is the only place that rate changes,
+/// and it runs at the project-reload and offline-render boundary. If the
+/// snapshot is not republished there, a track hydrated at its default rate keeps
+/// rendering at that stale rate even though the engine and the saved project are
+/// both correct.
+///
+/// This exercises the rate lifetime directly at 48 kHz, which is not the
+/// Track/ChannelStrip default of 44.1 kHz, and asserts the reopened project's
+/// render matches a render taken before the save.
+#[test]
+fn reopened_project_renders_at_the_project_sample_rate() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let token = format!(
+        "hirari-project-rate-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock must be valid")
+            .as_nanos()
+    );
+    let project_path = std::env::temp_dir().join(format!("{token}.hirari"));
+    let before_path = std::env::temp_dir().join(format!("{token}-before.wav"));
+    let after_path = std::env::temp_dir().join(format!("{token}-after.wav"));
+
+    // 48 kHz is deliberately not the 44.1 kHz default, so a stale rate is
+    // observable rather than coincidental.
+    assert!(core.apply_audio_config(48_000, 1024));
+    core.start_recording_capture(48_000.0, 2, 4096, 0)
+        .expect("recording capture must start");
+    let recorded_audio: Vec<f32> = (0..4096u32)
+        .flat_map(|frame| {
+            let sample = if frame % 64 < 32 { 0.3 } else { -0.2 };
+            [sample, sample]
+        })
+        .collect();
+    core.append_recording_preview(&recorded_audio)
+        .expect("recorded audio must be accepted");
+    let track_id = core.add_track(0);
+    assert!(
+        core.commit_recording_capture_to_track(track_id, None)
+            .expect("recording take must publish")
+            > 0
+    );
+    let layout: serde_json::Value =
+        serde_json::from_str(&core.get_project_layout_json()).expect("layout must be JSON");
+    let region_id = layout
+        .as_array()
+        .and_then(|tracks| {
+            tracks.iter().find(|track| {
+                track.get("id").and_then(serde_json::Value::as_u64) == Some(track_id as u64)
+            })
+        })
+        .and_then(|track| track.get("regions"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|regions| regions.first())
+        .and_then(|region| region.get("id"))
+        .and_then(serde_json::Value::as_u64)
+        .expect("recording must publish a region") as u32;
+
+    // Pitch forces the region renderer down its rate-dependent path.
+    assert!(core.set_region_pitch_semitones(track_id, region_id, 5.0));
+    assert!(core.bounce_project(before_path.to_str().expect("before path must be UTF-8"), 0));
+    let before = std::fs::read(&before_path).expect("pre-save render must exist");
+
+    assert!(core.save_project(project_path.to_str().expect("project path must be UTF-8")));
+    assert!(core.load_project(project_path.to_str().expect("project path must be UTF-8")));
+    assert_eq!(
+        core.get_sample_rate(),
+        48_000.0,
+        "reopening a project must restore the project's sample rate"
+    );
+    assert!(core.bounce_project(after_path.to_str().expect("after path must be UTF-8"), 0));
+    let after = std::fs::read(&after_path).expect("post-load render must exist");
+
+    assert_eq!(
+        before.len(),
+        after.len(),
+        "reopened render length must match"
+    );
+    // Compare the way the Flex/Pitch contract does. The render is expected to
+    // match within a small tolerance rather than bit-for-bit: reopening a
+    // project re-derives buffers and may differ in dither. What this test
+    // guards is the rate, and a stale 44.1 kHz render is far outside 2%.
+    let before_rms = pcm16_rms(&before);
+    let after_rms = pcm16_rms(&after);
+    assert!(
+        (before_rms - after_rms).abs() <= before_rms.max(1.0) * 0.02,
+        "a reopened project must render at the project sample rate, not a stale one: \
+         before_rms={before_rms} after_rms={after_rms}"
+    );
+
+    let _ = std::fs::remove_file(project_path);
+    let _ = std::fs::remove_file(before_path);
+    let _ = std::fs::remove_file(after_path);
+}

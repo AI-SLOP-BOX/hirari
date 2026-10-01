@@ -26,6 +26,14 @@
         m_sendPostFaderBuffer.resize(2, blockSize);
         m_preInsertBuffer.resize(2, blockSize);
         m_effectChain.setSampleRate(sr, blockSize);
+        // A published region snapshot bakes this track's sample rate into
+        // HirariTrackRegionRenderInput::sampleRate. prepareToPlay is the only
+        // place the rate changes, and it is also the offline-render and
+        // project-reload boundary, so a snapshot published earlier (while the
+        // track still held its default rate) would otherwise keep rendering at
+        // the stale rate. Republish so the rate is captured with the new
+        // configuration. This is a per-prepare rebuild, not a per-block reset.
+        publishRegionSnapshot();
     }
     void resetForOfflineRender() noexcept {
         m_strip.reset();
