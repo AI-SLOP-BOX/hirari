@@ -42,10 +42,15 @@ TSAN_FLAGS="-fsanitize=thread -fno-omit-frame-pointer"
     tests/block_processor_stft_contract.cpp -o "$OUT_DIR/block-processor-stft" "$BRIDGE_LIB"
 "$CXX" $COMMON_FLAGS $TSAN_FLAGS \
     tests/rt_dsp_contract.cpp -o "$OUT_DIR/rt-dsp" "$BRIDGE_LIB"
+"$CXX" $COMMON_FLAGS $TSAN_FLAGS \
+    tests/wav_roundtrip_contract.cpp -o "$OUT_DIR/wav-roundtrip" "$BRIDGE_LIB"
 
 TSAN_OPTIONS=${TSAN_OPTIONS:-halt_on_error=1:second_deadlock_stack=1}
 export TSAN_OPTIONS
 "$OUT_DIR/realtime-safety"
 "$OUT_DIR/graph-focus"
 "$OUT_DIR/effect-chain-watchdog"
+"$OUT_DIR/block-processor-stft"
+"$OUT_DIR/rt-dsp"
+"$OUT_DIR/wav-roundtrip"
 echo "C++ ThreadSanitizer contract tests passed"

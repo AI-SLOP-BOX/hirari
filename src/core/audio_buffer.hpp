@@ -292,16 +292,25 @@ public:
         return hirari_audio_buffer_magnitude(getReadPointer(channel, start), n);
     }
 
+    // The static pointer array is filled for min(numChannels, kMaxFastPathChannels)
+    // entries by updatePointers(), and the Rust storage pointer array is only
+    // sized/populated beyond kMaxFastPathChannels (see reserve()). Returning the
+    // storage array for any count above 2 therefore handed the Rust ops an
+    // unpopulated pointer array, which corrupted memory as soon as a buffer had
+    // 3..kMaxFastPathChannels channels - for example loading any multi-channel
+    // WAV with more than two channels.
     const float* const* getArrayOfReadPointers() const {
         if (m_isExternal) return const_cast<const float* const*>(m_externalData);
-        if (m_numChannels <= 2) return const_cast<const float* const*>(m_staticPointers);
+        if (m_numChannels <= kMaxFastPathChannels) {
+            return const_cast<const float* const*>(m_staticPointers);
+        }
         return const_cast<const float* const*>(
             hirari_audio_buffer_storage_channel_pointers(m_storage));
     }
 
     float** getArrayOfWritePointers() {
         if (m_isExternal) return m_externalData;
-        if (m_numChannels <= 2) return m_staticPointers;
+        if (m_numChannels <= kMaxFastPathChannels) return m_staticPointers;
         return hirari_audio_buffer_storage_channel_pointers(m_storage);
     }
 

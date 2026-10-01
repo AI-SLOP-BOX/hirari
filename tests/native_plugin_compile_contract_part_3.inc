@@ -134,18 +134,15 @@
     // WavWriter::reserveTemporary used to open the destination with
     // O_WRONLY|O_CREAT|O_EXCL and was removed when export moved to Rust. The
     // exclusive-create primitive now applies to the writer's internal spool
-    // (OpenOptions::create_new(true) in export.rs), while the destination is
+    // (OpenOptions::create_new(true) in export.rs) while the destination is
     // published afterwards, so the old "a second reserve of the same path
-    // fails" assertion no longer describes observable behaviour and cannot be
-    // reproduced through the public API.
+    // fails" behaviour is no longer observable through the public API.
     //
-    // What remains observable, and is what that reservation existed to protect,
-    // is that an export publishes a complete, loadable WAV at the requested
-    // format. That is asserted here. The frame count deliberately is not: the
-    // Rust writer and the Symphonia-backed loader disagree on the decoded frame
-    // count for these small buffers (both a 4-frame and a 6-frame export decode
-    // as 2), which is tracked separately rather than encoded as an assertion
-    // that would encode the wrong expectation.
+    // What remains observable, and is what that reservation protected, is that
+    // an export publishes a complete WAV. That is asserted here directly: the
+    // frame count must round-trip exactly, and a re-export over an existing
+    // destination must replace it wholesale rather than leave a truncated
+    // remnant.
     const auto reservedTempPath = std::filesystem::temp_directory_path() /
                                   "hirari-native-wav-reservation-contract.wav";
     std::filesystem::remove(reservedTempPath, offlineCleanup);
@@ -153,19 +150,31 @@
     const std::vector<float> reservationRight{0.0f, -0.5f, 0.25f, -0.125f};
     if (!Hirari::IO::Persistence::WavWriter::write(
             reservedTempPath.string(), reservationLeft.data(), reservationRight.data(),
-            2, 48'000)) return 62;
-    // Re-export over the existing destination must still leave a loadable file.
-    const std::vector<float> replacedLeft{0.25f, -0.25f, 0.75f, -0.5f};
-    const std::vector<float> replacedRight{-0.25f, 0.25f, 0.5f, -0.75f};
-    if (!Hirari::IO::Persistence::WavWriter::write(
-            reservedTempPath.string(), replacedLeft.data(), replacedRight.data(),
-            2, 48'000)) return 62;
+            static_cast<uint64_t>(reservationLeft.size()), 48'000)) return 62;
     {
         Hirari::IO::WavLoader::WavInfo reservationInfo{};
-        const auto reservationDecoded =
+        const auto decoded =
             Hirari::IO::WavLoader::load(reservedTempPath.string(), reservationInfo);
-        if (reservationDecoded.size() != 2 || reservationInfo.sampleRate != 48'000 ||
+        if (decoded.size() != 2 || reservationInfo.sampleRate != 48'000 ||
             reservationInfo.numChannels != 2) return 62;
+        if (decoded[0].size() != reservationLeft.size() ||
+            decoded[1].size() != reservationRight.size()) return 62;
+    }
+    // Re-export different, longer content over the existing destination.
+    const std::vector<float> replacedLeft{0.25f, -0.25f, 0.75f, -0.5f, 0.125f, -0.125f};
+    const std::vector<float> replacedRight{-0.25f, 0.25f, 0.5f, -0.75f, 0.25f, -0.25f};
+    if (!Hirari::IO::Persistence::WavWriter::write(
+            reservedTempPath.string(), replacedLeft.data(), replacedRight.data(),
+            static_cast<uint64_t>(replacedLeft.size()), 48'000)) return 62;
+    {
+        Hirari::IO::WavLoader::WavInfo reservationInfo{};
+        const auto decoded =
+            Hirari::IO::WavLoader::load(reservedTempPath.string(), reservationInfo);
+        if (decoded.size() != 2 || reservationInfo.sampleRate != 48'000 ||
+            reservationInfo.numChannels != 2) return 62;
+        if (decoded[0].size() != replacedLeft.size() ||
+            decoded[1].size() != replacedRight.size()) return 62;
+        if (decoded[0] != replacedLeft || decoded[1] != replacedRight) return 62;
     }
     std::filesystem::remove(reservedTempPath, offlineCleanup);
     const auto pcm16Path = std::filesystem::temp_directory_path() / "hirari-native-pcm16-contract.wav";
