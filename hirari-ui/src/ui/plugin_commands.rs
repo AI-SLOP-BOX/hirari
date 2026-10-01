@@ -1,13 +1,116 @@
 use hirari_core_bridge::HirariCore;
 use slint::{ComponentHandle, Model, VecModel};
+use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::slint_ui::{
     clamp_selection_index, clear_plugin_blacklist, load_plugin_favorites, sync_tracks_from_engine,
     ui_error_message, ui_error_with_action, AppWindow, PluginActions, UiErrorKind, Z_Plugin_Entry,
     Z_Track,
 };
+
+thread_local! {
+    /// The engine handle owned by the UI thread.
+    ///
+    /// HirariCore holds a cxx::UniquePtr and is deliberately not `Send`, so it
+    /// cannot be captured by a closure handed to `invoke_from_event_loop`. The
+    /// closures below run *on* the UI thread, so a thread-local gives them the
+    /// engine without an unsafe raw pointer or an unjustified `Send` impl.
+    static THREAD_CORE: RefCell<Option<Rc<HirariCore>>> = const { RefCell::new(None) };
+}
+
+/// Publish the engine handle for deferred work that resumes on the UI thread.
+/// Must be called from the UI thread during startup.
+pub fn register_thread_core(core: Rc<HirariCore>) {
+    THREAD_CORE.with(|slot| *slot.borrow_mut() = Some(core));
+}
+
+/// Run `action` with the UI thread's engine, or `None` if it is unavailable
+/// (for example when the callback is invoked after shutdown).
+pub fn with_thread_core<T>(action: impl FnOnce(&HirariCore) -> T) -> Option<T> {
+    THREAD_CORE.with(|slot| slot.borrow().as_ref().map(|core| action(core)))
+}
+
+/// Monotonic token identifying the most recent tuning request.
+///
+/// A worker finishes long after the user may have started another request or
+/// closed the window. Only the newest generation is allowed to publish a
+/// result, so a slow, superseded subprocess cannot overwrite fresher UI state.
+static TUNING_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Result handed back from the tuning worker thread to the UI thread.
+#[derive(Clone)]
+struct TuningResult {
+    generation: u64,
+    succeeded: bool,
+    output: String,
+    scoop: f32,
+    vibrato: f32,
+    dynamics: f32,
+    consonants: f32,
+}
+
+/// Shared, thread-safe landing slot for the worker result.
+type TuningSlot = Arc<Mutex<Option<TuningResult>>>;
+
+/// The slot the most recent worker will publish into, so the UI-thread
+/// collector can reach it from the event loop.
+static TUNING_PENDING: Mutex<Option<TuningSlot>> = Mutex::new(None);
+
+/// Consume a finished tuning result on the UI thread.
+///
+/// Runs inside `invoke_from_event_loop`, so the engine is reached through the
+/// thread-local rather than being captured across threads. Results from a
+/// superseded generation are discarded, and a closed window upgrades to None so
+/// nothing touches a dead UI.
+fn collect_tuning_result(weak: &slint::Weak<AppWindow>) {
+    let slot = TUNING_PENDING
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.take());
+    let Some(slot) = slot else {
+        return;
+    };
+    let result = slot.lock().ok().and_then(|mut pending| pending.take());
+    let Some(result) = result else {
+        return;
+    };
+    if result.generation != TUNING_GENERATION.load(Ordering::Acquire) {
+        // A newer request superseded this one; drop the stale result.
+        return;
+    }
+    let Some(ui) = weak.upgrade() else {
+        return;
+    };
+    if !result.succeeded {
+        ui.set_openutau_status("TUNING FAILED · CHECK PYTHON / USTX".into());
+        return;
+    }
+    let output = std::path::PathBuf::from(&result.output);
+    let source = ui.get_openutau_score_path().to_string();
+    // HirariCore is not Send; it is reached through the UI-thread handle.
+    if with_thread_core(|core| {
+        core.set_openutau_tuning(
+            &source,
+            &result.output,
+            result.scoop,
+            result.vibrato,
+            result.dynamics,
+            result.consonants,
+        )
+    })
+    .is_none()
+    {
+        ui.set_openutau_status("TUNING FAILED · ENGINE UNAVAILABLE".into());
+        return;
+    }
+    ui.set_openutau_score_path(result.output.as_str().into());
+    set_openutau_note_preview(&ui, &output);
+    ui.set_openutau_status("HIRARI TUNING APPLIED · PITCH / VIBRATO / DYNAMICS READY".into());
+}
 
 fn launch_openutau(source: &std::path::Path) -> Result<(), String> {
     hirari_core_bridge::openutau::validate_source(&source.to_string_lossy())
@@ -491,38 +594,73 @@ pub fn handle_command(
             let output = source_path.with_file_name(format!("{stem}_hirari_tuned.ustx"));
             let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../scripts/tune_openutau_chorus.py");
-            let result = Command::new("python3")
-                .arg(script)
-                .arg(&source)
-                .arg(&output)
-                .arg(format!("{:.2}", ui.get_openutau_scoop() * 16.0))
-                .arg(format!("{:.2}", ui.get_openutau_vibrato() * 18.0 + 4.0))
-                .arg(format!("{:.2}", ui.get_openutau_vibrato() * 34.0 + 16.0))
-                .arg(format!("{:.2}", ui.get_openutau_dynamics()))
-                .arg(format!("{:.2}", ui.get_openutau_consonants()))
-                .arg(format!(
-                    "{:.2}",
-                    220.0 - ui.get_openutau_vibrato_rate() * 160.0
-                ))
-                .output();
-            if result.as_ref().is_ok_and(|value| value.status.success()) {
-                let _ = core.set_openutau_tuning(
-                    &source,
-                    &output.to_string_lossy(),
-                    ui.get_openutau_scoop(),
-                    ui.get_openutau_vibrato(),
-                    ui.get_openutau_dynamics(),
-                    ui.get_openutau_consonants(),
-                );
-                ui.set_openutau_score_path(output.to_string_lossy().into_owned().into());
-                set_openutau_note_preview(ui, &output);
-                ui.set_openutau_status(
-                    "HIRARI TUNING APPLIED · PITCH / VIBRATO / DYNAMICS READY".into(),
-                );
-            } else {
-                ui.set_openutau_status("TUNING FAILED · CHECK PYTHON / USTX".into());
+
+            // Read every slider once, on the UI thread, so the worker needs no
+            // access to the UI and the values cannot drift mid-run.
+            let scoop = ui.get_openutau_scoop();
+            let vibrato = ui.get_openutau_vibrato();
+            let dynamics = ui.get_openutau_dynamics();
+            let consonants = ui.get_openutau_consonants();
+            let vibrato_rate = ui.get_openutau_vibrato_rate();
+
+            ui.set_openutau_status("APPLYING OPENUTAU TUNING…".into());
+
+            // Invalidate any in-flight request; only the newest generation may
+            // publish a result.
+            let generation = TUNING_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+            let slot: TuningSlot = Arc::new(Mutex::new(None));
+            let worker_slot = Arc::clone(&slot);
+            let worker_source = source.clone();
+            let worker_output = output.to_string_lossy().into_owned();
+            let worker_generation = generation;
+            let weak = ui.as_weak();
+            if let Ok(mut pending) = TUNING_PENDING.lock() {
+                *pending = Some(Arc::clone(&slot));
             }
-            true
+
+            // Running python3 synchronously froze the whole window until the
+            // interpreter exited, so the subprocess now runs on a worker and
+            // only the cheap result hand-off touches the UI thread.
+            let spawn = std::thread::Builder::new()
+                .name("hirari-openutau-tuning".to_owned())
+                .spawn(move || {
+                    let _permit = crate::ui::worker_budget::WorkerPermit::acquire();
+                    let status = Command::new("python3")
+                        .arg(&script)
+                        .arg(&worker_source)
+                        .arg(&worker_output)
+                        .arg(format!("{:.2}", scoop * 16.0))
+                        .arg(format!("{:.2}", vibrato * 18.0 + 4.0))
+                        .arg(format!("{:.2}", vibrato * 34.0 + 16.0))
+                        .arg(format!("{:.2}", dynamics))
+                        .arg(format!("{:.2}", consonants))
+                        .arg(format!("{:.2}", 220.0 - vibrato_rate * 160.0))
+                        .output();
+                    let succeeded = status.as_ref().is_ok_and(|value| value.status.success());
+                    let result = TuningResult {
+                        generation: worker_generation,
+                        succeeded,
+                        output: worker_output,
+                        scoop,
+                        vibrato,
+                        dynamics,
+                        consonants,
+                    };
+                    if let Ok(mut pending) = worker_slot.lock() {
+                        *pending = Some(result);
+                    }
+                    drop(worker_slot);
+                    // Wake the event loop so the UI thread can collect the slot.
+                    let _ = slint::invoke_from_event_loop(move || {
+                        collect_tuning_result(&weak);
+                    });
+                });
+
+            if spawn.is_err() {
+                ui.set_openutau_status("TUNING FAILED · COULD NOT START WORKER".into());
+                return true;
+            }
+            return true;
         }
         "OPENUTAU IMPORT RENDER" => {
             let source = ui.get_openutau_score_path().to_string();

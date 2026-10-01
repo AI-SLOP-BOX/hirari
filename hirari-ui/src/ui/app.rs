@@ -325,6 +325,10 @@ pub fn run() {
             return;
         }
     };
+    // Publish the engine handle for deferred work that resumes on the UI thread
+    // (for example the OpenUatu tuning worker, which must not block the event
+    // loop while python3 runs).
+    crate::ui::plugin_commands::register_thread_core(Rc::clone(&core));
     let configured_moufu_address = std::env::var("HIRARI_MOUFU_ADDR")
         .ok()
         .or_else(crate::slint_ui::load_moufu_address)
