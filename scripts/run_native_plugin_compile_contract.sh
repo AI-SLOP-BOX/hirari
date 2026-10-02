@@ -46,15 +46,7 @@ mkdir -p "$OUT_DIR"
 
 # The native surface is backed by the Rust core bridge. Without the staticlib,
 # every hirari_* symbol in the contract below is undefined at link time.
-if ! cargo rustc -p hirari-core-bridge --lib --crate-type staticlib; then
-    echo "failed to build the hirari-core-bridge staticlib" >&2
-    exit 1
-fi
-BRIDGE_LIB=target/debug/libhirari_core_bridge.a
-if [ ! -f "$BRIDGE_LIB" ]; then
-    echo "hirari-core-bridge staticlib not found at $BRIDGE_LIB" >&2
-    exit 1
-fi
+BRIDGE_LIB=$("$ROOT_DIR/scripts/build_bridge_staticlib.sh")
 
 LINK_FLAGS=""
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -81,43 +73,43 @@ fi
 "$OUT_DIR/wav-io-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/project_decoder_contract.cpp $LINK_FLAGS \
+    tests/project_decoder_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/project-decoder-contract"
 "$OUT_DIR/project-decoder-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/persistence_contract.cpp $LINK_FLAGS \
+    tests/persistence_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/persistence-contract"
 "$OUT_DIR/persistence-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/timeline_track_render_contract.cpp $LINK_FLAGS \
+    tests/timeline_track_render_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/timeline-track-render-contract"
 "$OUT_DIR/timeline-track-render-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/recording_engine_contract.cpp $LINK_FLAGS \
+    tests/recording_engine_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/recording-engine-contract"
 "$OUT_DIR/recording-engine-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/recording_engine_stress.cpp $LINK_FLAGS \
+    tests/recording_engine_stress.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/recording-engine-stress"
 HIRARI_RECORDING_STRESS_ROUNDS="${HIRARI_RECORDING_STRESS_ROUNDS:-250}" \
     "$OUT_DIR/recording-engine-stress"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/recording_autosave_contract.cpp $LINK_FLAGS \
+    tests/recording_autosave_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/recording-autosave-contract"
 "$OUT_DIR/recording-autosave-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/shared_memory_multiprocess_contract.cpp $LINK_FLAGS \
+    tests/shared_memory_multiprocess_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/shared-memory-multiprocess-contract"
 "$OUT_DIR/shared-memory-multiprocess-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/sidechain_snapshot_contract.cpp $LINK_FLAGS \
+    tests/sidechain_snapshot_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/sidechain-snapshot-contract"
 "$OUT_DIR/sidechain-snapshot-contract"
 
@@ -133,7 +125,7 @@ HIRARI_RECORDING_STRESS_ROUNDS="${HIRARI_RECORDING_STRESS_ROUNDS:-250}" \
 "$OUT_DIR/hirari-omni-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/vocal_restoration_contract.cpp $LINK_FLAGS \
+    tests/vocal_restoration_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/vocal-restoration-contract"
 "$OUT_DIR/vocal-restoration-contract"
 
@@ -148,7 +140,7 @@ HIRARI_RECORDING_STRESS_ROUNDS="${HIRARI_RECORDING_STRESS_ROUNDS:-250}" \
 "$OUT_DIR/spectral-editor-contract"
 
 "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/sampler_engine_contract.cpp $LINK_FLAGS \
+    tests/sampler_engine_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
     -o "$OUT_DIR/sampler-engine-contract"
 "$OUT_DIR/sampler-engine-contract"
 

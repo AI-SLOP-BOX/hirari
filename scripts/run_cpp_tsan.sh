@@ -11,15 +11,7 @@ mkdir -p "$OUT_DIR"
 # The engine's C++ surface links against the Rust runtime. Build the staticlib
 # first; without it every contract test below fails to link on undefined
 # hirari_* symbols.
-if ! cargo rustc -p hirari-core-bridge --lib --crate-type staticlib; then
-    echo "failed to build the hirari-core-bridge staticlib" >&2
-    exit 1
-fi
-BRIDGE_LIB=target/debug/libhirari_core_bridge.a
-if [ ! -f "$BRIDGE_LIB" ]; then
-    echo "hirari-core-bridge staticlib not found at $BRIDGE_LIB" >&2
-    exit 1
-fi
+BRIDGE_LIB=$("$ROOT_DIR/scripts/build_bridge_staticlib.sh")
 
 if ! "$CXX" -std=c++20 -fsanitize=thread -x c++ -o "$OUT_DIR/probe" - <<'EOF'
 int main() { return 0; }
