@@ -91,12 +91,8 @@ public:
         }
         // The Rust render core owns validation and normalization so the audio
         // callback receives bounded, ordered range data.
-        static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
-        static_assert(offsetof(Region::RangeEdit, start) == offsetof(HirariRegionRangeEdit, start));
-        const size_t validRangeEditCount = hirari_region_normalize_range_edits(
-            reinterpret_cast<HirariRegionRangeEdit*>(normalized.rangeEdits.data()),
-            normalized.rangeEdits.size(), normalized.len);
-        normalized.rangeEdits.resize(validRangeEditCount);
+        (void)adoptRangeEdits(normalized.rangeEdits, normalized.rangeEdits, 0u,
+                              normalized.len);
         std::sort(normalized.audioNoteSegments.begin(),
                   normalized.audioNoteSegments.end(),
                   [](const auto& a, const auto& b) {
@@ -434,32 +430,6 @@ private:
                 region.baseStart, region.baseSourceOffset, region.baseLength,
                 region.loopCount, region.fadeInSamples, region.fadeOutSamples,
                 region.warpRatio, region.sourceSampleRate, region.timelineSampleRate};
-    }
-
-    static std::vector<HirariRegionRangeEdit> copyRangeEditsToRust(
-        const std::vector<Region::RangeEdit>& edits) {
-        static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
-        static_assert(offsetof(Region::RangeEdit, start) == offsetof(HirariRegionRangeEdit, start));
-        static_assert(offsetof(Region::RangeEdit, end) == offsetof(HirariRegionRangeEdit, end));
-        static_assert(offsetof(Region::RangeEdit, gain) == offsetof(HirariRegionRangeEdit, gain));
-        static_assert(offsetof(Region::RangeEdit, fadeIn) == offsetof(HirariRegionRangeEdit, fade_in));
-        static_assert(offsetof(Region::RangeEdit, fadeOut) == offsetof(HirariRegionRangeEdit, fade_out));
-        std::vector<HirariRegionRangeEdit> output;
-        output.reserve(edits.size());
-        for (const auto& edit : edits) {
-            output.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
-        }
-        return output;
-    }
-
-    static std::vector<Region::RangeEdit> copyRangeEditsFromRust(
-        const std::vector<HirariRegionRangeEdit>& edits) {
-        std::vector<Region::RangeEdit> output;
-        output.reserve(edits.size());
-        for (const auto& edit : edits) {
-            output.push_back({edit.start, edit.end, edit.gain, edit.fade_in, edit.fade_out});
-        }
-        return output;
     }
 
     std::string copyExpressionMapJson(uint8_t mapKind) const {

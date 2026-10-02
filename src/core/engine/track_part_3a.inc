@@ -630,34 +630,46 @@
         return false;
     }
 
+    // Adopts the result of a Rust range-edit transform.
+    //
+    // Rust returns a buffer it owns and the caller releases; nothing is ever
+    // written through a pointer into this vector, so a returned count can no
+    // longer be turned into a resize that value-initializes over data a
+    // foreign language had already written.
+    static bool adoptRangeEdits(std::vector<Region::RangeEdit>& destination,
+                                const std::vector<Region::RangeEdit>& current,
+                                uint32_t op, uint64_t regionLength,
+                                uint64_t start = 0, uint64_t end = 0,
+                                float gain = 0.0f, uint64_t fadeIn = 0,
+                                uint64_t fadeOut = 0) {
+        static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
+        static_assert(offsetof(Region::RangeEdit, start) == offsetof(HirariRegionRangeEdit, start));
+        size_t produced = 0;
+        HirariRegionRangeEdit* result = hirari_region_range_edits_apply(
+            reinterpret_cast<const HirariRegionRangeEdit*>(current.data()),
+            current.size(), regionLength, op, start, end, gain, fadeIn, fadeOut,
+            &produced);
+        if (!result) return false;
+        std::vector<Region::RangeEdit> adopted;
+        adopted.reserve(produced);
+        for (size_t index = 0; index < produced; ++index) {
+            const auto& edit = result[index];
+            adopted.push_back({edit.start, edit.end, edit.gain, edit.fade_in, edit.fade_out});
+        }
+        hirari_free_range_edits(result, produced);
+        destination = std::move(adopted);
+        return true;
+    }
+
     bool setRegionRangeEdit(uint32_t rid, uint64_t start, uint64_t end,
                             float gain, uint64_t fadeIn, uint64_t fadeOut) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid || region.locked) continue;
-            auto nativeEdits = copyRangeEditsToRust(region.rangeEdits);
-            // The Rust kernel appends or replaces through the raw pointer and
-            // reports the resulting count. Pass a pointer with room for one
-            // more element, then adopt that count. Growing the vector with
-            // resize() before the call would value-initialize the spare slot
-            // (harmless), but growing it afterwards would overwrite the entry
-            // Rust just wrote with a zeroed struct. Resize exactly once, after
-            // the call, and only when the count actually grew.
-            nativeEdits.reserve(std::max<size_t>(1, nativeEdits.size() + 1));
-            const size_t before = nativeEdits.size();
-            const size_t count = hirari_region_range_edit_upsert(
-                nativeEdits.data(), before, nativeEdits.capacity(), region.len,
-                start, end, gain, fadeIn, fadeOut);
-            if (count == static_cast<size_t>(-1)) return false;
-            // Uninitialized spare capacity: set the size without touching the
-            // bytes Rust already wrote, then copy out by pointer.
-            HirariRegionRangeEdit* first = nativeEdits.data();
-            HirariRegionRangeEdit* last = first + count;
-            region.rangeEdits.clear();
-            region.rangeEdits.reserve(count);
-            for (const HirariRegionRangeEdit* it = first; it != last; ++it) {
-                region.rangeEdits.push_back({it->start, it->end, it->gain, it->fade_in, it->fade_out});
+            if (!adoptRangeEdits(region.rangeEdits, region.rangeEdits, 1u,
+                                 region.len, start, end, gain, fadeIn, fadeOut)) {
+                return false;
             }
             publishRegionSnapshot();
             return true;
@@ -670,12 +682,10 @@
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid || region.locked) continue;
-            auto nativeEdits = copyRangeEditsToRust(region.rangeEdits);
-            const size_t count = hirari_region_range_edit_remove(
-                nativeEdits.data(), nativeEdits.size(), start, end);
-            if (count == static_cast<size_t>(-1)) return false;
-            nativeEdits.resize(count);
-            region.rangeEdits = copyRangeEditsFromRust(nativeEdits);
+            if (!adoptRangeEdits(region.rangeEdits, region.rangeEdits, 2u,
+                                 region.len, start, end)) {
+                return false;
+            }
             publishRegionSnapshot();
             return true;
         }
@@ -693,10 +703,7 @@
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid || region.locked) continue;
-            auto nativeEdits = copyRangeEditsToRust(edits);
-            if (!hirari_region_range_edits_replace(
-                    nativeEdits.data(), nativeEdits.size(), region.len)) return false;
-            region.rangeEdits = copyRangeEditsFromRust(nativeEdits);
+            if (!adoptRangeEdits(region.rangeEdits, edits, 3u, region.len)) return false;
             publishRegionSnapshot();
             return true;
         }

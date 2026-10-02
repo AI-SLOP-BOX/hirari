@@ -719,19 +719,18 @@ extern "C" bool hirari_region_set_trim_geometry(
 extern "C" bool hirari_region_move_geometry(
     const HirariNativeRegionGeometry* region, uint64_t new_start,
     HirariNativeRegionGeometry* output);
-extern "C" size_t hirari_region_normalize_range_edits(
-    HirariRegionRangeEdit* edits, size_t count, uint64_t region_length);
-extern "C" size_t hirari_region_range_edit_upsert(
-    HirariRegionRangeEdit* edits, size_t count, size_t capacity,
-    uint64_t region_length, uint64_t start, uint64_t end, float gain,
-    uint64_t fade_in, uint64_t fade_out);
-extern "C" size_t hirari_region_range_edit_remove(
-    HirariRegionRangeEdit* edits, size_t count, uint64_t start, uint64_t end);
 extern "C" char* hirari_xml_escape_attribute(const char* input);
 extern "C" char* hirari_xml_unescape_attribute(const char* input);
 extern "C" void hirari_xml_string_free(char* value);
-extern "C" bool hirari_region_range_edits_replace(
-    HirariRegionRangeEdit* edits, size_t count, uint64_t region_length);
+// Region range edits are a pure transform: Rust reads the caller's current
+// edits and returns a buffer it owns. Nothing is written through a pointer into
+// caller storage, so no returned count can drive a container resize over data
+// a foreign language had already written.
+extern "C" HirariRegionRangeEdit* hirari_region_range_edits_apply(
+    const HirariRegionRangeEdit* edits_in, size_t count_in, uint64_t region_length,
+    uint32_t op, uint64_t start, uint64_t end, float gain, uint64_t fade_in,
+    uint64_t fade_out, size_t* out_count);
+extern "C" void hirari_free_range_edits(HirariRegionRangeEdit* edits, size_t count);
 struct HirariRegionCompRange {
     uint64_t start;
     uint64_t end;

@@ -308,143 +308,6 @@ pub unsafe extern "C" fn hirari_region_move_geometry(
 /// Validates, clips, and orders a Track region's non-destructive range edits.
 /// The realtime renderer consumes this normalized array without extra scans
 /// for malformed project data.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_normalize_range_edits(
-    edits: *mut NativeRangeEdit,
-    count: usize,
-    region_length: u64,
-) -> usize {
-    if count == 0 || edits.is_null() || region_length == 0 {
-        return 0;
-    }
-    let bounded_count = count.min(4096);
-    let edits = slice::from_raw_parts_mut(edits, bounded_count);
-    let mut valid = Vec::with_capacity(bounded_count);
-    for mut edit in edits.iter().copied() {
-        if edit.start >= edit.end
-            || edit.start >= region_length
-            || !edit.gain.is_finite()
-            || !(0.0..=16.0).contains(&edit.gain)
-        {
-            continue;
-        }
-        edit.end = edit.end.min(region_length);
-        let length = edit.end - edit.start;
-        edit.fade_in = edit.fade_in.min(length);
-        edit.fade_out = edit.fade_out.min(length);
-        valid.push(edit);
-    }
-    valid.sort_by_key(|edit| edit.start);
-    let length = valid.len();
-    edits[..length].copy_from_slice(&valid);
-    length
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_range_edit_upsert(
-    edits: *mut NativeRangeEdit,
-    count: usize,
-    capacity: usize,
-    region_length: u64,
-    start: u64,
-    end: u64,
-    gain: f32,
-    fade_in: u64,
-    fade_out: u64,
-) -> usize {
-    if edits.is_null()
-        || count > capacity
-        || count > 4096
-        || start >= end
-        || end > region_length
-        || !gain.is_finite()
-        || !(0.0..=16.0).contains(&gain)
-        || fade_in > end - start
-        || fade_out > end - start
-    {
-        return usize::MAX;
-    }
-    let edits = unsafe { slice::from_raw_parts_mut(edits, count) };
-    let replacement = NativeRangeEdit {
-        start,
-        end,
-        gain,
-        fade_in,
-        fade_out,
-    };
-    if let Some(existing) = edits
-        .iter_mut()
-        .find(|edit| edit.start == start && edit.end == end)
-    {
-        *existing = replacement;
-        return count;
-    }
-    if count >= 4096 || count == capacity {
-        return usize::MAX;
-    }
-
-    unsafe { edits.as_mut_ptr().add(count).write(replacement) };
-    let updated = unsafe { slice::from_raw_parts_mut(edits.as_mut_ptr(), count + 1) };
-    updated.sort_unstable_by_key(|edit| edit.start);
-    count + 1
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_range_edit_remove(
-    edits: *mut NativeRangeEdit,
-    count: usize,
-    start: u64,
-    end: u64,
-) -> usize {
-    if edits.is_null() || count == 0 || count > 4096 {
-        return usize::MAX;
-    }
-    let edits = unsafe { slice::from_raw_parts_mut(edits, count) };
-    let mut write = 0usize;
-    for read in 0..count {
-        let edit = edits[read];
-        if edit.start == start && edit.end == end {
-            continue;
-        }
-        edits[write] = edit;
-        write += 1;
-    }
-    if write == count {
-        usize::MAX
-    } else {
-        write
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_range_edits_replace(
-    edits: *mut NativeRangeEdit,
-    count: usize,
-    region_length: u64,
-) -> bool {
-    if count > 4096 || (count > 0 && edits.is_null()) {
-        return false;
-    }
-    if count == 0 {
-        return true;
-    }
-    let edits = unsafe { slice::from_raw_parts_mut(edits, count) };
-    for edit in edits.iter_mut() {
-        if edit.start >= edit.end
-            || edit.end > region_length
-            || !edit.gain.is_finite()
-            || !(0.0..=16.0).contains(&edit.gain)
-        {
-            return false;
-        }
-        let length = edit.end - edit.start;
-        edit.fade_in = edit.fade_in.min(length);
-        edit.fade_out = edit.fade_out.min(length);
-    }
-    edits.sort_unstable_by_key(|edit| edit.start);
-    true
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeCompRange {
@@ -454,7 +317,6 @@ pub struct NativeCompRange {
     pub fade_out: u64,
 }
 
-/// Inputs shared by the realtime Track region scheduler for one bounded block.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HirariRegionBlockConfig {
@@ -1635,20 +1497,40 @@ mod tests {
                 fade_out: 0,
             },
         ];
-        let count =
-            unsafe { hirari_region_normalize_range_edits(edits.as_mut_ptr(), edits.len(), 20) };
+        // The source list is left untouched: normalization is a pure transform
+        // that returns an owned buffer rather than writing through a pointer.
+        let mut count = 0usize;
+        let normalized = unsafe {
+            hirari_region_range_edits_apply(
+                edits.as_ptr(),
+                edits.len(),
+                20,
+                0,
+                0,
+                0,
+                0.0,
+                0,
+                0,
+                &mut count,
+            )
+        };
+        assert!(!normalized.is_null());
         assert_eq!(count, 3);
-        assert_eq!(edits[0].start, 0);
-        assert_eq!(edits[0].fade_in, 3);
-        assert_eq!(edits[0].fade_out, 4);
-        assert_eq!(edits[1].start, 7);
-        assert_eq!(edits[1].end, 20);
-        assert_eq!(edits[1].fade_in, 13);
-        assert_eq!(edits[1].fade_out, 13);
-        assert_eq!(edits[2].start, 12);
-        assert_eq!(edits[2].end, 20);
-        assert_eq!(edits[2].fade_in, 8);
-        assert_eq!(edits[2].fade_out, 2);
+        let result =
+            unsafe { std::slice::from_raw_parts(normalized, count) }.to_vec();
+        assert_eq!(result[0].start, 0);
+        assert_eq!(result[0].fade_in, 3);
+        assert_eq!(result[0].fade_out, 4);
+        assert_eq!(result[1].start, 7);
+        assert_eq!(result[1].end, 20);
+        assert_eq!(result[1].fade_in, 13);
+        assert_eq!(result[1].fade_out, 13);
+        assert_eq!(result[2].start, 12);
+        assert_eq!(result[2].end, 20);
+        assert_eq!(result[2].fade_in, 8);
+        assert_eq!(result[2].fade_out, 2);
+        unsafe { hirari_free_range_edits(normalized, count) };
+        assert_eq!(edits.len(), 5, "input must not be modified in place");
     }
     use crate::audio_note_curve::{HirariAudioNoteAnchor, HirariAudioNoteCurveView};
     use crate::region_warp::HirariWarpMarker;
@@ -2106,5 +1988,148 @@ mod tests {
             Some("clip gain")
         );
         assert!(buffer[0] > 1.0);
+    }
+}
+
+/// Region range-edit operations, as a pure transform.
+///
+/// The caller passes its current edits by immutable pointer and receives a
+/// freshly allocated buffer it must release with
+/// [`hirari_free_range_edits`]. Rust never writes into caller storage, so a
+/// caller can no longer observe a count returned by Rust and then resize a
+/// container whose contents Rust had written through a raw pointer. That
+/// pattern is what silently zeroed an appended edit once already.
+///
+/// `out_count` receives the resulting entry count. A null return means the
+/// operation was rejected and the caller's state is unchanged.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_range_edits_apply(
+    edits_in: *const NativeRangeEdit,
+    count_in: usize,
+    region_length: u64,
+    op: u32,
+    start: u64,
+    end: u64,
+    gain: f32,
+    fade_in: u64,
+    fade_out: u64,
+    out_count: *mut usize,
+) -> *mut NativeRangeEdit {
+    const OP_NORMALIZE: u32 = 0;
+    const OP_UPSERT: u32 = 1;
+    const OP_REMOVE: u32 = 2;
+    const OP_REPLACE: u32 = 3;
+    if out_count.is_null() || count_in > 4096 {
+        return std::ptr::null_mut();
+    }
+    let source: &[NativeRangeEdit] = if count_in == 0 {
+        &[]
+    } else if edits_in.is_null() {
+        return std::ptr::null_mut();
+    } else {
+        unsafe { slice::from_raw_parts(edits_in, count_in) }
+    };
+
+    let gain_is_valid =
+        |value: f32| value.is_finite() && (0.0..=16.0).contains(&value);
+
+    let mut result: Vec<NativeRangeEdit> = match op {
+        OP_NORMALIZE => {
+            if region_length == 0 {
+                Vec::new()
+            } else {
+                let mut valid: Vec<NativeRangeEdit> = Vec::with_capacity(source.len());
+                for mut edit in source.iter().copied() {
+                    if edit.start >= edit.end
+                        || edit.start >= region_length
+                        || !gain_is_valid(edit.gain)
+                    {
+                        continue;
+                    }
+                    edit.end = edit.end.min(region_length);
+                    let length = edit.end - edit.start;
+                    edit.fade_in = edit.fade_in.min(length);
+                    edit.fade_out = edit.fade_out.min(length);
+                    valid.push(edit);
+                }
+                valid
+            }
+        }
+        OP_UPSERT => {
+            if start >= end || end > region_length || !gain_is_valid(gain) || fade_in > end - start
+                || fade_out > end - start
+            {
+                return std::ptr::null_mut();
+            }
+            let replacement = NativeRangeEdit {
+                start,
+                end,
+                gain,
+                fade_in,
+                fade_out,
+            };
+            let mut next: Vec<NativeRangeEdit> = source.to_vec();
+            if let Some(existing) = next
+                .iter_mut()
+                .find(|edit| edit.start == start && edit.end == end)
+            {
+                *existing = replacement;
+            } else {
+                next.push(replacement);
+            }
+            next
+        }
+        OP_REMOVE => {
+            let before = source.len();
+            let next: Vec<NativeRangeEdit> = source
+                .iter()
+                .copied()
+                .filter(|edit| !(edit.start == start && edit.end == end))
+                .collect();
+            if next.len() == before {
+                return std::ptr::null_mut();
+            }
+            next
+        }
+        OP_REPLACE => {
+            let mut next: Vec<NativeRangeEdit> = source.to_vec();
+            let mut rejected = false;
+            for edit in next.iter_mut() {
+                if edit.start >= edit.end
+                    || edit.end > region_length
+                    || !gain_is_valid(edit.gain)
+                {
+                    rejected = true;
+                    break;
+                }
+                let length = edit.end - edit.start;
+                edit.fade_in = edit.fade_in.min(length);
+                edit.fade_out = edit.fade_out.min(length);
+            }
+            if rejected {
+                return std::ptr::null_mut();
+            }
+            next
+        }
+        _ => return std::ptr::null_mut(),
+    };
+    if result.len() > 4096 {
+        return std::ptr::null_mut();
+    }
+    result.sort_by_key(|edit| edit.start);
+    let length = result.len();
+    unsafe { *out_count = length };
+    let mut boxed = result.into_boxed_slice();
+    Box::into_raw(boxed) as *mut NativeRangeEdit
+}
+
+/// Releases a buffer returned by [`hirari_region_range_edits_apply`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_free_range_edits(edits: *mut NativeRangeEdit, count: usize) {
+    if edits.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(std::slice::from_raw_parts_mut(edits, count)));
     }
 }
