@@ -76,11 +76,64 @@ impl PdcConfiguration {
                 &mut global_latency,
             )
         };
+        // Per-node compensation for a track's own audio.
+        //
+        // edge_compensation aligns the signals *arriving* at a node: it delays a
+        // shorter incoming path so every contribution meets at that node's
+        // input. That is the right model for a shared bus, but it is not what a
+        // track delay line needs. A track's delay line acts on that track's own
+        // output, so the delay required is the longest path that the track's
+        // own signal experiences on the way to master, not the latency it
+        // inherits from upstream tracks routed into it.
+        //
+        // Conflating the two cancels the compensation of every track that sits
+        // downstream of a higher-latency track: a 480-sample track routed into a
+        // 0-sample track makes the downstream track's accumulated output
+        // latency read as 480, so it is published with zero delay even though
+        // its own audio reaches master immediately and must be delayed to line
+        // up. Compute the own-path latency separately, over the same routing.
+        let mut own_path = vec![0u64; ROUTED_NODE_COUNT];
+        let mut own_path_valid = vec![false; ROUTED_NODE_COUNT];
+        // Walk each node's route to master once, in reverse topological order,
+        // accumulating only the latencies that lie downstream of the node.
+        for index in (0..ROUTED_NODE_COUNT).rev() {
+            let destination = self.routing[index];
+            let downstream = if destination == MASTER_ID
+                || (destination as usize) >= ROUTED_NODE_COUNT
+            {
+                0
+            } else if own_path_valid[destination as usize] {
+                own_path[destination as usize]
+            } else {
+                // Unresolved destination means a cycle the shared solver will
+                // reject; leave this node at zero rather than guess.
+                0
+            };
+            let own = if index < MAX_TRACKS {
+                u64::from(self.track_latencies[index])
+            } else {
+                u64::from(self.bus_latencies[index - MAX_TRACKS])
+            };
+            own_path[index] = own.saturating_add(downstream);
+            own_path_valid[index] = true;
+        }
+
+        let mut node_own_compensation = vec![0u32; ROUTED_NODE_COUNT];
+        let mut maximum_own_path = 0u64;
+        for index in 0..ROUTED_NODE_COUNT {
+            maximum_own_path = maximum_own_path.max(own_path[index]);
+        }
+        for index in 0..ROUTED_NODE_COUNT {
+            node_own_compensation[index] =
+                (maximum_own_path.saturating_sub(own_path[index])).min(u64::from(u32::MAX)) as u32;
+        }
+
         valid.then_some(PdcSolution {
             edge_sources,
             edge_destinations,
             edge_compensations,
             global_latency,
+            node_own_compensation,
         })
     }
 }
@@ -90,6 +143,8 @@ struct PdcSolution {
     edge_destinations: Vec<u32>,
     edge_compensations: Vec<u32>,
     global_latency: u32,
+    /// Per-node delay for a track's own output, indexed by routed node id.
+    node_own_compensation: Vec<u32>,
 }
 
 impl PdcSolution {
@@ -358,14 +413,14 @@ impl NativePdcManager {
         };
         for track in 0..MAX_TRACKS {
             self.published.track_offsets[write][track].store(
-                solution.compensation_for(track as u32, configuration.routing[track]),
+                solution.node_own_compensation[track],
                 Ordering::Relaxed,
             );
         }
         for bus in 0..MAX_BUSES {
             let node = MAX_TRACKS + bus;
             self.published.bus_offsets[write][bus].store(
-                solution.compensation_for(node as u32, configuration.routing[node]),
+                solution.node_own_compensation[node],
                 Ordering::Relaxed,
             );
         }
@@ -407,7 +462,7 @@ impl NativePdcManager {
         let active = self.published.active_buffer.load(Ordering::Acquire) as usize;
         for track in 0..MAX_TRACKS {
             if self.published.track_offsets[active][track].load(Ordering::Acquire)
-                != solution.compensation_for(track as u32, configuration.routing[track])
+                != solution.node_own_compensation[track]
             {
                 return false;
             }
@@ -415,7 +470,7 @@ impl NativePdcManager {
         for bus in 0..MAX_BUSES {
             let node = MAX_TRACKS + bus;
             if self.published.bus_offsets[active][bus].load(Ordering::Acquire)
-                != solution.compensation_for(node as u32, configuration.routing[node])
+                != solution.node_own_compensation[node]
             {
                 return false;
             }
