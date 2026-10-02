@@ -21,11 +21,6 @@ public:
     PDCManager(const PDCManager&) = delete;
     PDCManager& operator=(const PDCManager&) = delete;
 
-    static PDCManager& getInstance() {
-        static PDCManager instance;
-        return instance;
-    }
-
     uint32_t getCompensationOffset(uint32_t trackId) const {
         return hirari_native_pdc_get_track_offset(m_state, trackId);
     }
