@@ -213,8 +213,8 @@ fn bus_and_multiple_sidechain_sources_are_kept_as_distinct_routes() {
 #[test]
 fn sidechain_processing_reduces_program_signal_under_external_trigger() {
     let _guard = native_engine_test_guard();
-    let mut compressor =
-        hirari_core_bridge::sidechain_compressor::SidechainCompressorEngine::new(48_000.0);
+    use hirari_core_bridge::sidechain_compressor::SidechainCompressorEngine;
+    let mut compressor = SidechainCompressorEngine::new(48_000.0);
     compressor.set_params(0.1, 10.0, 0.1, 20.0);
     let mut left = vec![0.8_f32; 512];
     let mut right = vec![0.8_f32; 512];
@@ -222,13 +222,73 @@ fn sidechain_processing_reduces_program_signal_under_external_trigger() {
     let side_right = vec![1.0_f32; 512];
     compressor.process(&mut left, &mut right, Some((&side_left, &side_right)));
     assert!(compressor.current_gain < 1.0);
-    assert!(left
-        .iter()
-        .all(|sample| sample.is_finite() && *sample < 0.8));
-    assert!(right
-        .iter()
-        .all(|sample| sample.is_finite() && *sample < 0.8));
+
+    // The compressor has a finite attack, and process_block clamps attack_ms to
+    // a 1.0 ms floor. At 48 kHz that is a 48-sample time constant, so the
+    // detector envelope needs several frames to rise past the 0.1 threshold.
+    // Until it does, the gain is exactly unity and the output is exactly the
+    // input. The same one-pole smoothing shapes the gain itself, so both settle
+    // over that time constant. Requiring every sample to be below the input
+    // would assert instantaneous ducking, which contradicts the attack this
+    // test sets and is not how a compressor behaves.
+    //
+    // What must hold: the compressor never amplifies, and once the attack has
+    // settled the external trigger ducks the program signal well below it.
+    // 48 samples is one 1.0 ms attack time constant at 48 kHz; 128 frames is
+    // roughly 2.7 of them, enough for the detector envelope and the gain to
+    // reach the ratio-controlled value well inside this 512-sample block.
+    const ATTACK_SETTLE_FRAMES: usize = 128;
+    let settled = &left[ATTACK_SETTLE_FRAMES..];
+    assert!(
+        left.iter()
+            .all(|sample| sample.is_finite() && *sample <= 0.8),
+        "a compressor must never amplify its input"
+    );
+    assert!(
+        settled
+            .iter()
+            .all(|sample| sample.is_finite() && *sample < 0.8),
+        "an external trigger above threshold must duck the program signal once the attack settles"
+    );
+    assert!(
+        settled.iter().all(|sample| *sample < 0.8 * 0.5),
+        "a 10:1 ratio against a full-scale trigger must duck far below the input, got max {:?}",
+        settled.iter().cloned().fold(f32::MIN, f32::max)
+    );
+    assert!(
+        right
+            .iter()
+            .all(|sample| sample.is_finite() && *sample <= 0.8),
+        "the right channel must track the same gain"
+    );
+    assert!(
+        right[ATTACK_SETTLE_FRAMES..]
+            .iter()
+            .all(|sample| sample.is_finite() && *sample < 0.8),
+        "the right channel must be ducked by the same external trigger"
+    );
     assert!(compressor.audit_sidechain_compressor());
+
+    // Control: the reduction must come from the external trigger, not from the
+    // program signal itself. A silent sidechain leaves the detector below the
+    // threshold, so the compressor must pass the program signal through
+    // untouched even though the program signal is well above the threshold.
+    let mut silent = SidechainCompressorEngine::new(48_000.0);
+    silent.set_params(0.1, 10.0, 0.1, 20.0);
+    let mut loud = vec![0.8_f32; 512];
+    let mut loud_r = vec![0.8_f32; 512];
+    let silence = vec![0.0_f32; 512];
+    silent.process(
+        &mut loud,
+        &mut loud_r,
+        Some((silence.as_slice(), silence.as_slice())),
+    );
+    assert!(
+        loud[ATTACK_SETTLE_FRAMES..]
+            .iter()
+            .all(|sample| (*sample - 0.8).abs() < 1.0e-6),
+        "a silent sidechain must not reduce the program signal"
+    );
 }
 
 #[test]
