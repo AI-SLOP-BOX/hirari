@@ -637,13 +637,28 @@
         for (auto& region : m_regions) {
             if (region.id != rid || region.locked) continue;
             auto nativeEdits = copyRangeEditsToRust(region.rangeEdits);
+            // The Rust kernel appends or replaces through the raw pointer and
+            // reports the resulting count. Pass a pointer with room for one
+            // more element, then adopt that count. Growing the vector with
+            // resize() before the call would value-initialize the spare slot
+            // (harmless), but growing it afterwards would overwrite the entry
+            // Rust just wrote with a zeroed struct. Resize exactly once, after
+            // the call, and only when the count actually grew.
             nativeEdits.reserve(std::max<size_t>(1, nativeEdits.size() + 1));
+            const size_t before = nativeEdits.size();
             const size_t count = hirari_region_range_edit_upsert(
-                nativeEdits.data(), nativeEdits.size(), nativeEdits.capacity(), region.len,
+                nativeEdits.data(), before, nativeEdits.capacity(), region.len,
                 start, end, gain, fadeIn, fadeOut);
             if (count == static_cast<size_t>(-1)) return false;
-            nativeEdits.resize(count);
-            region.rangeEdits = copyRangeEditsFromRust(nativeEdits);
+            // Uninitialized spare capacity: set the size without touching the
+            // bytes Rust already wrote, then copy out by pointer.
+            HirariRegionRangeEdit* first = nativeEdits.data();
+            HirariRegionRangeEdit* last = first + count;
+            region.rangeEdits.clear();
+            region.rangeEdits.reserve(count);
+            for (const HirariRegionRangeEdit* it = first; it != last; ++it) {
+                region.rangeEdits.push_back({it->start, it->end, it->gain, it->fade_in, it->fade_out});
+            }
             publishRegionSnapshot();
             return true;
         }
