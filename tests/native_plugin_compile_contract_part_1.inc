@@ -46,22 +46,31 @@ int main() {
             jack.lastError().find("HIRARI_ENABLE_JACK") == std::string::npos) return 88;
 #endif
     }
+    // Attribute escaping at the persistence boundary is Rust-owned. This
+    // contract used to cover the retired C++ SessionIO helpers, which had no
+    // production callers; the escaping contract itself is unchanged and is now
+    // exercised against the implementation that actually writes projects.
     const std::string xmlProbe = "C:\\Audio & Mix/<take>\"lead\"'";
-    if (Hirari::Core::IO::SessionIO::unescapeXmlAttribute(
-            Hirari::Core::IO::SessionIO::escapeXmlAttribute(xmlProbe)) != xmlProbe) return 81;
-    const auto sessionProbe = std::filesystem::temp_directory_path() / "hirari-session-atomic-contract.xml";
-    Hirari::Core::IO::SessionIO::getInstance().saveProject(sessionProbe.string(), {});
-    Hirari::Core::IO::SessionIO::getInstance().saveProject(
-        sessionProbe.string(), {std::shared_ptr<Hirari::Core::Engine::Track>{}});
-    std::ifstream sessionInput(sessionProbe, std::ios::binary);
-    const std::string sessionXml((std::istreambuf_iterator<char>(sessionInput)), {});
-    std::error_code sessionCleanup;
-    std::filesystem::remove(sessionProbe, sessionCleanup);
-    if (sessionXml.find("<HirariProject") == std::string::npos ||
-        sessionXml.find("</HirariProject>") == std::string::npos) return 82;
-    for (const auto& entry : std::filesystem::directory_iterator(sessionProbe.parent_path())) {
-        const auto name = entry.path().filename().string();
-        if (name.rfind("hirari-session-atomic-contract.xml.tmp-", 0) == 0) return 83;
+    {
+        char* escaped = hirari_xml_escape_attribute(xmlProbe.c_str());
+        if (!escaped) return 81;
+        const std::string escapedText(escaped);
+        char* restored = hirari_xml_unescape_attribute(escaped);
+        hirari_xml_string_free(escaped);
+        if (!restored) return 81;
+        const std::string restoredText(restored);
+        hirari_xml_string_free(restored);
+        if (restoredText != xmlProbe) return 81;
+        if (escapedText.find("&amp;") == std::string::npos ||
+            escapedText.find("&lt;take&gt;") == std::string::npos ||
+            escapedText.find("&quot;") == std::string::npos) return 84;
+        // Decoding is a single ordered pass, so an already-escaped entity is
+        // never re-expanded. This is the persisted format's long-standing
+        // behavior and the exporter's encoder implies it.
+        char* nested = hirari_xml_unescape_attribute("&amp;lt;");
+        const std::string nestedText(nested ? nested : "");
+        hirari_xml_string_free(nested);
+        if (nestedText != "&lt;") return 85;
     }
     {
         SDKContractFactory factory;

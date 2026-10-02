@@ -22,7 +22,6 @@
 #include "src/core/io/bounce_system.hpp"
 #include "src/core/io/ffmpeg_engine.hpp"
 #include "src/core/offline_renderer.hpp"
-#include "src/core/io/session_io.hpp"
 #include "src/core/engine/latency_manager.hpp"
 #include "src/core/engine/midi_orchestrator.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"

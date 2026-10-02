@@ -4,6 +4,7 @@
 
 use crate::persistence::ProjectMetadata;
 use crate::project::{ProjectDocument, ProjectRegion, ProjectTrack};
+use crate::xml_attribute::escape_xml;
 use crate::project_contracts::{
     AutomationPointContract, MarkerContract, MidiNoteContract, TempoEventContract,
     TimeSignatureEventContract, WarpMarkerContract,
@@ -1837,21 +1838,6 @@ fn parse_clip_expression_value(
 
 fn normalized_pan(pan: f32) -> f32 {
     ((pan.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(0.0, 1.0)
-}
-
-fn escape_xml(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&apos;"),
-            _ => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 fn read_wav_info(path: &Path) -> Result<(u16, u32, u64)> {

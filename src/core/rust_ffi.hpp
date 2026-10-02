@@ -727,6 +727,9 @@ extern "C" size_t hirari_region_range_edit_upsert(
     uint64_t fade_in, uint64_t fade_out);
 extern "C" size_t hirari_region_range_edit_remove(
     HirariRegionRangeEdit* edits, size_t count, uint64_t start, uint64_t end);
+extern "C" char* hirari_xml_escape_attribute(const char* input);
+extern "C" char* hirari_xml_unescape_attribute(const char* input);
+extern "C" void hirari_xml_string_free(char* value);
 extern "C" bool hirari_region_range_edits_replace(
     HirariRegionRangeEdit* edits, size_t count, uint64_t region_length);
 struct HirariRegionCompRange {

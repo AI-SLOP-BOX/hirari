@@ -66,6 +66,7 @@ pub mod control_room_audio;
 pub mod control_room_runtime;
 pub mod convolution_reverb;
 pub mod dawproject;
+pub mod xml_attribute;
 pub mod deesser;
 pub mod delay_line;
 pub mod delivery;
