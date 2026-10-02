@@ -135,10 +135,20 @@ impl NativeCapture {
         {
             return false;
         }
+        // Starting a take supersedes whatever is already at the destination.
+        // Publishing refuses to replace an existing file so that a late worker
+        // cannot clobber a newer take, which means the previous take has to be
+        // retired here, once this take's spool exists and before the writer
+        // thread can publish. Doing it only after the spool is created keeps a
+        // failed start from destroying the take that is already on disk.
+        let previous_take = path.clone();
         let writer = match StreamingRecordingWriter::create_float32(path, sample_rate as u32, 2) {
             Ok(writer) => writer,
             Err(_) => return false,
         };
+        if previous_take.is_file() {
+            let _ = std::fs::remove_file(&previous_take);
+        }
         self.shared.ring.reset();
         self.shared.write_failed.store(false, Ordering::Relaxed);
         self.shared.overflowed.store(false, Ordering::Relaxed);

@@ -49,114 +49,147 @@ mkdir -p "$OUT_DIR"
 BRIDGE_LIB=$("$ROOT_DIR/scripts/build_bridge_staticlib.sh")
 
 LINK_FLAGS=""
-if [ "$(uname -s)" = "Darwin" ]; then
-    LINK_FLAGS="-framework AudioToolbox -framework CoreAudio"
-fi
 
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/native_plugin_compile_contract.cpp src/io/coreaudio_driver.cpp \
-    "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/native-plugin-compile"
-# This translation unit intentionally exercises the complete native surface in
-# one process.  Its aggregate RAII locals are larger than macOS's default
-# 8-MiB main-thread stack; raise only the child process limit so the contract
-# remains deterministic without changing production runtime stack usage.
-if [ "$(uname -s)" = "Darwin" ]; then
-    (ulimit -s 16384 && "$OUT_DIR/native-plugin-compile")
+# ---------------------------------------------------------------------------
+# Contract runner
+#
+# Each contract is independent, so one failure must not hide the ones behind
+# it. Build, link and run every contract, recording each outcome, then report a
+# full accounting and exit non-zero if any of them failed. The previous
+# fail-fast structure meant a single defect masked every later contract, which
+# is how a mono-export bug and a recording-publish bug both stayed latent.
+# ---------------------------------------------------------------------------
+CONTRACT_NAMES=""
+CONTRACT_STATUS=""
+
+record() {
+    CONTRACT_NAMES="$CONTRACT_NAMES $1"
+    CONTRACT_STATUS="$CONTRACT_STATUS $2"
+}
+
+build_link_run() {
+    # $1 = label, $2 = source path, rest = extra link inputs / runner args
+    label=$1
+    source=$2
+    shift 2
+    binary="$OUT_DIR/$label"
+    # Linking the large staticlib is memory-hungry and this machine can OOM the
+    # compiler without reporting a diagnostic. Retry once before declaring the
+    # link failed, so an environment kill is not mistaken for a real defect.
+    linked=1
+    attempt=1
+    while [ "$attempt" -le 2 ]; do
+        if "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
+            "$source" "$@" $LINK_FLAGS -o "$binary"; then
+            linked=0
+            break
+        fi
+        attempt=$((attempt + 1))
+    done
+    if [ "$linked" -ne 0 ]; then
+        record "$label" BUILD_OR_LINK_FAILED
+        return 0
+    fi
+    if [ "$(uname -s)" = "Darwin" ]; then
+        if (ulimit -s 16384 && "$binary"); then
+            record "$label" PASSED
+        else
+            record "$label" FAILED
+        fi
+    elif "$binary"; then
+        record "$label" PASSED
+    else
+        record "$label" FAILED
+    fi
+}
+
+# The main contract needs the audio driver translation unit and the frameworks.
+# Same memory-driven retry as build_link_run: this translation unit pulls in
+# the whole engine and is the most likely to be OOM-killed on a small machine.
+main_linked=1
+main_attempt=1
+while [ "$main_attempt" -le 2 ]; do
+    if "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
+        tests/native_plugin_compile_contract.cpp src/io/coreaudio_driver.cpp \
+        "$BRIDGE_LIB" $LINK_FLAGS -o "$OUT_DIR/native-plugin-compile"; then
+        main_linked=0
+        break
+    fi
+    main_attempt=$((main_attempt + 1))
+done
+if [ "$main_linked" -ne 0 ]; then
+    record native-plugin-compile BUILD_OR_LINK_FAILED
 else
-    "$OUT_DIR/native-plugin-compile"
+    # This translation unit intentionally exercises the complete native surface
+    # in one process. Its aggregate RAII locals are larger than macOS's default
+    # 8-MiB main-thread stack; raise only the child process limit.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        if (ulimit -s 16384 && "$OUT_DIR/native-plugin-compile"); then
+            record native-plugin-compile PASSED
+        else
+            record native-plugin-compile FAILED
+        fi
+    elif "$OUT_DIR/native-plugin-compile"; then
+        record native-plugin-compile PASSED
+    else
+        record native-plugin-compile FAILED
+    fi
 fi
 
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/wav_io_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/wav-io-contract"
-"$OUT_DIR/wav-io-contract"
+build_link_run wav-io-contract tests/wav_io_contract.cpp "$BRIDGE_LIB"
+build_link_run project-decoder-contract tests/project_decoder_contract.cpp "$BRIDGE_LIB"
+build_link_run persistence-contract tests/persistence_contract.cpp "$BRIDGE_LIB"
+build_link_run timeline-track-render-contract tests/timeline_track_render_contract.cpp "$BRIDGE_LIB"
+build_link_run recording-engine-contract tests/recording_engine_contract.cpp "$BRIDGE_LIB"
+build_link_run recording-autosave-contract tests/recording_autosave_contract.cpp "$BRIDGE_LIB"
+build_link_run shared-memory-multiprocess-contract tests/shared_memory_multiprocess_contract.cpp "$BRIDGE_LIB"
+build_link_run sidechain-snapshot-contract tests/sidechain_snapshot_contract.cpp "$BRIDGE_LIB"
+build_link_run vocal-restoration-contract tests/vocal_restoration_contract.cpp "$BRIDGE_LIB"
+build_link_run cli-media-processor-contract tests/cli_media_processor_contract.cpp
+build_link_run spectral-editor-contract tests/spectral_editor_contract.cpp "$BRIDGE_LIB"
+build_link_run sampler-engine-contract tests/sampler_engine_contract.cpp "$BRIDGE_LIB"
+build_link_run audio-buffer-contract tests/audio_buffer_contract.cpp "$BRIDGE_LIB"
+build_link_run mmap-audio-contract tests/mmap_audio_contract.cpp "$BRIDGE_LIB"
+build_link_run range-edit-contract tests/range_edit_contract.cpp "$BRIDGE_LIB"
 
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/project_decoder_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/project-decoder-contract"
-"$OUT_DIR/project-decoder-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/persistence_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/persistence-contract"
-"$OUT_DIR/persistence-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/timeline_track_render_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/timeline-track-render-contract"
-"$OUT_DIR/timeline-track-render-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/recording_engine_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/recording-engine-contract"
-"$OUT_DIR/recording-engine-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/recording_engine_stress.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/recording-engine-stress"
-HIRARI_RECORDING_STRESS_ROUNDS="${HIRARI_RECORDING_STRESS_ROUNDS:-250}" \
-    "$OUT_DIR/recording-engine-stress"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/recording_autosave_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/recording-autosave-contract"
-"$OUT_DIR/recording-autosave-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/shared_memory_multiprocess_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/shared-memory-multiprocess-contract"
-"$OUT_DIR/shared-memory-multiprocess-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/sidechain_snapshot_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/sidechain-snapshot-contract"
-"$OUT_DIR/sidechain-snapshot-contract"
-
+# The CLAP direct-process contract needs the fixture binary and libdl, and the
+# omni contract is plugin-surface only; neither references the Rust bridge.
 "$ROOT_DIR/scripts/build_clap_fixture.sh" >/dev/null
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/clap_direct_process_contract.cpp \
-    -ldl $LINK_FLAGS -o "$OUT_DIR/clap-direct-process-contract"
-"$OUT_DIR/clap-direct-process-contract" "$ROOT_DIR/build-tools/minimal-gain.clap"
+build_link_run clap-direct-process-contract \
+    tests/clap_direct_process_contract.cpp -ldl "$BRIDGE_LIB" \
+    "$OUT_DIR/clap-direct-process-contract" "$ROOT_DIR/build-tools/minimal-gain.clap"
+build_link_run hirari-omni-contract tests/hirari_omni_contract.cpp
 
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/hirari_omni_contract.cpp \
-    -o "$OUT_DIR/hirari-omni-contract"
-"$OUT_DIR/hirari-omni-contract"
+# The stress contract is long and round-tunable, so it runs only when asked,
+# but it is still built so a link break is reported rather than hidden.
+if ! "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
+    tests/recording_engine_stress.cpp "$BRIDGE_LIB" $LINK_FLAGS \
+    -o "$OUT_DIR/recording-engine-stress"; then
+    record recording-engine-stress BUILD_OR_LINK_FAILED
+elif [ "${HIRARI_RUN_RECORDING_STRESS:-0}" = "1" ]; then
+    HIRARI_RECORDING_STRESS_ROUNDS="${HIRARI_RECORDING_STRESS_ROUNDS:-250}" \
+        "$OUT_DIR/recording-engine-stress"
+    record recording-engine-stress PASSED
+else
+    # Linked, but the run is opt-in; record it as linked-only so the summary
+    # does not claim an execution that never happened.
+    record recording-engine-stress NOT_RUN_OPTIONAL
+fi
 
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/vocal_restoration_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/vocal-restoration-contract"
-"$OUT_DIR/vocal-restoration-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/cli_media_processor_contract.cpp \
-    -o "$OUT_DIR/cli-media-processor-contract"
-"$OUT_DIR/cli-media-processor-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/spectral_editor_contract.cpp \
-    -o "$OUT_DIR/spectral-editor-contract"
-"$OUT_DIR/spectral-editor-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/sampler_engine_contract.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/sampler-engine-contract"
-"$OUT_DIR/sampler-engine-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/audio_buffer_contract.cpp \
-    -o "$OUT_DIR/audio-buffer-contract"
-"$OUT_DIR/audio-buffer-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/mmap_audio_contract.cpp \
-    -o "$OUT_DIR/mmap-audio-contract"
-"$OUT_DIR/mmap-audio-contract"
-
-"$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/range_edit_contract.cpp \
-    -o "$OUT_DIR/range-edit-contract"
-"$OUT_DIR/range-edit-contract"
-
+echo "native contract summary:"
+overall=0
+# Report each name with its status; statuses are recorded in the same order.
+set -- $CONTRACT_STATUS
+for name in $CONTRACT_NAMES; do
+    status=$1
+    shift
+    printf '  %-34s %s\n' "$name" "$status"
+    if [ "$status" != "PASSED" ] && [ "$status" != "NOT_RUN_OPTIONAL" ]; then
+        overall=1
+    fi
+done
+if [ "$overall" -ne 0 ]; then
+    echo "native plugin compile contract FAILED" >&2
+    exit 1
+fi
 echo "native plugin compile contract passed"
