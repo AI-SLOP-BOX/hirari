@@ -144,10 +144,14 @@ public:
             Core::AudioBuffer buffer;
             uint32_t tap;
             uint32_t stemTrackId;
+            // The Rust writer allocates one plane per exported channel, so a
+            // mono export supplies a single plane pointer.
+            uint16_t channels;
             const std::atomic<bool>* cancellation;
             std::function<void(float)>* onProgress;
         } context{timeline, timeline.getTracksSnapshot(), Core::AudioBuffer(2, 1024),
-                  opts.renderTap, opts.stemTrackId, opts.cancellation, &onProgress};
+                  opts.renderTap, opts.stemTrackId, opts.channels, opts.cancellation,
+                  &onProgress};
         const auto reset = +[](void* opaque) -> uint8_t {
             auto& state = *static_cast<RenderContext*>(opaque);
             state.timeline.resetForOfflineRender();
@@ -156,7 +160,11 @@ public:
         const auto render = +[](void* opaque, uint64_t position, uint32_t frames,
                                 float** output) -> uint8_t {
             auto& state = *static_cast<RenderContext*>(opaque);
-            if (!output || !output[0] || !output[1] || frames == 0 || frames > 1024) return 0;
+            // Honor the plane count the writer actually supplied. Requiring a
+            // second plane made every mono export fail, because the Rust writer
+            // allocates exactly one plane when channels == 1.
+            if (!output || !output[0] || frames == 0 || frames > 1024) return 0;
+            if (state.channels == 2 && !output[1]) return 0;
             state.buffer.clear();
             for (const auto& track : state.tracks) {
                 if (state.stemTrackId != 0 &&
@@ -168,7 +176,13 @@ public:
             const float* right = state.buffer.getReadPointer(1);
             if (!left || !right) return 0;
             std::copy_n(left, frames, output[0]);
-            std::copy_n(right, frames, output[1]);
+            // A mono export folds the right channel into the left rather than
+            // dropping it, matching how the writer lays out a single plane.
+            if (state.channels == 2) {
+                std::copy_n(right, frames, output[1]);
+            } else {
+                for (uint32_t i = 0; i < frames; ++i) output[0][i] = 0.5f * (left[i] + right[i]);
+            }
             return 1;
         };
         const auto cancelled = +[](void* opaque) -> uint8_t {
