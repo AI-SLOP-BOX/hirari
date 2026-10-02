@@ -36,6 +36,28 @@ impl HirariCore {
             Err(error) => return Err(anyhow::anyhow!("failed to read control room state: {error}")),
             },
         };
+        // A project publishes a MIDI event sidecar next to itself. Validate it
+        // under the same rule as the control-room state: a sidecar that exists
+        // but cannot be parsed is corrupt project data, and silently ignoring it
+        // would drop the user's events while reporting a successful open.
+        // Validate before any native state is touched so a rejected project
+        // leaves the currently open one intact.
+        let midi_sidecar_path = format!("{path}.midi-events.json");
+        match std::fs::read_to_string(&midi_sidecar_path) {
+            Ok(contents) => {
+                let events: Vec<midi::MIDIEvent> = serde_json::from_str(&contents)
+                    .map_err(|error| anyhow::anyhow!("invalid MIDI event sidecar: {error}"))?;
+                if events.iter().any(|event| !event.validate()) {
+                    return Err(anyhow::anyhow!("invalid MIDI event sidecar"));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "failed to read MIDI event sidecar: {error}"
+                ))
+            }
+        }
         // A plugin binary is part of the cache identity.  Never hydrate a
         // state blob captured from a different binary: keep the project
         // editable, but let the plugin start from its defaults and acquire a
