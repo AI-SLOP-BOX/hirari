@@ -1,6 +1,7 @@
 #include "src/network/shared_memory_bridge.hpp"
 
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sys/wait.h>
@@ -32,8 +33,22 @@ int main(int argc, char** argv) {
     // A same-sized but stale segment must not be accepted as a current
     // SharedState. The consumer also must not unlink a segment it did not
     // create.
-    const std::string staleName = "/hirari_shared_state_stale_" +
+    // macOS caps shm_open names at 31 characters (PSHMNAMLEN, ENAMETOOLONG
+    // beyond it). SharedMemoryBridge already keeps its own name within that
+    // budget; this probe's name must too. It used to be
+    // "/hirari_shared_state_stale_<pid>", which is 31 characters only for a
+    // four-digit pid and 32 for a five-digit one, so the contract passed or
+    // failed purely as a function of how many digits the kernel had assigned.
+    static constexpr size_t kMaxShmNameLength = 31;
+    const std::string staleName = "/hirari_shm_stale_" +
         std::to_string(static_cast<unsigned long long>(::getpid()));
+    if (staleName.size() > kMaxShmNameLength) {
+        std::fprintf(stderr,
+                     "shm probe name '%s' is %zu characters, over the %zu "
+                     "character platform limit\n",
+                     staleName.c_str(), staleName.size(), kMaxShmNameLength);
+        return 8;
+    }
     const int staleFd = shm_open(staleName.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
     if (staleFd == -1 || ftruncate(staleFd, sizeof(Hirari::Network::SharedMemoryBridge::SharedState)) != 0) {
         if (staleFd >= 0) close(staleFd);
