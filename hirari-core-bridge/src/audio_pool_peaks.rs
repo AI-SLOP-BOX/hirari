@@ -131,16 +131,22 @@ mod tests {
     use super::*;
     use std::fs::File;
     use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// Names each scratch WAV uniquely per call. The clock alone can repeat
+    /// within one tick when the whole suite runs in parallel, which made these
+    /// tests truncate each other's fixture and fail intermittently.
     fn wave_path() -> std::path::PathBuf {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!(
-            "hirari-pool-peaks-{}-{nonce}.wav",
-            std::process::id()
+            "hirari-pool-peaks-{}-{nonce}-{}.wav",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ))
     }
 
