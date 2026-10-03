@@ -765,9 +765,12 @@ struct HirariWarpMarker {
     uint64_t timelineSample = 0;
     bool transient = false;
 };
-extern "C" size_t hirari_region_normalize_warp_markers(
-    HirariWarpMarker* markers, size_t count,
-    uint64_t source_span, uint64_t timeline_length);
+// Warp-marker normalization is a pure transform: Rust reads the caller's
+// markers and returns a buffer it owns, released with hirari_free_warp_markers.
+extern "C" HirariWarpMarker* hirari_region_normalize_warp_markers(
+    const HirariWarpMarker* markers_in, size_t count,
+    uint64_t source_span, uint64_t timeline_length, size_t* out_count);
+extern "C" void hirari_free_warp_markers(HirariWarpMarker* markers, size_t count);
 extern "C" bool hirari_region_align_audio(
     const float* const* reference_channels, size_t reference_channel_count,
     size_t reference_offset, size_t reference_span,

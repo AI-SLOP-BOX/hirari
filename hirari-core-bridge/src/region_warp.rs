@@ -11,26 +11,37 @@ pub struct HirariWarpMarker {
 /// Bounds and orders project-provided warp markers before they enter the
 /// immutable audio-thread snapshot. Invalid or non-monotonic anchors are
 /// dropped, matching Track's former C++ normalization contract.
+/// Pure transform: reads the caller's markers and returns a buffer it owns.
+///
+/// Rust never writes into caller storage here. The previous signature took a
+/// mutable pointer, sorted and compacted in place, and returned a count that
+/// the caller then turned into a container resize, which is the same
+/// architecture that silently zeroed an appended region edit once. Marker
+/// storage still belongs to Track; only the normalization result is Rust-owned.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_normalize_warp_markers(
-    markers: *mut HirariWarpMarker,
+    markers_in: *const HirariWarpMarker,
     count: usize,
     source_span: u64,
     timeline_length: u64,
-) -> usize {
-    if count == 0 || markers.is_null() || timeline_length == 0 {
-        return 0;
+    out_count: *mut usize,
+) -> *mut HirariWarpMarker {
+    if out_count.is_null() {
+        return std::ptr::null_mut();
     }
-    let markers = slice::from_raw_parts_mut(markers, count);
+    if count == 0 || markers_in.is_null() || timeline_length == 0 {
+        unsafe { *out_count = 0 };
+        return std::ptr::null_mut();
+    }
+    let mut markers = unsafe { slice::from_raw_parts(markers_in, count) }.to_vec();
     markers.sort_by_key(|marker| marker.timeline_sample);
-    let mut valid_count = 0usize;
+    let mut valid: Vec<HirariWarpMarker> = Vec::with_capacity(markers.len());
     let mut previous_source = 0u64;
     let mut previous_timeline = 0u64;
-    for index in 0..markers.len() {
-        let marker = markers[index];
+    for marker in markers {
         if marker.source_sample > source_span
             || marker.timeline_sample > timeline_length
-            || (valid_count > 0
+            || (!valid.is_empty()
                 && (marker.source_sample <= previous_source
                     || marker.timeline_sample <= previous_timeline))
         {
@@ -38,10 +49,22 @@ pub unsafe extern "C" fn hirari_region_normalize_warp_markers(
         }
         previous_source = marker.source_sample;
         previous_timeline = marker.timeline_sample;
-        markers[valid_count] = marker;
-        valid_count += 1;
+        valid.push(marker);
     }
-    valid_count
+    let length = valid.len();
+    unsafe { *out_count = length };
+    Box::into_raw(valid.into_boxed_slice()) as *mut HirariWarpMarker
+}
+
+/// Releases a buffer returned by [`hirari_region_normalize_warp_markers`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_free_warp_markers(markers: *mut HirariWarpMarker, count: usize) {
+    if markers.is_null() {
+        return;
+    }
+    unsafe {
+        drop(Box::from_raw(slice::from_raw_parts_mut(markers, count)));
+    }
 }
 
 /// Maps one timeline frame to source-frame position using the region's
@@ -149,6 +172,7 @@ pub unsafe extern "C" fn hirari_region_source_block(
 #[cfg(test)]
 mod normalization_tests {
     use super::{hirari_region_normalize_warp_markers, HirariWarpMarker};
+    use std::slice;
 
     #[test]
     fn warp_marker_normalization_bounds_and_enforces_monotonic_mapping() {
@@ -184,18 +208,100 @@ mod normalization_tests {
                 transient: 0,
             },
         ];
-        let count = unsafe {
-            hirari_region_normalize_warp_markers(markers.as_mut_ptr(), markers.len(), 25, 25)
+        let mut count = 0usize;
+        let normalized = unsafe {
+            hirari_region_normalize_warp_markers(
+                markers.as_ptr(),
+                markers.len(),
+                25,
+                25,
+                &mut count,
+            )
         };
         assert_eq!(count, 4);
+        let result = unsafe { slice::from_raw_parts(normalized, count) }.to_vec();
         assert_eq!(
-            markers[..count]
+            result
                 .iter()
                 .map(|marker| marker.timeline_sample)
                 .collect::<Vec<_>>(),
             vec![0, 8, 12, 20]
         );
-        assert_eq!(markers[2].transient, 1);
+        assert_eq!(result[2].transient, 1);
+        unsafe { super::hirari_free_warp_markers(normalized, count) };
+        assert_eq!(markers.len(), 6, "input must not be modified in place");
+
+
+    }
+    /// Pins the contract the C++ caller depends on: the transform keeps every
+    /// marker it returns in strictly increasing order, and drops anything it
+    /// cannot keep. The caller compares the returned count against its input
+    /// count to decide whether the edit is acceptable, so dropping exactly one
+    /// marker must produce a different count rather than a silently truncated
+    /// result of the same length.
+    #[test]
+    fn normalization_drops_only_invalid_markers_and_reports_the_count() {
+        let valid = [
+            HirariWarpMarker { source_sample: 0, timeline_sample: 0, transient: 0 },
+            HirariWarpMarker { source_sample: 512, timeline_sample: 512, transient: 1 },
+            HirariWarpMarker { source_sample: 1024, timeline_sample: 1024, transient: 0 },
+        ];
+        let mut count = 0usize;
+        let out = unsafe {
+            hirari_region_normalize_warp_markers(valid.as_ptr(), valid.len(), 4096, 4096, &mut count)
+        };
+        assert_eq!(count, 3);
+        unsafe { super::hirari_free_warp_markers(out, count) };
+
+        // Unordered but valid input is sorted and kept, not dropped. The C++
+        // caller accepts exactly this case by comparing counts, so the output
+        // order, and not just the count, is the contract that matters here.
+        let unordered = [
+            HirariWarpMarker { source_sample: 0, timeline_sample: 0, transient: 0 },
+            HirariWarpMarker { source_sample: 1024, timeline_sample: 1024, transient: 0 },
+            HirariWarpMarker { source_sample: 512, timeline_sample: 512, transient: 0 },
+        ];
+        let mut reordered = 0usize;
+        let out = unsafe {
+            hirari_region_normalize_warp_markers(
+                unordered.as_ptr(), unordered.len(), 4096, 4096, &mut reordered,
+            )
+        };
+        assert_eq!(reordered, 3);
+        let ordered = unsafe { std::slice::from_raw_parts(out, reordered) };
+        assert_eq!(
+            ordered.iter().map(|m| m.timeline_sample).collect::<Vec<_>>(),
+            vec![0, 512, 1024],
+            "the output is sorted even though nothing was dropped"
+        );
+        unsafe { super::hirari_free_warp_markers(out, reordered) };
+
+        // A marker that duplicates its predecessor is not strictly increasing
+        // and is the case that actually changes the count.
+        let duplicate = [
+            HirariWarpMarker { source_sample: 0, timeline_sample: 0, transient: 0 },
+            HirariWarpMarker { source_sample: 1024, timeline_sample: 1024, transient: 0 },
+            HirariWarpMarker { source_sample: 1024, timeline_sample: 1024, transient: 0 },
+        ];
+        let mut dropped = 0usize;
+        let out = unsafe {
+            hirari_region_normalize_warp_markers(
+                duplicate.as_ptr(), duplicate.len(), 4096, 4096, &mut dropped,
+            )
+        };
+        assert_eq!(dropped, 2, "one marker must be dropped, changing the count");
+        unsafe { super::hirari_free_warp_markers(out, dropped) };
+
+        // Beyond the timeline bound.
+        let out_of_range = [HirariWarpMarker { source_sample: 0, timeline_sample: 999, transient: 0 }];
+        let mut rejected = 0usize;
+        let out = unsafe {
+            hirari_region_normalize_warp_markers(
+                out_of_range.as_ptr(), out_of_range.len(), 4096, 100, &mut rejected,
+            )
+        };
+        assert_eq!(rejected, 0, "the out-of-range marker must be dropped");
+        unsafe { super::hirari_free_warp_markers(out, rejected) };
     }
 }
 

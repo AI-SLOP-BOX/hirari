@@ -78,9 +78,26 @@ public:
         }
         const uint64_t warpSourceSpan = normalized.sourceLength > 0
             ? normalized.sourceLength : normalized.len;
-        normalized.warpMarkers.resize(hirari_region_normalize_warp_markers(
+        // Rust normalizes into a buffer it owns; nothing is written through a
+        // pointer into this vector, so no returned count can drive a resize
+        // over foreign-written data.
+        size_t validWarpMarkerCount = 0;
+        HirariWarpMarker* normalizedWarpMarkers = hirari_region_normalize_warp_markers(
             normalized.warpMarkers.data(), normalized.warpMarkers.size(),
-            warpSourceSpan, normalized.len));
+            warpSourceSpan, normalized.len, &validWarpMarkerCount);
+        if (normalizedWarpMarkers) {
+            std::vector<Region::WarpMarker> adopted;
+            adopted.reserve(validWarpMarkerCount);
+            for (size_t index = 0; index < validWarpMarkerCount; ++index) {
+                const auto& marker = normalizedWarpMarkers[index];
+                adopted.push_back({marker.sourceSample, marker.timelineSample,
+                                   marker.transient != 0});
+            }
+            hirari_free_warp_markers(normalizedWarpMarkers, validWarpMarkerCount);
+            normalized.warpMarkers = std::move(adopted);
+        } else {
+            normalized.warpMarkers.clear();
+        }
         for (auto& segment : normalized.audioNoteSegments) {
             const size_t anchorCount = hirari_audio_note_curve_normalize_anchors(
                 segment.anchors.data(), segment.anchors.size(),

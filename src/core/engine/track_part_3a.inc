@@ -839,11 +839,36 @@
         return true;
     }
 
+    // Validates and orders warp markers through the Rust pure transform.
+    //
+    // Rust returns a buffer it owns and never writes into caller storage, so
+    // the former in-place sort/compact cannot corrupt a C++ vector. Returns
+    // false when normalization would drop any marker, matching the previous
+    // contract that rejected anything which did not survive 1:1. On success
+    // `ordered` holds the normalized markers in their stored order.
+    static bool normalizeWarpMarkers(const std::vector<Region::WarpMarker>& input,
+                                     uint64_t sourceSpan, uint64_t timelineLength,
+                                     std::vector<Region::WarpMarker>& ordered) {
+        static_assert(sizeof(Region::WarpMarker) == sizeof(HirariWarpMarker));
+        size_t produced = 0;
+        HirariWarpMarker* result = hirari_region_normalize_warp_markers(
+            reinterpret_cast<const HirariWarpMarker*>(input.data()), input.size(),
+            sourceSpan, timelineLength, &produced);
+        if (!result) return false;
+        std::vector<Region::WarpMarker> adopted;
+        adopted.reserve(produced);
+        for (size_t index = 0; index < produced; ++index) {
+            adopted.push_back(result[index]);
+        }
+        hirari_free_warp_markers(result, produced);
+        if (produced != input.size()) return false;
+        ordered = std::move(adopted);
+        return true;
+    }
+
     bool setRegionWarpMarkers(uint32_t rid, std::vector<Region::WarpMarker> markers) {
         if (markers.size() > 100'000) return false;
-        const size_t orderedCount = hirari_region_normalize_warp_markers(
-            markers.data(), markers.size(), UINT64_MAX, UINT64_MAX);
-        if (orderedCount != markers.size()) return false;
+        if (!normalizeWarpMarkers(markers, UINT64_MAX, UINT64_MAX, markers)) return false;
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         auto it = std::find_if(m_regions.begin(), m_regions.end(), [rid](const Region& r) {
@@ -851,9 +876,7 @@
         });
         if (it == m_regions.end() || it->locked) return false;
         const uint64_t sourceSpan = it->sourceLength > 0 ? it->sourceLength : it->len;
-        const size_t boundedCount = hirari_region_normalize_warp_markers(
-            markers.data(), markers.size(), sourceSpan, it->len);
-        if (boundedCount != markers.size()) return false;
+        if (!normalizeWarpMarkers(markers, sourceSpan, it->len, markers)) return false;
         if (it->warpMarkers.size() == markers.size() &&
             std::equal(it->warpMarkers.begin(), it->warpMarkers.end(), markers.begin(),
                        [](const auto& a, const auto& b) {
