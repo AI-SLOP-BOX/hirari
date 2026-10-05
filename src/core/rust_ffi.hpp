@@ -959,37 +959,6 @@ extern "C" void hirari_audio_note_curve_block(
     uint64_t first_region_sample, uint64_t region_length, double sample_rate,
     uint32_t frame_count, double* pitch_output, double* formant_output,
     int64_t* matched_indices_output, int64_t* previous_indices_output);
-extern "C" bool hirari_region_prepare_block(
-    const HirariRegionBlockConfig* config, uint32_t frames,
-    const HirariRegionCompRange* comp_ranges, size_t comp_range_count,
-    const HirariRegionRangeEdit* range_edits, size_t range_edit_count,
-    const HirariAudioNoteSegmentRange* note_ranges, size_t note_range_count,
-    const HirariAudioNoteCurveView* note_curves, size_t note_curve_count,
-    const HirariWarpMarker* warp_markers, size_t warp_marker_count,
-    const HirariRegionBlockOutput* output);
-extern "C" void hirari_region_render_chunks(
-    const float* source_left, const float* source_right,
-    const HirariRegionBlockConfig* block_template,
-    const HirariRegionRenderConfig* render_config,
-    const HirariRegionCompRange* comp_ranges, size_t comp_range_count,
-    const HirariRegionRangeEdit* range_edits, size_t range_edit_count,
-    const HirariAudioNoteSegmentRange* note_ranges, size_t note_range_count,
-    const HirariAudioNoteCurveView* note_curves, size_t note_curve_count,
-    const HirariWarpMarker* warp_markers, size_t warp_marker_count,
-    const float* resample_kernel, const float* wsola_window,
-    void* stretch_handle,
-    float* destination_left, float* destination_right, uint32_t frames);
-extern "C" bool hirari_region_render_block(
-    const float* source_left, const float* source_right,
-    const HirariRegionBlockConfig* block_config,
-    const HirariRegionRenderConfig* render_config,
-    const HirariRegionBlockOutput* prepared,
-    const HirariWarpMarker* warp_markers, size_t warp_marker_count,
-    const HirariAudioNoteSegmentRange* note_ranges, size_t note_range_count,
-    const HirariAudioNoteCurveView* note_curves, size_t note_curve_count,
-    const float* kernel, const float* window,
-    const float* spectral_left, const float* spectral_right,
-    float* destination_left, float* destination_right, uint32_t frames);
 extern "C" bool hirari_region_needs_spectral_stretch(
     double source_rate, size_t warp_marker_count, float pitch_semitones,
     const HirariAudioNoteCurveView* note_curves, size_t note_curve_count);
