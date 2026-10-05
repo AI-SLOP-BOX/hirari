@@ -140,6 +140,17 @@ build_link_run wav-io-contract tests/wav_io_contract.cpp "$BRIDGE_LIB"
 build_link_run project-decoder-contract tests/project_decoder_contract.cpp "$BRIDGE_LIB"
 build_link_run persistence-contract tests/persistence_contract.cpp "$BRIDGE_LIB"
 build_link_run timeline-track-render-contract tests/timeline_track_render_contract.cpp "$BRIDGE_LIB"
+# The BPM ghost contract sets the authoritative project tempo through the real
+# production engine path before exercising the duplicate TimelineSystem value.
+# Including the engine pulls in Objective-C driver objects on macOS, so link
+# those frameworks there only.
+BPM_GHOST_LINK_FLAGS=""
+if [ "$(uname -s)" = "Darwin" ]; then
+    BPM_GHOST_LINK_FLAGS="-framework Foundation -framework CoreMIDI -framework CoreAudio -framework CoreMedia"
+fi
+# shellcheck disable=SC2086
+build_link_run timeline-bpm-ghost-contract tests/timeline_bpm_ghost_contract.cpp \
+    "$BRIDGE_LIB" $BPM_GHOST_LINK_FLAGS
 build_link_run recording-engine-contract tests/recording_engine_contract.cpp "$BRIDGE_LIB"
 build_link_run recording-autosave-contract tests/recording_autosave_contract.cpp "$BRIDGE_LIB"
 build_link_run shared-memory-multiprocess-contract tests/shared_memory_multiprocess_contract.cpp "$BRIDGE_LIB"
