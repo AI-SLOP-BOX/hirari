@@ -48,7 +48,17 @@ mkdir -p "$OUT_DIR"
 # every hirari_* symbol in the contract below is undefined at link time.
 BRIDGE_LIB=$("$ROOT_DIR/scripts/build_bridge_staticlib.sh")
 
+# Shared link inputs for every contract on macOS. The engine's CoreAudio
+# driver translation unit references AudioComponent/AudioUnit/AudioObject
+# symbols, and the Rust staticlib archives Objective-C driver objects; with
+# LINK_FLAGS left empty those symbols stayed unresolved, so
+# native-plugin-compile could never leave BUILD_OR_LINK_FAILED. This block
+# existed earlier in the script's history and was lost in a later refactor.
+# HIRARI_NO_FRAMEWORKS=1 disables it for negative-control runs.
 LINK_FLAGS=""
+if [ "$(uname -s)" = "Darwin" ] && [ "${HIRARI_NO_FRAMEWORKS:-0}" != "1" ]; then
+    LINK_FLAGS="-framework Foundation -framework CoreAudio -framework CoreMIDI -framework AudioToolbox -framework CoreMedia"
+fi
 
 # ---------------------------------------------------------------------------
 # Contract runner
@@ -62,17 +72,30 @@ LINK_FLAGS=""
 CONTRACT_NAMES=""
 CONTRACT_STATUS=""
 
+# Extra runtime arguments for the contract binary. Link inputs stay in "$@" so
+# the linker sees them; a contract whose main() reads argv[1..] sets this
+# immediately before calling build_link_run. It is consumed on entry, so a
+# value can never leak into a later contract during the same run.
+CONTRACT_RUN_ARGS=""
+
 record() {
     CONTRACT_NAMES="$CONTRACT_NAMES $1"
     CONTRACT_STATUS="$CONTRACT_STATUS $2"
 }
 
 build_link_run() {
-    # $1 = label, $2 = source path, rest = extra link inputs / runner args
+    # $1 = label, $2 = source path, rest = extra link inputs.
+    # Runtime arguments come from CONTRACT_RUN_ARGS, never from "$@": the
+    # linker must not see them, and the runner must not see link inputs.
     label=$1
     source=$2
     shift 2
+    run_args=${CONTRACT_RUN_ARGS:-}
+    CONTRACT_RUN_ARGS=""
     binary="$OUT_DIR/$label"
+    # A failed build must never be able to execute a binary left behind by an
+    # earlier successful one, so any previous artifact goes first.
+    rm -f "$binary"
     # Linking the large staticlib is memory-hungry and this machine can OOM the
     # compiler without reporting a diagnostic. Retry once before declaring the
     # link failed, so an environment kill is not mistaken for a real defect.
@@ -91,12 +114,12 @@ build_link_run() {
         return 0
     fi
     if [ "$(uname -s)" = "Darwin" ]; then
-        if (ulimit -s 16384 && "$binary"); then
+        if (ulimit -s 16384 && "$binary" $run_args); then
             record "$label" PASSED
         else
             record "$label" FAILED
         fi
-    elif "$binary"; then
+    elif "$binary" $run_args; then
         record "$label" PASSED
     else
         record "$label" FAILED
@@ -140,17 +163,10 @@ build_link_run wav-io-contract tests/wav_io_contract.cpp "$BRIDGE_LIB"
 build_link_run project-decoder-contract tests/project_decoder_contract.cpp "$BRIDGE_LIB"
 build_link_run persistence-contract tests/persistence_contract.cpp "$BRIDGE_LIB"
 build_link_run timeline-track-render-contract tests/timeline_track_render_contract.cpp "$BRIDGE_LIB"
-# The BPM ghost contract sets the authoritative project tempo through the real
-# production engine path before exercising the duplicate TimelineSystem value.
-# Including the engine pulls in Objective-C driver objects on macOS, so link
-# those frameworks there only.
-BPM_GHOST_LINK_FLAGS=""
-if [ "$(uname -s)" = "Darwin" ]; then
-    BPM_GHOST_LINK_FLAGS="-framework Foundation -framework CoreMIDI -framework CoreAudio -framework CoreMedia"
-fi
-# shellcheck disable=SC2086
+# The BPM ghost contract pulls the engine (and therefore the Apple driver
+# frameworks) in through the shared LINK_FLAGS above.
 build_link_run timeline-bpm-ghost-contract tests/timeline_bpm_ghost_contract.cpp \
-    "$BRIDGE_LIB" $BPM_GHOST_LINK_FLAGS
+    "$BRIDGE_LIB"
 build_link_run recording-engine-contract tests/recording_engine_contract.cpp "$BRIDGE_LIB"
 build_link_run recording-autosave-contract tests/recording_autosave_contract.cpp "$BRIDGE_LIB"
 build_link_run shared-memory-multiprocess-contract tests/shared_memory_multiprocess_contract.cpp "$BRIDGE_LIB"
@@ -163,12 +179,14 @@ build_link_run audio-buffer-contract tests/audio_buffer_contract.cpp "$BRIDGE_LI
 build_link_run mmap-audio-contract tests/mmap_audio_contract.cpp "$BRIDGE_LIB"
 build_link_run range-edit-contract tests/range_edit_contract.cpp "$BRIDGE_LIB"
 
-# The CLAP direct-process contract needs the fixture binary and libdl, and the
-# omni contract is plugin-surface only; neither references the Rust bridge.
+# The CLAP direct-process contract's main() takes exactly one runtime argument
+# (the fixture path), and its objects reference hirari_* buffer symbols while
+# linking, so the staticlib stays a link input but only the fixture is a run
+# argument.
 "$ROOT_DIR/scripts/build_clap_fixture.sh" >/dev/null
+CONTRACT_RUN_ARGS="$ROOT_DIR/build-tools/minimal-gain.clap"
 build_link_run clap-direct-process-contract \
-    tests/clap_direct_process_contract.cpp -ldl "$BRIDGE_LIB" \
-    "$OUT_DIR/clap-direct-process-contract" "$ROOT_DIR/build-tools/minimal-gain.clap"
+    tests/clap_direct_process_contract.cpp -ldl "$BRIDGE_LIB"
 build_link_run hirari-omni-contract tests/hirari_omni_contract.cpp
 
 # The stress contract is long and round-tunable, so it runs only when asked,
