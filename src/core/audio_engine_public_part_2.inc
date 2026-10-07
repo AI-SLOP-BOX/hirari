@@ -564,7 +564,7 @@
     void shutdown() const;
 
     // Explicit process-lifetime operation.  Call this only from the host's
-    // final shutdown path, after all AudioEngine/AnalysisHub handles are gone.
+    // final shutdown path, after all AudioEngine handles are gone.
     static void shutdown_process() noexcept;
 
     rust::Vec<float> get_engine_status_v() const;

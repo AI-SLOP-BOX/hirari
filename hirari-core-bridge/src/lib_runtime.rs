@@ -103,9 +103,8 @@ pub fn report_hirari_log(level: u32, msg: &str) {
 
 pub struct HirariCore {
     // --- INDUSTRIAL: Explicit Lifetime Binding ---
-    // engine is the root of sovereignty. analysis is a dependent handle.
+    // engine is the root of sovereignty.
     engine: cxx::UniquePtr<ffi::AudioEngine>,
-    analysis: cxx::UniquePtr<ffi::AnalysisHub>,
     gpu_initialized: bool,
     preview_audio: std::sync::Mutex<preview_audio_runtime::PreviewAudioRuntime>,
     recording_session: std::sync::Mutex<Option<recording_session::RecordingSession>>,

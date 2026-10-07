@@ -13,10 +13,6 @@ namespace Hirari::Core::Bridge {
         return std::make_unique<BridgeFFI::AudioEngine>(false);
     }
 
-    std::unique_ptr<BridgeFFI::AnalysisHub> new_analysis_hub(const BridgeFFI::AudioEngine& engine) {
-        return std::make_unique<BridgeFFI::AnalysisHub>(engine.get_core_shared());
-    }
-
     const Engine::HirariUnifiedEngine& get_unified_engine(const BridgeFFI::AudioEngine& bridge) {
         return bridge.get_core();
     }
@@ -76,31 +72,6 @@ namespace Hirari::Core::Bridge {
         if (!mask) return false;
         return engine.push_command(static_cast<::Hirari::Core::CommandType>(cmd), tid, val, ts,
                                    expected_project_generation, expected_audio_generation);
-    }
-
-    rust::Vec<BridgeClash> get_spectral_clash_v_ffi(const BridgeFFI::AnalysisHub& hub) {
-        auto clashes = hub.get_spectral_clash_v();
-        rust::Vec<BridgeClash> result;
-        for (const auto& c : clashes) {
-            result.push_back({static_cast<float>(c.bin), c.intensity});
-        }
-        return result;
-    }
-
-    BridgeLoudness get_master_loudness_v_ffi(const BridgeFFI::AnalysisHub& hub) {
-        auto n = hub.get_master_loudness_v();
-        return {n.integrated, n.short_term, n.true_peak_l, n.true_peak_r, n.correlation};
-    }
-
-    rust::String get_song_structure_json_ffi(const BridgeFFI::AnalysisHub& hub) {
-        return hub.get_song_structure_json();
-    }
-
-    rust::Vec<float> get_mixer_levels_v(const BridgeFFI::AnalysisHub& hub) {
-        return hub.get_mixer_levels_v();
-    }
-    rust::Vec<float> get_spectral_data_v(const BridgeFFI::AnalysisHub& hub) {
-        return hub.get_spectral_data_v();
     }
 
     bool initialize_gpu_with_status() {

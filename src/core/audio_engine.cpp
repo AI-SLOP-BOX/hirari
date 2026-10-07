@@ -90,9 +90,8 @@ bool AudioEngine::start_audio_device() const {
         if (m_driver) {
             m_driver->stop();
         }
-        // AudioEngine owns its session engine. AnalysisHub retains the same
-        // shared_ptr while it is alive, so destruction remains ordered and
-        // does not tear down another project's graph.
+        // AudioEngine owns its session engine, so teardown of the shared graph
+        // cannot tear down another project's graph.
         if (m_engine) m_engine->shutdown();
     }
 

@@ -219,10 +219,7 @@ fn main() {
         {
             build.file(&path);
         }
-        println!(
-            "cargo:rerun-if-changed={}",
-            pattern.replace("*.cpp", "")
-        );
+        println!("cargo:rerun-if-changed={}", pattern.replace("*.cpp", ""));
     }
 
     // cxx_build does not reliably discover headers included through nested

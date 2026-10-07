@@ -312,22 +312,32 @@ impl HirariCore {
         self.get_spectral_data_v()
     }
     pub fn get_synesthesia_colors(&self) -> Vec<f32> {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        a.get_synesthesia_colors_v()
+        let core = ffi::get_unified_engine(engine);
+        let idx = ffi::get_active_telemetry_idx(core);
+        crate::analysis_synesthesia_colors(&ffi::get_spectrum(core, idx))
+            .into_iter()
+            .collect()
     }
     pub fn get_motion_energy(&self) -> f32 {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return 0.0;
         };
-        a.get_motion_energy()
+        let core = ffi::get_unified_engine(engine);
+        let idx = ffi::get_active_telemetry_idx(core);
+        crate::analysis_motion_energy(&ffi::get_spectrum(core, idx))
     }
     pub fn get_spectral_partials_v(&self) -> Vec<f32> {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        a.get_spectral_partials_v()
+        let core = ffi::get_unified_engine(engine);
+        let idx = ffi::get_active_telemetry_idx(core);
+        crate::analysis_partials(&ffi::get_spectrum(core, idx))
+            .into_iter()
+            .collect()
     }
     pub fn get_video_frame(&self) -> Vec<u8> {
         self.engine
@@ -352,40 +362,59 @@ impl HirariCore {
     }
 
     pub fn get_song_structure_json(&self) -> String {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return String::new();
         };
-        ffi::get_song_structure_json_ffi(a)
+        ffi::get_song_structure_json(ffi::get_unified_engine(engine))
     }
 
     pub fn get_ai_advice(&self) -> Vec<String> {
         let mut results = Vec::new();
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return results;
         };
-        results.push(a.get_creative_advice());
-        results.push(a.get_arrangement_advice(0));
+        let core = ffi::get_unified_engine(engine);
+        let meter = ffi::get_master_meter_data(core);
+        results.push(crate::analysis_creative_advice(
+            meter.true_peak_l,
+            meter.true_peak_r,
+            meter.correlation,
+        ));
+        results.push(crate::analysis_arrangement_advice(0));
         results
     }
 
     // --- COMPATIBILITY PASS-THROUGHS FOR UI ---
     pub fn get_mixer_levels_v(&self) -> Vec<f32> {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        a.get_mixer_levels_v()
+        let core = ffi::get_unified_engine(engine);
+        let l = ffi::get_track_peaks_l_owned(core);
+        let r = ffi::get_track_peaks_r_owned(core);
+        let count = l.len().min(r.len());
+        let mut result = Vec::with_capacity(count * 2);
+        for i in 0..count {
+            result.push(l[i]);
+            result.push(r[i]);
+        }
+        result
     }
     pub fn get_spectral_data_v(&self) -> Vec<f32> {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        a.get_spectral_data_v()
+        let core = ffi::get_unified_engine(engine);
+        let idx = ffi::get_active_telemetry_idx(core);
+        crate::analysis_spectral_display(&ffi::get_spectrum(core, idx), engine.get_sample_rate())
+            .into_iter()
+            .collect()
     }
     pub fn get_master_loudness(&self) -> LoudnessData {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return LoudnessData::default();
         };
-        let v = ffi::get_master_loudness_v_ffi(a);
+        let v = ffi::get_master_meter_data(ffi::get_unified_engine(engine));
         LoudnessData {
             integrated: v.integrated,
             short_term: v.short_term,
@@ -395,21 +424,30 @@ impl HirariCore {
         }
     }
     pub fn get_intelligence_dashboard_json(&self) -> String {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return String::new();
         };
-        a.get_intelligence_dashboard_json()
+        ffi::get_intelligence_dashboard_json(ffi::get_unified_engine(engine))
     }
     pub fn get_clashing_frequencies(&self) -> Vec<ClashData> {
-        let Some(a) = self.analysis() else {
+        let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        ffi::get_spectral_clash_v_ffi(a)
-            .into_iter()
-            .map(|c| ClashData {
-                frequency: c.frequency,
-                severity: c.severity,
-            })
-            .collect()
+        let meter = ffi::get_master_meter_data(ffi::get_unified_engine(engine));
+        let encoded = crate::analysis_spectral_clashes(
+            meter.true_peak_l,
+            meter.true_peak_r,
+            meter.correlation,
+        );
+        let mut result = Vec::new();
+        for chunk in encoded.chunks(2) {
+            if chunk.len() == 2 {
+                result.push(ClashData {
+                    frequency: chunk[0],
+                    severity: chunk[1],
+                });
+            }
+        }
+        result
     }
 }

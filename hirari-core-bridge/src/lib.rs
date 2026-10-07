@@ -101,15 +101,12 @@ pub mod ffi {
 
     unsafe extern "C++" {
         include!("core/audio_engine.hpp");
-        include!("core/analysis_hub.hpp");
         include!("core/hirari_unified_engine.hpp");
         include!("core/bridge_shims.hpp");
         include!("core/bridge_types.hpp");
 
         #[namespace = "Hirari::Core::BridgeFFI"]
         type AudioEngine;
-        #[namespace = "Hirari::Core::BridgeFFI"]
-        type AnalysisHub;
 
         #[namespace = "Hirari::Core::Bridge"]
         type StructureNode;
@@ -120,7 +117,6 @@ pub mod ffi {
         fn new_audio_engine() -> UniquePtr<AudioEngine>;
         fn new_audio_engine_offline() -> UniquePtr<AudioEngine>;
         fn start_audio_device(self: &AudioEngine) -> bool;
-        fn new_analysis_hub(engine: &AudioEngine) -> UniquePtr<AnalysisHub>;
 
         fn set_playing(self: &AudioEngine, p: bool);
         fn try_set_playing(self: &AudioEngine, p: bool) -> bool;
@@ -783,18 +779,6 @@ pub mod ffi {
         fn get_region_source_frame_count(self: &AudioEngine, tid: u32, rid: u32) -> u64;
         fn get_region_sample_rate(self: &AudioEngine, tid: u32, rid: u32) -> f64;
         fn get_region_channel_count(self: &AudioEngine, tid: u32, rid: u32) -> u32;
-        fn get_mixer_levels_v(self: &AnalysisHub) -> Vec<f32>;
-        fn get_spectral_data_v(self: &AnalysisHub) -> Vec<f32>;
-        fn get_spectral_partials_v(self: &AnalysisHub) -> Vec<f32>;
-        fn get_motion_energy(self: &AnalysisHub) -> f32;
-        fn get_synesthesia_colors_v(self: &AnalysisHub) -> Vec<f32>;
-        fn get_master_loudness_v_ffi(hub: &AnalysisHub) -> BridgeLoudness;
-        fn get_intelligence_dashboard_json(self: &AnalysisHub) -> String;
-        fn get_spectral_clash_v_ffi(hub: &AnalysisHub) -> Vec<BridgeClash>;
-        fn get_creative_advice(self: &AnalysisHub) -> String;
-        fn get_arrangement_advice(self: &AnalysisHub, tid: u32) -> String;
-        fn get_song_structure_json_ffi(hub: &AnalysisHub) -> String;
-
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
         fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
         fn get_track_peaks_l(engine: &HirariUnifiedEngine) -> &[f32];
@@ -802,6 +786,12 @@ pub mod ffi {
         fn get_track_peaks_l_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;
         fn get_track_peaks_r_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;
         fn pop_event(engine: &HirariUnifiedEngine, event: &mut BridgeEvent) -> bool;
+        // Engine-side analysis accessors (replace the deleted AnalysisHub shim).
+        fn get_active_telemetry_idx(engine: &HirariUnifiedEngine) -> u32;
+        fn get_spectrum(engine: &HirariUnifiedEngine, idx: u32) -> Vec<f32>;
+        fn get_master_meter_data(engine: &HirariUnifiedEngine) -> BridgeLoudness;
+        fn get_intelligence_dashboard_json(engine: &HirariUnifiedEngine) -> String;
+        fn get_song_structure_json(engine: &HirariUnifiedEngine) -> String;
 
         // --- GPU: Explicit deterministic initialization ---
         fn initialize_gpu();

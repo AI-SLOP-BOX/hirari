@@ -51,16 +51,9 @@ impl HirariCore {
         // Engine bootstrap/template setup is not a user edit and must not
         // appear as the first undoable action of a new Core instance.
         engine_ref.clear_undo_history();
-        let analysis = ffi::new_analysis_hub(engine_ref);
-        if analysis.is_null() {
-            return Err(anyhow::anyhow!(
-                "HIRARI | FATAL: Failed to initialize AnalysisHub (nullptr)"
-            ));
-        }
 
         Ok(Self {
             engine,
-            analysis,
             gpu_initialized,
             preview_audio: std::sync::Mutex::new(preview_audio_runtime::PreviewAudioRuntime::new()),
             recording_session: std::sync::Mutex::new(None),
@@ -127,12 +120,6 @@ impl HirariCore {
         if let Ok(mut hub) = self.production_events.lock() {
             let _ = hub.publish(self.project_generation(), event);
         }
-    }
-
-    /// Returns a lifetime-bound handle to the analysis hub.
-    /// This enforces that the hub cannot be used if the core is mutated or dropped.
-    pub fn analysis(&self) -> Option<&ffi::AnalysisHub> {
-        self.analysis.as_ref()
     }
 
     pub fn gpu_initialized(&self) -> bool {

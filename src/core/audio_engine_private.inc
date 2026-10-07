@@ -40,8 +40,7 @@ private:
         if (self->m_driver) self->m_driver->record_callback(frames, std::isfinite(peak) ? peak : 0.0f);
 #endif
     }
-    // Session-owned graph. AnalysisHub receives a shared reference to this
-    // same graph, while separate FFI handles receive separate project state.
+    // Session-owned graph. Separate FFI handles receive separate project state.
     std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> m_engine;
     inline static std::atomic<uint64_t> s_waveformSequence{0};
     inline static std::mutex s_waveformMutex;
