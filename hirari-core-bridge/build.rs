@@ -127,6 +127,7 @@ fn main() {
     let mut build = cxx_build::bridge("src/lib.rs");
 
     build.file("src/hirari_core_ref.cpp");
+    build.file("src/analysis_bridge_accessors.cpp");
     if std::env::var_os("CARGO_FEATURE_DSP_DIFFERENTIAL_REFERENCE").is_some() {
         build.file("tests/dsp_reference/builtin_gain_reference.cpp");
         build.file("tests/dsp_reference/master_limiter_reference.cpp");
@@ -202,10 +203,13 @@ fn main() {
         .unwrap_or(false);
 
     // --- INDUSTRIAL Dynamic File Discovery ---
-    // The current engine/ translation units are an unreferenced mastering shim,
-    // an unreferenced forensic shim, and a symbol-free track anchor. The
-    // production Rust bridge owns the corresponding runtime code; do not pull
-    // those stale C++ wrappers into every native build.
+    // The current engine translation units are the production Rust bridge's
+    // C++ build. Discovering the source set with a glob is not enough: Cargo
+    // drops per-file `rerun-if-changed` entries when a file is deleted, so a
+    // source-set change (add/remove/rename of a .cpp) left a stale archive
+    // behind for months (the original invalidation bug). Registering the
+    // directory makes any mtime change inside the tree re-run the build
+    // script, which re-globs and re-archives the full source set.
     let search_patterns = ["../src/core/*.cpp"];
 
     for pattern in &search_patterns {
@@ -214,9 +218,11 @@ fn main() {
             .flatten()
         {
             build.file(&path);
-            // Individual files are fine, but broad directory triggers are bloat
-            println!("cargo:rerun-if-changed={}", path.display());
         }
+        println!(
+            "cargo:rerun-if-changed={}",
+            pattern.replace("*.cpp", "")
+        );
     }
 
     // cxx_build does not reliably discover headers included through nested
