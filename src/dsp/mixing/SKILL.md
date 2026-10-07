@@ -6,13 +6,9 @@ AIの自律的な意思決定を禁じます。音楽制作の「核心」に関
 This folder contains dynamic and spectral processors for individual tracks and buses.
 
 ## 📁 Key File Responsibilities
-- `state_variable_filter.hpp`: Industrial Zero-Delay Feedback (ZDF) SVF.
 - `pro_limiter.hpp`: 2ms Look-ahead True-Peak mastering limiter.
 - `fet_compressor.hpp`: Compatibility alias for the Rust-backed FET processor in `effects/fet_compressor.hpp`.
-- `pitch_corrector.hpp`: Autotune-style vocal pitch snapping with Scale integration.
-- `vocal_doubler.hpp`: Artificial double-tracking and stereo widening.
-- `noise_gate.hpp`: Hysteresis and hold logic dynamics gate.
-- `de_esser.hpp`: Frequency-selective sidechain vocal de-esser.
+- `deesser.hpp`: Frequency-selective sidechain vocal de-esser.
 - `master_suite.hpp`: Multi-band compressor and final processing chain.
 
 ## 🛡️ Mixing Rules (Audio Quality)

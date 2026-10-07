@@ -11,7 +11,6 @@
 ### 1. `src/core/` (DAWの骨格・中枢神経)
 - **役割**: オーディオスレッドの生命線管理、ルーティング、コンカレンシー（並行処理）、プロセッサーグラフ。
 - **重要ファイル**:
-  - `concurrency/lock_free_command_queue.hpp`: 【最重要】UIとオーディオをロックフリーで繋ぐSPSCリングバッファ。
   - `memory/realtime_memory_pool.hpp`: Rust所有のリアルタイムarena allocatorへのC++互換API。
   - `status_queue.hpp`: Rust所有の有界MPMC通知キューへのC++互換API。
   - `concurrency/audio_task_manager.hpp`: Rust所有のtask dequeを使うworker scheduler。タスク実行・OS affinityはC++側。
@@ -21,17 +20,14 @@
 ### 2. `src/dsp/` (DAWの筋肉・内臓・計算コア)
 - **役割**: 信号処理、エフェクト、ダイナミクス、メーター、ピッチ補正などの「肉付け」機能群。
 - **重要ファイル**:
-  - `effects/elastic_warp_engine.hpp`: タイムストレッチ機能（Flex Time）。ピッチを変えずに長さを変える。
   - `effects/auto_pitch_corrector.hpp`: ボーカルのリアルタイム・ピッチ補正（オートチューン）。
   - `mixing/master_suite.hpp`: マスターバスの最終段。**Dither（ディザー）は必ずここの一番最後で行うこと。**
-  - `mixing/gate_deesser_processor.hpp`: ノイズゲートおよびディエッサー。ジッパーノイズを防ぐエンベロープホールドを搭載。
   - `analysis/master_meter.hpp`: 真のTrue-Peak（ISP）推定と指数減衰（Decay）を持ったプロ仕様メーター。
-
+  - `effects/deesser.hpp`: ノイズゲートおよびディエッサー。ジッパーノイズを防ぐエンベロープホールドを搭載。
 ### 3. `src/synthesis/` (内蔵インストゥルメント)
 - **役割**: ソフトウェア音源、サンプラー、モデリングシンセサイザー。
 - **重要ファイル**:
-  - `virtual_analog_oscillator.hpp`: PolyBLEPを用いたエイリアスノイズ（折り返し歪み）の無い王道VAオシレーター。
-  - `virtuoso_synthesis.hpp`: メモリ動的確保を絶対ゼロにした、完全ロックフリーの物理モデリング・オーケストラエンジン。
+  - `sampler_map.hpp`: マルチゾーンマップとレイヤー・ピッチカーブの管理。
 
 ### 4. `src/app_main.cpp` (起動シーケンス)
 - OSのシグナル（SIGINT/TERM）をトラップし、ドライバを安全にシャットダウンするDAWのエントリポイント。

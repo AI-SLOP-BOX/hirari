@@ -8,15 +8,9 @@ This folder contains the "Nervous System" of the DAW. High stability, zero-laten
 ## 📁 Key File Responsibilities
 - `timeline_system.hpp`: High-performance multi-core track summing, PDC alignment, and Render-in-Place.
 - `track.hpp`: Track-level regions, effects, VCA gain, and Global Sidechain routing.
-- `param_tree.hpp`: Lock-free atomic parameter table ($O(1)$).
 - `automation_curve.hpp`: Bezier curves with Trim/Relative mode support.
-- `take_management.hpp`: O(1) cached Comping system with automatic crossfades.
-- `marker_system.hpp`: Global project structure (Intro, Verse, Chorus) and SMPTE navigation.
 - `video_system.hpp`: Professional frame-accurate (24, 25, 29.97, 30 fps) timecode sync.
 - `scale_system.hpp`: Global project key and harmonic quantization logic.
-- `mix_snapshot.hpp`: Scene-recall and A/B mix comparison snapshots.
-- `midi_transformer.hpp`: Logical MIDI editor for batch Humanize, Transpose, and Legato.
-- `region_slicer.hpp`: Transient-based audio chopping (Flex Slice infrastructure).
 
 ## 🛡️ The "Zero Allocation" Protocol (Absolute Rule)
 AI agents MUST NEVER introduce heap allocations (`new`, `std::vector::push_back`, `std::make_shared`) inside any function called by `TimelineSystem::render`.

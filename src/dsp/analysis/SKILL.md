@@ -6,13 +6,7 @@ AIはあくまで分析結果の「提案者」に留まります。AIに自動�
 This folder contains precision metering and audio analytics tools.
 
 ## 📁 Key File Responsibilities
-- `loudness_meter.hpp`: EBU R128 LUFS and 4x True-peak mastering.
-- `phase_correlator.hpp`: L/R phase relationship [-1, +1] monitor.
-- `mastering_reference.hpp`: A/B comparison with LUFS matching.
-- `spectrum_analyzer.hpp`: FFT-based real-time frequency distribution.
 - `transient_detector.hpp`: High-pass filtered energy-flux onset detection.
-- `phase_correlator.hpp`: L/R phase relationship and mono compatibility check.
-- `rms_analyzer.hpp`: Fast and slow average RMS monitoring.
 
 ## 🛡️ Monitoring Rules (Measurement Accuracy)
 - **EBU R128 / ITU-R BS.1770 Standards**: All LUFS analysis MUST implement K-Weighting filters (+4dB High Shelf, RLB High Pass).

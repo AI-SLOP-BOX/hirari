@@ -6,12 +6,6 @@ AIによる音色操作の自律化は行いません。クリエイティブな
 This folder contains high-end sonic sculpting and time-based effects.
 
 ## 📁 Key File Responsibilities
-- `lush_reverb.hpp`: High-end Hall/Chamber Algorithmic Reverb (FDN).
-- `analog_saturator.hpp`: C++ host adapter for Rust-owned saturation models and 2x oversampling.
-- `vintage_eq.hpp`: Pultec-style passive EQ (Low-end trick).
-- `multiband_exciter.hpp`: LR-4 crossover based frequency saturation.
-- `elastic_audio.hpp`: Multi-mode Time-Stretch (Poly/Mono/Percussive).
-- `delay_line.hpp`: High-performance circular buffer.
 - `hirari-core-bridge/src/oversampler.rs`: Stateful two-branch all-pass 2x interpolation used by the Rust saturator.
 
 ## 🛡️ Effects Selection & Processing Rules
