@@ -77,4 +77,44 @@ rust::String get_song_structure_json(const Engine::HirariUnifiedEngine* engine) 
         rust::Slice<const float>(flows.data(), flows.size()));
 }
 
+rust::Vec<float> get_runtime_telemetry(const BridgeFFI::AudioEngine& bridge) {
+    rust::Vec<float> out;
+    const auto* engine = &bridge.get_core();
+    if (!engine) return out;
+    // Same 10-element shape as the deleted AudioEngine::get_runtime_health_v(),
+    // sourced from the engine's raw telemetry block so the UI snapshot keeps
+    // its established index contract (0..9). The block publish is a thin
+    // seqlock-style handoff in the audio callback; copy with retries.
+    Engine::HirariUnifiedEngine::TelemetryData telemetry{};
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        if (engine->copy_telemetry(engine->get_active_telemetry_idx(), telemetry)) {
+            break;
+        }
+    }
+    out.reserve(10);
+    const auto peak = [](float const* samples, size_t n) -> float {
+        float best = 0.0f;
+        for (size_t i = 0; i < n; ++i) {
+            if (std::isfinite(samples[i])) {
+                const float abs = samples[i] < 0.0f ? -samples[i] : samples[i];
+                if (abs > best) {
+                    best = abs;
+                }
+            }
+        }
+        return best;
+    };
+    out.push_back(telemetry.dspLoad);
+    out.push_back(peak(telemetry.peaksL, 256));
+    out.push_back(peak(telemetry.peaksR, 256));
+    out.push_back(telemetry.correlation);
+    out.push_back(static_cast<float>(telemetry.activeVoices));
+    out.push_back(static_cast<float>(telemetry.count));
+    out.push_back(static_cast<float>(telemetry.version & 0x00ffffff));
+    out.push_back(bridge.is_driver_running() ? 1.0f : 0.0f);
+    out.push_back(engine->is_playing() ? 1.0f : 0.0f);
+    out.push_back(static_cast<float>(engine->get_playhead()));
+    return out;
+}
+
 } // namespace Hirari::Core::Bridge

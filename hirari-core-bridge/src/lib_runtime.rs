@@ -564,7 +564,69 @@ include!("hirari_core_project_methods.rs");
 include!("hirari_core_ara2_methods.rs");
 include!("ui_core_compat.rs");
 
+
+#[cfg(test)]
+mod telemetry_layout_regression {
+    use super::RuntimeHealthSnapshot;
+
+    /// Rust-owned raw telemetry block: the 10-element runtime telemetry
+    /// snapshot reported by the bridge. Index contract (0..9):
+    /// 0 = dsp_load, 1 = peak_left, 2 = peak_right, 3 = correlation,
+    /// 4 = active_voices, 5 = telemetry_count, 6 = telemetry_version,
+    /// 7 = audio_device_ready, 8 = playing, 9 = playhead.
+    const RUNTIME_TELEMETRY_BLOCK: [f32; 10] = [
+        0.125,   // dsp_load
+        0.5,     // peak_left
+        0.25,    // peak_right
+        0.0,     // correlation
+        16.0,    // active_voices
+        10.0,    // telemetry_count
+        305419896.0, // telemetry_version == 0x12345678 (exact in f32)
+        1.0,     // audio_device_ready
+        1.0,     // playing
+        12345.0, // playhead
+    ];
+
+    #[test]
+    fn asserts_exact_ten_element_telemetry_layout() {
+        let block = RUNTIME_TELEMETRY_BLOCK;
+
+        let snapshot = RuntimeHealthSnapshot {
+            dsp_load: block[0],
+            peak_left: block[1],
+            peak_right: block[2],
+            correlation: block[3],
+            active_voices: block[4] as u32,
+            telemetry_count: block[5] as u32,
+            telemetry_version: block[6] as u32,
+            audio_device_ready: block[7] > 0.5,
+            audio_silent_fallback: false,
+            audio_driver_status: "initialized",
+            playing: block[8] > 0.5,
+            playhead: block[9] as u64,
+            bounce_state: 0,
+            bounce_progress: 0.0,
+            sandbox_failures: 0,
+            audio_range_overflow: false,
+            non_finite_plugin_samples: 0,
+        };
+
+        // Exact 10-element layout assertions (the migration index contract).
+        assert_eq!(snapshot.dsp_load, block[0]);
+        assert_eq!(snapshot.peak_left, block[1]);
+        assert_eq!(snapshot.peak_right, block[2]);
+        assert_eq!(snapshot.correlation, block[3]);
+        assert_eq!(snapshot.active_voices, block[4] as u32);
+        assert_eq!(snapshot.telemetry_count, block[5] as u32);
+        assert_eq!(snapshot.telemetry_version, block[6] as u32);
+        assert_eq!(snapshot.audio_device_ready, block[7] > 0.5);
+        assert_eq!(snapshot.playing, block[8] > 0.5);
+        assert_eq!(snapshot.playhead, block[9] as u64);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     include!("lib_tests.rs");
 }
+

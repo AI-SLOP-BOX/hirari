@@ -185,6 +185,13 @@ public:
         }
         return ready;
     }
+    bool is_driver_running() const noexcept {
+        // Pure, side-effect-free view of the same driver lifecycle that
+        // is_audio_device_ready() inspects. Elected by the telemetry cluster
+        // (get_runtime_health_v path) so the native health snapshot reports
+        // the real connection state without driving any transport action.
+        return m_driver && m_driver->is_running();
+    }
     bool is_silent_fallback() const noexcept {
 #if defined(__APPLE__)
         if (!m_driver) return true;

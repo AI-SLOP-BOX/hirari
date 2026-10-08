@@ -735,9 +735,10 @@ pub mod ffi {
         fn get_project_state_revision(self: &AudioEngine) -> u64;
         fn mark_project_layout_changed(self: &AudioEngine);
         fn get_last_command_error(self: &AudioEngine) -> u8;
-        fn get_cpu_total_v(self: &AudioEngine) -> f32;
-        fn get_runtime_health_v(self: &AudioEngine) -> Vec<f32>;
         fn audio_range_overflowed(self: &AudioEngine) -> bool;
+
+        fn get_runtime_telemetry(bridge: &AudioEngine) -> Vec<f32>;
+
         fn get_block_size(self: &AudioEngine) -> u32;
         fn get_latency_ms(self: &AudioEngine) -> f32;
         fn get_track_latency_ms(self: &AudioEngine, tid: u32) -> f32;
@@ -801,18 +802,6 @@ pub mod ffi {
     extern "Rust" {
         fn report_hirari_log(level: u32, msg: &str);
 
-        fn runtime_health_vector(
-            peaks_l: &[f32],
-            peaks_r: &[f32],
-            sample_count: u32,
-            dsp_load: f32,
-            correlation: f32,
-            active_voices: u32,
-            telemetry_version: u64,
-            device_running: bool,
-            playing: bool,
-            playhead: f32,
-        ) -> Vec<f32>;
         fn interleave_planar_audio_input(
             planar: &[f32],
             channels: u32,

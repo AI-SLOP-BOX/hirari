@@ -21,6 +21,8 @@ namespace Hirari::Core::Bridge {
 
     const Engine::HirariUnifiedEngine& get_unified_engine(const BridgeFFI::AudioEngine& bridge);
 
+    rust::Vec<float> get_runtime_telemetry(const BridgeFFI::AudioEngine& bridge);
+
     rust::Slice<const float> get_track_peaks_l(const Engine::HirariUnifiedEngine& engine);
     rust::Slice<const float> get_track_peaks_r(const Engine::HirariUnifiedEngine& engine);
     rust::Vec<float> get_track_peaks_l_owned(const Engine::HirariUnifiedEngine& engine);

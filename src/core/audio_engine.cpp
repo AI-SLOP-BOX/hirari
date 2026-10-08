@@ -113,36 +113,10 @@ bool AudioEngine::start_audio_device() const {
         ::Hirari::Core::Engine::HirariUnifiedEngine::getInstance().shutdown();
     }
 
-    rust::Vec<float> AudioEngine::get_engine_status_v() const {
-        rust::Vec<float> v;
-        if (!m_engine) return v;
-        v.push_back(m_engine->is_playing() ? 1.0f : 0.0f);
-        v.push_back(static_cast<float>(m_engine->get_playhead()));
-        return v;
-    }
-
-    rust::Vec<float> AudioEngine::get_runtime_health_v() const {
-        rust::Vec<float> result;
-        if (!m_engine) return result;
-        const auto index = m_engine->get_active_telemetry_idx();
-        ::Hirari::Core::Engine::HirariUnifiedEngine::TelemetryData telemetry{};
-        if (!m_engine->copy_telemetry(index, telemetry)) return result;
-        return ::Hirari::Core::Bridge::runtime_health_vector(
-            rust::Slice<const float>(telemetry.peaksL, 256),
-            rust::Slice<const float>(telemetry.peaksR, 256), telemetry.count,
-            telemetry.dspLoad, telemetry.correlation, telemetry.activeVoices,
-            telemetry.version, m_driver && m_driver->is_running(),
-            m_engine->is_playing(), static_cast<float>(m_engine->get_playhead()));
-    }
-
     rust::Vec<uint8_t> AudioEngine::get_video_frame() const {
         return m_engine ? m_engine->get_video_frame() : rust::Vec<uint8_t>();
     }
 
-
-    float AudioEngine::get_cpu_total_v() const {
-        return m_engine ? m_engine->get_dsp_load() : 0.0f;
-    }
 
     void AudioEngine::discard_pending_audio_input() const {
         std::lock_guard<std::mutex> pollLock(m_inputPollMutex);

@@ -48,7 +48,7 @@ impl HirariCore {
     pub fn get_cpu_total(&self) -> f32 {
         self.engine
             .as_ref()
-            .map_or(0.0, |e| e.get_cpu_total_v() * 100.0)
+            .map_or(0.0, |e| ffi::get_runtime_telemetry(e)[0] * 100.0)
     }
     pub fn get_buffer_size(&self) -> u32 {
         self.engine.as_ref().map_or(0, |e| e.get_block_size())

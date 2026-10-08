@@ -567,8 +567,6 @@
     // final shutdown path, after all AudioEngine handles are gone.
     static void shutdown_process() noexcept;
 
-    rust::Vec<float> get_engine_status_v() const;
-    rust::Vec<float> get_runtime_health_v() const;
     bool audio_range_overflowed() const noexcept {
         return m_engine && m_engine->audio_range_overflowed();
     }
