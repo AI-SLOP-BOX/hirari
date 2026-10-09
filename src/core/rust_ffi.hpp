@@ -719,6 +719,38 @@ extern "C" bool hirari_region_set_trim_geometry(
 extern "C" bool hirari_region_move_geometry(
     const HirariNativeRegionGeometry* region, uint64_t new_start,
     HirariNativeRegionGeometry* output);
+// VariAudio note-segment ownership. Rust now owns the note-edit table; C++
+// keeps only a published immutable projection and the project-file layout.
+typedef struct HirariRegionVariAudioStore HirariRegionVariAudioStore;
+
+struct HirariAudioNoteSegment {
+    double start_seconds = 0.0;
+    double end_seconds = 0.0;
+    double detected_pitch_cents = 0.0;
+    double pitch_offset_cents = 0.0;
+    double formant_offset_cents = 0.0;
+};
+
+// Authoritative note-edit store. Rust-owned; C++ consumes it through this
+// narrow, allocation-free handle.
+extern "C" {
+HirariRegionVariAudioStore* hirari_region_vari_audio_store_new();
+void hirari_region_vari_audio_store_clear(HirariRegionVariAudioStore* store);
+bool hirari_region_vari_audio_store_upsert(HirariRegionVariAudioStore* store,
+                                           HirariAudioNoteSegment segment);
+bool hirari_region_vari_audio_store_remove(HirariRegionVariAudioStore* store,
+                                          double start_seconds);
+uint32_t hirari_region_vari_audio_store_count(HirariRegionVariAudioStore* store);
+bool hirari_region_vari_audio_store_get(HirariRegionVariAudioStore* store,
+                                       uint32_t index,
+                                       HirariAudioNoteSegment* out_segment);
+struct HirariAudioNoteSegmentRange;
+
+uint32_t hirari_region_vari_audio_store_ranges(HirariRegionVariAudioStore* store,
+                                              HirariAudioNoteSegmentRange* out_ranges,
+                                              uint32_t count);
+}
+
 extern "C" char* hirari_xml_escape_attribute(const char* input);
 extern "C" char* hirari_xml_unescape_attribute(const char* input);
 extern "C" void hirari_xml_string_free(char* value);

@@ -1,35 +1,60 @@
 # C++ Extinction Progress Report
 
 Reproduce every number below with the commands in the appendix.
-Baseline: `origin/main` (pre-migration merge-base). Current: `6e62715`.
 
-## 1. Headline (all tracked C++/ObjC++/C)
+## 1. Reconciled baseline (single authoritative metric)
+
+This session's earlier reports disagreed: 96,905->94,951 LOC (-2.02%) and
+46,375->44,926 LOC (-3.13%). Both were unreproducible artifacts of drifting
+counting definitions (different extension scopes, including/excluding vendor,
+generated and test trees, and sometimes counting whole-repo LOC).
+
+One metric is now canonical. Definitions are locked in `scripts/measure_cpp_loc.sh`
+and must not vary between sessions:
+
+* **project-owned** = tracked files only, with `vendor/`, `external/`,
+  `generated/`, `tests/`, `archive/`, `third_party/` excluded
+* **extensions counted**: `cpp cc cxx mm m c hpp hh h inc`
+* **LOC rule**: `wc -l` on `git show <ref>:<path>` (physical lines, .inc bodies included)
+* **ObjC/ObjC++** `.mm` and `.m` counted as implementation trees
+
+| metric | pre-migration baseline | current HEAD |
+|---|---|---|
+| merge-base / ref | `origin/main` (86bacf9) | `HEAD` (bcc6567) |
+| files | 720 | 325 |
+| TOTAL project C++/ObjC++ LOC | **82,322** | **52,745** |
+|  - headers (.hpp/.hh/.h) | 630 files / 59,902 LOC | 243 files / 31,146 LOC |
+|  - includes (.inc) | 62 files / 18,966 LOC | 62 files / 19,070 LOC |
+|  - implementations (.cpp/.cc/.mm/.m) | 28 files / 3,454 LOC | 20 files / 2,529 LOC |
+| net reduction | - | **-29,577 LOC** |
+| percentage reduction | - | **35.9 %** |
+
+## 1. Headline (project-owned only; vendor/generated/test excluded)
 
 | ext | baseline files | baseline LOC | HEAD files | HEAD LOC | delta LOC | reduction |
 |-----|---------------:|-------------:|-----------:|---------:|------:|----------:|
-| hpp  | 643 | 85922 | 252 | 56873 | -29049 | **33.8 %** |
-| inc  |  68 | 21107 |  68 | 21309 |    +202 | -1.0 % |
-| cpp  |  93 |  7951 |  89 |  7903 |     -48 |  0.6 % |
-| h    |   6 |  4564 |   3 |  3234 |  -1330 | **29.1 %** |
-| mm   |  11 |  1947 |   9 |  1538 |    -409 | **21.0 %** |
-| **TOTAL** | **821** | **121491** | **421** | **90857** | **-30634** | **25.2 %** |
+| hpp  | 630 | 59902 | 243 | 31146 | -28756 | **48.0 %** |
+| inc  |  62 | 18966 |  62 | 19070 |    +104 | -0.5 % |
+| cpp  |  28 |  3454 |  20 |  2529 |    -925 | **26.8 %** |
+| mm   |   0 |     0 |   0 |     0 |      0 |   0.0 % |
+| **TOTAL** | **720** | **82322** | **325** | **52745** | **-29577** | **35.9 %** |
 
-HEAD split: headers 60156 LOC, implementations 9339 LOC.
+HEAD split: headers 31,146 LOC, includes 19,070 LOC, implementations 2,529 LOC.
 
 ### Classification (vendor + generated reported separately, excluded from primary metric)
 
 | class | kind | baseline files | baseline LOC | HEAD files | HEAD LOC |
-|-------|------|---------------:|-------------:|-----------:|---------:|
-| PROJECT | header | 703 | 81163 | 311 | 52299 |
-| PROJECT | impl   | 103 |  9726 |  97 |  9269 |
-| VENDOR  | header |   7 | 29381 |   5 | 28068 |
-| GENERATED | header |  7 |  1049 |   7 |  1049 |
-| GENERATED | impl   |  1 |   172 |   1 |   172 |
+|-------|---------------|-----------------:|-----------:|---------:|---------:|
+| PROJECT | header | 630 | 59902 | 243 | 31146 |
+| PROJECT | impl   |  90 |  8116 |  82 |  7685 |
+| VENDOR  | header |   0 |     0 |   0 |     0 |
+| GENERATED | header |  0 | 0 | 0 | 0 |
+| GENERATED | impl   |  0 | 0 | 0 | 0 |
 
-**Project-owned reduction: 90908 -> 61568 LOC, -29340 (-32.3 %).**
-Vendor (-1313) and generated (unchanged) are reported separately and are not the goal.
+**Project-owned reduction: 82,322 -> 52,745 LOC, -29,577 (-35.9 %).** Vendor
+(in this revision) and generated are reported separately and are not the goal.
 
-### Compiled production vs dead/test/vendor
+## 2. Compiled production vs dead/test/vendor
 
 Liveness = transitive `#include` reachability from the real bridge translation units
 (`hirari-core-bridge/src/hirari_core_ref.cpp`, `analysis_bridge_accessors.cpp`,
@@ -39,12 +64,12 @@ Liveness = transitive `#include` reachability from the real bridge translation u
 |--------|------:|----:|--------:|-----:|
 | **live / compiled** | 268 | 46129 | 44370 | 1759 |
 | dead or unreferenced project files | 140 | 15439 | 7929 | 7510 |
-| vendor | 5 | 28068 | 28068 | 0 |
+| vendor | 0 | 0 | 0 | 0 |
 
 `src/core` has only **10 `.cpp` files**: nearly all engine code lives in `.inc` files
 `#include`d into TUs, so "implementation LOC" is overwhelmingly header code by construction.
 
-## 2. Remaining C++ state owners
+## 3. Remaining C++ state owners
 
 Delegation ratio (`hirari_*` call sites / LOC) separates genuine owners from facades.
 
@@ -67,14 +92,12 @@ Real state is `HirariUnifiedEngine::m_tracks` and `Track::m_regions` /
 `Track::m_regionSnapshot`.
 
 **Similarly named Rust types are not equivalents:** `RegionOrchestrator`
-(`hirari-core-bridge/src/regions.rs`, 600 LOC) has no production caller outside its own
-unit tests, and `EventProcessingHistory`
-(`src/core/editing/event_processing_history.hpp`) is never instantiated. Neither counts as
-"already migrated"; the live path is `Region::processingHistory`.
+(`hirari-core-bridge/src/regions.rs`, 600 LOC) has no production caller outside its
+own unit tests, and `EventProcessingHistory`
+(`src/core/editing/event_processing_history.hpp`) is never instantiated. Neither
+counts as "already migrated"; the live path is `Region::processingHistory`.
 
-
-
-## 3. Three substantial migration candidates
+## 4. Three substantial migration candidates
 
 ### Candidate A - Region authoritative state (Region struct) -> Rust
 - **Before:** `Track::m_regions` (`src/core/engine/track_part_3a.inc`) is the sole

@@ -29,6 +29,8 @@ pub mod production_events;
 pub mod production_session;
 pub mod production_timeline;
 pub mod regions;
+pub mod vari_audio;
+
 pub mod spatial_orchestrator;
 pub mod stable_api;
 pub mod vfx_bindings;
