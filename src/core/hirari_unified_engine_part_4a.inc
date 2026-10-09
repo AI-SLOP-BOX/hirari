@@ -155,7 +155,11 @@ bool HirariUnifiedEngine::remove_region(uint32_t tid, uint32_t rid) {
 }
 
 bool HirariUnifiedEngine::set_region_gain(uint32_t tid, uint32_t rid, float gain) {
-    if (!std::isfinite(gain)) return false;
+    // The Rust policy owns the accept/reject and clamp decision; the engine
+    // layer only resolves the track and records the undo snapshot.
+    const auto precheck = decideScalarEdit(
+        kHirariRegionScalarClipGain, gain);
+    if (!precheck.accepted) return false;
     std::shared_ptr<Track> target;
     float before = 1.0f;
     {
@@ -173,7 +177,7 @@ bool HirariUnifiedEngine::set_region_gain(uint32_t tid, uint32_t rid, float gain
         }
     }
     if (!target) return false;
-    const float bounded = std::clamp(gain, 0.0f, 2.0f);
+    const float bounded = precheck.value_a;
     auto apply = [target, rid](float value) { target->setRegionGain(rid, value); };
     m_undoManager.performAction(
         "Region Gain", [apply, before] { apply(before); }, [apply, bounded] { apply(bounded); });
@@ -230,7 +234,9 @@ bool HirariUnifiedEngine::set_region_comp_ranges(
 }
 
 bool HirariUnifiedEngine::set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) {
-    if (!std::isfinite(fadeIn) || !std::isfinite(fadeOut)) return false;
+    const auto precheck = decideScalarEdit(
+        kHirariRegionScalarFades, fadeIn, fadeOut);
+    if (!precheck.accepted) return false;
     std::shared_ptr<Track> target;
     float beforeIn = 0.0f;
     float beforeOut = 0.0f;
@@ -252,8 +258,8 @@ bool HirariUnifiedEngine::set_region_fades(uint32_t tid, uint32_t rid, float fad
         }
     }
     if (!target) return false;
-    const float boundedIn = std::clamp(fadeIn, 0.0f, 1.0f);
-    const float boundedOut = std::clamp(fadeOut, 0.0f, 1.0f);
+    const float boundedIn = precheck.value_a;
+    const float boundedOut = precheck.value_b;
     auto apply = [target, rid](float in, float out) { target->setRegionFades(rid, in, out); };
     m_undoManager.performAction(
         "Region Fades", [apply, beforeIn, beforeOut] { apply(beforeIn, beforeOut); },
@@ -431,7 +437,9 @@ bool HirariUnifiedEngine::set_region_pitch_preserve_warp(uint32_t tid, uint32_t 
 }
 
 bool HirariUnifiedEngine::set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones) {
-    if (!std::isfinite(semitones) || semitones < -24.0f || semitones > 24.0f) return false;
+    const auto precheck = decideScalarEdit(
+        kHirariRegionScalarPitchSemitones, semitones);
+    if (!precheck.accepted) return false;
     std::shared_ptr<Track> target;
     float before = 0.0f;
     {
@@ -874,7 +882,9 @@ bool HirariUnifiedEngine::finalize_region_audio_note_analysis(uint32_t tid, uint
 }
 
 bool HirariUnifiedEngine::set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count) {
-    if (count == 0 || count > 1024) return false;
+    const auto precheck = decideScalarEdit(
+        kHirariRegionScalarLoopCount, std::bit_cast<float>(count));
+    if (!precheck.accepted) return false;
     std::shared_ptr<Track> target;
     uint32_t before = 1;
     {

@@ -408,6 +408,317 @@ pub unsafe extern "C" fn hirari_regions_apply_overlap_crossfades(
     }
     true
 }
+// ---------------------------------------------------------------------------
+// Scalar region edit policy
+// ---------------------------------------------------------------------------
+//
+// Clip gain, mute, reverse, pitch, loop count, sync group and fades each had
+// their numeric bounds duplicated in two C++ places: the `Track` storage
+// mutators and the `HirariUnifiedEngine` wrappers that build undo snapshots.
+// When the two disagreed, an edit could be accepted at the UI/undo layer but
+// silently dropped (or clamped differently) by the storage layer.
+//
+// The policy now lives here, in Rust, and both C++ layers call it. `Track` still
+// owns the storage and the immutable-snapshot publication; the bounds no longer
+// exist in C++ at all.
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum HirariRegionScalarField {
+    #[default]
+    ClipGain = 1,
+    Muted = 2,
+    Reverse = 3,
+    PitchSemitones = 4,
+    LoopCount = 5,
+    SyncGroup = 6,
+    Fades = 7,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HirariRegionScalarEdit {
+    pub field: HirariRegionScalarField,
+    pub locked: bool,
+    /// Primary numeric argument: gain / semitones / loop count, or fade-in.
+    pub value_a: f32,
+    /// Secondary numeric argument: fade-out only.
+    pub value_b: f32,
+    /// Region geometry, needed only by the LoopCount overflow guard.
+    pub region_len: u64,
+    pub region_start: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HirariRegionScalarDecision {
+    pub accepted: bool,
+    /// Clamped value the caller must store. LoopCount and SyncGroup carry their
+    /// integer payload as the raw `f32` bit pattern of this field.
+    pub value_a: f32,
+    /// Clamped fade-out. Only meaningful for `HirariRegionScalarField::Fades`.
+    pub value_b: f32,
+}
+
+impl HirariRegionScalarDecision {
+    fn reject() -> Self {
+        Self {
+            accepted: false,
+            value_a: 0.0,
+            value_b: 0.0,
+        }
+    }
+
+    fn accept(value_a: f32, value_b: f32) -> Self {
+        Self {
+            accepted: true,
+            value_a,
+            value_b,
+        }
+    }
+
+    fn decide(edit: &HirariRegionScalarEdit) -> Self {
+        // Clip gain and the fade pair clamp into range; the other scalar fields
+        // reject out-of-range input outright so callers keep their own bounds.
+        //
+        // Non-finite input is rejected rather than clamped, matching the
+        // previous C++ `std::isfinite` guards, which ran before any clamp.
+        //
+        // A locked region rejects every field. Editing the lock itself is the
+        // only permitted mutation on a locked region, and it never comes
+        // through here.
+        match edit.field {
+            HirariRegionScalarField::ClipGain => {
+                if !edit.value_a.is_finite() || edit.locked {
+                    return Self::reject();
+                }
+                Self::accept(edit.value_a.clamp(0.0, 2.0), 0.0)
+            }
+            HirariRegionScalarField::Muted | HirariRegionScalarField::Reverse => {
+                if edit.locked {
+                    return Self::reject();
+                }
+                // Booleans carry no payload; the caller stores its own `bool`.
+                Self::accept(0.0, 0.0)
+            }
+            HirariRegionScalarField::PitchSemitones => {
+                if !edit.value_a.is_finite() || edit.locked || edit.value_a.abs() > 24.0 {
+                    return Self::reject();
+                }
+                Self::accept(edit.value_a, 0.0)
+            }
+            HirariRegionScalarField::LoopCount => {
+                if edit.locked {
+                    return Self::reject();
+                }
+                let count = edit.value_a.to_bits();
+                if count == 0 || count > 1024 {
+                    return Self::reject();
+                }
+                // `len * count` and `start + len * count` must both stay inside
+                // u64, otherwise the rendered loop length would wrap around.
+                let Some(total) = edit.region_len.checked_mul(u64::from(count)) else {
+                    return Self::reject();
+                };
+                if edit.region_start > u64::MAX - total {
+                    return Self::reject();
+                }
+                Self::accept(edit.value_a, 0.0)
+            }
+            HirariRegionScalarField::SyncGroup => {
+                if edit.locked {
+                    return Self::reject();
+                }
+                // An unrestricted u32 tag carried verbatim in `value_a`.
+                Self::accept(edit.value_a, 0.0)
+            }
+            HirariRegionScalarField::Fades => {
+                if !edit.value_a.is_finite() || !edit.value_b.is_finite() || edit.locked {
+                    return Self::reject();
+                }
+                Self::accept(edit.value_a.clamp(0.0, 1.0), edit.value_b.clamp(0.0, 1.0))
+            }
+        }
+    }
+}
+
+/// Authoritative policy for scalar region edits.
+///
+/// Both the C++ storage layer (`Track`) and the C++ undo layer
+/// (`HirariUnifiedEngine`) call this, so neither can drift from the other.
+///
+/// The decision is written through an out-param rather than returned by value
+/// because returning a C++ struct is not a C-compatible calling convention and
+/// this boundary is plain C ABI. Returns false and writes nothing when `out` is
+/// null, so a C++ caller that forgets to allocate the out-param cannot silently
+/// read an uninitialized decision as "accepted".
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_scalar_edit_decision(
+    edit: HirariRegionScalarEdit,
+    out: *mut HirariRegionScalarDecision,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let decision = HirariRegionScalarDecision::decide(&edit);
+    unsafe { out.write(decision) };
+    true
+}
+
+/// Converts a normalized fade (0..1) into a sample count for `region_len`.
+///
+/// Truncates rather than rounds, matching the previous C++
+/// `static_cast<uint64_t>(norm * len)`, and clamps to `region_len` so a fade can
+/// never exceed the region it belongs to. Computed in `f64` so the multiply
+/// cannot lose precision for very large regions.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_fade_samples(fade_norm: f32, region_len: u64) -> u64 {
+    if !fade_norm.is_finite() || fade_norm <= 0.0 {
+        return 0;
+    }
+    let norm = f64::from(fade_norm.clamp(0.0, 1.0));
+    let samples = (norm * region_len as f64) as u64;
+    samples.min(region_len)
+}
+
+#[cfg(test)]
+mod scalar_edit_policy_tests {
+    use super::*;
+
+    use HirariRegionScalarField as F;
+
+    fn edit(field: HirariRegionScalarField, a: f32, b: f32) -> HirariRegionScalarEdit {
+        HirariRegionScalarEdit {
+            field,
+            locked: false,
+            value_a: a,
+            value_b: b,
+            region_len: 0,
+            region_start: 0,
+        }
+    }
+
+    fn decide(edit: HirariRegionScalarEdit) -> HirariRegionScalarDecision {
+        HirariRegionScalarDecision::decide(&edit)
+    }
+
+    #[test]
+    fn clip_gain_clamps_and_rejects_non_finite() {
+        assert_eq!(decide(edit(F::ClipGain, 5.0, 0.0)).value_a, 2.0);
+        assert!(decide(edit(F::ClipGain, 5.0, 0.0)).accepted);
+        assert_eq!(decide(edit(F::ClipGain, -1.0, 0.0)).value_a, 0.0);
+        assert!(decide(edit(F::ClipGain, -1.0, 0.0)).accepted);
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(!decide(edit(F::ClipGain, bad, 0.0)).accepted, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn pitch_semitones_rejects_out_of_range_without_clamping() {
+        for good in [-24.0, 0.0, 24.0] {
+            assert!(decide(edit(F::PitchSemitones, good, 0.0)).accepted, "{good}");
+        }
+        for bad in [-24.001, 24.001, f32::NAN] {
+            assert!(!decide(edit(F::PitchSemitones, bad, 0.0)).accepted, "{bad}");
+        }
+    }
+
+    #[test]
+    fn fades_clamp_both_ends_and_reject_non_finite_either_end() {
+        let d = decide(edit(F::Fades, 2.0, -1.0));
+        assert!(d.accepted);
+        assert_eq!(d.value_a, 1.0);
+        assert_eq!(d.value_b, 0.0);
+        assert!(!decide(edit(F::Fades, f32::NAN, 0.5)).accepted);
+        assert!(!decide(edit(F::Fades, 0.5, f32::NAN)).accepted);
+    }
+
+    fn loop_count_bits(count: u32) -> f32 {
+        // LoopCount travels as a raw bit pattern, not a numeric value.
+        f32::from_bits(count)
+    }
+
+    #[test]
+    fn loop_count_bounds_and_overflow_guard() {
+        assert!(decide(edit(F::LoopCount, loop_count_bits(1), 0.0)).accepted);
+        assert!(decide(edit(F::LoopCount, loop_count_bits(1024), 0.0)).accepted);
+        assert!(!decide(edit(F::LoopCount, loop_count_bits(0), 0.0)).accepted);
+        assert!(!decide(edit(F::LoopCount, loop_count_bits(1025), 0.0)).accepted);
+
+        // len * count must not overflow u64.
+        let mut e = edit(F::LoopCount, loop_count_bits(4), 0.0);
+        e.region_len = u64::MAX / 2;
+        assert!(!decide(e).accepted);
+
+        // start + len * count must not overflow u64.
+        let mut e = edit(F::LoopCount, loop_count_bits(2), 0.0);
+        e.region_len = u64::MAX / 2;
+        e.region_start = u64::MAX / 2 + 1;
+        assert!(!decide(e).accepted);
+
+        let mut e = edit(F::LoopCount, loop_count_bits(2), 0.0);
+        e.region_len = 1000;
+        e.region_start = 10;
+        assert!(decide(e).accepted);
+    }
+
+    #[test]
+    fn locked_regions_reject_every_mutation() {
+        for field in [
+            F::ClipGain,
+            F::Muted,
+            F::Reverse,
+            F::PitchSemitones,
+            F::LoopCount,
+            F::SyncGroup,
+            F::Fades,
+        ] {
+            let mut e = edit(field, 1.0, 1.0);
+            e.locked = true;
+            assert!(!decide(e).accepted, "{field:?} must reject when locked");
+        }
+    }
+
+    #[test]
+    fn sync_group_passes_any_u32_tag_through_verbatim() {
+        for tag in [0u32, 1, 7, 0xDEAD_BEEF, u32::MAX] {
+            let d = decide(edit(F::SyncGroup, f32::from_bits(tag), 0.0));
+            assert!(d.accepted, "tag {tag:#x}");
+            assert_eq!(d.value_a.to_bits(), tag);
+        }
+    }
+
+    #[test]
+    fn fade_samples_truncates_like_the_previous_cpp_cast() {
+        assert_eq!(unsafe { hirari_region_fade_samples(0.0, 1000) }, 0);
+        assert_eq!(unsafe { hirari_region_fade_samples(-0.5, 1000) }, 0);
+        assert_eq!(unsafe { hirari_region_fade_samples(0.5, 1000) }, 500);
+        // Truncation, not rounding: 0.3333 * 1000 = 333.3 -> 333.
+        assert_eq!(unsafe { hirari_region_fade_samples(0.3333, 1000) }, 333);
+        // Clamped to the region length.
+        assert_eq!(unsafe { hirari_region_fade_samples(2.0, 1000) }, 1000);
+        // Zero-length regions produce zero samples rather than panicking.
+        assert_eq!(unsafe { hirari_region_fade_samples(0.5, 0) }, 0);
+        assert_eq!(unsafe { hirari_region_fade_samples(f32::NAN, 1000) }, 0);
+    }
+
+    #[test]
+    fn c_abi_entry_point_fills_out_param_and_rejects_null() {
+        let mut out = HirariRegionScalarDecision::default();
+        let filled =
+            unsafe { hirari_region_scalar_edit_decision(edit(F::ClipGain, 5.0, 0.0), &mut out) };
+        assert!(filled);
+        assert!(out.accepted);
+        assert_eq!(out.value_a, 2.0);
+
+        let filled =
+            unsafe { hirari_region_scalar_edit_decision(edit(F::ClipGain, 1.0, 0.0), ptr::null_mut()) };
+        assert!(!filled);
+    }
+}
+
+
+
 
 #[cfg(test)]
 mod overlap_tests {

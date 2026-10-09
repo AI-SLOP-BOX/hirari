@@ -781,6 +781,46 @@ extern "C" bool hirari_region_sync_move_positions(
     const uint64_t* starts, const uint64_t* base_starts, size_t count,
     uint64_t anchor_start, uint64_t new_anchor_start,
     uint64_t* output_starts, uint64_t* output_base_starts);
+
+// Scalar region edit fields. The accept/reject and clamping policy for these
+// lives in the Rust core so the C++ storage layer cannot drift from it.
+enum HirariRegionScalarField : int32_t {
+    kHirariRegionScalarClipGain = 1,
+    kHirariRegionScalarMuted = 2,
+    kHirariRegionScalarReverse = 3,
+    kHirariRegionScalarPitchSemitones = 4,
+    kHirariRegionScalarLoopCount = 5,
+    kHirariRegionScalarSyncGroup = 6,
+    kHirariRegionScalarFades = 7,
+};
+
+struct HirariRegionScalarEdit {
+    HirariRegionScalarField field = kHirariRegionScalarClipGain;
+    bool locked = false;
+    float value_a = 0.0f;
+    float value_b = 0.0f;
+    uint64_t region_len = 0;
+    uint64_t region_start = 0;
+};
+
+struct HirariRegionScalarDecision {
+    bool accepted = false;
+    float value_a = 0.0f;
+    float value_b = 0.0f;
+};
+
+// Authoritative scalar-edit policy. LoopCount and SyncGroup carry their integer
+// value as the raw float bit pattern of `value_a`.
+//
+// Returns true when `out` was filled in. The decision is written through the
+// out-pointer rather than returned by value because a C++ struct return is not
+// a C-compatible calling convention, and this boundary is plain C ABI.
+extern "C" bool hirari_region_scalar_edit_decision(
+    HirariRegionScalarEdit edit, HirariRegionScalarDecision* out);
+
+// Converts a normalized fade (0..1) into sample counts for a region length.
+extern "C" uint64_t hirari_region_fade_samples(float fade_norm, uint64_t region_len);
+
 struct HirariRegionBlockConfig {
     uint64_t regionOffset = 0;
     uint64_t regionLength = 0;

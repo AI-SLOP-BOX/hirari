@@ -149,6 +149,25 @@
     mutable std::mutex m_regionAlignmentMutex;
     std::unordered_map<uint64_t, std::shared_ptr<RegionAlignmentJob>> m_regionAlignmentJobs;
 
+    // Consults the authoritative Rust scalar-edit policy. The engine layer uses
+    // this only to validate input and to recover the clamped value for undo
+    // snapshots, so it can never disagree with the storage layer in Track.
+    HirariRegionScalarDecision decideScalarEdit(
+        HirariRegionScalarField field, float valueA, float valueB = 0.0f) const {
+        HirariRegionScalarEdit edit{};
+        edit.field = field;
+        edit.locked = false;
+        edit.value_a = valueA;
+        edit.value_b = valueB;
+        // LoopCount/SyncGroup are range-checked without geometry; the storage
+        // layer re-checks the u64 overflow guard with the real region extent.
+        edit.region_len = 0;
+        edit.region_start = 0;
+        HirariRegionScalarDecision decision{};
+        hirari_region_scalar_edit_decision(edit, &decision);
+        return decision;
+    }
+
     bool commit_region_import(uint32_t trackId, uint64_t startSample,
                               const std::string& path,
                               const std::shared_ptr<Track>& expectedTrack,

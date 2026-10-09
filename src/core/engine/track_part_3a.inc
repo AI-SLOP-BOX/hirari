@@ -553,17 +553,35 @@
             m_regionSnapshots.end());
     }
 
+    // The numeric bounds for every scalar region field are owned by
+    // hirari_region_scalar_edit_decision in the Rust core. This layer keeps only
+    // the storage lookup, the lock, and snapshot publication.
+    HirariRegionScalarDecision decideScalarEdit(
+        HirariRegionScalarField field, const Region& region, float valueA,
+        float valueB = 0.0f) const {
+        HirariRegionScalarEdit edit{};
+        edit.field = field;
+        edit.locked = region.locked;
+        edit.value_a = valueA;
+        edit.value_b = valueB;
+        edit.region_len = region.len;
+        edit.region_start = region.start;
+        HirariRegionScalarDecision decision{};
+        hirari_region_scalar_edit_decision(edit, &decision);
+        return decision;
+    }
+
     bool setRegionGain(uint32_t rid, float gain) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        if (!std::isfinite(gain)) return false;
         for (auto& region : m_regions) {
-            if (region.id == rid) {
-                if (region.locked) return false;
-                region.clipGain = std::clamp(gain, 0.0f, 2.0f);
-                publishRegionSnapshot();
-                return true;
-            }
+            if (region.id != rid) continue;
+            const auto decision = decideScalarEdit(
+                kHirariRegionScalarClipGain, region, gain);
+            if (!decision.accepted) return false;
+            region.clipGain = decision.value_a;
+            publishRegionSnapshot();
+            return true;
         }
         return false;
     }
@@ -573,7 +591,9 @@
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid) continue;
-            if (region.locked) return false;
+            const auto decision = decideScalarEdit(
+                kHirariRegionScalarMuted, region, muted ? 1.0f : 0.0f);
+            if (!decision.accepted) return false;
             region.muted = muted;
             publishRegionSnapshot();
             return true;
@@ -615,17 +635,15 @@
     bool setRegionFades(uint32_t rid, float fadeIn, float fadeOut) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        if (!std::isfinite(fadeIn) || !std::isfinite(fadeOut)) return false;
         for (auto& region : m_regions) {
-            if (region.id == rid) {
-                if (region.locked) return false;
-                const float inNorm = std::clamp(fadeIn, 0.0f, 1.0f);
-                const float outNorm = std::clamp(fadeOut, 0.0f, 1.0f);
-                region.fadeInSamples = static_cast<uint64_t>(inNorm * region.len);
-                region.fadeOutSamples = static_cast<uint64_t>(outNorm * region.len);
-                publishRegionSnapshot();
-                return true;
-            }
+            if (region.id != rid) continue;
+            const auto decision = decideScalarEdit(
+                kHirariRegionScalarFades, region, fadeIn, fadeOut);
+            if (!decision.accepted) return false;
+            region.fadeInSamples = hirari_region_fade_samples(decision.value_a, region.len);
+            region.fadeOutSamples = hirari_region_fade_samples(decision.value_b, region.len);
+            publishRegionSnapshot();
+            return true;
         }
         return false;
     }
@@ -718,12 +736,13 @@
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
-            if (region.id == rid) {
-                if (region.locked) return false;
-                region.reverse = reverse;
-                publishRegionSnapshot();
-                return true;
-            }
+            if (region.id != rid) continue;
+            const auto decision = decideScalarEdit(
+                kHirariRegionScalarReverse, region, reverse ? 1.0f : 0.0f);
+            if (!decision.accepted) return false;
+            region.reverse = reverse;
+            publishRegionSnapshot();
+            return true;
         }
         return false;
     }
@@ -787,14 +806,14 @@
     bool setRegionPitchSemitones(uint32_t rid, float semitones) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        if (!std::isfinite(semitones) || semitones < -24.0f || semitones > 24.0f) return false;
         for (auto& region : m_regions) {
-            if (region.id == rid) {
-                if (region.locked) return false;
-                region.pitchSemitones = semitones;
-                publishRegionSnapshot();
-                return true;
-            }
+            if (region.id != rid) continue;
+            const auto decision = decideScalarEdit(
+                kHirariRegionScalarPitchSemitones, region, semitones);
+            if (!decision.accepted) return false;
+            region.pitchSemitones = decision.value_a;
+            publishRegionSnapshot();
+            return true;
         }
         return false;
     }
@@ -810,14 +829,16 @@
     bool setRegionLoopCount(uint32_t rid, uint32_t count) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        if (count == 0 || count > 1024) return false;
         for (auto& region : m_regions) {
-            if (region.id == rid && !region.locked && region.len <= UINT64_MAX / count &&
-                region.start <= UINT64_MAX - region.len * count) {
-                region.loopCount = count;
-                publishRegionSnapshot();
-                return true;
-            }
+            if (region.id != rid) continue;
+            // The integer travels as the raw float bit pattern so the Rust
+            // policy owns the range and overflow guards without an extra ABI type.
+            const auto decision = decideScalarEdit(
+                kHirariRegionScalarLoopCount, region, std::bit_cast<float>(count));
+            if (!decision.accepted) return false;
+            region.loopCount = std::bit_cast<uint32_t>(decision.value_a);
+            publishRegionSnapshot();
+            return true;
         }
         return false;
     }
@@ -830,13 +851,18 @@
     bool setRegionSyncGroup(uint32_t rid, uint32_t group) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::find_if(m_regions.begin(), m_regions.end(), [rid](const Region& r){ return r.id == rid; });
-        if (it == m_regions.end() || it->locked) return false;
-        if (it->syncGroup != group) {
-            it->syncGroup = group;
-            publishRegionSnapshot();
+        for (auto& region : m_regions) {
+            if (region.id != rid) continue;
+            const auto decision = decideScalarEdit(
+                kHirariRegionScalarSyncGroup, region, std::bit_cast<float>(group));
+            if (!decision.accepted) return false;
+            if (region.syncGroup != group) {
+                region.syncGroup = group;
+                publishRegionSnapshot();
+            }
+            return true;
         }
-        return true;
+        return false;
     }
 
     // Validates and orders warp markers through the Rust pure transform.
