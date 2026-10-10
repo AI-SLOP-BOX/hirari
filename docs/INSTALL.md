@@ -59,7 +59,7 @@ scripts/run_app_launch_smoke.sh
 ```
 
 For device- and display-dependent acceptance, use
-[`docs/MANUAL_E2E_CHECKLIST.md`](docs/MANUAL_E2E_CHECKLIST.md).
+[`docs/MANUAL_E2E_CHECKLIST.md`](MANUAL_E2E_CHECKLIST.md).
 
 The result is written to `packaging/Hirari DAW.app`. Generated bundles, plugins,
 rendered audio, logs, and local SDKs are intentionally excluded from Git.

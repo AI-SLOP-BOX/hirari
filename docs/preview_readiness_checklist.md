@@ -458,7 +458,7 @@
 - 自動Pause：実装済み
 
 詳細な未実装箇所、未接続UIコールバック、バウンス／プラグイン／GPUのスタブは
-[DEEP_IMPLEMENTATION_GAP_AUDIT.md](docs/DEEP_IMPLEMENTATION_GAP_AUDIT.md) に集約する。
+[DEEP_IMPLEMENTATION_GAP_AUDIT.md](audits/DEEP_IMPLEMENTATION_GAP_AUDIT.md) に集約する。
 - Missing音源判定：実装済み
 - ワークスペーステスト：20件全件パス
 

@@ -2,7 +2,7 @@
 
 Hirari is a technical preview and is not feature-equivalent to Cubase Pro 15.
 The current, evidence-based comparison and work order lives in the
-[Cubase parity roadmap](../docs/CUBASE_PARITY_ROADMAP.md).
+[Cubase parity roadmap](../docs/architecture/CUBASE_PARITY_ROADMAP.md).
 
 The previous Ardour table compared lines of code, memory, and binary size
 without reproducible measurement procedures or matching build configurations.

@@ -24,15 +24,17 @@ require_absent_from_index() {
     fi
 }
 
+# Project documentation lives in docs/; the legal notices stay at the root
+# because release bundling copies them from there.
 require_tracked Cargo.lock
 require_tracked rust-toolchain.toml
 require_tracked README.md
-require_tracked INSTALL.md
-require_tracked CONTRIBUTING.md
-require_tracked SECURITY.md
-require_tracked CODE_OF_CONDUCT.md
-require_tracked CHANGELOG.md
-require_tracked ROADMAP.md
+require_tracked docs/INSTALL.md
+require_tracked docs/CONTRIBUTING.md
+require_tracked docs/SECURITY.md
+require_tracked docs/CODE_OF_CONDUCT.md
+require_tracked docs/CHANGELOG.md
+require_tracked docs/ROADMAP.md
 
 # Third-party fixture repositories may legitimately contain reference audio;
 # only reject generated build trees/bundles and transient diagnostics here.

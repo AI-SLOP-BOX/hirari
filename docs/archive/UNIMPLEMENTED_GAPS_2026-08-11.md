@@ -5,8 +5,8 @@
 
 > **履歴資料:** このファイルは2026-08-11時点の監査スナップショットです。
 > 現在の対応状況を表す正本ではありません。現行の公開範囲・検証条件・
-> capabilityの判定は [`RELEASE_READINESS.md`](RELEASE_READINESS.md)、
-> [`ARCHITECTURE_STATUS.md`](ARCHITECTURE_STATUS.md)、および
+> capabilityの判定は [`RELEASE_READINESS.md`](../RELEASE_READINESS.md)、
+> [`ARCHITECTURE_STATUS.md`](../architecture/ARCHITECTURE_STATUS.md)、および
 > `scripts/verify_release_bundle.sh` を参照してください。以下の項目には、
 > その後に実装済みになったものも含まれます。
 

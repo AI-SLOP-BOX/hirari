@@ -11,7 +11,7 @@ rendering, and a JSON command boundary for CLI and automation clients.
 Hirari is not yet a production replacement for a commercial DAW and does not
 have feature parity with Cubase Pro 15. Hardware, plugin, and long-running
 stability claims are capability-specific; see the
-[Cubase parity roadmap](./docs/CUBASE_PARITY_ROADMAP.md) and
+[Cubase parity roadmap](./docs/architecture/CUBASE_PARITY_ROADMAP.md) and
 [release readiness](./docs/RELEASE_READINESS.md) for current evidence and
 known gaps.
 
@@ -56,7 +56,7 @@ implemented in-tree are:
 * **Integration boundaries**: AU/CLAP/VST3 and OpenUtau adapters exist as
   capability-specific boundaries. A host-path test or installed fixture does
   not prove that every third-party plugin, native editor, voicebank, or device
-  works. An opt-in [Moufu project link](./docs/MOUFU_INTEGRATION.md) publishes
+  works. An opt-in [Moufu project link](./docs/architecture/MOUFU_INTEGRATION.md) publishes
   Hirari project-layout snapshots to linked apps; remote edits are not applied.
 
 The following are explicitly **not** complete product features: VariAudio-style
@@ -64,7 +64,7 @@ note/formant editing, phase-coherent multitrack warp, ARA2 partner exchange,
 Windows ASIO certification, universal VST3/AU/CLAP compatibility, native plugin
 GUI embedding for every vendor, Dolby Atmos object workflows, and long-running
 commercial stability. See [release readiness](./docs/RELEASE_READINESS.md) and
-[unimplemented gaps](./docs/UNIMPLEMENTED_GAPS.md) for the evidence boundary.
+[unimplemented gaps](./docs/audits/UNIMPLEMENTED_GAPS.md) for the evidence boundary.
 
 ### Adding third-party plugins (experimental)
 
@@ -97,10 +97,10 @@ vendor SDKs and voicebanks remain subject to their own licenses.
 
 ## Building and contributing
 
-See [INSTALL.md](./INSTALL.md) for a reproducible local build and strict release
-verification. Contributions should follow [CONTRIBUTING.md](./CONTRIBUTING.md),
+See [INSTALL.md](./docs/INSTALL.md) for a reproducible local build and strict release
+verification. Contributions should follow [CONTRIBUTING.md](./docs/CONTRIBUTING.md),
 and security issues should use the private process in
-[SECURITY.md](./SECURITY.md).
+[SECURITY.md](./docs/SECURITY.md).
 
 The workspace is self-contained: `hirari-core-bridge` and `hirari-ui` are ordinary
 tracked directories, not private or optional submodules. A fork needs only a
@@ -117,9 +117,9 @@ accidentally converted back to a gitlink or its manifest is omitted. CI runs
 this check before compiling so an incomplete clone cannot be published as a
 passing build.
 
-Planned quality gates are listed in [ROADMAP.md](./ROADMAP.md), and user-visible
-changes are recorded in [CHANGELOG.md](./CHANGELOG.md). Participation is
-governed by [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+Planned quality gates are listed in [ROADMAP.md](./docs/ROADMAP.md), and user-visible
+changes are recorded in [CHANGELOG.md](./docs/CHANGELOG.md). Participation is
+governed by [CODE_OF_CONDUCT.md](./docs/CODE_OF_CONDUCT.md).
 
 ### First run (technical preview)
 
@@ -134,7 +134,7 @@ Create an audio track, import a WAV, press Play, adjust the track fader, then
 use Save and reopen the project to exercise the preview path. This is not a
 commercial acceptance test. For the exact hardware, plugin, OpenUtau, and
 release checks, follow
-[INSTALL.md](./INSTALL.md) and [release readiness](./docs/RELEASE_READINESS.md).
+[INSTALL.md](./docs/INSTALL.md) and [release readiness](./docs/RELEASE_READINESS.md).
 The device- and display-dependent acceptance steps are listed in the
 [manual E2E checklist](./docs/MANUAL_E2E_CHECKLIST.md).
 
@@ -240,7 +240,7 @@ integration before they can be called production-ready. Formal ARA2 partner
 exchange, VariAudio-style note-level pitch/formant editing, phase-coherent
 multitrack warp, Windows ASIO certification, Dolby Atmos object metadata, and
 physical-controller certification remain future work. See
-[UNIMPLEMENTED_GAPS.md](./docs/UNIMPLEMENTED_GAPS.md) and
+[UNIMPLEMENTED_GAPS.md](./docs/audits/UNIMPLEMENTED_GAPS.md) and
 [release readiness](./docs/RELEASE_READINESS.md) for evidence and exact
 boundaries.
 

@@ -1,7 +1,7 @@
 # Hirari 現行ギャップ一覧
 
 このページは、現在の公開版に残る未接続・未検証項目だけを扱う正本です。
-過去の監査結果は [`archive/UNIMPLEMENTED_GAPS_2026-08-11.md`](archive/UNIMPLEMENTED_GAPS_2026-08-11.md) に保存しています。
+過去の監査結果は [`archive/UNIMPLEMENTED_GAPS_2026-08-11.md`](../archive/UNIMPLEMENTED_GAPS_2026-08-11.md) に保存しています。
 
 ## 外部環境に依存する項目
 

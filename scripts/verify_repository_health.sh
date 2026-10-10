@@ -33,10 +33,10 @@ check_file Cargo.toml
 check_file Cargo.lock
 check_file rust-toolchain.toml
 check_file README.md
-check_file INSTALL.md
-check_file CONTRIBUTING.md
-check_file SECURITY.md
-check_file CODE_OF_CONDUCT.md
+check_file docs/INSTALL.md
+check_file docs/CONTRIBUTING.md
+check_file docs/SECURITY.md
+check_file docs/CODE_OF_CONDUCT.md
 check_file hirari-core-bridge/Cargo.toml
 check_file hirari-core-bridge/src/lib.rs
 check_file hirari-core-bridge/src/bin/hirari.rs

@@ -3,7 +3,7 @@
 The roadmap is ordered by evidence and user safety, not feature count.
 
 The product-level benchmark against Cubase Pro 15 and Hirari's staged parity
-goals are tracked in [CUBASE_PARITY_ROADMAP.md](./docs/CUBASE_PARITY_ROADMAP.md).
+goals are tracked in [CUBASE_PARITY_ROADMAP.md](./architecture/CUBASE_PARITY_ROADMAP.md).
 
 ## Preview quality gate
 
