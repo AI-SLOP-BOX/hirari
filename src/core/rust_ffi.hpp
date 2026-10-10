@@ -731,24 +731,83 @@ struct HirariAudioNoteSegment {
     double formant_offset_cents = 0.0;
 };
 
+struct HirariAudioNoteAnchor;
+struct HirariAudioNoteCurveView;
+typedef struct HirariVariAudioFrozen HirariVariAudioFrozen;
+
 // Authoritative note-edit store. Rust-owned; C++ consumes it through this
 // narrow, allocation-free handle.
 extern "C" {
 HirariRegionVariAudioStore* hirari_region_vari_audio_store_new();
 void hirari_region_vari_audio_store_clear(HirariRegionVariAudioStore* store);
 bool hirari_region_vari_audio_store_upsert(HirariRegionVariAudioStore* store,
-                                           HirariAudioNoteSegment segment);
+                                           HirariAudioNoteSegment segment,
+                                           const HirariAudioNoteAnchor* anchors,
+                                           size_t anchor_count);
 bool hirari_region_vari_audio_store_remove(HirariRegionVariAudioStore* store,
-                                          double start_seconds);
+                                           double start_seconds);
 uint32_t hirari_region_vari_audio_store_count(HirariRegionVariAudioStore* store);
 bool hirari_region_vari_audio_store_get(HirariRegionVariAudioStore* store,
-                                       uint32_t index,
-                                       HirariAudioNoteSegment* out_segment);
+                                        uint32_t index,
+                                        HirariAudioNoteSegment* out_segment);
+bool hirari_region_vari_audio_store_upsert_anchor(
+    HirariRegionVariAudioStore* store, double segment_start, double position_seconds,
+    double pitch_cents, double formant_cents);
+bool hirari_region_vari_audio_store_warp(HirariRegionVariAudioStore* store,
+                                         double segment_start, double new_start,
+                                         double new_end);
+bool hirari_region_vari_audio_store_clear_segments(HirariRegionVariAudioStore* store);
+// Replaces the whole table. `anchor_offsets` / `anchor_counts` describe the
+// flat `anchors` layout, one entry per segment.
+bool hirari_region_vari_audio_store_set(HirariRegionVariAudioStore* store,
+                                        const HirariAudioNoteSegment* segments,
+                                        size_t segment_count,
+                                        const HirariAudioNoteAnchor* anchors,
+                                        const size_t* anchor_offsets,
+                                        const size_t* anchor_counts);
 struct HirariAudioNoteSegmentRange;
 
 uint32_t hirari_region_vari_audio_store_ranges(HirariRegionVariAudioStore* store,
-                                              HirariAudioNoteSegmentRange* out_ranges,
-                                              uint32_t count);
+                                               HirariAudioNoteSegmentRange* out_ranges,
+                                               size_t count);
+
+// Control-thread snapshot of the whole table. The views it hands out point
+// into the snapshot's own arrays, so the audio thread can read them without
+// a lock for as long as the snapshot is retained.
+HirariVariAudioFrozen* hirari_region_vari_audio_freeze(
+    const HirariRegionVariAudioStore* store);
+void hirari_region_vari_audio_frozen_free(HirariVariAudioFrozen* frozen);
+const HirariAudioNoteSegmentRange* hirari_region_vari_audio_frozen_ranges(
+    const HirariVariAudioFrozen* frozen, size_t* out_count);
+const HirariAudioNoteCurveView* hirari_region_vari_audio_frozen_curves(
+    const HirariVariAudioFrozen* frozen, size_t* out_count);
+
+// Materializes the table for serialization, split and undo. Anchors are
+// flattened in segment order; `anchor_offsets` / `anchor_counts` describe the
+// layout. Counts are only written once every capacity check has passed.
+bool hirari_region_vari_audio_store_materialize(
+    const HirariRegionVariAudioStore* store,
+    HirariAudioNoteSegment* out_segments, size_t segment_capacity,
+    HirariAudioNoteAnchor* out_anchors, size_t anchor_capacity,
+    size_t* out_anchor_offsets, size_t* out_anchor_counts,
+    size_t* out_segment_count, size_t* out_anchor_total);
+
+// Segment and anchor totals, so a caller can allocate exactly once before
+// materializing.
+bool hirari_region_vari_audio_store_sizes(
+    const HirariRegionVariAudioStore* store, size_t* out_segment_count,
+    size_t* out_anchor_total);
+
+// Replaces the table for project load / region split / pitch analysis:
+// malformed entries are repaired instead of rejecting the batch.
+bool hirari_region_vari_audio_store_load(
+    HirariRegionVariAudioStore* store, const HirariAudioNoteSegment* segments,
+    size_t segment_count, const HirariAudioNoteAnchor* anchors,
+    const size_t* anchor_offsets, const size_t* anchor_counts);
+
+// Applies the region-add policy in place (cap, drop malformed, normalize
+// anchor windows, sort, rebuild phases).
+bool hirari_region_vari_audio_store_normalize(HirariRegionVariAudioStore* store);
 }
 
 extern "C" char* hirari_xml_escape_attribute(const char* input);

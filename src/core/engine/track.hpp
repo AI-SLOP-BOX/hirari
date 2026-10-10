@@ -108,12 +108,13 @@ struct Region {
     bool needsSpectralStretch = false;
     std::shared_ptr<RegionTimeStretch> timeStretch;
     float pitchSemitones = 0.0f;
-    // Non-destructive VariAudio-style note edits for this audio region.
-    std::vector<::hirari::editing::AudioNoteSegment> audioNoteSegments;
-    // Control-thread projection consumed by the real-time Rust segment lookup.
-    std::vector<HirariAudioNoteSegmentRange> audioNoteSegmentRanges;
-    // Immutable C ABI views consumed by the Rust WSOLA grain-pitch scheduler.
-    std::vector<HirariAudioNoteCurveView> audioNoteCurveViews;
+    // Non-destructive VariAudio-style note edits for this audio region. Rust
+    // owns the authoritative table; C++ keeps the store handle plus the
+    // immutable projection the audio callback reads (see editing/
+    // audio_note_segment.hpp).
+    ::hirari::editing::RegionNoteEdits noteEdits;
+    // Cache identity of the published note projection.
+    std::uintptr_t noteCacheKey = 0;
     uint32_t loopCount = 1;
     std::vector<RangeEdit> rangeEdits;
     bool compManaged = false;

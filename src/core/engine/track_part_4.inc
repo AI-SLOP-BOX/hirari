@@ -15,48 +15,22 @@
             static_assert(offsetof(HirariAudioNoteSegmentRange, startSeconds) == 0);
             static_assert(offsetof(HirariAudioNoteSegmentRange, endSeconds) == 8);
             static_assert(offsetof(HirariAudioNoteSegmentRange, detectedPitchCents) == 16);
-            region.audioNoteSegmentRanges.resize(region.audioNoteSegments.size());
-            for (size_t segmentIndex = 0;
-                 segmentIndex < region.audioNoteSegments.size(); ++segmentIndex) {
-                region.audioNoteSegmentRanges[segmentIndex] = {
-                    region.audioNoteSegments[segmentIndex].startSeconds,
-                    region.audioNoteSegments[segmentIndex].endSeconds,
-                    region.audioNoteSegments[segmentIndex].detectedPitchCents};
-            }
-            region.audioNoteCurveViews.resize(region.audioNoteSegments.size());
-            for (size_t segmentIndex = 0;
-                 segmentIndex < region.audioNoteSegments.size(); ++segmentIndex) {
-                const auto& segment = region.audioNoteSegments[segmentIndex];
-                region.audioNoteCurveViews[segmentIndex] = {
-                    segment.anchors.data(), segment.anchors.size(),
-                    segment.pitchRatioIntegralPrefix.data(), segment.startSeconds,
-                    segment.endSeconds, segment.pitchOffsetCents,
-                    segment.pitchRatioCorrectionBeforeSeconds,
-                    segment.formantOffsetCents};
-            }
+            // The note-edit table is Rust-owned: republish its immutable
+            // projection here and let the callback read it lock-free.
+            region.noteEdits.publish();
+            region.noteCacheKey = region.noteEdits.cacheKey();
             region.needsSpectralStretch = hirari_region_needs_spectral_stretch(
                 region.sourceFramesPerTimelineFrame(), region.warpMarkers.size(),
-                region.pitchSemitones, region.audioNoteCurveViews.data(),
-                region.audioNoteCurveViews.size());
+                region.pitchSemitones, region.noteEdits.curves(),
+                region.noteEdits.curveCount());
             if (!region.pitchPreserveWarp) continue;
             region.timeStretch = std::make_shared<RegionTimeStretch>();
             (void)region.timeStretch->prepare(m_sampleRate,
                 std::max<uint32_t>(m_blockSize, 512u));
         }
         auto snapshot = std::make_unique<RegionSnapshot>(m_regions);
-        for (auto& region : *snapshot) {
-            region.audioNoteCurveViews.resize(region.audioNoteSegments.size());
-            for (size_t segmentIndex = 0;
-                 segmentIndex < region.audioNoteSegments.size(); ++segmentIndex) {
-                const auto& segment = region.audioNoteSegments[segmentIndex];
-                region.audioNoteCurveViews[segmentIndex] = {
-                    segment.anchors.data(), segment.anchors.size(),
-                    segment.pitchRatioIntegralPrefix.data(), segment.startSeconds,
-                    segment.endSeconds, segment.pitchOffsetCents,
-                    segment.pitchRatioCorrectionBeforeSeconds,
-                    segment.formantOffsetCents};
-            }
-        }
+        // The published note views address the shared Rust snapshot, so the
+        // snapshot copy needs no second rebuild pass.
         static_assert(sizeof(HirariRegionOverlapView) == 48);
         static_assert(offsetof(HirariRegionOverlapView, muted) == 24);
         static_assert(offsetof(HirariRegionOverlapView, crossfade_in) == 32);
@@ -113,10 +87,10 @@
             input.compRangeCount = region.compRanges.size();
             input.rangeEdits = reinterpret_cast<const HirariRegionRangeEdit*>(region.rangeEdits.data());
             input.rangeEditCount = region.rangeEdits.size();
-            input.noteRanges = region.audioNoteSegmentRanges.data();
-            input.noteRangeCount = region.audioNoteSegmentRanges.size();
-            input.noteCurves = region.audioNoteCurveViews.data();
-            input.noteCurveCount = region.audioNoteCurveViews.size();
+            input.noteRanges = region.noteEdits.ranges();
+            input.noteRangeCount = region.noteEdits.rangeCount();
+            input.noteCurves = region.noteEdits.curves();
+            input.noteCurveCount = region.noteEdits.curveCount();
             input.warpMarkers = region.warpMarkers.data();
             input.warpMarkerCount = region.warpMarkers.size();
             input.resampleKernel = m_regionResampleKernel;
@@ -124,7 +98,7 @@
             input.stretchHandle = region.timeStretch ? region.timeStretch->rustState() : nullptr;
             input.cacheOwner = reinterpret_cast<std::uintptr_t>(this);
             input.cacheSnapshot = reinterpret_cast<std::uintptr_t>(snapshot.get());
-            input.cacheNoteSegments = reinterpret_cast<std::uintptr_t>(region.audioNoteSegments.data());
+            input.cacheNoteSegments = reinterpret_cast<std::uintptr_t>(region.noteCacheKey);
             input.regionStart = region.start;
             input.regionLength = region.len;
             input.loopCount = region.loopCount;

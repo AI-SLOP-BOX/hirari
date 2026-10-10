@@ -62,17 +62,14 @@ public:
         // only bounded, well-formed segments in the published snapshot so a
         // malformed project cannot inject NaN/Inf pitch ratios into the audio
         // callback.  Ordering is deterministic for fast segment lookup.
-        if (normalized.audioNoteSegments.size() > 4096) {
-            normalized.audioNoteSegments.resize(4096);
-        }
-        normalized.audioNoteSegments.erase(
-            std::remove_if(normalized.audioNoteSegments.begin(),
-                           normalized.audioNoteSegments.end(),
-                           [](const auto& segment) {
-                               return !segment.valid() ||
-                                      segment.anchors.size() > 4096;
-                           }),
-            normalized.audioNoteSegments.end());
+        // The whole policy (cap, drop malformed, normalize anchor windows,
+        // sort, phase prefixes) lives in the Rust store. Detach first: the
+        // copy shares the caller's store handle until it owns its own table.
+        // A failed normalization only drops notes, so keep the region and let
+        // the caller observe it in the published snapshot rather than silently
+        // discarding the whole edit.
+        normalized.noteEdits.detach();
+        (void)normalized.noteEdits.normalize();
         if (normalized.warpMarkers.size() > 100'000) {
             normalized.warpMarkers.resize(100'000);
         }
@@ -98,24 +95,10 @@ public:
         } else {
             normalized.warpMarkers.clear();
         }
-        for (auto& segment : normalized.audioNoteSegments) {
-            const size_t anchorCount = hirari_audio_note_curve_normalize_anchors(
-                segment.anchors.data(), segment.anchors.size(),
-                segment.startSeconds, segment.endSeconds);
-            if (anchorCount == std::numeric_limits<size_t>::max()) continue;
-            segment.anchors.resize(anchorCount);
-            segment.rebuildPitchRatioIntegral();
-        }
         // The Rust render core owns validation and normalization so the audio
         // callback receives bounded, ordered range data.
         (void)adoptRangeEdits(normalized.rangeEdits, normalized.rangeEdits, 0u,
                               normalized.len);
-        std::sort(normalized.audioNoteSegments.begin(),
-                  normalized.audioNoteSegments.end(),
-                  [](const auto& a, const auto& b) {
-                      return a.startSeconds < b.startSeconds;
-                  });
-        hirari::editing::rebuildAudioNotePhasePrefixes(normalized.audioNoteSegments);
         normalized.fadeInSamples = std::min(normalized.fadeInSamples, normalized.len);
         normalized.fadeOutSamples = std::min(normalized.fadeOutSamples, normalized.len);
         auto it = std::lower_bound(

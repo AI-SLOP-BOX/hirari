@@ -63,7 +63,7 @@
                                                  marker.transient});
                     }
                     r.processingHistory = rs.processingHistory;
-                    r.audioNoteSegments = rs.audioNoteSegments;
+                    if (!r.noteEdits.assignRepaired(rs.audioNoteSegments)) return false;
                     r.rangeEdits.clear();
                     r.rangeEdits.reserve(std::min<size_t>(rs.rangeEdits.size(), 4096));
                     for (const auto& edit : rs.rangeEdits) {
@@ -348,7 +348,7 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
                                           marker.transient});
             }
             rs.processingHistory = region.processingHistory;
-            rs.audioNoteSegments = region.audioNoteSegments;
+            if (!region.noteEdits.copy(rs.audioNoteSegments)) return {};
             rs.rangeEdits.clear();
             for (const auto& edit : region.rangeEdits) {
                 rs.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});

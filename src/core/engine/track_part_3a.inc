@@ -266,13 +266,8 @@
         auto it = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (it == m_regions.end()) return false;
-        const auto ranges = ::hirari::editing::audioNoteSegmentRanges(it->audioNoteSegments);
-        const int64_t slot = hirari_audio_note_upsert_segment_slot(
-            ranges.data(), ranges.size(), segment.startSeconds, segment.endSeconds);
-        if (slot == -2) return false;
-        if (slot < 0) it->audioNoteSegments.push_back(std::move(segment));
-        else it->audioNoteSegments[static_cast<size_t>(slot)] = std::move(segment);
-        ::hirari::editing::rebuildAudioNotePhasePrefixes(it->audioNoteSegments);
+        // Rust owns the table and therefore the slot/overlap rule.
+        if (!it->noteEdits.upsert(segment)) return false;
         publishRegionSnapshot();
         return true;
     }
@@ -284,8 +279,7 @@
         const auto it = std::find_if(snapshot->begin(), snapshot->end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (it == snapshot->end()) return false;
-        output = it->audioNoteSegments;
-        return true;
+        return it->noteEdits.copy(output);
     }
 
     bool beginAudioPitchAnalysis() noexcept {
@@ -303,30 +297,13 @@
     bool setAudioNoteSegments(uint32_t regionId,
                               std::vector<::hirari::editing::AudioNoteSegment> segments) {
         if (segments.size() > 4096 || audioPitchAnalysisRunning()) return false;
-        std::vector<::HirariAudioNoteSegmentValidation> validation;
-        validation.reserve(segments.size());
-        for (const auto& segment : segments) {
-            validation.push_back({segment.startSeconds, segment.endSeconds,
-                segment.detectedPitchCents, segment.pitchOffsetCents,
-                segment.formantOffsetCents, segment.anchors.data(), segment.anchors.size()});
-        }
-        std::vector<uint32_t> orderedIndices(segments.size());
-        if (!hirari_audio_note_validate_segments(validation.data(), validation.size(),
-                                                  orderedIndices.data())) return false;
-        std::vector<::hirari::editing::AudioNoteSegment> ordered;
-        ordered.reserve(segments.size());
-        for (uint32_t index : orderedIndices) {
-            ordered.push_back(std::move(segments[index]));
-        }
-        segments = std::move(ordered);
-        for (auto& segment : segments) segment.rebuildPitchRatioIntegral();
-        ::hirari::editing::rebuildAudioNotePhasePrefixes(segments);
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         auto it = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (it == m_regions.end()) return false;
-        it->audioNoteSegments = std::move(segments);
+        // Rust validates the batch and returns the chronological order.
+        if (!it->noteEdits.assignValidated(segments)) return false;
         publishRegionSnapshot();
         return true;
     }
@@ -342,18 +319,10 @@
         auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (regionIt == m_regions.end()) return false;
-        const auto ranges = ::hirari::editing::audioNoteSegmentRanges(regionIt->audioNoteSegments);
-        const int64_t segmentIndex = hirari_audio_note_find_segment_for_edit(
-            ranges.data(), ranges.size(), segmentStartSeconds);
-        if (segmentIndex < 0) return false;
-        auto segmentIt = regionIt->audioNoteSegments.begin() + segmentIndex;
-        if (segmentIt->anchors.size() >= 4096 &&
-            std::none_of(segmentIt->anchors.begin(), segmentIt->anchors.end(),
-                         [position = anchor.positionSeconds](const auto& current) {
-                             return std::abs(current.positionSeconds - position) < 1e-9;
-                         })) return false;
-        segmentIt->upsertAnchor(anchor);
-        ::hirari::editing::rebuildAudioNotePhasePrefixes(regionIt->audioNoteSegments);
+        if (!regionIt->noteEdits.upsertAnchor(segmentStartSeconds, anchor.positionSeconds,
+                                              anchor.pitchCents, anchor.formantCents)) {
+            return false;
+        }
         publishRegionSnapshot();
         return true;
     }
@@ -364,8 +333,8 @@
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         auto it = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
-        if (it == m_regions.end() || it->audioNoteSegments.empty()) return false;
-        it->audioNoteSegments.clear();
+        if (it == m_regions.end() || it->noteEdits.empty()) return false;
+        it->noteEdits.clear();
         publishRegionSnapshot();
         return true;
     }
@@ -379,16 +348,10 @@
         auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (regionIt == m_regions.end()) return false;
-        const auto ranges = ::hirari::editing::audioNoteSegmentRanges(regionIt->audioNoteSegments);
-        const int64_t segmentIndex = hirari_audio_note_find_segment_for_edit(
-            ranges.data(), ranges.size(), segmentStartSeconds);
-        if (segmentIndex < 0) return false;
-        auto segmentIt = regionIt->audioNoteSegments.begin() + segmentIndex;
-        if (!segmentIt->valid() || !hirari_audio_note_can_warp_segment(
-                ranges.data(), ranges.size(), static_cast<size_t>(segmentIndex),
-                newStartSeconds, newEndSeconds)) return false;
-        if (!segmentIt->warpTiming(newStartSeconds, newEndSeconds)) return false;
-        ::hirari::editing::rebuildAudioNotePhasePrefixes(regionIt->audioNoteSegments);
+        // Rust re-checks validity, the overlap guard and the anchor warp.
+        if (!regionIt->noteEdits.warp(segmentStartSeconds, newStartSeconds, newEndSeconds)) {
+            return false;
+        }
         publishRegionSnapshot();
         return true;
     }
@@ -400,13 +363,7 @@
         auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (regionIt == m_regions.end()) return false;
-        const auto before = regionIt->audioNoteSegments.size();
-        regionIt->audioNoteSegments.erase(std::remove_if(regionIt->audioNoteSegments.begin(),
-            regionIt->audioNoteSegments.end(), [segmentStartSeconds](const auto& segment) {
-                return std::abs(segment.startSeconds - segmentStartSeconds) < 1e-9;
-            }), regionIt->audioNoteSegments.end());
-        if (regionIt->audioNoteSegments.size() == before) return false;
-        ::hirari::editing::rebuildAudioNotePhasePrefixes(regionIt->audioNoteSegments);
+        if (!regionIt->noteEdits.remove(segmentStartSeconds)) return false;
         publishRegionSnapshot();
         return true;
     }
@@ -496,8 +453,9 @@
         }
         detected.erase(std::remove_if(detected.begin(), detected.end(),
             [](const auto& segment) { return !segment.valid(); }), detected.end());
-        for (auto& segment : detected) segment.rebuildPitchRatioIntegral();
-        ::hirari::editing::rebuildAudioNotePhasePrefixes(detected);
+        // The store rebuilds the integral prefixes and the phase corrections
+        // when the batch is handed over, so the C++ side only has to drop
+        // malformed detections first.
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         auto it = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
@@ -513,7 +471,7 @@
             if (it->warpMarkers[index].sourceSample != analysisRegion.warpMarkers[index].sourceSample ||
                 it->warpMarkers[index].timelineSample != analysisRegion.warpMarkers[index].timelineSample) return false;
         }
-        it->audioNoteSegments = std::move(detected);
+        it->noteEdits.assignRepaired(detected);
         publishRegionSnapshot();
         return true;
     }

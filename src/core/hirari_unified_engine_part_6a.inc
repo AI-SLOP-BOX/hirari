@@ -354,25 +354,30 @@ bool HirariUnifiedEngine::write_project_layout_json(
             }
             ss << "]";
             ss << ",\"audio_note_segments\":[";
-            for (size_t si = 0; si < region.audioNoteSegments.size(); ++si) {
-                if (cancelled()) return false;
-                if (si > 0) ss << ",";
-                const auto& segment = region.audioNoteSegments[si];
-                ss << "{\"start\":" << jsonNumber(segment.startSeconds)
-                   << ",\"end\":" << jsonNumber(segment.endSeconds)
-                   << ",\"detected_pitch_cents\":" << jsonNumber(segment.detectedPitchCents)
-                   << ",\"pitch_offset_cents\":" << jsonNumber(segment.pitchOffsetCents)
-                   << ",\"formant_offset_cents\":" << jsonNumber(segment.formantOffsetCents)
-                   << ",\"anchors\":[";
-                for (size_t ai = 0; ai < segment.anchors.size(); ++ai) {
+            {
+                // The authoritative table is Rust-owned; materialize it here.
+                std::vector<::hirari::editing::AudioNoteSegment> noteSegments;
+                if (!region.noteEdits.copy(noteSegments)) return false;
+                for (size_t si = 0; si < noteSegments.size(); ++si) {
                     if (cancelled()) return false;
-                    if (ai > 0) ss << ",";
-                    const auto& anchor = segment.anchors[ai];
-                    ss << "{\"position\":" << jsonNumber(anchor.positionSeconds)
-                       << ",\"pitch_cents\":" << jsonNumber(anchor.pitchCents)
-                       << ",\"formant_cents\":" << jsonNumber(anchor.formantCents) << "}";
+                    if (si > 0) ss << ",";
+                    const auto& segment = noteSegments[si];
+                    ss << "{\"start\":" << jsonNumber(segment.startSeconds)
+                       << ",\"end\":" << jsonNumber(segment.endSeconds)
+                       << ",\"detected_pitch_cents\":" << jsonNumber(segment.detectedPitchCents)
+                       << ",\"pitch_offset_cents\":" << jsonNumber(segment.pitchOffsetCents)
+                       << ",\"formant_offset_cents\":" << jsonNumber(segment.formantOffsetCents)
+                       << ",\"anchors\":[";
+                    for (size_t ai = 0; ai < segment.anchors.size(); ++ai) {
+                        if (cancelled()) return false;
+                        if (ai > 0) ss << ",";
+                        const auto& anchor = segment.anchors[ai];
+                        ss << "{\"position\":" << jsonNumber(anchor.positionSeconds)
+                           << ",\"pitch_cents\":" << jsonNumber(anchor.pitchCents)
+                           << ",\"formant_cents\":" << jsonNumber(anchor.formantCents) << "}";
+                    }
+                    ss << "]}";
                 }
-                ss << "]}";
             }
             ss << "]";
             ss << "}";

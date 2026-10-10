@@ -646,8 +646,12 @@ uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t 
         std::max(1.0, m_sampleRate.load(std::memory_order_acquire));
     const double regionSeconds = static_cast<double>(before.len) /
         std::max(1.0, m_sampleRate.load(std::memory_order_acquire));
-    left.audioNoteSegments.clear();
-    right.audioNoteSegments.clear();
+    std::vector<::hirari::editing::AudioNoteSegment> beforeSegments;
+    if (!before.noteEdits.copy(beforeSegments)) return false;
+    left.noteEdits.detach();
+    right.noteEdits.detach();
+    std::vector<::hirari::editing::AudioNoteSegment> leftSegments;
+    std::vector<::hirari::editing::AudioNoteSegment> rightSegments;
     const auto appendSegmentWindow = [](const ::hirari::editing::AudioNoteSegment& source,
                                         double start, double end, double timeShift,
                                         auto& destination) {
@@ -681,13 +685,17 @@ uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t 
         segment.pitchRatioCorrectionBeforeSeconds = 0.0;
         destination.push_back(std::move(segment));
     };
-    for (const auto& segment : before.audioNoteSegments) {
+    for (const auto& segment : beforeSegments) {
         appendSegmentWindow(segment, segment.startSeconds,
                             std::min(segment.endSeconds, splitSeconds), 0.0,
-                            left.audioNoteSegments);
+                            leftSegments);
         appendSegmentWindow(segment, std::max(segment.startSeconds, splitSeconds),
                             std::min(segment.endSeconds, regionSeconds), splitSeconds,
-                            right.audioNoteSegments);
+                            rightSegments);
+    }
+    if (!left.noteEdits.assignRepaired(leftSegments) ||
+        !right.noteEdits.assignRepaired(rightSegments)) {
+        return false;
     }
     const auto splitLocalRanges = [splitOffset, regionLength = before.len](
         const auto& sourceRanges, auto& leftRanges, auto& rightRanges) {
