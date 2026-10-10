@@ -62,7 +62,9 @@
                         r.warpMarkers.push_back({marker.sourceSample, marker.timelineSample,
                                                  marker.transient});
                     }
-                    r.processingHistory = rs.processingHistory;
+                    for (const auto& step : rs.processingHistory) {
+                        if (!r.processingHistory.append(step)) break;
+                    }
                     if (!r.noteEdits.assignRepaired(rs.audioNoteSegments)) return false;
                     r.rangeEdits.clear();
                     r.rangeEdits.reserve(std::min<size_t>(rs.rangeEdits.size(), 4096));
@@ -347,7 +349,7 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
                 rs.warpMarkers.push_back({marker.sourceSample, marker.timelineSample,
                                           marker.transient});
             }
-            rs.processingHistory = region.processingHistory;
+            if (!region.processingHistory.copy(rs.processingHistory)) return {};
             if (!region.noteEdits.copy(rs.audioNoteSegments)) return {};
             rs.rangeEdits.clear();
             for (const auto& edit : region.rangeEdits) {

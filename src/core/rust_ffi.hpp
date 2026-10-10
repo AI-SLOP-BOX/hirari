@@ -834,6 +834,43 @@ struct HirariRegionCompRange {
 extern "C" bool hirari_region_comp_ranges_validate(
     const HirariRegionCompRange* ranges, size_t range_count, uint64_t region_len,
     bool locked, bool managed);
+
+// Rust-owned per-region processing-step history. `operation` is borrowed for
+// the duration of a call and copied into the store; nothing on the render path
+// reads it, so no published projection exists.
+struct HirariEventStep {
+    uint32_t id = 0;
+    const uint8_t* operation = nullptr;
+    size_t operation_len = 0;
+    float parameter = 0.0f;
+    bool enabled = true;
+};
+struct HirariEventStepView {
+    uint32_t id = 0;
+    float parameter = 0.0f;
+    bool enabled = true;
+    size_t operation_len = 0;
+    size_t operation_offset = 0;
+};
+typedef struct HirariRegionProcessingHistoryStore HirariRegionProcessingHistoryStore;
+extern "C" {
+HirariRegionProcessingHistoryStore* hirari_region_processing_history_new();
+void hirari_region_processing_history_clear(
+    HirariRegionProcessingHistoryStore* store);
+void hirari_region_processing_history_reset(
+    HirariRegionProcessingHistoryStore* store);
+bool hirari_region_processing_history_append(
+    HirariRegionProcessingHistoryStore* store, HirariEventStep step);
+size_t hirari_region_processing_history_count(
+    const HirariRegionProcessingHistoryStore* store);
+bool hirari_region_processing_history_sizes(
+    const HirariRegionProcessingHistoryStore* store, size_t* out_count,
+    size_t* out_byte_total);
+bool hirari_region_processing_history_materialize(
+    const HirariRegionProcessingHistoryStore* store,
+    HirariEventStepView* out_views, size_t view_capacity, uint8_t* out_bytes,
+    size_t byte_capacity, size_t* out_count, size_t* out_byte_total);
+}
 extern "C" void hirari_region_gain_block(
     float* output, uint32_t frames, uint64_t region_offset,
     uint64_t region_length, uint64_t timeline_length,

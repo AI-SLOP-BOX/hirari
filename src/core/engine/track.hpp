@@ -123,7 +123,10 @@ struct Region {
     uint32_t syncGroup = 0;
     // Region-local, source-to-timeline anchors for non-destructive timing edits.
     std::vector<WarpMarker> warpMarkers;
-    std::vector<::hirari::editing::EventProcessingStep> processingHistory;
+    // Non-destructive processing-step history. Rust owns the authoritative
+    // table; C++ hands steps in and materializes them for serialization (see
+    // editing/event_processing_history.hpp).
+    ::hirari::editing::RegionProcessingHistory processingHistory;
     // Derived on the control thread when a region snapshot is published.
     uint64_t crossfadeInSamples = 0;
     uint64_t crossfadeOutSamples = 0;

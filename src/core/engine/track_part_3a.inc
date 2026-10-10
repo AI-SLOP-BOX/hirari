@@ -479,12 +479,23 @@
     bool appendProcessingStep(uint32_t regionId, ::hirari::editing::EventProcessingStep step) {
         if (step.operation.empty() || step.operation.size() > 256 || step.id == 0) return false;
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) if (region.id == regionId) { if (region.processingHistory.size() >= 4096) return false; region.processingHistory.push_back(std::move(step)); publishRegionSnapshot(); return true; }
+        for (auto& region : m_regions) if (region.id == regionId) {
+            // The store owns the rest of the policy, including the parameter
+            // finiteness check the engine wrapper used to make alone.
+            if (!region.processingHistory.append(step)) return false;
+            publishRegionSnapshot();
+            return true;
+        }
         return false;
     }
     bool clearProcessingHistory(uint32_t regionId) {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) if (region.id == regionId) { region.processingHistory.clear(); publishRegionSnapshot(); return true; }
+        for (auto& region : m_regions) if (region.id == regionId) {
+            if (region.processingHistory.empty()) return false;
+            region.processingHistory.clear();
+            publishRegionSnapshot();
+            return true;
+        }
         return false;
     }
     // Legacy escape hatch: callers that mutate the returned vector must call
