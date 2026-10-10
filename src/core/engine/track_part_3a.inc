@@ -595,22 +595,17 @@
         const std::vector<Region::CompRange>& ranges,
         bool managed) {
         if (ranges.size() > 4096) return false;
-        uint64_t previousEnd = 0;
-        for (const auto& range : ranges) {
-            if (range.start >= range.end || range.fadeIn > range.end - range.start ||
-                range.fadeOut > range.end - range.start || range.start < previousEnd) {
-                return false;
-            }
-            previousEnd = range.end;
-        }
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid) continue;
-            if (region.locked && managed) return false;
-            if (std::any_of(ranges.begin(), ranges.end(), [&region](const auto& range) {
-                    return range.end > region.len;
-                })) {
+            static_assert(sizeof(Region::CompRange) == sizeof(HirariRegionCompRange));
+            static_assert(offsetof(Region::CompRange, start) == offsetof(HirariRegionCompRange, start));
+            // Admissibility (count, ordering/overlap, fade width, region
+            // bounds, lock/managed interaction) is owned by the Rust core.
+            if (!hirari_region_comp_ranges_validate(
+                    reinterpret_cast<const HirariRegionCompRange*>(ranges.data()),
+                    ranges.size(), region.len, region.locked, managed)) {
                 return false;
             }
             region.compManaged = managed;

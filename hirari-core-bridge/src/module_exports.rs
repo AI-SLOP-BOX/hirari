@@ -243,6 +243,7 @@ pub mod recording_capture_runtime;
 pub mod recording_session;
 pub mod recording_stream;
 pub mod region_alignment;
+pub mod region_comp_ranges;
 pub mod region_mutations;
 pub mod region_pitch_correction;
 pub mod region_processing;

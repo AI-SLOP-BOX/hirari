@@ -224,3 +224,71 @@ fn scalar_region_edits_round_trip_through_the_shared_policy_path() {
 
     let _ = std::fs::remove_file(source_path);
 }
+
+#[test]
+fn comp_range_edits_are_adjudicated_by_the_rust_policy() {
+    let _guard = native_engine_test_guard();
+    let engine = crate::ffi::new_audio_engine();
+    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let unique = unique_tag();
+    let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
+    let source = source_path.to_str().unwrap();
+
+    let track_id = engine_ref.add_track(0);
+    assert!(engine_ref.bounce_project(source, 0));
+    assert!(engine_ref.add_region(track_id, source, 0.0));
+    let layout: Value =
+        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+    let (region_id, region_len) = layout
+        .as_array()
+        .and_then(|tracks| tracks.first())
+        .and_then(|track| track.get("regions"))
+        .and_then(Value::as_array)
+        .and_then(|regions| regions.first())
+        .map(|region| {
+            (
+                region.get("id").and_then(Value::as_u64).unwrap_or(0) as u32,
+                region.get("len").and_then(Value::as_u64).unwrap_or(0),
+            )
+        })
+        .expect("added region must have a stable id and length");
+
+    let set = |ranges: &[(u64, u64, u64, u64)], managed: bool| {
+        let mut packed: Vec<u64> = Vec::with_capacity(ranges.len() * 4);
+        for (start, end, fade_in, fade_out) in ranges {
+            packed.extend_from_slice(&[*start, *end, *fade_in, *fade_out]);
+        }
+        engine_ref.set_region_comp_ranges(track_id, region_id, packed.as_slice(), managed)
+    };
+
+    // A batch that is ordered, non-overlapping and inside the region.
+    let some = region_len / 4;
+    assert!(some > 0, "bounced region must be non-empty");
+    let good = [
+        (0u64, some, 0u64, 0u64),
+        (some, some * 2, 0, some / 2),
+        (some * 2, some * 3, 0, 0),
+    ];
+    assert!(set(&good, true));
+
+    // Ordering is enforced at the boundary. This batch is non-overlapping, so
+    // the partial validation the Rust wrapper used to run accepted it while
+    // the core rejected it.
+    let out_of_order = [
+        (some * 2, some * 3, 0, 0),
+        (0, some, 0, 0),
+    ];
+    assert!(!set(&out_of_order, false));
+
+    // Overlap, inverted, over-wide fades and out-of-region are all refused.
+    assert!(!set(&[(0, some, 0, 0), (some / 2, some * 2, 0, 0)], false));
+    assert!(!set(&[(some, 0, 0, 0)], false));
+    assert!(!set(&[(0, some, some + 1, 0)], false));
+    assert!(!set(&[(0, region_len + 1, 0, 0)], false));
+
+    // An empty batch un-manages the region and stays admissible.
+    assert!(set(&[], false));
+    assert!(set(&good, true));
+
+    let _ = std::fs::remove_file(source_path);
+}

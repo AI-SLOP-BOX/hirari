@@ -828,6 +828,12 @@ struct HirariRegionCompRange {
     uint64_t fade_in;
     uint64_t fade_out;
 };
+// Authoritative comp-range edit policy: count bound, ordering and overlap,
+// fade fits inside its own range, every range inside the region, and the
+// lock/managed interaction. Returns false when the batch may not be stored.
+extern "C" bool hirari_region_comp_ranges_validate(
+    const HirariRegionCompRange* ranges, size_t range_count, uint64_t region_len,
+    bool locked, bool managed);
 extern "C" void hirari_region_gain_block(
     float* output, uint32_t frames, uint64_t region_offset,
     uint64_t region_length, uint64_t timeline_length,

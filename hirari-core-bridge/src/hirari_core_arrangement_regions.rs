@@ -368,14 +368,15 @@ impl HirariCore {
         ranges: &[(u64, u64, u64, u64)],
         managed: bool,
     ) -> bool {
+        // Admissibility is owned by the Rust core (hirari_region_comp_ranges_validate).
+        // This layer used to re-implement part of it and silently skipped the
+        // ordering and region-bounds checks, so an out-of-order batch could be
+        // accepted here and rejected one layer down.
         if tid == 0 || rid == 0 || ranges.len() > 4096 {
             return false;
         }
         let mut packed = Vec::with_capacity(ranges.len().saturating_mul(4));
         for (start, end, fade_in, fade_out) in ranges {
-            if *start >= *end || *fade_in > *end - *start || *fade_out > *end - *start {
-                return false;
-            }
             packed.extend_from_slice(&[*start, *end, *fade_in, *fade_out]);
         }
         self.engine.as_ref().is_some_and(|engine| {
