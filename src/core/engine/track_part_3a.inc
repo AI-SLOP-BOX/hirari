@@ -529,34 +529,65 @@
         return decision;
     }
 
-    bool setRegionGain(uint32_t rid, float gain) {
+    // Single lookup/lock/publish path for every scalar region field that
+    // routes through the Rust edit policy. The bounds, the accept/reject
+    // decision and the resolved values all come from
+    // hirari_region_scalar_edit_decision; this only stores the decision in
+    // the field it names, so adding a scalar field never means adding a ninth
+    // copy of the scan/lock/publish sequence.
+    //
+    // Booleans are the exception that proves the contract: Rust returns no
+    // payload for Muted/Reverse, so `valueA` (the caller's own 0/1) is what
+    // gets stored.
+    bool applyScalarRegionEdit(uint32_t rid, HirariRegionScalarField field,
+                               float valueA, float valueB = 0.0f) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid) continue;
-            const auto decision = decideScalarEdit(
-                kHirariRegionScalarClipGain, region, gain);
+            const auto decision = decideScalarEdit(field, region, valueA, valueB);
             if (!decision.accepted) return false;
-            region.clipGain = decision.value_a;
+            switch (field) {
+                case kHirariRegionScalarClipGain:
+                    region.clipGain = decision.value_a;
+                    break;
+                case kHirariRegionScalarMuted:
+                    region.muted = valueA != 0.0f;
+                    break;
+                case kHirariRegionScalarReverse:
+                    region.reverse = valueA != 0.0f;
+                    break;
+                case kHirariRegionScalarPitchSemitones:
+                    region.pitchSemitones = decision.value_a;
+                    break;
+                case kHirariRegionScalarLoopCount:
+                    // The integer travels as the raw float bit pattern so the
+                    // Rust policy owns the range and overflow guards.
+                    region.loopCount = std::bit_cast<uint32_t>(decision.value_a);
+                    break;
+                case kHirariRegionScalarSyncGroup:
+                    region.syncGroup = std::bit_cast<uint32_t>(decision.value_a);
+                    break;
+                case kHirariRegionScalarFades:
+                    region.fadeInSamples =
+                        hirari_region_fade_samples(decision.value_a, region.len);
+                    region.fadeOutSamples =
+                        hirari_region_fade_samples(decision.value_b, region.len);
+                    break;
+            }
             publishRegionSnapshot();
             return true;
         }
         return false;
     }
 
+    bool setRegionGain(uint32_t rid, float gain) {
+        return applyScalarRegionEdit(rid, kHirariRegionScalarClipGain, gain);
+    }
+
     bool setRegionMuted(uint32_t rid, bool muted) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            const auto decision = decideScalarEdit(
-                kHirariRegionScalarMuted, region, muted ? 1.0f : 0.0f);
-            if (!decision.accepted) return false;
-            region.muted = muted;
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
+        return applyScalarRegionEdit(rid, kHirariRegionScalarMuted,
+                                     muted ? 1.0f : 0.0f);
     }
 
     bool setRegionCompRanges(
@@ -591,19 +622,7 @@
     }
 
     bool setRegionFades(uint32_t rid, float fadeIn, float fadeOut) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            const auto decision = decideScalarEdit(
-                kHirariRegionScalarFades, region, fadeIn, fadeOut);
-            if (!decision.accepted) return false;
-            region.fadeInSamples = hirari_region_fade_samples(decision.value_a, region.len);
-            region.fadeOutSamples = hirari_region_fade_samples(decision.value_b, region.len);
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
+        return applyScalarRegionEdit(rid, kHirariRegionScalarFades, fadeIn, fadeOut);
     }
 
     // Adopts the result of a Rust range-edit transform.
@@ -691,24 +710,16 @@
     }
 
     bool setRegionReverse(uint32_t rid, bool reverse) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            const auto decision = decideScalarEdit(
-                kHirariRegionScalarReverse, region, reverse ? 1.0f : 0.0f);
-            if (!decision.accepted) return false;
-            region.reverse = reverse;
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
+        return applyScalarRegionEdit(rid, kHirariRegionScalarReverse,
+                                     reverse ? 1.0f : 0.0f);
     }
 
     bool setRegionWarpRatio(uint32_t rid, double ratio) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        if (!std::isfinite(ratio) || ratio < 0.5 || ratio > 2.0) return false;
+        // The range and finiteness guard lives in
+        // hirari_region_set_warp_ratio_geometry; a second C++ copy of the same
+        // bound is how the two implementations drift apart.
         for (auto& region : m_regions) {
             if (region.id == rid) {
                 if (region.locked) return false;
@@ -762,18 +773,8 @@
     }
 
     bool setRegionPitchSemitones(uint32_t rid, float semitones) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            const auto decision = decideScalarEdit(
-                kHirariRegionScalarPitchSemitones, region, semitones);
-            if (!decision.accepted) return false;
-            region.pitchSemitones = decision.value_a;
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
+        return applyScalarRegionEdit(rid, kHirariRegionScalarPitchSemitones,
+                                     semitones);
     }
 
     std::optional<float> getRegionPitchSemitones(uint32_t rid) const {
@@ -785,20 +786,10 @@
     }
 
     bool setRegionLoopCount(uint32_t rid, uint32_t count) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            // The integer travels as the raw float bit pattern so the Rust
-            // policy owns the range and overflow guards without an extra ABI type.
-            const auto decision = decideScalarEdit(
-                kHirariRegionScalarLoopCount, region, std::bit_cast<float>(count));
-            if (!decision.accepted) return false;
-            region.loopCount = std::bit_cast<uint32_t>(decision.value_a);
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
+        // The integer travels as the raw float bit pattern so the Rust
+        // policy owns the range and overflow guards without an extra ABI type.
+        return applyScalarRegionEdit(rid, kHirariRegionScalarLoopCount,
+                                     std::bit_cast<float>(count));
     }
 
     bool setRegionLocked(uint32_t rid, bool locked) {
@@ -807,20 +798,12 @@
         if (it == m_regions.end()) return false; it->locked = locked; publishRegionSnapshot(); return true;
     }
     bool setRegionSyncGroup(uint32_t rid, uint32_t group) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            const auto decision = decideScalarEdit(
-                kHirariRegionScalarSyncGroup, region, std::bit_cast<float>(group));
-            if (!decision.accepted) return false;
-            if (region.syncGroup != group) {
-                region.syncGroup = group;
-                publishRegionSnapshot();
-            }
-            return true;
-        }
-        return false;
+        // Delegates to the shared scalar path. Unlike before, a no-op set now
+        // publishes a snapshot like the other six fields do; that costs one
+        // snapshot copy on a redundant user action and removes the last
+        // hand-written scan/lock/publish sequence.
+        return applyScalarRegionEdit(rid, kHirariRegionScalarSyncGroup,
+                                     std::bit_cast<float>(group));
     }
 
     // Validates and orders warp markers through the Rust pure transform.

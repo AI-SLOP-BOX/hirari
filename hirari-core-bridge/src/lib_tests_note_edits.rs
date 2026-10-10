@@ -150,3 +150,77 @@ fn note_edit_round_trip_flows_through_the_rust_store() {
     let _ = std::fs::remove_file(source_path);
     let _ = std::fs::remove_file(project_path);
 }
+
+#[test]
+fn scalar_region_edits_round_trip_through_the_shared_policy_path() {
+    let _guard = native_engine_test_guard();
+    let engine = crate::ffi::new_audio_engine();
+    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let unique = unique_tag();
+    let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
+    let source = source_path.to_str().unwrap();
+
+    let track_id = engine_ref.add_track(0);
+    assert!(engine_ref.bounce_project(source, 0));
+    assert!(engine_ref.add_region(track_id, source, 0.0));
+    let layout: Value =
+        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+    let region_id = layout
+        .as_array()
+        .and_then(|tracks| tracks.first())
+        .and_then(|track| track.get("regions"))
+        .and_then(Value::as_array)
+        .and_then(|regions| regions.first())
+        .and_then(|region| region.get("id"))
+        .and_then(Value::as_u64)
+        .expect("added region must have a stable id") as u32;
+
+    let region = |engine: &crate::ffi::AudioEngine| -> Value {
+        let layout: Value =
+            serde_json::from_str(&engine.get_project_layout_json().to_string()).unwrap();
+        layout
+            .as_array()
+            .and_then(|tracks| tracks.first())
+            .and_then(|track| track.get("regions"))
+            .and_then(Value::as_array)
+            .and_then(|regions| {
+                regions
+                    .iter()
+                    .find(|region| {
+                        region.get("id").and_then(Value::as_u64) == Some(region_id as u64)
+                    })
+                    .cloned()
+            })
+            .expect("region must stay addressable")
+    };
+
+    // Booleans are the trap: the Rust policy returns no payload for
+    // Muted/Reverse, so the shared path has to store the caller's own value.
+    // Storing the (always zero) decision value would silently drop every edit.
+    assert!(engine_ref.set_region_muted(track_id, region_id, true));
+    assert_eq!(region(engine_ref)["muted"], Value::Bool(true));
+    assert!(engine_ref.set_region_reverse(track_id, region_id, true));
+    assert_eq!(region(engine_ref)["reverse"], Value::Bool(true));
+    assert!(engine_ref.set_region_muted(track_id, region_id, false));
+    assert_eq!(region(engine_ref)["muted"], Value::Bool(false));
+    assert!(engine_ref.set_region_reverse(track_id, region_id, false));
+    assert_eq!(region(engine_ref)["reverse"], Value::Bool(false));
+
+    // Numeric fields keep their clamp/reject policy and their payload. Gain
+    // clamps (documented Rust policy), so 25.0 becomes 2.0 rather than being
+    // rejected, while NaN is refused outright and leaves the value alone.
+    assert!(engine_ref.set_region_gain(track_id, region_id, 1.5));
+    assert_eq!(region(engine_ref)["clip_gain"].as_f64(), Some(1.5));
+    assert!(!engine_ref.set_region_gain(track_id, region_id, f32::NAN));
+    assert_eq!(region(engine_ref)["clip_gain"].as_f64(), Some(1.5));
+    assert!(engine_ref.set_region_gain(track_id, region_id, 25.0));
+    assert_eq!(region(engine_ref)["clip_gain"].as_f64(), Some(2.0));
+    assert!(engine_ref.set_region_gain(track_id, region_id, -3.0));
+    assert_eq!(region(engine_ref)["clip_gain"].as_f64(), Some(0.0));
+    assert!(engine_ref.set_region_loop_count(track_id, region_id, 2));
+    assert_eq!(region(engine_ref)["loop_count"].as_u64(), Some(2));
+    assert!(!engine_ref.set_region_loop_count(track_id, region_id, 1025));
+    assert_eq!(region(engine_ref)["loop_count"].as_u64(), Some(2));
+
+    let _ = std::fs::remove_file(source_path);
+}
