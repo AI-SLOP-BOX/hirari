@@ -990,12 +990,12 @@ pub use crate::ui::app::run;
 
 #[cfg(test)]
 mod tests {
+    use super::super::app_state::UiSettings;
     use super::{
         atomic_write_midi_sidecar, hydrate_project_models,
         load_project_transactionally_with_hydrator, load_project_transactionally_with_rollback,
         restore_latest_project_backup_transactionally, PersistedNote, ProjectLoadTransactionError,
     };
-    use super::super::app_state::UiSettings;
     use slint::Model;
     use std::fs;
     use std::path::PathBuf;

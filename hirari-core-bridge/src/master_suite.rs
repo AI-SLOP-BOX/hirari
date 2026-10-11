@@ -124,7 +124,12 @@ pub extern "C" fn hirari_master_suite_create(sample_rate: f64) -> *mut c_void {
         mid_side_enabled: AtomicBool::new(false),
         stereo_width_bits: AtomicU32::new(1.0_f32.to_bits()),
         dither_enabled: AtomicBool::new(false),
-        meter: crate::master_meter::hirari_master_meter_create(44_100.0),
+        // The meter follows the suite's own sample rate. It used to be pinned
+        // to 44.1 kHz here, which left the RMS ballistics (a 300 ms
+        // integration scaled by sample rate) and the analysis engine's
+        // frequency mapping wrong at 48 kHz and above, and a `prepare` that
+        // reconfigured the DSP without the meter locked the mismatch in.
+        meter: crate::master_meter::hirari_master_meter_create(sample_rate),
     }))
     .cast()
 }
@@ -145,6 +150,10 @@ pub unsafe extern "C" fn hirari_master_suite_prepare(handle: *mut c_void, sample
     let handle = unsafe { &*handle.cast::<MasterSuiteHandle>() };
     let dsp = unsafe { &mut *handle.dsp.get() };
     dsp.prepare_to_play(sample_rate);
+    // The meter carries its own sample-rate-dependent state (RMS integration
+    // time, analysis engine), so a prepare that skips it leaves the meter
+    // reporting for the rate it was created at.
+    unsafe { crate::master_meter::hirari_master_meter_prepare(handle.meter, sample_rate) };
 }
 
 #[no_mangle]
@@ -320,5 +329,107 @@ pub unsafe extern "C" fn hirari_master_suite_meter_goniometer(
             correlation,
             balance,
         )
+    }
+}
+
+#[cfg(test)]
+mod master_suite_tests {
+    use super::*;
+
+    const RMS_LEFT: u32 = 4;
+
+    /// Feeds a constant full-scale signal for `blocks` blocks and returns the
+    /// reported left RMS, in the same units the meter reports.
+    fn rms_after(sample_rate: f64, blocks: usize) -> f32 {
+        unsafe {
+            let handle = hirari_master_suite_create(sample_rate);
+            assert!(!handle.is_null());
+            // The suite's DSP must not clip the measurement away: leave every
+            // processor at its neutral default.
+            let mut left = vec![0.5_f32; 512];
+            let mut right = vec![0.5_f32; 512];
+            for _ in 0..blocks {
+                hirari_master_suite_process(
+                    handle,
+                    left.as_mut_ptr(),
+                    right.as_mut_ptr(),
+                    left.len(),
+                );
+            }
+            let value = hirari_master_suite_meter_value(handle, RMS_LEFT);
+            hirari_master_suite_destroy(handle);
+            value
+        }
+    }
+
+    #[test]
+    fn the_meter_follows_the_suite_sample_rate() {
+        // The RMS integrator is a 300 ms one-pole whose coefficient scales
+        // with the sample rate, so the same number of frames must converge to
+        // a different value at different rates. If the meter were pinned to
+        // 44.1 kHz both readings would be identical.
+        let at_44k = rms_after(44_100.0, 8);
+        let at_96k = rms_after(96_000.0, 8);
+        assert!(
+            (at_44k - at_96k).abs() > 1.0e-4,
+            "RMS ballistics must follow the sample rate: 44.1k={at_44k} 96k={at_96k}"
+        );
+        // The higher rate has seen less time for the same frame count, so it
+        // must have converged less, not more.
+        assert!(
+            at_96k.abs() < at_44k.abs(),
+            "96k has processed less wall-clock time: 44.1k={at_44k} 96k={at_96k}"
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_rate_still_falls_back_rather_than_silencing() {
+        // Both the suite and the meter clamp an unusable rate to their default,
+        // so an invalid rate must not produce a dead meter.
+        let value = rms_after(0.0, 4);
+        assert!(value.is_finite());
+    }
+
+    #[test]
+    fn prepare_reconfigures_the_meter_not_only_the_dsp() {
+        unsafe {
+            let handle = hirari_master_suite_create(44_100.0);
+            assert!(!handle.is_null());
+            let before = {
+                let mut left = vec![0.5_f32; 512];
+                let mut right = vec![0.5_f32; 512];
+                for _ in 0..8 {
+                    hirari_master_suite_process(
+                        handle,
+                        left.as_mut_ptr(),
+                        right.as_mut_ptr(),
+                        left.len(),
+                    );
+                }
+                hirari_master_suite_meter_value(handle, RMS_LEFT)
+            };
+            // Reconfigure to a rate that needs twice the frames for the same
+            // integration time, then measure again from a reset.
+            hirari_master_suite_prepare(handle, 96_000.0);
+            hirari_master_suite_reset(handle);
+            let after = {
+                let mut left = vec![0.5_f32; 512];
+                let mut right = vec![0.5_f32; 512];
+                for _ in 0..8 {
+                    hirari_master_suite_process(
+                        handle,
+                        left.as_mut_ptr(),
+                        right.as_mut_ptr(),
+                        left.len(),
+                    );
+                }
+                hirari_master_suite_meter_value(handle, RMS_LEFT)
+            };
+            hirari_master_suite_destroy(handle);
+            assert!(
+                (before - after).abs() > 1.0e-4,
+                "prepare must reconfigure the meter: before={before} after={after}"
+            );
+        }
     }
 }
