@@ -4,8 +4,8 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use crate::slint_ui::{AppWindow, CommandActions, Z_Track};
-use slint::{ComponentHandle, VecModel};
+use crate::slint_ui::{AppWindow, CommandActions, MidiActions, Z_Track};
+use slint::{ComponentHandle, Model, VecModel};
 
 pub(crate) fn install(
     ui: &AppWindow,
@@ -21,6 +21,10 @@ pub(crate) fn install(
     dawproject_import_queue: Arc<crate::ui::dawproject_import_queue::DawProjectImportQueue>,
 ) {
     let weak = ui.as_weak();
+    // The palette handler is a `move` closure and captures `tracks`, so the
+    // demo arrangement takes its own clone before that happens.
+    let write_demo_tracks = tracks.clone();
+    let write_demo_ui = ui.as_weak();
     ui.global::<CommandActions>()
         .on_palette_exec(move |raw_command| {
             let Some(ui) = weak.upgrade() else { return };
@@ -94,6 +98,81 @@ pub(crate) fn install(
                 ui.set_last_action(format!("COMMAND NOT AVAILABLE: {command}").into());
             }
         });
+
+    // The demo arrangement is data, not layout: sixty add_note calls in the
+    // Slint part made the toolbar file hit the repository's 600-line part
+    // limit and blocked every other change to it. Cloned up front because the
+    // palette handler below is a `move` closure and takes `tracks` with it.
+    ui.global::<CommandActions>().on_write_demo(move || {
+        if let Some(ui) = write_demo_ui.upgrade() {
+            // `global::<T>()` hands back the global by value, so it has to be
+            // bound before the arrangement helper can borrow it.
+            let midi = ui.global::<MidiActions>();
+            write_demo_arrangement(&midi, &write_demo_tracks);
+        }
+    });
+}
+
+/// Seeds the four-track demo arrangement.
+fn write_demo_arrangement(midi: &MidiActions, tracks: &Rc<VecModel<Z_Track>>) {
+    let seed = |track_index: usize, notes: &[(i32, f32, f32, i32)]| {
+        let Some(track) = tracks.row_data(track_index) else {
+            return;
+        };
+        for (pitch, beat, length, velocity) in notes {
+            midi.invoke_add_note(track.id, *pitch, *beat, *length, *velocity);
+        }
+    };
+    seed(
+        0,
+        &[
+            (60, 0.0, 4.0, 100),
+            (64, 4.0, 4.0, 96),
+            (67, 8.0, 4.0, 104),
+            (72, 12.0, 4.0, 100),
+        ],
+    );
+    seed(
+        1,
+        &[
+            (36, 0.0, 2.0, 108),
+            (36, 4.0, 2.0, 104),
+            (43, 8.0, 2.0, 106),
+            (41, 12.0, 2.0, 104),
+            (45, 16.0, 2.0, 106),
+            (43, 20.0, 2.0, 104),
+            (40, 24.0, 2.0, 106),
+            (43, 25.0, 2.0, 104),
+        ],
+    );
+    seed(
+        2,
+        &[
+            (48, 0.0, 4.0, 86),
+            (53, 4.0, 4.0, 86),
+            (55, 8.0, 4.0, 86),
+            (50, 12.0, 4.0, 86),
+        ],
+    );
+    seed(
+        3,
+        &[
+            (42, 13.0, 0.5, 76),
+            (38, 14.0, 0.5, 110),
+            (42, 15.0, 0.5, 76),
+            (36, 16.0, 0.5, 118),
+            (42, 17.0, 0.5, 76),
+            (38, 18.0, 0.5, 110),
+            (42, 19.0, 0.5, 76),
+            (36, 20.0, 0.5, 118),
+            (42, 21.0, 0.5, 76),
+            (38, 22.0, 0.5, 110),
+            (42, 23.0, 0.5, 76),
+            (36, 24.0, 0.5, 118),
+            (42, 25.0, 0.5, 76),
+            (38, 26.0, 0.5, 110),
+        ],
+    );
 }
 
 // Keep the test-only environment hook out of production binaries entirely.

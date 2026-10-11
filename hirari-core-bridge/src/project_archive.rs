@@ -26,7 +26,12 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// restorer to provision 128 TiB before any real work starts.
 const MAX_TOTAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_PROJECT_JSON_BYTES: u64 = 1024 * 1024 * 1024;
+/// Ceiling on the packaged project document. A 1 GiB cap let a crafted
+/// package ask for the whole buffer up front (`with_capacity` on the member
+/// size) and then cost several times that again as a `serde_json::Value`,
+/// which is what actually exhausted memory. 64 MiB is far above a real
+/// project document and keeps the whole read bounded.
+const MAX_PROJECT_JSON_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ArchiveEntry {
@@ -408,12 +413,14 @@ impl ProjectArchive {
         if project_member.size() > MAX_PROJECT_JSON_BYTES {
             bail!("archive project.json exceeds supported size");
         }
-        let mut project_bytes = Vec::with_capacity(project_member.size() as usize);
-        project_member
-            .take(MAX_PROJECT_JSON_BYTES + 1)
-            .read_to_end(&mut project_bytes)?;
-        let project: serde_json::Value =
-            serde_json::from_slice(&project_bytes).context("archive project.json is invalid")?;
+        // Parse straight off the bounded reader instead of materializing the
+        // bytes first: the Value is needed below anyway, so the raw buffer was
+        // pure extra peak memory on top of it.
+        let mut bounded = project_member.take(MAX_PROJECT_JSON_BYTES + 1);
+        let mut project_bytes = Vec::new();
+        bounded.read_to_end(&mut project_bytes)?;
+        let project: serde_json::Value = serde_json::from_slice(&project_bytes)
+            .context("archive project.json is invalid")?;
         verify_packaged_project_member_paths(&project, &manifest, &mut errors);
         errors.sort();
         errors.dedup();
