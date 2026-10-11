@@ -499,6 +499,17 @@ pub unsafe extern "C" fn hirari_spectral_processor_reduce_noise(
     for value in &mut profile {
         *value /= learned as f32;
     }
+    // Frames outside the time selection are skipped, so the per-sample scratch
+    // arrays stay zero there. Bound them (and the input view) to the span a
+    // qualifying frame can touch, exactly as the gain path does; the output
+    // write loop below then only has to cover that span too.
+    let first_offset =
+        ((t0 - time_feather) * sample_rate as f32 - (FFT_SIZE / 2) as f32).max(0.0);
+    let last_offset = ((t1 + time_feather) * sample_rate as f32 - (FFT_SIZE / 2) as f32)
+        + FFT_SIZE as f32;
+    let span_begin = (first_offset as usize).min(len);
+    let span_end = (last_offset as usize).max(span_begin).min(len);
+    let span = span_end - span_begin;
     for (channel, original) in originals.iter().enumerate() {
         let Some(input) = original else {
             continue;
@@ -506,8 +517,9 @@ pub unsafe extern "C" fn hirari_spectral_processor_reduce_noise(
         let Some(output) = channel_mut(channels, channel, len) else {
             continue;
         };
-        let mut delta = vec![0.0f32; len];
-        let mut norm = vec![0.0f32; len];
+        let input = &input[span_begin..span_end];
+        let mut delta = vec![0.0f32; span];
+        let mut norm = vec![0.0f32; span];
         for offset in (0..len).step_by(HOP) {
             let time = (offset + FFT_SIZE / 2) as f32 / sample_rate as f32;
             if time < t0 - time_feather || time > t1 + time_feather {
@@ -551,21 +563,26 @@ pub unsafe extern "C" fn hirari_spectral_processor_reduce_noise(
             }
             plan.inverse(&mut real, &mut imag);
             for i in 0..FFT_SIZE {
-                let Some(position) = offset.checked_add(i).filter(|p| *p < len) else {
+                let Some(position) = offset
+                    .checked_add(i)
+                    .filter(|p| *p < len && *p >= span_begin)
+                else {
                     break;
                 };
-                delta[position] += real[i] * window[i];
-                norm[position] += window[i] * window[i];
+                delta[position - span_begin] += real[i] * window[i];
+                norm[position - span_begin] += window[i] * window[i];
             }
         }
-        for i in 0..len {
-            let value = if norm[i] > 1.0e-6 {
-                delta[i] / norm[i]
+        // Outside the span the scratch stayed zero, so the original value is
+        // kept; inside it the reconstructed value wins when it is finite.
+        for (i, (delta, norm)) in delta.iter().zip(norm.iter()).enumerate() {
+            let value = if *norm > 1.0e-6 {
+                *delta / *norm
             } else {
-                output[i]
+                output[span_begin + i]
             };
             if value.is_finite() {
-                output[i] = value;
+                output[span_begin + i] = value;
             }
         }
     }
