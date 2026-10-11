@@ -17,24 +17,24 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(serde::Deserialize, serde::Serialize)]
-struct UiSettings {
-    project_path: String,
+pub(super) struct UiSettings {
+    pub(super) project_path: String,
     #[serde(default)]
-    recent_project_paths: Vec<String>,
+    pub(super) recent_project_paths: Vec<String>,
     #[serde(default)]
-    audio_library_path: String,
+    pub(super) audio_library_path: String,
     #[serde(default = "default_beginner_mode")]
-    beginner_mode: bool,
+    pub(super) beginner_mode: bool,
     #[serde(default)]
-    focus_mode: bool,
+    pub(super) focus_mode: bool,
     #[serde(default = "default_workspace_preset")]
-    workspace_preset: String,
+    pub(super) workspace_preset: String,
     #[serde(default)]
-    plugin_favorites: Vec<String>,
+    pub(super) plugin_favorites: Vec<String>,
     #[serde(default)]
-    onboarding_completed: bool,
+    pub(super) onboarding_completed: bool,
     #[serde(default)]
-    onboarding_step: u8,
+    pub(super) onboarding_step: u8,
 }
 
 fn default_beginner_mode() -> bool {

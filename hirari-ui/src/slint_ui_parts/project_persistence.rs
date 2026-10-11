@@ -994,8 +994,8 @@ mod tests {
         atomic_write_midi_sidecar, hydrate_project_models,
         load_project_transactionally_with_hydrator, load_project_transactionally_with_rollback,
         restore_latest_project_backup_transactionally, PersistedNote, ProjectLoadTransactionError,
-        UiSettings,
     };
+    use super::super::app_state::UiSettings;
     use slint::Model;
     use std::fs;
     use std::path::PathBuf;
@@ -1044,6 +1044,7 @@ mod tests {
     fn ui_settings_round_trip_preserves_mode_and_project_path() {
         let settings = UiSettings {
             project_path: "/tmp/song.hirari".into(),
+            recent_project_paths: Vec::new(),
             audio_library_path: String::new(),
             beginner_mode: false,
             focus_mode: true,
@@ -1068,6 +1069,7 @@ mod tests {
         ).unwrap();
         assert_eq!(legacy.vibrato_rate_millihz, 5000);
         let current = PersistedNote {
+            region_id: 0,
             pitch: 60,
             midi_channel: 0,
             start_beat: 0.0,
