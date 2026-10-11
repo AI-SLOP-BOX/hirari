@@ -50,8 +50,8 @@
                         Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: true; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
                         Z_IconButton { icon: "Scan Plugins"; compact: true; button-width: 82px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); } }
                         if (!audio_device_ready) : Z_IconButton { icon: "Reconnect"; compact: true; button-width: 64px; active-col: Style.record; clicked => { CommandActions.palette_exec("RECONNECT_AUDIO"); } }
-                        Z_IconButton { icon: "Audio Settings"; compact: true; button-width: 82px; clicked => { bot_view = 20; mx_open = true; pr_open = false; } }
-                        if (sandbox_failures > 0) : Z_IconButton { icon: "Plugin Issues " + sandbox_failures; compact: true; button-width: 104px; active-col: Style.record; clicked => { bot_view = 16; mx_open = true; pr_open = false; } }
+                        Z_IconButton { icon: "Audio Settings"; compact: true; button-width: 82px; clicked => { bot_view = ViewModes.preferences; mx_open = true; pr_open = false; } }
+                        if (sandbox_failures > 0) : Z_IconButton { icon: "Plugin Issues " + sandbox_failures; compact: true; button-width: 104px; active-col: Style.record; clicked => { bot_view = ViewModes.browser; mx_open = true; pr_open = false; } }
                         Text { text: buffer_size > 0 ? "Buffer: " + buffer_size : "Buffer: --"; font-size: 8px; color: Style.text-tertiary; }
                         Text { text: audio_sample_rate > 0.0 ? "SR: " + Math.round(audio_sample_rate) + " Hz" : "SR: --"; font-size: 8px; color: Style.text-tertiary; }
                         Text {
@@ -63,7 +63,7 @@
             }
         }
     }
-    if (bot_view == 19) : Rectangle {
+    if (bot_view == ViewModes.diagnostics) : Rectangle {
         // Keep the diagnostics surface below the production navigation bar.
         z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
         background: Style.surface-1; border-width: 1px; border-color: Style.border;
@@ -79,17 +79,17 @@
             range-overflow: root.diagnostic_range_overflow;
         }
     }
-    if (bot_view == 27) : Z_MoufuLinkPage { z: 12100; x: 0px; y: 66px; width: 100%; height: 488px; }
+    if (bot_view == ViewModes.moufu) : Z_MoufuLinkPage { z: 12100; x: 0px; y: 66px; width: 100%; height: 488px; }
     // These production pages use their real editors in the full arrangement
     // layout; this overlay keeps those same controls measurable in compact
     // workspace presets where the legacy bottom panel can collapse.
-    if (bot_view == 17) : Z_MidiLearnPage {
+    if (bot_view == ViewModes.midi) : Z_MidiLearnPage {
         z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
         status: root.midi_input_status;
         target-track-id: root.tracks.length > 0 && root.selected_row < root.tracks.length ? root.tracks[root.selected_row].id : -1;
         target-track-type: root.tracks.length > 0 && root.selected_row < root.tracks.length ? root.tracks[root.selected_row].type : "";
     }
-    if (bot_view == 18) : Z_MasteringPage {
+    if (bot_view == ViewModes.export) : Z_MasteringPage {
         z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
         gpu-waveform-image: root.gpu-waveform-image;
         gpu-spectrum-image: root.gpu-spectrum-image;
@@ -99,7 +99,7 @@
         rendering: root.is_rendering;
         status: root.is_rendering ? root.render_state : "READY TO EXPORT";
     }
-            if (bot_view == 16) : Rectangle {
+            if (bot_view == ViewModes.browser) : Rectangle {
         z: 12100; x: 0px; y: 66px; width: 100%; height: 488px;
         background: Style.surface-1; border-width: 1px; border-color: Style.border;
         VerticalLayout {
@@ -299,10 +299,10 @@
                     spacing: 8px;
                     if (beginner_guide_step == 0) : Z_IconButton { icon: "ADD TRACK"; button-width: 110px; clicked => { ProjectActions.add_track("AUDIO"); beginner_guide_step = 1; onboarding-progress-changed(false, 1); } }
                     if (beginner_guide_step == 1) : Z_IconButton { icon: "ADD AUDIO"; button-width: 100px; clicked => { CommandActions.palette_exec("IMPORT AUDIO"); beginner_guide_step = 2; onboarding-progress-changed(false, 2); } }
-                    if (beginner_guide_step == 2) : Z_IconButton { icon: "MIXER"; button-width: 90px; clicked => { bot_view = 0; mx_open = true; pr_open = false; beginner_guide_step = 3; onboarding-progress-changed(false, 3); } }
+                    if (beginner_guide_step == 2) : Z_IconButton { icon: "MIXER"; button-width: 90px; clicked => { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; beginner_guide_step = 3; onboarding-progress-changed(false, 3); } }
                     if (beginner_guide_step == 3) : Z_IconButton { icon: "SCAN PLUGINS"; button-width: 116px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); beginner_guide_step = 4; onboarding-progress-changed(false, 4); } }
-                    if (beginner_guide_step == 4) : Z_IconButton { icon: "MIDI"; button-width: 90px; clicked => { bot_view = 17; mx_open = true; pr_open = false; beginner_guide_step = 5; onboarding-progress-changed(false, 5); } }
-                    if (beginner_guide_step == 5) : Z_IconButton { icon: "AUTOMATION"; button-width: 112px; clicked => { bot_view = 13; mx_open = true; pr_open = false; beginner_guide_step = 6; onboarding-progress-changed(false, 6); } }
+                    if (beginner_guide_step == 4) : Z_IconButton { icon: "MIDI"; button-width: 90px; clicked => { bot_view = ViewModes.midi; mx_open = true; pr_open = false; beginner_guide_step = 5; onboarding-progress-changed(false, 5); } }
+                    if (beginner_guide_step == 5) : Z_IconButton { icon: "AUTOMATION"; button-width: 112px; clicked => { bot_view = ViewModes.automation; mx_open = true; pr_open = false; beginner_guide_step = 6; onboarding-progress-changed(false, 6); } }
                     if (beginner_guide_step == 6) : Z_IconButton { icon: "SAVE"; button-width: 90px; clicked => { CommandActions.palette_exec("SAVE PROJECT"); beginner_guide_open = false; onboarding-progress-changed(true, 6); } }
                     Rectangle { horizontal-stretch: 1; }
                     Z_IconButton { icon: beginner_guide_step < 6 ? "SKIP" : "DONE"; button-width: 70px; clicked => { beginner_guide_open = false; onboarding-progress-changed(true, beginner_guide_step); } }
@@ -413,7 +413,7 @@
     // Final visible arrangement surface. Keep it above legacy editor layers,
     // but below dialogs and recovery overlays so export/spotlight/modals can
     // always receive input when a project has many tracks.
-    if (root.tracks.length >= 1 && !show_arrange_surface && !mx_open && !pr_open && bot_view == 0) : Rectangle {
+    if (root.tracks.length >= 1 && !show_arrange_surface && !mx_open && !pr_open && bot_view == ViewModes.mixer) : Rectangle {
         width: 100%; height: 100%; z: 100; clip: true; background: transparent;
         Rectangle {
             x: 0px; y: 0px; width: 100%; height: 32px; background: #202226; border-width: 1px; border-color: Style.border;
@@ -427,26 +427,26 @@
                 padding-left: 8px; padding-right: 8px; spacing: 4px;
                 Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: false; button-width: 54px; clicked => { TransportActions.toggle_play(); } }
                 Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: false; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
-                // `bot_view = 0` is the MIXER panel (see the declaration in
+                // `bot_view = ViewModes.mixer` is the MIXER panel (see the declaration in
                 // app_window.slint). This used to be a separate "Editor" button
                 // that set the same state and lit up alongside "Mixer", so the
                 // label did not match the destination. The arrange surface above
                 // is the editor; this toolbar controls the bottom panel only.
-                Z_IconButton { icon: "Piano Roll"; compact: false; button-width: 74px; active: bot_view == 2; clicked => { bot_view = 2; mx_open = true; pr_open = true; } }
-                Z_IconButton { icon: "Mixer"; compact: false; button-width: 60px; active: bot_view == 0; clicked => { bot_view = 0; mx_open = true; pr_open = false; } }
-                Z_IconButton { icon: "Smart Controls"; compact: false; button-width: 92px; active: bot_view == 10; clicked => { bot_view = 10; mx_open = true; pr_open = false; } }
-                if (!production_mode) : Z_IconButton { icon: "Live Loops"; compact: false; button-width: 76px; active: bot_view == 11; clicked => { bot_view = 11; mx_open = true; pr_open = false; } }
-                if (!production_mode) : Z_IconButton { icon: "Step Seq"; compact: false; button-width: 68px; active: bot_view == 25; clicked => { bot_view = 25; mx_open = true; pr_open = false; if (tracks.length > 0 && selected_row < tracks.length) { StepActions.load_pattern(tracks[selected_row].id); } } }
-                if (!production_mode) : Z_IconButton { icon: "Score"; compact: false; button-width: 56px; active: bot_view == 8; clicked => { bot_view = 8; mx_open = true; pr_open = false; } }
-                if (!production_mode) : Z_IconButton { icon: "Audio"; compact: false; button-width: 56px; active: bot_view == 1; clicked => { bot_view = 1; mx_open = true; pr_open = false; } }
+                Z_IconButton { icon: "Piano Roll"; compact: false; button-width: 74px; active: bot_view == ViewModes.piano_roll; clicked => { bot_view = ViewModes.piano_roll; mx_open = true; pr_open = true; } }
+                Z_IconButton { icon: "Mixer"; compact: false; button-width: 60px; active: bot_view == ViewModes.mixer; clicked => { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; } }
+                Z_IconButton { icon: "Smart Controls"; compact: false; button-width: 92px; active: bot_view == ViewModes.smart_controls; clicked => { bot_view = ViewModes.smart_controls; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: "Live Loops"; compact: false; button-width: 76px; active: bot_view == ViewModes.loops; clicked => { bot_view = ViewModes.loops; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: "Step Seq"; compact: false; button-width: 68px; active: bot_view == ViewModes.steps; clicked => { bot_view = ViewModes.steps; mx_open = true; pr_open = false; if (tracks.length > 0 && selected_row < tracks.length) { StepActions.load_pattern(tracks[selected_row].id); } } }
+                if (!production_mode) : Z_IconButton { icon: "Score"; compact: false; button-width: 56px; active: bot_view == ViewModes.score; clicked => { bot_view = ViewModes.score; mx_open = true; pr_open = false; } }
+                if (!production_mode) : Z_IconButton { icon: "Audio"; compact: false; button-width: 56px; active: bot_view == ViewModes.audio_editor; clicked => { bot_view = ViewModes.audio_editor; mx_open = true; pr_open = false; } }
                 // Keep the vocal workflow reachable in the production overlay.
                 // The legacy secondary navigation exposes this destination, but
                 // the track-count overlay is the surface used by real projects.
                 Z_IconButton { icon: "Vocal / OpenUtau"; compact: false; button-width: 116px; active: bot_view == ViewModes.openutau; active-col: Style.brand; clicked => { bot_view = ViewModes.openutau; mx_open = true; pr_open = false; } }
                 Z_IconButton { icon: "Scan Plugins"; compact: false; button-width: 92px; active-col: Style.brand; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); } }
-                Z_IconButton { icon: "Browser"; compact: false; button-width: 66px; active: bot_view == 16; clicked => { bot_view = 16; mx_open = true; pr_open = false; } }
-                Z_IconButton { icon: "Export"; compact: false; button-width: 58px; active: bot_view == 18; clicked => { bot_view = 18; mx_open = true; pr_open = false; export_open = true; } }
-                Z_IconButton { icon: "Diag"; compact: false; button-width: 58px; active: bot_view == 19; clicked => { bot_view = 19; mx_open = true; pr_open = false; } }
+                Z_IconButton { icon: "Browser"; compact: false; button-width: 66px; active: bot_view == ViewModes.browser; clicked => { bot_view = ViewModes.browser; mx_open = true; pr_open = false; } }
+                Z_IconButton { icon: "Export"; compact: false; button-width: 58px; active: bot_view == ViewModes.export; clicked => { bot_view = ViewModes.export; mx_open = true; pr_open = false; export_open = true; } }
+                Z_IconButton { icon: "Diag"; compact: false; button-width: 58px; active: bot_view == ViewModes.diagnostics; clicked => { bot_view = ViewModes.diagnostics; mx_open = true; pr_open = false; } }
                 // Saving must remain discoverable in production mode. The
                 // keyboard shortcut and command palette are not reliable
                 // entry points for a first-time project with no path yet.
@@ -499,7 +499,7 @@
             diagnostic: root.audio_diagnostic;
             busy: root.is_ply || root.is_rec;
         }
-        if (bot_view == 0 && root.tracks.length >= 4) : Rectangle {
+        if (bot_view == ViewModes.mixer && root.tracks.length >= 4) : Rectangle {
         x: ins_open ? Style.inspector-w : 0px; y: 205px;
         width: parent.width - (ins_open ? Style.inspector-w : 0px);
         height: 192px; clip: true; background: transparent; ScrollView { width: 100%; height: 100%;
@@ -539,7 +539,7 @@
                 }
             }
         } } } }
-        if (bot_view == 2 && root.tracks.length > 0) : Rectangle {
+        if (bot_view == ViewModes.piano_roll && root.tracks.length > 0) : Rectangle {
             x: 0px; y: 34px; width: 100%; height: 520px; z: 5; background: Style.surface-1; border-width: 1px; border-color: Style.border; clip: true;
             Text { text: "Piano Roll  |  Track " + (root.sel_idx + 1); x: 12px; y: 8px; font-size: 11px; color: Style.text; font-weight: 700; }
             Text { text: "Click the grid to add notes  ·  Snap " + root.snap_val; x: 190px; y: 9px; font-size: 9px; color: Style.text-muted; }

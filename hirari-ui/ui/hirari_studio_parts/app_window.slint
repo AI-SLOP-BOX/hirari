@@ -57,31 +57,7 @@ import { Z_OpenUtauEditor } from "./editor/openutau_editor.slint";
 import { Z_ExtensionBrowser } from "extensions/extension_browser.slint";
 import { Z_ArrangeDock } from "./arrange_dock.slint";
 import { Z_MoufuLinkPage } from "moufu_link_page.slint";
-// Stable view identifiers shared by menus, bottom navigation, and rendered
-// panels. Keep numeric values compatible with the Rust bridge.
-export global ViewModes {
-    in property<int> mixer: 0;
-    in property<int> audio_editor: 1;
-    in property<int> piano_roll: 2;
-    in property<int> console: 9;
-    in property<int> smart_controls: 10;
-    in property<int> loops: 11;
-    in property<int> drums: 12;
-    in property<int> automation: 13;
-    in property<int> project: 14;
-    in property<int> setup: 15;
-    in property<int> browser: 16;
-    in property<int> midi: 17;
-    in property<int> export: 18;
-    in property<int> diagnostics: 19;
-    in property<int> preferences: 20;
-    in property<int> flex: 21;
-    in property<int> comp: 22;
-    in property<int> stacks: 23;
-    in property<int> global: 24;
-    in property<int> steps: 25;
-    in property<int> openutau: 26;
-}
+import { ViewModes } from "./navigation/view_modes.slint";
 import { Z_WorkflowPage, Z_MidiLearnPage, Z_StepSequencerPage, Z_TrackStackPage, Z_GlobalTracksPage, Z_FlexPitchPage, Z_CompingPage } from "./pages/workflow_pages.slint";
 import { Z_MasteringPage } from "./pages/mastering_page.slint";
 import { Z_Meter } from "./primitives/meter.slint";
@@ -153,7 +129,7 @@ export component AppWindow inherits Window {
     // signal to assert before sampling the window.
     in property <bool> project_surface_ready: tracks.length > 0 && !show_genesis;
     property <bool> show_arrange_surface: tracks.length > 0 && workspace_preset == "arrange" && !mx_open && !pr_open && !show_genesis;
-    in-out property <bool> mx_open: false; in-out property <int> bot_view: 0; // 0: MIXER, 1: AUDIO_EDITOR, 2: PIANO_ROLL
+    in-out property <bool> mx_open: false; in-out property <int> bot_view: ViewModes.mixer; // 0: MIXER, 1: AUDIO_EDITOR, 2: PIANO_ROLL
     in property <string> midi_input_status: "MIDI INPUT OFF";
     in-out property <[bool]> sequencer_step_states: []; in-out property <int> sequencer_unmapped_note_count: 0;
     in-out property <[int]> sequencer_step_velocities: [];
@@ -497,21 +473,25 @@ export component AppWindow inherits Window {
                 Image { source: @image-url("assets/hirari-logo.svg"); width: 26px; height: 26px; }
             }
             Text { text: "Hirari"; width: 62px; font-size: 15px; color: Style.text; font-weight: 700; vertical-alignment: center; }
-            for m in ["File", "Edit", "Track", "Mix", "Plugin", "Window", "Help", "Moufu"] : Rectangle {
+            for m in ["Project", "Automation", "Stacks", "Mix", "Plugins", "Prefs", "Diagnostics", "Moufu"] : Rectangle {
                 width: 50px; height: 30px; border-radius: 5px;
                 background: menu_area.has-hover ? Style.panel-h : transparent;
                 Text { text: m; width: 100%; height: 100%; font-size: 9px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
                 menu_area := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
-                        if (m == "File") { bot_view = 14; mx_open = true; pr_open = false; }
-                        if (m == "Edit") { bot_view = 13; mx_open = true; pr_open = false; }
-                        if (m == "Track") { bot_view = 23; mx_open = true; pr_open = false; }
-                        if (m == "Mix") { bot_view = 0; mx_open = true; pr_open = false; }
-                        if (m == "Plugin") { CommandActions.palette_exec("SCAN PLUGINS"); bot_view = 16; mx_open = true; pr_open = false; }
-                        if (m == "Window") { bot_view = 20; mx_open = true; pr_open = false; }
-                        if (m == "Help") { bot_view = 19; mx_open = true; pr_open = false; }
-                        if (m == "Moufu") { bot_view = 27; mx_open = true; pr_open = false; MoufuActions.refresh(); }
+                        // Each label names the view it actually opens. These used
+                        // to read "File / Edit / Track / Window / Help", which
+                        // promised DAW menu behavior and delivered a navigation
+                        // jump instead; every mismatch is now spelled out.
+                        if (m == "Project") { bot_view = ViewModes.project; mx_open = true; pr_open = false; }
+                        if (m == "Automation") { bot_view = ViewModes.automation; mx_open = true; pr_open = false; }
+                        if (m == "Stacks") { bot_view = ViewModes.stacks; mx_open = true; pr_open = false; }
+                        if (m == "Mix") { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; }
+                        if (m == "Plugins") { CommandActions.palette_exec("SCAN PLUGINS"); bot_view = ViewModes.browser; mx_open = true; pr_open = false; }
+                        if (m == "Prefs") { bot_view = ViewModes.preferences; mx_open = true; pr_open = false; }
+                        if (m == "Diagnostics") { bot_view = ViewModes.diagnostics; mx_open = true; pr_open = false; }
+                        if (m == "Moufu") { bot_view = ViewModes.moufu; mx_open = true; pr_open = false; MoufuActions.refresh(); }
                     }
                 }
             }
@@ -586,7 +566,7 @@ export component AppWindow inherits Window {
         clip-move-commit(clip_id, delta) => { EditorActions.clip_moved(clip_id, delta); }
         clip-trim-commit(clip_id, trim_left, delta_beats) => { EditorActions.trim_clip_by_beats(clip_id, trim_left, delta_beats); }
     }
-    if (mx_open && bot_view == 0) : Z_FullMixer {
+    if (mx_open && bot_view == ViewModes.mixer) : Z_FullMixer {
         x: 0px; y: 42px; width: parent.width; height: parent.height - 42px; horizontal-stretch: 1; vertical-stretch: 1; z: 3000;
         tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode; input_channels: root.audio_input_channel_count; input_channel_names: root.audio_input_channel_names;
         gpu-meter-image: root.gpu-meter-image; gpu-spectrum-image: root.gpu-spectrum-image;

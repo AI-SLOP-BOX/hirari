@@ -506,4 +506,4 @@
                                         }
                                     }
                                 }
-                        if (bot_view == 6) : Z_StageViewCore { tracks: root.tracks; pan-3d-moved(id, x, y, z) => { SpatialActions.pan_3d_moved(id, x, y, z); } }
+                        if (bot_view == ViewModes.stage) : Z_StageViewCore { tracks: root.tracks; pan-3d-moved(id, x, y, z) => { SpatialActions.pan_3d_moved(id, x, y, z); } }

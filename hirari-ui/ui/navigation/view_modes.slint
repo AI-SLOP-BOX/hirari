@@ -1,0 +1,37 @@
+// Stable view identifiers shared by menus, bottom navigation, and rendered
+// panels. Keep numeric values compatible with the Rust bridge.
+//
+// This lives in its own file so every call site can name the view it opens.
+// While the identifiers were inline in app_window.slint, that part sat at the
+// repository's 600-line ceiling and no call site could be converted from a
+// bare number to a name.
+export global ViewModes {
+    in property<int> mixer: 0;
+    in property<int> audio_editor: 1;
+    in property<int> piano_roll: 2;
+    in property<int> sound_design: 3;
+    in property<int> routing: 4;
+    in property<int> synth: 5;
+    in property<int> stage: 6;
+    in property<int> console_full: 7;
+    in property<int> score: 8;
+    in property<int> console: 9;
+    in property<int> smart_controls: 10;
+    in property<int> loops: 11;
+    in property<int> drums: 12;
+    in property<int> automation: 13;
+    in property<int> project: 14;
+    in property<int> setup: 15;
+    in property<int> browser: 16;
+    in property<int> midi: 17;
+    in property<int> export: 18;
+    in property<int> diagnostics: 19;
+    in property<int> preferences: 20;
+    in property<int> flex: 21;
+    in property<int> comp: 22;
+    in property<int> stacks: 23;
+    in property<int> global: 24;
+    in property<int> steps: 25;
+    in property<int> openutau: 26;
+    in property<int> moufu: 27;
+}

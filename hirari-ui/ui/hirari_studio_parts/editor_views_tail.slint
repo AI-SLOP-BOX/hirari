@@ -16,7 +16,7 @@
                             import-render => { CommandActions.palette_exec("OPENUTAU IMPORT RENDER"); }
                             apply-tuning => { CommandActions.palette_exec("OPENUTAU APPLY TUNING"); }
                         }
-                        if (bot_view == 1 && !production_mode && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_SampleEditorAdapter {
+                        if (bot_view == ViewModes.audio_editor && !production_mode && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_SampleEditorAdapter {
                             gpu-waveform-image: root.gpu-waveform-image;
                             gpu-spectrum-image: root.gpu-spectrum-image;
                             samples: root.is_rec ? root.recording_waveform : [];
@@ -79,7 +79,7 @@
                             declick-waveform => { if (root.sel_cid >= 0) { EditorActions.declick_waveform(root.sel_cid); } } stereo-width-waveform => { if (root.sel_cid >= 0) { EditorActions.stereo_width_waveform(root.sel_cid); } } detect-transients-waveform => { if (root.sel_cid >= 0) { EditorActions.detect_transients_waveform(root.sel_cid); } }
                             mute-selection => { if (root.sel_cid >= 0) { EditorActions.mute_selection(root.sel_cid); } } normalize-selection-peak => { if (root.sel_cid >= 0) { EditorActions.normalize_selection_peak(root.sel_cid); } } normalize-selection-rms => { if (root.sel_cid >= 0) { EditorActions.normalize_selection_rms(root.sel_cid); } }
                         }
-                        if (bot_view == 2 && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_PianoRollView {
+                        if (bot_view == ViewModes.piano_roll && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_PianoRollView {
                             trk_id: root.tracks[root.selected_row].id;
                             track-number: root.selected_row;
                             ui_timer: ui_timer;
@@ -113,7 +113,7 @@
                             import-expression-map-pro => { MidiActions.import_expression_map_pro(root.tracks[root.selected_row].id) }
                             set-lyric(pitch, beat, lyric) => { MidiActions.set_note_lyric(root.tracks[root.selected_row].id, pitch, beat, lyric); }
                         }
-                        if (bot_view == 3) : Rectangle {
+                        if (bot_view == ViewModes.sound_design) : Rectangle {
                             background: Style.surface;
                             HorizontalLayout {
                                 padding: 12px; spacing: 16px;
@@ -206,7 +206,7 @@
                                 }
                             }
                         }
-                        if (bot_view == 4) : Rectangle {
+                        if (bot_view == ViewModes.routing) : Rectangle {
                             background: Style.surface;
                             VerticalLayout {
                                 padding: 20px; spacing: 12px;
@@ -336,17 +336,17 @@
                                 Text { text: "ROUTING ACTIVE | SAMPLE-ACCURATE PROCESSING"; font-size: Style.font-xxs; color: #333; horizontal-alignment: center; }
                             }
                         }
-                        if (bot_view == 5) : Z_HirariSynth { accent-col: Style.brand; ui_timer: root.ui_timer; gpu-waveform-image: root.gpu-waveform-image; gpu-spectrum-image: root.gpu-spectrum-image; parameter-changed(index, value) => { PluginActions.macro_changed(index, value); } engine-changed(index) => { PluginActions.set_synth_engine(index); } }
-                        if (bot_view == 6) : HorizontalLayout {
+                        if (bot_view == ViewModes.synth) : Z_HirariSynth { accent-col: Style.brand; ui_timer: root.ui_timer; gpu-waveform-image: root.gpu-waveform-image; gpu-spectrum-image: root.gpu-spectrum-image; parameter-changed(index, value) => { PluginActions.macro_changed(index, value); } engine-changed(index) => { PluginActions.set_synth_engine(index); } }
+                        if (bot_view == ViewModes.stage) : HorizontalLayout {
                             Z_StageViewCore { tracks: root.tracks; pan-3d-moved(id, x, y, z) => { SpatialActions.pan_3d_moved(id, x, y, z); } }
                         }
-                        if (bot_view == 7) : Z_FullMixer {
+                        if (bot_view == ViewModes.console_full) : Z_FullMixer {
                             input_channels: root.audio_input_channel_count;
                             tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode;
                             gpu-meter-image: root.gpu-meter-image; gpu-spectrum-image: root.gpu-spectrum-image;
                             close => { root.mx_open = false; }
                         }
-                        if (bot_view == 8 && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_NotationHubView {
+                        if (bot_view == ViewModes.score && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_NotationHubView {
                             notes: root.tracks[selected_row].piano_roll_notes;
                             track-id: root.tracks[selected_row].id;
                             project-changed => { project_save_status = "Unsaved changes"; }

@@ -1,10 +1,10 @@
-                        if (bot_view == 7) : Z_FullMixer {
+                        if (bot_view == ViewModes.console_full) : Z_FullMixer {
                             input_channels: root.audio_input_channel_count;
                             tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode;
                             gpu-meter-image: root.gpu-meter-image; gpu-spectrum-image: root.gpu-spectrum-image;
                             close => { mx_open = false; }
                         }
-                        if (bot_view == 8 && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_NotationHubView {
+                        if (bot_view == ViewModes.score && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_NotationHubView {
                             notes: root.tracks[selected_row].piano_roll_notes;
                             track-id: root.tracks[selected_row].id;
                             project-changed => { project_save_status = "Unsaved changes"; }
@@ -34,10 +34,10 @@
                 // the old `< 4 tracks` shortcut left a stale arrangement
                 // frame visible as soon as a template had four or more lanes.
                 // The full mixer is mounted by the primary editor surface when
-                // bot_view == 7. Do not instantiate the legacy bottom panel as
+                // bot_view == ViewModes.console_full. Do not instantiate the legacy bottom panel as
                 // well, otherwise both trees draw meters and controls on top of
                 // each other during a view switch.
-                if ((mx_open || pr_open) && bot_view != 7) : Rectangle {
+                if ((mx_open || pr_open) && bot_view != ViewModes.console_full) : Rectangle {
                     height: 300px; background: Style.panel;
                     Rectangle { y: 0; height: 2px; background: #000; width: 100%; }
                     VerticalLayout {
@@ -59,7 +59,7 @@
                                         if (production_mode) : Z_IconButton { icon: "Project"; active: bot_view == ViewModes.project; clicked => { bot_view = ViewModes.project; mx_open = true; pr_open = false; } }
                                         if (!production_mode) : Z_IconButton { icon: "Audio"; active: bot_view == ViewModes.audio_editor; clicked => { bot_view = ViewModes.audio_editor; mx_open = true; pr_open = false; } }
                                         if (!production_mode) : Z_IconButton { icon: "Smart"; active: bot_view == ViewModes.smart_controls; clicked => { bot_view = ViewModes.smart_controls; mx_open = true; pr_open = false; } }
-                                        Z_IconButton { icon: "Diag"; active: bot_view == 19; clicked => { bot_view = 19; mx_open = true; pr_open = false; } }
+                                        Z_IconButton { icon: "Diag"; active: bot_view == ViewModes.diagnostics; clicked => { bot_view = ViewModes.diagnostics; mx_open = true; pr_open = false; } }
                                         if (!production_mode) : Z_IconButton { icon: more_views_open ? "Less" : "More"; compact: true; active: more_views_open; clicked => { more_views_open = !more_views_open; } }
                                     }
                                 }
@@ -69,43 +69,43 @@
                                         viewport-height: 28px;
                                         HorizontalLayout {
                                             padding-left: 10px; padding-right: 10px; spacing: 4px;
-                                            Z_IconButton { icon: "Score"; active: bot_view == 8; clicked => { bot_view = 8; mx_open = true; pr_open = false; } }
-                                            if (!production_mode) : Z_IconButton { icon: "Loops"; active: bot_view == 11; clicked => { bot_view = 11; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Drums"; active: bot_view == 12; clicked => { bot_view = 12; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Auto"; active: bot_view == 13; clicked => { bot_view = 13; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Project"; active: bot_view == 14; clicked => { bot_view = 14; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Setup"; active: bot_view == 15; clicked => { bot_view = 15; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "MIDI"; active: bot_view == 17; clicked => { bot_view = 17; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Score"; active: bot_view == ViewModes.score; clicked => { bot_view = ViewModes.score; mx_open = true; pr_open = false; } }
+                                            if (!production_mode) : Z_IconButton { icon: "Loops"; active: bot_view == ViewModes.loops; clicked => { bot_view = ViewModes.loops; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Drums"; active: bot_view == ViewModes.drums; clicked => { bot_view = ViewModes.drums; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Auto"; active: bot_view == ViewModes.automation; clicked => { bot_view = ViewModes.automation; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Project"; active: bot_view == ViewModes.project; clicked => { bot_view = ViewModes.project; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Setup"; active: bot_view == ViewModes.setup; clicked => { bot_view = ViewModes.setup; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "MIDI"; active: bot_view == ViewModes.midi; clicked => { bot_view = ViewModes.midi; mx_open = true; pr_open = false; } }
                                             Z_IconButton { icon: "Vocal"; active: bot_view == ViewModes.openutau; clicked => { bot_view = ViewModes.openutau; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Export"; active: bot_view == 18; clicked => { bot_view = 18; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Diag"; active: bot_view == 19; clicked => { bot_view = 19; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Prefs"; active: bot_view == 20; clicked => { bot_view = 20; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Flex"; active: bot_view == 21; clicked => { bot_view = 21; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Comp"; active: bot_view == 22; clicked => { bot_view = 22; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Stacks"; active: bot_view == 23; clicked => { bot_view = 23; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Global"; active: bot_view == 24; clicked => { bot_view = 24; mx_open = true; pr_open = false; } }
-                                            Z_IconButton { icon: "Steps"; active: bot_view == 25; clicked => { bot_view = 25; mx_open = true; pr_open = false; if (tracks.length > 0 && selected_row < tracks.length) { StepActions.load_pattern(tracks[selected_row].id); } } }
-                                            if (!production_mode) : Z_IconButton { icon: "Diagnostics"; active: bot_view == 9; clicked => { bot_view = 9; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Export"; active: bot_view == ViewModes.export; clicked => { bot_view = ViewModes.export; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Diag"; active: bot_view == ViewModes.diagnostics; clicked => { bot_view = ViewModes.diagnostics; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Prefs"; active: bot_view == ViewModes.preferences; clicked => { bot_view = ViewModes.preferences; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Flex"; active: bot_view == ViewModes.flex; clicked => { bot_view = ViewModes.flex; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Comp"; active: bot_view == ViewModes.comp; clicked => { bot_view = ViewModes.comp; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Stacks"; active: bot_view == ViewModes.stacks; clicked => { bot_view = ViewModes.stacks; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Global"; active: bot_view == ViewModes.global; clicked => { bot_view = ViewModes.global; mx_open = true; pr_open = false; } }
+                                            Z_IconButton { icon: "Steps"; active: bot_view == ViewModes.steps; clicked => { bot_view = ViewModes.steps; mx_open = true; pr_open = false; if (tracks.length > 0 && selected_row < tracks.length) { StepActions.load_pattern(tracks[selected_row].id); } } }
+                                            if (!production_mode) : Z_IconButton { icon: "Diagnostics"; active: bot_view == ViewModes.console; clicked => { bot_view = ViewModes.console; mx_open = true; pr_open = false; } }
                                         }
                                     }
                                 }
                                 Text { text: production_mode ? "BEGINNER" : "ADVANCED"; font-size: 8px; color: production_mode ? Style.text-secondary : Style.brand; vertical-alignment: center; }
-                                Z_IconButton { icon: production_mode ? "ADVANCED" : "BEGINNER"; compact: true; button-width: 76px; active: !production_mode; clicked => { production_mode = !production_mode; more_views_open = !production_mode; experience-mode-changed(production_mode); if (production_mode && (bot_view == 1 || bot_view == 11)) { bot_view = 0; } } }
+                                Z_IconButton { icon: production_mode ? "ADVANCED" : "BEGINNER"; compact: true; button-width: 76px; active: !production_mode; clicked => { production_mode = !production_mode; more_views_open = !production_mode; experience-mode-changed(production_mode); if (production_mode && (bot_view == ViewModes.audio_editor || bot_view == ViewModes.loops)) { bot_view = ViewModes.mixer; } } }
                                 Text { text: focus_mode ? "FOCUS" : "FULL"; font-size: 8px; color: focus_mode ? Style.brand : Style.text-secondary; vertical-alignment: center; }
-                                Z_IconButton { icon: focus_mode ? "FULL VIEW" : "FOCUS"; compact: true; button-width: 68px; active: focus_mode; clicked => { focus_mode = !focus_mode; focus-mode-changed(focus_mode); if (focus_mode) { bot_view = 0; mx_open = false; pr_open = false; } } }
+                                Z_IconButton { icon: focus_mode ? "FULL VIEW" : "FOCUS"; compact: true; button-width: 68px; active: focus_mode; clicked => { focus_mode = !focus_mode; focus-mode-changed(focus_mode); if (focus_mode) { bot_view = ViewModes.mixer; mx_open = false; pr_open = false; } } }
                                 Z_IconButton { icon: workspace_preset == "arrange" ? "ARRANGE" : (workspace_preset == "mix" ? "MIX" : (workspace_preset == "vocal" ? "VOCAL" : "SOUND")); compact: true; button-width: 76px; clicked => {
                                     workspace_preset = workspace_preset == "arrange" ? "mix" : (workspace_preset == "mix" ? "vocal" : (workspace_preset == "vocal" ? "sound_design" : "arrange"));
-                                    if (workspace_preset == "arrange") { bot_view = 0; mx_open = false; pr_open = false; }
-                                    if (workspace_preset == "mix") { bot_view = 0; mx_open = true; pr_open = false; }
-                                    if (workspace_preset == "vocal") { bot_view = 8; mx_open = true; pr_open = false; }
-                                    if (workspace_preset == "sound_design") { bot_view = 3; mx_open = true; pr_open = false; }
+                                    if (workspace_preset == "arrange") { bot_view = ViewModes.mixer; mx_open = false; pr_open = false; }
+                                    if (workspace_preset == "mix") { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; }
+                                    if (workspace_preset == "vocal") { bot_view = ViewModes.score; mx_open = true; pr_open = false; }
+                                    if (workspace_preset == "sound_design") { bot_view = ViewModes.sound_design; mx_open = true; pr_open = false; }
                                     workspace-preset-changed(workspace_preset);
                                 } }
                                 if (production_mode) : Z_IconButton { icon: "GUIDE"; compact: true; button-width: 52px; clicked => { beginner_guide_open = true; } }
                                 Z_IconButton { icon: "X"; compact: true; clicked => { mx_open = false; pr_open = false; } }
                             }
                         }
-                        if (bot_view == 9) : Rectangle {
+                        if (bot_view == ViewModes.console) : Rectangle {
                             background: Style.surface;
                             VerticalLayout {
                                 padding: 12px; spacing: 8px;
@@ -125,7 +125,7 @@
                                 Text { text: "Memory usage is not reported by the current engine."; font-size: Style.font-xxs; color: Style.text-tertiary; font-family: Style.numeric-font; }
                             }
                         }
-                        if (bot_view == 0) : HorizontalLayout {
+                        if (bot_view == ViewModes.mixer) : HorizontalLayout {
                             // Scrollable Track Statically Assigned Strips
                             ScrollView {
                                 horizontal-stretch: 1;
@@ -200,37 +200,37 @@
                                 }
                             }
                         }
-                        if (bot_view == 10 && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_SmartControls {
+                        if (bot_view == ViewModes.smart_controls && root.tracks.length > 0 && root.selected_row < root.tracks.length) : Z_SmartControls {
                             track_name: root.tracks[selected_row].name;
                             values: root.track_macros;
                             changed(idx, value) => { PluginActions.macro_changed(idx, value); }
                         }
-                        if (bot_view == 11) : Z_WorkflowPage {
+                        if (bot_view == ViewModes.loops) : Z_WorkflowPage {
                             title: "Live Session";
                             subtitle: "Live Loops";
                             status: "CLIP LAUNCH NOT CONNECTED";
                             guidance: "This project does not yet have a playable clip-launch grid. The numbered cells and launch states are hidden until they can trigger real project clips.";
                         }
-                        if (bot_view == 12) : Z_WorkflowPage {
+                        if (bot_view == ViewModes.drums) : Z_WorkflowPage {
                             title: "Drum Pads";
                             subtitle: "Drum sampler";
                             status: "PAD-TO-SAMPLER ROUTING NOT CONNECTED";
                             guidance: "Pad triggers are not connected to the sampler and MIDI recording path yet. Use the Step Sequencer for MIDI patterns.";
                         }
-                        if (bot_view == 13) : Z_WorkflowPage {
+                        if (bot_view == ViewModes.automation) : Z_WorkflowPage {
                             title: "Automation";
                             subtitle: "Automation lanes in the arrangement";
                             status: root.tracks.length > 0 ? "SELECT A TRACK AND SHOW ITS LANES" : "CREATE A TRACK";
                             guidance: "Automation editing is available directly on the timeline. Select a track and use its A control to show volume, pan, and available effect lanes.";
                         }
-                        if (bot_view == 14) : Z_ProjectRecovery {
+                        if (bot_view == ViewModes.project) : Z_ProjectRecovery {
                             project-path: root.project-path;
                             backup-count: root.recovery-backup-count;
                             backup-summary: root.recovery-backup-summary;
                             backup-generations: root.recovery-backup-generations;
                             status: root.last_action;
                         }
-                        if (bot_view == 15 || bot_view == 20) : Z_AudioSettings {
+                        if (bot_view == ViewModes.setup || bot_view == ViewModes.preferences) : Z_AudioSettings {
                             ready: root.audio_device_ready;
                             device-catalog: root.audio_device_catalog;
                             device-names: root.audio_device_names; device-indices: root.audio_device_indices; device-query: root.audio_device_query;
@@ -240,11 +240,11 @@
                             diagnostic: root.audio_diagnostic;
                             busy: root.is_ply || root.is_rec;
                         }
-                        if (bot_view == 16) : Z_LibraryPage {
+                        if (bot_view == ViewModes.browser) : Z_LibraryPage {
                             entries: root.sample_entries;
                             preview(path) => { BrowserActions.browser_preview(path); }
                         }
-                        if (bot_view == 19) : Z_DiagnosticsPage {
+                        if (bot_view == ViewModes.diagnostics) : Z_DiagnosticsPage {
                             engine-state: root.diagnostic_state;
                             cpu-load: root.diagnostic_load;
                             dropped-blocks: root.input_dropped_blocks;
@@ -254,7 +254,7 @@
                             pdc-status: root.diagnostic_pdc;
                             range-overflow: root.diagnostic_range_overflow;
                         }
-                        if (bot_view == 21) : Z_FlexPitchPage {
+                        if (bot_view == ViewModes.flex) : Z_FlexPitchPage {
                             selected-clip-id: root.sel_cid;
                             selected-clip-editable: root.sel_cid >= 0 && root.sel_idx >= 0 && root.tracks.length > 0 && root.sel_idx < root.tracks.length && (root.tracks[root.sel_idx].type == "Audio" || root.tracks[root.sel_idx].type == "Vocal");
                             selected-clip-name: root.selected_clip_name;
@@ -275,15 +275,15 @@
                             sync-group-changed(value) => { if (root.sel_cid >= 0) { EditorActions.sync_group_changed(root.sel_cid, value); } }
                             quantize-requested(clip_id, strength, grid_index, swing) => { if (clip_id >= 0) { EditorActions.quantize_sync_group(clip_id, strength, grid_index, swing); } }
                         }
-                        if (bot_view == 22) : Z_CompingPage {
+                        if (bot_view == ViewModes.comp) : Z_CompingPage {
                             takes: root.comp_takes;
                             comp-ranges: root.comp_ranges;
                             crossfade: root.comp_crossfade;
                         }
-                        if (bot_view == 23) : Z_TrackStackPage {
+                        if (bot_view == ViewModes.stacks) : Z_TrackStackPage {
                             selected-track-id: tracks.length > 0 && selected_row < tracks.length ? tracks[selected_row].id : -1;
                         }
-                        if (bot_view == 24) : Z_GlobalTracksPage {
+                        if (bot_view == ViewModes.global) : Z_GlobalTracksPage {
                             bpm: Style.bpm;
                             playhead-beat: root.ph;
                             zoom-level: root.z_lvl;
@@ -293,7 +293,7 @@
                             time-signature: root.time_sig;
                             cycle-active: root.loop_active;
                         }
-                        if (bot_view == 25) : Z_StepSequencerPage {
+                        if (bot_view == ViewModes.steps) : Z_StepSequencerPage {
                             selected-track-id: tracks.length > 0 && selected_row < tracks.length ? tracks[selected_row].id : -1;
                             selected-track-type: tracks.length > 0 && selected_row < tracks.length ? tracks[selected_row].type : "";
                             active-steps: root.sequencer_step_states;
