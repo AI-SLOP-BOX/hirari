@@ -89,9 +89,9 @@
                                         }
                                     }
                                 }
-                                Text { text: production_mode ? "BEGINNER" : "ADVANCED"; font-size: 8px; color: production_mode ? Style.text-secondary : Style.brand; vertical-alignment: center; }
+                                Text { text: production_mode ? "BEGINNER" : "ADVANCED"; font-size: 10px; color: production_mode ? Style.text-secondary : Style.brand; vertical-alignment: center; }
                                 Z_IconButton { icon: production_mode ? "ADVANCED" : "BEGINNER"; compact: true; button-width: 76px; active: !production_mode; clicked => { production_mode = !production_mode; more_views_open = !production_mode; experience-mode-changed(production_mode); if (production_mode && (bot_view == ViewModes.audio_editor || bot_view == ViewModes.loops)) { bot_view = ViewModes.mixer; } } }
-                                Text { text: focus_mode ? "FOCUS" : "FULL"; font-size: 8px; color: focus_mode ? Style.brand : Style.text-secondary; vertical-alignment: center; }
+                                Text { text: focus_mode ? "FOCUS" : "FULL"; font-size: 10px; color: focus_mode ? Style.brand : Style.text-secondary; vertical-alignment: center; }
                                 Z_IconButton { icon: focus_mode ? "FULL VIEW" : "FOCUS"; compact: true; button-width: 68px; active: focus_mode; clicked => { focus_mode = !focus_mode; focus-mode-changed(focus_mode); if (focus_mode) { bot_view = ViewModes.mixer; mx_open = false; pr_open = false; } } }
                                 Z_IconButton { icon: workspace_preset == "arrange" ? "ARRANGE" : (workspace_preset == "mix" ? "MIX" : (workspace_preset == "vocal" ? "VOCAL" : "SOUND")); compact: true; button-width: 76px; clicked => {
                                     workspace_preset = workspace_preset == "arrange" ? "mix" : (workspace_preset == "mix" ? "vocal" : (workspace_preset == "vocal" ? "sound_design" : "arrange"));
@@ -110,19 +110,19 @@
                             VerticalLayout {
                                 padding: 12px; spacing: 8px;
                                 Text { text: "ENGINE DIAGNOSTICS"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; font-weight: 600; }
-                                Text { text: "Live runtime status · command console unavailable"; font-size: 9px; color: Style.text-muted; }
+                                Text { text: "Live runtime status · command console unavailable"; font-size: 10px; color: Style.text-muted; }
                                 ScrollView {
                                     VerticalLayout {
                                         spacing: 6px;
-                                        Text { text: "Engine: " + root.diagnostic_state; font-size: 9px; color: Style.text-primary; font-family: Style.numeric-font; }
-                                        Text { text: "Audio: " + root.audio_diagnostic; font-size: 9px; color: root.audio_device_ready ? Style.ok : Style.text-secondary; font-family: Style.numeric-font; }
-                                        Text { text: "DSP load: " + root.diagnostic_load + "%"; font-size: 9px; color: Style.text-primary; font-family: Style.numeric-font; }
-                                        Text { text: "Plug-in catalog: " + root.plugin_catalog_status; font-size: 9px; color: Style.text-secondary; font-family: Style.numeric-font; }
-                                        Text { text: "Sandbox failures: " + root.diagnostic_sandbox_failures; font-size: 9px; color: root.diagnostic_sandbox_failures > 0 ? Style.alert : Style.text-secondary; font-family: Style.numeric-font; }
+                                        Text { text: "Engine: " + root.diagnostic_state; font-size: 10px; color: Style.text-primary; font-family: Style.numeric-font; }
+                                        Text { text: "Audio: " + root.audio_diagnostic; font-size: 10px; color: root.audio_device_ready ? Style.ok : Style.text-secondary; font-family: Style.numeric-font; }
+                                        Text { text: "DSP load: " + root.diagnostic_load + "%"; font-size: 10px; color: Style.text-primary; font-family: Style.numeric-font; }
+                                        Text { text: "Plug-in catalog: " + root.plugin_catalog_status; font-size: 10px; color: Style.text-secondary; font-family: Style.numeric-font; }
+                                        Text { text: "Sandbox failures: " + root.diagnostic_sandbox_failures; font-size: 10px; color: root.diagnostic_sandbox_failures > 0 ? Style.alert : Style.text-secondary; font-family: Style.numeric-font; }
                                     }
                                 }
                                 Rectangle { height: 1px; background: Style.border; }
-                                Text { text: "Memory usage is not reported by the current engine."; font-size: Style.font-xxs; color: Style.text-tertiary; font-family: Style.numeric-font; }
+                                Text { text: "Memory usage is not reported by the current engine."; font-size: 10px; color: Style.text-tertiary; font-family: Style.numeric-font; }
                             }
                         }
                         if (bot_view == ViewModes.mixer) : HorizontalLayout {
@@ -163,7 +163,7 @@
                                     padding: 8px; spacing: 10px;
                                     HorizontalLayout {
                                         spacing: 4px;
-                                        Text { text: "Master Monitoring"; font-size: 9px; font-weight: 600; color: Style.brand; horizontal-stretch: 1; vertical-alignment: center; }
+                                        Text { text: "Master Monitoring"; font-size: 10px; font-weight: 600; color: Style.brand; horizontal-stretch: 1; vertical-alignment: center; }
                                         if (root.gpu-meter-image.width > 0) : Image { source: root.gpu-meter-image; width: 28px; height: 24px; image-fit: contain; }
                                         Z_IconButton { icon: "DIM"; active: is_dim; clicked => { is_dim = !is_dim; DiagnosticsActions.toggle_dim(); } } Z_IconButton { icon: "TALK"; active: is_talkback; clicked => { is_talkback = !is_talkback; DiagnosticsActions.toggle_talkback(); } } Z_IconButton { icon: "TB " + (root.talkback-input-channel + 1); button-width: 46px; clicked => { DiagnosticsActions.step_talkback_input(1); } } Z_IconButton { icon: "MON"; active: is_monitor_enabled; clicked => { is_monitor_enabled = !is_monitor_enabled; DiagnosticsActions.toggle_monitor_output(); } }
                                         Z_IconButton { icon: "EXP"; clicked => { export_open = true; } }
@@ -191,10 +191,10 @@
                                         VerticalLayout {
                                             spacing: 6px; alignment: end; horizontal-stretch: 1;
                                             Rectangle { height: 1px; background: Style.border; }
-                                            Text { text: root.lufs_integrated > -120.0 ? "LUFS: " + (Math.round(root.lufs_integrated * 10.0) / 10.0) : "LUFS: N/A"; font-size: 8px; color: root.lufs_integrated > -120.0 ? Style.ok : Style.text-secondary; font-weight: 600; }
-                                            Text { text: "Peak: " + (Math.floor(((pks.length > 0 ? pks[0] : 0.0) - 1.0) * 10.0)) + " dBFS"; font-size: 8px; color: Style.text-secondary; }
+                                            Text { text: root.lufs_integrated > -120.0 ? "LUFS: " + (Math.round(root.lufs_integrated * 10.0) / 10.0) : "LUFS: N/A"; font-size: 10px; color: root.lufs_integrated > -120.0 ? Style.ok : Style.text-secondary; font-weight: 600; }
+                                            Text { text: "Peak: " + (Math.floor(((pks.length > 0 ? pks[0] : 0.0) - 1.0) * 10.0)) + " dBFS"; font-size: 10px; color: Style.text-secondary; }
                                             Rectangle { vertical-stretch: 1; }
-                                            Text { text: root.audio_sample_rate > 0.0 ? "Engine Ready | " + (Math.round(root.audio_sample_rate / 100.0) / 10.0) + " kHz" : "Audio Engine Offline"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                            Text { text: root.audio_sample_rate > 0.0 ? "Engine Ready | " + (Math.round(root.audio_sample_rate / 100.0) / 10.0) + " kHz" : "Audio Engine Offline"; font-size: 10px; color: Style.text-tertiary; }
                                         }
                                     }
                                 }

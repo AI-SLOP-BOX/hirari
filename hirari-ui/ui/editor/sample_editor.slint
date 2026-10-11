@@ -65,7 +65,7 @@ export component Z_SampleEditor {
             // Project regions for the selected track.
             Rectangle { width: 184px; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 5px;
                 VerticalLayout { spacing: 0px;
-                    Rectangle { height: 38px; background: Style.surface-2; HorizontalLayout { padding: 10px; Text { text: "Regions"; color: Style.text-primary; font-size: 11px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: clips.length + " clips"; color: Style.text-tertiary; font-size: 9px; } } }
+                    Rectangle { height: 38px; background: Style.surface-2; HorizontalLayout { padding: 10px; Text { text: "Regions"; color: Style.text-primary; font-size: 11px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: clips.length + " clips"; color: Style.text-tertiary; font-size: 10px; } } }
                     for clip[idx] in clips : Rectangle {
                         height: 48px; x: 8px; width: parent.width - 16px;
                         background: clip.id == selected-clip-id ? Style.selection : transparent;
@@ -75,13 +75,13 @@ export component Z_SampleEditor {
                             Rectangle { width: 5px; height: 30px; background: clip.color; border_radius: 3px; }
                             VerticalLayout {
                                 alignment: center;
-                                Text { text: clip.name; color: Style.text-primary; font-size: 9px; overflow: elide; }
-                                Text { text: "Beat " + clip.start_beat + " · " + clip.length_beats + " beats"; color: Style.text-tertiary; font-size: 8px; }
+                                Text { text: clip.name; color: Style.text-primary; font-size: 10px; overflow: elide; }
+                                Text { text: "Beat " + clip.start_beat + " · " + clip.length_beats + " beats"; color: Style.text-tertiary; font-size: 10px; }
                             }
                         }
                         TouchArea { clicked => { root.select-clip(clip.id); } }
                     }
-                    if (clips.length == 0) : Text { text: "This track has no regions."; x: 8px; width: parent.width - 16px; color: Style.text-muted; font-size: 9px; wrap: word-wrap; }
+                    if (clips.length == 0) : Text { text: "This track has no regions."; x: 8px; width: parent.width - 16px; color: Style.text-muted; font-size: 10px; wrap: word-wrap; }
                     Rectangle { vertical-stretch: 1; }
                 }
             }
@@ -93,7 +93,7 @@ export component Z_SampleEditor {
             HorizontalLayout {
                 spacing: 12px;
                 Text { text: "Waveform Editor"; font-size: 14px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; }
-                Text { text: "WAVEFORM"; font-size: 9px; color: Style.brand; vertical-alignment: center; }
+                Text { text: "WAVEFORM"; font-size: 10px; color: Style.brand; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
 
                 Z_IconButton {
@@ -149,7 +149,7 @@ export component Z_SampleEditor {
                     }
                 }
             }
-            Text { text: "Gain, fades, trim, reverse, Flex, pitch and loop count are saved with the project"; font-size: Style.font-xxs; color: Style.text-muted; }
+            Text { text: "Gain, fades, trim, reverse, Flex, pitch and loop count are saved with the project"; font-size: 10px; color: Style.text-muted; }
 
             // Waveform Canvas
             Rectangle {
@@ -260,37 +260,37 @@ export component Z_SampleEditor {
 
                 if (gpu-waveform-image.width <= 0 && samples.length == 0) : Text {
                     text: "No waveform preview is available for the selected region.";
-                    x: 12px; y: 12px; color: Style.text-muted; font-size: 9px;
+                    x: 12px; y: 12px; color: Style.text-muted; font-size: 10px;
                 }
             }
 
             if (gpu-spectrum-image.width > 0) : Rectangle {
                 height: 54px; background: #050812; border_width: 1px; border_color: Style.border;
                 Image { source: gpu-spectrum-image; x: 8px; y: 4px; width: parent.width - 16px; height: parent.height - 8px; image-fit: fill; }
-                Text { text: "GPU SPECTRUM"; x: 12px; y: 6px; font-size: 8px; color: Style.text-tertiary; }
+                Text { text: "GPU SPECTRUM"; x: 12px; y: 6px; font-size: 10px; color: Style.text-tertiary; }
             }
 
-            Text { text: selected-clip-id < 0 ? "Select a region to edit its audio properties." : "Editing region " + selected-clip-id + " on track " + track-id; font-size: Style.font-xxs; color: Style.text-muted; }
+            Text { text: selected-clip-id < 0 ? "Select a region to edit its audio properties." : "Editing region " + selected-clip-id + " on track " + track-id; font-size: 10px; color: Style.text-muted; }
             }
             // Inspector reads the selected project region.
             Rectangle { width: 220px; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 5px;
                 VerticalLayout { spacing: 0px;
                     Rectangle { height: 38px; background: Style.surface-2; HorizontalLayout { padding: 10px; Text { text: "Selected Region"; color: Style.text-primary; font-size: 11px; font-weight: 700; } } }
-                    if (selected-clip-id < 0) : Text { text: "No region selected."; color: Style.text-muted; font-size: 9px; }
+                    if (selected-clip-id < 0) : Text { text: "No region selected."; color: Style.text-muted; font-size: 10px; }
                     for clip in clips : VerticalLayout {
                         if (clip.id == selected-clip-id) : VerticalLayout {
                             padding: 12px; spacing: 8px;
                             Text { text: clip.name; color: Style.text-primary; font-size: 13px; font-weight: 700; overflow: elide; }
-                            Text { text: "Track " + track-id; color: Style.text-tertiary; font-size: 9px; }
-                            Text { text: "Start beat  " + clip.start_beat; color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Length  " + clip.length_beats + " beats"; color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Gain  " + clip.gain; color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Trim  " + clip.trim_start + " – " + clip.trim_end; color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Reverse  " + (clip.reverse ? "On" : "Off"); color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Playback speed  " + clip.warp_ratio + "x"; color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Pitch  " + clip.pitch_semitones + " st"; color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Loop count  " + clip.loop_count; color: Style.text-secondary; font-size: 9px; }
-                            Text { text: "Detected pitch segments  " + clip.audio_pitch_segments.length; color: Style.text-secondary; font-size: 9px; }
+                            Text { text: "Track " + track-id; color: Style.text-tertiary; font-size: 10px; }
+                            Text { text: "Start beat  " + clip.start_beat; color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Length  " + clip.length_beats + " beats"; color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Gain  " + clip.gain; color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Trim  " + clip.trim_start + " – " + clip.trim_end; color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Reverse  " + (clip.reverse ? "On" : "Off"); color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Playback speed  " + clip.warp_ratio + "x"; color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Pitch  " + clip.pitch_semitones + " st"; color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Loop count  " + clip.loop_count; color: Style.text-secondary; font-size: 10px; }
+                            Text { text: "Detected pitch segments  " + clip.audio_pitch_segments.length; color: Style.text-secondary; font-size: 10px; }
                             Button {
                                 text: "Extract MIDI notes";
                                 enabled: clip.audio_pitch_segments.length > 0;
@@ -305,7 +305,7 @@ export component Z_SampleEditor {
                                             + " · formant " + Math.round(segment.formant_offset_cents) + " cents"
                                             + " · " + segment.anchor_count + " points · click "
                                             + (root.formant_edit_mode ? "formant" : "pitch") + " curve to edit";
-                                        color: Style.text-secondary; font-size: 8px;
+                                        color: Style.text-secondary; font-size: 10px;
                                     }
                                     Rectangle {
                                         height: 52px; background: Style.surface; border-width: 1px;

@@ -27,12 +27,12 @@ export component Z_HirariSynth {
                 // Engine selection
                 HorizontalLayout {
                     spacing: 6px; alignment: center;
-                    Text { text: "Engine"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; vertical-alignment: center; }
+                    Text { text: "Engine"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; vertical-alignment: center; }
                     for name[idx] in ["SYNTH", "WAVETABLE", "SAMPLER"] : Rectangle {
                         height: 18px; background: active_engine == idx ? Style.border : Style.surface; border_radius: 2px; border_width: 1px; border_color: active_engine == idx ? current_accent : Style.border;
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px;
-                            Text { text: name; font-size: Style.font-xxs; color: active_engine == idx ? Style.text-primary : Style.text-secondary; font-weight: 500; vertical-alignment: center; }
+                            Text { text: name; font-size: 10px; color: active_engine == idx ? Style.text-primary : Style.text-secondary; font-weight: 500; vertical-alignment: center; }
                         }
                         TouchArea { clicked => { active_engine = idx; root.engine-changed(idx); } }
                     }
@@ -41,12 +41,12 @@ export component Z_HirariSynth {
                 // Skin selection (Visible only when Surge XT is active)
                 if (active_engine == 1) : HorizontalLayout {
                     spacing: 6px; alignment: center;
-                    Text { text: "Skin"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; vertical-alignment: center; }
+                    Text { text: "Skin"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; vertical-alignment: center; }
                     for skin_name[idx] in ["CLASSIC DARK", "ROYAL BLUE", "CHROMA GLOW", "RETRO ANALOG"] : Rectangle {
                         height: 18px; background: active_skin == idx ? Style.border : Style.surface; border_radius: 2px; border_width: 1px; border_color: active_skin == idx ? current_accent : Style.border;
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px;
-                            Text { text: skin_name; font-size: Style.font-xxs; color: active_skin == idx ? Style.text-primary : Style.text-secondary; font-weight: 500; vertical-alignment: center; }
+                            Text { text: skin_name; font-size: 10px; color: active_skin == idx ? Style.text-primary : Style.text-secondary; font-weight: 500; vertical-alignment: center; }
                         }
                         TouchArea { clicked => { active_skin = idx; } }
                     }
@@ -106,7 +106,7 @@ export component Z_HirariSynth {
                             QuadraticTo { control-x: 150; control-y: 10; x: 300; y: 140; }
                             Close { }
                         }
-                        Text { text: active_engine == 1 ? "Cutoff: 2.8 kHz" : "Cutoff: 4.2 kHz"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 10px; y: 10px; }
+                        Text { text: active_engine == 1 ? "Cutoff: 2.8 kHz" : "Cutoff: 4.2 kHz"; font-size: 10px; color: Style.text-tertiary; x: 10px; y: 10px; }
                     }
                     HorizontalLayout {
                         spacing: 12px;
@@ -119,7 +119,7 @@ export component Z_HirariSynth {
             // Compact modulation row keeps the instrument surface visually dense like the reference synth.
             HorizontalLayout { height: 68px; spacing: 6px;
                 for block[idx] in ["AMP ENV", "MOD ENV", "LFO 1", "LFO 2"] : Rectangle { horizontal-stretch: 1; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 3px;
-                    VerticalLayout { padding: 6px; spacing: 4px; Text { text: block; color: idx == 0 ? current_accent : Style.text-tertiary; font-size: 8px; font-weight: 700; }
+                    VerticalLayout { padding: 6px; spacing: 4px; Text { text: block; color: idx == 0 ? current_accent : Style.text-tertiary; font-size: 10px; font-weight: 700; }
                         if (idx == 0) : Path { width: 100%; height: 28px; stroke: current_accent; stroke_width: 1.5px; MoveTo { x: 0; y: 25; } LineTo { x: 8; y: 5; } LineTo { x: 28; y: 12; } LineTo { x: 52; y: 18; } LineTo { x: 78; y: 20; } }
                         if (idx == 1) : Path { width: 100%; height: 28px; stroke: Style.ok; stroke_width: 1.5px; MoveTo { x: 0; y: 24; } LineTo { x: 10; y: 6; } LineTo { x: 25; y: 14; } LineTo { x: 44; y: 20; } LineTo { x: 78; y: 22; } }
                         if (idx == 2) : Path { width: 100%; height: 28px; stroke: #63C7C5; stroke_width: 1.5px; MoveTo { x: 0; y: 16; } LineTo { x: 12; y: 5; } LineTo { x: 24; y: 16; } LineTo { x: 36; y: 27; } LineTo { x: 48; y: 16; } LineTo { x: 60; y: 5; } LineTo { x: 72; y: 16; } }
@@ -131,7 +131,7 @@ export component Z_HirariSynth {
                 HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 2px;
                     for key[idx] in ["C", "D", "E", "F", "G", "A", "B", "C", "D", "E", "F", "G", "A", "B", "C"] : Rectangle {
                         horizontal-stretch: 1; height: 42px; background: (key == "C" || key == "F") ? #F4F7FB : #DEE5EC; border-width: 1px; border-color: #7A8794; border-radius: 2px;
-                        Text { text: key; y: 28px; width: 100%; color: #1A222C; font-size: 8px; horizontal-alignment: center; }
+                        Text { text: key; y: 28px; width: 100%; color: #1A222C; font-size: 10px; horizontal-alignment: center; }
                         TouchArea { clicked => { root.parameter-changed(32 + idx, 1.0); } }
                     }
                 }

@@ -17,12 +17,12 @@ export component Z_AdvancedAutomation {
             // Selector bar for automation targets (Ardour / Zrythm Style)
             HorizontalLayout {
                 spacing: 6px; alignment: start;
-                Text { text: "TARGET:"; font-size: 8px; color: #A1A1A6; font-weight: 950; vertical-alignment: center; }
+                Text { text: "TARGET:"; font-size: 10px; color: #A1A1A6; font-weight: 950; vertical-alignment: center; }
                 for name[idx] in ["VOLUME", "PAN", "CUTOFF", "REVERB"] : Rectangle {
                     height: 18px; background: active_target == idx ? Style.border : Style.surface; border_radius: 1px; border_width: 1px; border_color: active_target == idx ? Style.brand : Style.border;
                     HorizontalLayout {
                         padding-left: 6px; padding-right: 6px;
-                        Text { text: name; font-size: Style.font-xxs; color: active_target == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                        Text { text: name; font-size: 10px; color: active_target == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
                     }
                     TouchArea { clicked => { active_target = idx; } }
                 }
@@ -33,7 +33,7 @@ export component Z_AdvancedAutomation {
                           active_target == 1 ? ("VAL: L" + Math.floor((1.0 - p2_y) * 100) + " / R" + Math.floor(p2_y * 100)) :
                           active_target == 2 ? ("VAL: " + Math.floor(p2_y * 20.0 * 10) / 10 + " kHz") :
                           ("VAL: " + Math.floor(p2_y * 100) + "%");
-                    font-size: 8px; color: Style.brand; font-weight: 900; vertical-alignment: center;
+                    font-size: 10px; color: Style.brand; font-weight: 900; vertical-alignment: center;
                 }
             }
             

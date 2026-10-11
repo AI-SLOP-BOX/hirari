@@ -30,7 +30,7 @@ export component Z_LogicFeaturePage inherits Rectangle {
                 VerticalLayout {
                     padding: 10px;
                     spacing: 7px;
-                    Text { text: label; font-size: 9px; color: Style.text; overflow: elide; }
+                    Text { text: label; font-size: 10px; color: Style.text; overflow: elide; }
                     Text { text: Math.floor(root.values[idx] * 100.0) + "%"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
                     Slider {
                         vertical-stretch: 1;
@@ -42,9 +42,9 @@ export component Z_LogicFeaturePage inherits Rectangle {
         }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
-            Text { text: "Changes are applied at block boundaries."; font-size: 9px; color: Style.text-muted; }
+            Text { text: "Changes are applied at block boundaries."; font-size: 10px; color: Style.text-muted; }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: "READY"; font-size: 9px; color: Style.ok; font-family: Style.numeric-font; }
+            Text { text: "READY"; font-size: 10px; color: Style.ok; font-family: Style.numeric-font; }
         }
     }
 }
@@ -82,6 +82,6 @@ export component Z_QuickHelp inherits Rectangle {
         padding: 12px; spacing: 7px;
         Text { text: "Quick Help"; font-size: 11px; font-weight: 700; color: Style.text; }
         Text { text: root.context; font-size: 10px; color: Style.text-dim; wrap: word-wrap; }
-        Text { text: "Space: Play/Stop   C: Cycle   I: Inspector   ⌘D: Duplicate Clip"; font-size: 9px; color: Style.brand; font-family: Style.numeric-font; }
+        Text { text: "Space: Play/Stop   C: Cycle   I: Inspector   ⌘D: Duplicate Clip"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
     }
 }

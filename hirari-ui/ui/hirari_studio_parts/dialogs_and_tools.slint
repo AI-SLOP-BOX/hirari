@@ -17,13 +17,13 @@
                     HorizontalLayout {
                         spacing: 8px; alignment: center;
                         Rectangle { width: 12px; height: 12px; border_radius: 6px; background: Style.brand; opacity: 0.2 + 0.8 * Math.sin(0.0 / 200.0 * 1rad).abs(); }
-                        Text { text: "TOOL: " + (active_tool == 0 ? "SELECTION (V)" : (active_tool == 1 ? "SLICE (S)" : (active_tool == 2 ? "DRAW (B)" : "MUTE (M)"))); font-size: 8px; color: #666; font-weight: 900; vertical-alignment: center; }
+                        Text { text: "TOOL: " + (active_tool == 0 ? "SELECTION (V)" : (active_tool == 1 ? "SLICE (S)" : (active_tool == 2 ? "DRAW (B)" : "MUTE (M)"))); font-size: 10px; color: #666; font-weight: 900; vertical-alignment: center; }
                     }
 
                     Rectangle { width: 1px; background: Style.border; height: 16px; y: 5px; }
                     HorizontalLayout {
                         spacing: 8px; horizontal-stretch: 1;
-                        Text { text: last_action; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; vertical-alignment: center; }
+                        Text { text: last_action; font-size: 10px; color: Style.text-secondary; font-family: Style.numeric-font; vertical-alignment: center; }
                     }
                     HorizontalLayout {
                         spacing: 12px; alignment: center;
@@ -37,7 +37,7 @@
                                     border_radius: 0.5px;
                                 }
                             }
-                        Text { text: "CPU: " + Math.floor(cpu_usage) + "%"; font-size: Style.font-xxs; color: cpu_usage > 90 ? Style.record : Style.text-secondary; font-weight: 600; horizontal-alignment: center; }
+                        Text { text: "CPU: " + Math.floor(cpu_usage) + "%"; font-size: 10px; color: cpu_usage > 90 ? Style.record : Style.text-secondary; font-weight: 600; horizontal-alignment: center; }
                         }
                     }
 
@@ -45,18 +45,18 @@
 
                     HorizontalLayout {
                         spacing: 10px; alignment: center;
-                        Text { text: input_dropped_blocks > 0 ? "Input drops: " + input_dropped_blocks : (audio_device_ready ? "音声: 準備完了" : "音声: オフライン"); font-size: 8px; color: input_dropped_blocks > 0 ? Style.record : (audio_device_ready ? Style.ok : Style.record); }
+                        Text { text: input_dropped_blocks > 0 ? "Input drops: " + input_dropped_blocks : (audio_device_ready ? "音声: 準備完了" : "音声: オフライン"); font-size: 10px; color: input_dropped_blocks > 0 ? Style.record : (audio_device_ready ? Style.ok : Style.record); }
                         Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: true; button-width: 54px; clicked => { TransportActions.toggle_play(); } }
                         Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: true; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
                         Z_IconButton { icon: "Scan Plugins"; compact: true; button-width: 82px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); } }
                         if (!audio_device_ready) : Z_IconButton { icon: "Reconnect"; compact: true; button-width: 64px; active-col: Style.record; clicked => { CommandActions.palette_exec("RECONNECT_AUDIO"); } }
                         Z_IconButton { icon: "Audio Settings"; compact: true; button-width: 82px; clicked => { bot_view = ViewModes.preferences; mx_open = true; pr_open = false; } }
                         if (sandbox_failures > 0) : Z_IconButton { icon: "Plugin Issues " + sandbox_failures; compact: true; button-width: 104px; active-col: Style.record; clicked => { bot_view = ViewModes.browser; mx_open = true; pr_open = false; } }
-                        Text { text: buffer_size > 0 ? "Buffer: " + buffer_size : "Buffer: --"; font-size: 8px; color: Style.text-tertiary; }
-                        Text { text: audio_sample_rate > 0.0 ? "SR: " + Math.round(audio_sample_rate) + " Hz" : "SR: --"; font-size: 8px; color: Style.text-tertiary; }
+                        Text { text: buffer_size > 0 ? "Buffer: " + buffer_size : "Buffer: --"; font-size: 10px; color: Style.text-tertiary; }
+                        Text { text: audio_sample_rate > 0.0 ? "SR: " + Math.round(audio_sample_rate) + " Hz" : "SR: --"; font-size: 10px; color: Style.text-tertiary; }
                         Text {
                             text: "TS: " + time_sig + " | CLICK: " + Math.floor(click_vol * 100) + "% | SNAP: " + snap_val;
-                            width: 170px; font-size: 8px; color: #A1A1A6; vertical-alignment: center; overflow: elide;
+                            width: 170px; font-size: 10px; color: #A1A1A6; vertical-alignment: center; overflow: elide;
                         }
                     }
                 }
@@ -107,7 +107,7 @@
             HorizontalLayout {
                 Text { text: "PLUGIN BROWSER"; font-size: 16px; color: Style.brand; font-weight: 700; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: plugin_catalog_status; font-size: 9px; color: Style.text-secondary; vertical-alignment: center; }
+                Text { text: plugin_catalog_status; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; }
                 Z_IconButton { icon: "EXTENSIONS"; compact: false; button-width: 100px; clicked => { PluginActions.refresh_extensions(); } }
                 Z_IconButton { icon: "INSTALL"; compact: false; button-width: 82px; clicked => { CommandActions.palette_exec("INSTALL PLUGIN"); } }
                 Z_IconButton { icon: "RESCAN ALL"; compact: false; button-width: 100px; clicked => { PluginActions.rescan_plugins(); } }
@@ -115,7 +115,7 @@
             HorizontalLayout {
                 spacing: 8px;
                 LineEdit { placeholder-text: "Search name, format, capability, path, or favorites"; text <=> plugin_catalog_query; edited => { PluginActions.catalog_query_changed(self.text); } horizontal-stretch: 1; }
-                Text { text: "CLAP / VST3 / AU"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+                Text { text: "CLAP / VST3 / AU"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
             }
             if extension_catalog.length > 0 : Z_ExtensionBrowser {
                 height: 112px;
@@ -140,9 +140,9 @@
                             Rectangle { width: 5px; height: 28px; background: plugin.sandboxed ? Style.ok : Style.brand; }
                             VerticalLayout { horizontal-stretch: 1; alignment: center;
                                 Text { text: plugin.name; font-size: 11px; color: Style.text; font-weight: 600; }
-                                Text { text: plugin.format + "  ·  " + plugin.capability + "  ·  " + (plugin.binary_bytes / 1024) + " KiB  ·  " + plugin.binary_hash; font-size: 8px; color: Style.text-muted; }
+                                Text { text: plugin.format + "  ·  " + plugin.capability + "  ·  " + (plugin.binary_bytes / 1024) + " KiB  ·  " + plugin.binary_hash; font-size: 10px; color: Style.text-muted; }
                             }
-                            Text { text: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? "READY" : "CHECK"; font-size: 8px; color: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? Style.ok : Style.solo; vertical-alignment: center; }
+                            Text { text: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? "READY" : "CHECK"; font-size: 10px; color: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? Style.ok : Style.solo; vertical-alignment: center; }
                             Z_IconButton { icon: "★"; compact: true; selected: plugin.favorite; active-col: Style.brand; clicked => { plugin-favorite-changed(plugin.id, !plugin.favorite); } }
                             Z_IconButton { icon: "INSERT"; compact: false; button-width: 72px; clicked => { PluginActions.insert_plugin(plugin.id); } }
                         }
@@ -163,7 +163,7 @@
                 padding: 24px; spacing: 18px;
                 HorizontalLayout {
                     spacing: 12px;
-                    Text { text: "COMMAND"; font-size: Style.font-xxs; vertical-alignment: center; }
+                    Text { text: "COMMAND"; font-size: 10px; vertical-alignment: center; }
                     LineEdit {
                         placeholder-text: "Type a command (e.g. SAVE PROJECT)"; font-size: 16px; horizontal-stretch: 1;
                         text <=> pal_query;
@@ -171,7 +171,7 @@
                     }
                 }
                 Rectangle { height: 1px; background: Style.border; }
-                Text { text: production_mode ? "AVAILABLE COMMANDS" : "AVAILABLE COMMANDS · ROUTE <source_id> <dest_id> ON|OFF · EXTENSION <id.command> {JSON}"; font-size: 9px; color: Style.text-tertiary; font-weight: 600; }
+                Text { text: production_mode ? "AVAILABLE COMMANDS" : "AVAILABLE COMMANDS · ROUTE <source_id> <dest_id> ON|OFF · EXTENSION <id.command> {JSON}"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
@@ -185,7 +185,7 @@
                         }
                     }
                 }
-                Text { text: "Escape to close · ⌘K for Command Palette"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                Text { text: "Escape to close · ⌘K for Command Palette"; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
             }
         }
     }
@@ -238,10 +238,10 @@
                     spacing: 20px;
                     VerticalLayout {
                         spacing: 8px; width: 200px;
-                        Text { text: "Render Summary"; font-size: 9px; color: Style.text-tertiary; font-weight: 600; }
+                        Text { text: "Render Summary"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
                         Text { text: "Tracks: " + root.tracks.length; font-size: 10px; color: Style.text-secondary; }
                         Text { text: "Format: " + (root.audio_sample_rate > 0.0 ? Math.round(root.audio_sample_rate) + " Hz" : "--"); font-size: 10px; color: Style.text-secondary; }
-                        Text { text: root.render_summary; font-size: 9px; color: Style.text-secondary; wrap: word-wrap; }
+                        Text { text: root.render_summary; font-size: 10px; color: Style.text-secondary; wrap: word-wrap; }
                     }
                 }
                 Rectangle { vertical-stretch: 1; }
@@ -380,7 +380,7 @@
             Text { text: "Reset Mode Active"; font-size: 14px; color: Style.text-primary; font-weight: 600; horizontal-alignment: center; }
             VerticalLayout {
                 spacing: 8px; alignment: center;
-                Text { text: "Restoring session assets..."; font-size: 9px; color: Style.text-secondary; horizontal-alignment: center; }
+                Text { text: "Restoring session assets..."; font-size: 10px; color: Style.text-secondary; horizontal-alignment: center; }
                 Rectangle { width: 200px; height: 2px; background: Style.line-subtle; Rectangle { width: Math.mod(root.ui_timer / 10, 200) * 1px; height: 100%; background: Style.brand; } }
             }
             Z_IconButton { icon: "Reset Project"; active-col: Style.brand; clicked => { is_null_horizon = false; ProjectActions.genesis_reset(); } }
@@ -463,8 +463,8 @@
                     }
                 } }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "CAPTURE " + root.recording_lifecycle; width: 120px; font-size: 8px; color: root.recording_lifecycle == "Recording" ? Style.record : Style.text-muted; horizontal-alignment: right; vertical-alignment: center; }
-                Text { text: root.last_action; width: 300px; font-size: 8px; color: Style.text-muted; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                Text { text: "CAPTURE " + root.recording_lifecycle; width: 120px; font-size: 10px; color: root.recording_lifecycle == "Recording" ? Style.record : Style.text-muted; horizontal-alignment: right; vertical-alignment: center; }
+                Text { text: root.last_action; width: 300px; font-size: 10px; color: Style.text-muted; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
             }
             }
         }
@@ -525,7 +525,7 @@
                             Rectangle { width: track.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border-radius: 2px; }
                             TouchArea { mouse-cursor: ew-resize; moved => { if (self.pressed) { MixerActions.fader_changed(track.id, (self.mouse_x / parent.width).clamp(0, 1)); } } }
                         }
-                        Text { text: track.pan == 0.0 ? "C" : (track.pan < 0.0 ? "L" + Math.round(-track.pan * 128.0) : "R" + Math.round(track.pan * 127.0)); width: 86px; height: 10px; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
+                        Text { text: track.pan == 0.0 ? "C" : (track.pan < 0.0 ? "L" + Math.round(-track.pan * 128.0) : "R" + Math.round(track.pan * 127.0)); width: 86px; height: 10px; font-size: 10px; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; height: 100%; clip: true;
@@ -533,7 +533,7 @@
                         x: clip_data.start_beat * Style.grid-step * root.z_lvl; y: 6px;
                         width: Math.max(28px, clip_data.length_beats * Style.grid-step * root.z_lvl - 2px); height: 35px;
                         background: clip_data.color.with-alpha(clip_data.selected ? 0.58 : 0.28); border-width: clip_data.selected ? 2px : 1px; border-color: clip_data.selected ? Style.text-primary : clip_data.color; border-radius: 3px;
-                        Text { text: clip_data.name; x: 6px; width: parent.width - 12px; height: 12px; font-size: Style.font-xxs; color: Style.text-primary; vertical-alignment: center; overflow: elide; }
+                        Text { text: clip_data.name; x: 6px; width: parent.width - 12px; height: 12px; font-size: 10px; color: Style.text-primary; vertical-alignment: center; overflow: elide; }
                     TouchArea { clicked => { root.sel_idx = idx; root.sel_cid = clip_data.id; ProjectActions.select_track(track.id); } }
                     }
                 }
@@ -542,7 +542,7 @@
         if (bot_view == ViewModes.piano_roll && root.tracks.length > 0) : Rectangle {
             x: 0px; y: 34px; width: 100%; height: 520px; z: 5; background: Style.surface-1; border-width: 1px; border-color: Style.border; clip: true;
             Text { text: "Piano Roll  |  Track " + (root.sel_idx + 1); x: 12px; y: 8px; font-size: 11px; color: Style.text; font-weight: 700; }
-            Text { text: "Click the grid to add notes  ·  Snap " + root.snap_val; x: 190px; y: 9px; font-size: 9px; color: Style.text-muted; }
+            Text { text: "Click the grid to add notes  ·  Snap " + root.snap_val; x: 190px; y: 9px; font-size: 10px; color: Style.text-muted; }
             Rectangle {
                 x: 60px; y: 32px; width: parent.width - 60px; height: 470px; background: Style.surface-0; clip: true;
                 TouchArea {

@@ -67,7 +67,7 @@ export component Z_Knob {
         }
         Text {
             text: display-value != "" ? display-value : (bipolar ? (Math.round((value - 0.5) * 200.0) + unit) : (Math.round(value * 100.0) + unit));
-            height: 10px; font-family: Style.numeric-font; font-size: Style.font-xxs;
+            height: 10px; font-family: Style.numeric-font; font-size: 10px;
             color: Style.text-primary; opacity: show-value || ta.has-hover ? 1.0 : 0.0; horizontal-alignment: center;
         }
         if (label != "") : Text {

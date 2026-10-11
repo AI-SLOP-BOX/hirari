@@ -23,7 +23,7 @@ export component Z_HomePage inherits Rectangle {
                 spacing: 10px;
                 Image { source: @image-url("assets/hirari-logo.svg"); width: 28px; height: 28px; }
                 Text { text: "Hirari"; color: Style.text-primary; font-size: 16px; font-weight: 700; vertical-alignment: center; }
-                Text { text: "START PAGE"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+                Text { text: "START PAGE"; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
                 Z_IconButton { icon: "?"; compact: true; button-width: 32px; clicked => { root.tutorial-requested(); } }
             }
@@ -101,7 +101,7 @@ export component Z_HomePage inherits Rectangle {
                     HorizontalLayout {
                         Text { text: "Templates"; font-size: 16px; color: Style.text-primary; font-weight: 650; }
                         Rectangle { horizontal-stretch: 1; }
-                        Text { text: "4 project setups"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+                        Text { text: "4 project setups"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
                     }
                     HorizontalLayout {
                         height: 130px;
@@ -119,7 +119,7 @@ export component Z_HomePage inherits Rectangle {
                                 if (template == "ELECTRONIC") : Image { source: @image-url("assets/waveform.svg"); height: 72px; width: 100%; }
                                 if (template == "VOICE-OVER PRO") : Image { source: @image-url("assets/mixer.svg"); height: 72px; width: 100%; }
                                 if (template == "ATMOS MASTERING") : Image { source: @image-url("assets/mastering.svg"); height: 72px; width: 100%; }
-                                Text { text: template; font-size: 9px; color: Style.text-primary; horizontal-alignment: center; overflow: elide; }
+                                Text { text: template; font-size: 10px; color: Style.text-primary; horizontal-alignment: center; overflow: elide; }
                             }
                             TouchArea { mouse-cursor: pointer; clicked => { root.template-selected(template); } }
                         }
@@ -131,7 +131,7 @@ export component Z_HomePage inherits Rectangle {
                     HorizontalLayout {
                         Text { text: "Recent Projects"; font-size: 16px; color: Style.text-primary; font-weight: 650; }
                         Rectangle { horizontal-stretch: 1; }
-                        Text { text: root.recent-projects.length + " saved projects"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+                        Text { text: root.recent-projects.length + " saved projects"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
                     }
                     if (root.recent-projects.length == 0) : Rectangle {
                         height: 62px;
@@ -164,10 +164,10 @@ export component Z_HomePage inherits Rectangle {
                                 vertical-stretch: 1;
                                 spacing: 3px;
                                 Text { text: project.name; font-size: 11px; color: Style.text-primary; overflow: elide; }
-                                Text { text: project.folder; font-size: 9px; color: Style.text-tertiary; overflow: elide; }
+                                Text { text: project.folder; font-size: 10px; color: Style.text-tertiary; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            Text { text: "OPEN"; font-size: 9px; color: Style.brand; vertical-alignment: center; }
+                            Text { text: "OPEN"; font-size: 10px; color: Style.brand; vertical-alignment: center; }
                         }
                         row_area := TouchArea {
                             mouse-cursor: pointer;

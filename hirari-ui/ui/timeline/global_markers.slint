@@ -11,7 +11,7 @@ export component Z_GlobalMarkers {
         for m in markers : Rectangle {
             x: m.beat * Style.grid-step * z_lvl; width: 60px; height: 100%; background: m.color.with-alpha(0.1);
             Rectangle { width: 2px; height: 100%; background: m.color; x: 0; }
-            Text { text: m.label; font-size: Style.font-xxs; color: m.color; x: 4px; vertical-alignment: center; font-weight: 900; }
+            Text { text: m.label; font-size: 10px; color: m.color; x: 4px; vertical-alignment: center; font-weight: 900; }
         }
         // Extra Playhead Line for Marker Area
         Rectangle { x: ph * Style.grid-step * z_lvl; width: 1.5px; height: 100%; background: Style.ok; opacity: 0.4; }

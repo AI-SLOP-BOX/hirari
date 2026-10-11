@@ -31,7 +31,7 @@ export component Z_NotationHub {
                 HorizontalLayout {
                     padding-left: 10px; padding-right: 8px; spacing: 6px;
                     Text { text: "SCORE EDITOR"; font-size: Style.font-xs; font-weight: 700; color: Style.brand; vertical-alignment: center; }
-                    Text { text: notes.length + " notes · treble staff · MIDI-linked"; font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
+                    Text { text: notes.length + " notes · treble staff · MIDI-linked"; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                     Button { text: "− Pitch"; enabled: selected-index >= 0; clicked => {
                         move-note(selected-pitch, selected-beat, 0.0, -1, selected-index);
@@ -72,7 +72,7 @@ export component Z_NotationHub {
             }
             Text {
                 text: "Click a staff position to add a quarter note. Select a note, then use the score controls to change pitch, timing, or length.";
-                x: 10px; height: 20px; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center;
+                x: 10px; height: 20px; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center;
             }
             ScrollView {
                 vertical-stretch: 1;

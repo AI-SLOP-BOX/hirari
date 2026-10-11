@@ -25,7 +25,7 @@ export component Z_GlobalTempoEditor {
             // 1. Time Signature & Tap Controls
             VerticalLayout {
                 width: 120px; spacing: 4px; alignment: center;
-                Text { text: "SIGNATURE & TAP"; font-size: 8px; color: #6E6E73; font-weight: 950; }
+                Text { text: "SIGNATURE & TAP"; font-size: 10px; color: #6E6E73; font-weight: 950; }
                 
                 HorizontalLayout {
                     spacing: 4px;
@@ -33,7 +33,7 @@ export component Z_GlobalTempoEditor {
                         height: 16px; background: time_sig == idx ? Style.border : Style.surface; border_radius: 1px; border_width: 1px; border_color: time_sig == idx ? Style.brand : Style.border;
                         HorizontalLayout {
                             padding-left: 4px; padding-right: 4px;
-                            Text { text: name; font-size: Style.font-xxs; color: time_sig == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                            Text { text: name; font-size: 10px; color: time_sig == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
                         }
                         TouchArea {
                             clicked => {
@@ -48,7 +48,7 @@ export component Z_GlobalTempoEditor {
                 // Tap Tempo
                 Rectangle {
                     height: 18px; background: Style.surface; border_radius: 1.5px; border_width: 1px; border_color: Style.brand;
-                    Text { text: "TAP TEMPO"; font-size: Style.font-xxs; color: Style.brand; font-weight: 900; horizontal-alignment: center; vertical-alignment: center; }
+                    Text { text: "TAP TEMPO"; font-size: 10px; color: Style.brand; font-weight: 900; horizontal-alignment: center; vertical-alignment: center; }
                     TouchArea {
                         clicked => { tap-tempo(); }
                     }
@@ -59,7 +59,7 @@ export component Z_GlobalTempoEditor {
 
             VerticalLayout {
                 width: 82px; spacing: 3px; alignment: center;
-                Text { text: "EVENT AT " + Math.floor(event_beat * 100.0) / 100.0; font-size: Style.font-xxs; color: #6E6E73; horizontal-alignment: center; }
+                Text { text: "EVENT AT " + Math.floor(event_beat * 100.0) / 100.0; font-size: 10px; color: #6E6E73; horizontal-alignment: center; }
                 Z_IconButton {
                     icon: "APPLY";
                     active: true;
@@ -74,7 +74,7 @@ export component Z_GlobalTempoEditor {
 
             VerticalLayout {
                 width: 150px; spacing: 2px;
-                Text { text: "TEMPO MAP"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; }
+                Text { text: "TEMPO MAP"; font-size: 10px; color: #6E6E73; font-weight: 900; }
                 Flickable {
                     viewport-height: 42px;
                     VerticalLayout {
@@ -86,7 +86,7 @@ export component Z_GlobalTempoEditor {
                             border-color: Math.abs(event_beat - beat) < 0.001 ? Style.brand : Style.border;
                             Text {
                                 text: Math.floor(beat * 100.0) / 100.0 + "  " + Math.floor(tempo_event_bpms[index] * 10.0) / 10.0 + " BPM";
-                                font-size: Style.font-xxs;
+                                font-size: 10px;
                                 color: Math.abs(event_beat - beat) < 0.001 ? #fff : #A1A1A6;
                                 horizontal-alignment: center; vertical-alignment: center;
                             }
@@ -116,12 +116,12 @@ export component Z_GlobalTempoEditor {
                 VerticalLayout {
                     alignment: center; spacing: 2px;
                     Z_Knob { value: (bpm - 20.0)/280.0; unit: " BPM"; display-value: Math.round(bpm * 10.0) / 10.0 + " BPM"; changed(v) => { set-base-tempo(20.0 + v * 280.0); } }
-                    Text { text: "START: " + Math.floor(bpm * 10) / 10 + " BPM"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                    Text { text: "START: " + Math.floor(bpm * 10) / 10 + " BPM"; font-size: 10px; color: #aaa; horizontal-alignment: center; }
                 }
                 VerticalLayout {
                     alignment: center; spacing: 2px;
                     Z_Knob { value: (target_bpm - 20.0)/280.0; unit: " BPM"; display-value: Math.round(target_bpm * 10.0) / 10.0 + " BPM"; accent-col: Style.alert; changed(v) => { target_bpm = 20.0 + v * 280.0; } }
-                    Text { text: "TARGET: " + Math.floor(target_bpm * 10) / 10 + " BPM"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                    Text { text: "TARGET: " + Math.floor(target_bpm * 10) / 10 + " BPM"; font-size: 10px; color: #aaa; horizontal-alignment: center; }
                 }
             }
             
@@ -132,14 +132,14 @@ export component Z_GlobalTempoEditor {
                 horizontal-stretch: 1; spacing: 4px;
                 HorizontalLayout {
                     spacing: 8px;
-                    Text { text: "TEMPO MAP TRAJECTORY"; font-size: 8px; color: #6E6E73; font-weight: 950; vertical-alignment: center; }
+                    Text { text: "TEMPO MAP TRAJECTORY"; font-size: 10px; color: #6E6E73; font-weight: 950; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; }
                     // Curve type selection tabs
                     for type_name[idx] in ["STEP", "LINEAR RAMP"] : Rectangle {
                         height: 14px; background: ramp_mode == idx ? Style.border : Style.surface; border_radius: 1px; border_width: 1px; border_color: ramp_mode == idx ? Style.brand : Style.border;
                         HorizontalLayout {
                             padding-left: 4px; padding-right: 4px;
-                            Text { text: type_name; font-size: Style.font-xxs; color: ramp_mode == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                            Text { text: type_name; font-size: 10px; color: ramp_mode == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
                         }
                         TouchArea { clicked => { ramp_mode = idx; } }
                     }
@@ -168,8 +168,8 @@ export component Z_GlobalTempoEditor {
                         LineTo { x: parent.width / 1px; y: (y2_val * parent.height) / 1px; }
                     }
                     
-                    Text { text: "START: " + Math.floor(bpm) + " BPM"; font-size: Style.font-xxs; color: #6E6E73; x: 10px; y: 4px; }
-                    Text { text: "TARGET: " + Math.floor(target_bpm) + " BPM"; font-size: Style.font-xxs; color: #6E6E73; x: parent.width - 70px; y: parent.height - 12px; }
+                    Text { text: "START: " + Math.floor(bpm) + " BPM"; font-size: 10px; color: #6E6E73; x: 10px; y: 4px; }
+                    Text { text: "TARGET: " + Math.floor(target_bpm) + " BPM"; font-size: 10px; color: #6E6E73; x: parent.width - 70px; y: parent.height - 12px; }
                 }
             }
         }

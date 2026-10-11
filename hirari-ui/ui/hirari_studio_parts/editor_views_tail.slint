@@ -145,19 +145,19 @@
                                             padding: 8px; spacing: 12px;
                                             VerticalLayout {
                                                 alignment: center; spacing: 4px;
-                                                Text { text: "LUFS"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                                Text { text: "LUFS"; font-size: 10px; color: Style.text-tertiary; }
                                                 Rectangle { property <float> lufs_fill: ((root.lufs_integrated + 60.0) / 60.0).clamp(0.0, 1.0); height: 80px; width: 30px; background: Style.surface; Rectangle { y: (1.0 - lufs_fill) * parent.height; height: lufs_fill * parent.height; width: 100%; background: Style.ok; } }
-                                                Text { text: Math.round(root.lufs_integrated * 10.0) / 10.0 + " LUFS"; font-size: Style.font-xxs; color: Style.ok; font-weight: 700; horizontal-alignment: center; }
+                                                Text { text: Math.round(root.lufs_integrated * 10.0) / 10.0 + " LUFS"; font-size: 10px; color: Style.ok; font-weight: 700; horizontal-alignment: center; }
                                             }
                                             VerticalLayout {
                                                 alignment: center; spacing: 4px;
-                                                Text { text: "Peak L/R"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                                                Text { text: "Peak L/R"; font-size: 10px; color: Style.text-tertiary; }
                                                 HorizontalLayout { spacing: 2px; for peak_db in [root.master_true_peak_l, root.master_true_peak_r] : Rectangle { property <float> safe_peak: Math.pow(10.0, peak_db / 20.0).clamp(0.0, 1.2); height: 80px; width: 8px; background: Style.surface; Rectangle { y: (1.0 - (safe_peak / 1.2)) * parent.height; height: (safe_peak / 1.2) * parent.height; width: 100%; background: @linear-gradient(180deg, Style.record 0%, Style.solo 100%); } } }
-                                                Text { text: Math.round(root.master_true_peak_l * 10.0) / 10.0 + " / " + Math.round(root.master_true_peak_r * 10.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: Style.text-primary; horizontal-alignment: center; }
+                                                Text { text: Math.round(root.master_true_peak_l * 10.0) / 10.0 + " / " + Math.round(root.master_true_peak_r * 10.0) / 10.0 + " dB"; font-size: 10px; color: Style.text-primary; horizontal-alignment: center; }
                                             }
                                             VerticalLayout {
                                                 alignment: center; horizontal-stretch: 1;
-                                                Text { text: "Stereo Phase"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                                                Text { text: "Stereo Phase"; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
                                                 Z_PhaseMeter { correlation: root.phase_correlation; }
                                             }
                                         }
@@ -176,7 +176,7 @@
                                                 y: (parent.height - self.height) / 2.0;
                                             }
                                         }
-                                        Text { text: "Master Spectrum"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 6px; y: 4px; font-weight: 600; }
+                                        Text { text: "Master Spectrum"; font-size: 10px; color: Style.text-tertiary; x: 6px; y: 4px; font-weight: 600; }
                                     }
                                     HorizontalLayout {
                                         spacing: 8px;
@@ -186,7 +186,7 @@
                                             VerticalLayout {
                                                 padding: 10px; spacing: 8px;
                                                 HorizontalLayout {
-                                                    Text { text: "Master Dynamics"; font-size: Style.font-xxs; color: Style.text-secondary; font-weight: 600; horizontal-stretch: 1; }
+                                                    Text { text: "Master Dynamics"; font-size: 10px; color: Style.text-secondary; font-weight: 600; horizontal-stretch: 1; }
                                                     Button {
                                                         text: "ASSIST"; enabled: root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0;
                                                         clicked => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.apply_dynamics_suggestion(root.tracks[root.selected_row].id, root.fx_active_id); } }
@@ -199,7 +199,7 @@
                                                     Z_Knob { label: "ATT"; value: root.plugin-parameter-values.length > 2 ? root.plugin-parameter-values[2] : 0.0; accent-col: Style.solo; changed(v) => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 2, v); } } }
                                                     Z_Knob { label: "REL"; value: root.plugin-parameter-values.length > 3 ? root.plugin-parameter-values[3] : 0.0; accent-col: Style.ok; changed(v) => { if (root.tracks.length > 0 && root.selected_row < root.tracks.length && root.fx_active_id >= 0) { PluginActions.plugin_param_changed(root.tracks[root.selected_row].id, root.fx_active_id, 3, v); } } }
                                                 }
-                                                Rectangle { height: 18px; background: Style.surface-0; border_radius: 1px; Text { text: "Gain Reduction: " + Math.round(root.master_gain_reduction * 10.0) / 10.0 + " dB"; font-size: Style.font-xxs; color: Style.record; horizontal-alignment: center; vertical-alignment: center; font-weight: 600; } }
+                                                Rectangle { height: 18px; background: Style.surface-0; border_radius: 1px; Text { text: "Gain Reduction: " + Math.round(root.master_gain_reduction * 10.0) / 10.0 + " dB"; font-size: 10px; color: Style.record; horizontal-alignment: center; vertical-alignment: center; font-weight: 600; } }
                                             }
                                         }
                                     }
@@ -235,7 +235,7 @@
                                                     width: 33px; height: 20px; background: Style.surface;
                                                     Text {
                                                         text: b < root.tracks.length ? root.tracks[b].name : "DEST " + (b + 1);
-                                                        font-size: Style.font-xxs; color: #6E6E73;
+                                                        font-size: 10px; color: #6E6E73;
                                                         vertical-alignment: center; horizontal-alignment: center;
                                                     }
                                                 }
@@ -250,7 +250,7 @@
                                                 }
                                                 if t_idx >= root.tracks.length : Rectangle {
                                                     width: 80px; height: 22px; background: Style.surface;
-                                                    Text { text: "TRACK " + (t_idx+1); font-size: Style.font-xxs; color: #888; x: 8px; vertical-alignment: center; }
+                                                    Text { text: "TRACK " + (t_idx+1); font-size: 10px; color: #888; x: 8px; vertical-alignment: center; }
                                                 }
                                                 for b_idx in 10 : Rectangle {
                                                     // The matrix is refreshed from Core's canonical route snapshot.
@@ -302,7 +302,7 @@
                                                     text: root.route-source-id >= 0 && root.route-destination-id >= 0
                                                         ? (root.send-routing-mode ? "SEND " : "ROUTE ") + root.route-source-id + " → " + root.route-destination-id
                                                         : (root.send-routing-mode ? "SELECT A BUS SEND" : "SELECT A ROUTE");
-                                                    font-size: 9px; color: Style.text-secondary;
+                                                    font-size: 10px; color: Style.text-secondary;
                                                 }
                                                 HorizontalLayout {
                                                     spacing: 6px;
@@ -333,7 +333,7 @@
                                         }
                                     }
                                 }
-                                Text { text: "ROUTING ACTIVE | SAMPLE-ACCURATE PROCESSING"; font-size: Style.font-xxs; color: #333; horizontal-alignment: center; }
+                                Text { text: "ROUTING ACTIVE | SAMPLE-ACCURATE PROCESSING"; font-size: 10px; color: #333; horizontal-alignment: center; }
                             }
                         }
                         if (bot_view == ViewModes.synth) : Z_HirariSynth { accent-col: Style.brand; ui_timer: root.ui_timer; gpu-waveform-image: root.gpu-waveform-image; gpu-spectrum-image: root.gpu-spectrum-image; parameter-changed(index, value) => { PluginActions.macro_changed(index, value); } engine-changed(index) => { PluginActions.set_synth_engine(index); } }

@@ -27,8 +27,8 @@ export component Z_IndustrialKnob {
                 }
             }
         }
-        Text { text: label; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
-        Text { text: Math.round(value * 100.0) + "%"; font-size: Style.font-xxs; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
+        Text { text: label; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
+        Text { text: Math.round(value * 100.0) + "%"; font-size: 10px; color: Style.text-secondary; font-family: Style.numeric-font; horizontal-alignment: center; }
     }
 }
 
@@ -39,7 +39,7 @@ export component Z_ProSlot {
     callback clicked();
     Rectangle {
         height: 18px; background: !isActive ? Style.surface-0 : (bypassed ? Style.surface-1 : Style.surface-2); border_width: 1px; border_color: isActive ? Style.brand.with-alpha(0.45) : Style.line-subtle;
-        Text { text: pluginName; font-size: Style.font-xxs; color: !isActive ? Style.text-tertiary : (bypassed ? Style.text-muted : Style.text-primary); x: 4px; vertical-alignment: center; }
+        Text { text: pluginName; font-size: 10px; color: !isActive ? Style.text-tertiary : (bypassed ? Style.text-muted : Style.text-primary); x: 4px; vertical-alignment: center; }
         if (isActive) : Rectangle { x: 1px; y: 1px; width: 2px; height: parent.height - 2px; background: bypassed ? Style.text-muted : Style.ok; }
         TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
     }
@@ -82,11 +82,11 @@ export component SpectralRestorationHUD {
                     spacing: 4px;
                     Rectangle {
                         width: 60px; height: 16px; background: learn_mode ? Style.record.with-alpha(0.22) : Style.surface-0; border_radius: 2px;
-                        Text { text: "Learn"; font-size: Style.font-xxs; color: learn_mode ? Style.record : Style.text-tertiary; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "Learn"; font-size: 10px; color: learn_mode ? Style.record : Style.text-tertiary; horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 60px; height: 16px; background: Style.surface-0; border_radius: 2px;
-                        Text { text: "Erase Harmonics"; font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
+                        Text { text: "Erase Harmonics"; font-size: 10px; color: Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; }
                     }
                 }
             }
@@ -116,7 +116,7 @@ export component MasterMasteringHUD {
 
         VerticalLayout {
             spacing: 4px;
-            Text { text: "Mastering Telemetry"; font-size: Style.font-xxs; font-weight: 600; color: Style.text-tertiary; letter-spacing: 0.5px; }
+            Text { text: "Mastering Telemetry"; font-size: 10px; font-weight: 600; color: Style.text-tertiary; letter-spacing: 0.5px; }
 
             HorizontalLayout {
                 spacing: 8px;
@@ -136,7 +136,7 @@ export component MasterMasteringHUD {
 
                 // CPU
                 VerticalLayout {
-                    Text { text: @tr("{load}% CPU", load = Math.round(cpu_load * 100)); font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: right; }
+                    Text { text: @tr("{load}% CPU", load = Math.round(cpu_load * 100)); font-size: 10px; color: Style.text-secondary; horizontal-alignment: right; }
                 }
             }
         }

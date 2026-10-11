@@ -1,4 +1,4 @@
-                            Text { text: v; font-size: 9px; color: root.snap_val == v ? Style.brand : (area_sn.has_hover ? #fff : #888); x: 10px; vertical-alignment: center; }
+                            Text { text: v; font-size: 10px; color: root.snap_val == v ? Style.brand : (area_sn.has_hover ? #fff : #888); x: 10px; vertical-alignment: center; }
                             area_sn := TouchArea { clicked => { root.snap_val = v; snap_open = false; TransportActions.set_snap(v); } }
                         }
                     }
@@ -24,9 +24,9 @@
                         height: 24px; background: Style.surface;
                         HorizontalLayout {
                             padding-left: 10px; padding-right: 10px; spacing: 16px;
-                            Text { text: "BPM"; font-size: Style.font-xxs; color: Style.text-dim; vertical-alignment: center; }
+                            Text { text: "BPM"; font-size: 10px; color: Style.text-dim; vertical-alignment: center; }
                             Text { text: Math.floor(Style.bpm * 100) / 100 + " BPM"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; font-weight: 700; vertical-alignment: center; }
-                            Text { text: root.time_sig; font-size: Style.font-xxs; color: Style.text-dim; vertical-alignment: center; }
+                            Text { text: root.time_sig; font-size: 10px; color: Style.text-dim; vertical-alignment: center; }
                             Rectangle { horizontal-stretch: 1; }
                         }
                     }
@@ -67,11 +67,11 @@
                                     padding: 2px; spacing: 2px;
                                     for i in 12 : Rectangle {
                                         width: 72px; height: 100%; background: Style.surface; border_radius: 1px;
-                                        Text { text: "FRM " + (i * 240); font-size: Style.font-xxs; color: #333; x: 4px; y: 4px; }
+                                        Text { text: "FRM " + (i * 240); font-size: 10px; color: #333; x: 4px; y: 4px; }
                                         Rectangle { x: 4px; y: 12px; width: 64px; height: 24px; background: Style.brand; opacity: 0.1; }
                                     }
                                 }
-                                Text { text: "VIDEO"; font-size: Style.font-xxs; color: #6E6E73; x: 8px; y: 2px; font-weight: 950; }
+                                Text { text: "VIDEO"; font-size: 10px; color: #6E6E73; x: 8px; y: 2px; font-weight: 950; }
                             }
 
                             Rectangle { height: 1px; background: Style.border; }
@@ -88,7 +88,7 @@
                                         height: 30px; width: (m.beat * 1.5).clamp(40.0, 120.0) * 1px;
                                         background: m.color.with-alpha(0.15);
                                         border_width: 1px; border_color: m.color;
-                                        Text { text: m.label; font-size: Style.font-xxs; color: m.color; vertical-alignment: center; horizontal-alignment: center; font-weight: 950; }
+                                        Text { text: m.label; font-size: 10px; color: m.color; vertical-alignment: center; horizontal-alignment: center; font-weight: 950; }
                                         Rectangle { width: 100%; height: 100%; background: @linear-gradient(45deg, transparent 0%, #fff.with-alpha(0.1) 100%); }
                                     }
                                     Rectangle { y: parent.height - 1.5px; height: 1.5px; width: 100%; background: #000; }
@@ -102,7 +102,7 @@
                                         Rectangle { x: loop_st * Style.grid-step * root.z_lvl; width: (loop_ed - loop_st) * Style.grid-step * root.z_lvl; height: 100%; background: Style.cycle; opacity: loop_active ? 0.28 : 0.08; }
                                         for i in 128 : Rectangle { 
                                             x: i * Style.grid-step * root.z_lvl; width: 1px; height: 100%; opacity: Math.mod(i,16)==0 ? 1.0 : (Math.mod(i,4)==0 ? 0.7 : 0.35); background: (Math.mod(i,16)==0)?Style.grid-bar:(Math.mod(i,4)==0 ? Style.grid-beat : Style.grid-subbeat);
-                                            if (Math.mod(i,4)==0) : Text { text: tm_beats ? ("" + (i/4 + 1)) : Math.floor(i/(Style.bpm/60.0*4.0)) + ":" + Math.floor(Math.mod(i/(Style.bpm/60.0), 1.0)*60.0); font-size: 8px; color: (Math.mod(i,16)==0)?#888:#6E6E73; y: 12px; x: 4px; font-weight: 900; }
+                                            if (Math.mod(i,4)==0) : Text { text: tm_beats ? ("" + (i/4 + 1)) : Math.floor(i/(Style.bpm/60.0*4.0)) + ":" + Math.floor(Math.mod(i/(Style.bpm/60.0), 1.0)*60.0); font-size: 10px; color: (Math.mod(i,16)==0)?#888:#6E6E73; y: 12px; x: 4px; font-weight: 900; }
                                         }
                                         TouchArea { 
                                             clicked => { TransportActions.scrub(self.mouse_x / 1px / (Style.grid-step / 1px * root.z_lvl)); }
@@ -115,7 +115,7 @@
                                             background: Style.record.with-alpha(0.05);
                                             Rectangle { x: 0; width: 2px; height: 100%; background: Style.record; }
                                             Rectangle { x: parent.width - 2px; width: 2px; height: 100%; background: Style.record; }
-                                            Text { text: "PUNCH"; font-size: Style.font-xxs; color: Style.record; x: 8px; y: 2px; font-weight: 500; opacity: 0.45; }
+                                            Text { text: "PUNCH"; font-size: 10px; color: Style.record; x: 8px; y: 2px; font-weight: 500; opacity: 0.45; }
                                         }
 
                                         // Playhead (High Visibility)
@@ -150,7 +150,7 @@
                                             x: m.beat * Style.grid-step * root.z_lvl; width: 1px; height: 100%; background: m.color.with-alpha(0.6);
                                             Rectangle { 
                                                 x: 0; width: 60px; height: 16px; background: m.color.with-alpha(0.12); border_radius: 1px;
-                                                Text { text: m.label; font-size: 8px; font-weight: 900; color: m.color; x: 4px; vertical-alignment: center; } 
+                                                Text { text: m.label; font-size: 10px; font-weight: 900; color: m.color; x: 4px; vertical-alignment: center; } 
                                                 TouchArea { 
                                                     mouse-cursor: ew-resize;
                                                     moved => { if (self.pressed) { TimelineActions.marker_moved(idx, (self.mouse_x / 1px + parent.x / 1px + m_lane.x / 1px) / (Style.grid-step / 1px * root.z_lvl)); } }
@@ -165,10 +165,10 @@
                                         Rectangle { y: 0; height: 1px; background: Style.border; }
                                         HorizontalLayout { 
                                             padding-left: 10px; spacing: 14px;
-                                            Text { text: "GLOBAL TEMPO: " + Math.floor(Style.bpm * 100)/100 + " BPM"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; vertical-alignment: center; }
-                                            Text { text: "METER: 4/4"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; vertical-alignment: center; }
+                                            Text { text: "GLOBAL TEMPO: " + Math.floor(Style.bpm * 100)/100 + " BPM"; font-size: 10px; color: #6E6E73; font-weight: 900; vertical-alignment: center; }
+                                            Text { text: "METER: 4/4"; font-size: 10px; color: #6E6E73; font-weight: 900; vertical-alignment: center; }
                                             Rectangle { horizontal-stretch: 1; }
-                                            Text { text: "SYNC: INTERNAL INT"; font-size: Style.font-xxs; color: Style.border; vertical-alignment: center; }
+                                            Text { text: "SYNC: INTERNAL INT"; font-size: 10px; color: Style.border; vertical-alignment: center; }
                                         }
                                     }
                                 }
@@ -226,17 +226,17 @@
                                         // VCA / Group Tag
                                         if (am_trk_h.group_id > 0) : Rectangle {
                                             width: 14px; height: 14px; background: #000; border_radius: 2px; border_width: 1px; border_color: Style.brand;
-                                            Text { text: "" + am_trk_h.group_id; font-size: Style.font-xxs; color: Style.brand; horizontal-alignment: center; vertical-alignment: center; font-weight: 950; }
+                                            Text { text: "" + am_trk_h.group_id; font-size: 10px; color: Style.brand; horizontal-alignment: center; vertical-alignment: center; font-weight: 950; }
                                         }
 
                                         VerticalLayout { 
                                             alignment: center; horizontal-stretch: 1;
                                             Text { text: "\{idx < 9 ? "0" : ""}\{idx + 1} | \{am_trk_h.name}"; font-size: 11px; font-weight: 600; color: am_trk_h.mute ? Style.text-secondary : Style.text-primary; overflow: elide; }
-                                            if (am_trk_h.frozen) : Text { text: "FROZEN" + (am_trk_h.frozen_sample_rate > 0 ? " " + am_trk_h.frozen_sample_rate + "Hz" : ""); font-size: 8px; color: Style.brand; font-weight: 800; }
+                                            if (am_trk_h.frozen) : Text { text: "FROZEN" + (am_trk_h.frozen_sample_rate > 0 ? " " + am_trk_h.frozen_sample_rate + "Hz" : ""); font-size: 10px; color: Style.brand; font-weight: 800; }
                                             HorizontalLayout {
                                                 spacing: 6px;
-                                                Text { text: am_trk_h.input; width: 34px; font-size: Style.font-xxs; color: Style.brand; font-weight: 900; overflow: elide; }
-                                                Text { text: "LAT: " + (idx * 0.2) + "ms"; width: 42px; font-size: Style.font-xxs; color: Style.text-muted; overflow: elide; }
+                                                Text { text: am_trk_h.input; width: 34px; font-size: 10px; color: Style.brand; font-weight: 900; overflow: elide; }
+                                                Text { text: "LAT: " + (idx * 0.2) + "ms"; width: 42px; font-size: 10px; color: Style.text-muted; overflow: elide; }
                                                 Rectangle {
                                                     width: 48px; height: 4px; background: Style.border; border_radius: 2px;
                                                     Rectangle { width: am_trk_h.volume.clamp(0, 1) * parent.width; height: 100%; background: Style.ok; border_radius: 2px; }
@@ -267,7 +267,7 @@
                                     if (am_trk_h.expanded && !am_trk_h.is_folder) : VerticalLayout {
                                         y: 56px; padding: 12px; spacing: 10px;
                                         Rectangle { height: 1px; background: Style.border; }
-                                        Text { text: "Track Controls"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                                        Text { text: "Track Controls"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
                                         HorizontalLayout {
                                             spacing: 16px; alignment: start;
                                             for m_idx in 4 : Z_Knob {
@@ -357,7 +357,7 @@
                                         }
                                         if (am_trk.mute) : Rectangle {
                                             width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.42);
-                                            Text { text: "MUTED"; x: 6px; y: 15px; font-size: Style.font-xxs; color: Style.text-tertiary; font-family: Style.numeric-font; }
+                                            Text { text: "MUTED"; x: 6px; y: 15px; font-size: 10px; color: Style.text-tertiary; font-family: Style.numeric-font; }
                                         }
 
                                         // --- INDUSTRIAL WAVEFORM RENDERING ---
@@ -374,7 +374,7 @@
                                         Rectangle {
                                             z: 10; x: 0; y: 0; width: 100%; height: 12px;
                                             background: @linear-gradient(180deg, am_c.color.with-alpha(0.82) 0%, am_c.color.with-alpha(0.58) 100%);
-                                            Text { text: am_c.name; x: 5px; width: parent.width - 10px; font-size: Style.font-xxs; color: #FFFFFF; vertical-alignment: center; overflow: elide; }
+                                            Text { text: am_c.name; x: 5px; width: parent.width - 10px; font-size: 10px; color: #FFFFFF; vertical-alignment: center; overflow: elide; }
                                         }
 
                                         if (root.loop_active && root.loop_st <= am_c.start_beat + am_c.length_beats && root.loop_ed >= am_c.start_beat) : Text {
@@ -420,7 +420,7 @@
                                         // Keep the region title in one place. The header above owns
                                         // the name; a second title at y=2 caused visible text overlap.
                                         if (am_c.missing) : Text {
-                                            text: "MISSING"; font-size: Style.font-xxs; color: Style.record;
+                                            text: "MISSING"; font-size: 10px; color: Style.record;
                                             x: 6px; y: 14px; font-weight: 700; opacity: 0.95;
                                         }
 
@@ -460,7 +460,7 @@
                                                 }
                                             }
                                             Rectangle { y: parent.height - 1px; height: 1px; background: Style.border; }
-                                            Text { text: lane.name + (lane.plugin_index >= 0 ? " · right-click to add point" : ""); x: 8px; y: 4px; font-size: Style.font-xxs; color: lane.color; font-weight: 900; opacity: 0.6; }
+                                            Text { text: lane.name + (lane.plugin_index >= 0 ? " · right-click to add point" : ""); x: 8px; y: 4px; font-size: 10px; color: lane.color; font-weight: 900; opacity: 0.6; }
                                             Text { text: "×"; x: parent.width - 22px; y: 2px; width: 18px; height: 18px; horizontal-alignment: center; font-size: Style.font-xs; color: lane.color; opacity: 0.65;
                                                 TouchArea { clicked => { AutomationActions.clear_automation_lane(am_trk.id, l_idx); } }
                                             }

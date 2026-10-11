@@ -45,18 +45,18 @@ export component Z_FullMixer {
             Rectangle { x: 0px; y: 0px; width: 208px; height: 100%; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 6px;
                 VerticalLayout { spacing: 0px;
                     Rectangle { height: 42px; background: Style.surface-2; HorizontalLayout { padding: 10px; spacing: 8px; Text { text: "Sounds"; color: Style.text-primary; font-size: 12px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌕"; color: Style.text-secondary; font-size: 16px; vertical-alignment: center; } }
-                    Rectangle { height: 34px; x: 10px; width: parent.width - 20px; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 5px; Text { text: "Search sounds, presets..."; x: 10px; width: parent.width - 20px; height: 100%; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; } }
+                    Rectangle { height: 34px; x: 10px; width: parent.width - 20px; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 5px; Text { text: "Search sounds, presets..."; x: 10px; width: parent.width - 20px; height: 100%; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; } }
                     for cat in ["All Sounds", "Favorites", "Drums", "Bass", "Keys", "Synths", "Guitars", "Vocals", "FX"] : Rectangle { height: 28px; background: cat == "All Sounds" ? Style.selection : transparent; HorizontalLayout { padding-left: 12px; spacing: 8px; Text { text: cat == "All Sounds" ? "◈" : "•"; color: cat == "All Sounds" ? Style.brand : Style.text-tertiary; font-size: 11px; vertical-alignment: center; } Text { text: cat; color: cat == "All Sounds" ? Style.text-primary : Style.text-secondary; font-size: 10px; vertical-alignment: center; } } }
                     Rectangle { height: 1px; background: Style.border; }
-                    Text { text: "LIBRARY"; x: 12px; y: 10px; color: Style.text-tertiary; font-size: 8px; font-weight: 700; }
+                    Text { text: "LIBRARY"; x: 12px; y: 10px; color: Style.text-tertiary; font-size: 10px; font-weight: 700; }
                     Rectangle { height: 20px; }
-                    for pack in ["Foundry", "Neon Kit", "Circuit Kit", "Vintage 808"] : Rectangle { height: 56px; x: 10px; width: parent.width - 20px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 5px; HorizontalLayout { padding: 7px; spacing: 8px; Rectangle { width: 42px; height: 40px; background: Style.brand-glow; border_radius: 4px; } VerticalLayout { alignment: center; Text { text: pack; color: Style.text-primary; font-size: 10px; } Text { text: "Factory collection"; color: Style.text-tertiary; font-size: 8px; } } } }
+                    for pack in ["Foundry", "Neon Kit", "Circuit Kit", "Vintage 808"] : Rectangle { height: 56px; x: 10px; width: parent.width - 20px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 5px; HorizontalLayout { padding: 7px; spacing: 8px; Rectangle { width: 42px; height: 40px; background: Style.brand-glow; border_radius: 4px; } VerticalLayout { alignment: center; Text { text: pack; color: Style.text-primary; font-size: 10px; } Text { text: "Factory collection"; color: Style.text-tertiary; font-size: 10px; } } } }
                     Rectangle { vertical-stretch: 1; }
                 }
             }
             Rectangle { x: 216px; y: 0px; width: parent.width - 480px; height: 100%; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 6px;
                 VerticalLayout { padding: 4px; spacing: 4px;
-                    HorizontalLayout { height: 28px; padding-left: 8px; padding-right: 8px; spacing: 6px; Text { text: "CHANNELS"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "◉ Peak + RMS"; color: Style.text-tertiary; font-size: 8px; vertical-alignment: center; } }
+                    HorizontalLayout { height: 28px; padding-left: 8px; padding-right: 8px; spacing: 6px; Text { text: "CHANNELS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "◉ Peak + RMS"; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; } }
                     ScrollView { horizontal-stretch: 1; vertical-stretch: 1;
                         HorizontalLayout { spacing: 2px; padding: 4px;
                             for trk[idx] in tracks : Z_MixerStrip {
@@ -95,17 +95,17 @@ export component Z_FullMixer {
                     Rectangle { height: 42px; background: Style.surface-2; HorizontalLayout { padding: 12px; Text { text: "Channel"; color: Style.text-primary; font-size: 12px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: "Clip"; color: Style.text-tertiary; font-size: 10px; } Text { text: "Project"; color: Style.text-tertiary; font-size: 10px; } } }
                     VerticalLayout { padding: 12px; spacing: 10px;
                         Text { text: "Drums"; color: Style.text-primary; font-size: 15px; font-weight: 700; }
-                        Text { text: "Volume"; color: Style.text-tertiary; font-size: 9px; }
+                        Text { text: "Volume"; color: Style.text-tertiary; font-size: 10px; }
                         Rectangle { height: 8px; background: Style.surface-0; border_radius: 4px; Rectangle { width: 70%; height: 100%; background: Style.brand; border_radius: 4px; } }
                         HorizontalLayout { Text { text: "-6.2 dB"; color: Style.text-secondary; font-size: 11px; } Rectangle { horizontal-stretch: 1; } Text { text: "Pan 0"; color: Style.text-secondary; font-size: 11px; } }
-                        Text { text: "INSERTS"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; }
-                        for fx in ["Hirari Compressor", "EQ Pro", "Transient Shaper", "Tape Saturator"] : Rectangle { height: 30px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 4px; HorizontalLayout { padding-left: 9px; spacing: 8px; Text { text: "◉"; color: Style.brand; font-size: 10px; vertical-alignment: center; } Text { text: fx; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌄"; color: Style.text-tertiary; vertical-alignment: center; } } }
-                        Text { text: "AUX SENDS"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; }
+                        Text { text: "INSERTS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; }
+                        for fx in ["Hirari Compressor", "EQ Pro", "Transient Shaper", "Tape Saturator"] : Rectangle { height: 30px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 4px; HorizontalLayout { padding-left: 9px; spacing: 8px; Text { text: "◉"; color: Style.brand; font-size: 10px; vertical-alignment: center; } Text { text: fx; color: Style.text-secondary; font-size: 10px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌄"; color: Style.text-tertiary; vertical-alignment: center; } } }
+                        Text { text: "AUX SENDS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; }
                         Button { text: "Open Send Routing"; clicked => { MixerActions.open_send_routing(); } }
-                        Text { text: "Send levels and pre/post taps are shown in Audio Routing."; color: Style.text-tertiary; font-size: 8px; wrap: word-wrap; }
+                        Text { text: "Send levels and pre/post taps are shown in Audio Routing."; color: Style.text-tertiary; font-size: 10px; wrap: word-wrap; }
                         Rectangle { vertical-stretch: 1; }
                         Text { text: "Channel Settings"; color: Style.text-primary; font-size: 11px; font-weight: 700; }
-                        Text { text: "Meter: Peak + RMS    Curve: Linear"; color: Style.text-tertiary; font-size: 9px; }
+                        Text { text: "Meter: Peak + RMS    Curve: Linear"; color: Style.text-tertiary; font-size: 10px; }
                     }
                 }
             }

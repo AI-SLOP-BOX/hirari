@@ -385,7 +385,7 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding: 16px; spacing: 12px;
                     HorizontalLayout {
-                        Text { text: (RenderActions.render-format == 0 ? "PCM16" : (RenderActions.render-format == 1 ? "PCM24" : (RenderActions.render-format == 2 ? "Float32" : "WAVE64 Float32"))) + " · Current engine rate · " + (RenderActions.stem-export-mode ? "Track stems" : "Master"); font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-stretch: 1; }
+                        Text { text: (RenderActions.render-format == 0 ? "PCM16" : (RenderActions.render-format == 1 ? "PCM24" : (RenderActions.render-format == 2 ? "Float32" : "WAVE64 Float32"))) + " · Current engine rate · " + (RenderActions.stem-export-mode ? "Track stems" : "Master"); font-size: 10px; color: Style.text-tertiary; horizontal-stretch: 1; }
                         Text { text: render_progress_available ? Math.floor(render_progress * 100) + "%" : render_state; font-size: 12px; color: Style.brand; font-weight: 700; }
                     }
                     // Progress Bar (Industrial)
@@ -401,8 +401,8 @@ export component AppWindow inherits Window {
                             background: Style.brand; opacity: 0.6; border_radius: 1px;
                         }
                     }
-                    Text { text: render_progress_available ? (render_state == "COMPLETE" ? "Export complete" : "Rendering…") : (render_state == "RENDERING" ? "Rendering · " + render_elapsed_seconds + "s" : render_state); font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: right; }
-                    Text { text: render_error; font-size: Style.font-xxs; color: Style.alert; horizontal-alignment: right; }
+                    Text { text: render_progress_available ? (render_state == "COMPLETE" ? "Export complete" : "Rendering…") : (render_state == "RENDERING" ? "Rendering · " + render_elapsed_seconds + "s" : render_state); font-size: 10px; color: Style.text-secondary; horizontal-alignment: right; }
+                    Text { text: render_error; font-size: 10px; color: Style.alert; horizontal-alignment: right; }
                 }
             }
             if (is_rendering) : HorizontalLayout {
@@ -427,7 +427,7 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     VerticalLayout {
                         Text { text: "Plugin Sandbox"; font-size: 10px; color: Style.brand; font-weight: 700; }
-                        Text { text: "Sandbox · " + (audio_sample_rate > 0.0 ? Math.round(audio_sample_rate) + " Hz" : "Audio offline"); font-size: Style.font-xxs; color: Style.text-tertiary; }
+                        Text { text: "Sandbox · " + (audio_sample_rate > 0.0 ? Math.round(audio_sample_rate) + " Hz" : "Audio offline"); font-size: 10px; color: Style.text-tertiary; }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     Z_IconButton { icon: "✕"; clicked => { fx_active_id = -1; } }
@@ -446,8 +446,8 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 padding: 8px; spacing: 12px;
                                 VerticalLayout { alignment: center; width: 100px;
-                                    Text { text: name; font-size: Style.font-xxs; color: Style.text-tertiary; }
-                                    Text { text: "Value: " + Math.floor(sl_p.value * 10) / 10; font-size: Style.font-xxs; color: Style.ok; }
+                                    Text { text: name; font-size: 10px; color: Style.text-tertiary; }
+                                    Text { text: "Value: " + Math.floor(sl_p.value * 10) / 10; font-size: 10px; color: Style.ok; }
                                 }
                                 sl_p := Slider {
                                     value: plugin-parameter-values.length > i ? plugin-parameter-values[i] * 100.0 : 60.0;
@@ -457,7 +457,7 @@ export component AppWindow inherits Window {
                                 Rectangle {
                                     width: 44px; height: 28px; background: Style.surface-0; border_radius: 1px;
                                     border_width: 1px; border_color: Style.border;
-                                    Text { text: "AUTO"; font-size: Style.font-xxs; color: Style.brand; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { text: "AUTO"; font-size: 10px; color: Style.brand; horizontal-alignment: center; vertical-alignment: center; }
                                     TouchArea { clicked => {
                                         if (tracks.length > 0 && selected_row < tracks.length) {
                                             PluginActions.automate_plugin_parameter(tracks[selected_row].id, fx_active_id, i);
@@ -491,7 +491,7 @@ export component AppWindow inherits Window {
             for m in ["Project", "Automation", "Stacks", "Mix", "Plugins", "Prefs", "Diagnostics", "Moufu"] : Rectangle {
                 width: 50px; height: 30px; border-radius: 5px;
                 background: menu_area.has-hover ? Style.panel-h : transparent;
-                Text { text: m; width: 100%; height: 100%; font-size: 9px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
+                Text { text: m; width: 100%; height: 100%; font-size: 10px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
                 menu_area := TouchArea {
                     // The transparent Button below owns the accessibility action,
                     // so this raw pointer area stays non-accessible: marking both
@@ -531,7 +531,7 @@ export component AppWindow inherits Window {
                 background: Style.surface-2; border_width: 1px; border_color: Style.border;
                 HorizontalLayout {
                     padding-left: 9px; padding-right: 9px; spacing: 4px;
-                    Text { text: "BPM"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; }
+                    Text { text: "BPM"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
                     Text { text: Math.floor(Style.bpm * 100) / 100 + ""; font-size: 13px; color: Style.brand; font-family: Style.numeric-font; font-weight: 700; vertical-alignment: center; }
                     Text { text: time_sig; font-size: 10px; color: Style.text-dim; vertical-alignment: center; }
                 }
@@ -555,7 +555,7 @@ export component AppWindow inherits Window {
             }
             Text {
                 text: "Create a track to start arranging.";
-                font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center;
+                font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center;
             }
             Z_IconButton {
                 icon: "Add Audio Track";

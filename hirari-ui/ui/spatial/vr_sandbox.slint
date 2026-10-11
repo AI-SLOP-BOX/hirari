@@ -27,7 +27,7 @@ export component Z_VRSandbox {
                     height: 16px; background: headset_active ? Style.ok.with-alpha(0.15) : Style.border; border_radius: 2px;
                     HorizontalLayout {
                         padding-left: 6px; padding-right: 6px;
-                        Text { text: headset_active ? "LOCK: ACTIVE" : "LOCK: SEARCHING"; font-size: Style.font-xxs; color: headset_active ? Style.ok : #666; font-weight: 900; vertical-alignment: center; }
+                        Text { text: headset_active ? "LOCK: ACTIVE" : "LOCK: SEARCHING"; font-size: 10px; color: headset_active ? Style.ok : #666; font-weight: 900; vertical-alignment: center; }
                     }
                 }
             }
@@ -40,7 +40,7 @@ export component Z_VRSandbox {
                 // LEFT: Interactive 2D Head/Object Map
                 VerticalLayout {
                     width: 160px; spacing: 6px;
-                    Text { text: "TOP-DOWN SPATIAL MAP"; font-size: 8px; color: #6E6E73; font-weight: 900; horizontal-alignment: center; }
+                    Text { text: "TOP-DOWN SPATIAL MAP"; font-size: 10px; color: #6E6E73; font-weight: 900; horizontal-alignment: center; }
                     
                     Rectangle {
                         width: 160px; height: 160px; background: #000; border_radius: 80px; border_width: 1px; border_color: Style.border;
@@ -63,7 +63,7 @@ export component Z_VRSandbox {
                                 MoveTo { x: 16; y: 0; }
                                 LineTo { x: 16; y: -6; }
                             }
-                            Text { text: "User"; font-size: Style.font-xxs; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "User"; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         
                         // Draggable spatial object
@@ -72,7 +72,7 @@ export component Z_VRSandbox {
                             x: obj_x * (parent.width - 18px);
                             y: obj_y * (parent.height - 18px);
                             
-                            Text { text: "S1"; font-size: 8px; color: #fff; font-weight: 950; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "S1"; font-size: 10px; color: #fff; font-weight: 950; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         
                         TouchArea {
@@ -87,7 +87,7 @@ export component Z_VRSandbox {
                     
                     Text { 
                         text: "SRC_1: X=" + Math.floor((obj_x - 0.5) * 200) + " | Y=" + Math.floor((0.5 - obj_y) * 200); 
-                        font-size: Style.font-xxs; color: #666; font-weight: 800; horizontal-alignment: center; 
+                        font-size: 10px; color: #666; font-weight: 800; horizontal-alignment: center; 
                     }
                 }
                 
@@ -102,7 +102,7 @@ export component Z_VRSandbox {
                             height: 20px; background: vr_mode == idx ? Style.border : Style.surface; border_radius: 2px; border_width: 1px; border_color: vr_mode == idx ? Style.brand : Style.border;
                             HorizontalLayout {
                                 padding-left: 8px; padding-right: 8px;
-                                Text { text: name; font-size: Style.font-xxs; color: vr_mode == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
+                                Text { text: name; font-size: 10px; color: vr_mode == idx ? #fff : #A1A1A6; font-weight: 900; vertical-alignment: center; }
                             }
                             TouchArea { clicked => { vr_mode = idx; } }
                         }
@@ -114,17 +114,17 @@ export component Z_VRSandbox {
                         VerticalLayout {
                             alignment: center; spacing: 4px;
                             Z_Knob { value: yaw; changed(v) => { yaw = v; } }
-                            Text { text: "YAW: " + Math.floor(yaw * 360) + "°"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                            Text { text: "YAW: " + Math.floor(yaw * 360) + "°"; font-size: 10px; color: #aaa; horizontal-alignment: center; }
                         }
                         VerticalLayout {
                             alignment: center; spacing: 4px;
                             Z_Knob { value: pitch; changed(v) => { pitch = v; } }
-                            Text { text: "PITCH: " + Math.floor(pitch * 360) + "°"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                            Text { text: "PITCH: " + Math.floor(pitch * 360) + "°"; font-size: 10px; color: #aaa; horizontal-alignment: center; }
                         }
                         VerticalLayout {
                             alignment: center; spacing: 4px;
                             Z_Knob { value: roll; changed(v) => { roll = v; } }
-                            Text { text: "ROLL: " + Math.floor(roll * 360) + "°"; font-size: Style.font-xxs; color: #aaa; horizontal-alignment: center; }
+                            Text { text: "ROLL: " + Math.floor(roll * 360) + "°"; font-size: 10px; color: #aaa; horizontal-alignment: center; }
                         }
                     }
                     
@@ -134,19 +134,19 @@ export component Z_VRSandbox {
                         VerticalLayout {
                             padding: 8px; spacing: 4px;
                             HorizontalLayout {
-                                Text { text: "HEADSETS READY:"; font-size: Style.font-xxs; color: #6E6E73; font-weight: 900; }
+                                Text { text: "HEADSETS READY:"; font-size: 10px; color: #6E6E73; font-weight: 900; }
                                 Rectangle { horizontal-stretch: 1; }
-                                Text { text: headset_active ? "HIRARI-VR v2" : "NONE"; font-size: Style.font-xxs; color: Style.brand; font-weight: 950; }
+                                Text { text: headset_active ? "HIRARI-VR v2" : "NONE"; font-size: 10px; color: Style.brand; font-weight: 950; }
                             }
                             HorizontalLayout {
-                                Text { text: "Head Tracking"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+                                Text { text: "Head Tracking"; font-size: 10px; color: Style.text-tertiary; font-weight: 500; }
                                 Rectangle { horizontal-stretch: 1; }
-                                Text { text: "1.4 ms"; font-size: Style.font-xxs; color: Style.ok; font-weight: 700; }
+                                Text { text: "1.4 ms"; font-size: 10px; color: Style.ok; font-weight: 700; }
                             }
                             HorizontalLayout {
-                                Text { text: "HRTF Filter"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+                                Text { text: "HRTF Filter"; font-size: 10px; color: Style.text-tertiary; font-weight: 500; }
                                 Rectangle { horizontal-stretch: 1; }
-                                Text { text: "128 coef / ear"; font-size: Style.font-xxs; color: Style.text-secondary; font-weight: 500; }
+                                Text { text: "128 coef / ear"; font-size: 10px; color: Style.text-secondary; font-weight: 500; }
                             }
                         }
                     }

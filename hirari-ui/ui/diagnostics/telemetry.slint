@@ -10,12 +10,12 @@ export component Z_Telemetry {
                 spacing: 8px;
                 VerticalLayout {
                     spacing: 2px;
-                    Text { text: "DSP Load: " + Math.floor(cpu) + "%"; font-size: Style.font-xxs; color: cpu > 85 ? Style.record : Style.text-secondary; font-weight: 600; }
+                    Text { text: "DSP Load: " + Math.floor(cpu) + "%"; font-size: 10px; color: cpu > 85 ? Style.record : Style.text-secondary; font-weight: 600; }
                     Rectangle { width: 44px; height: 3px; background: Style.surface; Rectangle { width: (cpu/100.0) * parent.width; height: 100%; background: Style.brand; } }
                 }
                 VerticalLayout {
                     spacing: 2px;
-                    Text { text: ram > 0 ? "RAM: " + Math.floor(ram) + "%" : "RAM: --"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+                    Text { text: ram > 0 ? "RAM: " + Math.floor(ram) + "%" : "RAM: --"; font-size: 10px; color: Style.text-tertiary; font-weight: 500; }
                     Rectangle { width: 44px; height: 3px; background: Style.surface; Rectangle { width: (ram/100.0) * parent.width; height: 100%; background: Style.ok; } }
                 }
             }

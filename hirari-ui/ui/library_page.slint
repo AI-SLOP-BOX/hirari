@@ -17,7 +17,7 @@ export component Z_LibraryPage inherits Rectangle {
             VerticalLayout {
                 padding: 14px; spacing: 8px;
                 Text { text: "Audio Library"; font-size: 15px; font-weight: 700; color: Style.text; }
-                Text { text: "Indexed audio files"; font-size: 9px; color: Style.text-dim; }
+                Text { text: "Indexed audio files"; font-size: 10px; color: Style.text-dim; }
                 Rectangle { height: 1px; background: Style.border; }
                 Rectangle {
                     height: 28px; background: Style.border;
@@ -32,7 +32,7 @@ export component Z_LibraryPage inherits Rectangle {
                 Text { text: "Audio Files"; font-size: 13px; font-weight: 600; color: Style.text; }
                 Rectangle { horizontal-stretch: 1; }
                 Z_IconButton { icon: "Scan"; compact: true; clicked => { BrowserActions.browser_scan(""); } }
-                Text { text: entries.length + " items"; font-size: 9px; color: Style.text-muted; }
+                Text { text: entries.length + " items"; font-size: 10px; color: Style.text-muted; }
             }
             LineEdit {
                 text <=> root.query;
@@ -48,7 +48,7 @@ export component Z_LibraryPage inherits Rectangle {
                         HorizontalLayout {
                             padding-left: 10px; padding-right: 8px; spacing: 8px;
                             Rectangle { width: 4px; height: 22px; background: Style.brand; }
-                            VerticalLayout { vertical-stretch: 1; Text { text: entry.name; font-size: 10px; color: Style.text; overflow: elide; } Text { text: entry.fmt + "  " + entry.sr + " Hz  " + entry.size; font-size: 8px; color: Style.text-muted; } }
+                            VerticalLayout { vertical-stretch: 1; Text { text: entry.name; font-size: 10px; color: Style.text; overflow: elide; } Text { text: entry.fmt + "  " + entry.sr + " Hz  " + entry.size; font-size: 10px; color: Style.text-muted; } }
                             Z_IconButton { icon: "Preview"; compact: true; clicked => { root.preview(entry.path != "" ? entry.path : entry.name); } }
                         }
                         row_area := TouchArea { mouse-cursor: pointer; clicked => { root.preview(entry.path != "" ? entry.path : entry.name); } }

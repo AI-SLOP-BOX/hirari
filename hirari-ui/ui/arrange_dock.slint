@@ -52,9 +52,9 @@ export component Z_ArrangeDock inherits Rectangle {
                 Z_IconButton { icon: "+"; compact: true; button-width: 24px; clicked => { root.zoom = (root.zoom * 1.25).min(4.0); } }
                 Z_IconButton { icon: "FIT"; compact: true; button-width: 32px; clicked => { root.zoom = ((root.width - 120px) / (root.timeline-end-beat * 20px)).max(0.25).min(4.0); } }
                 Text { text: "ARRANGEMENT"; color: Style.text-primary; font-size: 10px; font-weight: 700; vertical-alignment: center; }
-                Text { text: root.tracks.length + " tracks"; color: Style.text-secondary; font-size: 9px; vertical-alignment: center; }
+                Text { text: root.tracks.length + " tracks"; color: Style.text-secondary; font-size: 10px; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "ZOOM " + Math.round(root.zoom * 100.0) + "% · " + Math.round(root.pixels-per-beat) + " px/beat"; color: Style.text-tertiary; font-size: 9px; vertical-alignment: center; }
+                Text { text: "ZOOM " + Math.round(root.zoom * 100.0) + "% · " + Math.round(root.pixels-per-beat) + " px/beat"; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; }
             }
         }
 
@@ -69,14 +69,14 @@ export component Z_ArrangeDock inherits Rectangle {
                     background: Style.surface-1;
                     border-width: 1px;
                     border-color: Style.border;
-                    Text { x: 10px; width: 84px; text: "TRACK"; color: Style.text-tertiary; font-size: 8px; font-weight: 700; vertical-alignment: center; }
+                    Text { x: 10px; width: 84px; text: "TRACK"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; vertical-alignment: center; }
                     for measure in root.measure-starts : Rectangle {
                         x: 104px + measure.beat * root.pixels-per-beat * 1px;
                         width: 1px;
                         height: 100%;
                         background: Style.border;
                         opacity: 0.8;
-                        Text { x: 4px; text: "" + measure.number; color: Style.text-tertiary; font-size: 8px; vertical-alignment: center; }
+                        Text { x: 4px; text: "" + measure.number; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; }
                     }
                 }
 
@@ -99,8 +99,8 @@ export component Z_ArrangeDock inherits Rectangle {
                         width: 100px;
                         height: 100%;
                         background: Style.panel;
-                        Text { x: 8px; y: 8px; width: 86px; text: track.name; color: Style.text-primary; font-size: 9px; font-weight: 600; overflow: elide; }
-                        Text { x: 8px; y: 31px; width: 86px; text: track.type + " · " + track.clips.length + " clips"; color: Style.text-tertiary; font-size: 8px; overflow: elide; }
+                        Text { x: 8px; y: 8px; width: 86px; text: track.name; color: Style.text-primary; font-size: 10px; font-weight: 600; overflow: elide; }
+                        Text { x: 8px; y: 31px; width: 86px; text: track.type + " · " + track.clips.length + " clips"; color: Style.text-tertiary; font-size: 10px; overflow: elide; }
                         TouchArea { clicked => { root.track-selected(idx); } }
                     }
                     Rectangle {
@@ -161,7 +161,7 @@ export component Z_ArrangeDock inherits Rectangle {
                                     }
                                 }
                             }
-                            Text { x: 6px; width: parent.width - 12px; text: clip_data.name; color: Style.text-primary; font-size: 8px; vertical-alignment: center; overflow: elide; }
+                            Text { x: 6px; width: parent.width - 12px; text: clip_data.name; color: Style.text-primary; font-size: 10px; vertical-alignment: center; overflow: elide; }
                             TouchArea {
                                 enabled: !root.is-locked;
                                 pointer-event(event) => {

@@ -15,14 +15,14 @@ export component Z_CloudBridge {
                         height: 36px; background: Style.surface; border_radius: 1px;
                         HorizontalLayout {
                             padding: 8px; spacing: 12px;
-                            Text { text: "Cloud"; font-size: Style.font-xxs; vertical-alignment: center; }
+                            Text { text: "Cloud"; font-size: 10px; vertical-alignment: center; }
                             VerticalLayout {
                                 alignment: center;
-                                Text { text: commit.name; font-size: 9px; color: #fff; font-weight: 800; }
-                                Text { text: commit.author + " | " + commit.date; font-size: Style.font-xxs; color: #6E6E73; }
+                                Text { text: commit.name; font-size: 10px; color: #fff; font-weight: 800; }
+                                Text { text: commit.author + " | " + commit.date; font-size: 10px; color: #6E6E73; }
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            Text { text: commit.hash; font-size: Style.font-xxs; color: #333; vertical-alignment: center; font-family: Style.numeric-font; }
+                            Text { text: commit.hash; font-size: 10px; color: #333; vertical-alignment: center; font-family: Style.numeric-font; }
                         }
                     }
                 }

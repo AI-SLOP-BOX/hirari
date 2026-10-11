@@ -54,8 +54,8 @@ export component Z_MixerStrip {
         // I/O Header
         Rectangle {
             height: 16px; background: Style.surface-0; border_radius: 2px;
-            if (is_master) : Text { text: "MASTER OUT"; font-size: Style.font-xxs; color: Style.text-secondary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-            if (!is_master && !input_enabled) : Text { text: track_type; font-size: Style.font-xxs; color: Style.text-muted; horizontal-alignment: center; vertical-alignment: center; }
+            if (is_master) : Text { text: "MASTER OUT"; font-size: 10px; color: Style.text-secondary; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+            if (!is_master && !input_enabled) : Text { text: track_type; font-size: 10px; color: Style.text-muted; horizontal-alignment: center; vertical-alignment: center; }
             if (!is_master && input_enabled) : HorizontalLayout {
                 spacing: 1px; alignment: center;
                 Rectangle { width: 16px; height: 14px; Text { text: "‹"; color: Style.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.input-step(tid, -1); } } }
@@ -74,19 +74,19 @@ export component Z_MixerStrip {
                     spacing: 4px; alignment: center;
                     VerticalLayout {
                         Z_Knob { value: low_b; compact: true; accent-col: Style.ok; display-value: Math.round(low_b * 100.0) + "%"; changed(v) => { root.eq-changed(tid, v, low_c, high_b, high_c); } }
-                        Text { text: "LB"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                        Text { text: "LB"; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
                     }
                     VerticalLayout {
                         Z_Knob { value: low_c; compact: true; accent-col: Style.alert; display-value: Math.round(low_c * 100.0) + "%"; changed(v) => { root.eq-changed(tid, low_b, v, high_b, high_c); } }
-                        Text { text: "LC"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                        Text { text: "LC"; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
                     }
                     VerticalLayout {
                         Z_Knob { value: high_b; compact: true; accent-col: Style.brand; display-value: Math.round(high_b * 100.0) + "%"; changed(v) => { root.eq-changed(tid, low_b, low_c, v, high_c); } }
-                        Text { text: "HB"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                        Text { text: "HB"; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
                     }
                     VerticalLayout {
                         Z_Knob { value: high_c; compact: true; accent-col: Style.text-secondary; display-value: Math.round(high_c * 100.0) + "%"; changed(v) => { root.eq-changed(tid, low_b, low_c, high_b, v); } }
-                        Text { text: "HC"; font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                        Text { text: "HC"; font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
                     }
                 }
                 // Interactive Response Path
@@ -119,10 +119,10 @@ export component Z_MixerStrip {
                 if (slot < fx.length) : HorizontalLayout {
                     padding-left: 3px; padding-right: 3px; spacing: 3px;
                     Z_IconButton { icon: "●"; compact: true; active: fx[slot].active; active-col: Style.ok; clicked => { root.fx-toggled(tid, slot); } }
-                    Text { text: fx[slot].name; font-size: Style.font-xxs; color: Style.text; horizontal-alignment: center; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                    Text { text: "▾"; font-size: Style.font-xxs; color: Style.text-muted; vertical-alignment: center; }
+                    Text { text: fx[slot].name; font-size: 10px; color: Style.text; horizontal-alignment: center; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: "▾"; font-size: 10px; color: Style.text-muted; vertical-alignment: center; }
                 }
-                if (slot >= fx.length) : Text { text: "Audio FX"; font-size: Style.font-xxs; color: Style.text-muted; x: 6px; vertical-alignment: center; }
+                if (slot >= fx.length) : Text { text: "Audio FX"; font-size: 10px; color: Style.text-muted; x: 6px; vertical-alignment: center; }
             }
         }
 
@@ -156,7 +156,7 @@ export component Z_MixerStrip {
                 // Peak Numeric Readout (Pro Parity)
                 Rectangle {
                     height: 14px; background: Style.lcd-bg; border_radius: 1px;
-                    Text { text: peak <= 0.000001 ? "-∞ dB" : (peak > 1.0 ? "+" : "") + (Math.floor(20.0 * Math.log(peak, 10.0) * 10.0) / 10.0) + " dB"; font-size: Style.font-xxs; color: peak > 1.0 ? Style.record : Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; font-weight: 700; }
+                    Text { text: peak <= 0.000001 ? "-∞ dB" : (peak > 1.0 ? "+" : "") + (Math.floor(20.0 * Math.log(peak, 10.0) * 10.0) / 10.0) + " dB"; font-size: 10px; color: peak > 1.0 ? Style.record : Style.text-secondary; horizontal-alignment: center; vertical-alignment: center; font-weight: 700; }
                 }
                 Rectangle {
                     height: compact ? 160px : 220px; background: Style.surface-0; width: compact ? 26px : 32px; border_radius: 3px; border_width: 1px; border_color: Style.border;
@@ -177,7 +177,7 @@ export component Z_MixerStrip {
                     for s in [0, -6, -12, -18, -24, -36, -48, -60] : Rectangle {
                         y: (1.2 - (s == -60 ? 0.001 : Math.pow(10.0, s/20.0)))/1.2 * parent.height;
                         width: 4px; height: 1px; background: Style.border; x: 0;
-                        if (!compact) : Text { text: s + ""; font-size: Style.font-xxs; color: Style.text-tertiary; x: 6px; y: -3px; font-weight: 500; }
+                        if (!compact) : Text { text: s + ""; font-size: 10px; color: Style.text-tertiary; x: 6px; y: -3px; font-weight: 500; }
                     }
 
                     // Multichannel Metering (ATMOS Support)
@@ -216,14 +216,14 @@ export component Z_MixerStrip {
             if (!compact) : VerticalLayout {
                 spacing: 2px;
                 Z_Meter { val: peak; width: 4px; height: 100%; mode: 1; reset-peaks => { root.peaks-reset(); } }
-                Text { text: "PEAK"; font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: center; font-weight: 600; }
+                Text { text: "PEAK"; font-size: 10px; color: Style.text-secondary; horizontal-alignment: center; font-weight: 600; }
             }
         }
 
         // --- TRACK STRIP FOOTER ---
         Rectangle {
             height: 18px; background: Style.surface-0; border_radius: 2px;
-            Text { text: is_master ? "Master" : (track_idx + 1) + ""; font-size: 9px; color: Style.text-tertiary; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+            Text { text: is_master ? "Master" : (track_idx + 1) + ""; font-size: 10px; color: Style.text-tertiary; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
         }
     }
 }

@@ -31,7 +31,7 @@ export component Z_AudioSettings inherits Rectangle {
                 }
                 Rectangle { vertical-stretch: 1; }
                 Text { text: "Hirari DAW"; font-size: 10px; color: Style.text-tertiary; }
-                Text { text: "Audio engine settings"; font-size: 9px; color: Style.text-muted; }
+                Text { text: "Audio engine settings"; font-size: 10px; color: Style.text-muted; }
             }
         }
         VerticalLayout {
@@ -62,7 +62,7 @@ export component Z_AudioSettings inherits Rectangle {
                     }
                     if (root.device-query == "" && root.device-names.length == 0) : Text { text: "No audio devices available"; font-size: 10px; color: Style.text-muted; }
                     if (root.device-query != "" && root.device-indices.length == 0) : Text { text: "No matching audio devices"; font-size: 10px; color: Style.text-muted; }
-                    Text { text: root.device-query == "" ? root.device-names.length + " audio devices" : "Showing " + root.device-indices.length + " of " + root.device-names.length + " devices"; font-size: 9px; color: Style.text-muted; }
+                    Text { text: root.device-query == "" ? root.device-names.length + " audio devices" : "Showing " + root.device-indices.length + " of " + root.device-names.length + " devices"; font-size: 10px; color: Style.text-muted; }
                     Rectangle { vertical-stretch: 1; }
                     Z_IconButton { icon: "Reconnect audio"; button-width: 150px; active-col: Style.record; clicked => { AudioSettingsActions.reconnect(); } }
                 } }
@@ -72,10 +72,10 @@ export component Z_AudioSettings inherits Rectangle {
                     Text { text: "Sample rate"; font-size: 10px; color: Style.text-tertiary; }
                     HorizontalLayout { spacing: 5px; for rate in ["44.1 kHz", "48 kHz", "88.2 kHz", "96 kHz", "192 kHz"] : Z_IconButton { icon: rate; compact: true; enabled: !root.busy; button-width: 76px; clicked => { AudioSettingsActions.apply_config(rate == "44.1 kHz" ? 44100 : (rate == "48 kHz" ? 48000 : (rate == "88.2 kHz" ? 88200 : (rate == "96 kHz" ? 96000 : 192000))), root.buffer-size > 0 ? root.buffer-size : 256); } } }
                     Text { text: "Buffer size"; font-size: 10px; color: Style.text-tertiary; }
-                    HorizontalLayout { spacing: 4px; for size in [32, 64, 128, 256, 512, 1024, 2048] : Z_IconButton { icon: size + ""; compact: true; enabled: !root.busy; button-width: 48px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, size); } } Text { text: "samples"; font-size: 9px; color: Style.text-tertiary; vertical-alignment: center; } }
+                    HorizontalLayout { spacing: 4px; for size in [32, 64, 128, 256, 512, 1024, 2048] : Z_IconButton { icon: size + ""; compact: true; enabled: !root.busy; button-width: 48px; clicked => { AudioSettingsActions.apply_config(root.sample-rate > 0 ? Math.round(root.sample-rate) : 48000, size); } } Text { text: "samples"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; } }
                     Rectangle { height: 1px; background: Style.border; }
                     Text { text: "Current  " + (root.sample-rate > 0 ? Math.round(root.sample-rate) + " Hz" : "--") + "  ·  " + (root.buffer-size > 0 ? root.buffer-size + " samples" : "--"); font-size: 11px; color: Style.brand; }
-                    Text { text: root.diagnostic; font-size: 9px; color: Style.text-tertiary; overflow: elide; }
+                    Text { text: root.diagnostic; font-size: 10px; color: Style.text-tertiary; overflow: elide; }
                 } }
             }
         }

@@ -20,7 +20,7 @@ export component Z_ExportDialog {
             Text { text: "Export"; font-size: 14px; color: Style.brand; font-weight: 700; horizontal-alignment: center; }
             VerticalLayout {
                 spacing: 12px;
-                Text { text: "Output Format"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                Text { text: "Output Format"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
                 ComboBox {
                     model: ["WAV · PCM16", "WAV · PCM24", "WAV · Float32", "WAVE64 · Float32"];
                     current-index <=> RenderActions.render-format;
@@ -30,23 +30,23 @@ export component Z_ExportDialog {
                 // the actual WAV header after a device/config change.
                 Text {
                     text: "Current engine rate · " + (RenderActions.render-format == 0 ? "PCM16" : (RenderActions.render-format == 1 ? "PCM24" : (RenderActions.render-format == 2 ? "Float32" : "WAVE64 Float32")));
-                    font-size: Style.font-xxs; color: Style.text-secondary;
+                    font-size: 10px; color: Style.text-secondary;
                 }
             }
             VerticalLayout {
                 spacing: 12px;
-                Text { text: "Effect Tail"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                Text { text: "Effect Tail"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
                 ComboBox {
                     model: ["None", "1 second", "2 seconds", "5 seconds", "10 seconds", "30 seconds"];
                     current-index <=> RenderActions.render-tail-index;
                 }
-                Text { text: "Adds time after the last clip so reverb and delay can ring out."; font-size: Style.font-xxs; color: Style.text-secondary; }
+                Text { text: "Adds time after the last clip so reverb and delay can ring out."; font-size: 10px; color: Style.text-secondary; }
             }
             Rectangle { height: 1px; background: Style.border; }
             VerticalLayout {
                 spacing: 12px;
-                Text { text: "Metadata"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
-                Text { text: "Metadata follows the current project settings."; font-size: Style.font-xxs; color: Style.text-secondary; }
+                Text { text: "Metadata"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
+                Text { text: "Metadata follows the current project settings."; font-size: 10px; color: Style.text-secondary; }
             }
             Rectangle { vertical-stretch: 1; }
             HorizontalLayout {

@@ -19,22 +19,22 @@ export component Z_ExtensionBrowser inherits Rectangle {
         HorizontalLayout {
             Text { text: "EXTENSION COMMANDS"; font-size: 10px; color: Style.brand; font-weight: 700; }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: status; font-size: 8px; color: Style.text-muted; vertical-alignment: center; }
+            Text { text: status; font-size: 10px; color: Style.text-muted; vertical-alignment: center; }
             TouchArea {
                 width: 64px;
                 Rectangle { background: parent.has-hover ? Style.brand.with-alpha(0.2) : Style.surface; border-width: 1px; border-color: Style.border; }
-                Text { text: "INSTALL"; font-size: 8px; color: Style.text; horizontal-alignment: center; vertical-alignment: center; }
+                Text { text: "INSTALL"; font-size: 10px; color: Style.text; horizontal-alignment: center; vertical-alignment: center; }
                 clicked => { root.install(); }
             }
-            LineEdit { text <=> payload; placeholder-text: "{}"; width: 140px; font-size: 8px; }
+            LineEdit { text <=> payload; placeholder-text: "{}"; width: 140px; font-size: 10px; }
             TouchArea {
                 width: 64px;
                 Rectangle { background: parent.has-hover ? Style.brand.with-alpha(0.2) : Style.surface; border-width: 1px; border-color: Style.border; }
-                Text { text: "RESCAN"; font-size: 8px; color: Style.text; horizontal-alignment: center; vertical-alignment: center; }
+                Text { text: "RESCAN"; font-size: 10px; color: Style.text; horizontal-alignment: center; vertical-alignment: center; }
                 clicked => { root.refresh(); }
             }
         }
-        if entries.length == 0 : Text { text: "No project-local extensions discovered"; font-size: 8px; color: Style.text-muted; }
+        if entries.length == 0 : Text { text: "No project-local extensions discovered"; font-size: 10px; color: Style.text-muted; }
         ScrollView {
             vertical-stretch: 1;
             VerticalLayout { spacing: 3px;
@@ -47,7 +47,7 @@ export component Z_ExtensionBrowser inherits Rectangle {
                     HorizontalLayout { padding-left: 8px; padding-right: 8px; spacing: 7px;
                         Rectangle { width: 4px; height: 20px; background: extension.execution == "trusted" ? Style.solo : Style.ok; }
                         VerticalLayout { horizontal-stretch: 1; alignment: center;
-                            Text { text: extension.title; font-size: 9px; color: Style.text; font-weight: 600; }
+                            Text { text: extension.title; font-size: 10px; color: Style.text; font-weight: 600; }
                             Text { text: extension.extension_id + "." + extension.command_id + " · " + extension.kind; font-size: 7px; color: Style.text-muted; }
                         }
                         Text { text: extension.enabled ? "READY" : "OFF"; font-size: 7px; color: extension.enabled ? Style.ok : Style.text-muted; vertical-alignment: center; }

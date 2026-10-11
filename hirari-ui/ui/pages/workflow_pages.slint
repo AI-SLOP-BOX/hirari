@@ -24,9 +24,9 @@ export component Z_CompingPage inherits Rectangle {
         Text { text: "Take Comping"; font-size: 15px; font-weight: 700; color: Style.text; }
         Text { text: "Drag across a take lane to replace that timeline range. Short clicks select the full take."; font-size: 10px; color: Style.text-dim; }
         HorizontalLayout {
-            Text { text: "BOUNDARY CROSSFADE"; font-size: 9px; color: Style.text-secondary; vertical-alignment: center; }
+            Text { text: "BOUNDARY CROSSFADE"; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; }
             Slider { horizontal-stretch: 1; minimum: 0.0; maximum: 0.25; step: 0.005; value: root.crossfade; released(v) => { CompingActions.crossfade_changed(v); } }
-            Text { text: Math.round(root.crossfade * 1000) + " ms"; width: 42px; font-size: 9px; color: Style.brand; vertical-alignment: center; }
+            Text { text: Math.round(root.crossfade * 1000) + " ms"; width: 42px; font-size: 10px; color: Style.brand; vertical-alignment: center; }
             Button { text: "PREVIEW"; clicked => { CompingActions.preview(); } }
         }
         Rectangle { height: 1px; background: Style.border; }
@@ -135,12 +135,12 @@ export component Z_MidiLearnPage inherits Rectangle {
             }
             Text {
                 text: root.target-track-id >= 0 && (root.target-track-type == "Midi" || root.target-track-type == "MIDI" || root.target-track-type == "Instrument") ? "Insert buffered notes on the selected MIDI track (up to 30 seconds)." : "Select a MIDI or Instrument track first.";
-                font-size: 9px; color: Style.text-muted; vertical-alignment: center;
+                font-size: 10px; color: Style.text-muted; vertical-alignment: center;
             }
         }
         Text { text: root.status; color: Style.ok; font-size: 10px; font-family: Style.numeric-font; }
         Rectangle { vertical-stretch: 1; }
-        Text { text: "CC mappings are saved with the project."; font-size: 9px; color: Style.text-muted; }
+        Text { text: "CC mappings are saved with the project."; font-size: 10px; color: Style.text-muted; }
     }
 }
 
@@ -173,11 +173,11 @@ export component Z_StepSequencerPage inherits Rectangle {
         padding: 12px; spacing: 6px;
         Text { text: "Step Sequencer"; font-size: 15px; font-weight: 700; color: Style.text; }
         Text { text: root.selected-region-id >= 0 ? (root.selected-region-length-beats > 128.0 * root.step-beats ? "MIDI region: " + root.selected-region-name + " · first 128 steps shown · 1/" + root.step-resolution + " " + root.step-feel-name : "MIDI region: " + root.selected-region-name + " · 1/" + root.step-resolution + " " + root.step-feel-name + " steps · velocity and probability") : "Select a MIDI region in Arrange to edit its pattern"; font-size: 10px; color: Style.text-dim; }
-        if (root.unmapped-note-count > 0) : Text { text: root.unmapped-note-count + " MIDI notes are outside this grid or lane; the original notes are preserved."; font-size: 9px; color: Style.solo; }
+        if (root.unmapped-note-count > 0) : Text { text: root.unmapped-note-count + " MIDI notes are outside this grid or lane; the original notes are preserved."; font-size: 10px; color: Style.solo; }
         Rectangle { height: 1px; background: Style.border; }
         HorizontalLayout {
             spacing: 6px;
-            Text { text: "STEP SIZE"; width: 58px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Text { text: "STEP SIZE"; width: 58px; font-size: 10px; color: Style.text; vertical-alignment: center; }
             for resolution in [4, 8, 16, 32, 64] : Button {
                 text: (root.step-resolution == resolution ? "● " : "") + "1/" + resolution;
                 clicked => { StepActions.set_step_resolution(resolution); }
@@ -191,13 +191,13 @@ export component Z_StepSequencerPage inherits Rectangle {
         }
         HorizontalLayout {
             spacing: 6px;
-            Text { text: "FEEL"; width: 34px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Text { text: "FEEL"; width: 34px; font-size: 10px; color: Style.text; vertical-alignment: center; }
             for feel in [0, 1, 2] : Button {
                 text: (root.step-feel == feel ? "● " : "") + (feel == 0 ? "Straight" : (feel == 1 ? "Triplet" : "Dotted"));
                 clicked => { StepActions.set_step_feel(feel); }
             }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: "PAGE"; width: 38px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Text { text: "PAGE"; width: 38px; font-size: 10px; color: Style.text; vertical-alignment: center; }
             Button { text: "‹"; enabled: root.selected-region-id >= 0 && root.visible-bar > 0; clicked => { root.selected-bar = Math.max(0, root.visible-bar - 1); } }
             Text { text: root.selected-region-id >= 0 ? (root.visible-bar + 1) + " / " + root.selected-region-bars : "NO REGION"; width: 48px; color: Style.brand; vertical-alignment: center; horizontal-alignment: center; }
             Button { text: "›"; enabled: root.selected-region-id >= 0 && root.visible-bar + 1 < root.selected-region-bars; clicked => { root.selected-bar = root.visible-bar + 1; } }
@@ -205,7 +205,7 @@ export component Z_StepSequencerPage inherits Rectangle {
         }
         for lane in 6 : HorizontalLayout {
             height: 22px; spacing: 4px;
-            Text { text: "LANE " + (lane + 1) + " · MIDI " + (root.lane-pitches.length == 6 ? root.lane-pitches[lane] : 36); width: 82px; font-size: 8px; color: Style.text; vertical-alignment: center; }
+            Text { text: "LANE " + (lane + 1) + " · MIDI " + (root.lane-pitches.length == 6 ? root.lane-pitches[lane] : 36); width: 82px; font-size: 10px; color: Style.text; vertical-alignment: center; }
             Button {
                 text: "−";
                 width: 20px;
@@ -285,7 +285,7 @@ export component Z_StepSequencerPage inherits Rectangle {
             }
         }
         Rectangle { vertical-stretch: 1; }
-        Text { text: "Select a cell, add or remove its note, then set velocity and playback probability. Slider release applies the edit; APPLY also commits keyboard changes."; font-size: 9px; color: Style.text-muted; }
+        Text { text: "Select a cell, add or remove its note, then set velocity and playback probability. Slider release applies the edit; APPLY also commits keyboard changes."; font-size: 10px; color: Style.text-muted; }
     }
 }
 
@@ -304,7 +304,7 @@ export component Z_GlobalTracksPage inherits Rectangle {
         HorizontalLayout {
             Text { text: "Global Tracks"; font-size: 15px; font-weight: 700; color: Style.text; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: "TEMPO · METER · MARKERS · CYCLE"; font-size: 9px; color: Style.text-dim; vertical-alignment: center; }
+            Text { text: "TEMPO · METER · MARKERS · CYCLE"; font-size: 10px; color: Style.text-dim; vertical-alignment: center; }
             Z_IconButton { icon: root.cycle-active ? "CYCLE ON" : "CYCLE OFF"; active: root.cycle-active; active-col: Style.cycle; clicked => { TransportActions.set_loop_enabled(!root.cycle-active); } }
         }
         Z_GlobalTempoEditor {
@@ -321,9 +321,9 @@ export component Z_GlobalTracksPage inherits Rectangle {
             tempo_event_bpms: root.tempo-event-bpms;
         }
         HorizontalLayout {
-            Text { text: "MARKERS · " + root.markers.length; font-size: 9px; color: Style.text-dim; vertical-alignment: center; }
+            Text { text: "MARKERS · " + root.markers.length; font-size: 10px; color: Style.text-dim; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: "Click the timeline to add a marker."; font-size: 9px; color: Style.text-muted; vertical-alignment: center; }
+            Text { text: "Click the timeline to add a marker."; font-size: 10px; color: Style.text-muted; vertical-alignment: center; }
         }
         Z_GlobalMarkers { markers: root.markers; z_lvl: root.zoom-level; ph: root.playhead-beat; }
         Rectangle { vertical-stretch: 1; }
@@ -361,25 +361,25 @@ export component Z_FlexPitchPage inherits Rectangle {
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { text: "SYNC GROUP"; width: 92px; font-size: 9px; color: Style.text; vertical-alignment: center; }
-            Text { text: root.sync-group-id == 0 ? "UNLINKED" : "GROUP " + root.sync-group-id; width: 92px; font-size: 9px; color: root.sync-group-id == 0 ? Style.text-muted : Style.brand; vertical-alignment: center; }
+            Text { text: "SYNC GROUP"; width: 92px; font-size: 10px; color: Style.text; vertical-alignment: center; }
+            Text { text: root.sync-group-id == 0 ? "UNLINKED" : "GROUP " + root.sync-group-id; width: 92px; font-size: 10px; color: root.sync-group-id == 0 ? Style.text-muted : Style.brand; vertical-alignment: center; }
             LineEdit { text <=> root.sync-group-text; placeholder-text: "0 = unlink"; enabled: root.selected-clip-id >= 0; horizontal-stretch: 1; }
             Button { text: "APPLY"; enabled: root.selected-clip-id >= 0; clicked => { root.sync-group-changed(root.sync-group-text); } }
         }
         HorizontalLayout {
             spacing: 8px;
-            Text { text: "GROUP QUANTIZE"; width: 92px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Text { text: "GROUP QUANTIZE"; width: 92px; font-size: 10px; color: Style.text; vertical-alignment: center; }
             Slider { horizontal-stretch: 1; minimum: 0.0; maximum: 1.0; step: 0.05; value: root.quantize-strength; enabled: root.selected-clip-editable; released(v) => { root.quantize-strength = v; } }
-            Text { text: Math.round(root.quantize-strength * 100.0) + "%"; width: 34px; font-size: 9px; color: Style.brand; }
+            Text { text: Math.round(root.quantize-strength * 100.0) + "%"; width: 34px; font-size: 10px; color: Style.brand; }
             ComboBox { model: ["1/4", "1/8", "1/16", "1/32", "1/64", "1/4T", "1/8T", "1/16T", "1/32T", "1/4D", "1/8D", "1/16D", "1/32D"]; current-index <=> root.quantize-grid-index; enabled: root.selected-clip-editable; }
             Button { text: "QUANTIZE"; enabled: root.selected-clip-editable; clicked => { root.quantize-requested(root.selected-clip-id, root.quantize-strength, root.quantize-grid-index, root.quantize-swing); } }
         }
         HorizontalLayout {
-            Text { text: "SWING"; width: 92px; font-size: 9px; color: Style.text; vertical-alignment: center; }
+            Text { text: "SWING"; width: 92px; font-size: 10px; color: Style.text; vertical-alignment: center; }
             Slider { horizontal-stretch: 1; minimum: -1.0; maximum: 1.0; step: 0.05; value: root.quantize-swing; enabled: root.selected-clip-editable; released(v) => { root.quantize-swing = v; } }
-            Text { text: (root.quantize-swing > 0.0 ? "+" : "") + Math.round(root.quantize-swing * 100.0) + "%"; width: 40px; font-size: 9px; color: Style.brand; }
+            Text { text: (root.quantize-swing > 0.0 ? "+" : "") + Math.round(root.quantize-swing * 100.0) + "%"; width: 40px; font-size: 10px; color: Style.brand; }
         }
-        Text { text: root.sync-group-id > 0 ? "Uses the project tempo map and one shared transient map for this audio sync group. Undoable." : "Uses the project tempo map on this region. Assign a sync group to keep multi-mic timing linked."; font-size: 8px; color: Style.text-muted; }
+        Text { text: root.sync-group-id > 0 ? "Uses the project tempo map and one shared transient map for this audio sync group. Undoable." : "Uses the project tempo map on this region. Assign a sync group to keep multi-mic timing linked."; font-size: 10px; color: Style.text-muted; }
         HorizontalLayout {
             spacing: 8px;
             Rectangle {
@@ -387,12 +387,12 @@ export component Z_FlexPitchPage inherits Rectangle {
                 VerticalLayout {
                     padding: 10px; spacing: 7px;
                     HorizontalLayout {
-                        Text { text: "PLAYBACK SPEED"; font-size: 9px; color: Style.text; }
+                        Text { text: "PLAYBACK SPEED"; font-size: 10px; color: Style.text; }
                         Rectangle { horizontal-stretch: 1; }
                         Text { text: Math.round(root.warp-ratio * 100.0) / 100.0 + "x"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
                     }
                     Slider { vertical-stretch: 1; minimum: 0.5; maximum: 2.0; step: 0.01; value: root.warp-ratio; enabled: root.selected-clip-editable; released(v) => { root.changed(0, v); } }
-                    Text { text: root.pitch-preserve-warp ? "Clip length changes · pitch-preserving WSOLA" : "Clip length changes · pitch follows speed"; font-size: 8px; color: Style.text-muted; }
+                    Text { text: root.pitch-preserve-warp ? "Clip length changes · pitch-preserving WSOLA" : "Clip length changes · pitch follows speed"; font-size: 10px; color: Style.text-muted; }
                 }
             }
             Rectangle {
@@ -400,12 +400,12 @@ export component Z_FlexPitchPage inherits Rectangle {
                 VerticalLayout {
                     padding: 10px; spacing: 7px;
                     HorizontalLayout {
-                        Text { text: "PITCH"; font-size: 9px; color: Style.text; }
+                        Text { text: "PITCH"; font-size: 10px; color: Style.text; }
                         Rectangle { horizontal-stretch: 1; }
                         Text { text: (root.pitch-semitones > 0.0 ? "+" : "") + Math.round(root.pitch-semitones * 10.0) / 10.0 + " st"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
                     }
                     Slider { vertical-stretch: 1; minimum: -24.0; maximum: 24.0; step: 0.1; value: root.pitch-semitones; enabled: root.selected-clip-editable; released(v) => { root.changed(1, v); } }
-                    Text { text: "−24 – +24 semitones"; font-size: 8px; color: Style.text-muted; }
+                    Text { text: "−24 – +24 semitones"; font-size: 10px; color: Style.text-muted; }
                 }
             }
             Rectangle {
@@ -413,17 +413,17 @@ export component Z_FlexPitchPage inherits Rectangle {
                 VerticalLayout {
                     padding: 10px; spacing: 7px;
                     HorizontalLayout {
-                        Text { text: "REGION GAIN"; font-size: 9px; color: Style.text; }
+                        Text { text: "REGION GAIN"; font-size: 10px; color: Style.text; }
                         Rectangle { horizontal-stretch: 1; }
                         Text { text: Math.round(root.region-gain * 100.0) / 100.0 + "x"; font-size: 10px; color: Style.brand; font-family: Style.numeric-font; }
                     }
                     Slider { vertical-stretch: 1; minimum: 0.0; maximum: 2.0; step: 0.01; value: root.region-gain; enabled: root.selected-clip-editable; released(v) => { root.changed(2, v); } }
-                    Text { text: "0.00x – 2.00x"; font-size: 8px; color: Style.text-muted; }
+                    Text { text: "0.00x – 2.00x"; font-size: 10px; color: Style.text-muted; }
                 }
             }
         }
         Rectangle { vertical-stretch: 1; }
-        Text { text: "Edits use the selected region's saved values and enter the project Undo history."; font-size: 9px; color: Style.text-muted; }
+        Text { text: "Edits use the selected region's saved values and enter the project Undo history."; font-size: 10px; color: Style.text-muted; }
     }
 }
 
@@ -447,7 +447,7 @@ export component Z_TrackStackPage inherits Rectangle {
             Text { text: "Stack level"; width: 90px; color: Style.text; vertical-alignment: center; }
             Slider { horizontal-stretch: 1; value: 1.0; changed(v) => { StackActions.gain_changed(v * 2.0); } }
         }
-        Text { text: "Changes are persisted with the project and available to CLI transactions."; font-size: 9px; color: Style.text-muted; }
+        Text { text: "Changes are persisted with the project and available to CLI transactions."; font-size: 10px; color: Style.text-muted; }
         Rectangle { vertical-stretch: 1; }
     }
 }

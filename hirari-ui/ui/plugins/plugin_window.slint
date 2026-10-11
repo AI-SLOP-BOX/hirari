@@ -49,7 +49,7 @@ export component Z_PluginWnd {
                 // Left: GR Meter & Controls
                 VerticalLayout {
                     width: 140px; spacing: 12px;
-                    Text { text: "Gain Reduction"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+                    Text { text: "Gain Reduction"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
                     Rectangle {
                         height: 180px; background: Style.surface-0; border_width: 1px; border_color: Style.border;
                         if (root.gr_history.length > 0) : HorizontalLayout {
@@ -62,11 +62,11 @@ export component Z_PluginWnd {
                         if (root.gr_history.length == 0) : Text {
                             text: "METER DATA NOT CONNECTED";
                             x: 6px; y: 8px;
-                            font-size: Style.font-xxs;
+                            font-size: 10px;
                             color: Style.text-tertiary;
                         }
                         // Scale
-                        for s in [0, -3, -6, -12, -20] : Text { text: s + ""; font-size: Style.font-xxs; color: #333; y: (-s/20.0) * parent.height; x: 2px; }
+                        for s in [0, -3, -6, -12, -20] : Text { text: s + ""; font-size: 10px; color: #333; y: (-s/20.0) * parent.height; x: 2px; }
                     }
                     Flickable {
                         viewport-height: 210px;
@@ -78,7 +78,7 @@ export component Z_PluginWnd {
                                 background: Style.surface;
                                 HorizontalLayout {
                                     padding: 4px;
-                                    Text { text: parameter-names.length > p_idx ? parameter-names[p_idx] : "PARAM " + p_idx; font-size: 8px; color: #666; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Text { text: parameter-names.length > p_idx ? parameter-names[p_idx] : "PARAM " + p_idx; font-size: 10px; color: #666; vertical-alignment: center; horizontal-stretch: 1; }
                                     Slider {
                                         value: parameter-values.length > p_idx ? parameter-values[p_idx] * 100.0 : 50.0;
                                         width: 80px;
@@ -93,7 +93,7 @@ export component Z_PluginWnd {
                 // Right: Transfer Curve & Visualizer
                 VerticalLayout {
                     spacing: 12px;
-                    Text { text: "TRANSFER CURVE / ANALYZER"; font-size: 8px; color: #6E6E73; font-weight: 900; }
+                    Text { text: "TRANSFER CURVE / ANALYZER"; font-size: 10px; color: #6E6E73; font-weight: 900; }
                     Rectangle {
                         background: Style.surface; border_width: 1.5px; border_color: Style.border;
                         height: 240px; clip: true;
@@ -103,7 +103,7 @@ export component Z_PluginWnd {
                         Text {
                             text: "TRANSFER CURVE DATA NOT CONNECTED";
                             x: 12px; y: 12px;
-                            font-size: Style.font-xxs;
+                            font-size: 10px;
                             color: Style.text-tertiary;
                         }
                     }
@@ -113,7 +113,7 @@ export component Z_PluginWnd {
             Rectangle { vertical-stretch: 1; }
             HorizontalLayout {
                 spacing: 6px;
-                Text { text: "Preset"; font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
+                Text { text: "Preset"; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; }
                 Button { text: "Browse"; clicked => { PluginActions.browse_preset(false); } }
                 LineEdit {
                     text: root.preset-path;
@@ -145,8 +145,8 @@ export component Z_PluginWnd {
             }
             HorizontalLayout {
                 spacing: 8px;
-                Text { text: "Sidechain"; font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
-                Text { text: root.sidechain-source-id >= 0 ? (root.sidechain-source-name != "" ? root.sidechain-source-name : "Track " + root.sidechain-source-id) : "Choose a source in Routing"; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center; horizontal-stretch: 1; }
+                Text { text: "Sidechain"; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; }
+                Text { text: root.sidechain-source-id >= 0 ? (root.sidechain-source-name != "" ? root.sidechain-source-name : "Track " + root.sidechain-source-id) : "Choose a source in Routing"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; horizontal-stretch: 1; }
                 Button { text: root.sidechain-tap-point == 0 ? "✓ Pre" : "Pre"; clicked => { PluginActions.set_sidechain_tap_point(root.sidechain-source-id, root.track-id, root.plugin-index, 0); } }
                 Button { text: root.sidechain-tap-point == 1 ? "✓ Post" : "Post"; clicked => { PluginActions.set_sidechain_tap_point(root.sidechain-source-id, root.track-id, root.plugin-index, 1); } }
                 Button { text: root.sidechain-tap-point == 2 ? "✓ Input" : "Input"; clicked => { PluginActions.set_sidechain_tap_point(root.sidechain-source-id, root.track-id, root.plugin-index, 2); } }
@@ -158,13 +158,13 @@ export component Z_PluginWnd {
                     }
                 }
             }
-            if (root.pdc-status != "READY") : Text { text: root.pdc-status == "UNAVAILABLE" ? "PDC unavailable" : (root.pdc-status == "NO_PLUGIN" ? "No PDC plugin" : (root.pdc-status == "ERROR" ? "PDC error" : "PDC calculating")); font-size: Style.font-xxs; color: Style.text-tertiary; }
-            if (root.parameter-error) : Text { text: "Plugin parameters unavailable · host returned an invalid snapshot"; font-size: Style.font-xxs; color: Style.record; }
+            if (root.pdc-status != "READY") : Text { text: root.pdc-status == "UNAVAILABLE" ? "PDC unavailable" : (root.pdc-status == "NO_PLUGIN" ? "No PDC plugin" : (root.pdc-status == "ERROR" ? "PDC error" : "PDC calculating")); font-size: 10px; color: Style.text-tertiary; }
+            if (root.parameter-error) : Text { text: "Plugin parameters unavailable · host returned an invalid snapshot"; font-size: 10px; color: Style.record; }
             HorizontalLayout {
                 padding-top: 10px; spacing: 8px;
-                Text { text: root.pdc-status == "READY" ? "PDC " + Math.round(root.pdc-compensation-ms * 100.0) / 100.0 + " ms" : "PDC " + root.pdc-status; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                Text { text: root.pdc-status == "READY" ? "PDC " + Math.round(root.pdc-compensation-ms * 100.0) / 100.0 + " ms" : "PDC " + root.pdc-status; font-size: 10px; color: Style.text-tertiary; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: root.editor-capability; font-size: Style.font-xxs; color: root.editor-capability == "NATIVE EDITOR · EMBEDDED" ? Style.ok : (root.editor-capability == "NATIVE EDITOR AVAILABLE · UI HOST PENDING" ? Style.record : Style.text-muted); }
+                Text { text: root.editor-capability; font-size: 10px; color: root.editor-capability == "NATIVE EDITOR · EMBEDDED" ? Style.ok : (root.editor-capability == "NATIVE EDITOR AVAILABLE · UI HOST PENDING" ? Style.record : Style.text-muted); }
             }
         }
     }

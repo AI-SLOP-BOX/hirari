@@ -16,7 +16,7 @@ export component Z_Meter {
             background: i > (mode == 2 ? 0.7 : 0.9) ? Style.line-strong : Style.line-subtle;
             if (i > 0) : Text {
                 text: mode == 2 ? (i == 1.0 ? "+20" : (i == 0.75 ? "+10" : (i == 0.5 ? "0" : "-10"))) : (i == 1.0 ? "0" : (i == 0.75 ? "-6" : (i == 0.5 ? "-12" : "-24")));
-                font-size: Style.font-xxs; color: Style.text-muted; x: -8px;
+                font-size: 10px; color: Style.text-muted; x: -8px;
             }
         }
         Rectangle {

@@ -28,7 +28,7 @@ export component Z_DiagnosticsPage inherits Rectangle {
                 horizontal-stretch: 1; height: 92px;
                 background: Style.panel; border-width: 1px; border-color: Style.border;
                 VerticalLayout { padding: 10px;
-                    Text { text: "ENGINE"; font-size: 9px; color: Style.text-dim; }
+                    Text { text: "ENGINE"; font-size: 10px; color: Style.text-dim; }
                     // Idle is a valid stopped state, not an engine fault. Keep
                     // the panel useful during device/configuration review by
                     // reserving red for an actual unhealthy state.
@@ -40,7 +40,7 @@ export component Z_DiagnosticsPage inherits Rectangle {
                 horizontal-stretch: 1; height: 92px;
                 background: Style.panel; border-width: 1px; border-color: Style.border;
                 VerticalLayout { padding: 10px;
-                    Text { text: "AUDIO"; font-size: 9px; color: Style.text-dim; }
+                    Text { text: "AUDIO"; font-size: 10px; color: Style.text-dim; }
                     Text { text: "DROPS " + root.dropped-blocks; font-size: 14px; color: root.dropped-blocks > 0 ? Style.record : Style.ok; font-weight: 700; }
                     Text { text: "MAILBOX " + root.mailbox-overruns; font-size: 10px; color: root.mailbox-overruns > 0 ? Style.record : Style.text-secondary; }
                 }
@@ -53,7 +53,7 @@ export component Z_DiagnosticsPage inherits Rectangle {
                 horizontal-stretch: 1; height: 92px;
                 background: Style.panel; border-width: 1px; border-color: Style.border;
                 VerticalLayout { padding: 10px;
-                    Text { text: "PLUGIN RECOVERY"; font-size: 9px; color: Style.text-dim; }
+                    Text { text: "PLUGIN RECOVERY"; font-size: 10px; color: Style.text-dim; }
                     Text { text: "FAILURES " + root.sandbox-failures; font-size: 14px; color: root.sandbox-failures > 0 ? Style.record : Style.ok; font-weight: 700; }
                     Text { text: "WATCHDOG " + root.watchdog-trips; font-size: 10px; color: root.watchdog-trips > 0 ? Style.record : Style.text-secondary; }
                 }
@@ -62,7 +62,7 @@ export component Z_DiagnosticsPage inherits Rectangle {
                 horizontal-stretch: 1; height: 92px;
                 background: Style.panel; border-width: 1px; border-color: Style.border;
                 VerticalLayout { padding: 10px;
-                    Text { text: "SYNC"; font-size: 9px; color: Style.text-dim; }
+                    Text { text: "SYNC"; font-size: 10px; color: Style.text-dim; }
                     Text { text: root.pdc-status; font-size: 14px; color: root.pdc-status == "OK" ? Style.ok : Style.text-secondary; font-weight: 700; }
                     Text { text: root.range-overflow ? "POSITION OVERFLOW" : "POSITION RANGE OK"; font-size: 10px; color: root.range-overflow ? Style.record : Style.text-secondary; }
                 }
@@ -74,6 +74,6 @@ export component Z_DiagnosticsPage inherits Rectangle {
         // surface so it is reachable from the application's top-level Help
         // menu in commercial desktop distributions.
         AboutSlint { height: 72px; }
-        Text { text: "判定基準: dropout 0 · callback overrun 0 · worker残留 0 · project corruption 0"; font-size: 9px; color: Style.text-muted; }
+        Text { text: "判定基準: dropout 0 · callback overrun 0 · worker残留 0 · project corruption 0"; font-size: 10px; color: Style.text-muted; }
     }
 }

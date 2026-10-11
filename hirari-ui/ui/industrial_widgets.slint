@@ -14,9 +14,9 @@ export component Z_ProFader {
             }
             // Quiet reference marks: enough for mix decisions without
             // turning the strip into a meter wall.
-            Text { text: "0"; x: 3px; y: 8px; font-size: 8px; color: Style.text-tertiary; }
-            Text { text: "-12"; x: 1px; y: 64px; font-size: 8px; color: Style.text-tertiary; }
-            Text { text: "-24"; x: 1px; y: 112px; font-size: 8px; color: Style.text-tertiary; }
+            Text { text: "0"; x: 3px; y: 8px; font-size: 10px; color: Style.text-tertiary; }
+            Text { text: "-12"; x: 1px; y: 64px; font-size: 10px; color: Style.text-tertiary; }
+            Text { text: "-24"; x: 1px; y: 112px; font-size: 10px; color: Style.text-tertiary; }
             // Fader Handle
             Rectangle {
                 y: (1.0 - value.clamp(0.0, 1.0)) * 140px + 10px;
@@ -26,8 +26,8 @@ export component Z_ProFader {
             }
             TouchArea { mouse-cursor: ns-resize; moved => { if (self.pressed) { root.value = (1.0 - (self.mouse_y - 8px) / 140px).clamp(0.0, 1.0); } } }
         }
-        Text { text: Math.round((value.clamp(0.0, 1.0) * 60.0 - 60.0) * 10.0) / 10.0 + " dB"; font-family: Style.numeric-font; font-size: Style.font-xxs; color: Style.text-primary; horizontal-alignment: center; }
-        Text { text: label; font-size: Style.font-xxs; color: Style.text-secondary; horizontal-alignment: center; }
+        Text { text: Math.round((value.clamp(0.0, 1.0) * 60.0 - 60.0) * 10.0) / 10.0 + " dB"; font-family: Style.numeric-font; font-size: 10px; color: Style.text-primary; horizontal-alignment: center; }
+        Text { text: label; font-size: 10px; color: Style.text-secondary; horizontal-alignment: center; }
     }
 }
 

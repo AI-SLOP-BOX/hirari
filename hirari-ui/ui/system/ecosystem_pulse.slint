@@ -13,7 +13,7 @@ export component Z_EcosystemPulse {
                     width: 60px; height: 60px; background: Style.surface; border_radius: 2px;
                     VerticalLayout {
                         alignment: center;
-                        Text { text: i == 0 ? "Security" : (i == 1 ? "Network" : (i == 2 ? "DSP" : "Power")); font-size: Style.font-xxs; color: Style.text-tertiary; horizontal-alignment: center; }
+                        Text { text: i == 0 ? "Security" : (i == 1 ? "Network" : (i == 2 ? "DSP" : "Power")); font-size: 10px; color: Style.text-tertiary; horizontal-alignment: center; }
                         Text { text: "OK"; font-size: 10px; color: Style.ok; horizontal-alignment: center; font-weight: 700; }
                     }
                 }
@@ -21,10 +21,10 @@ export component Z_EcosystemPulse {
             // Health Bar
             VerticalLayout {
                 spacing: 4px;
-                Text { text: "Overall stability: " + Math.floor(global_health * 1000) / 10 + "%"; font-size: Style.font-xxs; color: Style.text-secondary; }
+                Text { text: "Overall stability: " + Math.floor(global_health * 1000) / 10 + "%"; font-size: 10px; color: Style.text-secondary; }
                 Rectangle { height: 4px; background: Style.surface-0; Rectangle { width: global_health * parent.width; height: 100%; background: Style.brand; } }
             }
-            Text { text: "Security enabled | Local"; font-size: Style.font-xxs; color: Style.text-tertiary; }
+            Text { text: "Security enabled | Local"; font-size: 10px; color: Style.text-tertiary; }
         }
     }
 }

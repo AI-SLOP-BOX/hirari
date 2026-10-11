@@ -6,7 +6,7 @@ export component Z_ZeroPointMeter {
         height: 48px; background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border;
         VerticalLayout {
             padding: 6px; spacing: 4px;
-            Text { text: "Information Density"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+            Text { text: "Information Density"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
             Rectangle {
                 height: 14px; background: Style.surface-0; border_radius: 1px;
                 HorizontalLayout {
@@ -17,7 +17,7 @@ export component Z_ZeroPointMeter {
                     }
                 }
             }
-            Text { text: "Density: " + Math.round(entropy * 100) + "% | Minimal: " + (entropy < 0.01 ? "Yes" : "No"); font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+            Text { text: "Density: " + Math.round(entropy * 100) + "% | Minimal: " + (entropy < 0.01 ? "Yes" : "No"); font-size: 10px; color: Style.text-tertiary; font-weight: 500; }
         }
     }
 }

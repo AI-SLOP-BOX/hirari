@@ -67,7 +67,7 @@ export component Z_PianoRoll {
                 VerticalLayout {
                     HorizontalLayout {
                         padding-left: 10px; padding-right: 10px; spacing: 8px;
-                        Text { text: (drum-mode ? "Drum Editor" : "Piano Roll") + " · Track " + (track-number + 1); font-size: Style.font-xxs; color: Style.text-secondary; horizontal-stretch: 1; vertical-alignment: center; }
+                        Text { text: (drum-mode ? "Drum Editor" : "Piano Roll") + " · Track " + (track-number + 1); font-size: 10px; color: Style.text-secondary; horizontal-stretch: 1; vertical-alignment: center; }
                     Z_IconButton { icon: drum-mode ? "PIANO" : "DRUM"; clicked => { drum-mode = !drum-mode; } }
                     Z_IconButton { icon: "Q"; clicked => { quantize(); project-changed(); } }
                     Z_IconButton { icon: "RAMP"; clicked => { ramp-velocities(); project-changed(); } }
@@ -84,7 +84,7 @@ export component Z_PianoRoll {
                     }
                     HorizontalLayout {
                         padding-left: 10px; padding-right: 10px; spacing: 6px;
-                        Text { text: "ARTICULATION"; font-size: Style.font-xxs; color: Style.text-tertiary; vertical-alignment: center; }
+                        Text { text: "ARTICULATION"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
                     Z_IconButton { icon: "LOAD MAP"; button-width: 76px; compact: true; clicked => { if (import-expression-map-pro()) { project-changed(); } } }
                     Z_IconButton { icon: "MAP" + map-articulation-id; clicked => { map-articulation-id = map-articulation-id >= 255 ? 1 : map-articulation-id + 1; } }
                     LineEdit { text: articulation-names.length > map-articulation-id ? articulation-names[map-articulation-id] : ""; placeholder-text: "Articulation name"; width: 140px; edited => { set-articulation-name(map-articulation-id, self.text); project-changed(); } }
@@ -120,7 +120,7 @@ export component Z_PianoRoll {
                                 project-changed();
                             }
                         }
-                        Text { text: "A " + (articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0) + "  B " + (articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0) + "  CH " + ((articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0) + 1); font-size: Style.font-xxs; color: Style.text-secondary; vertical-alignment: center; }
+                        Text { text: "A " + (articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0) + "  B " + (articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0) + "  CH " + ((articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0) + 1); font-size: 10px; color: Style.text-secondary; vertical-alignment: center; }
                         Z_IconButton { icon: "A-"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 1; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind == 0 ? 1 : kind, Math.max(0, a - 1), b, channel); project-changed(); } }
                         Z_IconButton { icon: "A+"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 1; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind == 0 ? 1 : kind, Math.min(127, a + 1), b, channel); project-changed(); } }
                         Z_IconButton { icon: "B-"; clicked => { let kind = articulation-output-kinds.length > map-articulation-id ? articulation-output-kinds[map-articulation-id] : 1; let a = articulation-output-a.length > map-articulation-id ? articulation-output-a[map-articulation-id] : 0; let b = articulation-output-b.length > map-articulation-id ? articulation-output-b[map-articulation-id] : 0; let channel = articulation-switch-channels.length > map-articulation-id ? articulation-switch-channels[map-articulation-id] : 0; set-articulation-output(map-articulation-id, kind == 0 ? 1 : kind, a, Math.max(kind == 1 ? -1 : 0, b - 1), channel); project-changed(); } }
@@ -141,9 +141,9 @@ export component Z_PianoRoll {
                         border-width: 0.5px; border-color: Style.line-subtle;
                         if (drum-mode) : Text {
                             text: (83 - key == 36 ? "Kick" : (83 - key == 38 ? "Snare" : (83 - key == 42 ? "Closed HH" : (83 - key == 46 ? "Open HH" : (83 - key == 49 ? "Crash" : (83 - key == 51 ? "Ride" : ""))))));
-                            font-size: Style.font-xxs; color: Style.text-tertiary; x: 2px; vertical-alignment: center;
+                            font-size: 10px; color: Style.text-tertiary; x: 2px; vertical-alignment: center;
                         }
-                        if (!drum-mode && Math.mod(key, 12) == 0) : Text { text: "C" + Math.floor((83 - key) / 12); font-size: Style.font-xxs; color: Style.text-tertiary; x: 2px; vertical-alignment: center; }
+                        if (!drum-mode && Math.mod(key, 12) == 0) : Text { text: "C" + Math.floor((83 - key) / 12); font-size: 10px; color: Style.text-tertiary; x: 2px; vertical-alignment: center; }
                     }
                 }
                 grid := ScrollView {
@@ -180,7 +180,7 @@ export component Z_PianoRoll {
                                 text: note.lyric;
                                 placeholder-text: "lyric";
                                 edited => { set-lyric(note.pitch, note.start_beat, self.text); }
-                                font-size: 9px;
+                                font-size: 10px;
                                 x: 2px;
                                 y: 0px;
                             }
@@ -244,7 +244,7 @@ export component Z_PianoRoll {
             }
             Rectangle {
                 height: 64px; background: Style.surface-1; border-width: 1px; border-color: Style.line-subtle;
-                Text { text: "Velocity"; x: 4px; y: 4px; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                Text { text: "Velocity"; x: 4px; y: 4px; font-size: 10px; color: Style.text-tertiary; }
                 Rectangle {
                     x: 44px; clip: true; width: parent.width - 44px;
                     for note_index[idx] in notes : Rectangle {
@@ -265,7 +265,7 @@ export component Z_PianoRoll {
             }
             Rectangle {
                 height: 26px; background: Style.surface-1; border-width: 1px; border-color: Style.line-subtle;
-                Text { text: "ART ID"; x: 4px; y: 2px; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                Text { text: "ART ID"; x: 4px; y: 2px; font-size: 10px; color: Style.text-tertiary; }
                 Rectangle {
                     x: 88px; clip: true; width: parent.width - 88px; height: parent.height;
                     for note_index[idx] in notes : Rectangle {
@@ -274,7 +274,7 @@ export component Z_PianoRoll {
                         height: 20px; y: 3px;
                         background: note_index.selected ? Style.ok : Style.brand.with-alpha(0.55);
                         border-radius: 2px;
-                        Text { text: "A" + note_index.articulation; x: 3px; font-size: 9px; color: Style.text-primary; vertical-alignment: center; }
+                        Text { text: "A" + note_index.articulation; x: 3px; font-size: 10px; color: Style.text-primary; vertical-alignment: center; }
                         TouchArea { mouse-cursor: pointer; clicked => { set-articulation(idx, Math.mod(note_index.articulation + 1, 256)); } }
                     }
                 }

@@ -6,9 +6,9 @@ export component Z_EmpathyMeter {
         width: 140px; height: 32px; background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border;
         VerticalLayout {
             padding: 6px; spacing: 4px;
-            Text { text: "Performance Monitor"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+            Text { text: "Performance Monitor"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
             Rectangle { height: 8px; background: Style.surface-0; border_radius: 1px; Rectangle { width: val * parent.width; height: 100%; background: Style.brand; opacity: 0.8; } }
-            Text { text: "UNIFICATION INDEX: " + Math.round(val * 100) + "%"; font-size: Style.font-xxs; color: Style.brand; font-weight: 900; }
+            Text { text: "UNIFICATION INDEX: " + Math.round(val * 100) + "%"; font-size: 10px; color: Style.brand; font-weight: 900; }
         }
     }
 }
@@ -20,7 +20,7 @@ export component Z_ConsciousnessHub {
         height: 140px; background: Style.surface; border_radius: 2px; border_width: 1.5px; border_color: Style.brand;
         VerticalLayout {
             padding: 12px; spacing: 10px;
-            Text { text: "Control Hub"; font-size: Style.font-xxs; color: Style.brand; font-weight: 600; }
+            Text { text: "Control Hub"; font-size: 10px; color: Style.brand; font-weight: 600; }
             Rectangle {
                 vertical-stretch: 1; background: Style.surface-0; border_radius: 1px;
                 Path {
@@ -31,7 +31,7 @@ export component Z_ConsciousnessHub {
                     CubicTo { control-1-x: 75; control-1-y: 50 + 40 * Math.sin(root.time / 200.0 * 1rad + 1.5rad); control-2-x: 75; control-2-y: 50 - 40 * Math.cos(root.time / 150.0 * 1rad + 1.5rad); x: 100; y: 50; }
                 }
             }
-            Text { text: "Focus: " + Math.round(root.focus_idx * 100) + "% | Active"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+            Text { text: "Focus: " + Math.round(root.focus_idx * 100) + "% | Active"; font-size: 10px; color: Style.text-tertiary; font-weight: 500; }
         }
     }
 }
@@ -43,7 +43,7 @@ export component Z_UniversalMetronome {
         width: 38px; height: 38px;
         Rectangle { width: 100%; height: 100%; border_radius: 19px; border_width: 1.5px; border_color: root.active ? Style.brand : Style.border; opacity: 0.3; }
         Rectangle { width: parent.width * (1.0 - Math.mod(root.time, 500.0) / 500.0); height: self.width; border_radius: self.width / 2; background: Style.brand; opacity: root.active ? (1.0 - Math.mod(root.time, 500.0) / 500.0) : 0; }
-        Text { text: "UNIV"; font-size: Style.font-xxs; color: root.active ? Style.brand : Style.text-tertiary; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+        Text { text: "UNIV"; font-size: 10px; color: root.active ? Style.brand : Style.text-tertiary; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
     }
 }
 
@@ -53,9 +53,9 @@ export component Z_SilenceForensic {
         height: 52px; background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border;
         VerticalLayout {
             padding: 6px; spacing: 4px;
-            Text { text: "Silence Audit (-144 dB)"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+            Text { text: "Silence Audit (-144 dB)"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
             Rectangle { height: 12px; background: Style.surface-0; border_radius: 1px; Rectangle { width: jitter * parent.width; height: 100%; background: jitter > 0.8 ? Style.record : Style.ok; opacity: 0.6; } }
-            Text { text: "Jitter: " + (jitter < 0.1 ? "Stable" : "Unstable"); font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 500; }
+            Text { text: "Jitter: " + (jitter < 0.1 ? "Stable" : "Unstable"); font-size: 10px; color: Style.text-tertiary; font-weight: 500; }
         }
     }
 }
@@ -67,7 +67,7 @@ export component Z_DreamGenerator {
         height: 52px; background: Style.surface; border_radius: 26px; border_width: 1px; border_color: Style.border;
         HorizontalLayout {
             padding-left: 12px; padding-right: 12px; spacing: 10px;
-            Text { text: root.active ? "Generating…" : "Ready"; font-size: Style.font-xxs; color: Style.brand; font-weight: 600; vertical-alignment: center; }
+            Text { text: root.active ? "Generating…" : "Ready"; font-size: 10px; color: Style.brand; font-weight: 600; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
         }
     }

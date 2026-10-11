@@ -97,7 +97,7 @@ export component Z_HolographicSpec {
                 }
             }
         }
-        Text { text: "Depth"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 4px; y: 4px; font-weight: 500; opacity: 0.7; }
+        Text { text: "Depth"; font-size: 10px; color: Style.text-tertiary; x: 4px; y: 4px; font-weight: 500; opacity: 0.7; }
     }
 }
 
@@ -113,7 +113,7 @@ export component Z_DNAMap {
                 Rectangle { width: 4px; height: 12px; background: val > 0.3 ? Style.ok : Style.alert; border_radius: 2px; opacity: 1.0 - val; }
             }
         }
-        Text { text: "Analysis"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 4px; y: 4px; font-weight: 500; opacity: 0.7; }
+        Text { text: "Analysis"; font-size: 10px; color: Style.text-tertiary; x: 4px; y: 4px; font-weight: 500; opacity: 0.7; }
     }
 }
 
@@ -129,7 +129,7 @@ export component Z_NeuralVoice {
                 opacity: 0.2 + (val.abs() * 0.8);
             }
         }
-        Text { text: "Voice"; font-size: Style.font-xxs; color: Style.text-tertiary; x: 6px; y: 2px; font-weight: 500; opacity: 0.65; }
+        Text { text: "Voice"; font-size: 10px; color: Style.text-tertiary; x: 6px; y: 2px; font-weight: 500; opacity: 0.65; }
     }
 }
 
@@ -144,7 +144,7 @@ export component Z_SentinelDashboard {
             padding: 12px; spacing: 10px;
             HorizontalLayout {
                 spacing: 8px;
-                Text { text: "System Health"; font-size: Style.font-xxs; color: Style.brand; font-weight: 700; horizontal-stretch: 1; }
+                Text { text: "System Health"; font-size: 10px; color: Style.brand; font-weight: 700; horizontal-stretch: 1; }
                 Rectangle { width: 10px; height: 10px; border_radius: 5px; background: root.cpu_cur > 0.8 ? Style.alert : Style.ok; }
             }
             Rectangle {
@@ -159,9 +159,9 @@ export component Z_SentinelDashboard {
             }
             HorizontalLayout {
                 spacing: 20px;
-                VerticalLayout { spacing: 2px; Text { text: "Latency"; font-size: Style.font-xxs; color: Style.text-tertiary; } Text { text: Math.round(root.latency * 10.0)/10.0 + " ms"; font-size: 14px; color: Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
-                VerticalLayout { spacing: 2px; Text { text: "Buffer"; font-size: Style.font-xxs; color: Style.text-tertiary; } Text { text: root.buffer_size > 0 ? root.buffer_size + " spls" : "-- spls"; font-size: 14px; color: Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
-                VerticalLayout { spacing: 2px; Text { text: "Core Load"; font-size: Style.font-xxs; color: Style.text-tertiary; } Text { text: Math.round(root.cpu_cur * 100) + "%"; font-size: 14px; color: root.cpu_cur > 0.8 ? Style.alert : Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
+                VerticalLayout { spacing: 2px; Text { text: "Latency"; font-size: 10px; color: Style.text-tertiary; } Text { text: Math.round(root.latency * 10.0)/10.0 + " ms"; font-size: 14px; color: Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
+                VerticalLayout { spacing: 2px; Text { text: "Buffer"; font-size: 10px; color: Style.text-tertiary; } Text { text: root.buffer_size > 0 ? root.buffer_size + " spls" : "-- spls"; font-size: 14px; color: Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
+                VerticalLayout { spacing: 2px; Text { text: "Core Load"; font-size: 10px; color: Style.text-tertiary; } Text { text: Math.round(root.cpu_cur * 100) + "%"; font-size: 14px; color: root.cpu_cur > 0.8 ? Style.alert : Style.text-primary; font-weight: 700; font-family: Style.numeric-font; } }
             }
         }
     }
@@ -172,7 +172,7 @@ export component Z_MarkerList {
     callback scrub-to-marker(int);
     VerticalLayout {
         padding: 4px; spacing: 4px;
-        Text { text: "Project Markers"; font-size: Style.font-xxs; color: Style.text-tertiary; font-weight: 600; }
+        Text { text: "Project Markers"; font-size: 10px; color: Style.text-tertiary; font-weight: 600; }
         for m[idx] in markers : Rectangle {
             height: 38px; background: Style.surface; border_radius: 2px; border_width: 1px; border_color: Style.border;
             HorizontalLayout {
@@ -181,7 +181,7 @@ export component Z_MarkerList {
                 VerticalLayout {
                     alignment: center; horizontal-stretch: 1;
                     Text { text: m.label; font-size: 10px; color: Style.text-primary; font-weight: 600; }
-                    Text { text: "Beat: " + m.beat; font-size: Style.font-xxs; color: Style.text-tertiary; }
+                    Text { text: "Beat: " + m.beat; font-size: 10px; color: Style.text-tertiary; }
                 }
                 Z_IconButton { icon: "▶"; clicked => { root.scrub-to-marker(idx); } }
             }
