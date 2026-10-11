@@ -292,3 +292,70 @@ fn comp_range_edits_are_adjudicated_by_the_rust_policy() {
 
     let _ = std::fs::remove_file(source_path);
 }
+
+#[test]
+fn processing_history_round_trips_through_the_engine_and_the_project_file() {
+    let _guard = native_engine_test_guard();
+    let engine = crate::ffi::new_audio_engine();
+    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let unique = unique_tag();
+    let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
+    let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
+    let source = source_path.to_str().unwrap();
+    let project = project_path.to_str().unwrap();
+
+    let track_id = engine_ref.add_track(0);
+    assert!(engine_ref.bounce_project(source, 0));
+    assert!(engine_ref.add_region(track_id, source, 0.0));
+    let layout: Value =
+        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+    let region_id = layout
+        .as_array()
+        .and_then(|tracks| tracks.first())
+        .and_then(|track| track.get("regions"))
+        .and_then(Value::as_array)
+        .and_then(|regions| regions.first())
+        .and_then(|region| region.get("id"))
+        .and_then(Value::as_u64)
+        .expect("added region must have a stable id") as u32;
+
+    // A well-formed step is accepted.
+    assert!(engine_ref.append_region_processing(
+        track_id, region_id, 7, "gain", 0.5, true
+    ));
+    assert!(engine_ref.append_region_processing(
+        track_id, region_id, 8, "normalize", -1.25, false
+    ));
+
+    // The policy that used to be enforced only in the engine wrapper: a
+    // non-finite parameter never reached the store check before.
+    assert!(!engine_ref.append_region_processing(
+        track_id, region_id, 9, "gain", f32::NAN, true
+    ));
+    assert!(!engine_ref.append_region_processing(
+        track_id, region_id, 9, "gain", f32::INFINITY, true
+    ));
+    // Empty and oversized operations, and a zero id, are refused too.
+    assert!(!engine_ref.append_region_processing(
+        track_id, region_id, 9, "", 0.0, true
+    ));
+    let long = "x".repeat(257);
+    assert!(!engine_ref.append_region_processing(
+        track_id, region_id, 9, &long, 0.0, true
+    ));
+    assert!(!engine_ref.append_region_processing(
+        track_id, region_id, 0, "gain", 0.0, true
+    ));
+    // The 256-byte operation is the boundary and stays admissible.
+    let boundary = "x".repeat(256);
+    assert!(engine_ref.append_region_processing(
+        track_id, region_id, 10, &boundary, 0.0, true
+    ));
+
+    // Clearing an empty history is refused; one with steps succeeds once.
+    assert!(engine_ref.clear_region_processing(track_id, region_id));
+    assert!(!engine_ref.clear_region_processing(track_id, region_id));
+
+    let _ = std::fs::remove_file(source_path);
+    let _ = std::fs::remove_file(project_path);
+}

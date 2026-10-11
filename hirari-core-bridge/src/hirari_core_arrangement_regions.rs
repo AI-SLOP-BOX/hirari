@@ -383,6 +383,35 @@ impl HirariCore {
             engine.set_region_comp_ranges(tid, rid, packed.as_slice(), managed)
         })
     }
+    pub fn append_region_processing(
+        &self,
+        tid: u32,
+        rid: u32,
+        step_id: u32,
+        operation: &str,
+        parameter: f32,
+        enabled: bool,
+    ) -> bool {
+        // Trivial, region-independent rejections only. Everything else
+        // (operation size, parameter finiteness, the 4096-step cap) is
+        // adjudicated by the Rust store the region owns.
+        if tid == 0 || rid == 0 || step_id == 0 || operation.is_empty() {
+            return false;
+        }
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| {
+                engine.append_region_processing(tid, rid, step_id, operation, parameter, enabled)
+            })
+    }
+    pub fn clear_region_processing(&self, tid: u32, rid: u32) -> bool {
+        if tid == 0 || rid == 0 {
+            return false;
+        }
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.clear_region_processing(tid, rid))
+    }
     pub fn set_region_gain(&self, tid: u32, rid: u32, gain: f32) -> bool {
         if !gain.is_finite() || !(-24.0..=24.0).contains(&gain) {
             return false;

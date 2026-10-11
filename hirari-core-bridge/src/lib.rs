@@ -368,6 +368,16 @@ pub mod ffi {
         fn split_region(self: &AudioEngine, tid: u32, rid: u32, split: f64) -> bool;
         fn split_region_with_right_id(self: &AudioEngine, tid: u32, rid: u32, split: f64) -> u32;
         fn remove_region(self: &AudioEngine, tid: u32, rid: u32) -> bool;
+        fn append_region_processing(
+            self: &AudioEngine,
+            tid: u32,
+            rid: u32,
+            step_id: u32,
+            operation: &str,
+            parameter: f32,
+            enabled: bool,
+        ) -> bool;
+        fn clear_region_processing(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn duplicate_region(self: &AudioEngine, tid: u32, rid: u32, start_sample: u64) -> u32;
         fn set_region_gain(self: &AudioEngine, tid: u32, rid: u32, gain: f32) -> bool;
         fn set_region_range_edit(
