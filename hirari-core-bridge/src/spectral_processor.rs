@@ -65,13 +65,28 @@ pub unsafe extern "C" fn hirari_spectral_processor_apply_gain(
     let time_feather = (frame_seconds * 0.5).max(1.0e-4);
     let bin_width = sample_rate as f32 / FFT_SIZE as f32;
     let freq_feather = (bin_width * 2.0).max(1.0e-3);
+    let restrict_frequency = f1 > f0;
+    // Frames outside the time selection are skipped, so the per-sample scratch
+    // arrays stay zero there. Bound them (and the input copy) to the span a
+    // frame inside the selection can actually touch, instead of allocating
+    // three full-channel arrays for a selection that may cover a few seconds
+    // of an hour-long region.
+    let first_offset =
+        ((t0 - time_feather) * sample_rate as f32 - (FFT_SIZE / 2) as f32).max(0.0);
+    let last_offset = ((t1 + time_feather) * sample_rate as f32 - (FFT_SIZE / 2) as f32)
+        + FFT_SIZE as f32;
+    let begin = (first_offset as usize).min(len);
+    let end = (last_offset as usize).max(begin).min(len);
+    let span = end - begin;
     for channel in 0..channel_count as usize {
         let Some(output) = channel_mut(channels, channel, len) else {
             continue;
         };
-        let input = output.to_vec();
-        let mut delta = vec![0.0f32; len];
-        let mut norm = vec![0.0f32; len];
+        // Only the span is read, and it is a copy, so writing `output` in place
+        // below cannot feed mutated samples back into the transform.
+        let input = output[begin..end].to_vec();
+        let mut delta = vec![0.0f32; span];
+        let mut norm = vec![0.0f32; span];
         let mut real = vec![0.0f32; FFT_SIZE];
         let mut imag = vec![0.0f32; FFT_SIZE];
         for offset in (0..len).step_by(HOP) {
@@ -86,7 +101,7 @@ pub unsafe extern "C" fn hirari_spectral_processor_apply_gain(
             }
             for i in 0..FFT_SIZE {
                 let sample = input
-                    .get(offset + i)
+                    .get(offset + i - begin)
                     .copied()
                     .filter(|v| v.is_finite())
                     .unwrap_or(0.0);
@@ -108,31 +123,34 @@ pub unsafe extern "C" fn hirari_spectral_processor_apply_gain(
             }
             plan.inverse(&mut real, &mut imag);
             for i in 0..FFT_SIZE {
-                let Some(position) = offset.checked_add(i).filter(|p| *p < len) else {
+                let Some(position) = offset
+                    .checked_add(i)
+                    .filter(|p| *p < len && *p >= begin)
+                else {
                     break;
                 };
                 let difference = (real[i]
                     - input
-                        .get(offset + i)
+                        .get(position - begin)
                         .copied()
                         .filter(|v| v.is_finite())
                         .unwrap_or(0.0)
                         * window[i])
                     * window[i];
                 if difference.is_finite() {
-                    delta[position] += difference;
+                    delta[position - begin] += difference;
                 }
-                norm[position] += window[i] * window[i];
+                norm[position - begin] += window[i] * window[i];
             }
         }
-        for i in 0..len {
+        for i in 0..span {
             let difference = if norm[i] > 1.0e-6 {
                 delta[i] / norm[i]
             } else {
                 0.0
             };
             if difference.is_finite() {
-                output[i] += difference;
+                output[begin + i] += difference;
             }
         }
     }
