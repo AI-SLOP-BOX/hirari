@@ -103,6 +103,21 @@ export component AppWindow inherits Window {
     callback onboarding-progress-changed(bool, int);
     callback focus-mode-changed(bool);
     callback workspace-preset-changed(string);
+    /// Menu bar activation. Routed through a callback so the raw pointer area
+    /// and the accessibility button share one handler instead of two copies.
+    callback menu-selected(string);
+    menu-selected(item) => {
+        // Each label names the view it actually opens. Kept here rather than in
+        // Rust so the destinations stay `ViewModes.*` instead of bare numbers.
+        if (item == "Project") { bot_view = ViewModes.project; mx_open = true; pr_open = false; }
+        if (item == "Automation") { bot_view = ViewModes.automation; mx_open = true; pr_open = false; }
+        if (item == "Stacks") { bot_view = ViewModes.stacks; mx_open = true; pr_open = false; }
+        if (item == "Mix") { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; }
+        if (item == "Plugins") { CommandActions.palette_exec("SCAN PLUGINS"); bot_view = ViewModes.browser; mx_open = true; pr_open = false; }
+        if (item == "Prefs") { bot_view = ViewModes.preferences; mx_open = true; pr_open = false; }
+        if (item == "Diagnostics") { bot_view = ViewModes.diagnostics; mx_open = true; pr_open = false; }
+        if (item == "Moufu") { bot_view = ViewModes.moufu; mx_open = true; pr_open = false; MoufuActions.refresh(); }
+    }
     callback plugin-favorite-changed(string, bool);
     title: "HIRARI v1.0"; preferred-width: 1600px; preferred-height: 1000px; min-width: 1080px; min-height: 680px; background: Style.base;
     in-out property <bool> is_ply; in-out property <bool> is_rec; in property <bool> is_counting: false; in property <int> count_val: 0;
@@ -478,21 +493,20 @@ export component AppWindow inherits Window {
                 background: menu_area.has-hover ? Style.panel-h : transparent;
                 Text { text: m; width: 100%; height: 100%; font-size: 9px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
                 menu_area := TouchArea {
+                    // The transparent Button below owns the accessibility action,
+                    // so this raw pointer area stays non-accessible: marking both
+                    // would expose a duplicate control to VoiceOver.
+                    accessible-role: none;
                     mouse-cursor: pointer;
-                    clicked => {
-                        // Each label names the view it actually opens. These used
-                        // to read "File / Edit / Track / Window / Help", which
-                        // promised DAW menu behavior and delivered a navigation
-                        // jump instead; every mismatch is now spelled out.
-                        if (m == "Project") { bot_view = ViewModes.project; mx_open = true; pr_open = false; }
-                        if (m == "Automation") { bot_view = ViewModes.automation; mx_open = true; pr_open = false; }
-                        if (m == "Stacks") { bot_view = ViewModes.stacks; mx_open = true; pr_open = false; }
-                        if (m == "Mix") { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; }
-                        if (m == "Plugins") { CommandActions.palette_exec("SCAN PLUGINS"); bot_view = ViewModes.browser; mx_open = true; pr_open = false; }
-                        if (m == "Prefs") { bot_view = ViewModes.preferences; mx_open = true; pr_open = false; }
-                        if (m == "Diagnostics") { bot_view = ViewModes.diagnostics; mx_open = true; pr_open = false; }
-                        if (m == "Moufu") { bot_view = ViewModes.moufu; mx_open = true; pr_open = false; MoufuActions.refresh(); }
-                    }
+                    clicked => { root.menu-selected(m); }
+                }
+                // Invisible semantic layer so the menu bar exposes real buttons
+                // instead of a bare Text item. Same pattern as Z_IconButton.
+                Button {
+                    x: 0px; y: 0px; width: 100%; height: 100%;
+                    text: m;
+                    opacity: 0.01;
+                    clicked => { root.menu-selected(m); }
                 }
             }
             // Plugin scanning remains available from the Plugin menu and the
