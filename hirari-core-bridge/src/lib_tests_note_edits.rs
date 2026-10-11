@@ -493,3 +493,49 @@ fn processing_history_survives_the_v2_document_round_trip() {
     );
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn archive_manifest_rejects_an_unbounded_total() {
+    use crate::project_archive::{ArchiveEntry, ArchiveManifest, ARCHIVE_SCHEMA_VERSION};
+
+    fn entry(index: usize, bytes: u64) -> ArchiveEntry {
+        ArchiveEntry {
+            source: format!("source{index}.wav"),
+            package_path: format!("Media/source{index}.wav"),
+            bytes,
+            sha256: "a".repeat(64),
+            exists: true,
+        }
+    }
+
+    // Each entry is inside the per-file ceiling, so only the total can catch it.
+    let many: Vec<ArchiveEntry> = (0..10)
+        .map(|index| entry(index, 2 * 1024 * 1024 * 1024 - index as u64))
+        .collect();
+    let total: u64 = many.iter().map(|entry| entry.bytes).sum();
+    assert!(total > 16 * 1024 * 1024 * 1024, "test must exceed the ceiling");
+
+    let manifest = ArchiveManifest {
+        schema_version: ARCHIVE_SCHEMA_VERSION,
+        project_file: "project.hirari".into(),
+        entries: many,
+        missing: Vec::new(),
+        total_bytes: total,
+    };
+    assert!(
+        !manifest.validate(),
+        "a 20 GiB total must not validate even when every entry is legal"
+    );
+
+    // A total just inside the ceiling still validates.
+    let small: Vec<ArchiveEntry> = (0..4).map(|index| entry(index, 1024)).collect();
+    let small_total: u64 = small.iter().map(|entry| entry.bytes).sum();
+    let manifest = ArchiveManifest {
+        schema_version: ARCHIVE_SCHEMA_VERSION,
+        project_file: "project.hirari".into(),
+        entries: small,
+        missing: Vec::new(),
+        total_bytes: small_total,
+    };
+    assert!(manifest.validate(), "a bounded total must still validate");
+}

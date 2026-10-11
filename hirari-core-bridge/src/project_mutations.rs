@@ -256,6 +256,22 @@ impl ProjectDocument {
         self.feedback_routes.retain(|route| {
             route.source_id != track_id && route.destination_id != track_id
         });
+        self.plugin_instances
+            .retain(|plugin| plugin.track_id != track_id);
+        self.freeze_artifacts
+            .retain(|artifact| artifact.track_id != track_id);
+        self.step_sequencer_patterns
+            .retain(|pattern| pattern.track_id != track_id);
+        // A stack or VCA group whose membership becomes empty is a dangling
+        // record: validation rejects it and the document can no longer save.
+        self.track_stacks.retain_mut(|stack| {
+            stack.member_track_ids.retain(|id| *id != track_id);
+            !stack.member_track_ids.is_empty()
+        });
+        self.vca_groups.retain_mut(|group| {
+            group.track_ids.retain(|id| *id != track_id);
+            !group.track_ids.is_empty()
+        });
         self.metadata.tracks_count = self.tracks.len() as u32;
         Ok(())
     }

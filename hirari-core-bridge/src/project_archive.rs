@@ -21,6 +21,10 @@ use zip::{CompressionMethod, ZipWriter};
 pub const ARCHIVE_SCHEMA_VERSION: u32 = 1;
 const MAX_DEPENDENCIES: usize = 65_536;
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// Ceiling on the sum of every entry. Without it a manifest can name 65,536
+/// entries of 2 GiB each and still validate, so a crafted archive asks the
+/// restorer to provision 128 TiB before any real work starts.
+const MAX_TOTAL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_PROJECT_JSON_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -69,6 +73,9 @@ impl ArchiveManifest {
                 Some(value) => value,
                 None => return false,
             };
+            if total > MAX_TOTAL_BYTES {
+                return false;
+            }
         }
         let mut missing = BTreeSet::new();
         total == self.total_bytes
