@@ -421,11 +421,11 @@
                 padding-left: 8px; padding-right: 8px; spacing: 4px;
                 Z_IconButton { icon: is_ply ? "STOP" : "PLAY"; compact: false; button-width: 54px; clicked => { TransportActions.toggle_play(); } }
                 Z_IconButton { icon: is_rec ? "REC" : "Record"; compact: false; button-width: 54px; active-col: Style.record; clicked => { TransportActions.toggle_record(); } }
-                Z_IconButton {
-                    icon: "Editor"; compact: false; button-width: 58px;
-                    active: bot_view == 0;
-                    clicked => { bot_view = 0; mx_open = true; pr_open = false; }
-                }
+                // `bot_view = 0` is the MIXER panel (see the declaration in
+                // app_window.slint). This used to be a separate "Editor" button
+                // that set the same state and lit up alongside "Mixer", so the
+                // label did not match the destination. The arrange surface above
+                // is the editor; this toolbar controls the bottom panel only.
                 Z_IconButton { icon: "Piano Roll"; compact: false; button-width: 74px; active: bot_view == 2; clicked => { bot_view = 2; mx_open = true; pr_open = true; } }
                 Z_IconButton { icon: "Mixer"; compact: false; button-width: 60px; active: bot_view == 0; clicked => { bot_view = 0; mx_open = true; pr_open = false; } }
                 Z_IconButton { icon: "Smart Controls"; compact: false; button-width: 92px; active: bot_view == 10; clicked => { bot_view = 10; mx_open = true; pr_open = false; } }
