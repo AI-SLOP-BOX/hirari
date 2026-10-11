@@ -821,6 +821,9 @@ pub fn import_dawproject_file(
                             reverse: false,
                             loop_count: 1,
                             sync_group: 0,
+                            // DAWproject import has no processing-step concept;
+                            // an empty history keeps the field honest.
+                            processing_history: Vec::new(),
                         });
                     }
                 }

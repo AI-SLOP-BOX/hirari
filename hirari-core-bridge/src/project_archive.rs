@@ -911,6 +911,7 @@ mod tests {
                 reverse: false,
                 loop_count: 1,
                 sync_group: 0,
+                processing_history: Vec::new(),
             }],
             plugin_instances: vec![],
             midi_learn_mappings: vec![],

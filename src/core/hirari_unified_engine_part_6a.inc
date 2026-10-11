@@ -380,6 +380,24 @@ bool HirariUnifiedEngine::write_project_layout_json(
                 }
             }
             ss << "]";
+            ss << ",\"processing_history\":[";
+            {
+                // The authoritative table is Rust-owned; materialize it here.
+                // Without this the layout JSON drops the history, so the
+                // document `from_layout_json` builds has nothing to save.
+                std::vector<::hirari::editing::EventProcessingStep> history;
+                if (!region.processingHistory.copy(history)) return false;
+                for (size_t si = 0; si < history.size(); ++si) {
+                    if (cancelled()) return false;
+                    if (si > 0) ss << ",";
+                    const auto& step = history[si];
+                    ss << "{\"id\":" << step.id
+                       << ",\"operation\":\"" << jsonString(step.operation) << "\""
+                       << ",\"parameter\":" << jsonNumber(step.parameter)
+                       << ",\"enabled\":" << (step.enabled ? "true" : "false") << "}";
+                }
+            }
+            ss << "]";
             ss << "}";
         }
         ss << "]";

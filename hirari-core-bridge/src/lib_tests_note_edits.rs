@@ -294,7 +294,7 @@ fn comp_range_edits_are_adjudicated_by_the_rust_policy() {
 }
 
 #[test]
-fn processing_history_round_trips_through_the_engine_and_the_project_file() {
+fn processing_history_policy_is_enforced_end_to_end() {
     let _guard = native_engine_test_guard();
     let engine = crate::ffi::new_audio_engine();
     let engine_ref = engine.as_ref().expect("engine must initialize");
@@ -358,4 +358,138 @@ fn processing_history_round_trips_through_the_engine_and_the_project_file() {
 
     let _ = std::fs::remove_file(source_path);
     let _ = std::fs::remove_file(project_path);
+}
+
+#[test]
+fn processing_history_survives_a_save_and_load_round_trip() {
+    let _guard = native_engine_test_guard();
+    let engine = crate::ffi::new_audio_engine();
+    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let unique = unique_tag();
+    let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
+    let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
+    let source = source_path.to_str().unwrap();
+    let project = project_path.to_str().unwrap();
+
+    let track_id = engine_ref.add_track(0);
+    assert!(engine_ref.bounce_project(source, 0));
+    assert!(engine_ref.add_region(track_id, source, 0.0));
+    let layout: Value =
+        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+    let region_id = layout
+        .as_array()
+        .and_then(|tracks| tracks.first())
+        .and_then(|track| track.get("regions"))
+        .and_then(Value::as_array)
+        .and_then(|regions| regions.first())
+        .and_then(|region| region.get("id"))
+        .and_then(Value::as_u64)
+        .expect("added region must have a stable id") as u32;
+
+    assert!(engine_ref.append_region_processing(
+        track_id, region_id, 7, "gain", 0.5, true
+    ));
+    assert!(engine_ref.append_region_processing(
+        track_id, region_id, 8, "normalize", -1.25, false
+    ));
+
+    assert!(engine_ref.save_project(project));
+
+    engine_ref.new_project();
+    assert!(engine_ref.load_project(project));
+
+    let layout: Value =
+        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+    let reloaded_id = layout
+        .as_array()
+        .and_then(|tracks| tracks.first())
+        .and_then(|track| track.get("regions"))
+        .and_then(Value::as_array)
+        .and_then(|regions| {
+            regions
+                .iter()
+                .find(|region| {
+                    region.get("id").and_then(Value::as_u64) == Some(region_id as u64)
+                })
+                .and_then(|region| region.get("id"))
+                .and_then(Value::as_u64)
+        })
+        .expect("region id must be stable across a reload") as u32;
+
+    // The history has no read-back API, so a successful clear is the evidence
+    // that the steps came back: an empty table refuses the clear.
+    assert!(
+        engine_ref.clear_region_processing(track_id, reloaded_id),
+        "the reloaded region must still carry its processing steps"
+    );
+    assert!(!engine_ref.clear_region_processing(track_id, reloaded_id));
+
+    let _ = std::fs::remove_file(source_path);
+    let _ = std::fs::remove_file(project_path);
+}
+
+#[test]
+fn processing_history_survives_the_v2_document_round_trip() {
+    // The v2 save builds its document from the layout JSON. The engine's own
+    // binary format carries the history, so this exercises the other path,
+    // where the field used to be dropped between the JSON and the document.
+    let layout = serde_json::json!([{
+        "id": 1u32,
+        "name": "Track 1",
+        "type": "Audio",
+        "regions": [{
+            "id": 7u32,
+            "name": "Region",
+            "path": "source.wav",
+            "start": 0u64,
+            "len": 48_000u64,
+            "source_length": 48_000u64,
+            "source_sample_rate": 48_000u32,
+            "processing_history": [
+                {"id": 3u32, "operation": "gain", "parameter": 0.5, "enabled": true},
+                {"id": 4u32, "operation": "normalize", "parameter": -1.25, "enabled": false},
+            ],
+        }],
+    }])
+    .to_string();
+
+    let document = crate::project::ProjectDocument::from_layout_json(
+        "Round Trip",
+        120.0,
+        48_000.0,
+        &layout,
+    )
+    .expect("layout must hydrate");
+    let region = document
+        .regions
+        .iter()
+        .find(|region| region.id == 7)
+        .expect("region 7 must be present");
+
+    assert_eq!(
+        region.processing_history.len(),
+        2,
+        "the layout JSON must carry the processing history into the document"
+    );
+    assert_eq!(region.processing_history[0].operation, "gain");
+    assert_eq!(region.processing_history[1].operation, "normalize");
+    assert!(!region.processing_history[1].enabled);
+
+    let unique = unique_tag();
+    let path = std::env::temp_dir().join(format!("{unique}-v2.hirari"));
+    document
+        .save_atomic(path.to_str().unwrap())
+        .expect("document must save");
+    let reloaded = crate::project::ProjectDocument::load(path.to_str().unwrap())
+        .expect("document must load");
+    let reloaded_region = reloaded
+        .regions
+        .iter()
+        .find(|region| region.id == 7)
+        .expect("region 7 must survive the round trip");
+    assert_eq!(
+        reloaded_region.processing_history, region.processing_history,
+        "the processing history must survive save and load"
+    );
+    let _ = std::fs::remove_file(path);
 }

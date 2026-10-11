@@ -253,8 +253,7 @@ fn default_step_sequencer_resolution() -> u8 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProjectRegion {
     pub id: u32,
-    pub track_id: u32,
-    pub name: String,
+    pub track_id: u32,    pub name: String,
     pub path: String,
     pub start: u64,
     pub length: u64,
@@ -287,6 +286,27 @@ pub struct ProjectRegion {
     /// Shared edit group for phase-coherent multi-microphone audio operations.
     #[serde(default)]
     pub sync_group: u32,
+    /// Non-destructive processing steps applied to this region. Ordered as
+    /// appended; the id is the project-facing identity of each step.
+    #[serde(default)]
+    pub processing_history: Vec<ProjectEventStep>,
+}
+
+/// One non-destructive processing step recorded on a region.
+///
+/// Mirrors `hirari::editing::EventProcessingStep` on the C++ side and the
+/// `HirariProjectEventStepView` rows in the project file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProjectEventStep {
+    pub id: u32,
+    pub operation: String,
+    pub parameter: f32,
+    #[serde(default = "default_step_enabled")]
+    pub enabled: bool,
+}
+
+fn default_step_enabled() -> bool {
+    true
 }
 
 include!("project_bundles.rs");
@@ -475,6 +495,11 @@ struct LayoutRegion {
     sync_group: u32,
     #[serde(default)]
     warp_markers: Vec<LayoutWarpMarker>,
+    /// Processing steps are carried through the layout JSON so a save/load
+    /// round trip keeps them. The engine's own store is authoritative; this
+    /// is the transport representation.
+    #[serde(default)]
+    processing_history: Vec<ProjectEventStep>,
 }
 
 #[derive(Debug, Deserialize)]

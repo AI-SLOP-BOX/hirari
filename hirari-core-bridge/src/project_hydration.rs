@@ -159,6 +159,7 @@ impl ProjectDocument {
                     reverse: region.reverse,
                     loop_count: region.loop_count,
                     sync_group: region.sync_group,
+                    processing_history: region.processing_history.clone(),
                 });
             }
         }
