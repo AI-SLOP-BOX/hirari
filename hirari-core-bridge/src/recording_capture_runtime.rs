@@ -138,17 +138,18 @@ impl NativeCapture {
         // Starting a take supersedes whatever is already at the destination.
         // Publishing refuses to replace an existing file so that a late worker
         // cannot clobber a newer take, which means the previous take has to be
-        // retired here, once this take's spool exists and before the writer
-        // thread can publish. Doing it only after the spool is created keeps a
-        // failed start from destroying the take that is already on disk.
+        // retired before this take's writer can publish.
+        //
+        // The order matters. `create_float32` spools to a `.part` file and never
+        // touches `path`, so the writer existing proves nothing about this
+        // start succeeding. Retire the previous take only once the writer thread
+        // is actually running: a spawn failure then leaves the old take on disk
+        // (and the spool is dropped with the closure, so nothing is orphaned).
         let previous_take = path.clone();
         let writer = match StreamingRecordingWriter::create_float32(path, sample_rate as u32, 2) {
             Ok(writer) => writer,
             Err(_) => return false,
         };
-        if previous_take.is_file() {
-            let _ = std::fs::remove_file(&previous_take);
-        }
         self.shared.ring.reset();
         self.shared.write_failed.store(false, Ordering::Relaxed);
         self.shared.overflowed.store(false, Ordering::Relaxed);
@@ -160,9 +161,15 @@ impl NativeCapture {
             .name("hirari-native-recording-writer".into())
             .spawn(move || writer_loop(shared, writer))
         else {
+            // The thread never started, so the previous take is still the best
+            // recording on disk and must be left alone.
             self.shared.stop_writer.store(true, Ordering::Release);
             return false;
         };
+        // The writer is live from here on, so the old take can be retired.
+        if previous_take.is_file() {
+            let _ = std::fs::remove_file(&previous_take);
+        }
         *self.writer.lock().unwrap_or_else(PoisonError::into_inner) = Some(worker);
         self.shared.recording.store(true, Ordering::Release);
         true
