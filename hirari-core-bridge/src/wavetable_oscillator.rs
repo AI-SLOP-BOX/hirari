@@ -8,7 +8,7 @@ pub struct WavetableOscillatorEngine {
 
 impl WavetableOscillatorEngine {
     pub fn new(sample_rate: f64) -> Self {
-        let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate)
+        let sample_rate = if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate)
         {
             sample_rate
         } else {
@@ -104,7 +104,7 @@ impl WavetableOscillatorEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Wavetable state.
     pub fn audit_wavetable_oscillator(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.phase.is_finite()
             && self.phase >= 0.0
             && self.phase < 1.0

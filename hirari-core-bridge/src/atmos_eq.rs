@@ -21,7 +21,7 @@ pub struct StateVariableFilter {
 
 impl StateVariableFilter {
     pub fn new(sr: f64) -> Self {
-        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+        let sr = if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
             sr
         } else {
             48_000.0
@@ -180,7 +180,7 @@ impl AtmosEQEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Atmos EQ state.
     pub fn audit_atmos_eq(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.filters.len() == 12
             && self.filters.iter().all(|bands| {
                 bands.len() == 8

@@ -118,7 +118,7 @@ impl PitchCorrectorEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Pitch Corrector state.
     pub fn audit_pitch_corrector(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.prev_sample.is_finite()
             && self.current_ratio.is_finite()
             && (0.125..=8.0).contains(&self.current_ratio)

@@ -206,7 +206,7 @@ pub struct VirtuosoVocalEngine {
 
 impl VirtuosoVocalEngine {
     pub fn new(sr: f64) -> Self {
-        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+        let sr = if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
             sr
         } else {
             44_100.0
@@ -236,7 +236,7 @@ impl VirtuosoVocalEngine {
 
     pub fn prepare(&mut self, sample_rate: f64) {
         self.sample_rate =
-            if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+            if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
                 sample_rate
             } else {
                 44_100.0
@@ -261,7 +261,7 @@ impl VirtuosoVocalEngine {
 
     /// INDUSTRIAL: High-end Pitch & Formant Shifter (Vocal Transformer).
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
-        if !self.sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&self.sample_rate) {
+        if !self.sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(self.sample_rate) {
             return;
         }
         let shift = if self.pitch_shift_semi.is_finite() {
@@ -298,7 +298,7 @@ impl VirtuosoVocalEngine {
     }
 
     pub fn process_mono(&mut self, left: &mut [f32]) {
-        if !self.sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&self.sample_rate) {
+        if !self.sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(self.sample_rate) {
             return;
         }
         let shift = if self.pitch_shift_semi.is_finite() {
@@ -318,7 +318,7 @@ impl VirtuosoVocalEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Virtuoso Vocal state.
     pub fn audit_virtuoso_vocal(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.pitch_shift_semi.is_finite()
             && (-48.0..=48.0).contains(&self.pitch_shift_semi)
             && self.formant_shift.is_finite()

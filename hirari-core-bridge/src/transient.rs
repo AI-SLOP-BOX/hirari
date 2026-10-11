@@ -197,7 +197,7 @@ impl TransientOrchestrator {
 
     pub fn audit_transients(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.env_fast.is_finite()
             && self.env_slow.is_finite()
             && self.alpha_fast.is_finite()

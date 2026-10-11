@@ -592,7 +592,7 @@ pub fn write_standard_midi(
     sample_rate: f64,
     bpm: f64,
 ) -> Result<usize, String> {
-    if !sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate) {
+    if !sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(sample_rate) {
         return Err("invalid MIDI export sample rate".into());
     }
     if !bpm.is_finite() || !(1.0..=999.0).contains(&bpm) {

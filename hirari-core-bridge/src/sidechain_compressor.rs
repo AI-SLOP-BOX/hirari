@@ -218,7 +218,7 @@ impl SidechainCompressorEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Sidechain Compressor state.
     pub fn audit_sidechain_compressor(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.threshold.is_finite()
             && (1e-5..=4.0).contains(&self.threshold)
             && self.ratio.is_finite()

@@ -32,7 +32,7 @@ impl AutomationOrchestrator {
         Self {
             curves: Vec::new(),
             mode: AutomationMode::Read,
-            sample_rate: if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sample_rate: if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(f64::from(sr)) {
                 sr
             } else {
                 48_000.0
@@ -427,7 +427,7 @@ impl AutomationOrchestrator {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide automation synchronization graph.
     pub fn audit_automation(&self) -> bool {
-        if !self.sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&self.sample_rate) {
+        if !self.sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(f64::from(self.sample_rate)) {
             return false;
         }
 

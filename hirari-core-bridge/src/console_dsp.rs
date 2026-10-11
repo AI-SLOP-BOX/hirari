@@ -11,7 +11,7 @@ pub struct DivineConsoleEngine {
 impl DivineConsoleEngine {
     pub fn new(sr: f64) -> Self {
         Self {
-            sample_rate: if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sample_rate: if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
                 sr
             } else {
                 48_000.0
@@ -114,7 +114,7 @@ impl DivineConsoleEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Divine Console state.
     pub fn audit_divine_console(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.threshold.is_finite()
             && (1.0e-6..=1.0).contains(&self.threshold)
             && self.ratio.is_finite()

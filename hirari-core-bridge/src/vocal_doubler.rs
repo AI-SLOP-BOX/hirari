@@ -10,7 +10,7 @@ pub struct VocalDoublerEngine {
 
 impl VocalDoublerEngine {
     pub fn new(sr: f64) -> Self {
-        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) { sr } else { 48_000.0 };
+        let sr = if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) { sr } else { 48_000.0 };
         let mut lfo = LfoEngine::new(sr as f32);
         lfo.set_frequency(0.2); // 0.2 Hz
 
@@ -71,7 +71,7 @@ impl VocalDoublerEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Vocal Doubler state.
     pub fn audit_vocal_doubler(&self) -> bool {
-        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
+        self.sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.lfo.phase.is_finite() && self.delay_l.buffer.len() > 1 && self.delay_r.buffer.len() > 1
     }
 }

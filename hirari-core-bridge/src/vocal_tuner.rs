@@ -28,7 +28,7 @@ pub struct VocalPitchCorrectorEngine {
 impl VocalPitchCorrectorEngine {
     pub fn new(sr: f64) -> Self {
         Self {
-            sample_rate: if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sample_rate: if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
                 sr
             } else {
                 44_100.0
@@ -60,7 +60,7 @@ impl VocalPitchCorrectorEngine {
     }
 
     pub fn set_sample_rate(&mut self, sr: f64) {
-        if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+        if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
             self.sample_rate = sr;
             self.reset();
         }
@@ -99,7 +99,7 @@ impl VocalPitchCorrectorEngine {
         let size = 512; // Window size for correlation
         if len <= size + 2
             || !self.sample_rate.is_finite()
-            || !(8_000.0..=384_000.0).contains(&self.sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
         {
             return self.detected_freq;
         }
@@ -248,7 +248,7 @@ impl VocalPitchCorrectorEngine {
         if len == 0
             || buffer_len == 0
             || !self.sample_rate.is_finite()
-            || !(8_000.0..=384_000.0).contains(&self.sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
         {
             return;
         }
@@ -339,7 +339,7 @@ impl VocalPitchCorrectorEngine {
 
     pub fn audit_vocal_tuner(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && !self.buffer.is_empty()
             && self.input_pos < self.buffer.len()
             && self.detected_freq.is_finite()
@@ -383,7 +383,7 @@ pub unsafe extern "C" fn hirari_vocal_tuner_prepare(state: *const c_void, sample
     let Some(state) = (unsafe { state.cast::<VocalTunerState>().as_ref() }) else { return; };
     let runtime = unsafe { &mut *state.runtime.get() };
     runtime.set_sample_rate(if sample_rate.is_finite()
-        && (8_000.0..=384_000.0).contains(&sample_rate)
+        && crate::dsp_limits::is_supported_sample_rate(sample_rate)
     { sample_rate } else { 44_100.0 });
     state.detected_frequency.store(440.0f32.to_bits(), Ordering::Relaxed);
 }

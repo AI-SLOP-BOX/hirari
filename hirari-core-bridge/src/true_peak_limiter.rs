@@ -103,7 +103,7 @@ impl TruePeakLimiterEngine {
 
     pub fn prepare_to_play(&mut self, sample_rate: f64) {
         self.sample_rate =
-            if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+            if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
                 sample_rate
             } else {
                 44_100.0
@@ -225,7 +225,7 @@ impl TruePeakLimiterEngine {
 
     pub fn audit_true_peak_limiter(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.delay_samples > 0
             && self.delay_l.len() == self.delay_samples as usize + 1
             && self.delay_r.len() == self.delay_l.len()

@@ -18,7 +18,7 @@ pub struct TimelineRate {
 impl TimelineRate {
     pub fn validate(self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.frame_rate.is_finite()
             && (1.0..=240.0).contains(&self.frame_rate)
     }

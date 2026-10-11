@@ -13,7 +13,7 @@ pub struct DrumSynthBassEngine {
 
 impl DrumSynthBassEngine {
     pub fn new(sample_rate: f64) -> Self {
-        let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate)
+        let sample_rate = if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate)
         {
             sample_rate
         } else {
@@ -107,7 +107,7 @@ impl DrumSynthBassEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Drum Synth state.
     pub fn audit_drum_synth_bass(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.phase.is_finite()
             && self.env_pos.is_finite()
             && self.env_pos >= 0.0

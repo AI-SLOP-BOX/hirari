@@ -89,7 +89,7 @@ impl HirariWavetableSynthEngine {
     pub fn process(&mut self, l: &mut [f32], r: &mut [f32]) {
         if l.len() != r.len()
             || !self.sample_rate.is_finite()
-            || !(8_000.0..=384_000.0).contains(&self.sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
         {
             return;
         }
@@ -151,7 +151,7 @@ impl HirariWavetableSynthEngine {
     }
     pub fn audit_hirari_wavetable_synth(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && [
                 self.morph_pos,
                 self.cutoff1,

@@ -271,7 +271,7 @@ impl VocalSynthKernel {
 
     pub fn new(sr: f64) -> Self {
         Self {
-            sample_rate: if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+            sample_rate: if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
                 sr
             } else {
                 44_100.0
@@ -282,7 +282,7 @@ impl VocalSynthKernel {
     /// Update the synthesis rate without allowing invalid filter or oscillator
     /// coefficients to enter the render path.
     pub fn set_sample_rate(&mut self, sr: f64) -> bool {
-        if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+        if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
             self.sample_rate = sr;
             true
         } else {
@@ -376,7 +376,7 @@ impl VocalSynthKernel {
     }
 
     pub fn audit_vocal_synth(&self) -> bool {
-        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
+        self.sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
     }
 }
 

@@ -41,7 +41,7 @@ impl ConvolutionReverb {
     }
 
     fn valid_sample_rate(sample_rate: f64) -> f32 {
-        if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+        if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
             sample_rate as f32
         } else {
             44_100.0

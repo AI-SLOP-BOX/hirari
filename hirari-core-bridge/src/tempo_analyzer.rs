@@ -114,7 +114,7 @@ impl TempoAnalyzerEngine {
         let n_fft = 1024;
         let mut flux = Vec::new();
 
-        if len < n_fft || !sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate)
+        if len < n_fft || !sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
         {
             return AnalysisResult {
                 bpm: 120.0,

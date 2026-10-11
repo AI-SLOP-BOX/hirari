@@ -144,7 +144,7 @@ impl MeterDspState {
 
 #[no_mangle]
 pub extern "C" fn hirari_master_meter_create(sample_rate: f64) -> *mut c_void {
-    let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+    let sample_rate = if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
         sample_rate
     } else {
         44_100.0
@@ -181,7 +181,7 @@ pub unsafe extern "C" fn hirari_master_meter_prepare(state: *mut c_void, sample_
     }
     let core = unsafe { &*state.cast::<MeterCore>() };
     let dsp = unsafe { &mut *core.dsp.get() };
-    dsp.sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+    dsp.sample_rate = if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
         sample_rate
     } else {
         44_100.0

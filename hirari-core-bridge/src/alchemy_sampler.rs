@@ -46,7 +46,7 @@ impl SampleZone {
             || low_velocity > high_velocity
             || samples.len() < 2
             || (sample_rate != 0.0
-                && (!sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate)))
+                && (!sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(sample_rate)))
         {
             return None;
         }

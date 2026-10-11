@@ -188,7 +188,7 @@ fn validate_regions_and_midi_action(action: &CommandAction) -> Result<(), String
                     max_frames,
                 } => {
                     if !sample_rate.is_finite()
-                        || !(8_000.0..=384_000.0).contains(sample_rate)
+                        || !crate::dsp_limits::is_supported_sample_rate(f64::from(*sample_rate))
                         || *channels == 0
                         || *channels > 64
                         || *max_frames == 0
@@ -205,7 +205,7 @@ fn validate_regions_and_midi_action(action: &CommandAction) -> Result<(), String
                     ..
                 } => {
                     if !sample_rate.is_finite()
-                        || !(8_000.0..=384_000.0).contains(sample_rate)
+                        || !crate::dsp_limits::is_supported_sample_rate(f64::from(*sample_rate))
                         || *channels == 0
                         || *channels > 64
                         || *max_frames == 0

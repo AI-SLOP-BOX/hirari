@@ -385,7 +385,7 @@ pub unsafe extern "C" fn hirari_region_wsola_frame(
                 pitch_formant.as_mut_ptr(),
             );
             if pitch_formant[0].is_finite() {
-                ratio = 2.0f64.powf(pitch_formant[0].clamp(-4800.0, 4800.0) / 1200.0);
+                ratio = crate::dsp_limits::cents_to_pitch_ratio(pitch_formant[0]);
             }
         }
         (base_pitch_ratio * ratio).clamp(0.25, 4.0)

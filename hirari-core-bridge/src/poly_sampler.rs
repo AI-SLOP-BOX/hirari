@@ -212,7 +212,7 @@ struct PolySampler {
 
 impl PolySampler {
     fn new(sample_rate: f64) -> Self {
-        let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate)
+        let sample_rate = if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate)
         {
             sample_rate
         } else {
@@ -252,7 +252,7 @@ impl PolySampler {
                 || (view.right_length != 0 && view.right_length != view.left_length)
                 || (view.source_sample_rate != 0.0
                     && (!view.source_sample_rate.is_finite()
-                        || !(8_000.0..=384_000.0).contains(&view.source_sample_rate)))
+                        || !crate::dsp_limits::is_supported_sample_rate(view.source_sample_rate)))
                 || (view.loop_enabled
                     && (view.loop_start >= view.loop_end
                         || view.loop_end as usize > view.left_length))
@@ -362,7 +362,7 @@ impl PolySampler {
         voice.speed = speed;
         voice.target_speed = speed;
         voice.sample_rate_ratio = if zone.source_sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&zone.source_sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(zone.source_sample_rate)
             && self.sample_rate > 0.0
         {
             zone.source_sample_rate / self.sample_rate

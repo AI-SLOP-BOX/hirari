@@ -49,7 +49,7 @@ pub unsafe extern "C" fn hirari_spectral_processor_apply_gain(
         || channel_count == 0
         || len == 0
         || !sample_rate.is_finite()
-        || !(8000.0..=384000.0).contains(&sample_rate)
+        || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
         || ![t0, t1, f0, f1, gain].iter().all(|v| v.is_finite())
     {
         return false;
@@ -241,7 +241,7 @@ pub unsafe extern "C" fn hirari_spectral_processor_remove_hum(
     f1: f32,
 ) -> bool {
     if !sample_rate.is_finite()
-        || !(8000.0..=384000.0).contains(&sample_rate)
+        || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
         || !fundamental.is_finite()
         || fundamental <= 0.0
         || !bandwidth.is_finite()
@@ -300,7 +300,7 @@ pub unsafe extern "C" fn hirari_spectral_processor_interpolate(
         || channel_count == 0
         || len < 64
         || !sample_rate.is_finite()
-        || !(8000.0..=384000.0).contains(&sample_rate)
+        || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
         || ![t0, t1, f0, f1, blend].iter().all(|v| v.is_finite())
     {
         return false;
@@ -437,7 +437,7 @@ pub unsafe extern "C" fn hirari_spectral_processor_reduce_noise(
         || channel_count == 0
         || len < 64
         || !sample_rate.is_finite()
-        || !(8000.0..=384000.0).contains(&sample_rate)
+        || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
         || ![t0, t1, f0, f1, amount, profile_seconds]
             .iter()
             .all(|v| v.is_finite())
@@ -619,7 +619,7 @@ pub unsafe extern "C" fn hirari_spectral_processor_remove_clicks(
     } else {
         if len < 3
             || !sample_rate.is_finite()
-            || !(8000.0..=384000.0).contains(&sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
             || !t0.is_finite()
             || !t1.is_finite()
         {
@@ -721,7 +721,7 @@ pub unsafe extern "C" fn hirari_spectral_processor_repair_clipped(
     let (first, last) = if selected {
         if len < 3
             || !sample_rate.is_finite()
-            || !(8000.0..=384000.0).contains(&sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
             || !t0.is_finite()
             || !t1.is_finite()
         {

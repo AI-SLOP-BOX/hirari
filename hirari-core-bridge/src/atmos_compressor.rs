@@ -6,7 +6,7 @@ pub struct AtmosCompressorEngine {
 impl AtmosCompressorEngine {
     pub fn new(sample_rate: f64) -> Self {
         Self {
-            sample_rate: if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate)
+            sample_rate: if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate)
             {
                 sample_rate
             } else {
@@ -82,7 +82,7 @@ impl AtmosCompressorEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Atmos state.
     pub fn audit_atmos_compressor(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.env.is_finite()
             && (0.0..=4.0).contains(&self.env)
     }

@@ -41,7 +41,7 @@ impl MasterLimiter {
 
     fn prepare(&mut self, sample_rate: f64) {
         self.sample_rate =
-            if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+            if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
                 sample_rate
             } else {
                 44_100.0

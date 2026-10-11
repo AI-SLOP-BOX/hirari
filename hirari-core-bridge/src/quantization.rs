@@ -18,7 +18,7 @@ impl QuantizationOrchestrator {
         sample_rate: f64,
         options: &QuantizationOptions
     ) -> Vec<u64> {
-        if !bpm.is_finite() || !(20.0..=400.0).contains(&bpm) || !sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate)
+        if !bpm.is_finite() || !(20.0..=400.0).contains(&bpm) || !sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
             || !options.strength.is_finite() || !options.swing.is_finite() {
             return vec![0; transients.len()];
         }

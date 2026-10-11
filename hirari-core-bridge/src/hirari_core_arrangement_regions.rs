@@ -645,8 +645,8 @@ impl HirariCore {
             || end_seconds - start_seconds > 24.0 * 60.0
             || !pitch_offset_cents.is_finite()
             || !formant_offset_cents.is_finite()
-            || pitch_offset_cents.abs() > 4800.0
-            || formant_offset_cents.abs() > 2400.0
+            || pitch_offset_cents.abs() > crate::dsp_limits::MAX_PITCH_CENTS
+            || formant_offset_cents.abs() > crate::dsp_limits::MAX_FORMANT_CENTS
         {
             return false;
         }
@@ -676,9 +676,9 @@ impl HirariCore {
             && end_seconds > start_seconds
             && end_seconds - start_seconds <= 24.0 * 60.0
             && pitch_offset_cents.is_finite()
-            && pitch_offset_cents.abs() <= 4800.0
+            && pitch_offset_cents.abs() <= crate::dsp_limits::MAX_PITCH_CENTS
             && formant_offset_cents.is_finite()
-            && formant_offset_cents.abs() <= 2400.0;
+            && formant_offset_cents.abs() <= crate::dsp_limits::MAX_FORMANT_CENTS;
         if !valid {
             return "{\"code\":\"invalid_audio_note_segment\",\"retryable\":false}".to_owned();
         }
@@ -713,9 +713,9 @@ impl HirariCore {
             || !position_seconds.is_finite()
             || position_seconds < 0.0
             || !pitch_cents.is_finite()
-            || pitch_cents.abs() > 4800.0
+            || pitch_cents.abs() > crate::dsp_limits::MAX_PITCH_CENTS
             || !formant_cents.is_finite()
-            || formant_cents.abs() > 2400.0
+            || formant_cents.abs() > crate::dsp_limits::MAX_FORMANT_CENTS
         {
             return false;
         }
@@ -767,7 +767,7 @@ impl HirariCore {
     ) -> bool {
         if !segment_start_seconds.is_finite() || segment_start_seconds < 0.0
             || !position_seconds.is_finite() || position_seconds < 0.0
-            || !formant_cents.is_finite() || formant_cents.abs() > 2400.0
+            || !formant_cents.is_finite() || formant_cents.abs() > crate::dsp_limits::MAX_FORMANT_CENTS
         {
             return false;
         }
@@ -787,7 +787,7 @@ impl HirariCore {
     ) -> bool {
         if !segment_start_seconds.is_finite() || segment_start_seconds < 0.0
             || !position_seconds.is_finite() || position_seconds < 0.0
-            || !pitch_cents.is_finite() || pitch_cents.abs() > 4800.0
+            || !pitch_cents.is_finite() || pitch_cents.abs() > crate::dsp_limits::MAX_PITCH_CENTS
         {
             return false;
         }
@@ -807,7 +807,11 @@ impl HirariCore {
         value_cents: f64,
         edit_formant: bool,
     ) -> bool {
-        let limit = if edit_formant { 2400.0 } else { 4800.0 };
+        let limit = if edit_formant {
+            crate::dsp_limits::MAX_FORMANT_CENTS
+        } else {
+            crate::dsp_limits::MAX_PITCH_CENTS
+        };
         if !segment_start_seconds.is_finite() || segment_start_seconds < 0.0
             || !old_position_seconds.is_finite() || old_position_seconds < 0.0
             || !new_position_seconds.is_finite() || new_position_seconds < 0.0
@@ -900,7 +904,7 @@ impl HirariCore {
     }
 
     pub fn analyze_region_audio_note_segments(&self, tid: u32, rid: u32, sample_rate: f64) -> bool {
-        if !sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate) {
+        if !sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(sample_rate) {
             return false;
         }
         self.engine
@@ -915,7 +919,7 @@ impl HirariCore {
         if tid == 0
             || rid == 0
             || !sample_rate.is_finite()
-            || !(8_000.0..=384_000.0).contains(&sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
         {
             return false;
         }

@@ -104,7 +104,7 @@ fn validate_project_and_extensions_action(action: &CommandAction) -> Result<(), 
                 } if samples.len() > 262_144
                     || samples.iter().any(|sample| !sample.is_finite())
                     || !sample_rate.is_finite()
-                    || !(8_000.0..=384_000.0).contains(sample_rate)
+                    || !crate::dsp_limits::is_supported_sample_rate(*sample_rate)
                     || !speed.is_finite()
                     || !(0.0..=1.0).contains(speed)
                     || !timing_ratio.is_finite()

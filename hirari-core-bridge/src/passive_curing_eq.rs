@@ -42,7 +42,7 @@ pub struct PassiveCuringEqEngine {
 
 impl PassiveCuringEqEngine {
     pub fn new(sr: f64) -> Self {
-        let sample_rate = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+        let sample_rate = if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
             sr
         } else {
             48_000.0
@@ -187,7 +187,7 @@ impl PassiveCuringEqEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Passive Curing EQ state.
     pub fn audit_passive_curing_eq(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self
                 .state_l
                 .iter()

@@ -58,7 +58,7 @@ impl StemOrchestrator {
         if n == 0 {
             return;
         }
-        if !sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate) {
+        if !sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(sample_rate) {
             drums[..n].fill(0.0);
             bass[..n].fill(0.0);
             vocals[..n].fill(0.0);

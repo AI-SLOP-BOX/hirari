@@ -43,7 +43,7 @@ struct AutoPitchCorrector {
 
 impl AutoPitchCorrector {
     fn new(sample_rate: f64, requested_size: usize) -> Option<Self> {
-        let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate)
+        let sample_rate = if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate)
         {
             sample_rate as f32
         } else {
@@ -359,7 +359,7 @@ pub unsafe extern "C" fn hirari_auto_pitch_prepare(state: *mut c_void, sample_ra
     if let Some(state) = unsafe { state.cast::<AutoPitchState>().as_ref() } {
         let runtime = unsafe { &mut *state.runtime.get() };
         runtime.sample_rate =
-            if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+            if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
                 sample_rate as f32
             } else {
                 44_100.0

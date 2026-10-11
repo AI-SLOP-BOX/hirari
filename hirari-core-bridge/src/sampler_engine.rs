@@ -105,7 +105,7 @@ struct RealtimeSampler {
 impl RealtimeSampler {
     fn new(sample_rate: f64, reader: Option<SampleBufferReader>) -> Self {
         let mut result = Self {
-            sample_rate: if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate)
+            sample_rate: if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate)
             {
                 sample_rate
             } else {
@@ -163,7 +163,7 @@ impl RealtimeSampler {
         let channel = channel & 0x0f;
         let root = root & 0x7f;
         let rate_ratio = if source_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&source_rate)
+            && crate::dsp_limits::is_supported_sample_rate(source_rate)
             && self.sample_rate > 0.0
         {
             source_rate / self.sample_rate
@@ -200,7 +200,7 @@ impl RealtimeSampler {
                 && (zone.loop_start >= zone.loop_end || zone.loop_end as usize > zone.length))
             || (zone.sample_rate != 0.0
                 && (!zone.sample_rate.is_finite()
-                    || !(8_000.0..=384_000.0).contains(&zone.sample_rate)))
+                    || !crate::dsp_limits::is_supported_sample_rate(zone.sample_rate)))
         {
             return;
         }
@@ -888,7 +888,7 @@ pub unsafe extern "C" fn hirari_sampler_prepare(state: *mut c_void, sample_rate:
         return;
     }
     let sampler = &mut *state.cast::<RealtimeSampler>();
-    if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+    if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
         sampler.sample_rate = sample_rate;
     }
     sampler.reset();
@@ -985,7 +985,7 @@ impl SamplerEngineEngine {
                 && sample.loop_end <= sample.left.len()
                 && (sample.source_sample_rate == 0.0
                     || (sample.source_sample_rate.is_finite()
-                        && (8_000.0..=384_000.0).contains(&sample.source_sample_rate)))
+                        && crate::dsp_limits::is_supported_sample_rate(sample.source_sample_rate)))
         });
     }
 
@@ -1229,7 +1229,7 @@ impl SamplerEngineEngine {
                     && sample.loop_end <= sample.left.len()
                     && (sample.source_sample_rate == 0.0
                         || (sample.source_sample_rate.is_finite()
-                            && (8_000.0..=384_000.0).contains(&sample.source_sample_rate)))
+                            && crate::dsp_limits::is_supported_sample_rate(sample.source_sample_rate)))
                     && sample.left.iter().all(|value| value.is_finite())
                     && sample.right.iter().all(|value| value.is_finite())
             })

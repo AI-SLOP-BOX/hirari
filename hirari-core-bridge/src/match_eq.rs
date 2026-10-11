@@ -10,7 +10,7 @@ pub struct MatchEqEngine {
 impl MatchEqEngine {
     pub fn new(sr: f64) -> Self {
         let fft_size = 4096;
-        let sample_rate = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+        let sample_rate = if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
             sr
         } else {
             48_000.0
@@ -93,7 +93,7 @@ impl MatchEqEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Match EQ state.
     pub fn audit_match_eq(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.source_avg.len() == self.ref_avg.len()
             && self.ref_avg.len() == self.filter_curve.len()
             && !self.filter_curve.is_empty()

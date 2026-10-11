@@ -287,7 +287,7 @@ pub unsafe extern "C" fn hirari_region_render_block(
         }
         let cents = pitch_cents[frame];
         let note_pitch_ratio = if cents.is_finite() {
-            2.0f64.powf(cents.clamp(-4800.0, 4800.0) / 1200.0)
+            crate::dsp_limits::cents_to_pitch_ratio(cents)
         } else {
             1.0
         };

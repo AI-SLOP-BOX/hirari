@@ -131,7 +131,7 @@ impl NativeCapture {
         self.stop_unlocked();
         if path.as_os_str().is_empty()
             || !sample_rate.is_finite()
-            || !(8_000.0..=384_000.0).contains(&sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
         {
             return false;
         }

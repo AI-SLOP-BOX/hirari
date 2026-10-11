@@ -38,7 +38,7 @@ impl HarmonicReconstructorEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Harmonic Reconstructor state.
     pub fn audit_harmonic_reconstructor(&self) -> bool {
-        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
+        self.sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
     }
 }
 

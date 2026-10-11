@@ -25,7 +25,7 @@ impl MidiFxOrchestrator {
         sample_rate: f64,
     ) -> Vec<MidiEvent> {
         if !sample_rate.is_finite()
-            || !(8_000.0..=384_000.0).contains(&sample_rate)
+            || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
             || !config.strum_ms.is_finite()
             || !(0.0..=2_000.0).contains(&config.strum_ms)
             || !config.velocity_scaling.is_finite()

@@ -66,7 +66,7 @@ pub fn import_dawproject_file(
     }
     if !sample_rate.is_finite()
         || sample_rate.fract() != 0.0
-        || !(8_000.0..=384_000.0).contains(&sample_rate)
+        || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
     {
         bail!("target project sample rate is invalid");
     }

@@ -68,6 +68,7 @@ pub mod convolution_reverb;
 pub mod dawproject;
 pub mod xml_attribute;
 pub mod deesser;
+pub mod dsp_limits;
 pub mod delay_line;
 pub mod delivery;
 pub mod diagnostics;

@@ -234,7 +234,7 @@ impl HirariSamplerProEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Sampler state.
     pub fn audit_hirari_sampler_pro(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.voices.len() <= 256
             && (!self.is_looping || self.loop_end > self.loop_start)
             && self.voices.iter().all(|v| {

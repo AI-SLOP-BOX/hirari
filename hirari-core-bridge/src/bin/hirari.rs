@@ -175,7 +175,7 @@ fn main() {
                 .unwrap_or(44_100.0);
             if args.next().is_some()
                 || !sample_rate.is_finite()
-                || !(8_000.0..=384_000.0).contains(&sample_rate)
+                || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
             {
                 usage();
             }

@@ -33,7 +33,7 @@ impl EqOrchestrator {
             || !sr.is_finite()
             || !q.is_finite()
             || !gain_db.is_finite()
-            || !(8_000.0..=384_000.0).contains(&sr)
+            || !crate::dsp_limits::is_supported_sample_rate(sr)
             || !(10.0..sr * 0.49).contains(&freq)
             || !(0.05..=100.0).contains(&q)
             || !(-48.0..=48.0).contains(&gain_db)

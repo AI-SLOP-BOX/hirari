@@ -373,7 +373,7 @@ pub unsafe extern "C" fn hirari_audio_note_curve_block(
 
 #[inline]
 fn ratio_for_cents(cents: f64) -> f64 {
-    2.0f64.powf(cents.clamp(-4800.0, 4800.0) / 1200.0)
+    crate::dsp_limits::cents_to_pitch_ratio(cents)
 }
 
 #[inline]
@@ -381,8 +381,9 @@ fn integrate_linear_pitch(left: f64, right: f64, seconds: f64, offset: f64) -> f
     if !seconds.is_finite() || seconds <= 0.0 {
         return 0.0;
     }
-    let left = (offset + left).clamp(-4800.0, 4800.0);
-    let right = (offset + right).clamp(-4800.0, 4800.0);
+    let limit = crate::dsp_limits::MAX_PITCH_CENTS;
+    let left = (offset + left).clamp(-limit, limit);
+    let right = (offset + right).clamp(-limit, limit);
     let delta = right - left;
     const CENTS_TO_EXPONENT: f64 = 0.000_577_622_650_466_621_1;
     if delta.abs() < 1.0e-8 {

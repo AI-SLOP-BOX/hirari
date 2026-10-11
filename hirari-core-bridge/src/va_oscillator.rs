@@ -16,7 +16,7 @@ pub struct VaOscillatorEngine {
 
 impl VaOscillatorEngine {
     pub fn new(sample_rate: f64) -> Self {
-        let sample_rate = if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) { sample_rate } else { 48_000.0 };
+        let sample_rate = if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) { sample_rate } else { 48_000.0 };
         let mut engine = Self {
             sample_rate,
             phase: 0.0,
@@ -85,7 +85,7 @@ impl VaOscillatorEngine {
 
     /// INDUSTRIAL: Performs a forensic audit of the project-wide VA state.
     pub fn audit_va_oscillator(&self) -> bool {
-        self.sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&self.sample_rate)
+        self.sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.phase.is_finite() && (0.0..1.0).contains(&self.phase)
             && self.freq.is_finite() && (0.0..=self.sample_rate * 0.49).contains(&self.freq)
             && self.increment.is_finite() && (0.0..=0.49).contains(&self.increment)

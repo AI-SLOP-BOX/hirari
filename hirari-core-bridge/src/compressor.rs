@@ -49,7 +49,7 @@ impl DynamicCompressorEngine {
 
     pub fn prepare_to_play(&mut self, sample_rate: f64) {
         self.sample_rate =
-            if sample_rate.is_finite() && (8_000.0..=384_000.0).contains(&sample_rate) {
+            if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
                 sample_rate
             } else {
                 44_100.0
@@ -260,7 +260,7 @@ impl DynamicCompressorEngine {
 
     pub fn audit_compressor(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.threshold_db.is_finite()
             && (-100.0..=0.0).contains(&self.threshold_db)
             && self.ratio.is_finite()

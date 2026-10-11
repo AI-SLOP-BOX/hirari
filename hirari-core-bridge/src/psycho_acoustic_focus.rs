@@ -8,7 +8,7 @@ pub struct PsychoAcousticFocusEngine {
 
 impl PsychoAcousticFocusEngine {
     pub fn new(sr: f64) -> Self {
-        let sr = if sr.is_finite() && (8_000.0..=384_000.0).contains(&sr) {
+        let sr = if sr.is_finite() && crate::dsp_limits::is_supported_sample_rate(sr) {
             sr
         } else {
             48_000.0
@@ -67,7 +67,7 @@ impl PsychoAcousticFocusEngine {
     /// INDUSTRIAL: Performs a forensic audit of the project-wide Psycho Acoustic Focus state.
     pub fn audit_psycho_acoustic_focus(&self) -> bool {
         self.sample_rate.is_finite()
-            && (8_000.0..=384_000.0).contains(&self.sample_rate)
+            && crate::dsp_limits::is_supported_sample_rate(self.sample_rate)
             && self.alpha.is_finite()
             && (0.0..=1.0).contains(&self.alpha)
             && self.focus_amount.is_finite()
