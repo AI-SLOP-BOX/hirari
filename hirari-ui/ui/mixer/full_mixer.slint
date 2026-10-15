@@ -11,6 +11,8 @@ export component Z_FullMixer {
     in property <[float]> pks_h;
     in property <int> meter_mode;
     in property <int> input_channels: 0;
+    /// Row in `tracks` the inspector describes. -1 means nothing is selected.
+    in property <int> selected_index: -1;
     in property <[string]> input_channel_names: [];
     in property <image> gpu-meter-image;
     in property <image> gpu-spectrum-image;
@@ -94,12 +96,30 @@ export component Z_FullMixer {
                 VerticalLayout { spacing: 0px;
                     Rectangle { height: 42px; background: Style.surface-2; HorizontalLayout { padding: 12px; Text { text: "Channel"; color: Style.text-primary; font-size: 12px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: "Clip"; color: Style.text-tertiary; font-size: 10px; } Text { text: "Project"; color: Style.text-tertiary; font-size: 10px; } } }
                     VerticalLayout { padding: 12px; spacing: 10px;
-                        Text { text: "Drums"; color: Style.text-primary; font-size: 15px; font-weight: 700; }
-                        Text { text: "Volume"; color: Style.text-tertiary; font-size: 10px; }
-                        Rectangle { height: 8px; background: Style.surface-0; border_radius: 4px; Rectangle { width: 70%; height: 100%; background: Style.brand; border_radius: 4px; } }
-                        HorizontalLayout { Text { text: "-6.2 dB"; color: Style.text-secondary; font-size: 11px; } Rectangle { horizontal-stretch: 1; } Text { text: "Pan 0"; color: Style.text-secondary; font-size: 11px; } }
-                        Text { text: "INSERTS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; }
-                        for fx in ["Hirari Compressor", "EQ Pro", "Transient Shaper", "Tape Saturator"] : Rectangle { height: 30px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 4px; HorizontalLayout { padding-left: 9px; spacing: 8px; Text { text: "◉"; color: Style.brand; font-size: 10px; vertical-alignment: center; } Text { text: fx; color: Style.text-secondary; font-size: 10px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌄"; color: Style.text-tertiary; vertical-alignment: center; } } }
+                        // The inspector used to be fixed text: "Drums", "-6.2 dB"
+                        // and four named inserts, shown whichever channel was
+                        // selected. It now describes the selected track, and says
+                        // so plainly when there is nothing to describe.
+                        if (root.selected_index >= 0 && root.selected_index < root.tracks.length) : VerticalLayout { spacing: 10px;
+                            property <Z_Track> ch: root.tracks[root.selected_index];
+                            // Linear gain (0..~1.5) to dB. Slint's Math has no
+                            // log10, and the volume scale here is linear gain.
+                            pure function gain-to-db(g: float) -> float {
+                                if (g <= 0.0001) { return -999.0; }
+                                return Math.round(Math.log(2.0, g) * 6.0206 * 10.0) / 10.0;
+                            }
+                            Text { text: ch.name; color: Style.text-primary; font-size: 15px; font-weight: 700; }
+                            Text { text: "Volume"; color: Style.text-tertiary; font-size: 10px; }
+                            Rectangle { height: 8px; background: Style.surface-0; border_radius: 4px; Rectangle { width: (ch.volume / 1.5) * parent.width; height: 100%; background: Style.brand; border_radius: 4px; } }
+                            HorizontalLayout { Text { text: gain-to-db(ch.volume) + " dB"; color: Style.text-secondary; font-size: 11px; } Rectangle { horizontal-stretch: 1; } Text { text: "Pan " + Math.round(ch.pan * 100.0) / 100.0; color: Style.text-secondary; font-size: 11px; } }
+                            Text { text: "INSERTS (" + ch.fx.length + ")"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; }
+                            if (ch.fx.length == 0) : Text { text: "No inserts on this channel."; color: Style.text-tertiary; font-size: 10px; wrap: word-wrap; }
+                            for fx in ch.fx : Rectangle { height: 30px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 4px; HorizontalLayout { padding-left: 9px; spacing: 8px; Text { text: fx.active ? "◉" : "○"; color: fx.active ? Style.brand : Style.text-tertiary; font-size: 10px; vertical-alignment: center; } Text { text: fx.name; color: Style.text-secondary; font-size: 10px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌄"; color: Style.text-tertiary; vertical-alignment: center; } } }
+                        }
+                        if (root.selected_index < 0 || root.selected_index >= root.tracks.length) : VerticalLayout { spacing: 6px;
+                            Text { text: "No channel selected"; color: Style.text-tertiary; font-size: 12px; font-weight: 600; }
+                            Text { text: "Pick a channel strip to inspect its volume, pan and inserts."; color: Style.text-tertiary; font-size: 10px; wrap: word-wrap; }
+                        }
                         Text { text: "AUX SENDS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; }
                         Button { text: "Open Send Routing"; clicked => { MixerActions.open_send_routing(); } }
                         Text { text: "Send levels and pre/post taps are shown in Audio Routing."; color: Style.text-tertiary; font-size: 10px; wrap: word-wrap; }

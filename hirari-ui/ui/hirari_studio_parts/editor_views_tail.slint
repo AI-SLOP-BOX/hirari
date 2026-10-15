@@ -355,6 +355,7 @@
                         if (bot_view == ViewModes.console_full) : Z_FullMixer {
                             input_channels: root.audio_input_channel_count;
                             tracks: root.tracks; pks: root.pks; pks_h: root.pks_h; meter_mode: root.meter_mode;
+                            selected_index: root.selected_row;
                             gpu-meter-image: root.gpu-meter-image; gpu-spectrum-image: root.gpu-spectrum-image;
                             close => { root.mx_open = false; }
                         }
