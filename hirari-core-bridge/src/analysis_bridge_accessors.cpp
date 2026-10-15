@@ -16,9 +16,13 @@
 namespace Hirari::Core::Bridge {
 
 // The authoritative engine telemetry snapshot (peaks, 512-bin spectrum, meter).
-rust::Vec<float> get_spectrum(const Engine::HirariUnifiedEngine* engine, uint32_t idx) {
+uint32_t get_active_telemetry_idx(const Engine::HirariUnifiedEngine& engine) {
+    return engine.get_active_telemetry_idx();
+}
+
+rust::Vec<float> get_spectrum(const Engine::HirariUnifiedEngine& engine, uint32_t idx) {
     ::Hirari::Core::Engine::HirariUnifiedEngine::TelemetryData snapshot{};
-    if (!engine->copy_telemetry(idx, snapshot)) return {};
+    if (!engine.copy_telemetry(idx, snapshot)) return {};
     rust::Vec<float> result;
     result.reserve(512);
     for (uint32_t i = 0; i < 512; ++i) result.push_back(snapshot.spectrum[i]);
@@ -26,8 +30,8 @@ rust::Vec<float> get_spectrum(const Engine::HirariUnifiedEngine* engine, uint32_
 }
 
 // Current meter (true peak, correlation, integrated/short-term loudness).
-BridgeLoudness get_master_meter_data(const Engine::HirariUnifiedEngine* engine) {
-    const auto meter = engine->getMasterMeterData();
+BridgeLoudness get_master_meter_data(const Engine::HirariUnifiedEngine& engine) {
+    const auto meter = engine.getMasterMeterData();
     return BridgeLoudness{
         .integrated = meter.lufsIntegrated,
         .short_term = meter.lufsShortTerm,
@@ -39,18 +43,16 @@ BridgeLoudness get_master_meter_data(const Engine::HirariUnifiedEngine* engine) 
 
 // Intelligence dashboard JSON (meter only; the deleted AnalysisHub computed the
 // identical payload from the same engine fields).
-rust::String get_intelligence_dashboard_json(const Engine::HirariUnifiedEngine* engine) {
-    if (!engine) return {};
-    const auto meter = engine->getMasterMeterData();
+rust::String get_intelligence_dashboard_json(const Engine::HirariUnifiedEngine& engine) {
+    const auto meter = engine.getMasterMeterData();
     return ::Hirari::Core::Bridge::analysis_dashboard_json(
         meter.lufsShortTerm, meter.lufsIntegrated,
         meter.truePeakL, meter.truePeakR, meter.correlation);
 }
 
 // Song structure JSON (sections -> analysis_song_structure_json payload).
-rust::String get_song_structure_json(const Engine::HirariUnifiedEngine* engine) {
-    if (!engine) return rust::String("{\"available\":false,\"sections\":[]}");
-    auto* mutable_engine = const_cast<Engine::HirariUnifiedEngine*>(engine);
+rust::String get_song_structure_json(const Engine::HirariUnifiedEngine& engine) {
+    auto* mutable_engine = const_cast<Engine::HirariUnifiedEngine*>(&engine);
     const auto sections = mutable_engine->run_structural_analysis();
     std::vector<uint8_t> kinds;
     std::vector<uint64_t> starts;

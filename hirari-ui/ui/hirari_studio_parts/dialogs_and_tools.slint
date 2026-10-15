@@ -287,13 +287,15 @@
         }
     }
     if (beginner_guide_open && production_mode) : Rectangle {
-        z: 5000; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.72);
+        // Home and recovery overlays use z=9000 and z=9100. The first-run
+        // guide must sit above both so a fresh profile can actually see it.
+        z: 9200; width: 100%; height: 100%; background: Style.surface-0.with-alpha(0.72);
         TouchArea { clicked => { beginner_guide_open = false; onboarding-progress-changed(true, beginner_guide_step); } }
         Rectangle {
-            x: (parent.width - 560px) / 2; y: 96px; width: 560px; height: 350px;
+            x: (parent.width - 560px) / 2; y: (parent.height - 190px) / 2; width: 560px; height: 190px;
             background: Style.surface; border-width: 1px; border-color: Style.brand; border_radius: 8px;
             VerticalLayout {
-                padding: 24px; spacing: 14px;
+                padding: 20px; spacing: 10px;
                 HorizontalLayout {
                     Text { text: "HIRARI QUICK START"; font-size: 16px; color: Style.brand; font-weight: 700; }
                     Rectangle { horizontal-stretch: 1; }
@@ -307,10 +309,10 @@
                     text: beginner_guide_step == 0 ? "Create an audio track first. This is where your recording or imported sound will live." : (beginner_guide_step == 1 ? "Choose an audio file. If you are not ready, skip this step and record later." : (beginner_guide_step == 2 ? "The mixer is where you control volume, mute, solo and the overall balance." : (beginner_guide_step == 3 ? "Scan plugins to discover CLAP, VST3 and AU instruments and effects. Nothing is inserted automatically." : (beginner_guide_step == 4 ? "Open the MIDI editor and draw notes on the selected instrument or MIDI track." : (beginner_guide_step == 5 ? "Automation changes volume, pan, delay and plugin parameters over time. Every edit can be undone." : "Save creates a recoverable project snapshot. You can always undo changes later.")))));
                     font-size: 10px; color: Style.text-secondary; wrap: word-wrap;
                 }
-                Rectangle { vertical-stretch: 1; }
                 HorizontalLayout {
+                    padding-left: 20px; padding-right: 20px;
                     spacing: 8px;
-                    if (beginner_guide_step == 0) : Z_IconButton { icon: "ADD TRACK"; button-width: 110px; clicked => { ProjectActions.add_track("AUDIO"); beginner_guide_step = 1; onboarding-progress-changed(false, 1); } }
+                    if (beginner_guide_step == 0) : Z_IconButton { icon: "ADD TRACK"; button-width: 110px; clicked => { ProjectActions.add_track("AUDIO"); show_genesis = false; beginner_guide_step = 1; onboarding-progress-changed(false, 1); } }
                     if (beginner_guide_step == 1) : Z_IconButton { icon: "ADD AUDIO"; button-width: 100px; clicked => { CommandActions.palette_exec("IMPORT AUDIO"); beginner_guide_step = 2; onboarding-progress-changed(false, 2); } }
                     if (beginner_guide_step == 2) : Z_IconButton { icon: "MIXER"; button-width: 90px; clicked => { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; beginner_guide_step = 3; onboarding-progress-changed(false, 3); } }
                     if (beginner_guide_step == 3) : Z_IconButton { icon: "SCAN PLUGINS"; button-width: 116px; clicked => { CommandActions.palette_exec("SCAN PLUGINS"); beginner_guide_step = 4; onboarding-progress-changed(false, 4); } }

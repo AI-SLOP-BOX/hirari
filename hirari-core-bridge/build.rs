@@ -128,6 +128,7 @@ fn main() {
 
     build.file("src/hirari_core_ref.cpp");
     build.file("src/analysis_bridge_accessors.cpp");
+    println!("cargo:rerun-if-changed=src/analysis_bridge_accessors.cpp");
     if std::env::var_os("CARGO_FEATURE_DSP_DIFFERENTIAL_REFERENCE").is_some() {
         build.file("tests/dsp_reference/builtin_gain_reference.cpp");
         build.file("tests/dsp_reference/master_limiter_reference.cpp");
