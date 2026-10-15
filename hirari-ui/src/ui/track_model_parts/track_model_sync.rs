@@ -1,3 +1,91 @@
+/// Arrangement clips for a track that owns no audio region.
+///
+/// The arrangement renders clips, and clips were built exclusively from
+/// native audio regions. A MIDI or instrument project therefore always
+/// showed an empty arrangement while its piano roll was full of notes, and
+/// a freshly created template showed nothing at all. Group each contiguous
+/// run of notes into one clip, which is how every other DAW presents the
+/// note content of a MIDI track in the arranger.
+///
+/// These clips carry negative ids because they have no native region, so
+/// nothing downstream can resolve or mutate them.
+fn synthesize_midi_clips(
+    core: &HirariCore,
+    track_id: i32,
+    color: slint::Color,
+) -> Vec<Z_Clip> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&core.midi_notes_json()) else {
+        return Vec::new();
+    };
+    let Some(notes) = value.as_array() else {
+        return Vec::new();
+    };
+    struct NoteSpan {
+        start_beat: f64,
+        end_beat: f64,
+    }
+    let mut spans: Vec<NoteSpan> = notes
+        .iter()
+        .filter(|note| {
+            note.get("track_id").and_then(serde_json::Value::as_u64)
+                == Some(track_id.max(0) as u64)
+        })
+        .filter_map(|note| {
+            let start = note.get("start_sample").and_then(serde_json::Value::as_u64)?;
+            let length = note.get("length_samples").and_then(serde_json::Value::as_u64)?;
+            let start_beat = core.samples_to_beats(start);
+            let end_beat = core.samples_to_beats(start.saturating_add(length.max(1)));
+            (start_beat.is_finite() && end_beat.is_finite()).then_some(NoteSpan {
+                start_beat,
+                end_beat: end_beat.max(start_beat + 1.0 / 960.0),
+            })
+        })
+        .collect();
+    spans.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
+
+    // Notes closer than a quarter beat belong to the same region; anything
+    // further apart is a separate take and gets its own clip.
+    const MAX_GAP_BEATS: f64 = 0.25;
+    let mut groups: Vec<(f64, f64)> = Vec::new();
+    for span in spans {
+        match groups.last_mut() {
+            Some(group) if span.start_beat - group.1 <= MAX_GAP_BEATS => {
+                group.1 = group.1.max(span.end_beat);
+            }
+            _ => groups.push((span.start_beat, span.end_beat)),
+        }
+    }
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(index, (start_beat, end_beat))| Z_Clip {
+            id: -(index as i32 + 1),
+            name: "MIDI".into(),
+            source_path: "".into(),
+            start_beat: start_beat.max(0.0) as f32,
+            length_beats: (end_beat - start_beat).max(1.0 / 16.0) as f32,
+            color,
+            points: slint::ModelRc::default(),
+            fade_in: 0.0,
+            fade_out: 0.0,
+            gain: 1.0,
+            reverse: false,
+            warp_ratio: 1.0,
+            pitch_preserve_warp: false,
+            pitch_semitones: 0.0,
+            loop_count: 1,
+            sync_group: 0,
+            trim_start: 0.0,
+            trim_end: 1.0,
+            layer: 0,
+            selected: false,
+            missing: false,
+            midi: true,
+            audio_pitch_segments: slint::ModelRc::default(),
+        })
+        .collect()
+}
+
 pub(crate) fn reset_project_scoped_track_overlays(tracks_model: &slint::VecModel<Z_Track>) {
     crate::ui::project_state::mark_ui_routing_changed();
     for row in 0..tracks_model.row_count() {
@@ -357,6 +445,7 @@ fn sync_tracks_from_engine_with_empty_policy(
                         // successful Core mutation.
                         selected: selected_regions.contains(&r.id),
                         missing: r.missing,
+                        midi: false,
                         audio_pitch_segments: slint::ModelRc::new(slint::VecModel::from(
                             r.audio_note_segments
                                 .into_iter()
@@ -408,6 +497,16 @@ fn sync_tracks_from_engine_with_empty_policy(
                     }
                 })
                 .collect();
+            // A MIDI or instrument track owns no audio region, so its clip
+            // list was always empty and the arrangement showed nothing for it
+            // even when the piano roll was full of notes. Derive one clip per
+            // contiguous run of notes so note content is visible where every
+            // other DAW shows it.
+            let clips = if clips.is_empty() {
+                synthesize_midi_clips(&core, track_id, color)
+            } else {
+                clips
+            };
 
             let automation_points = |source: Vec<AutomationLayoutPoint>, min_value: f32, max_value: f32| {
                 source
@@ -765,4 +864,68 @@ pub(crate) fn fallback_template_tracks(template_tracks: &[(&str, u32)]) -> Vec<Z
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::synthesize_midi_clips;
+
+    /// The arrangement renders clips, and clips came only from native audio
+    /// regions, so a MIDI track showed nothing in the arranger no matter how
+    /// many notes it held. This pins the contract the fix establishes: note
+    /// content becomes arrangement clips.
+    #[test]
+    fn midi_notes_become_arrangement_clips_grouped_by_contiguity() {
+        let core = hirari_core_bridge::HirariCore::new_offline().expect("offline core initializes");
+        let track_id = core.add_midi_track();
+        assert_ne!(track_id, 0);
+        // Lengths are expressed in whatever the active tempo map calls a beat,
+        // so the expectations below are derived rather than assumed.
+        let beat = 24_000u64;
+        let beat_to_samples = |beats: u64| beats * beat;
+        for (index, pitch) in [60u8, 62, 64].into_iter().enumerate() {
+            assert!(core.set_midi_note_lyric(
+                track_id,
+                pitch,
+                100,
+                beat_to_samples(index as u64),
+                beat,
+                "",
+            ));
+        }
+        // A five-beat gap starts a new region rather than stretching one clip
+        // across silence.
+        assert!(core.set_midi_note_lyric(
+            track_id,
+            72,
+            100,
+            beat_to_samples(8),
+            beat,
+            "",
+        ));
+
+        let clips = synthesize_midi_clips(&core, track_id as i32, slint::Color::default());
+
+        assert_eq!(clips.len(), 2, "two contiguous note runs, two clips");
+        for clip in &clips {
+            assert!(clip.midi, "synthesized clips must be marked as MIDI");
+            assert!(clip.id < 0, "no native region id can back these clips");
+        }
+        let expected_start = core.samples_to_beats(0) as f32;
+        let expected_end = core.samples_to_beats(beat_to_samples(3)) as f32;
+        assert!((clips[0].start_beat - expected_start).abs() < 1e-3);
+        assert!((clips[0].length_beats - (expected_end - expected_start)).abs() < 1e-3);
+        let isolated_start = core.samples_to_beats(beat_to_samples(8)) as f32;
+        let isolated_end = core.samples_to_beats(beat_to_samples(9)) as f32;
+        assert!((clips[1].start_beat - isolated_start).abs() < 1e-3);
+        assert!((clips[1].length_beats - (isolated_end - isolated_start)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_track_without_notes_has_no_arrangement_clips() {
+        let core = hirari_core_bridge::HirariCore::new_offline().expect("offline core initializes");
+        let track_id = core.add_midi_track();
+        assert_ne!(track_id, 0);
+        assert!(synthesize_midi_clips(&core, track_id as i32, slint::Color::default()).is_empty());
+    }
 }

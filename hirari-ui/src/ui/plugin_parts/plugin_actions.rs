@@ -612,6 +612,18 @@ pub fn install(ui: &AppWindow, core: Rc<HirariCore>, tracks: Rc<VecModel<Z_Track
                             Ok((catalog_json, (discovered, rejected))) => {
                                 let catalog = crate::ui::plugin_commands::
                                     apply_plugin_catalog_json_to_ui(&catalog_json, &ui);
+                                // The status field is the persistent one shown in the
+                                // plugin browser header; `last_action` is a transient
+                                // log line. Leaving the status at "SCANNING…" after a
+                                // successful scan made the browser claim it was still
+                                // working while listing results, and hid the
+                                // discovered/rejected split entirely.
+                                ui.set_plugin_catalog_status(
+                                    format!(
+                                        "{catalog} AVAILABLE · {discovered} DISCOVERED · {rejected} REJECTED"
+                                    )
+                                    .into(),
+                                );
                                 ui.set_last_action(
                                     format!(
                                         "PLUGIN SCAN COMPLETE: {} AVAILABLE · {} DISCOVERED · {} REJECTED",

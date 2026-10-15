@@ -36,5 +36,9 @@ export struct Z_Clip {
     layer: int,
     selected: bool,
     missing: bool,
+    /// True when the clip is a synthesized MIDI region rather than a native
+    /// audio region. MIDI clips carry no audio region id, so move and trim
+    /// gestures that mutate a region must not be offered for them.
+    midi: bool,
     audio_pitch_segments: [Z_AudioPitchSegment],
 }

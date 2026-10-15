@@ -176,7 +176,7 @@ export component Z_ArrangeDock inherits Rectangle {
                                         root.clip-selected(idx, clip_data.id);
                                     } else if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
                                         let delta = root.drag-current-delta;
-                                        if (root.dragging-clip-id == clip_data.id && root.drag-kind == 1 && Math.abs(delta) > 0.0001) {
+                                        if (root.dragging-clip-id == clip_data.id && root.drag-kind == 1 && !clip_data.midi && Math.abs(delta) > 0.0001) {
                                             root.clip-move-commit(clip_data.id, delta);
                                         }
                                         root.dragging-clip-id = -1;
@@ -189,7 +189,7 @@ export component Z_ArrangeDock inherits Rectangle {
                                     }
                                 }
                                 moved => {
-                                    if (self.pressed && root.dragging-clip-id == clip_data.id && root.drag-kind == 1) {
+                                    if (self.pressed && !clip_data.midi && root.dragging-clip-id == clip_data.id && root.drag-kind == 1) {
                                         let raw_delta = (self.mouse-x - self.pressed-x) / (root.pixels-per-beat * 1px);
                                         let snap = 4.0 / root.snap-division.max(1.0);
                                         root.drag-current-delta = (Math.round(raw_delta / snap) * snap).max(-root.drag-start-beat);
@@ -282,6 +282,15 @@ export component Z_ArrangeDock inherits Rectangle {
                                     }
                                 }
                             }
+                        }
+                        // A freshly created template has tracks but no content,
+                        // which reads as a broken arrangement rather than an
+                        // empty one. Say what the lane is waiting for.
+                        if (track.clips.length == 0) : Text {
+                            x: 110px; width: Math.max(40px, parent.width - 116px); height: 100%;
+                            text: "Empty · import audio, or draw notes in the MIDI editor";
+                            color: Style.text-muted; font-size: 10px; vertical-alignment: center;
+                            overflow: elide;
                         }
                         if (root.playhead-beat >= 0.0 && root.playhead-beat <= root.timeline-end-beat) : Rectangle {
                             x: root.playhead-beat * root.pixels-per-beat * 1px;
