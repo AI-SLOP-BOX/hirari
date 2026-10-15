@@ -175,7 +175,7 @@ fn main() {
                 .unwrap_or(44_100.0);
             if args.next().is_some()
                 || !sample_rate.is_finite()
-                || !crate::dsp_limits::is_supported_sample_rate(sample_rate)
+                || !hirari_core_bridge::dsp_limits::is_supported_sample_rate(sample_rate)
             {
                 usage();
             }

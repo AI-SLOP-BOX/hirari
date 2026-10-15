@@ -80,13 +80,13 @@ struct AudioNoteSegment {
 
     void setPitchOffset(double cents) {
         if (std::isfinite(cents)) {
-            pitchOffsetCents = std::clamp(cents, -4800.0, 4800.0);
+            pitchOffsetCents = std::clamp(cents, -hirari::limits::kMaxPitchCents, hirari::limits::kMaxPitchCents);
             rebuildPitchRatioIntegral();
         }
     }
 
     void setFormantOffset(double cents) noexcept {
-        if (std::isfinite(cents)) formantOffsetCents = std::clamp(cents, -2400.0, 2400.0);
+        if (std::isfinite(cents)) formantOffsetCents = std::clamp(cents, -hirari::limits::kMaxFormantCents, hirari::limits::kMaxFormantCents);
     }
 
     void upsertAnchor(AudioNoteAnchor anchor) {

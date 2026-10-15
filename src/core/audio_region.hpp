@@ -198,8 +198,8 @@ public:
                 if (relativeSeconds >= segment.startSeconds && relativeSeconds <= segment.endSeconds) {
                     const double cents = segment.pitchAt(relativeSeconds);
                     const double formant = segment.formantAt(relativeSeconds);
-                    if (std::isfinite(cents)) pitchRatio = std::pow(2.0, std::clamp(cents, -4800.0, 4800.0) / 1200.0);
-                    if (std::isfinite(formant)) formantCents = std::clamp(formant, -2400.0, 2400.0);
+                    if (std::isfinite(cents)) pitchRatio = std::pow(2.0, std::clamp(cents, -hirari::limits::kMaxPitchCents, hirari::limits::kMaxPitchCents) / 1200.0);
+                    if (std::isfinite(formant)) formantCents = std::clamp(formant, -hirari::limits::kMaxFormantCents, hirari::limits::kMaxFormantCents);
                     break;
                 }
             }

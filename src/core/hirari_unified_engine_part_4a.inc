@@ -466,7 +466,7 @@ bool HirariUnifiedEngine::set_region_audio_note_segment(
     if (!std::isfinite(startSeconds) || !std::isfinite(endSeconds) ||
         endSeconds <= startSeconds || endSeconds - startSeconds > 24.0 * 60.0 ||
         !std::isfinite(pitchOffsetCents) || !std::isfinite(formantOffsetCents) ||
-        std::abs(pitchOffsetCents) > 4800.0 || std::abs(formantOffsetCents) > 2400.0) {
+        std::abs(pitchOffsetCents) > hirari::limits::kMaxPitchCents || std::abs(formantOffsetCents) > hirari::limits::kMaxFormantCents) {
         return false;
     }
     std::shared_ptr<Track> target;
@@ -511,8 +511,8 @@ bool HirariUnifiedEngine::set_region_audio_note_anchor(
     double positionSeconds, double pitchCents, double formantCents) {
     if (!std::isfinite(segmentStartSeconds) || segmentStartSeconds < 0.0 ||
         !std::isfinite(positionSeconds) || positionSeconds < 0.0 ||
-        !std::isfinite(pitchCents) || std::abs(pitchCents) > 4800.0 ||
-        !std::isfinite(formantCents) || std::abs(formantCents) > 2400.0) {
+        !std::isfinite(pitchCents) || std::abs(pitchCents) > hirari::limits::kMaxPitchCents ||
+        !std::isfinite(formantCents) || std::abs(formantCents) > hirari::limits::kMaxFormantCents) {
         return false;
     }
     std::shared_ptr<Track> target;
@@ -548,7 +548,7 @@ bool HirariUnifiedEngine::set_region_audio_note_formant_anchor(
     double positionSeconds, double formantCents) {
     if (!std::isfinite(segmentStartSeconds) || segmentStartSeconds < 0.0 ||
         !std::isfinite(positionSeconds) || positionSeconds < 0.0 ||
-        !std::isfinite(formantCents) || std::abs(formantCents) > 2400.0) return false;
+        !std::isfinite(formantCents) || std::abs(formantCents) > hirari::limits::kMaxFormantCents) return false;
     std::shared_ptr<Track> target;
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -627,7 +627,7 @@ bool HirariUnifiedEngine::move_region_audio_note_anchor(
     uint32_t tid, uint32_t rid, double segmentStartSeconds,
     double oldPositionSeconds, double newPositionSeconds,
     double valueCents, bool editFormant) {
-    const double maxCents = editFormant ? 2400.0 : 4800.0;
+    const double maxCents = editFormant ? hirari::limits::kMaxFormantCents : hirari::limits::kMaxPitchCents;
     if (!std::isfinite(segmentStartSeconds) || segmentStartSeconds < 0.0 ||
         !std::isfinite(oldPositionSeconds) || oldPositionSeconds < 0.0 ||
         !std::isfinite(newPositionSeconds) || newPositionSeconds < 0.0 ||

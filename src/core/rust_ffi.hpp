@@ -1,5 +1,24 @@
 #pragma once
 
+// Physical limits shared by the C++ engine and the Rust core. These mirror
+// `crate::dsp_limits` exactly; the two sides have to agree because a clamp on
+// one side and a rejection on the other is how a caller ends up storing a
+// value the other side would have refused.
+namespace hirari::limits {
+/// Cents per octave, the denominator of every cents-to-ratio conversion.
+constexpr double kCentsPerOctave = 1200.0;
+/// Cents of pitch offset a note edit may apply.
+constexpr double kMaxPitchCents = 4800.0;
+/// Cents of formant offset a note edit may apply.
+constexpr double kMaxFormantCents = 2400.0;
+/// Lowest sample rate any module accepts, in Hz.
+constexpr double kMinSampleRate = 8000.0;
+/// Highest sample rate any module accepts, in Hz.
+constexpr double kMaxSampleRate = 384000.0;
+/// Upper bound on the entries a per-region edit table may hold.
+constexpr size_t kMaxEditEntries = 4096;
+} // namespace hirari::limits
+
 #include <cstddef>
 #include <cstdint>
 
