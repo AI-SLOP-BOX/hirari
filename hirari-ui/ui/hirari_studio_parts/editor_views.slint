@@ -37,8 +37,23 @@
                 // bot_view == ViewModes.console_full. Do not instantiate the legacy bottom panel as
                 // well, otherwise both trees draw meters and controls on top of
                 // each other during a view switch.
+                // Editor surfaces belong in the bottom dock; page surfaces
+                // (project recovery, automation, preferences, ...) are
+                // destinations the user expects to fill the workspace. Both
+                // used to be drawn into this fixed 300px strip while `mx_open`
+                // hid the arrangement, so page destinations rendered as a 300px
+                // band over an empty window.
+                property <bool> page_view: bot_view == ViewModes.project
+                    || bot_view == ViewModes.automation || bot_view == ViewModes.preferences
+                    || bot_view == ViewModes.setup || bot_view == ViewModes.browser
+                    || bot_view == ViewModes.diagnostics || bot_view == ViewModes.console
+                    || bot_view == ViewModes.midi || bot_view == ViewModes.export
+                    || bot_view == ViewModes.flex || bot_view == ViewModes.comp
+                    || bot_view == ViewModes.stacks || bot_view == ViewModes.global
+                    || bot_view == ViewModes.steps;
                 if ((mx_open || pr_open) && bot_view != ViewModes.console_full) : Rectangle {
-                    height: 300px; background: Style.panel;
+                    height: page_view ? 640px : 300px;
+                    background: Style.panel;
                     Rectangle { y: 0; height: 2px; background: #000; width: 100%; }
                     VerticalLayout {
                         Rectangle {
