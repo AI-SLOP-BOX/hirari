@@ -316,7 +316,7 @@
         z: 3000; width: 100%; height: 100%; background: Style.surface-0;
         VerticalLayout {
             alignment: center; spacing: 60px;
-            Z_AudioEngineStatus { ready: true; time: 0.0; }
+            Z_AudioEngineStatus { ready: root.audio_device_ready; time: 0.0; }
             Rectangle {
                 width: 800px; height: 100px; background: Style.surface; border_radius: 1px;
                 HorizontalLayout {

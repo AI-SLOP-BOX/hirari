@@ -289,7 +289,7 @@
                                         width: 300px; spacing: 12px;
                                         Rectangle {
                                             height: 180px; background: #000; border_radius: 4px; border_width: 1px; border_color: Style.brand;
-                                            Z_AudioEngineStatus { ready: true; time: root.ui_timer; }
+                                            Z_AudioEngineStatus { ready: root.audio_device_ready; time: root.ui_timer; }
                                         }
                                         HorizontalLayout {
                                             spacing: 8px; alignment: center;
@@ -333,7 +333,19 @@
                                         }
                                     }
                                 }
-                                Text { text: "ROUTING ACTIVE | SAMPLE-ACCURATE PROCESSING"; font-size: 10px; color: #333; horizontal-alignment: center; }
+                                Text {
+                                    // This caption used to claim routing was
+                                    // active with no route selected. It now
+                                    // reports what the panel below actually
+                                    // knows: which source is routed to which
+                                    // destination, and nothing more.
+                                    text: root.route-source-id >= 0 && root.route-destination-id >= 0
+                                        ? "ROUTING: " + root.route-source-id + " -> " + root.route-destination-id
+                                        : "ROUTING: none selected";
+                                    font-size: 10px;
+                                    color: root.route-source-id >= 0 && root.route-destination-id >= 0 ? Style.text-secondary : Style.text-tertiary;
+                                    horizontal-alignment: center;
+                                }
                             }
                         }
                         if (bot_view == ViewModes.synth) : Z_HirariSynth { accent-col: Style.brand; ui_timer: root.ui_timer; gpu-waveform-image: root.gpu-waveform-image; gpu-spectrum-image: root.gpu-spectrum-image; parameter-changed(index, value) => { PluginActions.macro_changed(index, value); } engine-changed(index) => { PluginActions.set_synth_engine(index); } }
