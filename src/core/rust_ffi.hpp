@@ -1427,6 +1427,7 @@ extern "C" float hirari_virtuoso_pultec_get_parameter(const void* state, uint32_
 extern "C" void hirari_virtuoso_pultec_process(
     void* state, float* left, float* right, size_t frames);
 extern "C" void* hirari_tpdf_dither_create();
+extern "C" void* hirari_tpdf_dither_create_with_seed(uint32_t seed);
 extern "C" void hirari_tpdf_dither_destroy(void* state);
 extern "C" float hirari_tpdf_dither_next(void* state);
 extern "C" void hirari_tpdf_dither_process(void* state, float* samples, size_t frames);

@@ -1,5 +1,4 @@
 use std::ffi::c_void;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct TpdfDitherEngine {
     state: u32,
@@ -9,6 +8,20 @@ pub struct NoiseShapingDitherEngine {
     state: u32,
     error_history: [f32; 4],
 }
+
+/// Default seed for the deterministic dither sequence.
+///
+/// TPDF dither decorrelates the quantizer error. Deriving the seed from the
+/// wall clock made every offline bounce of the same project produce a different
+/// file, which breaks reproducibility for users who compare two renders and for
+/// any checksum-based export verification. The noise sequence is fixed instead;
+/// it still decorrelates, but it is the same sequence on every run.
+pub const DEFAULT_DITHER_SEED: u32 = 0x1234_5678;
+
+/// Seed for the right channel. The two channels must not share a noise
+/// sequence, or the dither would be correlated between them, so each channel
+/// gets its own fixed seed.
+pub const RIGHT_CHANNEL_DITHER_SEED: u32 = 0x9E37_79B9;
 
 impl Default for NoiseShapingDitherEngine {
     fn default() -> Self {
@@ -76,13 +89,14 @@ impl Default for TpdfDitherEngine {
 
 impl TpdfDitherEngine {
     pub fn new() -> Self {
-        let seed = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0x1234_5678, |time| {
-                time.subsec_nanos() ^ time.as_secs() as u32
-            });
+        Self::with_seed(DEFAULT_DITHER_SEED)
+    }
+
+    /// Build an engine from an explicit seed. Used to give the left and right
+    /// channels distinct, still reproducible, noise sequences.
+    pub fn with_seed(seed: u32) -> Self {
         Self {
-            state: if seed == 0 { 0x1234_5678 } else { seed },
+            state: if seed == 0 { DEFAULT_DITHER_SEED } else { seed },
         }
     }
 
@@ -113,6 +127,13 @@ impl TpdfDitherEngine {
 #[no_mangle]
 pub extern "C" fn hirari_tpdf_dither_create() -> *mut c_void {
     Box::into_raw(Box::new(TpdfDitherEngine::new())).cast()
+}
+
+/// Create a dither engine with an explicit seed so channels can be given
+/// distinct, reproducible sequences.
+#[no_mangle]
+pub extern "C" fn hirari_tpdf_dither_create_with_seed(seed: u32) -> *mut c_void {
+    Box::into_raw(Box::new(TpdfDitherEngine::with_seed(seed))).cast()
 }
 
 #[no_mangle]

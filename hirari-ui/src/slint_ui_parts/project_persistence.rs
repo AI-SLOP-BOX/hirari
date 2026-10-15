@@ -37,8 +37,21 @@ fn apply_audio_input_assignments(
     tracks: &slint::VecModel<Z_Track>,
     core: &HirariCore,
 ) -> bool {
-    let Ok(document) = hirari_core_bridge::project::ProjectDocument::load(project_path) else {
-        return false;
+    let document = match hirari_core_bridge::project::ProjectDocument::load(project_path) {
+        Ok(document) => document,
+        Err(_) => {
+            // The engine's own `save_project` writes the native project
+            // container, not a JSON document. Such a project is valid and the
+            // Core has already loaded it; it simply carries no JSON sidecar for
+            // the UI-owned input assignments restorable here. Treating that as
+            // a hydration failure rolled back a project the Core had loaded
+            // correctly, which made every native-container save unrecoverable
+            // through the recovery path. Anything that is neither a readable
+            // JSON document nor a native project still fails, so a corrupt
+            // backup is still rejected instead of being published.
+            return hirari_core_bridge::native_project::is_native_project(project_path)
+                .unwrap_or(false);
+        }
     };
     let endpoint_uid = document
         .audio_input_assignments

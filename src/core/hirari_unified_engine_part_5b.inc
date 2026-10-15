@@ -36,8 +36,12 @@
         }
     }
     AudioBuffer blockBuffer(2, 1024);
-    ::Hirari::DSP::Utils::TPDFDither ditherLeft;
-    ::Hirari::DSP::Utils::TPDFDither ditherRight;
+    // The render must be reproducible: two bounces of the same project have to
+    // produce the same file. The dither seed therefore comes from a fixed pair
+    // of constants rather than the wall clock. The channels use different
+    // seeds so their noise stays decorrelated while both remain deterministic.
+    ::Hirari::DSP::Utils::TPDFDither ditherLeft{Hirari::DSP::Utils::kTpdfDitherLeftSeed};
+    ::Hirari::DSP::Utils::TPDFDither ditherRight{Hirari::DSP::Utils::kTpdfDitherRightSeed};
 
     uint64_t originalPlayhead = m_playhead.load();
     bool wasPlaying = m_isPlaying.load();

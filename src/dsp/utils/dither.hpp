@@ -5,10 +5,23 @@
 
 namespace Hirari::DSP::Utils {
 
+/**
+ * Fixed seeds for the two dither channels of an offline render.
+ *
+ * They are constants rather than clock-derived values because a bounce has to
+ * be reproducible: rendering the same project twice must yield the same file,
+ * otherwise a user cannot compare two exports and no checksum of a render can
+ * be verified. They are two distinct constants so the left and right noise
+ * sequences are not correlated.
+ */
+inline constexpr uint32_t kTpdfDitherLeftSeed = 0x1234'5678;
+inline constexpr uint32_t kTpdfDitherRightSeed = 0x9E37'79B9;
+
 /** C++ compatibility handle for the Rust TPDF dither engine. */
 class TPDFDither {
 public:
     TPDFDither() : m_state(hirari_tpdf_dither_create()) {}
+    explicit TPDFDither(uint32_t seed) : m_state(hirari_tpdf_dither_create_with_seed(seed)) {}
     ~TPDFDither() { hirari_tpdf_dither_destroy(m_state); }
 
     TPDFDither(const TPDFDither&) = delete;

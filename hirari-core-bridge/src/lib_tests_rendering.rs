@@ -573,3 +573,69 @@ fn audio_device_diagnostics_preserve_configuration_boundaries() {
     assert!(reconnect["status"].is_string());
     assert!(reconnect["audio_generation"].as_u64().is_some());
 }
+
+#[test]
+fn tpdf_dither_is_reproducible_and_separates_the_two_channels() {
+    // The TPDF dither used to derive its seed from the wall clock. Every bounce
+    // therefore rendered a different noise sequence and two bounces of the same
+    // project produced different files. The sequence is fixed now; this asserts
+    // the contract at the unit level so the renderer cannot regress to
+    // clock-derived dither.
+    let left_a = {
+        let mut engine = crate::tpdf_dither::TpdfDitherEngine::new();
+        (0..512).map(|_| engine.next_sample()).collect::<Vec<f32>>()
+    };
+    let left_b = {
+        let mut engine = crate::tpdf_dither::TpdfDitherEngine::new();
+        (0..512).map(|_| engine.next_sample()).collect::<Vec<f32>>()
+    };
+    assert_eq!(left_a, left_b, "two engines built the same way must agree");
+
+    let right = {
+        let mut engine = crate::tpdf_dither::TpdfDitherEngine::with_seed(
+            crate::tpdf_dither::RIGHT_CHANNEL_DITHER_SEED,
+        );
+        (0..512).map(|_| engine.next_sample()).collect::<Vec<f32>>()
+    };
+    assert_ne!(
+        left_b, right,
+        "left and right dither must not share one noise sequence"
+    );
+
+    // A zero seed is a legal input and must still produce a usable, non-trivial
+    // sequence rather than the degenerate all-zero output of a stuck xorshift.
+    let mut spun = crate::tpdf_dither::TpdfDitherEngine::with_seed(0);
+    let any_nonzero = (0..64).any(|_| spun.next_sample() != 0.0);
+    assert!(any_nonzero, "a zero seed must still produce noise");
+}
+
+#[test]
+fn offline_bounce_of_the_same_project_is_reproducible() {
+    let _guard = native_engine_test_guard();
+    let core = crate::HirariCore::new().expect("core must initialize");
+    assert!(core.apply_audio_config(48_000, 1_024));
+    let track_id = core.add_audio_track();
+    assert_ne!(track_id, 0);
+
+    let first = std::env::temp_dir().join(format!(
+        "hirari-bounce-repro-a-{}.wav",
+        std::process::id()
+    ));
+    let second = std::env::temp_dir().join(format!(
+        "hirari-bounce-repro-b-{}.wav",
+        std::process::id()
+    ));
+    assert!(core.bounce_project(first.to_str().unwrap(), 0));
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert!(core.bounce_project(second.to_str().unwrap(), 0));
+
+    let first_bytes = std::fs::read(&first).expect("first bounce must exist");
+    let second_bytes = std::fs::read(&second).expect("second bounce must exist");
+    assert_eq!(
+        first_bytes, second_bytes,
+        "bouncing the same project twice must produce the same file"
+    );
+
+    let _ = std::fs::remove_file(&first);
+    let _ = std::fs::remove_file(&second);
+}

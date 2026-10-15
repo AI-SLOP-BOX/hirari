@@ -162,7 +162,8 @@ public:
             if (!float32->isOpen()) return;
         }
 
-        ::Hirari::DSP::Utils::TPDFDither ditherL, ditherR;
+        ::Hirari::DSP::Utils::TPDFDither ditherL{Hirari::DSP::Utils::kTpdfDitherLeftSeed};
+        ::Hirari::DSP::Utils::TPDFDither ditherR{Hirari::DSP::Utils::kTpdfDitherRightSeed};
         const float normalizationGain = options.normalize && m_maxPeak > 0.0f
             ? 1.0f / m_maxPeak : 1.0f;
         for (uint64_t s = 0; s < totalSamples; s += blockSize) {
