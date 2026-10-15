@@ -57,8 +57,7 @@ import { Z_OpenUtauEditor } from "./editor/openutau_editor.slint";
 import { Z_ExtensionBrowser } from "extensions/extension_browser.slint";
 import { Z_ArrangeDock } from "./arrange_dock.slint";
 import { Z_MoufuLinkPage } from "moufu_link_page.slint";
-import { ViewModes } from "./navigation/view_modes.slint";
-import { Z_WorkflowPage, Z_MidiLearnPage, Z_StepSequencerPage, Z_TrackStackPage, Z_GlobalTracksPage, Z_FlexPitchPage, Z_CompingPage } from "./pages/workflow_pages.slint";
+import { ViewModes } from "./navigation/view_modes.slint"; import { Z_WorkflowPage, Z_MidiLearnPage, Z_StepSequencerPage, Z_TrackStackPage, Z_GlobalTracksPage, Z_FlexPitchPage, Z_CompingPage } from "./pages/workflow_pages.slint";
 import { Z_MasteringPage } from "./pages/mastering_page.slint";
 import { Z_Meter } from "./primitives/meter.slint";
 import { Z_MixerStrip } from "./mixer/mixer_strip_adapter.slint";
@@ -103,13 +102,12 @@ export component AppWindow inherits Window {
     callback onboarding-progress-changed(bool, int);
     callback focus-mode-changed(bool);
     callback workspace-preset-changed(string);
-    /// Menu bar activation. Routed through a callback so the raw pointer area
-    /// and the accessibility button share one handler instead of two copies.
+    /// Menu bar activation; one handler shared by the pointer area and the a11y button.
     callback menu-selected(string);
     menu-selected(item) => {
-        // Each label names the view it actually opens. Kept here rather than in
-        // Rust so the destinations stay `ViewModes.*` instead of bare numbers.
+        // Each label names the view it opens; Slint keeps `ViewModes.*` names.
         if (item == "Project") { bot_view = ViewModes.project; mx_open = true; pr_open = false; }
+        if (item == "Home") { show_genesis = true; }
         if (item == "Automation") { bot_view = ViewModes.automation; mx_open = true; pr_open = false; }
         if (item == "Stacks") { bot_view = ViewModes.stacks; mx_open = true; pr_open = false; }
         if (item == "Mix") { bot_view = ViewModes.mixer; mx_open = true; pr_open = false; }
@@ -118,6 +116,7 @@ export component AppWindow inherits Window {
         if (item == "Diagnostics") { bot_view = ViewModes.diagnostics; mx_open = true; pr_open = false; }
         if (item == "Moufu") { bot_view = ViewModes.moufu; mx_open = true; pr_open = false; MoufuActions.refresh(); }
     }
+
     callback plugin-favorite-changed(string, bool);
     title: "HIRARI v1.0"; preferred-width: 1600px; preferred-height: 1000px; min-width: 1080px; min-height: 680px; background: Style.base;
     in-out property <bool> is_ply; in-out property <bool> is_rec; in property <bool> is_counting: false; in property <int> count_val: 0;
@@ -355,7 +354,12 @@ export component AppWindow inherits Window {
         z: 9000; x: 0px; y: 0px; width: 100%; height: 100%;
         Z_HomePage {
             recent-projects: root.recent_projects;
-            template-selected(template) => { show_genesis = false; CommandActions.palette_exec("INIT_" + template); }
+            template-selected(template) => {
+                // Close once the template produced tracks: closing first left a
+                // failed start on an empty, unreachable workspace.
+                CommandActions.palette_exec("INIT_" + template);
+                if (root.tracks.length > 0) { show_genesis = false; }
+            }
             tutorial-requested => { show_genesis = false; beginner_guide_open = true; }
             project-requested(project) => {
                 if (project == "") {
@@ -488,10 +492,12 @@ export component AppWindow inherits Window {
                 Image { source: @image-url("assets/hirari-logo.svg"); width: 26px; height: 26px; }
             }
             Text { text: "Hirari"; width: 62px; font-size: 15px; color: Style.text; font-weight: 700; vertical-alignment: center; }
-            for m in ["Project", "Automation", "Stacks", "Mix", "Plugins", "Prefs", "Diagnostics", "Moufu"] : Rectangle {
-                width: 50px; height: 30px; border-radius: 5px;
+            for m in ["Home", "Project", "Automation", "Stacks", "Mix", "Plugins", "Prefs", "Diagnostics", "Moufu"] : Rectangle {
+                // Fixed 50px + elide rendered "Automati…"/"Diagnost…" at the window
+                // minimum. Size to the label instead of truncating a name.
+                height: 30px; min-width: 50px; border-radius: 5px;
                 background: menu_area.has-hover ? Style.panel-h : transparent;
-                Text { text: m; width: 100%; height: 100%; font-size: 10px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
+                Text { text: m; height: 100%; font-size: 10px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; }
                 menu_area := TouchArea {
                     // The transparent Button below owns the accessibility action,
                     // so this raw pointer area stays non-accessible: marking both
