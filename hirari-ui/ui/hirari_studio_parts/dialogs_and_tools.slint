@@ -140,11 +140,24 @@
                             Rectangle { width: 5px; height: 28px; background: plugin.sandboxed ? Style.ok : Style.brand; }
                             VerticalLayout { horizontal-stretch: 1; alignment: center;
                                 Text { text: plugin.name; font-size: 11px; color: Style.text; font-weight: 600; }
-                                Text { text: plugin.format + "  ·  " + plugin.capability + "  ·  " + (plugin.binary_bytes / 1024) + " KiB  ·  " + plugin.binary_hash; font-size: 10px; color: Style.text-muted; }
+                                Text { text: plugin.format + "  ·  " + plugin.capability + "  ·  " + (plugin.binary_bytes / 1024) + " KiB"; font-size: 10px; color: Style.text-muted; }
                             }
                             Text { text: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? "READY" : "CHECK"; font-size: 10px; color: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready" ? Style.ok : Style.solo; vertical-alignment: center; }
                             Z_IconButton { icon: "★"; compact: true; selected: plugin.favorite; active-col: Style.brand; clicked => { plugin-favorite-changed(plugin.id, !plugin.favorite); } }
-                            Z_IconButton { icon: "INSERT"; compact: false; button-width: 72px; clicked => { PluginActions.insert_plugin(plugin.id); } }
+                            // INSERT used to be offered for every row, including
+                            // plugins whose worker could not be probed. A disabled
+                            // button that names the reason is honest; an enabled
+                            // one that fails on click is not.
+                            property <bool> insertable: plugin.capability == "sandbox-ready" || plugin.capability == "vst3-sandbox-ready" || plugin.capability == "au-sandbox-ready";
+                            Z_IconButton {
+                                icon: "INSERT"; compact: false; button-width: 72px;
+                                enabled: insertable;
+                                clicked => { PluginActions.insert_plugin(plugin.id); }
+                            }
+                            if (!insertable) : Text {
+                                text: plugin.capability == "" ? "unavailable" : plugin.capability;
+                                font-size: 9px; color: Style.record; vertical-alignment: center;
+                            }
                         }
                         row := TouchArea { mouse-cursor: pointer; }
                     }
