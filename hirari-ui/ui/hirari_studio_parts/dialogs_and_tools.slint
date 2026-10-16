@@ -107,7 +107,7 @@
             HorizontalLayout {
                 Text { text: "PLUGIN BROWSER"; font-size: 16px; color: Style.brand; font-weight: 700; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: plugin_catalog_status; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; }
+                Text { text: plugin_catalog_status; width: 260px; font-size: 10px; color: Style.text-secondary; vertical-alignment: center; horizontal-alignment: right; overflow: elide; }
                 Z_IconButton { icon: "EXTENSIONS"; compact: false; button-width: 100px; clicked => { PluginActions.refresh_extensions(); } }
                 Z_IconButton { icon: "INSTALL"; compact: false; button-width: 82px; clicked => { CommandActions.palette_exec("INSTALL PLUGIN"); } }
                 Z_IconButton { icon: "RESCAN ALL"; compact: false; button-width: 100px; clicked => { PluginActions.rescan_plugins(); } }

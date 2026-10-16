@@ -587,7 +587,7 @@ pub fn install(ui: &AppWindow, core: Rc<HirariCore>, tracks: Rc<VecModel<Z_Track
                 ui.set_last_action("PLUGIN SCAN ALREADY RUNNING".into());
                 return;
             }
-            ui.set_plugin_catalog_status("SCANNING INSTALLED PLUGINS…".into());
+            ui.set_plugin_catalog_status("SCANNING…".into());
             ui.set_last_action("SCANNING INSTALLED PLUGINS…".into());
 
             let weak = weak.clone();

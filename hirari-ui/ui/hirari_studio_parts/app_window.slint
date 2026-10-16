@@ -494,10 +494,10 @@ export component AppWindow inherits Window {
             }
             Text { text: "Hirari"; width: 62px; font-size: 15px; color: Style.text; font-weight: 700; vertical-alignment: center; }
             for m in ["Home", "Project", "Automation", "Stacks", "Mix", "Plugins", "Prefs", "Diagnostics", "Moufu"] : Rectangle {
-                // Sized to the label (not truncated); display text follows the UI language, `m` stays the routing key.
-                height: 30px; min-width: 50px; border-radius: 5px;
+                // Explicit per-destination widths fitting EN+JA at 1080px; fixed 50px boxes overflowed even in English and jammed in Japanese. `m` stays the routing key.
+                height: 30px; width: m == "Home" ? 36px : (m == "Project" ? 76px : (m == "Automation" ? 96px : (m == "Stacks" ? 52px : (m == "Mix" ? 32px : (m == "Plugins" ? 54px : (m == "Prefs" ? 34px : (m == "Diagnostics" ? 78px : 44px))))))); border-radius: 5px;
                 background: menu_area.has-hover ? Style.panel-h : transparent;
-                Text { text: m == "Project" ? Tr.tr("menu_project") : (m == "Automation" ? Tr.tr("menu_automation") : (m == "Stacks" ? Tr.tr("menu_stacks") : (m == "Prefs" ? Tr.tr("menu_prefs") : (m == "Diagnostics" ? Tr.tr("menu_diagnostics") : m)))); height: 100%; font-size: 10px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; }
+                Text { text: m == "Project" ? Tr.tr("menu_project") : (m == "Automation" ? Tr.tr("menu_automation") : (m == "Stacks" ? Tr.tr("menu_stacks") : (m == "Prefs" ? Tr.tr("menu_prefs") : (m == "Diagnostics" ? Tr.tr("menu_diagnostics") : m)))); height: 100%; width: 100%; font-size: 10px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; overflow: elide; }
                 menu_area := TouchArea {
                     // The transparent Button below owns the accessibility action,
                     // so this raw pointer area stays non-accessible: marking both
