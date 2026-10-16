@@ -66,6 +66,7 @@ fn main() {
         "ui/pages/workflow_pages.slint",
         "ui/moufu_link_page.slint",
         "ui/actions/moufu_actions.slint",
+        "ui/actions/render_actions.slint",
         "ui/actions/audio_settings_actions.slint",
         "ui/model/timeline_model.slint",
     ] {

@@ -8,4 +8,8 @@ export global RenderActions {
     callback cancel_render();
     callback pause_render();
     callback resume_render();
+    // Dismisses the completion overlay. Without this the finished overlay
+    // (opaque, input-eating) stays up forever: nothing else ever resets the
+    // COMPLETE state back to IDLE.
+    callback dismiss_render();
 }

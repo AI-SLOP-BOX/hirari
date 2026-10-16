@@ -373,7 +373,6 @@ export component AppWindow inherits Window {
     }
     if (show_genesis && unsaved_recovery_available) : Z_SessionRecoveryPrompt {
         z: 9100;
-        status: root.last_action;
         recover => { ProjectActions.recover_unsaved_session(); }
         discard => { ProjectActions.discard_unsaved_recovery(); }
         later => { ProjectActions.dismiss_unsaved_recovery(); }
@@ -416,6 +415,7 @@ export component AppWindow inherits Window {
                 if (render_state != "PAUSED") : Z_IconButton { icon: "Ⅱ PAUSE RENDER"; clicked => { RenderActions.pause_render(); } }
                 Z_IconButton { icon: "✕ CANCEL RENDER"; clicked => { RenderActions.cancel_render(); } }
             }
+            if (!is_rendering) : HorizontalLayout { alignment: center; Z_IconButton { icon: "✓ DONE"; active-col: Style.ok; clicked => { RenderActions.dismiss_render(); } } }
         }
     }
     if (is_counting) : Rectangle {

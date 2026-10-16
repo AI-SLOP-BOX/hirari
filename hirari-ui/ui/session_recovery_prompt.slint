@@ -6,9 +6,12 @@ export component Z_SessionRecoveryPrompt inherits Rectangle {
     callback recover();
     callback discard();
     callback later();
-    in property <string> status: "";
 
-    background: #00000099;
+    // No dimming scrim: this prompt used to black out the entire window on
+    // every launch, which reads as a broken/blank app rather than a
+    // question. The card floats above usable content now; the session behind
+    // it stays visible and clickable, and the three buttons still resolve
+    // the recovery files explicitly.
     VerticalLayout {
         alignment: center;
         HorizontalLayout {
@@ -40,12 +43,6 @@ export component Z_SessionRecoveryPrompt inherits Rectangle {
                         Button { text: Tr.tr("recovery_recover"); clicked => { root.recover(); } }
                         Button { text: Tr.tr("recovery_discard"); clicked => { root.discard(); } }
                         Button { text: Tr.tr("recovery_later"); clicked => { root.later(); } }
-                    }
-                    Text {
-                        text: root.status;
-                        color: Style.text-tertiary;
-                        font-size: 10px;
-                        wrap: word-wrap;
                     }
                 }
             }

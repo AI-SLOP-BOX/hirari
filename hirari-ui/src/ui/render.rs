@@ -400,6 +400,17 @@ pub(crate) fn install(
             }
         }
     });
+
+    ui.global::<RenderActions>().on_dismiss_render({
+        let weak = weak.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_is_rendering(false);
+                ui.set_render_state("IDLE".into());
+                ui.set_last_action("RENDER PANEL DISMISSED".into());
+            }
+        }
+    });
 }
 
 #[cfg(test)]
