@@ -51,11 +51,26 @@ struct SchedulerRun {
     running: Arc<AtomicBool>,
     workers: Vec<JoinHandle<()>>,
     dispatch: TaskDispatch,
+    /// Threads currently parked in `worker_loop`. Every queue push unparks
+    /// all of them so an idle worker wakes the moment work arrives instead
+    /// of discovering it on its next 1 ms timeout tick.
+    parkers: Arc<Mutex<Vec<thread::Thread>>>,
+}
+
+fn unpark_all(parkers: &Arc<Mutex<Vec<thread::Thread>>>) {
+    let parked: Vec<thread::Thread> = parkers
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
+    for thread in parked {
+        thread.unpark();
+    }
 }
 
 impl SchedulerRun {
     fn stop(&mut self) {
         self.running.store(false, Ordering::Release);
+        unpark_all(&self.parkers);
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
@@ -100,6 +115,7 @@ impl AudioTaskScheduler {
             queues.push(Arc::new(queue));
         }
         let running = Arc::new(AtomicBool::new(true));
+        let parkers = Arc::new(Mutex::new(Vec::new()));
         let mut workers = Vec::new();
         if workers.try_reserve_exact(worker_count).is_err() {
             return false;
@@ -107,12 +123,13 @@ impl AudioTaskScheduler {
         for index in 0..worker_count {
             let queues = queues.clone();
             let worker_running = Arc::clone(&running);
+            let worker_parkers = Arc::clone(&parkers);
             match thread::Builder::new()
                 .name(format!("hirari-audio-{index}"))
                 .spawn(move || {
                     // SAFETY: These C++ hooks configure only the current worker thread.
                     let fp_state = unsafe { enter(index as u32) };
-                    worker_loop(index, &queues, &worker_running);
+                    worker_loop(index, &queues, &worker_running, &worker_parkers);
                     unsafe { leave(fp_state) };
                 }) {
                 Ok(worker) => workers.push(worker),
@@ -137,6 +154,7 @@ impl AudioTaskScheduler {
             running,
             workers,
             dispatch,
+            parkers,
         });
         true
     }
@@ -147,6 +165,9 @@ impl AudioTaskScheduler {
         };
         if let Some(mut active) = run.take() {
             active.running.store(false, Ordering::Release);
+            // Wake parked workers so `join` below does not wait out their
+            // 1 ms park timeout.
+            unpark_all(&active.parkers);
             drop(run);
             for worker in active.workers.drain(..) {
                 let _ = worker.join();
@@ -195,10 +216,16 @@ impl AudioTaskScheduler {
         else {
             return false;
         };
-        active
+        let pushed = active
             .queues
             .get(worker % active.queues.len())
-            .is_some_and(|queue| queue.push(QueuedTask { data, dispatch }))
+            .is_some_and(|queue| queue.push(QueuedTask { data, dispatch }));
+        if pushed {
+            // Wake parked workers now; without this an idle pool only
+            // notices the task on its next timeout tick.
+            unpark_all(&active.parkers);
+        }
+        pushed
     }
 
     fn steal(&self, worker: usize) -> Option<*mut c_void> {
@@ -363,7 +390,18 @@ pub unsafe extern "C" fn hirari_audio_scheduler_parallel_for(
     scheduler.parallel_for(start, end, context, callback);
 }
 
-fn worker_loop(index: usize, queues: &[Arc<WorkQueue>], running: &AtomicBool) {
+fn worker_loop(
+    index: usize,
+    queues: &[Arc<WorkQueue>],
+    running: &AtomicBool,
+    parkers: &Arc<Mutex<Vec<thread::Thread>>>,
+) {
+    {
+        let mut parked = parkers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        parked.push(thread::current());
+    }
     loop {
         if let Some(task) = queues[index].pop(false) {
             // SAFETY: C++ enqueues only live AudioTaskJob objects and this callback
@@ -384,29 +422,25 @@ fn worker_loop(index: usize, queues: &[Arc<WorkQueue>], running: &AtomicBool) {
             continue;
         }
 
-        for _ in 0..64 {
-            if !running.load(Ordering::Relaxed) {
-                break;
-            }
-            thread::yield_now();
-            if let Some(task) = queues[index].pop(true) {
-                unsafe { (task.dispatch)(task.data) };
-                stole = true;
-                break;
-            }
+        if !running.load(Ordering::Relaxed)
+            && queues
+                .iter()
+                .all(|queue| queue.tasks.lock().map_or(true, |tasks| tasks.is_empty()))
+        {
+            break;
         }
-        if !stole {
-            if !running.load(Ordering::Relaxed)
-                && queues
-                    .iter()
-                    .all(|queue| queue.tasks.lock().map_or(true, |tasks| tasks.is_empty()))
-            {
-                break;
-            }
-            if running.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(1));
-            }
-        }
+        // Park instead of spinning. Every queue push unparks all workers,
+        // so an idle pool wakes the moment work arrives; the 1 ms timeout is
+        // only a backstop so a missed wakeup can delay a task by at most one
+        // tick rather than stalling the worker. The previous 64-yield spin
+        // kept two threads at ~5% CPU each while doing no work at all.
+        thread::park_timeout(Duration::from_millis(1));
+    }
+    {
+        let mut parked = parkers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        parked.retain(|thread| thread.id() != thread::current().id());
     }
 }
 
@@ -511,6 +545,56 @@ mod tests {
     fn cpp_scheduler_executes_parallel_for_through_rust_queues() {
         // SAFETY: The helper starts, drains, and joins its local singleton worker set.
         assert!(unsafe { hirari_audio_task_scheduler_cpp_smoke() });
+    }
+
+    unsafe extern "C" fn test_enter(_: u32) -> u64 {
+        0
+    }
+
+    unsafe extern "C" fn test_leave(_: u64) {}
+
+    unsafe extern "C" fn counting_dispatch(data: *mut c_void) {
+        if !data.is_null() {
+            (*(data as *const AtomicUsize)).fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// An idle pool must wake the moment work arrives instead of discovering
+    /// it on a timeout tick, and stopping a parked pool must join promptly.
+    /// The 64-yield spin this replaced kept two threads at ~5% CPU each
+    /// while doing no work; a lost wakeup here would stall tasks instead.
+    #[test]
+    fn idle_pool_wakes_promptly_and_stops_while_parked() {
+        use super::AudioTaskScheduler;
+        let scheduler = AudioTaskScheduler::new();
+        assert!(scheduler.start(2, 64, counting_dispatch, test_enter, test_leave));
+        // Let both workers reach their parked state.
+        thread::sleep(std::time::Duration::from_millis(50));
+        let counter = Arc::new(AtomicUsize::new(0));
+        let data = Arc::as_ptr(&counter) as *mut c_void;
+        // 200 sequential push/wait rounds against parked workers. A lost
+        // wakeup would stall here instead of merely delaying one tick.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        for expected in 1..=200usize {
+            assert!(scheduler.push_with_dispatch(expected % 2, data, counting_dispatch));
+            while counter.load(Ordering::Relaxed) < expected
+                && std::time::Instant::now() < deadline
+            {
+                thread::yield_now();
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "task {expected} was never picked up by a parked worker"
+            );
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 200);
+        // Stopping a parked pool must join promptly, not wait out timeouts.
+        let stopwatch = std::time::Instant::now();
+        scheduler.stop();
+        assert!(
+            stopwatch.elapsed() < std::time::Duration::from_secs(2),
+            "stop must join parked workers promptly"
+        );
     }
 
     #[test]
