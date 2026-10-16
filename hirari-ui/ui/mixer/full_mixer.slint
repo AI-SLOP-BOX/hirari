@@ -63,7 +63,7 @@ export component Z_FullMixer {
                     // The header above always renders the track count, so an
                     // empty project used to show "0 tracks" over a blank box
                     // with no explanation. Say what the lane is waiting for.
-                    if (tracks.length == 0) : Text { text: Tr.tr("mixer_no_channels"); color: Style.text-muted; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; vertical-stretch: 1; horizontal-stretch: 1; wrap: word-wrap; }
+                    if (tracks.length == 0) : Text { text: Tr.tr("mixer_no_channels"); color: Style.text-secondary; font-size: 11px; font-weight: 500; horizontal-alignment: center; vertical-alignment: center; vertical-stretch: 1; horizontal-stretch: 1; wrap: word-wrap; }
                     if (tracks.length > 0) : ScrollView { horizontal-stretch: 1; vertical-stretch: 1;
                         HorizontalLayout { spacing: 2px; padding: 4px;
                             for trk[idx] in tracks : Z_MixerStrip {
