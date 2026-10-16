@@ -56,10 +56,14 @@ export component Z_FullMixer {
                     Rectangle { vertical-stretch: 1; }
                 }
             }
-            Rectangle { x: 216px; y: 0px; width: parent.width - 480px; height: 100%; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 6px;
+            Rectangle { x: 216px; y: 0px; width: Math.max(200px, parent.width - 480px); height: 100%; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 6px;
                 VerticalLayout { padding: 4px; spacing: 4px;
                     HorizontalLayout { height: 28px; padding-left: 8px; padding-right: 8px; spacing: 6px; Text { text: "CHANNELS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "◉ Peak + RMS"; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; } }
-                    ScrollView { horizontal-stretch: 1; vertical-stretch: 1;
+                    // The header above always renders the track count, so an
+                    // empty project used to show "0 tracks" over a blank box
+                    // with no explanation. Say what the lane is waiting for.
+                    if (tracks.length == 0) : Text { text: "No channels yet · create a track to mix it here"; color: Style.text-muted; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; vertical-stretch: 1; horizontal-stretch: 1; wrap: word-wrap; }
+                    if (tracks.length > 0) : ScrollView { horizontal-stretch: 1; vertical-stretch: 1;
                         HorizontalLayout { spacing: 2px; padding: 4px;
                             for trk[idx] in tracks : Z_MixerStrip {
                                 property <float> safe_peak: pks.length > idx + 1 ? pks[idx + 1] : 0.0;

@@ -43,12 +43,10 @@ export component Z_HomePage inherits Rectangle {
                         Text { text: "Start a session"; font-size: 28px; color: Style.text-primary; font-weight: 700; }
                         Text { text: "Create a working session or open a saved project."; font-size: 11px; color: Style.text-secondary; }
                     }
-                    Z_IconButton {
-                        icon: "OPEN PROJECT";
-                        compact: false;
-                        button-width: 122px;
-                        clicked => { root.project-requested(""); }
-                    }
+                    // The "Open a saved project" card below is the single entry
+                    // point for opening a project. A second button here invoked
+                    // the identical file dialog, so two labels promised two
+                    // different destinations and delivered one.
                 }
 
                 HorizontalLayout {
