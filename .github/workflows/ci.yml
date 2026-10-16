@@ -54,7 +54,7 @@ jobs:
           ./scripts/generate_release_metadata.sh release-metadata "packaging/Hirari DAW.app"
           ./scripts/verify_release_metadata.sh release-metadata
       - name: Upload release metadata for review
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hirari-release-metadata
           path: release-metadata/
