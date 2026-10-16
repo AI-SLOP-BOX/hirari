@@ -5,8 +5,19 @@ use crate::ui::sync::replace_track;
 use hirari_core_bridge::ffi::BridgeEvent;
 use hirari_core_bridge::HirariCore;
 use slint::Model;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
+
+thread_local! {
+    /// Cached content hash for waveform-request matching, keyed by the O(1)
+    /// state revision. `project_generation()` serializes the whole project to
+    /// JSON and hashes it; calling that on every 32 ms tick stalled the UI
+    /// thread behind an O(project size) serialization and made clicks feel
+    /// late. The revision moves on any layout/MIDI/comping edit, so the hash
+    /// is recomputed exactly when the project actually changed.
+    static CACHED_PROJECT_GENERATION: Cell<(u64, u64)> = const { Cell::new((u64::MAX, 0)) };
+}
 
 const MAX_ASYNC_WAVEFORM_REQUESTS: usize = 8;
 
@@ -32,7 +43,17 @@ pub(crate) fn update_analysis_telemetry(
     // Completed waveform decodes are consumed here, never on the UI event
     // handler that opened the project. A request ID is mapped back to its
     // track/clip only after the worker has published a complete peak vector.
-    let current_generation = core.project_generation();
+    let state_revision = core.project_state_revision();
+    let current_generation = CACHED_PROJECT_GENERATION.with(|cached| {
+        let (revision, generation) = cached.get();
+        if revision == state_revision {
+            generation
+        } else {
+            let generation = core.project_generation();
+            cached.set((state_revision, generation));
+            generation
+        }
+    });
     let completed_requests: Vec<(u64, u32, u32, u64)> = waveform_requests()
         .lock()
         .map(|requests| {

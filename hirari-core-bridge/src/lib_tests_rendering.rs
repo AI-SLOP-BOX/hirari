@@ -1,4 +1,43 @@
 #[test]
+fn ui_telemetry_generation_cache_key_advances_on_project_mutations() {
+    // `update_analysis_telemetry` caches the expensive content hash keyed by
+    // the O(1) state revision instead of serializing the project every tick.
+    // That cache is only correct if the revision actually advances on the
+    // mutations the waveform path cares about: without it, a restored or
+    // edited project would keep matching requests against a stale generation
+    // and show the wrong peaks (or none).
+    let _guard = native_engine_test_guard();
+    let core = crate::HirariCore::new_offline().expect("offline core initializes");
+    let baseline = core.project_state_revision();
+    let track = core.add_audio_track();
+    assert_ne!(track, 0);
+    let after_add = core.project_state_revision();
+    assert_ne!(baseline, after_add, "adding a track must advance the revision");
+
+    assert!(core.set_track_name(track, "Cache Probe"));
+    let after_rename = core.project_state_revision();
+    assert_ne!(
+        after_add, after_rename,
+        "renaming a track must advance the revision"
+    );
+
+    // A region edit must also advance the revision; region add/remove/move
+    // publish snapshots through the same choke point.
+    core.start_recording_capture(48_000.0, 2, 128, 0)
+        .expect("capture must start");
+    let input = vec![0.1f32; 256];
+    core.append_recording_preview(&input)
+        .expect("capture must accept audio");
+    core.commit_recording_capture_to_track(track, None)
+        .expect("capture must publish a region");
+    let after_region = core.project_state_revision();
+    assert_ne!(
+        after_rename, after_region,
+        "publishing a region must advance the revision"
+    );
+}
+
+#[test]
 fn wav_publication_validator_accepts_rf64_ds64_data_size() {
     let mut wav = vec![0u8; 76];
     wav[0..4].copy_from_slice(b"RF64");
