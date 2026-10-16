@@ -58,10 +58,10 @@ export component Z_MixerStrip {
             if (!is_master && !input_enabled) : Text { text: track_type; font-size: 10px; color: Style.text-muted; horizontal-alignment: center; vertical-alignment: center; }
             if (!is_master && input_enabled) : HorizontalLayout {
                 spacing: 1px; alignment: center;
-                Rectangle { width: 16px; height: 14px; Text { text: "‹"; color: Style.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.input-step(tid, -1); } } }
+                Rectangle { width: 16px; height: 14px; background: step_down.has-hover ? Style.panel-h : transparent; border_radius: 2px; Text { text: "‹"; color: step_down.has-hover ? Style.text : Style.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } step_down := TouchArea { x: 0px; y: 0px; width: 100%; height: 100%; mouse-cursor: pointer; clicked => { root.input-step(tid, -1); } } }
                 ComboBox { model: input-channel-names; current-index <=> root.input-first-channel; selected(value) => { root.input-channel-selected(tid, value); } }
-                Rectangle { width: 16px; height: 14px; Text { text: ">"; color: Style.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.input-step(tid, 1); } } }
-                Rectangle { width: 22px; height: 14px; background: Style.surface-2; border_radius: 2px; Text { text: "CH"; color: Style.brand; font-size: 7px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } TouchArea { clicked => { root.input-mode-toggle(tid); } } }
+                Rectangle { width: 16px; height: 14px; background: step_up.has-hover ? Style.panel-h : transparent; border_radius: 2px; Text { text: ">"; color: step_up.has-hover ? Style.text : Style.text-secondary; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; } step_up := TouchArea { x: 0px; y: 0px; width: 100%; height: 100%; mouse-cursor: pointer; clicked => { root.input-step(tid, 1); } } }
+                Rectangle { width: 22px; height: 14px; background: mode_toggle.has-hover ? Style.panel-h : Style.surface-2; border_radius: 2px; Text { text: "CH"; color: Style.brand; font-size: 7px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; } mode_toggle := TouchArea { x: 0px; y: 0px; width: 100%; height: 100%; mouse-cursor: pointer; clicked => { root.input-mode-toggle(tid); } } }
             }
         }
 

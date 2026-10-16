@@ -55,10 +55,14 @@ export component Z_HomePage inherits Rectangle {
                     spacing: 12px;
                     Rectangle {
                         horizontal-stretch: 1;
-                        background: #2457C5.with-alpha(0.62);
+                        background: card_area.has-hover ? #2E63D8.with-alpha(0.72) : #2457C5.with-alpha(0.62);
                         border-width: 1px;
-                        border-color: #4C8DFF;
+                        border-color: card_area.has-hover ? #7AA5FF : #4C8DFF;
                         border-radius: 10px;
+                        // Behind the content: the button stays on top for its
+                        // own hover and keyboard handling; the card handles
+                        // clicks and hover everywhere else.
+                        card_area := TouchArea { x: 0px; y: 0px; width: 100%; height: 100%; mouse-cursor: pointer; clicked => { root.template-selected("ELECTRONIC"); } }
                         VerticalLayout {
                             padding: 18px;
                             spacing: 8px;
@@ -75,10 +79,11 @@ export component Z_HomePage inherits Rectangle {
                     }
                     Rectangle {
                         horizontal-stretch: 1;
-                        background: Style.surface-1;
+                        background: open_area.has-hover ? Style.panel-h : Style.surface-1;
                         border-width: 1px;
-                        border-color: Style.border;
+                        border-color: open_area.has-hover ? Style.brand : Style.border;
                         border-radius: 10px;
+                        open_area := TouchArea { x: 0px; y: 0px; width: 100%; height: 100%; mouse-cursor: pointer; clicked => { root.project-requested(""); } }
                         VerticalLayout {
                             padding: 18px;
                             spacing: 8px;

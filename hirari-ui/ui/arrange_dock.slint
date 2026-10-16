@@ -102,10 +102,10 @@ export component Z_ArrangeDock inherits Rectangle {
                         x: 4px;
                         width: 100px;
                         height: 100%;
-                        background: Style.panel;
+                        background: head_area.has-hover ? Style.panel-h : Style.panel;
                         Text { x: 8px; y: Math.max(8px, (parent.height - 36px) / 2); width: 86px; text: track.name; color: Style.text-primary; font-size: 10px; font-weight: 600; overflow: elide; }
                         Text { x: 8px; y: Math.max(31px, (parent.height - 36px) / 2 + 23px); width: 86px; text: track.type + " · " + track.clips.length + " clips"; color: Style.text-tertiary; font-size: 10px; overflow: elide; }
-                        TouchArea { clicked => { root.track-selected(idx); } }
+                        head_area := TouchArea { x: 0px; y: 0px; width: 100%; height: 100%; mouse-cursor: pointer; clicked => { root.track-selected(idx); } }
                     }
                     Rectangle {
                         x: 104px;
@@ -138,7 +138,7 @@ export component Z_ArrangeDock inherits Rectangle {
                             y: (parent.height - 42px) / 2;
                             width: Math.max(4px, clip_data.length_beats * root.pixels-per-beat * 1px - 2px + (root.dragging-clip-id == clip_data.id && root.drag-kind == 2 ? -root.drag-current-delta * root.pixels-per-beat * 1px : (root.dragging-clip-id == clip_data.id && root.drag-kind == 3 ? root.drag-current-delta * root.pixels-per-beat * 1px : 0px)));
                             height: 42px;
-                            background: clip_data.color.with-alpha(root.selected-clip-id == clip_data.id || clip_data.selected ? 0.72 : 0.45);
+                            background: clip_data.color.with-alpha(root.selected-clip-id == clip_data.id || clip_data.selected ? 0.72 : (clip_area.has-hover ? 0.62 : 0.45));
                             border-width: root.selected-clip-id == clip_data.id || clip_data.selected ? 2px : 1px;
                             border-color: clip_data.color;
                             border-radius: 3px;
@@ -166,7 +166,8 @@ export component Z_ArrangeDock inherits Rectangle {
                                 }
                             }
                             Text { x: 6px; width: parent.width - 12px; text: clip_data.name; color: Style.text-primary; font-size: 10px; vertical-alignment: center; overflow: elide; }
-                            TouchArea {
+                            clip_area := TouchArea {
+                                x: 0px; y: 0px; width: 100%; height: 100%;
                                 enabled: !root.is-locked;
                                 pointer-event(event) => {
                                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
