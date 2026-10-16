@@ -29,7 +29,15 @@ rand = { version = "0.8.6", default-features = false, features = ["std", "std_rn
 
 [features]
 default = ["slint-wgpu"]
-slint-wgpu = ["slint/unstable-wgpu-29"]
+# `slint/unstable-wgpu-29` is the requirement half: the UI selects the WGPU 29
+# backend at startup and feeds its plot imagery through the Slint WGPU
+# rendering notifier. `slint/renderer-femtovg-wgpu` is the capability half: a
+# WGPU-capable renderer compiled into the winit backend. They are wired into
+# one feature on purpose. Enabling the requirement without the capability
+# builds an app whose WGPU request falls through to the OpenGL compatibility
+# check, so every launch dies with "WGPU 29.x rendering is not supported with
+# an OpenGL renderer". Keep them together.
+slint-wgpu = ["slint/unstable-wgpu-29", "slint/renderer-femtovg-wgpu"]
 # High-rate waveform/spectrum surfaces are opt-in so the normal Slint build
 # stays small. The feature uses wgpu's native Metal/DX12/Vulkan backends.
 gpu-canvas = ["dep:wgpu", "dep:bytemuck"]

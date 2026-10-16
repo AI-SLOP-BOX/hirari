@@ -196,6 +196,11 @@ pub fn install(ui: &AppWindow, store: PlotFrameStore) -> Result<(), String> {
 mod tests {
     use super::{meter_rgba, piano_rgba, spectrum_rgba, waveform_rgba, HEIGHT, WIDTH};
     use crate::ui::gpu_canvas::PlotFrame;
+    // The launch gate lives in hirari-ui/tests/wgpu_boot.rs instead of here:
+    // on macOS the winit event loop must be created on the main thread, which
+    // unit tests never run on, so no in-process test can boot the backend.
+    // The integration test boots the real binary (child process, real main
+    // thread) and asserts the event loop runs without renderer errors.
 
     #[test]
     fn waveform_texture_has_stable_rgba_dimensions() {

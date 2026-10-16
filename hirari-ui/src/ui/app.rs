@@ -1011,7 +1011,33 @@ pub fn run() {
         return;
     }
 
-    if let Err(error) = ui.run() {
+    // Launch gate for hirari-ui/tests/wgpu_boot.rs: boot the fully wired UI,
+    // show it, run the event loop for a bounded moment, then quit. This goes
+    // through the same backend selection and window creation as production;
+    // only the shutdown is on a timer instead of user input.
+    let smoke_millis: Option<u64> = std::env::var("HIRARI_SMOKE_BOOT_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|millis| *millis > 0);
+    if let Some(millis) = smoke_millis {
+        use slint::ComponentHandle;
+        if let Err(error) = ui.show() {
+            eprintln!("HIRARI_SMOKE_BOOT_FAILED show: {error}");
+            std::process::exit(1);
+        }
+        slint::Timer::single_shot(std::time::Duration::from_millis(millis), || {
+            if slint::quit_event_loop().is_err() {
+                std::process::exit(1);
+            }
+        });
+        match slint::run_event_loop() {
+            Ok(()) => println!("HIRARI_SMOKE_BOOT_OK"),
+            Err(error) => {
+                eprintln!("HIRARI_SMOKE_BOOT_FAILED event loop: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else if let Err(error) = ui.run() {
         eprintln!("Hirari UI event loop failed: {error}");
     }
     if let Some(publisher) = &moufu_publisher {
