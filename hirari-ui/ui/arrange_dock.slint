@@ -291,7 +291,7 @@ export component Z_ArrangeDock inherits Rectangle {
                         if (track.clips.length == 0) : Text {
                             x: 110px; width: Math.max(40px, parent.width - 116px); height: 100%;
                             text: Tr.tr("arrange_empty_lane");
-                            color: Style.text-secondary; font-size: 11px; font-weight: 500; vertical-alignment: center;
+                            color: Style.text-secondary; font-size: 11px; vertical-alignment: center;
                             overflow: elide;
                         }
                         if (root.playhead-beat >= 0.0 && root.playhead-beat <= root.timeline-end-beat) : Rectangle {
