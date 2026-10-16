@@ -3,6 +3,7 @@ import { Style } from "style.slint";
 import { Z_IconButton } from "primitives/icon_button.slint";
 import { Z_Track } from "model/track_model.slint";
 import { Z_MeasureStart } from "model/timeline_model.slint";
+import { Tr } from "locale/strings.slint";
 
 // Engine-backed arrangement surface. It renders the same track/clip model used
 // by save, playback, and the editors instead of shipping demo lanes as a live UI.
@@ -288,7 +289,7 @@ export component Z_ArrangeDock inherits Rectangle {
                         // empty one. Say what the lane is waiting for.
                         if (track.clips.length == 0) : Text {
                             x: 110px; width: Math.max(40px, parent.width - 116px); height: 100%;
-                            text: "Empty · import audio, or draw notes in the MIDI editor";
+                            text: Tr.tr("arrange_empty_lane");
                             color: Style.text-muted; font-size: 10px; vertical-alignment: center;
                             overflow: elide;
                         }

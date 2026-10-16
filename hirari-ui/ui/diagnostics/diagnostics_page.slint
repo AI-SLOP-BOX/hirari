@@ -1,5 +1,6 @@
 import { Style } from "../style.slint";
 import { AboutSlint } from "std-widgets.slint";
+import { Tr } from "../locale/strings.slint";
 
 export component Z_DiagnosticsPage inherits Rectangle {
     in property <string> engine-state: "ENGINE IDLE";
@@ -18,8 +19,8 @@ export component Z_DiagnosticsPage inherits Rectangle {
     VerticalLayout {
         padding: 18px;
         spacing: 12px;
-        Text { text: "DIAGNOSTIC PANEL"; font-size: 15px; font-weight: 700; color: Style.text; }
-        Text { text: "Audio and plugin health"; font-size: 10px; color: Style.text-dim; }
+        Text { text: Tr.tr("diag_title"); font-size: 15px; font-weight: 700; color: Style.text; }
+        Text { text: Tr.tr("diag_subtitle"); font-size: 10px; color: Style.text-dim; }
         Rectangle { height: 1px; background: Style.border; }
 
         // The engine used to report "AUDIO SILENT FALLBACK" in red while every
@@ -28,9 +29,9 @@ export component Z_DiagnosticsPage inherits Rectangle {
         if (root.engine-state == "AUDIO SILENT FALLBACK" || root.engine-state == "AUDIO START FAILED" || root.engine-state == "AUDIO UNAVAILABLE") : Rectangle {
             background: Style.surface; border-width: 1px; border-color: Style.record; border_radius: 4px;
             VerticalLayout { padding: 12px; spacing: 6px;
-                Text { text: "No audio output"; font-size: 13px; font-weight: 700; color: Style.record; }
-                Text { text: "The engine is running but no audio device is connected, so playback is silent. Transport controls stay enabled for editing."; font-size: 10px; color: Style.text-secondary; wrap: word-wrap; }
-                Text { text: "1. Connect or select an output device in Audio Settings.  2. Reconnect the driver.  3. Restart the app if the device still does not appear."; font-size: 10px; color: Style.text-secondary; wrap: word-wrap; }
+                Text { text: Tr.tr("diag_no_audio"); font-size: 13px; font-weight: 700; color: Style.record; }
+                Text { text: Tr.tr("diag_no_audio_body"); font-size: 10px; color: Style.text-secondary; wrap: word-wrap; }
+                Text { text: Tr.tr("diag_no_audio_steps"); font-size: 10px; color: Style.text-secondary; wrap: word-wrap; }
             }
         }
 
@@ -86,6 +87,6 @@ export component Z_DiagnosticsPage inherits Rectangle {
         // surface so it is reachable from the application's top-level Help
         // menu in commercial desktop distributions.
         AboutSlint { height: 72px; }
-        Text { text: "Criteria: no dropouts, no callback overruns, no leaked workers, no project corruption"; font-size: 10px; color: Style.text-muted; }
+        Text { text: Tr.tr("diag_criteria"); font-size: 10px; color: Style.text-muted; }
     }
 }

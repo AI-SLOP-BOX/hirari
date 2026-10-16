@@ -51,6 +51,43 @@ pub fn install(
     tracks: Rc<slint::VecModel<crate::slint_ui::Z_Track>>,
 ) {
     let weak = ui.as_weak();
+    // The Prefs screen owns the display-language selector. Show the stored
+    // override (not the resolved language) so "System" stays visible when
+    // the user has not pinned a language.
+    ui.global::<AudioSettingsActions>()
+        .set_ui_language(crate::slint_ui::load_language().into());
+    ui.global::<AudioSettingsActions>().on_select_language({
+        let weak = weak.clone();
+        move |language| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if crate::slint_ui::store_language(language.as_str()) {
+                ui.global::<AudioSettingsActions>()
+                    .set_ui_language(language.as_str().trim().to_lowercase().into());
+                ui.set_last_action("LANGUAGE SAVED · TAKES EFFECT ON NEXT LAUNCH".into());
+            } else {
+                ui.set_last_action("LANGUAGE NOT RECOGNIZED".into());
+            }
+        }
+    });
+    ui.global::<AudioSettingsActions>()
+        .set_ui_theme(crate::slint_ui::load_theme().into());
+    ui.global::<AudioSettingsActions>().on_select_theme({
+        let weak = weak.clone();
+        move |theme| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if crate::slint_ui::store_theme(theme.as_str()) {
+                ui.global::<AudioSettingsActions>()
+                    .set_ui_theme(theme.as_str().trim().to_lowercase().into());
+                ui.set_last_action("THEME SAVED · TAKES EFFECT ON NEXT LAUNCH".into());
+            } else {
+                ui.set_last_action("THEME NOT RECOGNIZED".into());
+            }
+        }
+    });
     ui.global::<AudioSettingsActions>().on_filter_devices({
         let weak = weak.clone();
         let core = core.clone();

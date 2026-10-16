@@ -13,6 +13,7 @@ pub mod editor;
 #[cfg(feature = "egui-canvas")]
 pub mod egui_canvas;
 pub mod gpu_canvas;
+pub mod locale;
 pub mod midi;
 pub mod midi_commands;
 pub mod midi_input;
@@ -46,6 +47,7 @@ pub mod telemetry_render;
 pub mod telemetry_video;
 pub mod templates;
 pub mod tempo;
+pub mod theme;
 pub mod timeline;
 pub mod track_model;
 pub mod transport;

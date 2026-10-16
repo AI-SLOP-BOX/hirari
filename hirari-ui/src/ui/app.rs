@@ -268,6 +268,17 @@ pub fn run() {
     // Persist the focused beginner surface versus the full advanced surface.
     // The existing production_mode property is the shared presentation gate.
     ui.set_production_mode(load_beginner_mode());
+    // Display language: the stored override wins, otherwise the OS locale
+    // decides, otherwise English. Installed once here; Slint bindings look
+    // keys up through it from the first frame.
+    let display_language =
+        crate::ui::locale::resolve_language(crate::slint_ui::load_language().as_str());
+    crate::ui::locale::install(&ui, &display_language);
+    // Display theme: the stored override wins, otherwise the OS appearance
+    // decides. The dark palette repeats the Style defaults exactly, so a
+    // dark machine renders what it always did.
+    let display_theme = crate::ui::theme::resolve_theme(crate::slint_ui::load_theme().as_str());
+    crate::ui::theme::apply_to_ui(&ui, &display_theme);
     let (onboarding_completed, onboarding_step) = load_onboarding_progress();
     ui.set_beginner_guide_step(i32::from(onboarding_step.min(6)));
     ui.set_beginner_guide_open(!onboarding_completed);

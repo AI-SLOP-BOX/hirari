@@ -25,6 +25,7 @@ hirari-moufu-adapter.workspace = true
 anyhow.workspace = true
 log.workspace = true
 rfd.workspace = true
+sys-locale = "0.3"
 rand = { version = "0.8.6", default-features = false, features = ["std", "std_rng"] }
 
 [features]

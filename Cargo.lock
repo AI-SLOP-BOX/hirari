@@ -2418,6 +2418,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "sys-locale",
  "wgpu 0.20.1",
 ]
 

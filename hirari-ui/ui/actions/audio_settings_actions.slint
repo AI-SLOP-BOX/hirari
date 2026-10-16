@@ -4,4 +4,13 @@ export global AudioSettingsActions {
     callback select_default_device();
     callback select_device(int);
     callback filter_devices(string);
+    // Display-language override owned by Settings: "system" follows the OS
+    // locale, "en"/"ja" pin a language. The Prefs screen binds its selector
+    // to this property; Rust persists changes and applies them on next launch.
+    in-out property <string> ui_language: "system";
+    callback select_language(string);
+    // Display-theme override owned by Settings: "system" follows the OS
+    // appearance, "dark"/"light" pin a theme. Same contract as language.
+    in-out property <string> ui_theme: "system";
+    callback select_theme(string);
 }

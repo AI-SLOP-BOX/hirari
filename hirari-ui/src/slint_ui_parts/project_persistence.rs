@@ -1065,6 +1065,8 @@ mod tests {
             plugin_favorites: Vec::new(),
             onboarding_completed: true,
             onboarding_step: 8,
+            language: "ja".into(),
+            theme: "light".into(),
         };
         let encoded = serde_json::to_string(&settings).unwrap();
         let decoded: UiSettings = serde_json::from_str(&encoded).unwrap();
@@ -1073,6 +1075,8 @@ mod tests {
         assert!(decoded.focus_mode);
         assert!(decoded.onboarding_completed);
         assert_eq!(decoded.onboarding_step, 8);
+        assert_eq!(decoded.language, "ja");
+        assert_eq!(decoded.theme, "light");
     }
 
     #[test]

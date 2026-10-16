@@ -4,6 +4,7 @@ import { Z_IconButton } from "../primitives/icon_button.slint";
 import { Z_MixerStrip } from "./mixer_strip.slint";
 import { Z_Track } from "../model/track_model.slint";
 import { MixerActions } from "../actions/mixer_actions.slint";
+import { Tr } from "../locale/strings.slint";
 
 export component Z_FullMixer {
     in property <[Z_Track]> tracks;
@@ -24,7 +25,7 @@ export component Z_FullMixer {
             height: 44px; background: Style.surface-1; border_radius: 6px; border_width: 1px; border_color: Style.border;
             HorizontalLayout {
                 padding-left: 12px; padding-right: 8px; spacing: 14px;
-                Text { text: "MixConsole"; font-size: 14px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; }
+                Text { text: Tr.tr("mixer_title"); font-size: 14px; color: Style.text-primary; font-weight: 700; vertical-alignment: center; }
                 for tab in ["Channels", "Views", "Options"] : Rectangle {
                     height: 28px; width: 70px; border_radius: 5px;
                     background: tab == "Channels" ? Style.brand-glow : transparent;
@@ -58,11 +59,11 @@ export component Z_FullMixer {
             }
             Rectangle { x: 216px; y: 0px; width: Math.max(200px, parent.width - 480px); height: 100%; background: Style.surface-0; border_width: 1px; border_color: Style.border; border_radius: 6px;
                 VerticalLayout { padding: 4px; spacing: 4px;
-                    HorizontalLayout { height: 28px; padding-left: 8px; padding-right: 8px; spacing: 6px; Text { text: "CHANNELS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "◉ Peak + RMS"; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; } }
+                    HorizontalLayout { height: 28px; padding-left: 8px; padding-right: 8px; spacing: 6px; Text { text: Tr.tr("mixer_channels"); color: Style.text-tertiary; font-size: 10px; font-weight: 700; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "◉ Peak + RMS"; color: Style.text-tertiary; font-size: 10px; vertical-alignment: center; } }
                     // The header above always renders the track count, so an
                     // empty project used to show "0 tracks" over a blank box
                     // with no explanation. Say what the lane is waiting for.
-                    if (tracks.length == 0) : Text { text: "No channels yet · create a track to mix it here"; color: Style.text-muted; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; vertical-stretch: 1; horizontal-stretch: 1; wrap: word-wrap; }
+                    if (tracks.length == 0) : Text { text: Tr.tr("mixer_no_channels"); color: Style.text-muted; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; vertical-stretch: 1; horizontal-stretch: 1; wrap: word-wrap; }
                     if (tracks.length > 0) : ScrollView { horizontal-stretch: 1; vertical-stretch: 1;
                         HorizontalLayout { spacing: 2px; padding: 4px;
                             for trk[idx] in tracks : Z_MixerStrip {
@@ -98,7 +99,7 @@ export component Z_FullMixer {
             // Inspector column gives the mixer the same contextual editing surface as the reference.
             Rectangle { x: parent.width - 256px; y: 0px; width: 248px; height: 100%; background: Style.surface-1; border_width: 1px; border_color: Style.border; border_radius: 6px;
                 VerticalLayout { spacing: 0px;
-                    Rectangle { height: 42px; background: Style.surface-2; HorizontalLayout { padding: 12px; Text { text: "Channel"; color: Style.text-primary; font-size: 12px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: "Clip"; color: Style.text-tertiary; font-size: 10px; } Text { text: "Project"; color: Style.text-tertiary; font-size: 10px; } } }
+                    Rectangle { height: 42px; background: Style.surface-2; HorizontalLayout { padding: 12px; Text { text: Tr.tr("mixer_inspector"); color: Style.text-primary; font-size: 12px; font-weight: 700; } Rectangle { horizontal-stretch: 1; } Text { text: "Clip"; color: Style.text-tertiary; font-size: 10px; } Text { text: "Project"; color: Style.text-tertiary; font-size: 10px; } } }
                     VerticalLayout { padding: 12px; spacing: 10px;
                         // The inspector used to be fixed text: "Drums", "-6.2 dB"
                         // and four named inserts, shown whichever channel was
@@ -121,8 +122,8 @@ export component Z_FullMixer {
                             for fx in ch.fx : Rectangle { height: 30px; background: Style.panel; border_width: 1px; border_color: Style.border; border_radius: 4px; HorizontalLayout { padding-left: 9px; spacing: 8px; Text { text: fx.active ? "◉" : "○"; color: fx.active ? Style.brand : Style.text-tertiary; font-size: 10px; vertical-alignment: center; } Text { text: fx.name; color: Style.text-secondary; font-size: 10px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "⌄"; color: Style.text-tertiary; vertical-alignment: center; } } }
                         }
                         if (root.selected_index < 0 || root.selected_index >= root.tracks.length) : VerticalLayout { spacing: 6px;
-                            Text { text: "No channel selected"; color: Style.text-tertiary; font-size: 12px; font-weight: 600; }
-                            Text { text: "Pick a channel strip to inspect its volume, pan and inserts."; color: Style.text-tertiary; font-size: 10px; wrap: word-wrap; }
+                            Text { text: Tr.tr("mixer_no_selection"); color: Style.text-tertiary; font-size: 12px; font-weight: 600; }
+                            Text { text: Tr.tr("mixer_no_selection_body"); color: Style.text-tertiary; font-size: 10px; wrap: word-wrap; }
                         }
                         Text { text: "AUX SENDS"; color: Style.text-tertiary; font-size: 10px; font-weight: 700; }
                         Button { text: "Open Send Routing"; clicked => { MixerActions.open_send_routing(); } }

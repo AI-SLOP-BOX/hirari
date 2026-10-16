@@ -35,6 +35,15 @@ pub(super) struct UiSettings {
     pub(super) onboarding_completed: bool,
     #[serde(default)]
     pub(super) onboarding_step: u8,
+    /// Display-language override: `"system"` (default) follows the OS
+    /// locale, `"en"` / `"ja"` pin a language. Unknown values behave as
+    /// `"system"` at resolve time, so old or hand-edited files stay valid.
+    #[serde(default = "default_language")]
+    pub(super) language: String,
+    /// Display-theme override: `"system"` (default) follows the OS
+    /// appearance, `"dark"` / `"light"` pin a theme.
+    #[serde(default = "default_theme")]
+    pub(super) theme: String,
 }
 
 fn default_beginner_mode() -> bool {
@@ -43,6 +52,14 @@ fn default_beginner_mode() -> bool {
 
 fn default_workspace_preset() -> String {
     "arrange".to_owned()
+}
+
+fn default_language() -> String {
+    crate::ui::locale::LANGUAGE_SYSTEM.to_owned()
+}
+
+fn default_theme() -> String {
+    crate::ui::theme::THEME_SYSTEM.to_owned()
 }
 
 impl Default for UiSettings {
@@ -57,6 +74,8 @@ impl Default for UiSettings {
             plugin_favorites: Vec::new(),
             onboarding_completed: false,
             onboarding_step: 0,
+            language: default_language(),
+            theme: default_theme(),
         }
     }
 }
@@ -294,6 +313,71 @@ pub(crate) fn store_beginner_mode(beginner_mode: bool) {
     let mut settings = load_ui_settings_from_path(&settings_path).unwrap_or_default();
     settings.beginner_mode = beginner_mode;
     store_ui_settings(&settings_path, &settings);
+}
+
+/// Loads the stored display-theme override (`"system"` when unset).
+pub(crate) fn load_theme() -> String {
+    ui_settings_path()
+        .and_then(|path| load_ui_settings_from_path(&path))
+        .map(|settings| settings.theme)
+        .filter(|theme| !theme.trim().is_empty())
+        .unwrap_or_else(crate::ui::theme::default_theme)
+}
+
+/// Persists the display-theme override. Only `"system"`, `"dark"` and
+/// `"light"` are stored; anything else is rejected so a bad caller cannot
+/// wedge the settings file into a state the UI cannot display.
+pub(crate) fn store_theme(theme: &str) -> bool {
+    let normalized = theme.trim().to_lowercase();
+    if ![
+        crate::ui::theme::THEME_SYSTEM,
+        crate::ui::theme::THEME_DARK,
+        crate::ui::theme::THEME_LIGHT,
+    ]
+    .contains(&normalized.as_str())
+    {
+        return false;
+    }
+    let Some(settings_path) = ui_settings_path() else {
+        return false;
+    };
+    let mut settings = load_ui_settings_from_path(&settings_path).unwrap_or_default();
+    settings.theme = normalized;
+    store_ui_settings(&settings_path, &settings);
+    true
+}
+
+/// Loads the stored display-language override (`"system"` when unset).
+/// Anything outside `"en"`/`"ja"` resolves to the OS locale downstream.
+pub(crate) fn load_language() -> String {
+    ui_settings_path()
+        .and_then(|path| load_ui_settings_from_path(&path))
+        .map(|settings| settings.language)
+        .filter(|language| !language.trim().is_empty())
+        .unwrap_or_else(crate::ui::locale::default_language)
+}
+
+/// Persists the display-language override. Only `"system"`, `"en"` and
+/// `"ja"` are stored; anything else is rejected so a bad caller cannot
+/// wedge the settings file into a state the UI cannot display.
+pub(crate) fn store_language(language: &str) -> bool {
+    let normalized = language.trim().to_lowercase();
+    if ![
+        crate::ui::locale::LANGUAGE_SYSTEM,
+        crate::ui::locale::LANGUAGE_ENGLISH,
+        crate::ui::locale::LANGUAGE_JAPANESE,
+    ]
+    .contains(&normalized.as_str())
+    {
+        return false;
+    }
+    let Some(settings_path) = ui_settings_path() else {
+        return false;
+    };
+    let mut settings = load_ui_settings_from_path(&settings_path).unwrap_or_default();
+    settings.language = normalized;
+    store_ui_settings(&settings_path, &settings);
+    true
 }
 
 pub(crate) fn load_onboarding_progress() -> (bool, u8) {

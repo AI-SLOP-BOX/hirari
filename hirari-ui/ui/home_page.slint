@@ -2,6 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { Style } from "style.slint";
 import { Z_IconButton } from "primitives/icon_button.slint";
 import { Z_Recent_Project } from "model/models.slint";
+import { Tr } from "locale/strings.slint";
 
 export component Z_HomePage inherits Rectangle {
     callback template-selected(string);
@@ -40,8 +41,8 @@ export component Z_HomePage inherits Rectangle {
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 5px;
-                        Text { text: "Start a session"; font-size: 28px; color: Style.text-primary; font-weight: 700; }
-                        Text { text: "Create a working session or open a saved project."; font-size: 11px; color: Style.text-secondary; }
+                        Text { text: Tr.tr("home_title"); font-size: 28px; color: Style.text-primary; font-weight: 700; }
+                        Text { text: Tr.tr("home_subtitle"); font-size: 11px; color: Style.text-secondary; }
                     }
                     // The "Open a saved project" card below is the single entry
                     // point for opening a project. A second button here invoked
@@ -61,11 +62,11 @@ export component Z_HomePage inherits Rectangle {
                         VerticalLayout {
                             padding: 18px;
                             spacing: 8px;
-                            Text { text: "New electronic session"; font-size: 17px; color: Style.text-primary; font-weight: 700; }
-                            Text { text: "Start with editable instrument and rhythm tracks."; font-size: 10px; color: Style.text-secondary; }
+                            Text { text: Tr.tr("home_new_title"); font-size: 17px; color: Style.text-primary; font-weight: 700; }
+                            Text { text: Tr.tr("home_new_body"); font-size: 10px; color: Style.text-secondary; }
                             Rectangle { vertical-stretch: 1; }
                             Z_IconButton {
-                                icon: "CREATE SESSION";
+                                icon: Tr.tr("home_new_button");
                                 button-width: 136px;
                                 active-col: #4C8DFF;
                                 clicked => { root.template-selected("ELECTRONIC"); }
@@ -81,11 +82,11 @@ export component Z_HomePage inherits Rectangle {
                         VerticalLayout {
                             padding: 18px;
                             spacing: 8px;
-                            Text { text: "Open a saved project"; font-size: 17px; color: Style.text-primary; font-weight: 700; }
-                            Text { text: "Choose a Hirari project from your files or open one from Recent Projects."; font-size: 10px; color: Style.text-secondary; }
+                            Text { text: Tr.tr("home_open_title"); font-size: 17px; color: Style.text-primary; font-weight: 700; }
+                            Text { text: Tr.tr("home_open_body"); font-size: 10px; color: Style.text-secondary; }
                             Rectangle { vertical-stretch: 1; }
                             Z_IconButton {
-                                icon: "BROWSE PROJECTS";
+                                icon: Tr.tr("home_open_button");
                                 button-width: 148px;
                                 active-col: Style.brand;
                                 clicked => { root.project-requested(""); }
@@ -97,9 +98,9 @@ export component Z_HomePage inherits Rectangle {
                 VerticalLayout {
                     spacing: 10px;
                     HorizontalLayout {
-                        Text { text: "Templates"; font-size: 16px; color: Style.text-primary; font-weight: 650; }
+                        Text { text: Tr.tr("home_templates"); font-size: 16px; color: Style.text-primary; font-weight: 650; }
                         Rectangle { horizontal-stretch: 1; }
-                        Text { text: "4 project setups"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
+                        Text { text: Tr.tr("home_templates_count"); font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
                     }
                     HorizontalLayout {
                         height: 130px;
@@ -127,9 +128,9 @@ export component Z_HomePage inherits Rectangle {
                 VerticalLayout {
                     spacing: 10px;
                     HorizontalLayout {
-                        Text { text: "Recent Projects"; font-size: 16px; color: Style.text-primary; font-weight: 650; }
+                        Text { text: Tr.tr("home_recent"); font-size: 16px; color: Style.text-primary; font-weight: 650; }
                         Rectangle { horizontal-stretch: 1; }
-                        Text { text: root.recent-projects.length + " saved projects"; font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
+                        Text { text: Tr.tr("home_saved_prefix") + root.recent-projects.length + Tr.tr("home_saved_suffix"); font-size: 10px; color: Style.text-tertiary; vertical-alignment: center; }
                     }
                     if (root.recent-projects.length == 0) : Rectangle {
                         height: 62px;
@@ -138,7 +139,7 @@ export component Z_HomePage inherits Rectangle {
                         border-color: Style.border;
                         border-radius: 6px;
                         Text {
-                            text: "No recent projects yet. Open or save a project and it will appear here.";
+                            text: Tr.tr("home_no_recent");
                             x: 14px;
                             width: parent.width - 28px;
                             height: parent.height;
@@ -165,7 +166,7 @@ export component Z_HomePage inherits Rectangle {
                                 Text { text: project.folder; font-size: 10px; color: Style.text-tertiary; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            Text { text: "OPEN"; font-size: 10px; color: Style.brand; vertical-alignment: center; }
+                            Text { text: Tr.tr("home_open_row"); font-size: 10px; color: Style.brand; vertical-alignment: center; }
                         }
                         row_area := TouchArea {
                             mouse-cursor: pointer;

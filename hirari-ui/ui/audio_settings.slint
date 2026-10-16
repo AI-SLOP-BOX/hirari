@@ -2,6 +2,7 @@ import { Style } from "style.slint";
 import { LineEdit } from "std-widgets.slint";
 import { Z_IconButton } from "./primitives/icon_button.slint";
 import { AudioSettingsActions } from "./actions/audio_settings_actions.slint";
+import { Tr } from "locale/strings.slint";
 
 export component Z_AudioSettings inherits Rectangle {
     in property <bool> ready: false;
@@ -78,6 +79,26 @@ export component Z_AudioSettings inherits Rectangle {
                     Text { text: root.diagnostic; font-size: 10px; color: Style.text-tertiary; overflow: elide; }
                 } }
             }
+            // Display language follows the OS by default; an explicit choice
+            // here is persisted and takes effect on the next launch.
+            Rectangle { background: Style.surface; border_width: 1px; border_color: Style.border; border_radius: 8px; VerticalLayout { padding: 14px; spacing: 8px;
+                Text { text: Tr.tr("settings_language"); font-size: 15px; color: Style.text-primary; font-weight: 650; }
+                HorizontalLayout { spacing: 5px;
+                    Z_IconButton { icon: Tr.tr("settings_language_system"); compact: true; button-width: 96px; active: AudioSettingsActions.ui_language == "system"; clicked => { AudioSettingsActions.select_language("system"); } }
+                    Z_IconButton { icon: Tr.tr("settings_language_english"); compact: true; button-width: 96px; active: AudioSettingsActions.ui_language == "en"; clicked => { AudioSettingsActions.select_language("en"); } }
+                    Z_IconButton { icon: Tr.tr("settings_language_japanese"); compact: true; button-width: 96px; active: AudioSettingsActions.ui_language == "ja"; clicked => { AudioSettingsActions.select_language("ja"); } }
+                }
+                Text { text: Tr.tr("settings_language_note"); font-size: 10px; color: Style.text-tertiary; }
+            } }
+            Rectangle { background: Style.surface; border_width: 1px; border_color: Style.border; border_radius: 8px; VerticalLayout { padding: 14px; spacing: 8px;
+                Text { text: Tr.tr("settings_theme"); font-size: 15px; color: Style.text-primary; font-weight: 650; }
+                HorizontalLayout { spacing: 5px;
+                    Z_IconButton { icon: Tr.tr("settings_theme_system"); compact: true; button-width: 96px; active: AudioSettingsActions.ui_theme == "system"; clicked => { AudioSettingsActions.select_theme("system"); } }
+                    Z_IconButton { icon: Tr.tr("settings_theme_dark"); compact: true; button-width: 96px; active: AudioSettingsActions.ui_theme == "dark"; clicked => { AudioSettingsActions.select_theme("dark"); } }
+                    Z_IconButton { icon: Tr.tr("settings_theme_light"); compact: true; button-width: 96px; active: AudioSettingsActions.ui_theme == "light"; clicked => { AudioSettingsActions.select_theme("light"); } }
+                }
+                Text { text: Tr.tr("settings_language_note"); font-size: 10px; color: Style.text-tertiary; }
+            } }
         }
     }
 }

@@ -1,0 +1,11 @@
+// Display-language lookup. Slint bindings call Tr.tr with a catalog key;
+// Rust owns the resolved language and the translated catalog
+// (`hirari-ui/src/ui/locale.rs`) and answers from it. A single callback replaces 43 mirrored
+// properties on purpose: a property-only global whose members are never
+// assigned in Slint is folded away before code generation, so Rust-side
+// setters would have no type to bind to. A callback invoked from Slint is
+// always generated, and the key lives next to its use, so a typo fails the
+// Slint compile instead of silently showing English.
+export global Tr {
+    pure callback tr(string) -> string;
+}

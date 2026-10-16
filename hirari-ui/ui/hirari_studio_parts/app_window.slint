@@ -19,6 +19,7 @@ export { DiagnosticsActions } from "./actions/diagnostics_actions.slint";
 export { AudioSettingsActions } from "./actions/audio_settings_actions.slint";
 export { CommandActions } from "./actions/command_actions.slint";
 export { MoufuActions } from "./actions/moufu_actions.slint";
+export { Tr } from "locale/strings.slint"; export { Style } from "style.slint";
 import { RenderActions } from "./actions/render_actions.slint";
 import { PluginActions } from "./actions/plugin_actions.slint";
 import { TransportActions } from "./actions/transport_actions.slint";
@@ -57,7 +58,7 @@ import { Z_OpenUtauEditor } from "./editor/openutau_editor.slint";
 import { Z_ExtensionBrowser } from "extensions/extension_browser.slint";
 import { Z_ArrangeDock } from "./arrange_dock.slint";
 import { Z_MoufuLinkPage } from "moufu_link_page.slint";
-import { ViewModes } from "./navigation/view_modes.slint"; import { Z_WorkflowPage, Z_MidiLearnPage, Z_StepSequencerPage, Z_TrackStackPage, Z_GlobalTracksPage, Z_FlexPitchPage, Z_CompingPage } from "./pages/workflow_pages.slint";
+import { ViewModes } from "./navigation/view_modes.slint"; import { Tr } from "locale/strings.slint"; import { Z_WorkflowPage, Z_MidiLearnPage, Z_StepSequencerPage, Z_TrackStackPage, Z_GlobalTracksPage, Z_FlexPitchPage, Z_CompingPage } from "./pages/workflow_pages.slint";
 import { Z_MasteringPage } from "./pages/mastering_page.slint";
 import { Z_Meter } from "./primitives/meter.slint";
 import { Z_MixerStrip } from "./mixer/mixer_strip_adapter.slint";
@@ -493,11 +494,10 @@ export component AppWindow inherits Window {
             }
             Text { text: "Hirari"; width: 62px; font-size: 15px; color: Style.text; font-weight: 700; vertical-alignment: center; }
             for m in ["Home", "Project", "Automation", "Stacks", "Mix", "Plugins", "Prefs", "Diagnostics", "Moufu"] : Rectangle {
-                // Fixed 50px + elide rendered "Automati…"/"Diagnost…" at the window
-                // minimum. Size to the label instead of truncating a name.
+                // Sized to the label (not truncated); display text follows the UI language, `m` stays the routing key.
                 height: 30px; min-width: 50px; border-radius: 5px;
                 background: menu_area.has-hover ? Style.panel-h : transparent;
-                Text { text: m; height: 100%; font-size: 10px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; }
+                Text { text: m == "Project" ? Tr.tr("menu_project") : (m == "Automation" ? Tr.tr("menu_automation") : (m == "Stacks" ? Tr.tr("menu_stacks") : (m == "Prefs" ? Tr.tr("menu_prefs") : (m == "Diagnostics" ? Tr.tr("menu_diagnostics") : m)))); height: 100%; font-size: 10px; color: menu_area.has-hover ? Style.text : Style.text-dim; font-weight: 500; vertical-alignment: center; horizontal-alignment: center; }
                 menu_area := TouchArea {
                     // The transparent Button below owns the accessibility action,
                     // so this raw pointer area stays non-accessible: marking both
@@ -510,7 +510,7 @@ export component AppWindow inherits Window {
                 // instead of a bare Text item. Same pattern as Z_IconButton.
                 Button {
                     x: 0px; y: 0px; width: 100%; height: 100%;
-                    text: m;
+                    text: m == "Project" ? Tr.tr("menu_project") : (m == "Automation" ? Tr.tr("menu_automation") : (m == "Stacks" ? Tr.tr("menu_stacks") : (m == "Prefs" ? Tr.tr("menu_prefs") : (m == "Diagnostics" ? Tr.tr("menu_diagnostics") : m))));
                     opacity: 0.01;
                     clicked => { root.menu-selected(m); }
                 }

@@ -52,6 +52,10 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/navigation/spotlight.slint");
     for ui_source in [
         "ui/audio_settings.slint",
+        "ui/home_page.slint",
+        "ui/session_recovery_prompt.slint",
+        "ui/diagnostics/diagnostics_page.slint",
+        "ui/locale/strings.slint",
         "ui/mixer/full_mixer.slint",
         "ui/mixer/mixer_strip.slint",
         "ui/editor/piano_roll.slint",
@@ -62,6 +66,7 @@ fn main() {
         "ui/pages/workflow_pages.slint",
         "ui/moufu_link_page.slint",
         "ui/actions/moufu_actions.slint",
+        "ui/actions/audio_settings_actions.slint",
         "ui/model/timeline_model.slint",
     ] {
         println!("cargo:rerun-if-changed={ui_source}");
