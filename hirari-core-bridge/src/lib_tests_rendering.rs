@@ -900,3 +900,121 @@ fn offline_bounce_of_the_same_project_is_reproducible() {
     let _ = std::fs::remove_file(&first);
     let _ = std::fs::remove_file(&second);
 }
+
+#[test]
+fn cli_render_stems_path_is_audible_at_the_projects_sample_rate() {
+    // Replicates `hirari render stems`: the same offline core, v2 load, then
+    // `bounce_stems_diagnostic_json` — the native bounce graph the UI's
+    // EXPORT STEMS uses. It replaces a private re-implementation that re-read
+    // region WAVs with `read_pcm_wav` and summed raw samples: for the demo
+    // project that renderer wrote digital silence (peak 0.0000) while
+    // `render mix` of the same project reached peak 0.99, and it ran at the
+    // engine's hardcoded 44100 regardless of the project's rate. Assert both
+    // properties the replacement must hold: audible stems, at the project's
+    // own rate.
+    let _guard = native_engine_test_guard();
+    let unique = format!(
+        "hirari-cli-stems-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let wav_path = std::env::temp_dir().join(format!("{unique}-src.wav"));
+    let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
+    let output_dir = std::env::temp_dir().join(format!("{unique}-stems"));
+    // 48 kHz is deliberately not the engine's default 44100, so a renderer
+    // that ignores the document's rate cannot pass by accident. A fresh core
+    // sits at 44100 and `save_project_v2` records the *engine's* rate, so the
+    // builder has to be reconfigured through the same `apply_audio_config`
+    // path the audio settings UI uses; otherwise this would silently produce
+    // a 44.1 kHz document and the rate assertion below would prove nothing.
+    write_test_tone_wav(&wav_path, 48_000, 48_000);
+    let project_text = project_path.to_string_lossy().into_owned();
+    let builder = crate::HirariCore::new_offline().expect("offline core must initialize");
+    assert!(
+        builder.apply_audio_config(48_000, 512),
+        "builder core must accept a 48 kHz configuration"
+    );
+    assert_eq!(
+        builder.get_sample_rate().round() as u32,
+        48_000,
+        "builder core must report the configured rate"
+    );
+    let track = builder.add_audio_track();
+    assert_ne!(track, 0);
+    assert!(builder.add_region(track, wav_path.to_str().unwrap(), 0.0));
+    builder
+        .save_project_v2(&project_text, "CLI Stems", 120.0)
+        .expect("save must succeed");
+
+    // The document itself must be 48 kHz; if the save had recorded the
+    // engine's default the rest of this test would only re-check 44.1 kHz.
+    let document = crate::project::ProjectDocument::load(&project_text)
+        .expect("saved document must load");
+    assert_eq!(
+        document.sample_rate.round() as u32,
+        48_000,
+        "the saved project document must carry the configured rate"
+    );
+
+    std::fs::create_dir_all(&output_dir).expect("stem output dir must be created");
+    let output_text = output_dir.to_string_lossy().into_owned();
+    let core = crate::HirariCore::new_offline().expect("offline core must initialize");
+    core.load_project_v2(&project_text)
+        .expect("load must succeed");
+    assert_eq!(
+        core.get_sample_rate().round() as u32,
+        48_000,
+        "the loaded core must run at the document's rate before bouncing"
+    );
+
+    let diagnostic = core.bounce_stems_diagnostic_json(&output_text, 0, &[], 2.0, false, true);
+    let value: serde_json::Value =
+        serde_json::from_str(&diagnostic).expect("stems diagnostic must be valid JSON");
+    assert_eq!(
+        value.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "stems bounce must report success, got {diagnostic}"
+    );
+    let outputs = value
+        .get("outputs")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !outputs.is_empty(),
+        "stems bounce must produce at least one file, got {diagnostic}"
+    );
+
+    let stem_path = outputs[0].as_str().expect("output path must be a string");
+    let bytes = std::fs::read(stem_path).expect("stem file must exist");
+    assert!(
+        bytes.len() > 44,
+        "stem file must carry audio data, got {} bytes",
+        bytes.len()
+    );
+    let stem_rate = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+    assert_eq!(
+        stem_rate, 48_000,
+        "stems must render at the project's sample rate"
+    );
+    let peak = bytes
+        .get(44..)
+        .map(|data| {
+            data.chunks_exact(2)
+                .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32_768.0)
+                .fold(0.0f32, |a, v| a.max(v.abs()))
+        })
+        .unwrap_or(0.0);
+    assert!(
+        peak > 0.01,
+        "stems must be audible (peak {peak}); digital silence means the \
+         renderer bypassed the engine graph"
+    );
+
+    let _ = std::fs::remove_file(&wav_path);
+    let _ = std::fs::remove_file(&project_path);
+    let _ = std::fs::remove_dir_all(&output_dir);
+}

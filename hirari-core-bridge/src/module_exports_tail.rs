@@ -51,3 +51,4 @@ pub mod wavetable_oscillator;
 pub mod wavetable_synth;
 pub mod zero_crossing_engine;
 pub mod zerocrossing;
+include!("cli_render_tests.rs");

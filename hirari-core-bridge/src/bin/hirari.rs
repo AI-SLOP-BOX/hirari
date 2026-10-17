@@ -1,6 +1,6 @@
 use hirari_core_bridge::command_api::{
-    audit_log_json, capabilities, diff, validate, validate_request_envelope, CommandAction,
-    CommandDocument, Permission, ProtocolRequest, PROTOCOL_VERSION,
+    audit_log_json, capabilities, diff, validate, validate_request_envelope, CommandDocument,
+    ProtocolRequest,
 };
 use hirari_core_bridge::project::ProjectDocument;
 use hirari_core_bridge::stable_api::{CoreApiV1, MixRenderRequest, WaveContainer};
@@ -70,54 +70,6 @@ fn read_pcm_wav(path: &str) -> Result<Vec<f32>, String> {
         }
     }
     Ok(samples)
-}
-
-fn render_project_stems(
-    project_path: &str,
-    output_dir: &str,
-) -> Result<Vec<std::path::PathBuf>, String> {
-    let project = ProjectDocument::load(project_path).map_err(|e| e.to_string())?;
-    let base = std::path::Path::new(project_path)
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
-    let output = std::path::Path::new(output_dir);
-    std::fs::create_dir_all(output).map_err(|e| e.to_string())?;
-    let mut stems = Vec::new();
-    for track in &project.tracks {
-        let regions: Vec<_> = project
-            .regions
-            .iter()
-            .filter(|r| r.track_id == track.id && !r.muted)
-            .collect();
-        if regions.is_empty() {
-            continue;
-        }
-        let end = regions
-            .iter()
-            .map(|r| r.start.saturating_add(r.length))
-            .max()
-            .unwrap_or(0) as usize;
-        let mut buffer = vec![0.0f32; end];
-        for region in regions {
-            let source = base.join(&region.path);
-            let samples = read_pcm_wav(source.to_str().ok_or("invalid audio path")?)?;
-            let offset = region.source_offset as usize;
-            let available = samples.len().saturating_sub(offset);
-            let count = available
-                .min(region.length as usize)
-                .min(buffer.len().saturating_sub(region.start as usize));
-            for index in 0..count {
-                buffer[region.start as usize + index] += samples[offset + index] * region.clip_gain;
-            }
-        }
-        stems.push((track.name.clone(), buffer));
-    }
-    if stems.is_empty() {
-        return Err("project has no renderable audio regions".into());
-    }
-    let sample_rate = project.sample_rate.round().clamp(1.0, u32::MAX as f64) as u32;
-    hirari_core_bridge::export::export_stems_to_wav(output, &stems, sample_rate, 1, 24, false, true)
-        .map_err(|e| format!("stem export failed: {e:?}"))
 }
 
 fn usage() -> ! {
@@ -419,105 +371,6 @@ fn main() {
                     eprintln!(
                         "{{\"ok\":false,\"error\":{}}}",
                         serde_json::to_string(&error).unwrap()
-                    );
-                    std::process::exit(1);
-                }
-            }
-        }
-        Some("render") if args.next().as_deref() == Some("stems") => {
-            let Some(project_path) = args.next() else {
-                usage();
-            };
-            let Some(output_dir) = args.next() else {
-                usage();
-            };
-            let format = args.next().unwrap_or_else(|| "wav".into());
-            let format_code = match format.as_str() {
-                "wav" => 0,
-                "wave64" => 1,
-                "wav-f32" => 2,
-                "wav-pcm24" => 3,
-                _ => usage(),
-            };
-            let request_id = match args.next().as_deref() {
-                None => format!(
-                    "cli-render-{}-{}",
-                    std::process::id(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos()
-                ),
-                Some("--request-id") => args.next().unwrap_or_else(|| usage()),
-                Some(_) => usage(),
-            };
-            if args.next().is_some() {
-                usage();
-            }
-            if format != "wav" {
-                usage();
-            }
-            match ProjectDocument::load(&project_path) {
-                Ok(project) => {
-                    if output_dir.trim().is_empty() || output_dir.len() > 4096 {
-                        eprintln!("{{\"ok\":false,\"error\":\"invalid_output_dir\"}}");
-                        std::process::exit(1);
-                    }
-                    let request = ProtocolRequest {
-                        protocol: PROTOCOL_VERSION.into(),
-                        request_id,
-                        client: "hirari-cli".into(),
-                        command: CommandDocument {
-                            schema_version: 1,
-                            command_version: 1,
-                            transaction: "cli-render-stems".into(),
-                            permission: Permission::SystemWrite,
-                            expected_generation: None,
-                            expected_audio_generation: None,
-                            actions: vec![CommandAction::BounceStems {
-                                output_dir: output_dir.clone(),
-                                format: format_code,
-                                track_ids: Vec::new(),
-                                tail_seconds: 2.0,
-                                pre_fader: false,
-                                include_inserts: true,
-                            }],
-                        },
-                    };
-                    if let Err(error) = validate_request_envelope(&request) {
-                        eprintln!(
-                            "{{\"ok\":false,\"error\":{}}}",
-                            serde_json::to_string(&error.code).unwrap()
-                        );
-                        std::process::exit(1);
-                    }
-                    let paths = match render_project_stems(&project_path, &output_dir) {
-                        Ok(paths) => paths,
-                        Err(error) => {
-                            eprintln!(
-                                "{{\"ok\":false,\"error\":{}}}",
-                                serde_json::to_string(&error).unwrap()
-                            );
-                            std::process::exit(1);
-                        }
-                    };
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "ok": true,
-                            "operation": "render.stems",
-                            "project": project.project_id,
-                            "track_count": project.tracks.len(),
-                            "files": paths,
-                            "request": request,
-                        }))
-                        .unwrap()
-                    );
-                }
-                Err(error) => {
-                    eprintln!(
-                        "{{\"ok\":false,\"error\":{}}}",
-                        serde_json::to_string(&error.to_string()).unwrap()
                     );
                     std::process::exit(1);
                 }
