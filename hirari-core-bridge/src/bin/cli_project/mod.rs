@@ -159,6 +159,16 @@ pub(super) fn try_handle(raw_args: &[String]) -> bool {
                             "track_count": project.tracks.len(),
                             "region_count": project.regions.len(),
                             "plugin_count": project.plugin_instances.len(),
+                            // `plugin insert` builds per-track effect chains,
+                            // which live in `track.plugin_types`, not in the
+                            // top-level `plugin_instances` collection. Reporting
+                            // only the latter made a successful insert look like
+                            // nothing happened (`plugin_count: 0`).
+                            "track_plugin_count": project
+                                .tracks
+                                .iter()
+                                .map(|track| track.plugin_types.len())
+                                .sum::<usize>(),
                             "midi_note_count": project.midi_notes.len(),
                             "midi_event_count": project.midi_events.len(),
                             "render_target_count": project.render_targets.len(),

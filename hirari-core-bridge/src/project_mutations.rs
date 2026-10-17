@@ -277,7 +277,15 @@ impl ProjectDocument {
     }
 
     pub fn insert_builtin_plugin(&mut self, track_id: u32, plugin_type: u32) -> Result<u32> {
-        if plugin_type == 0 { bail!("plugin type must be non-zero"); }
+        // Match the range `Track::addPlugin` actually instantiates (0..=10,
+        // with 0 the default "Hirari/Limiter"). Accepting anything wider let
+        // the document record a plugin the engine refuses to build, so the
+        // file claimed an insert that produced no audio; rejecting 0 instead
+        // made the Limiter — the one insertion the engine calls operational —
+        // impossible to request.
+        if plugin_type > 10 {
+            bail!("plugin type must be within 0..=10 (0=Limiter, 1=Compressor, 2=Gate, 3=Saturation, 4=Transient, 5=DeEsser, 6=Delay, 7=Reverb, 8=DynamicEQ, 9=MidSide, 10=Width)");
+        }
         let track = self.tracks.iter_mut().find(|track| track.id == track_id)
             .ok_or_else(|| anyhow::anyhow!("track was not found"))?;
         let slot = track.plugin_types.len() as u32;

@@ -74,9 +74,38 @@ fn read_pcm_wav(path: &str) -> Result<Vec<f32>, String> {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: hirari capabilities | hirari audit-log <ledger-path> | hirari project init <project> [name] [sample-rate] | hirari project inspect <project> | hirari project manifest <project> | hirari project production init <project> [fps] | hirari project production inspect <project> | hirari project production revision <project> <message> [author] [--audio-hash HASH] [--vfx-hash HASH] | hirari track add <project> <name> [type] | hirari track rename <project> <track-id> <name> | hirari track delete <project> <track-id> | hirari plugin insert <project> <track-id> <plugin-type> | hirari mix analyze <left.wav> <right.wav> | hirari render mix <project> <output.wav> [wav|wav-pcm24|wave64|wav-f32] | hirari render stems <project> <output-dir> [wav|wav-pcm24|wave64|wav-f32] | hirari render piano <notes.json> <audio.wav> <output.mp4> [sample-rate] [channels] | hirari ci verify <audio.wav> [max-peak] [min-rms] | hirari diff | hirari validate"
+        "usage: hirari capabilities | hirari audit-log <ledger-path> | hirari project init <project> [name] [sample-rate] | hirari project inspect <project> | hirari project manifest <project> | hirari project production init <project> [fps] | hirari project production inspect <project> | hirari project production revision <project> <message> [author] [--audio-hash HASH] [--vfx-hash HASH] | hirari track add <project> <name> [type] | hirari track rename <project> <track-id> <name> | hirari track delete <project> <track-id> | hirari plugin insert <project> <track-id> <plugin-type: name|0..=10> | hirari mix analyze <left.wav> <right.wav> | hirari render mix <project> <output.wav> [wav|wav-pcm24|wave64|wav-f32] | hirari render stems <project> <output-dir> [wav|wav-pcm24|wave64|wav-f32] | hirari render piano <notes.json> <audio.wav> <output.mp4> [sample-rate] [channels] | hirari ci verify <audio.wav> [max-peak] [min-rms] | hirari diff | hirari validate"
     );
     std::process::exit(2);
+}
+
+/// Resolve a `<plugin-type>` argument for `hirari plugin insert` to the
+/// numeric code `Track::addPlugin` instantiates. Names match the catalogue the
+/// UI displays (track_model_sync.rs), compared case-insensitively with
+/// separators removed so "De-Esser", "deesser" and "DEESSER" all resolve.
+fn parse_plugin_type(raw: &str) -> Option<u32> {
+    if let Ok(code) = raw.parse::<u32>() {
+        return (code <= 10).then_some(code);
+    }
+    let normalized: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    Some(match normalized.as_str() {
+        "limiter" => 0,
+        "compressor" => 1,
+        "gate" => 2,
+        "saturation" | "tubesaturation" => 3,
+        "transient" => 4,
+        "deesser" => 5,
+        "delay" => 6,
+        "reverb" => 7,
+        "dynamiceq" => 8,
+        "midside" => 9,
+        "width" => 10,
+        _ => return None,
+    })
 }
 
 fn main() {
@@ -166,6 +195,14 @@ fn main() {
                         "track_count": project.tracks.len(),
                         "region_count": project.regions.len(),
                         "plugin_count": project.plugin_instances.len(),
+                        // See the `project inspect` handler in cli_project:
+                        // `plugin insert` writes per-track effect chains, so
+                        // count those too rather than reporting 0.
+                        "track_plugin_count": project
+                            .tracks
+                            .iter()
+                            .map(|track| track.plugin_types.len())
+                            .sum::<usize>(),
                         "midi_note_count": project.midi_notes.len(),
                         "midi_event_count": project.midi_events.len(),
                         "render_target_count": project.render_targets.len(),
@@ -289,8 +326,11 @@ fn main() {
             let Some(track_id) = args.next().and_then(|value| value.parse::<u32>().ok()) else {
                 usage();
             };
-            let Some(plugin_type) = args.next().and_then(|value| value.parse::<u32>().ok()) else {
-                usage();
+            let Some(plugin_type) = args.next().and_then(|value| parse_plugin_type(&value)) else {
+                eprintln!(
+                    "{{\"ok\":false,\"error\":\"unknown plugin type; expected a name (Limiter, Compressor, Gate, Saturation, Transient, De-Esser, Delay, Reverb, Dynamic EQ, Mid/Side, Width) or a code in 0..=10\"}}"
+                );
+                std::process::exit(1);
             };
             if args.next().is_some() {
                 usage();

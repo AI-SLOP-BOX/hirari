@@ -16,6 +16,44 @@ mod tests {
     }
 
     #[test]
+    fn builtin_plugin_insert_accepts_every_type_the_engine_instantiates() {
+        // `Track::addPlugin` builds a processor for 0..=10 and treats 0 as its
+        // default "Hirari/Limiter", and the UI catalogue names those same
+        // codes. The document path used to reject 0 outright, making the one
+        // insertion the engine calls operational impossible to request, while
+        // accepting values the engine refuses (so the file recorded a plugin
+        // that produced no audio). The two must agree on the valid set.
+        let mut project =
+            ProjectDocument::from_layout_json("Plugins", 120.0, 48_000.0, "[]").expect("layout");
+        let track = project.add_track("Lead", "Audio").expect("track is added");
+
+        for plugin_type in 0..=10u32 {
+            let slot = project
+                .insert_builtin_plugin(track, plugin_type)
+                .unwrap_or_else(|error| panic!("type {plugin_type} must be insertable: {error}"));
+            assert_eq!(slot, plugin_type, "slots are assigned in insertion order");
+        }
+        assert_eq!(
+            project.tracks[0].plugin_types.len(),
+            11,
+            "every accepted type is recorded on the track"
+        );
+
+        // A code the engine cannot build must be rejected at the document
+        // boundary rather than persisted as a phantom insert.
+        let rejected = project.insert_builtin_plugin(track, 11);
+        assert!(
+            rejected.is_err(),
+            "a type outside 0..=10 must not be accepted, got {rejected:?}"
+        );
+        assert_eq!(
+            project.tracks[0].plugin_types.len(),
+            11,
+            "a rejected insert must not mutate the track"
+        );
+    }
+
+    #[test]
     fn layout_round_trips_all_project_state() {
         // region start must be >= the warped trim length: source_offset 256 at
         // warp_ratio 1.25 needs 205 timeline samples, so a start of 128 was
