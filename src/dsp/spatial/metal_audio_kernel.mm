@@ -51,6 +51,15 @@ MetalAudioKernel::MetalAudioKernel() : m_impl(nullptr) {}
 MetalAudioKernel::~MetalAudioKernel() = default;
 
 bool MetalAudioKernel::initialize() {
+    std::lock_guard<std::mutex> lock(m_initMutex);
+    // Idempotent: `HirariCore::new_with_mode` calls this once per engine, so a
+    // second (or tenth) engine used to build a brand-new Implementation and
+    // destroy the previous one underneath any thread still using it. Keep the
+    // first successful setup; only retry when there is nothing usable yet
+    // (e.g. the Metal device or the default library was unavailable).
+    if (m_impl && m_impl->device != nil) {
+        return true;
+    }
     try {
         m_impl = std::make_unique<Implementation>();
         return m_impl->device != nil;
@@ -59,7 +68,13 @@ bool MetalAudioKernel::initialize() {
     }
 }
 
+bool MetalAudioKernel::isInitialized() const {
+    std::lock_guard<std::mutex> lock(m_initMutex);
+    return m_impl && m_impl->device != nil && m_impl->pipeline != nil;
+}
+
 void MetalAudioKernel::processAsync(const float* input, float* output, uint32_t size, float az, float el) {
+    std::lock_guard<std::mutex> lock(m_useMutex);
     if (!m_impl || !m_impl->pipeline || !input || !output || size == 0 || size > 4096) return;
 
     // 1. Wait for In-flight Buffer (Backpressure)

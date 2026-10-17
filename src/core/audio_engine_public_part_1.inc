@@ -540,15 +540,18 @@ public:
         // only the graph leaves the device callback on the previous format.
         const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
         const bool offlineIsolation = isolated && std::strcmp(isolated, "1") == 0;
-        if (!offlineIsolation) {
-            if (!m_driver || !m_driver->reconfigure(static_cast<double>(sr), bs)) {
+        if (!offlineIsolation && m_driver && m_driver->is_running()) {
+            if (!m_driver->reconfigure(static_cast<double>(sr), bs)) {
                 return false;
             }
         } else {
-            // Integration tests deliberately detach from the process-wide
-            // CoreAudio callback. Keep the native graph configurable offline
-            // so sandbox/FFI tests do not accidentally require a physical
-            // device, while the product path still requires a real driver.
+            // A running CoreAudio host must be rebuilt as one transaction so
+            // the device callback never keeps the previous format. An engine
+            // that owns no device (CLI renders, automation, isolated tests)
+            // has nothing to reconfigure, and routing it through the driver
+            // made every reconfigure fail and silently leave the graph at its
+            // default 44100. Apply the config to the detached graph directly,
+            // the branch the HIRARI_NATIVE_TEST_ISOLATION sandbox already used.
             m_engine->waitForAudioCallbacks();
             m_engine->apply_config(cfg);
         }
@@ -572,22 +575,14 @@ public:
             sr < 8'000u || sr > 384'000u || bs == 0u || bs > 16'384u) return false;
         std::lock_guard<std::mutex> lock(m_configMutex);
         const uint64_t before = m_engine->get_audio_config_generation();
-        const double previousSampleRate = m_engine->get_sample_rate();
-        const uint32_t previousBlockSize = m_engine->get_block_size();
         if (!apply_config_locked(tempo, sr, bs)) return false;
-#if defined(__APPLE__)
-        const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
-        const bool offlineIsolation = isolated && std::strcmp(isolated, "1") == 0;
-        if (!offlineIsolation && (!m_driver || !m_driver->is_running())) {
-            // start_locked prepares the graph before opening the device. If
-            // CoreAudio rejects the requested format, restore the last graph
-            // configuration instead of leaving the engine/device split.
-            if (previousSampleRate > 0.0 && previousBlockSize > 0) {
-                m_engine->prepareToPlay(previousSampleRate, previousBlockSize);
-            }
-            return false;
-        }
-#endif
+        // No separate device-reconciliation step: apply_config_locked already
+        // rebuilds a running CoreAudio host together with the graph, and an
+        // engine that owns no device has nothing left to reconcile. An earlier
+        // guard here undid the just-applied config and returned false whenever
+        // no driver was running, which left offline/CLI/test engines stuck at
+        // their default 44100 and made them reject every project saved at a
+        // different rate.
         return m_engine->get_audio_config_generation() != before &&
                std::abs(m_engine->get_sample_rate() - static_cast<double>(sr)) < 0.5 &&
                m_engine->get_block_size() == bs;
