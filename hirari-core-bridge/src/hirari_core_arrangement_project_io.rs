@@ -488,6 +488,14 @@ impl HirariCore {
             if let Ok(mut history) = self.midi_lyric_history.lock() {
                 history.clear();
             }
+            // The ARUA container carries no note fields, so the notes now in
+            // Core belong to whatever was open before this load. Leaving them
+            // in place showed the previous project's piano roll in this one,
+            // and the next save would have written them into a project that
+            // never contained them. Clients that do have a note source (the
+            // UI reads `<project>.midi.json`) re-hydrate right after this
+            // call returns.
+            self.clear_midi_notes();
             let _ = std::fs::remove_file(&rollback_path);
             return Ok(());
         }
@@ -640,6 +648,11 @@ impl HirariCore {
             && self.restore_comping_snapshot_json(&candidate_comping)
             && self.set_midi_events_json(&candidate_midi);
         if restored {
+            // Same reasoning as `load_project_with_outcome`: a restored ARUA
+            // generation has no note fields, so any notes still scheduled are
+            // the previously open project's. Rolling back below does not need
+            // to restore them because nothing was cleared on failure.
+            self.clear_midi_notes();
             let _ = std::fs::remove_file(&rollback_path);
             return true;
         }

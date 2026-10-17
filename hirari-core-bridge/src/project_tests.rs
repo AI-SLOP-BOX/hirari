@@ -84,6 +84,57 @@ mod tests {
     }
 
     #[test]
+    fn opening_or_restoring_a_legacy_native_project_drops_the_previous_projects_midi_notes() {
+        let native = temp_path("legacy-native-notes");
+        let native_text = native.to_string_lossy().into_owned();
+        {
+            let producer = crate::HirariCore::new_offline().expect("offline core initializes");
+            let track = producer.add_midi_track();
+            assert!(producer.set_midi_note_lyric(track, 74, 100, 0, 24_000, "native note"));
+            // The ARUA container stores no note fields, so this project's
+            // notes exist only in the engine state of the core that wrote it.
+            assert!(producer.save_project(&native_text));
+        }
+
+        let core = crate::HirariCore::new_offline().expect("offline core initializes");
+        let track = core.add_midi_track();
+        assert!(core.set_midi_note_lyric(track, 67, 100, 0, 24_000, "other project"));
+        assert_eq!(
+            core.project_document_snapshot_v2("Before", 120.0)
+                .expect("snapshot works")
+                .midi_notes
+                .len(),
+            1
+        );
+
+        assert!(core.load_project(&native_text), "legacy native project opens");
+        let after_open = core
+            .project_document_snapshot_v2("After open", 120.0)
+            .expect("snapshot works");
+        assert_eq!(
+            after_open.midi_notes.len(),
+            0,
+            "a native load carries no notes, so the previously open project's \
+             notes must not survive it"
+        );
+
+        // Rotating one save produces `.bak.1`, a native generation again.
+        assert!(core.save_project(&native_text));
+        assert!(core.restore_project_backup(&native_text, 1));
+        let after_restore = core
+            .project_document_snapshot_v2("After restore", 120.0)
+            .expect("snapshot works");
+        assert_eq!(
+            after_restore.midi_notes.len(),
+            0,
+            "restoring a native generation must not resurface another \
+             project's notes either"
+        );
+
+        let _ = std::fs::remove_file(native);
+    }
+
+    #[test]
     fn track_rename_and_remove_preserve_document_invariants() {
         let mut document = ProjectDocument::from_layout_json("Ops", 120.0, 48_000.0, "[]").unwrap();
         let first = document.add_track("Audio", "Audio").unwrap();
