@@ -483,37 +483,13 @@
             }
             }
         }
-        // The production track-count overlay owns the visible navigation for
-        // real sessions. Keep the OpenUtau editor in the same overlay so the
-        // button cannot select a destination whose content is clipped by the
-        // legacy bottom-panel tree.
-        if (bot_view == ViewModes.openutau) : Z_OpenUtauEditor {
-            x: 0px; y: 32px; width: 100%; height: parent.height - 32px;
-            score-path <=> root.openutau_score_path;
-            render-path <=> root.openutau_render_path;
-            status: root.openutau_status;
-            scoop <=> root.openutau_scoop;
-            vibrato <=> root.openutau_vibrato; vibrato-rate <=> root.openutau_vibrato_rate;
-            dynamics <=> root.openutau_dynamics;
-            consonants <=> root.openutau_consonants;
-            notes: root.openutau_notes;
-            open-score => { CommandActions.palette_exec("OPENUTAU EDIT"); }
-            launch-editor => { CommandActions.palette_exec("OPENUTAU LAUNCH"); }
-            render-score => { CommandActions.palette_exec("OPENUTAU RENDER"); }
-            import-render => { CommandActions.palette_exec("OPENUTAU IMPORT RENDER"); }
-            apply-tuning => { CommandActions.palette_exec("OPENUTAU APPLY TUNING"); }
-        }
-        if (bot_view == ViewModes.preferences) : Z_AudioSettings {
-            x: 0px; y: 32px; width: 100%; height: parent.height - 32px;
-            ready: root.audio_device_ready;
-            device-catalog: root.audio_device_catalog;
-            device-names: root.audio_device_names; device-indices: root.audio_device_indices; device-query: root.audio_device_query;
-            sample-rate: root.audio_sample_rate;
-            buffer-size: root.buffer_size;
-            dropped-blocks: root.input_dropped_blocks;
-            diagnostic: root.audio_diagnostic;
-            busy: root.is_ply || root.is_rec;
-        }
+        // Nothing view-specific is mounted here. This whole overlay only
+        // exists while `bot_view == ViewModes.mixer` and `mx_open` is false
+        // (see the guard above the toolbar), so a child that also tests
+        // `bot_view == ViewModes.openutau` or `ViewModes.preferences` can
+        // never be shown -- the parent unmounts the moment either is
+        // selected. Those editors belong to the bottom-panel page tree in
+        // editor_views.slint, which is what the toolbar buttons open.
         if (bot_view == ViewModes.mixer && root.tracks.length >= 4) : Rectangle {
         x: ins_open ? Style.inspector-w : 0px; y: 205px;
         width: parent.width - (ins_open ? Style.inspector-w : 0px);

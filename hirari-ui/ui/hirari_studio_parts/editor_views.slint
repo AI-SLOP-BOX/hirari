@@ -50,7 +50,12 @@
                     || bot_view == ViewModes.midi || bot_view == ViewModes.export
                     || bot_view == ViewModes.flex || bot_view == ViewModes.comp
                     || bot_view == ViewModes.stacks || bot_view == ViewModes.global
-                    || bot_view == ViewModes.steps;
+                    || bot_view == ViewModes.steps
+                    // OpenUtau is a full editor, not a 300px editor strip.
+                    // Without it the arrangement hides as soon as the vocal
+                    // button is pressed (that button opens the panel), so the
+                    // editor was always the clipped strip and never a page.
+                    || bot_view == ViewModes.openutau;
                 if ((mx_open || pr_open) && bot_view != ViewModes.console_full) : Rectangle {
                     height: page_view ? 640px : 300px;
                     background: Style.panel;
