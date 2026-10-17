@@ -253,13 +253,6 @@ fn atomic_write_midi_sidecar(path: &Path, data: &[u8]) -> bool {
     true
 }
 
-#[cfg(test)]
-pub(crate) fn serialize_ui_midi_notes(_tracks: &slint::VecModel<Z_Track>) -> Option<String> {
-    // Legacy serializer retained for migration contract coverage. Current
-    // saves persist notes in ProjectDocument and do not publish this payload.
-    Some("[]".to_owned())
-}
-
 pub(crate) struct PreparedUiProjectSave {
     pub(crate) path: String,
     pub(crate) document: hirari_core_bridge::project::ProjectDocument,
@@ -1007,7 +1000,8 @@ mod tests {
     use super::{
         atomic_write_midi_sidecar, hydrate_project_models,
         load_project_transactionally_with_hydrator, load_project_transactionally_with_rollback,
-        restore_latest_project_backup_transactionally, PersistedNote, ProjectLoadTransactionError,
+        restore_latest_project_backup_transactionally, PersistedNote, PersistedTrackNotes,
+        ProjectLoadTransactionError,
     };
     use slint::Model;
     use std::fs;
@@ -1167,6 +1161,67 @@ mod tests {
         fs::remove_file(sidecar_path).expect("sidecar cleanup");
     }
 
+    /// The payload the retired native writer published into the UI note
+    /// sidecar: piano-roll rows keyed by their owning track.
+    fn persisted_ui_midi_notes(
+        tracks: &slint::VecModel<crate::slint_ui::Z_Track>,
+    ) -> Vec<PersistedTrackNotes> {
+        tracks
+            .iter()
+            .map(|track| PersistedTrackNotes {
+                track_id: track.id,
+                notes: track
+                    .piano_roll_notes
+                    .iter()
+                    .map(|note| PersistedNote {
+                        region_id: note.region_id,
+                        pitch: note.pitch,
+                        midi_channel: note.midi_channel.clamp(0, 15) as u8,
+                        start_beat: note.start_beat,
+                        length_beats: note.length_beats,
+                        velocity: note.velocity,
+                        articulation: note.articulation,
+                        vibrato_amount: note.vibrato_amount,
+                        vibrato_rate_millihz: note.vibrato_rate_millihz,
+                        phoneme: note.phoneme.to_string(),
+                        pitch_curve_cents: note.pitch_curve_cents.iter().collect(),
+                        portamento_samples: note.portamento_samples.max(0) as u32,
+                        probability: note.probability,
+                        repeat_count: note.repeat_count,
+                        lyric: note.lyric.to_string(),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Writes `<project>.midi.json.bak.<generation>` tagged with the identity
+    /// of the project backup it belongs to, mirroring the wrap step of the
+    /// retired native save path. Recovery rejects a sidecar whose checksum or
+    /// mtime no longer matches its backup generation.
+    fn write_legacy_ui_sidecar(project_path: &str, generation: u32, notes: &[PersistedTrackNotes]) {
+        let project_backup = PathBuf::from(format!("{project_path}.bak.{generation}"));
+        let bytes = fs::read(&project_backup).expect("backup generation reads");
+        let modified_ns = fs::metadata(&project_backup)
+            .expect("backup generation metadata reads")
+            .modified()
+            .expect("backup generation mtime reads")
+            .duration_since(UNIX_EPOCH)
+            .expect("backup generation predates the epoch")
+            .as_nanos();
+        let wrapped = serde_json::json!({
+            "hirari_project_checksum":
+                hirari_core_bridge::persistence::PersistenceOrchestrator::calculate_checksum(&bytes),
+            "hirari_project_modified_ns": modified_ns.to_string(),
+            "notes": notes,
+        });
+        fs::write(
+            format!("{project_path}.midi.json.bak.{generation}"),
+            serde_json::to_vec(&wrapped).expect("legacy sidecar serializes"),
+        )
+        .expect("legacy sidecar writes");
+    }
+
     #[test]
     fn recovery_uses_core_notes_when_ui_sidecar_generation_mismatches() {
         let root = std::env::temp_dir().join(format!(
@@ -1191,8 +1246,9 @@ mod tests {
         track.id = track_id as i32;
         model.set_row_data(0, track);
         crate::ui::track_model::sync_midi_notes_from_core(&model, &core);
-        let first_sidecar = super::serialize_ui_midi_notes(&model).unwrap();
-        assert!(core.save_project_with_ui_midi_notes(&project_text, &first_sidecar));
+        let first_generation_notes = persisted_ui_midi_notes(&model);
+        core.save_project_v2(&project_text, "Song", 120.0)
+            .expect("first generation saves");
 
         let mut next_generation = model.row_data(0).unwrap();
         next_generation.piano_roll_notes =
@@ -1218,8 +1274,9 @@ mod tests {
         assert!(crate::ui::track_model::sync_midi_notes_to_core(
             "", &model, &core
         ));
-        let second_sidecar = super::serialize_ui_midi_notes(&model).unwrap();
-        assert!(core.save_project_with_ui_midi_notes(&project_text, &second_sidecar));
+        let second_generation_notes = persisted_ui_midi_notes(&model);
+        core.save_project_v2(&project_text, "Song", 120.0)
+            .expect("second generation saves");
 
         let mut third_generation = model.row_data(0).unwrap();
         third_generation.piano_roll_notes =
@@ -1245,8 +1302,16 @@ mod tests {
         assert!(crate::ui::track_model::sync_midi_notes_to_core(
             "", &model, &core
         ));
-        let third_sidecar = super::serialize_ui_midi_notes(&model).unwrap();
-        assert!(core.save_project_with_ui_midi_notes(&project_text, &third_sidecar));
+        core.save_project_v2(&project_text, "Song", 120.0)
+            .expect("third generation saves");
+        // The v2 ProjectDocument is the canonical note store, so the shipping
+        // save path never writes the legacy `.midi.json` sidecars anymore.
+        // Publish them here exactly the way the retired native writer wrapped
+        // them (project checksum + mtime) so recovery can still be exercised
+        // against a sidecar that is missing, stale, or tagged for a different
+        // generation than the project backup it sits next to.
+        write_legacy_ui_sidecar(&project_text, 1, &second_generation_notes);
+        write_legacy_ui_sidecar(&project_text, 2, &first_generation_notes);
 
         // Simulate an interrupted UI-sidecar rotation by pairing generation 1
         // with the UI sidecar tagged for generation 2.
@@ -1342,9 +1407,13 @@ mod tests {
             &model,
             &core,
         );
-        assert_eq!(recovered_generation, Ok(2));
+        // `.bak.1` is the newest recoverable generation after rotation, and the
+        // missing UI sidecar asserted above must not disqualify it, so "restore
+        // latest" lands on generation 1 rather than the older `.bak.2`.
+        assert_eq!(recovered_generation, Ok(1));
         let recovered_notes: Vec<_> = model.row_data(0).unwrap().piano_roll_notes.iter().collect();
-        assert_eq!(recovered_notes[0].pitch, 60);
+        assert_eq!(recovered_notes[0].pitch, 67);
+        assert_eq!(recovered_notes[0].lyric.as_str(), "second generation");
         fs::write(&ui_generation_one, generation_one_ui).unwrap();
 
         fs::write(format!("{project_text}.bak.1"), b"corrupt backup").unwrap();
