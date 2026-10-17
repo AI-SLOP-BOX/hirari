@@ -822,6 +822,14 @@
     static bool normalizeWarpMarkers(const std::vector<Region::WarpMarker>& input,
                                      uint64_t sourceSpan, uint64_t timelineLength,
                                      std::vector<Region::WarpMarker>& ordered) {
+        // An empty marker list is valid: it means "no warp markers", which is
+        // the state of nearly every region. The normalizer below reports
+        // emptiness with a null pointer, which previously made clearing (or
+        // restoring) an unmarked region fail and broke project loading.
+        if (input.empty()) {
+            ordered.clear();
+            return true;
+        }
         static_assert(sizeof(Region::WarpMarker) == sizeof(HirariWarpMarker));
         size_t produced = 0;
         HirariWarpMarker* result = hirari_region_normalize_warp_markers(

@@ -35,7 +35,17 @@
             return false;
         }
     }
-    AudioBuffer blockBuffer(2, 1024);
+    // Tracks size their per-track buffers to the engine block size, and
+    // Track::canProcess() silently skips any block larger than that. A fixed
+    // 1024-sample render block therefore bounced every track prepared at a
+    // smaller device block size (256/512) as full-length silence. Render in
+    // chunks that never exceed the prepared block size so offline output
+    // matches the live graph. The chunk size is deterministic per engine
+    // configuration, keeping bounces reproducible.
+    const uint32_t engineBlockSize = get_block_size();
+    const uint32_t renderChunk =
+        engineBlockSize > 0 ? std::min(1024u, engineBlockSize) : 1024u;
+    AudioBuffer blockBuffer(2, renderChunk);
     // The render must be reproducible: two bounces of the same project have to
     // produce the same file. The dither seed therefore comes from a fixed pair
     // of constants rather than the wall clock. The channels use different
@@ -72,7 +82,7 @@
         }
     }
 
-    for (uint32_t s = 0; s < totalSamples; s += 1024) {
+    for (uint32_t s = 0; s < totalSamples; s += renderChunk) {
         if (!waitForBounceControl()) {
             m_playhead.store(originalPlayhead);
             m_isPlaying.store(wasPlaying);
@@ -81,7 +91,7 @@
             m_bounceState.store(static_cast<uint32_t>(BounceState::Cancelled), std::memory_order_release);
             return false;
         }
-        uint32_t sz = std::min(1024u, totalSamples - s);
+        uint32_t sz = std::min(renderChunk, totalSamples - s);
         processBlock(blockBuffer, 0, sz);
         // Silence is valid output from the actual project graph. Never
         // replace it with direct track rendering: that would bypass solo,

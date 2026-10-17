@@ -201,7 +201,16 @@ impl HirariCore {
 
         let sample_rate = u32::try_from(document.sample_rate as u64)
             .map_err(|_| anyhow::anyhow!("project sample rate is out of range"))?;
-        let block_size = engine.get_block_size().max(1);
+        // Keep the current device block size if it is a usable one;
+        // otherwise fall back to a standard offline block. A fresh engine
+        // reports 0, and `max(1)` turned that into a 1-sample block, which
+        // the native graph accepts but cannot render through — every bounce
+        // of a just-loaded project came out full-length and silent.
+        // This mirrors the validated set in `apply_audio_config`.
+        let block_size = match engine.get_block_size() {
+            32 | 64 | 128 | 256 | 512 | 1024 | 2048 => engine.get_block_size(),
+            _ => 1024,
+        };
 
         // Hydration mutates the native graph incrementally. Keep a native
         // snapshot so a failed track/region restore cannot leave a partially
@@ -669,54 +678,102 @@ impl HirariCore {
             } else {
                 true
             };
-            if !engine.set_region_gain(native_track_id, native_region.id, region.clip_gain)
-                || !engine.set_region_muted(native_track_id, native_region.id, region.muted)
-                || !engine.set_region_fades(
+            // The document stores fades as absolute samples, but the native
+            // setter takes timeline-normalized fractions (matching how it
+            // derives them from its own state: fadeInSamples / len).
+            // Passing raw samples rejected every region whose default
+            // 64-sample fades exceeded the 0..1 range, so no
+            // natively-created project could be reloaded at all.
+            let fade_base = region.length.max(1) as f64;
+            let fade_in = (region.fade_in_samples as f64 / fade_base).clamp(0.0, 1.0) as f32;
+            let fade_out =
+                (region.fade_out_samples as f64 / fade_base).clamp(0.0, 1.0) as f32;
+            // Each envelope setter is checked separately so a failure names
+            // the step instead of the whole region: a single combined
+            // boolean hid which of the eleven calls rejected the restore.
+            macro_rules! restore_step {
+                ($label:literal, $call:expr) => {
+                    if !$call {
+                        return Err(rollback_error(anyhow::anyhow!(
+                            "native engine failed to restore region envelope {} at {}",
+                            region.id,
+                            $label
+                        )));
+                    }
+                };
+            }
+            restore_step!(
+                "gain",
+                engine.set_region_gain(native_track_id, native_region.id, region.clip_gain)
+            );
+            restore_step!(
+                "muted",
+                engine.set_region_muted(native_track_id, native_region.id, region.muted)
+            );
+            restore_step!(
+                "fades",
+                engine.set_region_fades(native_track_id, native_region.id, fade_in, fade_out)
+            );
+            if !trim_ok {
+                return Err(rollback_error(anyhow::anyhow!(
+                    "native engine failed to restore region envelope {} at trim",
+                    region.id
+                )));
+            }
+            restore_step!(
+                "reverse",
+                engine.set_region_reverse(native_track_id, native_region.id, region.reverse)
+            );
+            restore_step!(
+                "warp_ratio",
+                engine.set_region_warp_ratio(
                     native_track_id,
                     native_region.id,
-                    region.fade_in_samples as f32,
-                    region.fade_out_samples as f32,
+                    region.warp_ratio
                 )
-                || !trim_ok
-                || !engine.set_region_reverse(native_track_id, native_region.id, region.reverse)
-                || !engine.set_region_warp_ratio(
+            );
+            restore_step!(
+                "pitch_preserve_warp",
+                engine.set_region_pitch_preserve_warp(
                     native_track_id,
                     native_region.id,
-                    region.warp_ratio,
+                    region.pitch_preserve_warp
                 )
-                || !engine.set_region_pitch_preserve_warp(
+            );
+            restore_step!(
+                "pitch_semitones",
+                engine.set_region_pitch_semitones(
                     native_track_id,
                     native_region.id,
-                    region.pitch_preserve_warp,
+                    region.pitch_semitones
                 )
-                || !engine.set_region_pitch_semitones(
+            );
+            restore_step!(
+                "loop_count",
+                engine.set_region_loop_count(
                     native_track_id,
                     native_region.id,
-                    region.pitch_semitones,
+                    region.loop_count
                 )
-                || !engine.set_region_loop_count(
+            );
+            restore_step!(
+                "sync_group",
+                engine.set_region_sync_group(
                     native_track_id,
                     native_region.id,
-                    region.loop_count,
+                    region.sync_group
                 )
-                || !engine.set_region_sync_group(
-                    native_track_id,
-                    native_region.id,
-                    region.sync_group,
-                )
-                || !engine.set_region_warp_markers(
+            );
+            restore_step!(
+                "warp_markers",
+                engine.set_region_warp_markers(
                     native_track_id,
                     native_region.id,
                     &warp_sources,
                     &warp_timeline,
-                    &warp_transients,
+                    &warp_transients
                 )
-            {
-                return Err(rollback_error(anyhow::anyhow!(
-                    "native engine failed to restore region envelope {}",
-                    region.id
-                )));
-            }
+            );
         }
 
         // Sidechain routes are logical project data; their runtime buffers
