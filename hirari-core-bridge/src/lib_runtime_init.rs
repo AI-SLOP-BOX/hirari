@@ -47,6 +47,14 @@ impl HirariCore {
         if isolated {
             engine_ref.new_project();
             let _ = engine_ref.remove_track(0);
+            // `new_project` starts the transport, and
+            // `AudioEngine::apply_config_locked` refuses to reconfigure a
+            // playing engine. The void `apply_config` wrapper discards that
+            // refusal, so without this pause every offline/CLI/test core
+            // stayed at the engine's default 44100 and any project saved at
+            // another rate (e.g. `hirari project init <proj> 48000`) failed
+            // to load with "loaded engine sample rate differs from project".
+            engine_ref.set_playing(false);
         }
         // Engine bootstrap/template setup is not a user edit and must not
         // appear as the first undoable action of a new Core instance.
