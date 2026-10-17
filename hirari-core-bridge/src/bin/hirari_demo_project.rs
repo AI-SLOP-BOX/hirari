@@ -88,10 +88,19 @@ fn main() -> anyhow::Result<()> {
             imported_midi_notes += 1;
         }
     }
-    anyhow::ensure!(
-        core.save_project(&output),
-        "failed to save native Hirari project"
-    );
+    // Publish the canonical typed document. The native ARUA writer drops
+    // `scheduled_midi_notes`, and `ProjectDocument::load` -- which every CLI
+    // subcommand and the v2 save path go through -- cannot read that container.
+    // Saving natively produced a demo project that lost every imported note on
+    // reload and failed `hirari project inspect` / `hirari render mix` with
+    // "project document JSON is malformed".
+    let project_name = std::path::Path::new(&output)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("Hirari Demo");
+    core.save_project_v2(&output, project_name, core.get_tempo())
+        .map_err(|error| anyhow::anyhow!("failed to save Hirari project: {error}"))?;
     println!(
         "{{\"ok\":true,\"project\":{:?},\"tracks\":2,\"regions\":2,\"openutau\":{},\"midi_notes\":{}}}",
         output,

@@ -124,7 +124,22 @@ impl HirariCore {
         // project; otherwise history and external automation see a new project
         // after every save.
         if std::path::Path::new(path).is_file() {
-            document.project_id = ProjectDocument::load(path)?.project_id;
+            match ProjectDocument::load(path) {
+                Ok(existing) => document.project_id = existing.project_id,
+                Err(error) => {
+                    // A legacy ARUA container predates the typed document and
+                    // carries no project_id to preserve, so overwriting it is
+                    // the migration to v2. Propagating this read error made
+                    // every legacy project unsavable from the UI: the save
+                    // target already *is* a file that is not JSON, so the
+                    // first Save after opening one always failed. Any other
+                    // read failure still stops the save rather than silently
+                    // reassigning identity to a project that had one.
+                    if !crate::native_project::is_native_project(path).unwrap_or(false) {
+                        return Err(error);
+                    }
+                }
+            }
         }
         for artifact in &mut document.freeze_artifacts {
             let original_path = std::path::PathBuf::from(&artifact.path);

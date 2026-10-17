@@ -51,6 +51,39 @@ mod tests {
     }
 
     #[test]
+    fn saving_v2_over_a_legacy_native_project_migrates_and_keeps_midi_notes() {
+        let core = crate::HirariCore::new_offline().expect("offline core initializes");
+        let track = core.add_midi_track();
+        assert!(core.set_track_name(track, "Legacy Vocal"));
+        assert!(core.set_midi_note_lyric(track, 60, 100, 0, 24_000, "legacy note"));
+
+        let path = temp_path("legacy-hirari");
+        let path_text = path.to_string_lossy().into_owned();
+        // The retired native writer emits an ARUA container that carries
+        // neither a project_id nor MIDI notes. It is still a valid project the
+        // UI can open, so saving over it has to migrate instead of failing.
+        assert!(core.save_project(&path_text));
+        assert!(crate::native_project::is_native_project(&path_text).unwrap_or(false));
+
+        core.save_project_v2(&path_text, "Migrated", 120.0)
+            .expect("saving v2 over a legacy native project must not fail");
+
+        let document = ProjectDocument::load(&path_text).expect("save publishes a v2 document");
+        assert_eq!(
+            document
+                .tracks
+                .iter()
+                .find(|candidate| candidate.id == track)
+                .map(|candidate| candidate.name.as_str()),
+            Some("Legacy Vocal")
+        );
+        assert_eq!(document.midi_notes.len(), 1);
+        assert_eq!(document.midi_notes[0].lyric, "legacy note");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn track_rename_and_remove_preserve_document_invariants() {
         let mut document = ProjectDocument::from_layout_json("Ops", 120.0, 48_000.0, "[]").unwrap();
         let first = document.add_track("Audio", "Audio").unwrap();
