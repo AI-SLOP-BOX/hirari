@@ -7,6 +7,23 @@ members = [
 ]
 resolver = "2"
 
+# `target/` measured 44G under the default dev profile (full debuginfo plus
+# incremental), which left the volume at 168MiB free; `cargo clean` reported
+# 112,488 files / 164.5GiB reclaimed. With this setting and one clean, the
+# same workspace measures 8.0G (deps 4.4G, incremental 2.9G) and all 1328
+# tests still pass.
+#
+# `line-tables-only` keeps file:line in panic and assert backtraces — what
+# native-crash triage actually reads — and drops the type and variable
+# information that accounted for some of that bulk. It is not a substitute
+# for `cargo clean`: the larger share of the 44G was stale fingerprints from
+# older compilations, which only a clean removes. Measured honestly, the
+# individual artifacts shrank less than a headline figure would suggest (the
+# hirari-core-bridge rlib went 280M -> 208M, not to tens of megabytes), so
+# do not read this setting as a cleanup.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 panic = "abort"
 
