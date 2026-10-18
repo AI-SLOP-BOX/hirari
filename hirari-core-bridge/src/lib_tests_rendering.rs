@@ -1018,3 +1018,150 @@ fn cli_render_stems_path_is_audible_at_the_projects_sample_rate() {
     let _ = std::fs::remove_file(&project_path);
     let _ = std::fs::remove_dir_all(&output_dir);
 }
+
+/// Every `<format>` spelling `render stems` advertises must reach the engine
+/// and produce the container it names. The dispatcher used to reject all four
+/// but `wav` — `format != "wav"` printed usage and exited 2 — while the usage
+/// line one row above advertised `wav|wav-pcm24|wave64|wav-f32`, so the
+/// documented forms failed for no reason other than the missing branch. What
+/// makes this a regression rather than a formality is the numbering: the
+/// engine's `format` is 0=Pcm16, 1=Wave64, 2=Float32, 3=Pcm24, which is *not*
+/// the order the names appear in, so a dispatcher that passes an index rather
+/// than the mapped container silently writes the wrong encoding.
+#[test]
+fn cli_render_stems_format_names_reach_the_engine_as_the_container_they_name() {
+    let _guard = native_engine_test_guard();
+    let unique = format!(
+        "hirari-stem-format-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let wav_path = std::env::temp_dir().join(format!("{unique}-src.wav"));
+    let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
+    write_test_tone_wav(&wav_path, 44_100, 44_100);
+    let project_text = project_path.to_string_lossy().into_owned();
+    let builder = crate::HirariCore::new_offline().expect("offline core must initialize");
+    let track = builder.add_audio_track();
+    assert_ne!(track, 0);
+    assert!(builder.add_region(track, wav_path.to_str().unwrap(), 0.0));
+    builder
+        .save_project_v2(&project_text, "Stem Formats", 120.0)
+        .expect("save must succeed");
+
+    // (format name, engine format number, expected bytes-per-sample in the
+    // written file). The engine's numbering is 0=Pcm16, 1=Wave64, 2=Float32,
+    // 3=Pcm24 — deliberately not the order the names appear in the usage
+    // line, so an index passed through un-mapped writes the wrong container.
+    let cases: [(&str, u32, u32); 4] = [
+        ("wav", 0, 2),
+        ("wave64", 1, 4),
+        ("wav-f32", 2, 4),
+        ("wav-pcm24", 3, 3),
+    ];
+    for (name, engine_format, expected_bytes_per_sample) in cases {
+        let output_dir = std::env::temp_dir().join(format!("{unique}-{name}"));
+        std::fs::create_dir_all(&output_dir).expect("stem output dir must be created");
+        let core = crate::HirariCore::new_offline().expect("offline core must initialize");
+        core.load_project_v2(&project_text)
+            .expect("load must succeed");
+        let diagnostic = core.bounce_stems_diagnostic_json(
+            output_dir.to_string_lossy().as_ref(),
+            engine_format,
+            &[],
+            2.0,
+            false,
+            true,
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&diagnostic).expect("stems diagnostic must be valid JSON");
+        assert_eq!(
+            value.get("ok").and_then(serde_json::Value::as_bool),
+            Some(true),
+            "format {name} must bounce, got {diagnostic}"
+        );
+        let outputs = value
+            .get("outputs")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert!(!outputs.is_empty(), "format {name} must emit a file");
+        let stem_path = outputs[0].as_str().expect("output path must be a string");
+        let bytes = std::fs::read(stem_path).expect("stem file must exist");
+
+        // The two containers have unrelated layouts, and the Wave64 fields
+        // are read off `write_wave64_stream_header`: a 16-byte RIFF GUID, an
+        // 8-byte size, a 16-byte WAVE GUID, then 16-byte chunk GUIDs with
+        // 8-byte sizes.
+        //
+        // Fixed offsets are not usable here at all. A WAVE file may carry a
+        // `JUNK` chunk ahead of `fmt` (28 bytes in the file this was derived
+        // from), so byte 20 is not reliably the format tag — it is the id of
+        // whatever chunk comes first. Asserting a constant offset would test
+        // the padding rather than the encoding, and would pass or fail for a
+        // reason unrelated to the format requested. Walk the chunks instead.
+        let (bits, format_tag) = if name == "wave64" {
+            let mut offset = 40usize;
+            let mut tag = 0u16;
+            let mut depth = 0u16;
+            while offset + 24 <= bytes.len() {
+                let size = u64::from_le_bytes(bytes[offset + 16..offset + 24].try_into().unwrap())
+                    as usize;
+                let body = offset + 24;
+                if &bytes[offset..offset + 4] == b"fmt " {
+                    tag = u16::from_le_bytes(bytes[body..body + 2].try_into().unwrap());
+                    depth = u16::from_le_bytes(bytes[body + 14..body + 16].try_into().unwrap());
+                    break;
+                }
+                if size < 24 {
+                    break;
+                }
+                offset += size;
+            }
+            (depth, tag)
+        } else {
+            let mut offset = 12usize;
+            let mut tag = 0u16;
+            let mut depth = 0u16;
+            while offset + 8 <= bytes.len() {
+                let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap())
+                    as usize;
+                let body = offset + 8;
+                if &bytes[offset..offset + 4] == b"fmt " {
+                    tag = u16::from_le_bytes(bytes[body..body + 2].try_into().unwrap());
+                    depth = u16::from_le_bytes(bytes[body + 14..body + 16].try_into().unwrap());
+                    break;
+                }
+                if size < 8 {
+                    break;
+                }
+                offset = body + size + (size & 1);
+            }
+            (depth, tag)
+        };
+        assert_eq!(
+            bits as u32,
+            expected_bytes_per_sample * 8,
+            "format {name} must write {expected_bytes_per_sample}-byte samples, got {bits} bits"
+        );
+
+        // The container family matters as much as the width: engine formats 1
+        // and 3 both land at 4 bytes on disk only in the float case, so a
+        // dispatcher that passed an index instead of the mapped container
+        // would still write a well-formed file, just not the one asked for.
+        // WAVE64 is specified as IEEE float, so its tag is 3 like wav-f32 —
+        // not the 1 a plain PCM file carries, and not a value to guess.
+        let expected_tag = if name == "wav-f32" || name == "wave64" { 3 } else { 1 };
+        assert_eq!(
+            format_tag, expected_tag,
+            "format {name} must write the container it names (fmt tag {expected_tag}), got \
+             {format_tag} at width {bits} bits"
+        );
+        let _ = std::fs::remove_dir_all(&output_dir);
+    }
+
+    let _ = std::fs::remove_file(&wav_path);
+    let _ = std::fs::remove_file(&project_path);
+}

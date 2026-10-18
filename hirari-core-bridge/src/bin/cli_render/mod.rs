@@ -4,6 +4,26 @@ use hirari_core_bridge::command_api::{
     PROTOCOL_VERSION,
 };
 use hirari_core_bridge::project::ProjectDocument;
+use hirari_core_bridge::stable_api::WaveContainer;
+
+/// Resolve a `<format>` argument to the container enum, whose `native_format`
+/// value is what the engine's `format` parameter expects (0=Pcm16, 1=Wave64,
+/// 2=Float32, 3=Pcm24 — see `HirariUnifiedEngine::bounce_project`).
+///
+/// `render stems` documented all four formats in its usage line but only ever
+/// accepted `wav`: the dispatcher tested `format != "wav"` and printed usage,
+/// exiting 2 for `render stems <proj> <dir> wav-pcm24` even though that exact
+/// spelling is advertised one line above. The formats were reachable on
+/// `render mix`, so a user reasonably expected the same words to work here.
+fn parse_container(raw: &str) -> Option<WaveContainer> {
+    match raw {
+        "wav" => Some(WaveContainer::Wav),
+        "wav-pcm24" => Some(WaveContainer::WavPcm24),
+        "wave64" => Some(WaveContainer::Wave64),
+        "wav-f32" => Some(WaveContainer::WavFloat32),
+        _ => None,
+    }
+}
 
 /// Handle render subcommands from an immutable argv slice. The legacy
 /// iterator dispatcher consumes values while evaluating match guards, which
@@ -20,11 +40,18 @@ pub(super) fn try_handle(raw_args: &[String]) -> bool {
     // `render stems <project> <output-dir>` is the documented minimal form,
     // so the format argument is optional and defaults to `wav`. The previous
     // dispatcher only accepted 5 or 7 arguments, which made the documented
-    // 4-argument form print usage and exit 2 even though it is valid.
-    let format = raw_args.get(4).map(String::as_str).unwrap_or("wav");
-    if format != "wav"
-        || (raw_args.len() > 5 && raw_args.get(5).map(String::as_str) != Some("--request-id"))
-    {
+    // 4-argument form print usage and exit 2 even though it is valid — and
+    // then, once that was repaired, it rejected every format but `wav` even
+    // though the usage line advertises all four. Accept the same spellings
+    // `render mix` takes.
+    let (format_name, container) = match raw_args.get(4).map(String::as_str) {
+        None => ("wav", WaveContainer::Wav),
+        Some(name) => match parse_container(name) {
+            Some(container) => (name, container),
+            None => usage(),
+        },
+    };
+    if raw_args.len() > 5 && raw_args.get(5).map(String::as_str) != Some("--request-id") {
         usage();
     }
     let request_id = if raw_args.len() == 4 || raw_args.len() == 5 {
@@ -68,7 +95,7 @@ pub(super) fn try_handle(raw_args: &[String]) -> bool {
             expected_audio_generation: None,
             actions: vec![CommandAction::BounceStems {
                 output_dir: output_dir.clone(),
-                format: 0,
+                format: container.native_format(),
                 track_ids: Vec::new(),
                 tail_seconds: 2.0,
                 pre_fader: false,
@@ -113,9 +140,16 @@ pub(super) fn try_handle(raw_args: &[String]) -> bool {
         );
         std::process::exit(1);
     }
-    // format 0 = wav, all tracks, 2s tail, post-fader with inserts — the same
-    // values carried by the `BounceStems` action in the request envelope above.
-    let diagnostic = core.bounce_stems_diagnostic_json(output_dir, 0, &[], 2.0, false, true);
+    // The same container the `BounceStems` action above carries, so the
+    // rendered files and the echoed request can never disagree.
+    let diagnostic = core.bounce_stems_diagnostic_json(
+        output_dir,
+        container.native_format(),
+        &[],
+        2.0,
+        false,
+        true,
+    );
     let paths: Vec<String> = match serde_json::from_str::<serde_json::Value>(&diagnostic) {
         Ok(value) if value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) => value
             .get("outputs")
@@ -149,6 +183,7 @@ pub(super) fn try_handle(raw_args: &[String]) -> bool {
             "operation": "render.stems",
             "project": project.project_id,
             "track_count": project.tracks.len(),
+            "format": format_name,
             "files": paths,
             "request": request,
         }))

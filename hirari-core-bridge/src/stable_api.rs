@@ -26,7 +26,13 @@ pub enum WaveContainer {
 }
 
 impl WaveContainer {
-    fn native_format(self) -> u32 {
+    /// The engine's numbering for this container, consumed by
+    /// `HirariUnifiedEngine::bounce_project` as its `format` parameter
+    /// (0=Pcm16, 1=Wave64, 2=Float32, 3=Pcm24). Kept public so every caller
+    /// that reaches the engine — `render mix`, `render stems`, the UI's export
+    /// path — maps through this one table instead of restating the numbers,
+    /// which is how the two already disagreed once.
+    pub fn native_format(self) -> u32 {
         match self {
             Self::Wav => 0,
             Self::Wave64 => 1,
