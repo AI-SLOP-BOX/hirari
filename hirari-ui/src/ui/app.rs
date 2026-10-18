@@ -892,9 +892,9 @@ pub fn run() {
         tracks_vec.clone(),
         last_saved_project_path.clone(),
         persisted_snapshot.clone(),
-        session_recovery_path,
+        session_recovery_path.clone(),
         operation_gate.clone(),
-        project_save_queue,
+        project_save_queue.clone(),
         dawproject_import_queue,
         markers_vec.clone(),
         tone_test_started_ms.clone(),
@@ -934,7 +934,15 @@ pub fn run() {
 
     #[cfg(debug_assertions)]
     if std::env::var("HIRARI_UI_SMOKE").as_deref() == Ok("production-workflow") {
-        if !crate::ui::smoke::run_production_workflow(&ui, &core) {
+        let pump = crate::ui::smoke::SavePumpContext {
+            tracks: &tracks_vec,
+            last_saved_path: &last_saved_project_path,
+            persisted_snapshot: &persisted_snapshot,
+            session_recovery_path: &session_recovery_path,
+            operation_gate: &operation_gate,
+            save_queue: &project_save_queue,
+        };
+        if !crate::ui::smoke::run_production_workflow(&ui, &core, &pump) {
             std::process::exit(1);
         }
         return;

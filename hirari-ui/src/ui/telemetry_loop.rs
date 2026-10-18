@@ -277,7 +277,10 @@ fn arrangement_measure_starts(events: &[f64], end_beat: f32) -> Vec<Z_MeasureSta
 }
 
 #[allow(clippy::too_many_arguments)]
-fn poll_project_autosave(
+// Shared with the production smoke harness so the smoke path drives the exact
+// autosave pump the 32ms UI timer uses, rather than re-implementing the
+// `SAVED:` completion labelling and getting it subtly out of sync.
+pub(crate) fn poll_project_autosave(
     ui: &AppWindow,
     core: &HirariCore,
     tracks: &slint::VecModel<Z_Track>,

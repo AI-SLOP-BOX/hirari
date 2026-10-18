@@ -3,11 +3,32 @@ use slint::ComponentHandle;
 
 use crate::slint_ui::{
     AppWindow, AudioSettingsActions, BounceState, PluginActions, ProjectActions, RenderActions,
+    Z_Track,
 };
+
+/// The shared UI state the autosave pump needs.
+///
+/// The production 32ms timer owns its own copies of these. The smoke harness is
+/// handed the same values so it can drive the identical
+/// [`crate::ui::telemetry_loop::poll_project_autosave`] path instead of
+/// re-implementing the `SAVED:` completion labelling and drifting out of sync
+/// with it.
+pub(crate) struct SavePumpContext<'a> {
+    pub(crate) tracks: &'a slint::VecModel<Z_Track>,
+    pub(crate) last_saved_path: &'a std::cell::RefCell<Option<String>>,
+    pub(crate) persisted_snapshot: &'a std::cell::Cell<Option<u64>>,
+    pub(crate) session_recovery_path: &'a std::cell::RefCell<Option<std::path::PathBuf>>,
+    pub(crate) operation_gate: &'a crate::ui::operation_gate::OperationGate,
+    pub(crate) save_queue: &'a crate::ui::project_save_queue::ProjectSaveQueue,
+}
 
 /// Runs the production workflow used by CI without making the application
 /// bootstrap own the scenario details.
-pub fn run_production_workflow(ui: &AppWindow, core: &HirariCore) -> bool {
+pub(crate) fn run_production_workflow(
+    ui: &AppWindow,
+    core: &HirariCore,
+    pump: &SavePumpContext<'_>,
+) -> bool {
     let token = format!(
         "hirari-ui-workflow-{}-{}",
         std::process::id(),
@@ -190,6 +211,37 @@ pub fn run_production_workflow(ui: &AppWindow, core: &HirariCore) -> bool {
     let project_path_text = project_path.to_string_lossy().into_owned();
     ui.global::<ProjectActions>()
         .invoke_save_project(project_path_text.clone().into());
+    // A manual save is asynchronous by design: `invoke_save_project` only
+    // enqueues a snapshot, and the queued save is advanced by the 32ms autosave
+    // timer that lives inside the Slint event loop. This harness returns before
+    // `run_event_loop()`, so without help nothing would ever tick it and the
+    // assertions below would fail on a pipeline that never started rather than
+    // on a product defect. Drive the production pump by hand until the
+    // completion lands, so `project=true` observes the real save pipeline.
+    let mut autosave_elapsed_ms = 0u32;
+    let mut last_observed_fingerprint = None;
+    let mut dirty_since = None;
+    let mut last_edit_at = std::time::Instant::now();
+    let mut last_attempt = None;
+    let save_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !ui.get_last_action().starts_with("SAVED:") && std::time::Instant::now() < save_deadline {
+        crate::ui::telemetry_loop::poll_project_autosave(
+            ui,
+            core,
+            pump.tracks,
+            pump.last_saved_path,
+            pump.persisted_snapshot,
+            pump.session_recovery_path,
+            pump.operation_gate,
+            pump.save_queue,
+            &mut autosave_elapsed_ms,
+            &mut last_observed_fingerprint,
+            &mut dirty_since,
+            &mut last_edit_at,
+            &mut last_attempt,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     let project_saved_via_ui = ui.get_last_action().starts_with("SAVED:");
     ui.global::<ProjectActions>()
         .invoke_load_project(project_path_text.into());
