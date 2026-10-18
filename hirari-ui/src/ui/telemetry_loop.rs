@@ -601,7 +601,6 @@ pub(crate) fn install_telemetry_loop(
     render_started_ms: Arc<AtomicU64>,
     render_output_path: Arc<Mutex<std::path::PathBuf>>,
     render_lease: Arc<Mutex<Option<crate::ui::operation_gate::OperationLease>>>,
-    stem_batch: Arc<Mutex<Option<crate::ui::render::StemExportBatch>>>,
     recording_target: Rc<RefCell<Option<Vec<(u32, Vec<u16>)>>>>,
     peak_reset_generation: Rc<Cell<u64>>,
     gpu_plot_store: crate::ui::gpu_canvas::PlotFrameStore,
@@ -621,7 +620,6 @@ pub(crate) fn install_telemetry_loop(
     let tone_test_baseline_callbacks_tele = tone_test_baseline_callbacks.clone();
     let render_started_ms_tele = render_started_ms.clone();
     let render_output_path_tele = render_output_path.clone();
-    let stem_batch_tele = stem_batch.clone();
     let gpu_plot_store_tele = gpu_plot_store.clone();
     let operation_gate_tele = operation_gate.clone();
     let import_queue_tele = import_queue.clone();
@@ -1135,7 +1133,6 @@ pub(crate) fn install_telemetry_loop(
                     &render_started_ms_tele,
                     &render_output_path_tele,
                     &render_lease,
-                    &stem_batch_tele,
                 );
 
                 // Transport state can change outside the UI callback (device

@@ -20,6 +20,12 @@ pub(crate) struct SavePumpContext<'a> {
     pub(crate) session_recovery_path: &'a std::cell::RefCell<Option<std::path::PathBuf>>,
     pub(crate) operation_gate: &'a crate::ui::operation_gate::OperationGate,
     pub(crate) save_queue: &'a crate::ui::project_save_queue::ProjectSaveQueue,
+    /// Held by whichever render action ran. The smoke workflow drives more
+    /// than one of them without an event loop to finish the first, so it has
+    /// to hand the gate back itself — exactly what `finish_*` in
+    /// `telemetry_render` would have done.
+    pub(crate) render_lease:
+        &'a std::sync::Arc<std::sync::Mutex<Option<crate::ui::operation_gate::OperationLease>>>,
 }
 
 /// Runs the production workflow used by CI without making the application
@@ -319,6 +325,75 @@ pub(crate) fn run_production_workflow(
         (warp_value - 1.1).abs() < 0.0001 && (pitch_value - 2.0).abs() < 0.0001 && loop_value == 2;
     let state_restored = project_ok && edit_values_restored && automation_values_restored;
 
+    // The GUI's stems entry point has to hand core a batch it accepted and
+    // armed. This is the only place that callback can be observed: it decodes
+    // core's `prepare` and `next` documents and kicks the engine, which is
+    // exactly where the GUI used to keep its own naming, selection and
+    // destination checks. The telemetry timer that walks the *remaining*
+    // stems does not run here, because the smoke workflow drives the app
+    // before the event loop starts; that half is covered by
+    // `a_surface_can_step_the_core_owned_stem_batch_to_completion`.
+    let stem_dir = std::env::temp_dir().join(format!("{token}-stems"));
+    let stem_jobs: Vec<(u32, String)> =
+        serde_json::from_str::<serde_json::Value>(&core.get_project_layout_json())
+            .ok()
+            .and_then(|layout| layout.as_array().map(ToOwned::to_owned))
+            .map(|tracks| {
+                tracks
+                    .iter()
+                    .filter(|track| {
+                        track
+                            .get("id")
+                            .and_then(serde_json::Value::as_u64)
+                            .is_some_and(|id| id > 0)
+                            && track.get("type").and_then(serde_json::Value::as_str) != Some("FOLD")
+                    })
+                    .filter_map(|track| {
+                        Some((
+                            track.get("id")?.as_u64()? as u32,
+                            track.get("name")?.as_str()?.to_owned(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    let stem_total = stem_jobs.len();
+    let stems_invoked = stem_total > 0 && std::fs::create_dir_all(&stem_dir).is_ok();
+    if stems_invoked {
+        let jobs_json = serde_json::to_string(&stem_jobs).unwrap_or_default();
+        ui.global::<RenderActions>().invoke_start_stems(
+            stem_dir.to_string_lossy().into_owned().into(),
+            jobs_json.into(),
+        );
+    }
+    // The batch exists only if the callback got past its own decoding of
+    // core's documents and kicked the engine for the first armed stem.
+    let stem_batch_ok = stems_invoked && core.stem_batch_progress() == Some((0, stem_total as u32));
+    if stem_batch_ok {
+        // Wait for that first stem so the folder can be removed without
+        // racing the engine's bounce thread.
+        let stem_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < stem_deadline {
+            if let Some((state, _)) = core.get_bounce_status() {
+                if state == BounceState::Complete as u32 || state == BounceState::Failed as u32 {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    // Hand back what `on_start_stems` claimed. Nothing finishes it here —
+    // there is no event loop to run the timer — and the mix render below
+    // refuses to start while the gate is held by a batch no timer advances.
+    core.stem_batch_abort();
+    if let Ok(mut lease) = pump.render_lease.lock() {
+        lease.take();
+    }
+    ui.set_is_rendering(false);
+    ui.global::<RenderActions>().set_stem_export_mode(false);
+    ui.set_render_state("IDLE".into());
+    let _ = std::fs::remove_dir_all(&stem_dir);
+
     ui.global::<RenderActions>()
         .invoke_start_render(render_path.to_string_lossy().into_owned().into(), 0);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -420,9 +495,12 @@ pub(crate) fn run_production_workflow(
         && render_ok
         // Silence is valid for an empty project; non-silent capture is
         // reported separately above and is not a container-format failure.
-        && render_spec_ok;
+        && render_spec_ok
+        // An entry point that silently failed to hand core a batch would
+        // otherwise look like a green stems export.
+        && stem_batch_ok;
     println!(
-        "HIRARI_UI_SMOKE production_workflow recording={} capture_non_silent={} edit={} automation={} plugin={} preset={} preset_value={:.3} plugin_state_restored={} sidechain={} sidechain_restored={} comping={} comp_take_id={} comp_at_1={:?} project={} state_restored={} edit_values_restored={} automation_values_restored={} automation_snapshot={} warp={:.3} pitch={:.3} loop={} render={} render_spec_ok={} render_non_silent={} action={}",
+        "HIRARI_UI_SMOKE production_workflow recording={} capture_non_silent={} edit={} automation={} plugin={} preset={} preset_value={:.3} plugin_state_restored={} sidechain={} sidechain_restored={} comping={} comp_take_id={} comp_at_1={:?} project={} state_restored={} edit_values_restored={} automation_values_restored={} automation_snapshot={} warp={:.3} pitch={:.3} loop={} render={} render_spec_ok={} render_non_silent={} stem_batch={} action={}",
         recording_ok,
         capture_non_silent,
         edit_ok,
@@ -447,11 +525,13 @@ pub(crate) fn run_production_workflow(
         render_ok,
         render_spec_ok,
         render_non_silent,
+        stem_batch_ok,
         ui.get_last_action()
     );
     let _ = std::fs::remove_file(project_path);
     let _ = std::fs::remove_file(pre_reload_render_path);
     let _ = std::fs::remove_file(render_path);
     let _ = std::fs::remove_file(preset_path);
+    let _ = std::fs::remove_dir_all(&stem_dir);
     workflow_ok
 }

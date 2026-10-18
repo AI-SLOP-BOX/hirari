@@ -80,14 +80,23 @@ pub struct StemBatchState {
     tracks: Vec<(u32, std::path::PathBuf)>,
     /// Files this batch published; removed together if any stem fails.
     published: Vec<std::path::PathBuf>,
+    /// Container the surface should render each stem into. Kept here so the
+    /// completion document can report the batch as it actually ran, instead
+    /// of a surface re-reading its own UI selection after the fact.
+    format: u32,
 }
 
 impl StemBatchState {
-    pub fn new(tracks: Vec<(u32, std::path::PathBuf)>) -> Self {
+    pub fn new(tracks: Vec<(u32, std::path::PathBuf)>, format: u32) -> Self {
         Self {
             tracks,
             published: Vec::new(),
+            format,
         }
+    }
+
+    pub fn format(&self) -> u32 {
+        self.format
     }
 
     /// The next stem to arm, or `None` once every track has been rendered.

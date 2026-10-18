@@ -407,8 +407,8 @@ impl HirariCore {
     /// destination through the one shared naming policy, and park the queue
     /// on the core.
     ///
-    /// Returns `{"ok":true,"total":N}` on success, or the same bare error
-    /// document `hirari render stems` has always emitted — the codes and
+    /// Returns `{"ok":true,"total":N,"format":F}` on success, or the same bare
+    /// error document `hirari render stems` has always emitted — the codes and
     /// messages are unchanged on purpose, they are the CLI's contract.
     ///
     /// The control-plane transaction is held only while the layout is
@@ -525,10 +525,10 @@ impl HirariCore {
                 if let Some(mut abandoned) = parked.take() {
                     abandoned.rollback();
                 }
-                let batch = crate::stem_export::StemBatchState::new(planned);
+                let batch = crate::stem_export::StemBatchState::new(planned, format);
                 let total = batch.progress().1;
                 *parked = Some(batch);
-                serde_json::json!({"ok": true, "total": total}).to_string()
+                serde_json::json!({"ok": true, "total": total, "format": format}).to_string()
             }
             Err(_) => stem_batch_unavailable(),
         }
@@ -546,10 +546,15 @@ impl HirariCore {
             return "{\"code\":\"stem_batch_not_started\",\"retryable\":false}".to_owned();
         };
         if batch.is_complete() {
-            let outputs = batch.outputs();
+            let (outputs, format) = (batch.outputs(), batch.format());
             *parked = None;
-            return serde_json::json!({"ok": true, "state": "complete", "outputs": outputs})
-                .to_string();
+            return serde_json::json!({
+                "ok": true,
+                "state": "complete",
+                "outputs": outputs,
+                "format": format,
+            })
+            .to_string();
         }
         let (track_id, path) = match batch.next_target() {
             Some(target) => target,
@@ -584,6 +589,7 @@ impl HirariCore {
             "state": "ready",
             "index": rendered,
             "total": total,
+            "format": batch.format(),
             "track_id": track_id,
             "output": path.to_string_lossy(),
         })
@@ -637,10 +643,15 @@ impl HirariCore {
             engine.clear_offline_render_target();
         }
         if batch.is_complete() {
-            let outputs = batch.outputs();
+            let (outputs, format) = (batch.outputs(), batch.format());
             *parked = None;
-            return serde_json::json!({"ok": true, "state": "complete", "outputs": outputs})
-                .to_string();
+            return serde_json::json!({
+                "ok": true,
+                "state": "complete",
+                "outputs": outputs,
+                "format": format,
+            })
+            .to_string();
         }
         let (rendered_count, total) = batch.progress();
         serde_json::json!({"ok": true, "state": "stem_done", "index": rendered_count, "total": total})

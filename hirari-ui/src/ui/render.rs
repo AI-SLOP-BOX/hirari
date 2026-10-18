@@ -10,32 +10,118 @@ use crate::slint_ui::{
     RenderActions, UiErrorKind,
 };
 use crate::ui::operation_gate::{OperationGate, OperationKind};
-use std::collections::HashSet;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug)]
-pub(crate) struct StemExportJob {
-    pub(crate) track_id: u32,
-    pub(crate) output: PathBuf,
+/// A stems export is owned by core (`stem_batch_*`), which does the track
+/// selection, the naming, the destination check, the per-stem WAV validation
+/// and the rollback of a partly written batch. Each surface only renders the
+/// stem core arms and reports the result back, so these variants are the
+/// whole of what a surface has to understand.
+#[derive(Debug)]
+pub(crate) enum StemStep {
+    /// A stem is armed: render `output` into `format`.
+    Ready {
+        output: PathBuf,
+        total: u32,
+        format: u32,
+    },
+    /// One stem published; `stem_batch_next` now reports the following target.
+    StemDone { rendered: u32, total: u32 },
+    /// The whole batch published.
+    Complete { outputs: Vec<String>, format: u32 },
+    /// Core rejected the batch or rolled it back; this is its reason.
+    Failed(String),
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct StemExportBatch {
-    pub(crate) output_dir: PathBuf,
-    pub(crate) format: u32,
-    pub(crate) jobs: Vec<StemExportJob>,
-    pub(crate) current: usize,
-    pub(crate) started: usize,
-}
-
-// Stem filenames are no longer derived here: `hirari_core_bridge::stem_export`
-// owns the single policy shared with the CLI's `render stems`.
-
-pub(crate) fn queue_stem(core: &HirariCore, job: &StemExportJob, format: u32) -> bool {
-    if job.output.exists() || !core.set_offline_render_target(job.track_id) {
-        return false;
+/// Decodes one `stem_batch_*` document. Core owns every code; this only maps
+/// a document onto what a surface has to do next.
+pub(crate) fn stem_step(document: &str) -> StemStep {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(document) else {
+        return StemStep::Failed("engine returned an unreadable stem export status".to_owned());
+    };
+    if value.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+        return StemStep::Failed(stem_failure_reason(&value));
     }
-    core.start_render_async_to_format(job.output.to_string_lossy().as_ref(), format)
+    let number = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as u32
+    };
+    match value.get("state").and_then(serde_json::Value::as_str) {
+        Some("ready") => StemStep::Ready {
+            output: value
+                .get("output")
+                .and_then(serde_json::Value::as_str)
+                .map(PathBuf::from)
+                .unwrap_or_default(),
+            total: number("total"),
+            format: number("format"),
+        },
+        Some("stem_done") => StemStep::StemDone {
+            rendered: number("index"),
+            total: number("total"),
+        },
+        Some("complete") => StemStep::Complete {
+            outputs: value
+                .get("outputs")
+                .and_then(serde_json::Value::as_array)
+                .map(|outputs| {
+                    outputs
+                        .iter()
+                        .filter_map(|output| output.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            format: number("format"),
+        },
+        _ => StemStep::Failed("stem export reported an unexpected state".to_owned()),
+    }
+}
+
+/// Turns core's bare error document into the sentence the action log shows.
+/// The codes stay core's; this is only the translation for a human.
+pub(crate) fn stem_failure_reason(value: &serde_json::Value) -> String {
+    let code = value
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let message = value.get("message").and_then(serde_json::Value::as_str);
+    match (code, message) {
+        ("stem_render_failed", Some(message)) => message.to_owned(),
+        ("stem_output_exists", _) => value
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .map(|path| format!("stem output already exists: {path}"))
+            .unwrap_or_else(|| "stem output already exists".to_owned()),
+        ("invalid_stem_track_selection", _) => "invalid stem track selection".to_owned(),
+        ("stem_track_not_found", _) => "one of the selected tracks no longer exists".to_owned(),
+        ("no_tracks_for_stem_export", _) => "there are no tracks to export".to_owned(),
+        ("invalid_stem_output_directory", _) => "stem output folder is unavailable".to_owned(),
+        ("unsupported_render_format", _) => "unsupported render format".to_owned(),
+        ("engine_unavailable", _) => "engine is unavailable".to_owned(),
+        ("project_transaction_busy", _) => "project is busy".to_owned(),
+        (code, _) => format!("stem export could not be prepared ({code})"),
+    }
+}
+
+/// `stem_batch_prepare` answers with `{"ok":true,...}` rather than a step, so
+/// this is what tells a surface whether core accepted the batch, and produces
+/// the sentence to show when it did not.
+pub(crate) fn prepare_rejected(document: &str) -> Option<String> {
+    match serde_json::from_str::<serde_json::Value>(document) {
+        Ok(value) if value.get("ok").and_then(serde_json::Value::as_bool) == Some(true) => None,
+        Ok(value) => Some(stem_failure_reason(&value)),
+        Err(_) => Some("engine returned an unreadable stem export status".to_owned()),
+    }
+}
+
+/// Kicks the engine's own bounce thread for an armed stem. Arming already
+/// happened inside `stem_batch_next`, which is the only thing that differs
+/// from the CLI: `render stems` blocks on the engine's synchronous bounce
+/// instead of letting its timer drive the queue.
+pub(crate) fn kick_stem(core: &HirariCore, output: &PathBuf, format: u32) -> bool {
+    core.start_render_async_to_format(output.to_string_lossy().as_ref(), format)
 }
 
 pub(crate) fn render_format_label(format: u32) -> &'static str {
@@ -79,7 +165,6 @@ pub(crate) fn install(
     output_path: Arc<Mutex<std::path::PathBuf>>,
     operation_gate: OperationGate,
     render_lease: Arc<Mutex<Option<crate::ui::operation_gate::OperationLease>>>,
-    stem_batch: Arc<Mutex<Option<StemExportBatch>>>,
 ) {
     let render_api = Rc::new(CoreApiV1::from_shared_core(core.clone()));
     let weak = ui.as_weak();
@@ -91,7 +176,6 @@ pub(crate) fn install(
         let output_path = output_path.clone();
         let operation_gate = operation_gate.clone();
         let render_lease = render_lease.clone();
-        let stem_batch = stem_batch.clone();
         move |requested_path, requested_format| {
             let Some(ui) = weak.upgrade() else { return };
             if ui.get_is_rendering() {
@@ -126,8 +210,10 @@ pub(crate) fn install(
                 })
                 .is_ok()
             {
-                if let Ok(mut batch) = stem_batch.lock() {
-                    *batch = None;
+                if core.stem_batch_progress().is_some() {
+                    // A parked stems batch must not outlive into a mix
+                    // render; core owns it, so core is what clears it.
+                    core.stem_batch_abort();
                 }
                 if let Ok(mut active) = render_lease.lock() {
                     *active = Some(lease);
@@ -166,7 +252,6 @@ pub(crate) fn install(
         let output_path = output_path.clone();
         let operation_gate = operation_gate.clone();
         let render_lease = render_lease.clone();
-        let stem_batch = stem_batch.clone();
         move |requested_dir, jobs_json| {
             let Some(ui) = weak.upgrade() else { return };
             if ui.get_is_rendering() {
@@ -181,92 +266,78 @@ pub(crate) fn install(
                 );
                 return;
             }
-            let requested = match serde_json::from_str::<Vec<(u32, String)>>(jobs_json.as_str()) {
-                Ok(jobs) if !jobs.is_empty() => jobs,
-                _ => {
-                    ui.set_last_action(
-                        ui_error_message(UiErrorKind::Render, "there are no tracks to export")
-                            .into(),
-                    );
-                    return;
-                }
-            };
-            let mut seen_ids = HashSet::with_capacity(requested.len());
-            let mut used_names = HashSet::with_capacity(requested.len());
-            let mut jobs = Vec::with_capacity(requested.len());
-            for (track_id, name) in requested {
-                if track_id == 0 || !seen_ids.insert(track_id) {
-                    ui.set_last_action(
-                        ui_error_message(UiErrorKind::Render, "invalid stem track selection")
-                            .into(),
-                    );
-                    return;
-                }
-                // One naming policy with the CLI's `render stems`.
-                let filename = hirari_core_bridge::stem_export::safe_stem_name(
-                    &name,
-                    track_id,
-                    &mut used_names,
+            // Only the ids matter: core derives every filename through the
+            // one policy shared with `render stems`, from the same project
+            // snapshot, so the two surfaces cannot disagree about names.
+            let Ok(requested) = serde_json::from_str::<Vec<(u32, String)>>(jobs_json.as_str())
+            else {
+                ui.set_last_action(
+                    ui_error_message(UiErrorKind::Render, "there are no tracks to export").into(),
                 );
-                let output = output_dir.join(format!("{filename}.wav"));
-                if output.exists() {
-                    ui.set_last_action(
-                        ui_error_message(
-                            UiErrorKind::Render,
-                            &format!("stem output already exists: {}", output.display()),
-                        )
-                        .into(),
-                    );
-                    return;
-                }
-                jobs.push(StemExportJob { track_id, output });
-            }
+                return;
+            };
+            let track_ids: Vec<u32> = requested
+                .into_iter()
+                .map(|(track_id, _)| track_id)
+                .collect();
             let Some(lease) = operation_gate.try_enter(OperationKind::Render) else {
                 ui.set_last_action("PROJECT BUSY: STEM EXPORT IGNORED".into());
                 return;
             };
             let selected_format = ui.global::<RenderActions>().get_render_format();
+            // Engine container numbering, which does not follow the order the
+            // options are listed in the UI; never pass an index through raw.
             let format = match selected_format {
                 1 => 3,
                 2 => 2,
                 3 => 1,
                 _ => 0,
             };
-            core.set_offline_render_tail_seconds(render_tail_seconds(
-                ui.global::<RenderActions>().get_render_tail_index(),
-            ));
-            core.set_offline_render_options(false, true);
-            let batch = StemExportBatch {
-                output_dir: output_dir.clone(),
+            // `prepare` validates the whole batch, names it, and rejects a
+            // destination that already holds a stem *before* anything is
+            // rendered. The trailing `false, true` is pre-fader off and
+            // inserts in, the same settings `render stems` passes.
+            let prepared = core.stem_batch_prepare(
+                output_dir.to_string_lossy().as_ref(),
                 format,
-                jobs,
-                current: 0,
-                started: 0,
-            };
-            let track_count = batch.jobs.len();
-            let first_job = batch.jobs[0].clone();
-            if !core.set_offline_render_target(first_job.track_id) {
-                core.clear_offline_render_target();
-                ui.set_last_action(
-                    ui_error_message(UiErrorKind::Render, "first stem target is unavailable")
-                        .into(),
-                );
+                &track_ids,
+                render_tail_seconds(ui.global::<RenderActions>().get_render_tail_index()),
+                false,
+                true,
+            );
+            if let Some(reason) = prepare_rejected(&prepared) {
+                // Dropping the lease here releases the gate again.
+                ui.set_last_action(ui_error_message(UiErrorKind::Render, &reason).into());
                 return;
             }
-            if !core
-                .start_render_async_to_format(first_job.output.to_string_lossy().as_ref(), format)
-            {
-                core.clear_offline_render_target();
+            let (first, track_count, first_format) = match stem_step(&core.stem_batch_next()) {
+                StemStep::Ready {
+                    output,
+                    total,
+                    format,
+                    ..
+                } => (output, total, format),
+                StemStep::Failed(reason) => {
+                    ui.set_last_action(ui_error_message(UiErrorKind::Render, &reason).into());
+                    return;
+                }
+                // `prepare` just parked a non-empty queue, so `next` cannot
+                // report anything other than its first target.
+                _ => {
+                    core.stem_batch_abort();
+                    ui.set_last_action(
+                        ui_error_message(UiErrorKind::Render, "stem export queue is invalid")
+                            .into(),
+                    );
+                    return;
+                }
+            };
+            if !kick_stem(&core, &first, first_format) {
+                core.stem_batch_abort();
                 ui.set_last_action(
                     ui_error_message(UiErrorKind::Render, "stem render could not be queued").into(),
                 );
                 return;
-            }
-            if let Ok(mut active_batch) = stem_batch.lock() {
-                *active_batch = Some(StemExportBatch {
-                    started: 1,
-                    ..batch
-                });
             }
             if let Ok(mut active) = render_lease.lock() {
                 *active = Some(lease);
@@ -359,7 +430,33 @@ pub(crate) fn install(
 
 #[cfg(test)]
 mod tests {
-    use super::cancellation_status;
+    use super::{cancellation_status, prepare_rejected, stem_step, StemStep};
+    use hirari_core_bridge::HirariCore;
+
+    /// Builds an offline core with the two tracks a stems batch needs, and a
+    /// private output folder for it to publish into.
+    fn batch_fixture(tag: &str) -> (HirariCore, u32, u32, std::path::PathBuf) {
+        let core = HirariCore::new_offline().expect("offline core initializes");
+        let first = core.add_audio_track();
+        let second = core.add_audio_track();
+        assert_ne!(first, 0, "first track must be valid");
+        assert_ne!(second, 0, "second track must be valid");
+        let output_dir = std::env::temp_dir().join(format!(
+            "hirari-stem-batch-{tag}-{}-{}",
+            std::process::id(),
+            crate::slint_ui::unix_time_millis()
+        ));
+        std::fs::create_dir_all(&output_dir).expect("stem output dir must be created");
+        (core, first, second, output_dir)
+    }
+
+    /// Stands in for the engine publishing the stem it was just asked for.
+    /// `settle(true)` validates this through the same `validate_render_output`
+    /// the CLI uses, so the batch only advances over a structurally valid WAV.
+    fn publish(output: &std::path::Path) {
+        hirari_core_bridge::export::write_wav_float32(output, &[0.25, -0.5], 48_000, 1)
+            .expect("simulated stem must be writable");
+    }
 
     #[test]
     fn cancellation_status_preserves_running_state_when_rejected() {
@@ -379,5 +476,156 @@ mod tests {
                 "RENDER CANCELLATION REJECTED"
             )
         );
+    }
+
+    /// The GUI walks a stems export one step at a time from its telemetry
+    /// timer, while `render stems` steps the same queue inside a single
+    /// blocking call. The blocking call is covered in core; this observes the
+    /// *stepwise* drive a surface outside core performs, which is where a
+    /// document the GUI cannot decode would strand an export mid-batch.
+    #[test]
+    fn a_surface_can_step_the_core_owned_stem_batch_to_completion() {
+        let (core, first, second, output_dir) = batch_fixture("walk");
+        let dir_text = output_dir.to_string_lossy().into_owned();
+
+        let prepared = core.stem_batch_prepare(&dir_text, 0, &[first, second], 2.0, false, true);
+        assert_eq!(
+            prepare_rejected(&prepared),
+            None,
+            "core must accept a two-track batch, got {prepared}"
+        );
+
+        let mut published = Vec::new();
+        let outputs = loop {
+            assert!(
+                published.len() <= 2,
+                "the batch must not take more steps than it has tracks"
+            );
+            let armed = stem_step(&core.stem_batch_next());
+            let StemStep::Ready {
+                output,
+                total,
+                format,
+            } = armed
+            else {
+                panic!("core must arm a stem, got {armed:?}");
+            };
+            assert_eq!(total, 2, "both tracks belong to this batch");
+            assert_eq!(format, 0, "the prepared format is reported back");
+            assert!(
+                !published.contains(&output.to_string_lossy().into_owned()),
+                "core must arm each track once, but {} was armed twice",
+                output.display()
+            );
+
+            publish(&output);
+            published.push(output.to_string_lossy().into_owned());
+
+            match stem_step(&core.stem_batch_settle(true)) {
+                StemStep::StemDone { rendered, total } => {
+                    assert_eq!(total, 2, "the batch still holds both tracks");
+                    assert_eq!(
+                        rendered as usize,
+                        published.len(),
+                        "the queue only advances when a stem was published"
+                    );
+                }
+                StemStep::Complete { outputs, format } => {
+                    assert_eq!(format, 0, "completion reports the format that ran");
+                    break outputs;
+                }
+                other => panic!("settle must advance or complete, got {other:?}"),
+            }
+        };
+
+        assert_eq!(
+            outputs, published,
+            "completion must report exactly the stems the engine was asked to render, in order"
+        );
+        assert_eq!(
+            core.stem_batch_progress(),
+            None,
+            "a completed batch is handed back so the next export can start"
+        );
+        for output in &outputs {
+            assert!(
+                std::path::Path::new(output).exists(),
+                "a published stem must survive completion: {output}"
+            );
+        }
+
+        std::fs::remove_dir_all(&output_dir).expect("stem output cleanup must succeed");
+    }
+
+    /// A stem that fails takes the whole batch with it. The GUI used to keep
+    /// its own list of started files for this rollback, which is exactly the
+    /// second copy core now owns: if the two disagreed, a failed GUI export
+    /// would leave stems the CLI's rollback would have removed.
+    #[test]
+    fn a_failed_stem_rolls_back_everything_the_batch_published() {
+        let (core, first, second, output_dir) = batch_fixture("rollback");
+        let dir_text = output_dir.to_string_lossy().into_owned();
+
+        let prepared = core.stem_batch_prepare(&dir_text, 0, &[first, second], 2.0, false, true);
+        assert_eq!(
+            prepare_rejected(&prepared),
+            None,
+            "core must accept a two-track batch, got {prepared}"
+        );
+
+        let StemStep::Ready {
+            output: first_out, ..
+        } = stem_step(&core.stem_batch_next())
+        else {
+            panic!("core must arm the first stem");
+        };
+        publish(&first_out);
+        assert!(
+            matches!(
+                stem_step(&core.stem_batch_settle(true)),
+                StemStep::StemDone { .. }
+            ),
+            "the first stem must publish"
+        );
+
+        // The second render reports failure and never produces a file.
+        let StemStep::Ready {
+            output: second_out, ..
+        } = stem_step(&core.stem_batch_next())
+        else {
+            panic!("core must arm the second stem");
+        };
+        let failed = stem_step(&core.stem_batch_settle(false));
+        let StemStep::Failed(reason) = failed else {
+            panic!("a failed render must be reported as a failure, got {failed:?}");
+        };
+        assert!(
+            reason.contains("stem render failed for track"),
+            "core must name the stem that failed, got {reason}"
+        );
+
+        assert!(
+            !first_out.exists(),
+            "the published stem must be rolled back, but {} survives",
+            first_out.display()
+        );
+        assert!(
+            !second_out.exists(),
+            "no output may be left for a failed stem"
+        );
+        assert_eq!(
+            core.stem_batch_progress(),
+            None,
+            "a rolled back batch is handed back so it cannot be resumed half-way"
+        );
+        assert_eq!(
+            std::fs::read_dir(&output_dir)
+                .expect("output dir must remain readable")
+                .count(),
+            0,
+            "a failed export must leave no partial set of stems"
+        );
+
+        std::fs::remove_dir_all(&output_dir).expect("stem output cleanup must succeed");
     }
 }

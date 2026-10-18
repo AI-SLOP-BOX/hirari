@@ -2,7 +2,7 @@
 
 use crate::slint_ui::*;
 use crate::ui::operation_gate::OperationLease;
-use crate::ui::render::StemExportBatch;
+use crate::ui::render::{stem_step, StemStep};
 use hirari_core_bridge::HirariCore;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -16,7 +16,6 @@ pub(crate) fn update_render_telemetry(
     started_ms: &Arc<AtomicU64>,
     output_path: &Arc<Mutex<PathBuf>>,
     render_lease: &Arc<Mutex<Option<OperationLease>>>,
-    stem_batch: &Arc<Mutex<Option<StemExportBatch>>>,
 ) {
     if !ui.get_is_rendering() {
         return;
@@ -37,8 +36,8 @@ pub(crate) fn update_render_telemetry(
                     ui,
                     core,
                     started_ms,
+                    output_path,
                     render_lease,
-                    stem_batch,
                     snapshot,
                     elapsed_ms,
                 );
@@ -87,63 +86,35 @@ pub(crate) fn update_render_telemetry(
     }
 }
 
+/// Drives the core-owned stems batch from the telemetry timer.
+///
+/// Core decides whether a stem published (`settle`) and which track comes next
+/// (`next`); this only feeds the engine's terminal state back to it and kicks
+/// the following render, which is the one thing a GUI can do that the CLI's
+/// blocking loop does for itself.
 fn update_stem_export(
     ui: &AppWindow,
     core: &HirariCore,
     started_ms: &Arc<AtomicU64>,
+    output_path: &Arc<Mutex<PathBuf>>,
     render_lease: &Arc<Mutex<Option<OperationLease>>>,
-    stem_batch: &Arc<Mutex<Option<StemExportBatch>>>,
     snapshot: hirari_core_bridge::BounceSnapshot,
     elapsed_ms: u64,
 ) {
-    let Ok(mut state) = stem_batch.lock() else {
+    let Some((rendered, total)) = core.stem_batch_progress() else {
         finish_stem_failure(
             ui,
             core,
             started_ms,
             render_lease,
-            stem_batch,
-            "stem export state is unavailable",
-            elapsed_ms,
-        );
-        return;
-    };
-    if state.is_none() {
-        drop(state);
-        finish_stem_failure(
-            ui,
-            core,
-            started_ms,
-            render_lease,
-            stem_batch,
             "stem export queue is missing",
             elapsed_ms,
         );
         return;
-    }
-    let Some(batch) = state.as_mut() else {
-        return;
     };
-    let total = batch.jobs.len();
-    let current = batch.current;
-    let output_dir = batch.output_dir.clone();
-    let format = batch.format;
-    let output = batch.jobs.get(current).map(|job| job.output.clone());
-    if total == 0 || current >= total || output.is_none() {
-        drop(state);
-        finish_stem_failure(
-            ui,
-            core,
-            started_ms,
-            render_lease,
-            stem_batch,
-            "stem export queue is invalid",
-            elapsed_ms,
-        );
-        return;
-    }
 
-    let overall_progress = (current as f32 + snapshot.progress.clamp(0.0, 1.0)) / total as f32;
+    let overall_progress =
+        (rendered as f32 + snapshot.progress.clamp(0.0, 1.0)) / total.max(1) as f32;
     ui.set_render_progress_available(snapshot.progress_available);
     ui.set_render_progress_indeterminate(snapshot.state == 2 && !snapshot.progress_available);
     ui.set_render_progress(overall_progress.clamp(0.0, 1.0));
@@ -151,95 +122,124 @@ fn update_stem_export(
 
     match snapshot.state {
         3 => {
-            let output = output.expect("validated above");
-            if !core.validate_render_output(output.to_string_lossy().as_ref(), false) {
-                drop(state);
-                finish_stem_failure(
-                    ui,
-                    core,
-                    started_ms,
-                    render_lease,
-                    stem_batch,
-                    &format!("rendered stem failed WAV validation: {}", output.display()),
-                    elapsed_ms,
-                );
-                return;
-            }
-            batch.current += 1;
-            if batch.current < total {
-                let next = batch.jobs[batch.current].clone();
-                if crate::ui::render::queue_stem(core, &next, format) {
-                    batch.started = batch.current + 1;
-                    ui.set_render_progress(batch.current as f32 / total as f32);
-                    ui.set_render_state("QUEUED".into());
-                    ui.set_render_error(
-                        format!(
-                            "STEM {} OF {} COMPLETE · QUEUING NEXT",
-                            batch.current, total
-                        )
-                        .into(),
-                    );
-                    ui.set_last_action(
-                        format!("STEM {} OF {} EXPORTED", batch.current, total).into(),
-                    );
-                    return;
-                }
-                let failed_index = batch.current + 1;
-                drop(state);
-                finish_stem_failure(
-                    ui,
-                    core,
-                    started_ms,
-                    render_lease,
-                    stem_batch,
-                    &format!("could not queue stem {failed_index} of {total}"),
-                    elapsed_ms,
-                );
-                return;
-            }
-            drop(state);
-            core.clear_offline_render_target();
-            finish_stem_success(
+            // The engine published the armed stem. Core validates the WAV and
+            // either advances the queue or rolls the whole batch back.
+            let step = stem_step(&core.stem_batch_settle(true));
+            advance_stem_export(
                 ui,
+                core,
                 started_ms,
+                output_path,
                 render_lease,
-                stem_batch,
-                total,
-                &output_dir,
-                format,
+                step,
                 elapsed_ms,
             );
         }
         4 => {
-            let failed_track = batch.jobs[current].track_id;
-            drop(state);
-            finish_stem_failure(
-                ui,
-                core,
-                started_ms,
-                render_lease,
-                stem_batch,
-                &format!("native stem render failed for track {failed_track}"),
-                elapsed_ms,
-            );
+            // `settle(false)` rolls the batch back and clears the render-only
+            // target, so a failed export leaves no partial set of stems.
+            let reason = match stem_step(&core.stem_batch_settle(false)) {
+                StemStep::Failed(reason) => reason,
+                _ => "native stem render failed".to_owned(),
+            };
+            finish_stem_failure(ui, core, started_ms, render_lease, &reason, elapsed_ms);
         }
         5 => {
-            drop(state);
-            finish_stem_cancelled(ui, core, started_ms, render_lease, stem_batch, elapsed_ms);
+            core.stem_batch_abort();
+            finish_stem_cancelled(ui, core, started_ms, render_lease, elapsed_ms);
         }
         _ => {}
     }
 }
 
-fn remove_started_stems(batch: &StemExportBatch) {
-    for job in batch.jobs.iter().take(batch.started) {
-        if let Err(error) = std::fs::remove_file(&job.output) {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                log::warn!(
-                    "Could not remove partial stem {}: {error}",
-                    job.output.display()
+/// Reacts to what core made of the stem that just finished: publish the next
+/// one, or end the export. Every path that cannot continue goes through
+/// `finish_stem_failure`, which reconciles the UI once core has rolled back.
+fn advance_stem_export(
+    ui: &AppWindow,
+    core: &HirariCore,
+    started_ms: &Arc<AtomicU64>,
+    output_path: &Arc<Mutex<PathBuf>>,
+    render_lease: &Arc<Mutex<Option<OperationLease>>>,
+    step: StemStep,
+    elapsed_ms: u64,
+) {
+    match step {
+        StemStep::Complete { outputs, format } => {
+            let output_dir = output_path
+                .lock()
+                .map(|path| path.clone())
+                .unwrap_or_default();
+            finish_stem_success(
+                ui,
+                started_ms,
+                render_lease,
+                &output_dir,
+                outputs.len(),
+                format,
+                elapsed_ms,
+            );
+        }
+        StemStep::StemDone { rendered, total } => {
+            let queued = match stem_step(&core.stem_batch_next()) {
+                StemStep::Ready { output, format, .. } => {
+                    crate::ui::render::kick_stem(core, &output, format)
+                }
+                StemStep::Failed(reason) => {
+                    finish_stem_failure(ui, core, started_ms, render_lease, &reason, elapsed_ms);
+                    return;
+                }
+                // Core owns the queue, so `next` can only report the target
+                // `settle` just advanced past. Anything else means the queue
+                // is gone, and continuing would re-render the last stem.
+                _ => {
+                    core.stem_batch_abort();
+                    finish_stem_failure(
+                        ui,
+                        core,
+                        started_ms,
+                        render_lease,
+                        "stem export queue is invalid",
+                        elapsed_ms,
+                    );
+                    return;
+                }
+            };
+            if !queued {
+                core.stem_batch_abort();
+                finish_stem_failure(
+                    ui,
+                    core,
+                    started_ms,
+                    render_lease,
+                    &format!("could not queue stem {} of {total}", rendered + 1),
+                    elapsed_ms,
                 );
+                return;
             }
+            ui.set_render_progress(rendered as f32 / total.max(1) as f32);
+            ui.set_render_state("QUEUED".into());
+            ui.set_render_error(
+                format!("STEM {rendered} OF {total} COMPLETE · QUEUING NEXT").into(),
+            );
+            ui.set_last_action(format!("STEM {rendered} OF {total} EXPORTED").into());
+        }
+        StemStep::Failed(reason) => {
+            finish_stem_failure(ui, core, started_ms, render_lease, &reason, elapsed_ms);
+        }
+        // `settle` reports `ready` only for a target it armed itself, which
+        // this timer never observes. Fail loudly instead of pretending the
+        // export is still moving.
+        StemStep::Ready { .. } => {
+            core.stem_batch_abort();
+            finish_stem_failure(
+                ui,
+                core,
+                started_ms,
+                render_lease,
+                "stem export reported an unexpected state",
+                elapsed_ms,
+            );
         }
     }
 }
@@ -248,15 +248,11 @@ fn finish_stem_success(
     ui: &AppWindow,
     started_ms: &Arc<AtomicU64>,
     render_lease: &Arc<Mutex<Option<OperationLease>>>,
-    stem_batch: &Arc<Mutex<Option<StemExportBatch>>>,
-    count: usize,
     output_dir: &PathBuf,
+    count: usize,
     format: u32,
     elapsed_ms: u64,
 ) {
-    if let Ok(mut state) = stem_batch.lock() {
-        state.take();
-    }
     ui.set_is_rendering(false);
     ui.set_render_progress(1.0);
     ui.set_render_progress_available(true);
@@ -277,21 +273,19 @@ fn finish_stem_success(
     clear_render_lease(render_lease);
 }
 
+/// Reconciles the UI after a stems export stopped. By the time a caller gets
+/// here core has already rolled the batch back and removed what it published;
+/// the extra `clear_offline_render_target` covers the paths where core had no
+/// batch to roll back in the first place.
 fn finish_stem_failure(
     ui: &AppWindow,
     core: &HirariCore,
     started_ms: &Arc<AtomicU64>,
     render_lease: &Arc<Mutex<Option<OperationLease>>>,
-    stem_batch: &Arc<Mutex<Option<StemExportBatch>>>,
     reason: &str,
     elapsed_ms: u64,
 ) {
     core.clear_offline_render_target();
-    if let Ok(mut state) = stem_batch.lock() {
-        if let Some(batch) = state.take() {
-            remove_started_stems(&batch);
-        }
-    }
     ui.set_is_rendering(false);
     ui.global::<RenderActions>().set_stem_export_mode(false);
     ui.set_render_progress_indeterminate(false);
@@ -314,15 +308,11 @@ fn finish_stem_cancelled(
     core: &HirariCore,
     started_ms: &Arc<AtomicU64>,
     render_lease: &Arc<Mutex<Option<OperationLease>>>,
-    stem_batch: &Arc<Mutex<Option<StemExportBatch>>>,
     elapsed_ms: u64,
 ) {
+    // `stem_batch_abort` already removed what the batch published; this
+    // clears the render-only target for the paths that had no batch left.
     core.clear_offline_render_target();
-    if let Ok(mut state) = stem_batch.lock() {
-        if let Some(batch) = state.take() {
-            remove_started_stems(&batch);
-        }
-    }
     ui.set_is_rendering(false);
     ui.global::<RenderActions>().set_stem_export_mode(false);
     ui.set_render_progress_indeterminate(false);

@@ -454,7 +454,6 @@ pub fn run() {
     let dawproject_import_queue =
         crate::ui::dawproject_import_queue::DawProjectImportQueue::start();
     let render_lease = Arc::new(Mutex::new(None));
-    let stem_batch = Arc::new(Mutex::new(None));
 
     // Start with no UI-authored content. The native project snapshot below is
     // the only source of track, region, and insert state shown to the user.
@@ -837,7 +836,6 @@ pub fn run() {
         render_output_path.clone(),
         operation_gate.clone(),
         render_lease.clone(),
-        stem_batch.clone(),
     );
     crate::ui::mixer::install(
         &ui,
@@ -902,7 +900,6 @@ pub fn run() {
         render_started_ms.clone(),
         render_output_path.clone(),
         render_lease.clone(),
-        stem_batch.clone(),
         recording_target,
         peak_reset_generation,
         gpu_plot_store,
@@ -941,6 +938,7 @@ pub fn run() {
             session_recovery_path: &session_recovery_path,
             operation_gate: &operation_gate,
             save_queue: &project_save_queue,
+            render_lease: &render_lease,
         };
         if !crate::ui::smoke::run_production_workflow(&ui, &core, &pump) {
             std::process::exit(1);
