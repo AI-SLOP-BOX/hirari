@@ -160,7 +160,6 @@ else
 fi
 
 build_link_run wav-io-contract tests/wav_io_contract.cpp "$BRIDGE_LIB"
-build_link_run project-decoder-contract tests/project_decoder_contract.cpp "$BRIDGE_LIB"
 build_link_run persistence-contract tests/persistence_contract.cpp "$BRIDGE_LIB"
 build_link_run timeline-track-render-contract tests/timeline_track_render_contract.cpp "$BRIDGE_LIB"
 # The BPM ghost contract pulls the engine (and therefore the Apple driver

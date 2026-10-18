@@ -1,5 +1,13 @@
 #pragma once
 
+// `size_t` is used by the limits below, so the header that defines it has to
+// come first. This include used to sit *after* the namespace, which compiled
+// only as long as every includer happened to pull in <cstddef> transitively;
+// the spectral-editor and mmap-audio contracts reached rust_ffi.hpp first and
+// failed on `unknown type name 'size_t'`.
+#include <cstddef>
+#include <cstdint>
+
 // Physical limits shared by the C++ engine and the Rust core. These mirror
 // `crate::dsp_limits` exactly; the two sides have to agree because a clamp on
 // one side and a rejection on the other is how a caller ends up storing a
@@ -18,9 +26,6 @@ constexpr double kMaxSampleRate = 384000.0;
 /// Upper bound on the entries a per-region edit table may hold.
 constexpr size_t kMaxEditEntries = 4096;
 } // namespace hirari::limits
-
-#include <cstddef>
-#include <cstdint>
 
 extern "C" void* hirari_virtuoso_drum_synth_create(double sample_rate);
 extern "C" void hirari_virtuoso_drum_synth_destroy(void* state);
