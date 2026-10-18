@@ -481,27 +481,11 @@ impl HirariCore {
                 .get("name")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("track");
-            let base: String = raw_name
-                .chars()
-                .map(|character| {
-                    if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-                        character
-                    } else {
-                        '_'
-                    }
-                })
-                .collect();
-            let base = if base.is_empty() {
-                format!("track-{track_id}")
-            } else {
-                base
-            };
-            let mut name = base.clone();
-            let mut suffix = 2usize;
-            while !names.insert(name.clone()) {
-                name = format!("{base}-{suffix}");
-                suffix += 1;
-            }
+            // One naming policy with the GUI's EXPORT STEMS.  The inline copy
+            // this replaces had no Windows device-name guard and matched
+            // collisions case-sensitively, so `CON` and `Drums`/`DRUMS`
+            // exported to different files from the CLI than from the GUI.
+            let name = crate::stem_export::safe_stem_name(raw_name, track_id, &mut names);
             track_state.push((track_id, output_dir_path.join(format!("{name}.wav"))));
         }
 

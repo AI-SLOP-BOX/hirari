@@ -28,69 +28,8 @@ pub(crate) struct StemExportBatch {
     pub(crate) started: usize,
 }
 
-fn safe_stem_name(name: &str, track_id: u32, used: &mut HashSet<String>) -> String {
-    let base = name
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    let base = if base.is_empty() {
-        format!("track-{track_id}")
-    } else {
-        base
-    };
-    let mut suffix = 1u32;
-    loop {
-        let stem = if suffix == 1 {
-            base.clone()
-        } else {
-            format!("{base}-{suffix}")
-        };
-        // Windows reserves these device names even when they have an
-        // extension. Prefix them so tracks named "CON" or "COM1" export.
-        let candidate = if matches!(
-            stem.to_ascii_uppercase().as_str(),
-            "CON"
-                | "PRN"
-                | "AUX"
-                | "NUL"
-                | "COM1"
-                | "COM2"
-                | "COM3"
-                | "COM4"
-                | "COM5"
-                | "COM6"
-                | "COM7"
-                | "COM8"
-                | "COM9"
-                | "LPT1"
-                | "LPT2"
-                | "LPT3"
-                | "LPT4"
-                | "LPT5"
-                | "LPT6"
-                | "LPT7"
-                | "LPT8"
-                | "LPT9"
-        ) {
-            format!("track-{stem}")
-        } else {
-            stem
-        };
-        // The destination commonly lives on a case-insensitive filesystem
-        // (including default macOS volumes). Match collisions the way the
-        // file system will, not by Rust's case-sensitive `String` equality.
-        if used.insert(candidate.to_ascii_lowercase()) {
-            return candidate;
-        }
-        suffix = suffix.saturating_add(1);
-    }
-}
+// Stem filenames are no longer derived here: `hirari_core_bridge::stem_export`
+// owns the single policy shared with the CLI's `render stems`.
 
 pub(crate) fn queue_stem(core: &HirariCore, job: &StemExportJob, format: u32) -> bool {
     if job.output.exists() || !core.set_offline_render_target(job.track_id) {
@@ -263,7 +202,12 @@ pub(crate) fn install(
                     );
                     return;
                 }
-                let filename = safe_stem_name(&name, track_id, &mut used_names);
+                // One naming policy with the CLI's `render stems`.
+                let filename = hirari_core_bridge::stem_export::safe_stem_name(
+                    &name,
+                    track_id,
+                    &mut used_names,
+                );
                 let output = output_dir.join(format!("{filename}.wav"));
                 if output.exists() {
                     ui.set_last_action(

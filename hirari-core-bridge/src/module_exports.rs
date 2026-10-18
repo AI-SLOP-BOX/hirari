@@ -306,6 +306,7 @@ pub mod spectrum_analyzer;
 pub mod state_variable_filter;
 pub mod status_queue;
 pub mod stem;
+pub mod stem_export;
 pub mod stem_splitter;
 pub mod step_filter;
 pub mod step_sequencer;

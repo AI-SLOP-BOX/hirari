@@ -1019,6 +1019,122 @@ fn cli_render_stems_path_is_audible_at_the_projects_sample_rate() {
     let _ = std::fs::remove_dir_all(&output_dir);
 }
 
+/// The CLI and the GUI used to carry separate stem filename sanitizers, and
+/// only the GUI prefixed Windows device names or matched collisions the way a
+/// destination volume resolves them.  Measured on the published names rather
+/// than on a sanitizer in isolation: `CON` left the CLI as the unusable
+/// `CON.wav`, and `Drums`/`DRUMS` reached it as two paths a case-insensitive
+/// volume collapses onto one inode — losing a stem while reporting two
+/// outputs.  This pins what `render stems` writes on disk.
+#[test]
+fn stem_filenames_follow_one_policy_for_reserved_and_case_colliding_names() {
+    let _guard = native_engine_test_guard();
+    let unique = format!(
+        "hirari-stem-names-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let wav_path = std::env::temp_dir().join(format!("{unique}-src.wav"));
+    let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
+    let output_dir = std::env::temp_dir().join(format!("{unique}-stems"));
+
+    write_test_tone_wav(&wav_path, 48_000, 48_000);
+    let project_text = project_path.to_string_lossy().into_owned();
+    let builder = crate::HirariCore::new_offline().expect("offline core must initialize");
+    assert!(builder.apply_audio_config(48_000, 512));
+    let reserved = builder.add_audio_track();
+    let first = builder.add_audio_track();
+    let second = builder.add_audio_track();
+    assert_ne!(reserved, 0);
+    assert_ne!(first, 0);
+    assert_ne!(second, 0);
+    assert!(builder.set_track_name(reserved, "CON"));
+    assert!(builder.set_track_name(first, "Drums"));
+    assert!(builder.set_track_name(second, "DRUMS"));
+    for track in [reserved, first, second] {
+        assert!(builder.add_region(track, wav_path.to_str().unwrap(), 0.0));
+    }
+    builder
+        .save_project_v2(&project_text, "Stem Filenames", 120.0)
+        .expect("save must succeed");
+
+    std::fs::create_dir_all(&output_dir).expect("stem output dir must be created");
+    let output_text = output_dir.to_string_lossy().into_owned();
+    let core = crate::HirariCore::new_offline().expect("offline core must initialize");
+    core.load_project_v2(&project_text)
+        .expect("load must succeed");
+
+    let diagnostic = core.bounce_stems_diagnostic_json(&output_text, 0, &[], 2.0, false, true);
+    let value: serde_json::Value =
+        serde_json::from_str(&diagnostic).expect("stems diagnostic must be valid JSON");
+    assert_eq!(
+        value.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true),
+        "stems bounce must report success, got {diagnostic}"
+    );
+    let outputs: Vec<String> = value
+        .get("outputs")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        outputs.len() >= 3,
+        "every named track must publish a stem, got {diagnostic}"
+    );
+
+    let stems: std::collections::HashSet<String> = outputs
+        .iter()
+        .filter_map(|path| {
+            std::path::Path::new(path)
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })
+        .collect();
+    assert!(
+        stems.contains("track-CON"),
+        "Windows device names must be prefixed, got {diagnostic}"
+    );
+    assert!(
+        !stems.contains("CON"),
+        "no stem may be published as CON, got {diagnostic}"
+    );
+
+    // Order-independent: whichever of the two collides first keeps its own
+    // casing, and the loser takes a `-2` suffix.
+    let drums: Vec<String> = stems
+        .iter()
+        .filter(|stem| stem.to_ascii_lowercase().starts_with("drums"))
+        .cloned()
+        .collect();
+    let mut drums_lower: Vec<String> = drums.iter().map(|stem| stem.to_ascii_lowercase()).collect();
+    drums_lower.sort();
+    assert_eq!(
+        drums_lower,
+        vec!["drums".to_owned(), "drums-2".to_owned()],
+        "case-only collisions must be suffixed, got {diagnostic}"
+    );
+
+    let lowered: std::collections::HashSet<String> =
+        stems.iter().map(|stem| stem.to_ascii_lowercase()).collect();
+    assert_eq!(
+        lowered.len(),
+        stems.len(),
+        "two outputs must never differ only by case, got {diagnostic}"
+    );
+
+    let _ = std::fs::remove_file(&wav_path);
+    let _ = std::fs::remove_file(&project_path);
+    let _ = std::fs::remove_dir_all(&output_dir);
+}
+
 /// Every `<format>` spelling `render stems` advertises must reach the engine
 /// and produce the container it names. The dispatcher used to reject all four
 /// but `wav` — `format != "wav"` printed usage and exited 2 — while the usage
