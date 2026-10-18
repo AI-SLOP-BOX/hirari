@@ -512,13 +512,15 @@ void HirariUnifiedEngine::new_project() {
         m_peakBuilds.clear();
     }
     m_regionIdCounter.store(1, std::memory_order_release);
-    // A freshly created template intentionally starts with track ID 0 for
-    // compatibility with the public project/template format. User-created
-    // tracks continue at 1, so zero remains unique to the starter track.
-    m_trackIdCounter.store(1, std::memory_order_release);
+    // Track ID 0 is the invalid/stale-ID sentinel across the whole bridge:
+    // ProjectDocument::validate() rejects it outright and the argument guards
+    // treat it as "no track", so a starter track at ID 0 could never be
+    // persisted or addressed. The starter therefore takes ID 1 (reserved for
+    // it while the session is fresh) and user-created tracks continue at 2.
+    m_trackIdCounter.store(2, std::memory_order_release);
     // Start with one audio track so a new project is immediately usable for
     // importing or recording, instead of presenting a dead empty canvas.
-    auto bootstrapTrack = std::make_shared<Track>(0, "Audio 1", Track::Audio,
+    auto bootstrapTrack = std::make_shared<Track>(1, "Audio 1", Track::Audio,
                                                   &m_sidechainManager, m_projectLayoutRevision);
     if (m_context) {
         bootstrapTrack->prepareToPlay(m_context->sampleRate, m_context->blockSize);

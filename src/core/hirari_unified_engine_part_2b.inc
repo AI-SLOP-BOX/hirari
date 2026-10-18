@@ -78,11 +78,11 @@ bool HirariUnifiedEngine::remove_track(uint32_t tid) {
         m_deferredDestructionTracks.push_back(removed);
         m_tracks.erase(it);
         mark_project_layout_changed();
-        if (tid == 0 && m_tracks.empty()) {
-            // new_project() creates the bootstrap at ID 0 and advances the
-            // allocator. Removing that placeholder during project hydration
-            // must rewind the allocator so the first persisted track retains
-            // its canonical ID instead of becoming ID 2.
+        if (tid == 1 && m_tracks.empty()) {
+            // new_project() creates the bootstrap at ID 1 and advances the
+            // allocator to 2. Removing that placeholder during project
+            // hydration must rewind the allocator so the first persisted track
+            // keeps its canonical ID instead of becoming ID 2.
             m_trackIdCounter.store(1, std::memory_order_release);
         }
         uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);

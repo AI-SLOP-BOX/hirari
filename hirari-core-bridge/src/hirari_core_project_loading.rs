@@ -265,7 +265,7 @@ impl HirariCore {
         // the persisted track list is reproduced exactly. Track ID 1 is the
         // reserved bootstrap ID; zero is the invalid/stale-ID sentinel and
         // must never be used as a real removal target.
-        engine.remove_track(0);
+        engine.remove_track(1);
         engine.apply_config(document.metadata.bpm, sample_rate, block_size);
         if !engine.set_tonal_scale(document.metadata.key_root, document.metadata.scale_type) {
             return Err(rollback_error(anyhow::anyhow!(

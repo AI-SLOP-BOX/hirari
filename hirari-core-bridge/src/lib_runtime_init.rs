@@ -46,7 +46,7 @@ impl HirariCore {
         };
         if isolated {
             engine_ref.new_project();
-            let _ = engine_ref.remove_track(0);
+            let _ = engine_ref.remove_track(1);
             // `new_project` starts the transport, and
             // `AudioEngine::apply_config_locked` refuses to reconfigure a
             // playing engine. The void `apply_config` wrapper discards that

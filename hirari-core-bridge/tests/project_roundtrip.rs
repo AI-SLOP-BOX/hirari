@@ -121,19 +121,29 @@ fn reload_reseeds_track_allocator_without_reusing_persisted_ids() {
 }
 
 #[test]
-fn template_first_track_id_zero_survives_save_and_reload() {
+fn starter_track_survives_save_and_reload() {
     let _guard = native_engine_test_guard();
     let core = HirariCore::new().expect("core must initialize");
     core.new_project();
-    assert!(core.set_track_name(0, "Drums"));
-    for name in ["Bass", "Synth Lead", "Pads", "Main Out"] {
+    // new_project() reserves ID 1 for the starter track. ID 0 remains the
+    // invalid/stale-ID sentinel that ProjectDocument::validate() and the
+    // bridge's argument guards reject, which is what lets a brand-new session
+    // be saved at all.
+    assert!(core.set_track_name(1, "Drums"));
+    for (index, name) in ["Bass", "Synth Lead", "Pads", "Main Out"]
+        .into_iter()
+        .enumerate()
+    {
         let id = core.add_track(0);
-        assert_ne!(id, 0);
+        // The starter owns ID 1, so user-created tracks begin at 2 and stay
+        // dense. This pins the whole allocation contract rather than only
+        // asserting "not zero", which would pass under either scheme.
+        assert_eq!(id, index as u32 + 2);
         assert!(core.set_track_name(id, name));
     }
 
     let path = std::env::temp_dir().join(format!(
-        "hirari-template-zero-id-{}-{}.hirari",
+        "hirari-template-starter-id-{}-{}.hirari",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

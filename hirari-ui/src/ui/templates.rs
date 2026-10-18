@@ -11,7 +11,7 @@ fn create_native_template(
     template_tracks: &[(&str, u32)],
 ) -> Result<(), String> {
     core.new_project();
-    if !core.remove_track(0) {
+    if !core.remove_track(1) {
         return Err("starter track could not be replaced".into());
     }
     for &(name, track_type) in template_tracks {

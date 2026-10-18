@@ -206,9 +206,12 @@
         
         uint32_t nextTrackId = 1;
         for (const auto& track : loadedTracks) {
-            // Track ID 0 is valid for the bootstrap/template track. Only the
-            // uint32 max sentinel is reserved; rejecting zero here made a
-            // native project pass serialization but fail hydration on reload.
+            // Only the uint32 max sentinel is refused here. new_project()
+            // never produces ID 0 any more -- the starter track is ID 1 and
+            // zero is the invalid sentinel -- but native containers written
+            // before that change can still carry a track at 0, so rejecting
+            // zero here would fail hydration on reload for files that
+            // serialize fine.
             if (!track || track->getId() == std::numeric_limits<uint32_t>::max()) return false;
             nextTrackId = std::max(nextTrackId, track->getId() + 1u);
         }
