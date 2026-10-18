@@ -403,7 +403,23 @@ impl HirariCore {
     /// Render one WAV per project track by selecting each track through a
     /// render-only solo state. The selection is never added to Undo/Redo and
     /// the original solo state is restored even when a stem fails.
-    pub fn bounce_stems_diagnostic_json(
+    /// Phase 1 of a stems export: validate the whole batch, derive every
+    /// destination through the one shared naming policy, and park the queue
+    /// on the core.
+    ///
+    /// Returns `{"ok":true,"total":N}` on success, or the same bare error
+    /// document `hirari render stems` has always emitted — the codes and
+    /// messages are unchanged on purpose, they are the CLI's contract.
+    ///
+    /// The control-plane transaction is held only while the layout is
+    /// snapshotted, not across the renders that follow. A render never mutates
+    /// the project, and each surface is already serialized against save and
+    /// load for the whole batch: the CLI is single threaded, and the GUI's
+    /// single-slot operation gate refuses Save/Load/Recover while its Render
+    /// lease is held (its autosave additionally requires `!is_rendering`).
+    /// Holding this mutex for the length of a multi-minute render would only
+    /// stall `save_project_with_optional_ui_midi_notes`, which shares it.
+    pub fn stem_batch_prepare(
         &self,
         output_dir: &str,
         format: u32,
@@ -430,7 +446,7 @@ impl HirariCore {
                 Ok(layout) => layout,
                 Err(_) => {
                     return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}"
-                        .to_owned();
+                        .to_owned()
                 }
             };
         let Some(tracks) = layout.as_array() else {
@@ -467,7 +483,7 @@ impl HirariCore {
             .to_string();
         }
 
-        let mut track_state = Vec::with_capacity(selected_tracks.len());
+        let mut planned = Vec::with_capacity(selected_tracks.len());
         let mut names = std::collections::HashSet::with_capacity(tracks.len());
         for track in selected_tracks {
             let Some(track_id) = track
@@ -481,48 +497,130 @@ impl HirariCore {
                 .get("name")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("track");
-            // One naming policy with the GUI's EXPORT STEMS.  The inline copy
-            // this replaces had no Windows device-name guard and matched
-            // collisions case-sensitively, so `CON` and `Drums`/`DRUMS`
-            // exported to different files from the CLI than from the GUI.
             let name = crate::stem_export::safe_stem_name(raw_name, track_id, &mut names);
-            track_state.push((track_id, output_dir_path.join(format!("{name}.wav"))));
+            planned.push((track_id, output_dir_path.join(format!("{name}.wav"))));
         }
 
-        let mut outputs = Vec::with_capacity(track_state.len());
         // Reject the whole batch before changing any render-only solo state.
         // Otherwise a pre-existing second stem would cause the first stem to
         // render and then be deleted during rollback, making a dry-run look
         // destructive and needlessly exercising the audio graph.
-        if let Some(existing) = track_state
-            .iter()
-            .find(|(_, output_path)| output_path.exists())
-        {
+        if let Some((_, existing)) = planned.iter().find(|(_, path)| path.exists()) {
             return serde_json::json!({
                 "code": "stem_output_exists",
-                "path": existing.1,
+                "path": existing,
                 "retryable": false,
                 "restored_render_target": true,
             })
             .to_string();
         }
-        let mut failure: Option<String> = None;
+
         engine.set_offline_render_tail_seconds(tail_seconds);
         engine.set_offline_render_options(pre_fader, include_inserts);
-        for (target_id, output_path) in &track_state {
-            if !engine.set_offline_render_target(*target_id)
-                || !engine.bounce_project(output_path.to_string_lossy().as_ref(), format)
-                || !self.validate_render_output(output_path.to_string_lossy().as_ref(), false)
-            {
-                failure = Some(format!("stem render failed for track {target_id}"));
-                break;
+
+        match self.stem_batch.lock() {
+            Ok(mut parked) => {
+                // A batch that was started and never settled still owns its
+                // published files; drop them rather than leak them.
+                if let Some(mut abandoned) = parked.take() {
+                    abandoned.rollback();
+                }
+                let batch = crate::stem_export::StemBatchState::new(planned);
+                let total = batch.progress().1;
+                *parked = Some(batch);
+                serde_json::json!({"ok": true, "total": total}).to_string()
             }
-            outputs.push(output_path.to_string_lossy().to_string());
+            Err(_) => stem_batch_unavailable(),
         }
-        engine.clear_offline_render_target();
+    }
+
+    /// Phase 2: arm the render target for the next stem and report the file
+    /// the surface has to render. A finished batch returns its outputs and is
+    /// cleared from the core.
+    pub fn stem_batch_next(&self) -> String {
+        let mut parked = match self.stem_batch.lock() {
+            Ok(parked) => parked,
+            Err(_) => return stem_batch_unavailable(),
+        };
+        let Some(batch) = parked.as_mut() else {
+            return "{\"code\":\"stem_batch_not_started\",\"retryable\":false}".to_owned();
+        };
+        if batch.is_complete() {
+            let outputs = batch.outputs();
+            *parked = None;
+            return serde_json::json!({"ok": true, "state": "complete", "outputs": outputs})
+                .to_string();
+        }
+        let (track_id, path) = match batch.next_target() {
+            Some(target) => target,
+            None => {
+                *parked = None;
+                return "{\"code\":\"stem_batch_not_started\",\"retryable\":false}".to_owned();
+            }
+        };
+        if !self
+            .engine
+            .as_ref()
+            .is_some_and(|engine| engine.set_offline_render_target(track_id))
+        {
+            // Reported exactly as the blocking driver reported it when arming
+            // was folded into the render call, so no document changed shape.
+            batch.rollback();
+            *parked = None;
+            if let Some(engine) = self.engine.as_ref() {
+                engine.clear_offline_render_target();
+            }
+            return serde_json::json!({
+                "code": "stem_render_failed",
+                "message": format!("stem render failed for track {track_id}"),
+                "retryable": true,
+                "restored_render_target": true,
+            })
+            .to_string();
+        }
+        let (rendered, total) = batch.progress();
+        serde_json::json!({
+            "ok": true,
+            "state": "ready",
+            "index": rendered,
+            "total": total,
+            "track_id": track_id,
+            "output": path.to_string_lossy(),
+        })
+        .to_string()
+    }
+
+    /// Phase 3: record the armed stem's result. A published stem has to
+    /// validate as a WAV before the queue advances; a failed bounce or an
+    /// unusable file rolls the whole batch back, so a failure never leaves a
+    /// partial set of stems behind.
+    pub fn stem_batch_settle(&self, rendered: bool) -> String {
+        let mut parked = match self.stem_batch.lock() {
+            Ok(parked) => parked,
+            Err(_) => return stem_batch_unavailable(),
+        };
+        let Some(batch) = parked.as_mut() else {
+            return "{\"code\":\"stem_batch_not_started\",\"retryable\":false}".to_owned();
+        };
+        // The armed stem is still the head of the queue: only `advance` moves it.
+        let failure: Option<String> = match batch.next_target() {
+            None => Some("stem batch had no armed target".to_owned()),
+            Some((track_id, path)) => {
+                if !rendered {
+                    Some(format!("stem render failed for track {track_id}"))
+                } else if !self.validate_render_output(path.to_string_lossy().as_ref(), false) {
+                    Some(format!("stem output failed validation for track {track_id}"))
+                } else {
+                    batch.advance(path);
+                    None
+                }
+            }
+        };
         if let Some(message) = failure {
-            for path in &outputs {
-                let _ = std::fs::remove_file(path);
+            batch.rollback();
+            *parked = None;
+            if let Some(engine) = self.engine.as_ref() {
+                engine.clear_offline_render_target();
             }
             return serde_json::json!({
                 "code": "stem_render_failed",
@@ -532,18 +630,186 @@ impl HirariCore {
             })
             .to_string();
         }
-        serde_json::json!({
-            "ok": true,
-            "operation": "bounce_stems",
-            "format": format,
-            "tail_seconds": tail_seconds,
-            "pre_fader": pre_fader,
-            "include_inserts": include_inserts,
-            "outputs": outputs,
-            "restored_render_target": true,
-        })
-        .to_string()
+
+        // Drop the render-only target after every stem, so a batch that stops
+        // here and one that continues leave the engine in the same state.
+        if let Some(engine) = self.engine.as_ref() {
+            engine.clear_offline_render_target();
+        }
+        if batch.is_complete() {
+            let outputs = batch.outputs();
+            *parked = None;
+            return serde_json::json!({"ok": true, "state": "complete", "outputs": outputs})
+                .to_string();
+        }
+        let (rendered_count, total) = batch.progress();
+        serde_json::json!({"ok": true, "state": "stem_done", "index": rendered_count, "total": total})
+            .to_string()
+    }
+
+    /// Aborts a batch: removes everything it published and clears the
+    /// render-only target, so a cancelled export leaves no partial stems.
+    pub fn stem_batch_abort(&self) -> String {
+        match self.stem_batch.lock() {
+            Ok(mut parked) => match parked.as_mut() {
+                Some(batch) => {
+                    batch.rollback();
+                    *parked = None;
+                    if let Some(engine) = self.engine.as_ref() {
+                        engine.clear_offline_render_target();
+                    }
+                    serde_json::json!({"ok": true, "state": "aborted"}).to_string()
+                }
+                None => "{\"code\":\"stem_batch_not_started\",\"retryable\":false}".to_owned(),
+            },
+            Err(_) => stem_batch_unavailable(),
+        }
+    }
+
+    /// `(rendered, total)` for a running batch, or `None` when nothing is
+    /// being exported. Stays a plain tuple so a polling surface can show
+    /// progress without parsing a document every tick.
+    pub fn stem_batch_progress(&self) -> Option<(u32, u32)> {
+        let parked = self.stem_batch.lock().ok()?;
+        parked
+            .as_ref()
+            .map(|batch| batch.progress())
+    }
+
+    /// The blocking driver `hirari render stems` uses.
+    ///
+    /// Everything that decides *what* a stems export does — selection,
+    /// naming, output validation, rollback — lives in `stem_batch_*`, which
+    /// the GUI drives from its telemetry timer. This loop adds only the one
+    /// thing a blocking caller has: it renders each armed stem with the
+    /// engine's synchronous bounce instead of waiting on the engine's own
+    /// bounce thread. The documents it returns are unchanged.
+    pub fn bounce_stems_diagnostic_json(
+        &self,
+        output_dir: &str,
+        format: u32,
+        requested_track_ids: &[u32],
+        tail_seconds: f32,
+        pre_fader: bool,
+        include_inserts: bool,
+    ) -> String {
+        let prepared = self.stem_batch_prepare(
+            output_dir,
+            format,
+            requested_track_ids,
+            tail_seconds,
+            pre_fader,
+            include_inserts,
+        );
+        if !stem_batch_succeeded(&prepared) {
+            return prepared;
+        }
+        loop {
+            let armed = self.stem_batch_next();
+            if !stem_batch_succeeded(&armed) {
+                return armed;
+            }
+            let armed_value = match serde_json::from_str::<serde_json::Value>(&armed) {
+                Ok(value) => value,
+                Err(_) => return stem_batch_unreadable(),
+            };
+            match armed_value
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some("complete") => {
+                    return stem_batch_success_document(
+                        &armed_value,
+                        format,
+                        tail_seconds,
+                        pre_fader,
+                        include_inserts,
+                    );
+                }
+                Some("ready") => {
+                    let output = match armed_value
+                        .get("output")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        Some(output) => output.to_owned(),
+                        None => {
+                            self.stem_batch_abort();
+                            return stem_batch_unreadable();
+                        }
+                    };
+                    let rendered = self
+                        .engine
+                        .as_ref()
+                        .is_some_and(|engine| engine.bounce_project(output.as_str(), format));
+                    let settled = self.stem_batch_settle(rendered);
+                    if !stem_batch_succeeded(&settled) {
+                        return settled;
+                    }
+                    let settled_value = match serde_json::from_str::<serde_json::Value>(&settled) {
+                        Ok(value) => value,
+                        Err(_) => return stem_batch_unreadable(),
+                    };
+                    if settled_value
+                        .get("state")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("complete")
+                    {
+                        return stem_batch_success_document(
+                            &settled_value,
+                            format,
+                            tail_seconds,
+                            pre_fader,
+                            include_inserts,
+                        );
+                    }
+                }
+                _ => return armed,
+            }
+        }
     }
 
     // --- RUST-POWERED PERSISTENCE (Point 3) ---
+}
+
+/// `stem_batch_*` reports success as `"ok": true` and every failure as the
+/// bare `{"code":…}` document this module has always returned, so the
+/// blocking driver can tell them apart without a second error code path.
+fn stem_batch_succeeded(document: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(document)
+        .map(|value| value.get("ok").and_then(serde_json::Value::as_bool) == Some(true))
+        .unwrap_or(false)
+}
+
+fn stem_batch_unavailable() -> String {
+    "{\"code\":\"stem_batch_unavailable\",\"retryable\":true}".to_owned()
+}
+
+fn stem_batch_unreadable() -> String {
+    "{\"code\":\"stem_batch_unreadable\",\"retryable\":true}".to_owned()
+}
+
+/// Rebuilds the success document `render stems` has always printed from the
+/// queue's own outputs, so only the state machine knows what was published.
+fn stem_batch_success_document(
+    document: &serde_json::Value,
+    format: u32,
+    tail_seconds: f32,
+    pre_fader: bool,
+    include_inserts: bool,
+) -> String {
+    let outputs = document
+        .get("outputs")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    serde_json::json!({
+        "ok": true,
+        "operation": "bounce_stems",
+        "format": format,
+        "tail_seconds": tail_seconds,
+        "pre_fader": pre_fader,
+        "include_inserts": include_inserts,
+        "outputs": outputs,
+        "restored_render_target": true,
+    })
+    .to_string()
 }

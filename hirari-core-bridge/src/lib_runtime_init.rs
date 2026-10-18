@@ -111,6 +111,7 @@ impl HirariCore {
             ),
             export_queue: std::sync::Mutex::new(crate::export::ExportOrchestrator::new()),
             advanced_export: std::sync::Mutex::new(crate::advanced_export_engine::ExportOrchestrator::new()),
+            stem_batch: std::sync::Mutex::new(None),
             ara2_protocol: std::sync::Mutex::new(crate::ara2_protocol::Ara2ProtocolEndpoint::default()),
         })
     }

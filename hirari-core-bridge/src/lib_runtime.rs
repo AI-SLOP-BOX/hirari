@@ -173,6 +173,12 @@ pub struct HirariCore {
     /// Advanced stem queue wired to the same native project bounce graph as
     /// the ordinary UI/CLI render path.
     pub(crate) advanced_export: std::sync::Mutex<crate::advanced_export_engine::ExportOrchestrator>,
+    /// At most one stems export at a time, stepped by whichever surface
+    /// started it: `render stems` steps synchronously, the GUI steps from its
+    /// telemetry timer. Core owns the queue either way, so track selection,
+    /// naming, output validation and rollback cannot diverge between them.
+    pub(crate) stem_batch:
+        std::sync::Mutex<Option<crate::stem_export::StemBatchState>>,
     /// SDK-neutral ARA2 document lifecycle. An external ARA2 adapter can bind
     /// its callbacks here without coupling the Core to a proprietary SDK.
     pub(crate) ara2_protocol: std::sync::Mutex<crate::ara2_protocol::Ara2ProtocolEndpoint>,

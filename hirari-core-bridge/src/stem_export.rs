@@ -62,6 +62,76 @@ pub fn safe_stem_name(name: &str, track_id: u32, used: &mut HashSet<String>) -> 
     }
 }
 
+/// Core-owned queue for one stems export.
+///
+/// Both surfaces step this instead of keeping a loop of their own: `hirari
+/// render stems` steps it around the engine's blocking bounce, and the GUI's
+/// `EXPORT STEMS` steps it from its telemetry timer around the engine's own
+/// bounce thread.  Selection, naming, output validation and the rollback of a
+/// partly written batch therefore exist once, in core, instead of once per
+/// surface.
+///
+/// The queue only advances when a stem has been *published*, so "which track
+/// is next" and "which files to delete if this fails" are the same fact and
+/// cannot drift apart.
+#[derive(Debug, Default)]
+pub struct StemBatchState {
+    /// `(track id, destination)` in project order.
+    tracks: Vec<(u32, std::path::PathBuf)>,
+    /// Files this batch published; removed together if any stem fails.
+    published: Vec<std::path::PathBuf>,
+}
+
+impl StemBatchState {
+    pub fn new(tracks: Vec<(u32, std::path::PathBuf)>) -> Self {
+        Self {
+            tracks,
+            published: Vec::new(),
+        }
+    }
+
+    /// The next stem to arm, or `None` once every track has been rendered.
+    pub fn next_target(&self) -> Option<(u32, std::path::PathBuf)> {
+        self.tracks
+            .get(self.published.len())
+            .map(|(track_id, path)| (*track_id, path.clone()))
+    }
+
+    /// Records one published stem so the queue moves to the next track.
+    pub fn advance(&mut self, rendered: std::path::PathBuf) {
+        self.published.push(rendered);
+    }
+
+    /// `(rendered, total)` for progress reporting.
+    pub fn progress(&self) -> (u32, u32) {
+        (self.published.len() as u32, self.tracks.len() as u32)
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.next_target().is_none()
+    }
+
+    /// Destinations published so far, in render order.
+    pub fn outputs(&self) -> Vec<String> {
+        self.published
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// Removes everything this batch published, so a failing batch never
+    /// leaves a partial set of stems on disk.
+    pub fn rollback(&mut self) {
+        for path in self.published.drain(..) {
+            if let Err(error) = std::fs::remove_file(&path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    log::warn!("Could not remove partial stem {}: {error}", path.display());
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::safe_stem_name;
