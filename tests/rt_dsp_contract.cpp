@@ -4,7 +4,6 @@
 #include <vector>
 
 #include "../src/core/audio_buffer.hpp"
-#include "../src/core/engine/automation_manager.hpp"
 #include "../src/dsp/effects/auto_pitch_corrector.hpp"
 
 int main() {
@@ -17,12 +16,11 @@ int main() {
     assert(AudioBuffer::realtimeResizeAttempts() == 1);
     assert(AudioBuffer::lastRealtimeRequestedCapacity() >= 128);
 
-    auto& automation = Hirari::Core::Engine::AutomationManager::getInstance();
-    automation.prepareToPlay(48000.0);
-    assert(automation.setTarget(3, 11, 1.0f));
-    assert(std::abs(automation.getTarget(3, 11) - 1.0f) < 1.0e-6f);
-    automation.process(64);
-    assert(std::isfinite(automation.getValue(0, 0)));
+    // The AutomationManager block that lived here moved to
+    // `automation_manager::tests::assertions_moved_from_the_cpp_contract_tests_hold_without_the_facade`.
+    // `src/core/engine/automation_manager.hpp` was a forwarding facade over the
+    // Rust-owned `hirari_automation_manager_*` symbols and no production code
+    // included it; each assertion it made is now observed directly in Rust.
 
     Hirari::Core::DSP::Effects::AutoPitchCorrector corrector(48000.0, 256);
     // detect_pitch() searches lags up to frames/2, so a 64-sample block can only

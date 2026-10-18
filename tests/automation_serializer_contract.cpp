@@ -1,18 +1,14 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
-#include <limits>
 
-#include "../src/core/engine/automation_manager.hpp"
 #include "../src/io/persistence/async_serializer.hpp"
 
 int main() {
-    auto& automation = Hirari::Core::Engine::AutomationManager::getInstance();
-    automation.reset();
-    assert(automation.setTarget(2, 4, 0.75f));
-    assert(!automation.setTarget(1024, 0, 1.0f));
-    assert(!automation.setTarget(0, 0, std::numeric_limits<float>::quiet_NaN()));
-    assert(automation.getTarget(2, 4) == 0.75f);
+    // The AutomationManager block that opened this test moved to
+    // `automation_manager::tests::assertions_moved_from_the_cpp_contract_tests_hold_without_the_facade`.
+    // `src/core/engine/automation_manager.hpp` only forwarded to the Rust-owned
+    // `hirari_automation_manager_*` symbols and no production code included it.
 
     const auto root = std::filesystem::temp_directory_path() / "hirari-serializer-contract";
     const auto path = root / "nested" / "project.json";

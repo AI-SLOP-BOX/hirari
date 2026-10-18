@@ -239,4 +239,47 @@ mod tests {
             hirari_automation_manager_destroy(state);
         }
     }
+
+    /// Every assertion the two C++ contract tests made through
+    /// `src/core/engine/automation_manager.hpp`, restated against the Rust
+    /// state directly. That header was a forwarding facade over the
+    /// `hirari_automation_manager_*` symbols defined in this file and nothing
+    /// in production included it, so removing it must not cost an observation.
+    /// The source assertion is quoted above each one.
+    #[test]
+    fn assertions_moved_from_the_cpp_contract_tests_hold_without_the_facade() {
+        unsafe {
+            let state = hirari_automation_manager_create();
+            hirari_automation_manager_prepare(state, 48_000.0);
+
+            // tests/rt_dsp_contract.cpp:
+            //   assert(automation.setTarget(3, 11, 1.0f));
+            //   assert(std::abs(automation.getTarget(3, 11) - 1.0f) < 1.0e-6f);
+            assert!(hirari_automation_manager_set_target(state, 3, 11, 1.0));
+            assert!((hirari_automation_manager_get_target(state, 3, 11) - 1.0).abs() < 1.0e-6);
+
+            // tests/rt_dsp_contract.cpp:
+            //   automation.process(64);
+            //   assert(std::isfinite(automation.getValue(0, 0)));
+            // Track 0 was never targeted, so this observes that an untouched
+            // parameter reads back as a real value rather than uninitialised
+            // storage.
+            hirari_automation_manager_process(state, 64);
+            assert!(hirari_automation_manager_get_value(state, 0, 0).is_finite());
+
+            // tests/automation_serializer_contract.cpp:
+            //   automation.reset();
+            hirari_automation_manager_reset(state);
+            //   assert(automation.setTarget(2, 4, 0.75f));
+            //   assert(!automation.setTarget(1024, 0, 1.0f));
+            //   assert(!automation.setTarget(0, 0, std::numeric_limits<float>::quiet_NaN()));
+            //   assert(automation.getTarget(2, 4) == 0.75f);
+            assert!(hirari_automation_manager_set_target(state, 2, 4, 0.75));
+            assert!(!hirari_automation_manager_set_target(state, 1024, 0, 1.0));
+            assert!(!hirari_automation_manager_set_target(state, 0, 0, f32::NAN));
+            assert_eq!(hirari_automation_manager_get_target(state, 2, 4), 0.75);
+
+            hirari_automation_manager_destroy(state);
+        }
+    }
 }

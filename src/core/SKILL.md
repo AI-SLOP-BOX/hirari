@@ -10,7 +10,6 @@ This folder contains the "Nervous System" of the DAW. High stability, zero-laten
 - `track.hpp`: Track-level regions, effects, VCA gain, and Global Sidechain routing.
 - `automation_curve.hpp`: Bezier curves with Trim/Relative mode support.
 - `video_system.hpp`: Professional frame-accurate (24, 25, 29.97, 30 fps) timecode sync.
-- `scale_system.hpp`: Global project key and harmonic quantization logic.
 
 ## 🛡️ The "Zero Allocation" Protocol (Absolute Rule)
 AI agents MUST NEVER introduce heap allocations (`new`, `std::vector::push_back`, `std::make_shared`) inside any function called by `TimelineSystem::render`.
