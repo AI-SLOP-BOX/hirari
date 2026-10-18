@@ -267,7 +267,11 @@ impl HirariCore {
         // must never be used as a real removal target.
         engine.remove_track(1);
         engine.apply_config(document.metadata.bpm, sample_rate, block_size);
-        if !engine.set_tonal_scale(document.metadata.key_root, document.metadata.scale_type) {
+        // Root and scale are Core-owned now, so the document restores them
+        // through the Core setter rather than the native engine. The failure
+        // contract is unchanged: an out-of-range scale in the file still
+        // rolls the whole load back.
+        if !self.set_tonal_scale(document.metadata.key_root, document.metadata.scale_type) {
             return Err(rollback_error(anyhow::anyhow!(
                 "project contains an unsupported tonal scale"
             )));

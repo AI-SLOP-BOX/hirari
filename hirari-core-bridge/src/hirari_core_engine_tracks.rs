@@ -429,6 +429,13 @@ impl HirariCore {
         if let Some(e) = self.engine.as_ref() {
             e.new_project();
         }
+        // The native `new_project()` used to reset its own `TonalSync` member
+        // to (root 0, Major). Now that the tonality lives here, this Core
+        // mirror has to make the same reset or a fresh project would inherit
+        // the previous project's key and scale.
+        if let Ok(mut tonal) = self.tonal.lock() {
+            *tonal = crate::tonal_sync::TonalOrchestrator::new();
+        }
         if let Ok(mut ids) = self.aux_track_ids.lock() {
             if !ids.is_empty() {
                 ids.clear();

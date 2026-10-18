@@ -37,7 +37,6 @@
 #include "concurrency/audio_task_manager.hpp"
 #include "log_buffer.hpp"
 #include "diagnostics_kernel.hpp"
-#include "engine/tonal_sync.hpp"
 #include "engine/script_manager.hpp"
 #include "database/project_db.hpp"
 #include "io/multi_device_sink.hpp"

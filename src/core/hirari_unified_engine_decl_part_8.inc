@@ -49,7 +49,6 @@
     // PDC is project/session state. It must not be shared through the legacy
     // process-wide compatibility singleton.
     PDCManager m_pdcManager;
-    TonalSync m_tonalSync;
     UndoTransactionManager m_undoManager;
     TempoMap m_tempoMap;
     RoutingEngine m_routingEngine;

@@ -225,8 +225,12 @@ impl HirariCore {
             engine.is_loop_enabled() && document.cycle_end_sample > document.cycle_start_sample;
         document.metronome_enabled = engine.is_metronome_enabled();
         document.master_gain = engine.get_master_gain();
-        document.metadata.key_root = engine.tonal_root();
-        document.metadata.scale_type = engine.tonal_scale_type();
+        // Root and scale are control-plane state, not engine state. This
+        // snapshot used to read them straight off the native engine
+        // (`engine.tonal_root()` / `engine.tonal_scale_type()`); since the
+        // tonality moved into Core, it reads the Core-owned copy instead.
+        document.metadata.key_root = self.tonal_root();
+        document.metadata.scale_type = self.tonal_scale_type();
         // Freeze metadata is derived from the native layout and the cache
         // file, then stamped with the same project/audio generations as the
         // document being saved. Content checksums are read by the publication

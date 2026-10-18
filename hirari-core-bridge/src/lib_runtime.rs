@@ -182,6 +182,11 @@ pub struct HirariCore {
     /// SDK-neutral ARA2 document lifecycle. An external ARA2 adapter can bind
     /// its callbacks here without coupling the Core to a proprietary SDK.
     pub(crate) ara2_protocol: std::sync::Mutex<crate::ara2_protocol::Ara2ProtocolEndpoint>,
+    /// Project-wide root + scale. This state used to live in the C++
+    /// `TonalSync` member and was only reachable through four bridge calls;
+    /// owning it here is what let that class be deleted without losing the
+    /// answer to "is this note in the project's scale".
+    pub(crate) tonal: std::sync::Mutex<crate::tonal_sync::TonalOrchestrator>,
 }
 
 #[derive(Clone)]

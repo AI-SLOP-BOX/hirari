@@ -10,10 +10,6 @@
     void new_project() const { if (m_engine) m_engine->new_project(); }
     bool set_low_latency_mode(bool active) const { return m_engine && m_engine->set_low_latency_mode(active); }
     bool low_latency_mode() const { return m_engine && m_engine->low_latency_mode(); }
-    bool set_tonal_scale(int32_t root, uint32_t scale_type) const { return m_engine && m_engine->set_tonal_scale(root, scale_type); }
-    bool is_note_in_tonal_scale(int32_t midi_note) const { return m_engine && m_engine->is_note_in_tonal_scale(midi_note); }
-    int32_t tonal_root() const { return m_engine ? m_engine->tonal_root() : 0; }
-    uint32_t tonal_scale_type() const { return m_engine ? m_engine->tonal_scale_type() : 0; }
     uint32_t duplicate_track(uint32_t id) const { return m_engine ? m_engine->duplicate_track(id) : 0; }
     bool freeze_track(uint32_t tid, uint64_t totalSamples, uint32_t sampleRate) const {
         return m_engine && m_engine->freeze_track(tid, totalSamples, sampleRate);

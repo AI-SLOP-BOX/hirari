@@ -80,16 +80,50 @@ impl HirariCore {
             .is_some_and(|engine| engine.low_latency_mode())
     }
 
+    /// Sets the project-wide root + scale.
+    ///
+    /// Returns `false` for an index outside `0..=10`, which is what the C++
+    /// bridge did. Index 11 (`PentatonicMinor`) is a declared enum variant
+    /// that this range can never reach, so it stays refused rather than
+    /// silently becoming selectable after the port.
     pub fn set_tonal_scale(&self, root: i32, scale_type: u32) -> bool {
-        self.engine
-            .as_ref()
-            .is_some_and(|engine| engine.set_tonal_scale(root, scale_type))
+        let Some(scale) = crate::tonal_sync::ScaleTypeRust::from_index(scale_type) else {
+            return false;
+        };
+        let Ok(mut tonal) = self.tonal.lock() else {
+            return false;
+        };
+        tonal.set_scale(root, scale);
+        true
     }
 
     pub fn is_note_in_tonal_scale(&self, midi_note: i32) -> bool {
-        self.engine
-            .as_ref()
-            .is_some_and(|engine| engine.is_note_in_tonal_scale(midi_note))
+        self.tonal
+            .lock()
+            .is_ok_and(|tonal| tonal.is_note_in_scale(midi_note))
+    }
+
+    /// Current project root, already normalized into `0..=11`.
+    pub fn tonal_root(&self) -> i32 {
+        self.tonal.lock().map_or(0, |tonal| tonal.root_note)
+    }
+
+    /// Current scale as the same `0..=10` index the setter accepts.
+    pub fn tonal_scale_type(&self) -> u32 {
+        self.tonal.lock().map_or(0, |tonal| match tonal.scale_type {
+            crate::tonal_sync::ScaleTypeRust::Major => 0,
+            crate::tonal_sync::ScaleTypeRust::Minor => 1,
+            crate::tonal_sync::ScaleTypeRust::HarmonicMinor => 2,
+            crate::tonal_sync::ScaleTypeRust::MelodicMinor => 3,
+            crate::tonal_sync::ScaleTypeRust::Dorian => 4,
+            crate::tonal_sync::ScaleTypeRust::Phrygian => 5,
+            crate::tonal_sync::ScaleTypeRust::Lydian => 6,
+            crate::tonal_sync::ScaleTypeRust::Mixolydian => 7,
+            crate::tonal_sync::ScaleTypeRust::Aeolian => 8,
+            crate::tonal_sync::ScaleTypeRust::Locrian => 9,
+            crate::tonal_sync::ScaleTypeRust::PentatonicMajor => 10,
+            crate::tonal_sync::ScaleTypeRust::PentatonicMinor => 11,
+        })
     }
 
     pub fn generate_chord_notes(&self, root: i32, octave: i32, quality: u32) -> Vec<u8> {

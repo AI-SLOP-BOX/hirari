@@ -279,25 +279,6 @@ bool HirariUnifiedEngine::low_latency_mode() const noexcept {
     return m_pdcManager.lowLatencyMode();
 }
 
-bool HirariUnifiedEngine::set_tonal_scale(int32_t root, uint32_t scale_type) noexcept {
-    if (scale_type > 10) return false;
-    using ScaleType = Hirari::Core::Engine::TonalSync::ScaleType;
-    static constexpr ScaleType kScales[] = {
-        ScaleType::Major, ScaleType::Minor, ScaleType::HarmonicMinor,
-        ScaleType::MelodicMinor, ScaleType::Dorian, ScaleType::Phrygian,
-        ScaleType::Lydian, ScaleType::Mixolydian, ScaleType::Aeolian,
-        ScaleType::Locrian, ScaleType::PentatonicMajor,
-    };
-    m_tonalSync.setScale(root, kScales[scale_type]);
-    return true;
-}
-
-bool HirariUnifiedEngine::is_note_in_tonal_scale(int32_t midi_note) const noexcept {
-    return m_tonalSync.isNoteInScale(midi_note);
-}
-
-int32_t HirariUnifiedEngine::tonal_root() const noexcept { return m_tonalSync.root(); }
-uint32_t HirariUnifiedEngine::tonal_scale_type() const noexcept { return m_tonalSync.scaleType(); }
 void HirariUnifiedEngine::set_playhead(uint64_t p) { m_playhead.store(p); }
 uint64_t HirariUnifiedEngine::get_playhead() const { return m_playhead.load(); }
 void HirariUnifiedEngine::set_loop(bool enabled) { m_loopEnabled.store(enabled); }
@@ -491,7 +472,9 @@ void HirariUnifiedEngine::new_project() {
     m_controlRoom.resetForProject();
     m_tempoMap.setCurrentBpm(120.0f);
     m_masterGain.store(1.0f, std::memory_order_release);
-    m_tonalSync.setScale(0, Hirari::Core::Engine::TonalSync::ScaleType::Major);
+    // Project tonality (root + scale) is no longer reset here: that state
+    // moved into Core, and HirariCore::new_project() resets the same
+    // (root 0, Major) defaults alongside the other project-scoped mirrors.
     m_waveformGeneration.fetch_add(1, std::memory_order_acq_rel);
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     m_sidechainRoutes.clear();

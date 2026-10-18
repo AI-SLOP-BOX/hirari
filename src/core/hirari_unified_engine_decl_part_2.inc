@@ -12,10 +12,6 @@
     float get_track_pdc_compensation_ms(uint32_t tid) const noexcept;
     bool set_low_latency_mode(bool active) noexcept;
     bool low_latency_mode() const noexcept;
-    bool set_tonal_scale(int32_t root, uint32_t scale_type) noexcept;
-    bool is_note_in_tonal_scale(int32_t midi_note) const noexcept;
-    int32_t tonal_root() const noexcept;
-    uint32_t tonal_scale_type() const noexcept;
     void set_playing(bool playing);
     uint64_t get_playhead() const;
     void set_playhead(uint64_t pos);

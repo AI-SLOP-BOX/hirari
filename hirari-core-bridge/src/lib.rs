@@ -757,10 +757,6 @@ pub mod ffi {
         fn get_track_pdc_compensation_ms(self: &AudioEngine, tid: u32) -> f32;
         fn set_low_latency_mode(self: &AudioEngine, active: bool) -> bool;
         fn low_latency_mode(self: &AudioEngine) -> bool;
-        fn set_tonal_scale(self: &AudioEngine, root: i32, scale_type: u32) -> bool;
-        fn is_note_in_tonal_scale(self: &AudioEngine, midi_note: i32) -> bool;
-        fn tonal_root(self: &AudioEngine) -> i32;
-        fn tonal_scale_type(self: &AudioEngine) -> u32;
         fn get_video_frame(self: &AudioEngine) -> Vec<u8>;
         fn get_video_frame_revision(self: &AudioEngine) -> u64;
         fn request_video_frame(self: &AudioEngine, seconds: f64) -> bool;
