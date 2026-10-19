@@ -1982,11 +1982,6 @@ extern "C" double hirari_tempo_map_bpm_at_sample(const void* state, uint64_t sam
 extern "C" bool hirari_tempo_map_set_bpm(void* state, double bpm);
 extern "C" float hirari_tempo_map_get_current_bpm(const void* state);
 extern "C" void hirari_tempo_map_set_current_bpm(void* state, float bpm);
-extern "C" bool hirari_compile_staged_routing_graph(
-    const uint32_t* node_ids, size_t node_count,
-    const uint32_t* edge_sources, const uint32_t* edge_destinations, size_t edge_count,
-    uint32_t* execution_order_out, size_t order_capacity,
-    uint32_t* stage_depths_out, size_t depth_capacity);
 extern "C" void* hirari_routing_graph_create();
 extern "C" void hirari_routing_graph_destroy(void* state);
 extern "C" bool hirari_routing_graph_add_connection(
@@ -2132,12 +2127,6 @@ extern "C" bool hirari_send_pdc_manager_process(
     const float* input_left, const float* input_right,
     float* output_left, float* output_right, uint32_t frames,
     uint32_t additional_delay, float input_gain);
-extern "C" bool hirari_pdc_solve_engine_graph(
-    const uint32_t* node_ids, const uint32_t* node_latencies, size_t node_count,
-    const uint32_t* edge_sources, const uint32_t* edge_destinations, size_t edge_count,
-    uint32_t* edge_delays_out, size_t edge_capacity,
-    uint32_t* node_output_latencies_out, uint32_t* node_compensations_out,
-    size_t node_output_capacity, uint32_t* global_latency_out);
 extern "C" void* hirari_native_pdc_create();
 extern "C" void hirari_native_pdc_destroy(void* state);
 extern "C" bool hirari_native_pdc_bind_control_thread(const void* state);

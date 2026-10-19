@@ -73,10 +73,9 @@ set_tests_properties(hirari_ui_core_integration PROPERTIES
 
 add_custom_target(hirari-test-native
     COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_native_plugin_compile_contract.sh"
-    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_pdc_graph.sh"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     USES_TERMINAL
-    COMMENT "Testing native plugin and PDC contracts"
+    COMMENT "Testing native plugin contracts"
 )
 
 add_custom_target(hirari-test
