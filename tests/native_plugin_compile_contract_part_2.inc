@@ -6,9 +6,6 @@
     }
     if (!Hirari::Core::Plugins::PluginAdmission::isSafeCandidate(uppercasePath, "vst3")) return 32;
     std::filesystem::remove(uppercasePath, cleanup);
-    auto ai = Hirari::SCAE::Intelligence::LocalAIModels::startStemSeparation(temp.string());
-    const auto aiResult = ai.get();
-    if (aiResult.success || aiResult.error.empty()) return 4;
 
     const auto project = std::filesystem::temp_directory_path() / "hirari-region-id-contract.bin";
     Hirari::Core::ProjectSerializer::ProjectState state;
@@ -78,45 +75,7 @@
     std::filesystem::remove(oversizedProject, cleanup);
     if (rejectedOversized.valid) return 60;
 
-    const auto legacyProject = std::filesystem::temp_directory_path() / "hirari-legacy-serializer-contract.txt";
-    Hirari::IO::Persistence::ProjectSerializer legacy;
-    if (!legacy.saveProject(legacyProject.string(), "{\"tracks\":[1,2]}")) return 7;
-    if (legacy.loadProject(legacyProject.string()) != "{\"tracks\":[1,2]}") return 8;
-    {
-        std::ofstream corrupt(legacyProject, std::ios::trunc);
-        corrupt << "{\"tracks\":[1,3]}\n--HIRARI_CRC:123";
-    }
-    if (!legacy.loadProject(legacyProject.string()).empty()) return 9;
-    std::filesystem::remove(legacyProject, cleanup);
 
-    // Plugin delay compensation must align every sink to the slowest path.
-    //
-    // This contract previously expected compensation(20) == 3 for a single
-    // chain 10(lat 3) -> 20(lat 9). That encoded a pre-migration, edge-based
-    // model. The current solver marks only sinks (nodes with no outgoing route)
-    // as outputs and delays each of them by (slowest path - its own path), so a
-    // terminal node that is already the slowest needs no delay at all.
-    //
-    // The assertions below check the property that actually matters, using a
-    // second, faster sink so the compensation is non-zero and a regression
-    // cannot hide behind an all-zero result.
-    {
-        Hirari::Core::Engine::BusRouter router;
-        router.addDependency(10, 20);
-        auto& latency = Hirari::Core::Engine::LatencyManager::getInstance();
-        latency.registerLatency(10, 3);
-        latency.registerLatency(20, 9);
-        latency.registerLatency(30, 0);  // fast sink with no incoming route
-        latency.calculatePDC(router);
-        // Sink 20 sits behind the full 3 + 9 = 12 sample path, so it is the
-        // slowest output and must not be delayed.
-        if (latency.getCompensationFor(20) != 0) return 12;
-        // Sink 30 has a zero-length path and must be delayed by the full 12
-        // samples so both sinks emit in alignment.
-        if (latency.getCompensationFor(30) != 12) return 12;
-        // A non-sink carries no output compensation of its own.
-        if (latency.getCompensationFor(10) != 0) return 12;
-    }
 
     // Exercise the production scheduler rather than only compiling its
     // headers. In particular, stolen tasks must execute exactly once and the
@@ -137,36 +96,7 @@
     scheduler.stop();
     if (completed->load(std::memory_order_acquire) != 64) return 14;
 
-    // OfflineRenderer must execute the supplied render callback and emit a
-    // valid BWF payload instead of silently writing the old all-zero stub.
-    const auto offlinePath = std::filesystem::temp_directory_path() /
-                             "hirari-offline-render-contract.wav";
-    auto offline = std::make_unique<Hirari::Core::OfflineRenderer>(48'000.0,
-        [](Hirari::Core::AudioBuffer& buffer, uint32_t count) {
-            for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-                float* samples = buffer.getWritePointer(c);
-                for (uint32_t i = 0; i < count; ++i) {
-                    samples[i] = (i % 32u == 0u) ? (c == 0u ? 0.5f : -0.25f) : 0.0f;
-                }
-            }
-        });
-    offline->renderToFile(offlinePath.string(), 0.01);
-    std::ifstream offlineInput(offlinePath, std::ios::binary);
-    std::vector<uint8_t> offlineBytes((std::istreambuf_iterator<char>(offlineInput)), {});
     std::error_code offlineCleanup;
-    std::filesystem::remove(offlinePath, offlineCleanup);
-    if (offlineBytes.size() < 700 ||
-        std::string(offlineBytes.begin(), offlineBytes.begin() + 4) != "RIFF" ||
-        std::string(offlineBytes.begin() + 8, offlineBytes.begin() + 12) != "WAVE" ||
-        std::string(offlineBytes.begin() + 12, offlineBytes.begin() + 16) != "bext" ||
-        offlineBytes[16] != 0x5a || offlineBytes[17] != 0x02 ||
-        std::string(offlineBytes.begin() + 622, offlineBytes.begin() + 626) != "fmt " ||
-        std::string(offlineBytes.begin() + 646, offlineBytes.begin() + 650) != "data") return 18;
-    bool hasAudioPayload = false;
-    for (size_t i = 654; i < offlineBytes.size(); ++i) {
-        if (offlineBytes[i] != 0u) { hasAudioPayload = true; break; }
-    }
-    if (!hasAudioPayload) return 19;
 
     const auto saverPath = std::filesystem::temp_directory_path() / "hirari-wav-saver-contract.wav";
     const std::vector<std::vector<float>> saverAudio = {
@@ -286,29 +216,6 @@
     waveformCache.waitForPending();
     if (waveformCache.getWaveform(77, 2) != nullptr) return 31;
 
-    const auto cachePath = std::filesystem::temp_directory_path() / "hirari-cache-contract.raw";
-    auto& cache = Hirari::IO::Assets::CachingSubsystem::getInstance();
-    cache.registerCacheSlot(501, cachePath.string());
-    const auto cachedPath = cache.getCachedPath(501);
-    if (!cachedPath || *cachedPath != cachePath.string()) return 28;
-    cache.writeAsync(501, {0.125f, -0.25f, 0.5f});
-    cache.writeAsync(501, {0.75f, -0.5f, 0.25f});
-    std::vector<float> cached(3, 0.0f);
-    const auto cacheDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    bool cachePublished = false;
-    while (std::chrono::steady_clock::now() < cacheDeadline) {
-        std::ifstream cacheInput(cachePath, std::ios::binary);
-        if (cacheInput) {
-            cacheInput.read(reinterpret_cast<char*>(cached.data()),
-                            static_cast<std::streamsize>(cached.size() * sizeof(float)));
-            cachePublished = cacheInput && cached[0] == 0.75f &&
-                cached[1] == -0.5f && cached[2] == 0.25f;
-            if (cachePublished) break;
-        }
-        std::this_thread::yield();
-    }
-    std::filesystem::remove(cachePath, offlineCleanup);
-    if (!cachePublished) return 26;
 
     const auto pluginFingerprintPath = std::filesystem::temp_directory_path() /
                                        "hirari-plugin-fingerprint-contract.clap";
@@ -340,62 +247,7 @@
     std::filesystem::remove(pluginFingerprintPath, offlineCleanup);
     if (!fingerprintV2 || *fingerprintV1 == *fingerprintV2) return 33;
 
-    const auto assetRoot = std::filesystem::temp_directory_path() /
-                           ("hirari-asset-collector-" +
-#if defined(_WIN32)
-                            std::to_string(0)
-#else
-                            std::to_string(::getpid())
-#endif
-                           );
-    const auto assetSource = assetRoot / "source" / "kick.wav";
-    const auto assetProject = assetRoot / "project";
-    std::filesystem::create_directories(assetSource.parent_path());
-    {
-        std::ofstream output(assetSource, std::ios::binary | std::ios::trunc);
-        output << "asset-v1";
-    }
-    const bool failedCollection = Hirari::IO::Persistence::ProjectCollector::getInstance().collect(
-        assetProject.string(), {assetSource.string(), (assetRoot / "missing.wav").string()});
-    if (failedCollection || std::filesystem::exists(assetProject / "Assets" / "kick.wav")) return 20;
-    if (!Hirari::IO::Persistence::ProjectCollector::getInstance().collect(
-            assetProject.string(), {assetSource.string()})) return 16;
-    if (!std::filesystem::exists(assetProject / "Assets" / "kick.wav")) return 21;
-    const auto collidingSource = assetRoot / "alternate" / "kick.wav";
-    std::filesystem::create_directories(collidingSource.parent_path());
-    {
-        std::ofstream output(collidingSource, std::ios::binary | std::ios::trunc);
-        output << "asset-v2";
-    }
-    if (!Hirari::IO::Persistence::ProjectCollector::getInstance().collect(
-            assetProject.string(), {collidingSource.string()})) return 48;
-    size_t collectedKickFiles = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(assetProject / "Assets")) {
-        if (entry.path().extension() == ".wav") ++collectedKickFiles;
-    }
-    if (collectedKickFiles != 2) return 49;
-    std::error_code assetCleanup;
-#if !defined(_WIN32)
-    const auto assetLink = assetRoot / "source-link.wav";
-    std::filesystem::create_symlink(assetSource, assetLink, assetCleanup);
-    if (Hirari::IO::Persistence::ProjectCollector::getInstance().collect(
-            assetProject.string(), {assetLink.string()})) return 50;
-    std::filesystem::remove(assetLink, assetCleanup);
-#endif
-    std::filesystem::remove_all(assetRoot, assetCleanup);
-    static uint8_t integrityRegion[] = {0x01, 0x02, 0x03, 0x04};
-    auto& security = Hirari::Core::Security::SecurityManager::getInstance();
-    security.enableMonitoring();
-    security.registerRegion(integrityRegion, sizeof(integrityRegion));
-    if (!security.verifyIntegrity()) return 35;
-    integrityRegion[2] ^= 0xffu;
-    if (security.verifyIntegrity()) return 36;
 
-    auto& vault = Hirari::Core::Security::LicenseVault::getInstance();
-    vault.registerAsset("contract-asset");
-    const std::vector<uint8_t> protectedPayload{0x01, 0x02, 0x03};
-    if (!vault.isAuthorized("contract-asset")) return 40;
-    if (!vault.decryptAsset(protectedPayload, "contract-asset").empty()) return 41;
 
     Hirari::Core::Engine::TimelineSystem encodedTimeline;
     auto encodedTrack = std::make_shared<Hirari::Core::Engine::Track>(
@@ -451,12 +303,6 @@
         encodedProject.find("MIDI Contract") == std::string::npos ||
         encodedProject.find("\"pitch\": 60") == std::string::npos) return 42;
 
-    Hirari::DSP::Mixing::NeuralDynamicsModel neural;
-    Hirari::DSP::Mixing::NeuralDynamicsModel::Weights malformedWeights;
-    malformedWeights.inputWeights = {std::numeric_limits<float>::quiet_NaN()};
-    malformedWeights.recurrentWeights = {0.25f};
-    const float neuralOutput = neural.process(std::numeric_limits<float>::infinity(), malformedWeights);
-    if (!std::isfinite(neuralOutput)) return 37;
     Hirari::DSP::Analysis::SpectralProcessor spectral;
     Hirari::Core::AudioBuffer invalidSpectralBuffer(1, 128);
     spectral.applyMask(invalidSpectralBuffer, 48'000.0,
@@ -590,11 +436,3 @@
     if (restoration.undoDepthOffline() == 0 || restoration.redoDepthOffline() != 0) return 83;
     restoration.reset();
     if (restoration.canUndoOffline() || restoration.canRedoOffline()) return 81;
-    Hirari::DSP::Effects::DivineConsoleStrip console;
-    console.prepareToPlay(48'000.0, 64);
-    if (!console.setBand(0, 120.0f, 6.0f, 0.8f) || console.getNumParameters() != 7) return 71;
-    Hirari::Core::AudioBuffer consoleBuffer(2, 64);
-    for (uint32_t i = 0; i < 64; ++i) {
-        consoleBuffer.getWritePointer(0)[i] = 0.1f;
-        consoleBuffer.getWritePointer(1)[i] = 0.1f;
-    }

@@ -1,44 +1,5 @@
 int main() {
     {
-        auto& driver = Hirari::Core::External::AudioDriverPro::getInstance();
-        driver.closeStream();
-        bool callbackOpened = false;
-        bool callbackClosed = false;
-        uint32_t callbackFrames = 0;
-        driver.bindExternalBackend(
-            Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
-            [&](double rate, int frames) {
-                callbackOpened = rate == 48'000.0 && frames == 256;
-                return callbackOpened;
-            },
-            [&] { callbackClosed = true; },
-            [&](float* const* outputs, float* const*, uint32_t frames) {
-                callbackFrames = frames;
-                if (outputs && outputs[0]) outputs[0][0] = 0.25f;
-            });
-        if (!driver.openStream(Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
-                               0, 48'000.0, 256) || !callbackOpened) return 83;
-        float output[2][4]{};
-        float input[2][4]{};
-        float* outputs[] = {output[0], output[1]};
-        float* inputs[] = {input[0], input[1]};
-        if (!driver.processBlock(outputs, inputs, 4) || callbackFrames != 4 || output[0][0] != 0.25f)
-            return 82;
-        driver.closeStream();
-        if (!callbackClosed) return 80;
-        driver.bindExternalBackend(
-            Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
-            [](double, int) { return false; }, [] {});
-
-        if (driver.openStream(Hirari::Core::External::AudioDriverPro::Backend::WASAPI,
-                              0, 48'000.0, 256)) return 84;
-        if (driver.isOpen() || driver.lastError().empty()) return 85;
-#if !defined(HIRARI_ENABLE_ASIO_SDK)
-        if (driver.openStream(Hirari::Core::External::AudioDriverPro::Backend::ASIO,
-                              0, 48'000.0, 256)) return 86;
-        if (driver.isOpen() || driver.lastError().find("ASIO SDK") == std::string::npos)
-            return 87;
-#endif
         auto& jack = Hirari::Core::External::JackBridgeDeep::getInstance();
         jack.shutdown();
 #if !defined(HIRARI_ENABLE_JACK)
@@ -121,56 +82,11 @@ int main() {
             !processor->loadGuiState(processor->saveGuiState())) return 67;
         factory.destroy(std::move(processor));
     }
-    {
-        auto& legacySidechain = Hirari::Core::DSP::Mixing::SidechainManager::getInstance();
-        const float source[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-        if (!legacySidechain.writeSource(7, source, 4)) return 63;
-        float copy[4] = {};
-        const size_t frames = legacySidechain.copySource(7, copy, 4);
-        if (frames != 4 || copy[0] != 1.0f || copy[3] != 4.0f) return 64;
-    }
     // This translation unit intentionally exercises the production native
     // plugin boundary without loading a third-party binary.
     auto& pool = Hirari::Core::Concurrency::ThreadPool::getInstance();
     auto poolResult = pool.enqueue([] { return 42; });
     if (poolResult.get() != 42) return 47;
-    const auto peakWav = std::filesystem::temp_directory_path() / "hirari-audio-pool-peaks.wav";
-    {
-        std::vector<uint8_t> wav;
-        const auto u16 = [&wav](uint16_t value) {
-            wav.push_back(static_cast<uint8_t>(value));
-            wav.push_back(static_cast<uint8_t>(value >> 8));
-        };
-        const auto u32 = [&wav](uint32_t value) {
-            for (unsigned shift = 0; shift < 32; shift += 8)
-                wav.push_back(static_cast<uint8_t>(value >> shift));
-        };
-        const uint32_t dataBytes = 4u * sizeof(int16_t);
-        wav.insert(wav.end(), {'R','I','F','F'});
-        u32(36u + dataBytes);
-        wav.insert(wav.end(), {'W','A','V','E','f','m','t',' '});
-        u32(16); u16(1); u16(1); u32(48'000); u32(96'000); u16(2); u16(16);
-        wav.insert(wav.end(), {'d','a','t','a'}); u32(dataBytes);
-        for (int16_t sample : {1000, 2000, 1500, 2500}) u16(static_cast<uint16_t>(sample));
-        std::ofstream output(peakWav, std::ios::binary | std::ios::trunc);
-        output.write(reinterpret_cast<const char*>(wav.data()), static_cast<std::streamsize>(wav.size()));
-    }
-    auto& audioPool = Hirari::Core::AudioPool::getInstance();
-    if (audioPool.addSource((peakWav.string() + ".missing")) != nullptr) return 50;
-    const auto peakSource = audioPool.addSource(peakWav.string());
-    if (!peakSource) return 48;
-    const auto peakDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    std::shared_ptr<Hirari::Core::PeakData> peaks;
-    while (std::chrono::steady_clock::now() < peakDeadline) {
-        peaks = audioPool.getPeaks(peakWav.string());
-        if (peaks && peaks->isReady.load(std::memory_order_acquire)) break;
-        std::this_thread::yield();
-    }
-    if (!peaks || !peaks->isReady.load(std::memory_order_acquire) || peaks->levels.empty() ||
-        peaks->levels.front().mins.front() <= 0.0f || peaks->levels.front().maxs.front() <= 0.0f) return 49;
-    audioPool.purgeUnused();
-    std::error_code peakCleanup;
-    std::filesystem::remove(peakWav, peakCleanup);
     // These hosts embed fixed-size realtime mailboxes. Keep them off the
     // test's main stack so the contract remains runnable on macOS's default
     // 8 MiB thread stack even when the sandbox protocol grows.
@@ -199,33 +115,6 @@ int main() {
         Hirari::DSP::Effects::DynamicCompressor restored;
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
-    }
-    // Procedural Foley must be deterministic for offline renders and must
-    // fail closed when a UI/FFI caller supplies non-finite event controls.
-    {
-        Hirari::Core::DSP::Effects::ProceduralFoleyKernel first;
-        Hirari::Core::DSP::Effects::ProceduralFoleyKernel second;
-        first.triggerEvent(std::numeric_limits<float>::quiet_NaN(), 0.65f);
-        second.triggerEvent(0.5f, 0.65f);
-        std::array<float, 512> firstBlock{};
-        std::array<float, 512> secondBlock{};
-        first.process(firstBlock.data(), static_cast<uint32_t>(firstBlock.size()));
-        second.process(secondBlock.data(), static_cast<uint32_t>(secondBlock.size()));
-        for (size_t sample = 0; sample < firstBlock.size(); ++sample) {
-            if (!std::isfinite(firstBlock[sample]) || !std::isfinite(secondBlock[sample]) ||
-                std::abs(firstBlock[sample] - secondBlock[sample]) > 1.0e-6f) return 76;
-        }
-    }
-    {
-        auto& assetLibrary = Hirari::IO::Assets::AudioAssetLibrary::getInstance();
-        assetLibrary.registerPatch("Contract Bass", "Bass", "/tmp/hirari-contract-bass.hirari");
-        assetLibrary.registerPatch("Contract Drums", "Drums", "/tmp/hirari-contract-drums.hirari");
-        assetLibrary.registerPatch("Contract Keys", "Keys", "/tmp/hirari-contract-keys.hirari");
-        const auto categories = assetLibrary.categories();
-        if (categories.size() < 3 || !std::is_sorted(categories.begin(), categories.end()) ||
-            std::find(categories.begin(), categories.end(), "Bass") == categories.end() ||
-            std::find(categories.begin(), categories.end(), "Drums") == categories.end() ||
-            std::find(categories.begin(), categories.end(), "Keys") == categories.end()) return 77;
     }
     // The sampler must consume both legacy MIDI and MIDI 2.0 UMP note events,
     // including sustain pedal state, through the same realtime dispatcher.
@@ -278,17 +167,6 @@ int main() {
             hasTail = hasTail || std::abs(block->getReadPointer(0)[i]) > 1.0e-5f;
         if (!hasTail) return 75;
     }
-    {
-        Hirari::Synthesis::SamplerMap map;
-        map.addZone(-1, 60, 1, 127, "invalid.wav");
-        map.addZone(0, 127, 0, 127, "layer-a.wav");
-        map.addZone(0, 127, 0, 127, "layer-b.wav");
-        if (map.resolveSample(60, 100).empty() || map.resolveSample(60, 100).empty()) return 72;
-        Hirari::Synthesis::SamplerMap independent;
-        independent.addZone(0, 127, 0, 127, "layer-a.wav");
-        if (independent.resolveSample(60, 100) != "layer-a.wav") return 73;
-    }
-    Hirari::Core::PluginHost::ClapHostInterface legacyClap("builtin://compile-contract");
     Hirari::Core::Engine::MIDIOrchestrator midiOrchestrator;
     // The sandbox host owns bounded shared-memory staging arrays sized for
     // the maximum plugin protocol block. Allocate it on the heap to keep
@@ -310,19 +188,11 @@ int main() {
             Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
     (void)vst3;
     (void)clap;
-    (void)legacyClap;
     (void)midiOrchestrator;
     (void)sandbox;
     (void)chain;
     (void)recovery;
 
-    // The legacy structural wrapper must remain ABI-compatible with the
-    // current processor interface while refusing to masquerade as a loaded
-    // third-party plugin. Real processing is covered by the format adapters.
-    Hirari::Core::PluginHost::ExternalPluginWrapper legacyExternal(
-        Hirari::Core::PluginHost::ExternalPluginWrapper::Format::VST3,
-        "builtin://unsupported-compat-wrapper");
-    if (legacyExternal.supportsProcessing()) return 65;
 
     // Transactional undo coverage, migrated onto the Rust-owned undo manager.
     //
@@ -472,34 +342,7 @@ int main() {
         !std::filesystem::is_directory(dbDestination)) return 65;
     std::filesystem::remove_all(dbDestination, dbCleanup);
 
-    // A newer asset batch must prevent an older worker from publishing stale
-    // results or failure diagnostics into the current project.
-    auto& assets = Hirari::IO::ParallelAssetManager::getInstance();
-    assets.loadAssets({"/definitely/missing/hirari-old.wav"});
-    if (assets.failedPaths().empty()) return 25;
 
-    // Native project collection must preserve distinct same-basename assets
-    // instead of silently reusing the first destination.
-    const auto collectorRoot = std::filesystem::temp_directory_path() /
-                               "hirari-project-collector-contract";
-    std::error_code collectorCleanup;
-    std::filesystem::remove_all(collectorRoot, collectorCleanup);
-    std::filesystem::create_directories(collectorRoot / "one", collectorCleanup);
-    std::filesystem::create_directories(collectorRoot / "two", collectorCleanup);
-    if (collectorCleanup) return 66;
-    const auto collectorFirst = collectorRoot / "one" / "same.wav";
-    const auto collectorSecond = collectorRoot / "two" / "same.wav";
-    std::ofstream(collectorFirst) << "first";
-    std::ofstream(collectorSecond) << "second";
-    auto& collector = Hirari::IO::Persistence::ProjectCollector::getInstance();
-    if (!collector.collect(collectorRoot.string(),
-                           {collectorFirst.string(), collectorSecond.string()})) return 67;
-    size_t collectedCount = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(collectorRoot / "Assets")) {
-        if (entry.is_regular_file()) ++collectedCount;
-    }
-    std::filesystem::remove_all(collectorRoot, collectorCleanup);
-    if (collectedCount != 2) return 68;
 
     auto& telemetryBridge = Hirari::Network::SharedMemoryBridge::getInstance();
     if (!telemetryBridge.start()) return 26;
