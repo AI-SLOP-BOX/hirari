@@ -44,73 +44,14 @@
     double midi_clock_rate() const noexcept { return m_externalSync.clockRate(); }
     void set_midi_clock_rate(double bpm) noexcept { m_externalSync.setClockRate(bpm); }
     bool set_master_gain(float value);
-    bool add_control_room_speaker(std::string_view name, float gain = 1.0f) {
-        return m_controlRoom.addSpeakerSet(std::string(name), gain);
-    }
-    void reset_control_room() { m_controlRoom.resetForProject(); }
-    bool select_control_room_speaker(uint32_t index) noexcept {
-        return m_controlRoom.selectSpeakerSet(index);
-    }
-    bool rename_control_room_speaker(uint32_t index, std::string_view name) {
-        return m_controlRoom.renameSpeakerSet(index, std::string(name));
-    }
-    bool remove_control_room_speaker(uint32_t index) { return m_controlRoom.removeSpeakerSet(index); }
-    bool set_control_room_speaker_gain(uint32_t index, float gain) { return m_controlRoom.setSpeakerGain(index, gain); }
-    bool set_control_room_speaker_enabled(uint32_t index, bool enabled) { return m_controlRoom.setSpeakerEnabled(index, enabled); }
-    bool set_control_room_dim_reduction_db(float db) noexcept { return m_controlRoom.setDimReductionDb(db); }
-    float control_room_dim_reduction_db() const noexcept { return m_controlRoom.dimReductionDb(); }
-    bool upsert_control_room_cue(uint32_t id, float gain, bool enabled = true) { return m_controlRoom.upsertCueMix(id, gain, enabled); }
-    bool remove_control_room_cue(uint32_t id) { return m_controlRoom.removeCueMix(id); }
-    bool set_control_room_cue_enabled(uint32_t id, bool enabled) { return m_controlRoom.setCueMixEnabled(id, enabled); }
-    float control_room_cue_gain(uint32_t id) const noexcept { return m_controlRoom.cueGain(id); }
-    bool set_control_room_cue_bus_track(uint32_t cueId, uint32_t busTrackId) {
-        if (busTrackId != 0) {
-            std::lock_guard<std::mutex> lock(m_tracksMutex);
-            const auto found = std::find_if(m_tracks.begin(), m_tracks.end(), [busTrackId](const auto& track) {
-                return track && track->getId() == busTrackId &&
-                       dynamic_cast<BusTrack*>(track.get()) != nullptr;
-            });
-            if (found == m_tracks.end()) return false;
-        }
-        return m_controlRoom.setCueMixBusTrack(cueId, busTrackId);
-    }
-    bool set_control_room_cue_output_channel(uint32_t cueId, uint32_t outputChannel) {
-        return m_controlRoom.setCueMixOutputChannel(cueId, outputChannel);
-    }
-    bool set_control_room_cue_click_enabled(uint32_t cueId, bool enabled) {
-        return m_controlRoom.setCueMixClickEnabled(cueId, enabled);
-    }
-    bool set_control_room_active_cue(uint32_t id) {
-        if (id != 0) {
-            const uint32_t busTrackId = m_controlRoom.cueBusTrackId(id);
-            if (busTrackId == 0) return false;
-            std::lock_guard<std::mutex> lock(m_tracksMutex);
-            const auto found = std::find_if(m_tracks.begin(), m_tracks.end(), [busTrackId](const auto& track) {
-                return track && track->getId() == busTrackId &&
-                       dynamic_cast<BusTrack*>(track.get()) != nullptr;
-            });
-            if (found == m_tracks.end()) return false;
-        }
-        return m_controlRoom.selectCueMix(id);
-    }
-    uint32_t control_room_active_cue() const noexcept { return m_controlRoom.activeCueMixId(); }
-    void set_control_room_dim(bool enabled) noexcept { m_controlRoom.setDim(enabled); }
-    void set_control_room_talkback(bool enabled, float gain = 1.0f) noexcept {
-        m_controlRoom.setTalkback(enabled, gain);
-    }
-    bool set_control_room_talkback_input_channel(uint32_t channel) noexcept {
-        return m_controlRoom.setTalkbackInputChannel(channel);
-    }
-    uint32_t control_room_talkback_input_channel() const noexcept {
-        return m_controlRoom.talkbackInputChannel();
-    }
-    bool control_room_dimmed() const noexcept { return m_controlRoom.isDimmed(); }
-    bool control_room_talkback_enabled() const noexcept { return m_controlRoom.talkbackEnabled(); }
-    float control_room_monitor_gain() const noexcept { return m_controlRoom.monitorGain(); }
-    bool control_room_validate() const noexcept { return m_controlRoom.validate(); }
-    void process_control_room_monitor(float* left, float* right, const float* talkback,
-                                      uint32_t frames) const noexcept {
-        m_controlRoom.processMonitorWithTalkback(left, right, talkback, frames);
+    void* control_room_state() const noexcept { return m_controlRoom.state(); }
+    bool bus_track_exists(uint32_t busTrackId) const {
+        if (busTrackId == 0) return false;
+        std::lock_guard<std::mutex> lock(m_tracksMutex);
+        return std::find_if(m_tracks.begin(), m_tracks.end(), [busTrackId](const auto& track) {
+            return track && track->getId() == busTrackId &&
+                   dynamic_cast<BusTrack*>(track.get()) != nullptr;
+        }) != m_tracks.end();
     }
     bool save_track_preset(std::string_view name, uint32_t track_id);
     bool apply_track_preset(std::string_view name, uint32_t track_id);

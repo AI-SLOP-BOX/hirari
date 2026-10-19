@@ -202,74 +202,157 @@ impl HirariCore {
         }
         if let Some(state) = persisted_control_room {
             // Rehydrate both the Rust control-plane snapshot and the native
-            // realtime monitor graph. Keeping only the Rust copy would make
-            // the UI look correct while the audio callback still used the
-            // default speaker set after reopening a project.
-            engine.reset_control_room();
+            // realtime monitor graph. The runtime object written below *is*
+            // the graph the audio callback reads, so the UI and the callback
+            // now share one state instead of maintaining two copies that could
+            // drift after reopening a project. The handle is read off the
+            // engine parameter rather than `self` because this method is handed
+            // an engine explicitly.
+            let handle = engine.control_room_state() as *mut std::ffi::c_void;
+            unsafe {
+                crate::control_room_runtime::hirari_control_room_reset(handle);
+            }
             for (index, name) in state.monitor_outputs.iter().enumerate() {
                 if index > 0
-                    && !engine.add_control_room_speaker(name, state.monitor_output_gains[index])
+                    && !unsafe {
+                        crate::control_room_runtime::hirari_control_room_add_speaker(
+                            handle,
+                            name.as_ptr(),
+                            name.len(),
+                            state.monitor_output_gains[index],
+                        )
+                    }
                 {
                     return Err(rollback_error(anyhow::anyhow!(
                         "failed to restore control room output"
                     )));
                 }
-                if !engine
-                    .set_control_room_speaker_gain(index as u32, state.monitor_output_gains[index])
-                    || !engine.set_control_room_speaker_enabled(
-                        index as u32,
+                if !unsafe {
+                    crate::control_room_runtime::hirari_control_room_set_speaker_gain(
+                        handle,
+                        index as u32 as usize,
+                        state.monitor_output_gains[index],
+                    )
+                } || !unsafe {
+                    crate::control_room_runtime::hirari_control_room_set_speaker_enabled(
+                        handle,
+                        index as u32 as usize,
                         state.monitor_output_enabled[index],
                     )
-                {
+                } {
                     return Err(rollback_error(anyhow::anyhow!(
                         "failed to restore control room output settings"
                     )));
                 }
             }
-            if !engine.select_control_room_speaker(state.active_output as u32) {
+            if !unsafe {
+                crate::control_room_runtime::hirari_control_room_select_speaker(
+                    handle,
+                    state.active_output as u32 as usize,
+                )
+            } {
                 return Err(rollback_error(anyhow::anyhow!(
                     "failed to restore active control room output"
                 )));
             }
             for cue in &state.cues {
-                if !engine.upsert_control_room_cue(cue.id, cue.gain, cue.enabled) {
+                if !unsafe {
+                    crate::control_room_runtime::hirari_control_room_upsert_cue(
+                        handle,
+                        cue.id,
+                        cue.gain,
+                        cue.enabled,
+                    )
+                } {
                     return Err(rollback_error(anyhow::anyhow!(
                         "failed to restore control room cue"
                     )));
                 }
                 if let Some(bus_track_id) = cue.bus_track_id {
-                    if !engine.set_control_room_cue_bus_track(cue.id, bus_track_id) {
+                    // The native setter only validated non-zero bus targets,
+                    // and it did so against the track list C++ still owns.
+                    let resolves = bus_track_id == 0 || engine.bus_track_exists(bus_track_id);
+                    if !resolves
+                        || !unsafe {
+                            crate::control_room_runtime::hirari_control_room_set_cue_bus(
+                                handle,
+                                cue.id,
+                                bus_track_id,
+                            )
+                        }
+                    {
                         return Err(rollback_error(anyhow::anyhow!(
                             "failed to restore Control Room Cue bus"
                         )));
                     }
                 }
                 if let Some(output_channel) = cue.output_channel {
-                    if !engine.set_control_room_cue_output_channel(cue.id, output_channel) {
+                    if !unsafe {
+                        crate::control_room_runtime::hirari_control_room_set_cue_output(
+                            handle,
+                            cue.id,
+                            output_channel,
+                        )
+                    } {
                         return Err(rollback_error(anyhow::anyhow!(
                             "failed to restore Control Room Cue output pair"
                         )));
                     }
                 }
-                if !engine.set_control_room_cue_click_enabled(cue.id, cue.click_enabled) {
+                if !unsafe {
+                    crate::control_room_runtime::hirari_control_room_set_cue_click(
+                        handle,
+                        cue.id,
+                        cue.click_enabled,
+                    )
+                } {
                     return Err(rollback_error(anyhow::anyhow!(
                         "failed to restore Control Room Cue click routing"
                     )));
                 }
             }
-            if !engine.set_control_room_active_cue(state.active_cue.unwrap_or(0)) {
+            let active_cue = state.active_cue.unwrap_or(0);
+            // Selecting a cue is only legal when its bus target resolves to a
+            // real BusTrack, which is the lookup HirariUnifiedEngine used to do
+            // inline before committing.
+            if active_cue != 0 {
+                let bus_track_id = unsafe {
+                    crate::control_room_runtime::hirari_control_room_cue_bus(handle, active_cue)
+                };
+                if bus_track_id == 0 || !engine.bus_track_exists(bus_track_id) {
+                    return Err(rollback_error(anyhow::anyhow!(
+                        "failed to restore active Control Room Cue"
+                    )));
+                }
+            }
+            if !unsafe {
+                crate::control_room_runtime::hirari_control_room_select_cue(handle, active_cue)
+            } {
                 return Err(rollback_error(anyhow::anyhow!(
                     "failed to restore active Control Room Cue"
                 )));
             }
-            if !engine.set_control_room_dim_reduction_db(state.dim_db) {
+            if !unsafe {
+                crate::control_room_runtime::hirari_control_room_set_dim_db(handle, state.dim_db)
+            } {
                 return Err(rollback_error(anyhow::anyhow!(
                     "failed to restore Control Room DIM level"
                 )));
             }
-            engine.set_control_room_dim(state.dim);
-            engine.set_control_room_talkback(state.talkback, state.talkback_gain);
-            if !engine.set_control_room_talkback_input_channel(state.talkback_input_channel) {
+            unsafe {
+                crate::control_room_runtime::hirari_control_room_set_dim(handle, state.dim);
+                crate::control_room_runtime::hirari_control_room_set_talkback(
+                    handle,
+                    state.talkback,
+                    state.talkback_gain,
+                );
+            }
+            if !unsafe {
+                crate::control_room_runtime::hirari_control_room_set_talkback_channel(
+                    handle,
+                    state.talkback_input_channel,
+                )
+            } {
                 return Err(rollback_error(anyhow::anyhow!(
                     "failed to restore Control Room Talkback input"
                 )));

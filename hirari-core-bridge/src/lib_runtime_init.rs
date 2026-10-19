@@ -60,8 +60,11 @@ impl HirariCore {
         // appear as the first undoable action of a new Core instance.
         engine_ref.clear_undo_history();
 
+        let control_room_state = engine_ref.control_room_state();
+
         Ok(Self {
             engine,
+            control_room_state,
             gpu_initialized,
             preview_audio: std::sync::Mutex::new(preview_audio_runtime::PreviewAudioRuntime::new()),
             recording_session: std::sync::Mutex::new(None),

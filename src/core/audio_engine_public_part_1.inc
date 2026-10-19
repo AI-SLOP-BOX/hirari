@@ -88,38 +88,12 @@ public:
         if (!m_engine || !m_engine->set_master_gain(value)) return false;
         m_engine->mark_project_state_changed(); return true;
     }
-    bool add_control_room_speaker(rust::Str name, float gain) const {
-        return m_engine && m_engine->add_control_room_speaker(std::string(name), gain);
+    uintptr_t control_room_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->control_room_state()) : 0;
     }
-    void reset_control_room() const { if (m_engine) m_engine->reset_control_room(); }
-    bool select_control_room_speaker(uint32_t index) const { return m_engine && m_engine->select_control_room_speaker(index); }
-    bool rename_control_room_speaker(uint32_t index, rust::Str name) const { return m_engine && m_engine->rename_control_room_speaker(index, std::string(name)); }
-    bool remove_control_room_speaker(uint32_t index) const { return m_engine && m_engine->remove_control_room_speaker(index); }
-    bool set_control_room_speaker_gain(uint32_t index, float gain) const { return m_engine && m_engine->set_control_room_speaker_gain(index, gain); }
-    bool set_control_room_speaker_enabled(uint32_t index, bool enabled) const { return m_engine && m_engine->set_control_room_speaker_enabled(index, enabled); }
-    bool upsert_control_room_cue(uint32_t id, float gain, bool enabled) const { return m_engine && m_engine->upsert_control_room_cue(id, gain, enabled); }
-    bool remove_control_room_cue(uint32_t id) const { return m_engine && m_engine->remove_control_room_cue(id); }
-    bool set_control_room_cue_enabled(uint32_t id, bool enabled) const { return m_engine && m_engine->set_control_room_cue_enabled(id, enabled); }
-    bool set_control_room_cue_bus_track(uint32_t cueId, uint32_t busTrackId) const { return m_engine && m_engine->set_control_room_cue_bus_track(cueId, busTrackId); }
-    bool set_control_room_cue_output_channel(uint32_t cueId, uint32_t outputChannel) const { return m_engine && m_engine->set_control_room_cue_output_channel(cueId, outputChannel); }
-    bool set_control_room_cue_click_enabled(uint32_t cueId, bool enabled) const { return m_engine && m_engine->set_control_room_cue_click_enabled(cueId, enabled); }
-    float control_room_cue_gain(uint32_t id) const { return m_engine ? m_engine->control_room_cue_gain(id) : 0.0f; }
-    bool set_control_room_active_cue(uint32_t id) const { return m_engine && m_engine->set_control_room_active_cue(id); }
-    uint32_t control_room_active_cue() const { return m_engine ? m_engine->control_room_active_cue() : 0; }
-    bool control_room_validate() const { return m_engine && m_engine->control_room_validate(); }
-    void set_control_room_dim(bool enabled) const { if (m_engine) m_engine->set_control_room_dim(enabled); }
-    bool set_control_room_dim_reduction_db(float db) const { return m_engine && m_engine->set_control_room_dim_reduction_db(db); }
-    float control_room_dim_reduction_db() const { return m_engine ? m_engine->control_room_dim_reduction_db() : -20.0f; }
-    void set_control_room_talkback(bool enabled, float gain) const { if (m_engine) m_engine->set_control_room_talkback(enabled, gain); }
-    bool set_control_room_talkback_input_channel(uint32_t channel) const {
-        return m_engine && m_engine->set_control_room_talkback_input_channel(channel);
+    bool bus_track_exists(uint32_t busTrackId) const {
+        return m_engine && m_engine->bus_track_exists(busTrackId);
     }
-    uint32_t control_room_talkback_input_channel() const {
-        return m_engine ? m_engine->control_room_talkback_input_channel() : 0;
-    }
-    bool control_room_dimmed() const { return m_engine && m_engine->control_room_dimmed(); }
-    bool control_room_talkback_enabled() const { return m_engine && m_engine->control_room_talkback_enabled(); }
-    float control_room_monitor_gain() const { return m_engine ? m_engine->control_room_monitor_gain() : 0.0f; }
     void clear_undo_history() const {
         if (m_engine) m_engine->clear_undo_history();
     }

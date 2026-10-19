@@ -105,6 +105,15 @@ pub struct HirariCore {
     // --- INDUSTRIAL: Explicit Lifetime Binding ---
     // engine is the root of sovereignty.
     engine: cxx::UniquePtr<ffi::AudioEngine>,
+    /// Address of the Control Room runtime the native audio callback renders
+    /// with. The object itself is Rust-owned (`control_room_runtime.rs`) and is
+    /// created by the engine's `ControlRoom` member, so it lives exactly as
+    /// long as `engine` above. Holding the handle here lets every Control Room
+    /// operation call straight into the same object the audio thread reads,
+    /// instead of round-tripping through the C++ forwarding shims. A zero
+    /// handle means "no engine", which those functions already treat as the
+    /// same falsy/defaults their null-`m_engine` branches returned.
+    control_room_state: usize,
     gpu_initialized: bool,
     preview_audio: std::sync::Mutex<preview_audio_runtime::PreviewAudioRuntime>,
     recording_session: std::sync::Mutex<Option<recording_session::RecordingSession>>,

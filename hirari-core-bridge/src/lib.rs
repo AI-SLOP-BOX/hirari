@@ -156,43 +156,15 @@ pub mod ffi {
         fn get_tempo(self: &AudioEngine) -> f32;
         fn set_tempo(self: &AudioEngine, bpm: f32) -> bool;
         fn set_master_gain(self: &AudioEngine, value: f32) -> bool;
-        fn add_control_room_speaker(self: &AudioEngine, name: &str, gain: f32) -> bool;
-        fn reset_control_room(self: &AudioEngine);
-        fn select_control_room_speaker(self: &AudioEngine, index: u32) -> bool;
-        fn remove_control_room_speaker(self: &AudioEngine, index: u32) -> bool;
-        fn set_control_room_speaker_gain(self: &AudioEngine, index: u32, gain: f32) -> bool;
-        fn set_control_room_speaker_enabled(self: &AudioEngine, index: u32, enabled: bool) -> bool;
-        fn upsert_control_room_cue(self: &AudioEngine, id: u32, gain: f32, enabled: bool) -> bool;
-        fn remove_control_room_cue(self: &AudioEngine, id: u32) -> bool;
-        fn set_control_room_cue_enabled(self: &AudioEngine, id: u32, enabled: bool) -> bool;
-        fn set_control_room_cue_bus_track(
-            self: &AudioEngine,
-            cue_id: u32,
-            bus_track_id: u32,
-        ) -> bool;
-        fn set_control_room_cue_output_channel(
-            self: &AudioEngine,
-            cue_id: u32,
-            output_channel: u32,
-        ) -> bool;
-        fn set_control_room_cue_click_enabled(
-            self: &AudioEngine,
-            cue_id: u32,
-            enabled: bool,
-        ) -> bool;
-        fn control_room_cue_gain(self: &AudioEngine, id: u32) -> f32;
-        fn set_control_room_active_cue(self: &AudioEngine, id: u32) -> bool;
-        fn control_room_active_cue(self: &AudioEngine) -> u32;
-        fn control_room_validate(self: &AudioEngine) -> bool;
-        fn set_control_room_dim(self: &AudioEngine, enabled: bool);
-        fn set_control_room_dim_reduction_db(self: &AudioEngine, db: f32) -> bool;
-        fn control_room_dim_reduction_db(self: &AudioEngine) -> f32;
-        fn set_control_room_talkback(self: &AudioEngine, enabled: bool, gain: f32);
-        fn set_control_room_talkback_input_channel(self: &AudioEngine, channel: u32) -> bool;
-        fn control_room_talkback_input_channel(self: &AudioEngine) -> u32;
-        fn control_room_dimmed(self: &AudioEngine) -> bool;
-        fn control_room_talkback_enabled(self: &AudioEngine) -> bool;
-        fn control_room_monitor_gain(self: &AudioEngine) -> f32;
+        // The Control Room runtime state is owned and implemented in Rust
+        // (control_room_runtime.rs). C++ only holds the handle its audio
+        // callback renders with, so Rust reaches that same object directly
+        // instead of round-tripping through the C++ forwarding shims. These
+        // two are the only Control Room operations that still cross the
+        // boundary: the handle itself, and the BusTrack-existence check that
+        // answers against the C++-owned track list.
+        fn control_room_state(self: &AudioEngine) -> usize;
+        fn bus_track_exists(self: &AudioEngine, bus_track_id: u32) -> bool;
         fn get_master_gain(self: &AudioEngine) -> f32;
         fn set_track_volume(self: &AudioEngine, tid: u32, value: f32) -> bool;
         fn get_track_volume(self: &AudioEngine, tid: u32) -> f32;

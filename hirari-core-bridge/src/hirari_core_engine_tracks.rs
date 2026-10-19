@@ -337,12 +337,19 @@ impl HirariCore {
                 restore_main_monitor = true;
             }
         }
-        if let Some(engine) = self.engine.as_ref() {
+        if self.engine.as_ref().is_some() {
+            let handle = self.control_room_handle();
             for cue_id in detached_cues {
-                let _ = engine.set_control_room_cue_bus_track(cue_id, 0);
+                // Clearing the bus target needs no track-list lookup: the
+                // native setter only validated non-zero targets.
+                let _ = unsafe {
+                    crate::control_room_runtime::hirari_control_room_set_cue_bus(handle, cue_id, 0)
+                };
             }
             if restore_main_monitor {
-                let _ = engine.set_control_room_active_cue(0);
+                let _ = unsafe {
+                    crate::control_room_runtime::hirari_control_room_select_cue(handle, 0)
+                };
             }
         }
         if let Ok(mut aux_ids) = self.aux_track_ids.lock() {

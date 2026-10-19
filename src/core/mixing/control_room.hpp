@@ -104,6 +104,8 @@ public:
     float cueGain(uint32_t id) const noexcept { return hirari_control_room_cue_gain(m_state, id); }
     bool validate() const noexcept { return hirari_control_room_validate(m_state); }
 
+    void* state() const noexcept { return m_state; }
+
     const std::vector<SpeakerSet>& speakerSets() const {
         m_speakerSnapshot = loadSpeakerSnapshot();
         return m_speakerSnapshot;

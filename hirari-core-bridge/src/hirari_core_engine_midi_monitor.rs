@@ -58,22 +58,58 @@ impl HirariCore {
         if !self.set_control_room_dim_db(state.dim_db) {
             return false;
         }
-        if let Some(engine) = self.engine.as_ref() {
+        if self.engine.as_ref().is_some() {
+            let handle = self.control_room_handle();
             for cue in &state.cues {
-                if !engine.upsert_control_room_cue(cue.id, cue.gain, cue.enabled) {
+                if !unsafe {
+                    crate::control_room_runtime::hirari_control_room_upsert_cue(
+                        handle,
+                        cue.id,
+                        cue.gain,
+                        cue.enabled,
+                    )
+                } {
                     return false;
                 }
                 if let Some(bus_track_id) = cue.bus_track_id {
-                    if !engine.set_control_room_cue_bus_track(cue.id, bus_track_id) {
+                    // The native setter verified the target resolves to a real
+                    // BusTrack before forwarding; that lookup still answers
+                    // against the C++-owned track list.
+                    let resolves = bus_track_id == 0
+                        || self
+                            .engine
+                            .as_ref()
+                            .is_some_and(|engine| engine.bus_track_exists(bus_track_id));
+                    if !resolves
+                        || !unsafe {
+                            crate::control_room_runtime::hirari_control_room_set_cue_bus(
+                                handle,
+                                cue.id,
+                                bus_track_id,
+                            )
+                        }
+                    {
                         return false;
                     }
                 }
                 if let Some(output_channel) = cue.output_channel {
-                    if !engine.set_control_room_cue_output_channel(cue.id, output_channel) {
+                    if !unsafe {
+                        crate::control_room_runtime::hirari_control_room_set_cue_output(
+                            handle,
+                            cue.id,
+                            output_channel,
+                        )
+                    } {
                         return false;
                     }
                 }
-                if !engine.set_control_room_cue_click_enabled(cue.id, cue.click_enabled) {
+                if !unsafe {
+                    crate::control_room_runtime::hirari_control_room_set_cue_click(
+                        handle,
+                        cue.id,
+                        cue.click_enabled,
+                    )
+                } {
                     return false;
                 }
             }
@@ -81,8 +117,13 @@ impl HirariCore {
         if !self.select_control_room_cue(state.active_cue) {
             return false;
         }
-        if let Some(engine) = self.engine.as_ref() {
-            engine.set_control_room_dim(state.dim);
+        if self.engine.as_ref().is_some() {
+            unsafe {
+                crate::control_room_runtime::hirari_control_room_set_dim(
+                    self.control_room_handle(),
+                    state.dim,
+                )
+            };
         }
         self.control_room
             .lock()
