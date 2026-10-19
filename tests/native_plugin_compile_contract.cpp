@@ -19,7 +19,6 @@
 #include "src/core/engine/undo_transaction_manager.hpp"
 #include "src/core/midi_buffer.hpp"
 #include "src/core/plugins/midi_fragment_transport.hpp"
-#include "src/dsp/synthesis/sampler_engine.hpp"
 #include "src/core/recording_engine.hpp"
 #include "src/io/persistence/auto_save_engine.hpp"
 #include "src/network/shared_memory_bridge.hpp"

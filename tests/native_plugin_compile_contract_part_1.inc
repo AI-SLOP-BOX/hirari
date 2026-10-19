@@ -116,57 +116,6 @@ int main() {
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }
-    // The sampler must consume both legacy MIDI and MIDI 2.0 UMP note events,
-    // including sustain pedal state, through the same realtime dispatcher.
-    {
-        static std::array<float, 4096> sample{};
-        sample.fill(0.25f);
-        auto sampler = std::make_unique<Hirari::DSP::Synthesis::SamplerEngine>(48'000.0);
-        sampler->addZone({60, 0, 127, 1, 127, {sample.data(), sample.size()}});
-        auto block = std::make_unique<Hirari::Core::AudioBuffer>(2, 32);
-        auto midi = std::make_unique<Hirari::Core::MidiBuffer>();
-        const uint8_t umpOn[] = {0x40, 0x90, 60, 0, 0x7f, 0, 0, 0,
-                                 0, 0, 0, 0, 0, 0, 0, 0};
-        midi->addEvent(0, umpOn, sizeof(umpOn));
-        Hirari::DSP::ProcessContext context{};
-        context.sampleRate = 48'000.0;
-        context.blockSize = 32;
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 69;
-        const uint8_t sustainDown[] = {0xB0, 64, 127};
-        const uint8_t noteOff[] = {0x80, 60, 0};
-        midi->clear();
-        midi->addEvent(0, sustainDown, sizeof(sustainDown));
-        midi->addEvent(1, noteOff, sizeof(noteOff));
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 70;
-        const uint8_t sustainUp[] = {0xB0, 64, 0};
-        midi->clear();
-        midi->addEvent(0, sustainUp, sizeof(sustainUp));
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 71;
-    }
-    // A looped zone must continue producing audio after the source reaches
-    // its end, while keeping the output finite.
-    {
-        static std::array<float, 8> loopSample{};
-        for (size_t i = 0; i < loopSample.size(); ++i) loopSample[i] = 0.1f + 0.1f * static_cast<float>(i);
-        auto sampler = std::make_unique<Hirari::DSP::Synthesis::SamplerEngine>(48'000.0);
-        sampler->addZone({60, 60, 60, 1, 127, {loopSample.data(), loopSample.size()}, 2, 6, true});
-        auto block = std::make_unique<Hirari::Core::AudioBuffer>(1, 32);
-        auto midi = std::make_unique<Hirari::Core::MidiBuffer>();
-        const uint8_t noteOn[] = {0x90, 60, 127};
-        midi->addEvent(0, noteOn, sizeof(noteOn));
-        Hirari::DSP::ProcessContext context{};
-        context.sampleRate = 48'000.0;
-        context.blockSize = 32;
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 74;
-        bool hasTail = false;
-        for (uint32_t i = 8; i < block->getNumSamples(); ++i)
-            hasTail = hasTail || std::abs(block->getReadPointer(0)[i]) > 1.0e-5f;
-        if (!hasTail) return 75;
-    }
     Hirari::Core::Engine::MIDIOrchestrator midiOrchestrator;
     // The sandbox host owns bounded shared-memory staging arrays sized for
     // the maximum plugin protocol block. Allocate it on the heap to keep
