@@ -107,11 +107,11 @@
         // Control Room is strictly device-monitoring. Never bake speaker trim
         // or DIM into an offline master/stem render.
         if (!m_offlineRenderActive.load(std::memory_order_acquire)) {
-            const uint32_t activeCueBus = m_controlRoom.activeCueMixBusTrackId();
-            uint32_t cueOutputChannel = m_controlRoom.activeCueMixOutputChannel();
+            const uint32_t activeCueBus = hirari_control_room_active_cue_bus(m_controlRoomState);
+            uint32_t cueOutputChannel = hirari_control_room_active_cue_output(m_controlRoomState);
             const bool cueUsesDedicatedPair = cueOutputChannel >= 2;
             const bool cueOutputAvailable = cueOutputChannel + 1 < output.getNumChannels();
-            const bool cueClickEnabled = m_controlRoom.activeCueMixClickEnabled();
+            const bool cueClickEnabled = hirari_control_room_active_cue_click(m_controlRoomState);
             if (!cueOutputAvailable) cueOutputChannel = 0;
             if (activeCueBus != 0 && (!cueUsesDedicatedPair || cueOutputAvailable)) {
                 auto* cueBus = dynamic_cast<BusTrack*>(findTrack(activeCueBus));
@@ -121,7 +121,7 @@
                     const float* cueRight = cue.getReadPointer(1);
                     float* monitorLeft = output.getWritePointer(cueOutputChannel, off);
                     float* monitorRight = output.getWritePointer(cueOutputChannel + 1, off);
-                    const float cueGain = m_controlRoom.activeCueMixGain();
+                    const float cueGain = hirari_control_room_active_cue_gain(m_controlRoomState);
                     hirari_control_room_mix_cue(
                         cueLeft, cueRight, m_metronomeClickLeft.data(), m_metronomeClickRight.data(),
                         monitorLeft, monitorRight, sz, cueGain, cueClickEnabled);
@@ -140,15 +140,15 @@
                 // Keep the Main control-room monitor live while a selected
                 // Cue feeds its own output pair.  Talkback is kept on that
                 // Cue pair so it does not leak into the control-room mix.
-                m_controlRoom.processMonitor(output.getWritePointer(0, off),
-                                              output.getWritePointer(1, off), sz);
+                hirari_control_room_process_monitor_state(m_controlRoomState, output.getWritePointer(0, off),
+                                              output.getWritePointer(1, off), nullptr, sz);
                 if (cueOutputAvailable) {
-                    m_controlRoom.processMonitorWithTalkback(
+                    hirari_control_room_process_monitor_state(m_controlRoomState, 
                         output.getWritePointer(cueOutputChannel, off),
                         output.getWritePointer(cueOutputChannel + 1, off), talkback, sz);
                 }
             } else {
-                m_controlRoom.processMonitorWithTalkback(
+                hirari_control_room_process_monitor_state(m_controlRoomState, 
                     output.getWritePointer(cueOutputChannel, off),
                     output.getWritePointer(cueOutputChannel + 1, off), talkback, sz);
             }

@@ -34,6 +34,7 @@ HirariUnifiedEngine& HirariUnifiedEngine::getInstance() {
 
 HirariUnifiedEngine::~HirariUnifiedEngine() {
     shutdown();
+    hirari_control_room_state_destroy(m_controlRoomState);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -65,8 +66,8 @@ void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs
 void HirariUnifiedEngine::publish_talkback_input_block(const float* const* inputs,
                                                        uint32_t numChannels,
                                                        uint32_t numSamples) noexcept {
-    const uint32_t inputChannel = m_controlRoom.talkbackInputChannel();
-    if (!m_controlRoom.talkbackEnabled() || !inputs || inputChannel >= numChannels ||
+    const uint32_t inputChannel = hirari_control_room_talkback_channel(m_controlRoomState);
+    if (!hirari_control_room_talkback_enabled(m_controlRoomState) || !inputs || inputChannel >= numChannels ||
         !inputs[inputChannel] ||
         numSamples == 0 || numSamples > kMaxAudioBlockSize) {
         m_talkbackInputPublished.store(false, std::memory_order_release);
@@ -590,7 +591,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
             // Cue buses are isolated monitor sources. Their Send inputs and
             // insert chain run normally, but their signal is selected only at
             // the Control Room boundary, never summed into the Main mix.
-            if (!offlineTargetActive && m_controlRoom.isCueBus(source->getId())) return;
+            if (!offlineTargetActive && hirari_control_room_is_cue_bus(m_controlRoomState, source->getId())) return;
             if (offlineTargetActive && offlineTargetId != 0 &&
                 source->getId() == offlineTargetId) {
                 const auto& targetBuffer = m_offlineRenderPreFader.load(std::memory_order_acquire)

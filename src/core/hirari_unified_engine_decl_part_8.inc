@@ -67,7 +67,11 @@
     // RT-Safe Pre-allocated Kernels
     ::Hirari::Core::DSP::Effects::AtmosphericProcessorKernel m_atmosphericEngine;
     ::Hirari::Core::Mixing::MasteringKernel m_masteringKernel;
-    ::Hirari::Core::Mixing::ControlRoom m_controlRoom;
+    // The Control Room model is implemented in Rust
+    // (control_room_runtime.rs). This is only the handle its audio
+    // callback renders with; C++ never interprets the state itself, so the
+    // engine owns nothing but the lifetime.
+    void* m_controlRoomState = hirari_control_room_state_create();
     ::Hirari::Core::Mixing::TrackPresetStore m_trackPresets;
     ::Hirari::Core::Plugins::PluginCompatibilityRegistry m_pluginCompatibility;
     ::Hirari::Core::Engine::AutomationLaneGroup m_automationLanes;

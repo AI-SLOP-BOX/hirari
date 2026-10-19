@@ -44,7 +44,7 @@
     double midi_clock_rate() const noexcept { return m_externalSync.clockRate(); }
     void set_midi_clock_rate(double bpm) noexcept { m_externalSync.setClockRate(bpm); }
     bool set_master_gain(float value);
-    void* control_room_state() const noexcept { return m_controlRoom.state(); }
+    void* control_room_state() const noexcept { return m_controlRoomState; }
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;
         std::lock_guard<std::mutex> lock(m_tracksMutex);

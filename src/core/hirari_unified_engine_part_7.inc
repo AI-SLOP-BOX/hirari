@@ -258,7 +258,7 @@ void HirariUnifiedEngine::perform_autonomous_correction() {
 }
 
 bool HirariUnifiedEngine::checkSystemHealth() const {
-    return m_engineDiagnostics.getHealth().isRealTimeSafe.load() && m_controlRoom.validate();
+    return m_engineDiagnostics.getHealth().isRealTimeSafe.load() && hirari_control_room_validate(m_controlRoomState);
 }
 
 HirariUnifiedEngine::WaveformCache::~WaveformCache() {

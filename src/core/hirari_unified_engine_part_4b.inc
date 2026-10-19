@@ -227,7 +227,7 @@
         sidechainManager.resetForProject();
         m_routingEngine.resetForProject();
         m_busSystem.resetForProject();
-        m_controlRoom.resetForProject();
+        hirari_control_room_reset(m_controlRoomState);
         m_sidechainRoutes.clear();
         m_regionIdCounter.store(nextRegionId, std::memory_order_release);
         m_trackIdCounter.store(nextTrackId, std::memory_order_release);
