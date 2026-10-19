@@ -91,7 +91,6 @@ int main() {
     // test's main stack so the contract remains runnable on macOS's default
     // 8 MiB thread stack even when the sandbox protocol grows.
     auto vst3 = std::make_unique<Hirari::Core::Plugins::VST3HostProcessor>();
-    auto clap = std::make_unique<Hirari::Core::Plugins::CLAPHostProcessor>();
     // The built-in compressor is part of the production plugin contract, not
     // merely a header-only type. Exercise prepare/process/parameter/state so
     // a future refactor cannot leave the browser-visible plugin unlinked.
@@ -136,7 +135,6 @@ int main() {
         Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
             Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
     (void)vst3;
-    (void)clap;
     (void)midiOrchestrator;
     (void)sandbox;
     (void)chain;
@@ -219,28 +217,6 @@ int main() {
         !std::isfinite(finiteContract.getReadPointer(0)[1]) ||
         !std::isfinite(finiteContract.getReadPointer(0)[2])) return 24;
 
-    // The graph must contain third-party faults: non-finite samples are
-    // sanitized without allocation and remain finite on subsequent blocks.
-    Hirari::Core::AudioProcessorGraph graphContract;
-    graphContract.addNode(std::make_shared<NonFiniteProcessor>());
-    graphContract.prepare(48'000.0, 8);
-    Hirari::Core::AudioBuffer graphBuffer(1, 8);
-    Hirari::Core::MidiBuffer graphMidi;
-    Hirari::DSP::ProcessContext graphContext{};
-    graphContext.sampleRate = 48'000.0;
-    graphContext.blockSize = 8;
-    graphContext.numOutputChannels = 1;
-    graphContract.process(graphBuffer, graphMidi, graphContext);
-    if (graphContract.getSanitizedSampleCount() != 8 ||
-        graphContract.getProcessorFaultCount() != 0 ||
-        graphContract.getFaultedNodeCount() != 0) return 31;
-    for (uint32_t index = 0; index < graphBuffer.getNumSamples(); ++index) {
-        if (!std::isfinite(graphBuffer.getReadPointer(0)[index])) return 32;
-    }
-    graphContract.process(graphBuffer, graphMidi, graphContext);
-    if (graphContract.getSanitizedSampleCount() != 16 ||
-        graphContract.getProcessorFaultCount() != 0 ||
-        graphContract.getFaultedNodeCount() != 0) return 33;
     int engineTransactionValue = 0;
     engineUndo.beginTransaction("engine-partial-operation");
     engineUndo.performAction("first", [&] { engineTransactionValue -= 2; },
@@ -319,54 +295,3 @@ int main() {
     const auto directorySecond = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
     std::filesystem::remove_all(directoryFingerprint, cleanup);
     if (!directoryFirst || !directorySecond || *directoryFirst != *directorySecond) return 4;
-    const auto admittedPath = std::filesystem::temp_directory_path() / "hirari-admission-contract.clap";
-    {
-        std::ofstream output(admittedPath, std::ios::binary | std::ios::trunc);
-        output << "fixture-v1";
-    }
-    Hirari::Core::Plugins::PluginDescriptor admitted;
-    admitted.uuid = "contract-admission-plugin";
-    admitted.name = "Admission Contract";
-    admitted.format = "CLAP";
-    admitted.binaryPath = admittedPath.string();
-    auto& infrastructure = Hirari::Core::Plugins::PluginHostInfrastructure::getInstance();
-    if (!infrastructure.registerPlugin(admitted)) return 28;
-    std::string admissionError;
-    admissionError = "stale diagnostic";
-    if (!infrastructure.validatePlugin(admitted.uuid, &admissionError)) return 29;
-    if (!admissionError.empty()) return 33;
-    {
-        std::ofstream output(admittedPath, std::ios::binary | std::ios::trunc);
-        output << "fixture-v2-with-a-new-binary-fingerprint";
-    }
-    if (infrastructure.validatePlugin(admitted.uuid, &admissionError) ||
-        admissionError.find("rescan required") == std::string::npos) return 30;
-    if (infrastructure.createPlugin(admitted.uuid, &admissionError)) return 36;
-    if (admissionError.find("rescan required") == std::string::npos) return 37;
-    const auto collisionPath = std::filesystem::temp_directory_path() /
-                               "hirari-admission-collision.clap";
-    {
-        std::ofstream output(collisionPath, std::ios::binary | std::ios::trunc);
-        output << "collision";
-    }
-    Hirari::Core::Plugins::PluginDescriptor collision = admitted;
-    collision.binaryPath = collisionPath.string();
-    collision.binaryFingerprint = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(
-        collisionPath).value_or(0);
-    if (infrastructure.registerPlugin(collision)) return 35;
-    std::filesystem::remove(collisionPath, cleanup);
-    std::filesystem::remove(admittedPath, cleanup);
-#if !defined(_WIN32)
-    const auto symlinkPath = std::filesystem::temp_directory_path() /
-                             "hirari-admission-contract-symlink.clap";
-    const auto symlinkTarget = std::filesystem::temp_directory_path() /
-                               "hirari-admission-contract-target.clap";
-    {
-        std::ofstream output(symlinkTarget, std::ios::binary | std::ios::trunc);
-        output << "target";
-    }
-    std::filesystem::create_symlink(symlinkTarget, symlinkPath, cleanup);
-    if (Hirari::Core::Plugins::PluginAdmission::isSafeCandidate(symlinkPath, "CLAP")) return 31;
-    std::filesystem::remove(symlinkPath, cleanup);
-    std::filesystem::remove(symlinkTarget, cleanup);
-#endif

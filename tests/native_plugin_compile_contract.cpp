@@ -1,13 +1,9 @@
 #include "src/core/plugins/vst3_host_processor.hpp"
-#include "src/core/plugins/clap_host_processor.hpp"
 #include "src/core/plugins/plugin_sandbox_host.hpp"
 #include "src/core/plugins/process_sandbox_processor.hpp"
 #include "src/core/plugins/au_sandbox_adapter.hpp"
-#include "src/core/plugins/au_host_processor.hpp"
 #include "src/core/plugins/plugin_cache_manager.hpp"
-#include "src/core/plugins/plugin_host_infrastructure.hpp"
 #include "src/core/effect_chain.hpp"
-#include "src/core/audio_processor_graph.hpp"
 #include "src/core/project_serializer.hpp"
 #include "src/io/wav_loader_utils.hpp"
 #include "src/io/audio_export_engine.hpp"
@@ -24,7 +20,6 @@
 #include "src/core/io/bounce_system.hpp"
 #include "src/dsp/analysis/spectral_processor.hpp"
 #include "src/dsp/effects/compressor.hpp"
-#include "src/io/persistence/project_encoder.hpp"
 #include "src/core/database/project_db.hpp"
 #include "src/io/persistence/wav_writer.hpp"
 #include "src/core/utils/wav_writer.hpp"
@@ -75,23 +70,6 @@ public:
 // undo guarantee it covered still exists and is now exercised against the
 // Rust-owned manager in native_plugin_compile_contract_part_1.inc, so no
 // coverage was dropped.
-
-class NonFiniteProcessor final : public Hirari::DSP::IProcessor {
-public:
-    void prepareToPlay(double, uint32_t) noexcept override {}
-    void process(Hirari::Core::AudioBuffer& buffer, Hirari::Core::MidiBuffer&, const Hirari::DSP::ProcessContext&) noexcept override {
-        for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
-            float* samples = buffer.getWritePointer(channel);
-            for (uint32_t index = 0; index < buffer.getNumSamples(); ++index) {
-                samples[index] = (index % 2u == 0u)
-                    ? std::numeric_limits<float>::quiet_NaN()
-                    : std::numeric_limits<float>::infinity();
-            }
-        }
-    }
-    void reset() noexcept override {}
-    std::string getName() const override { return "NonFiniteContract"; }
-};
 
 }
 

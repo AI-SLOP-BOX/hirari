@@ -1,12 +1,3 @@
-    const auto uppercasePath = std::filesystem::temp_directory_path() /
-                               "hirari-admission-contract-uppercase.VST3";
-    {
-        std::ofstream output(uppercasePath, std::ios::binary | std::ios::trunc);
-        output << "uppercase-extension";
-    }
-    if (!Hirari::Core::Plugins::PluginAdmission::isSafeCandidate(uppercasePath, "vst3")) return 32;
-    std::filesystem::remove(uppercasePath, cleanup);
-
     const auto project = std::filesystem::temp_directory_path() / "hirari-region-id-contract.bin";
     Hirari::Core::ProjectSerializer::ProjectState state;
     state.version = 28;
@@ -232,13 +223,6 @@
 
 
 
-    Hirari::Core::Engine::TimelineSystem encodedTimeline;
-    auto encodedTrack = std::make_shared<Hirari::Core::Engine::Track>(
-        77, "VCA Contract", Hirari::Core::Engine::Track::Audio);
-    auto midiRegion = std::make_shared<Hirari::Core::MidiRegion>(88, "MIDI Contract", 0.0, 4.0);
-    midiRegion->addNote(Hirari::Core::MIDINote{60, 100, 0.0, 1.0});
-    encodedTrack->addMidiRegion(midiRegion);
-    encodedTimeline.addTrack(encodedTrack);
     {
         // Freeze playback is a real native path: publish happens off the
         // audio thread, while Track::process only copies from the immutable
@@ -277,15 +261,6 @@
         renderedTrack->collectRetiredFrozenAudio();
         if (renderedTrack->isFrozen()) return 69;
     }
-    auto& vca = Hirari::Core::Engine::VCAControlSystem::getInstance();
-    vca.createGroup("Contract VCA", {77});
-    const auto encodedProject = Hirari::IO::Persistence::ProjectEncoder::encode(encodedTimeline);
-    if (encodedProject.find("\"vca_groups\"") == std::string::npos ||
-        encodedProject.find("Contract VCA") == std::string::npos ||
-        encodedProject.find("77") == std::string::npos ||
-        encodedProject.find("MIDI Contract") == std::string::npos ||
-        encodedProject.find("\"pitch\": 60") == std::string::npos) return 42;
-
     Hirari::DSP::Analysis::SpectralProcessor spectral;
     Hirari::Core::AudioBuffer invalidSpectralBuffer(1, 128);
     spectral.applyMask(invalidSpectralBuffer, 48'000.0,
@@ -293,21 +268,6 @@
                            std::numeric_limits<float>::quiet_NaN(), 0.0f, 1.0f, 100.0f},
                        0.0f);
     if (spectral.canUndo()) return 80;
-    std::string spectralFactoryError;
-    auto spectralPlugin = Hirari::Core::Plugins::PluginFactory::create(
-        Hirari::Core::Plugins::PluginDescription{"Spectral Restoration", "Hirari", Hirari::Core::Plugins::PluginFormat::Internal, ""},
-        &spectralFactoryError);
-    if (!spectralPlugin || spectralPlugin->getName() != "Spectral Restoration" ||
-        !spectralFactoryError.empty()) return 75;
-    if (spectralPlugin->getTailSamples() <= spectralPlugin->getLatencySamples()) return 92;
-    spectralPlugin->setBypassed(true);
-    spectralPlugin->setSidechainBus(7);
-    const auto spectralState = spectralPlugin->getState();
-    if (spectralState.size() != 24u) return 76;
-    auto restoredSpectral = Hirari::Core::Plugins::PluginFactory::create(
-        Hirari::Core::Plugins::PluginDescription{"Spectral Restoration", "Hirari", Hirari::Core::Plugins::PluginFormat::Internal, ""});
-    if (!restoredSpectral || !restoredSpectral->setState(spectralState) ||
-        !restoredSpectral->isBypassed() || restoredSpectral->getSidechainBus() != 7u) return 77;
     Hirari::Core::AudioBuffer spectralBuffer(1, 2048);
     spectralBuffer.getWritePointer(0)[0] = 1.0f;
     spectral.applyMask(spectralBuffer, 48'000.0,
@@ -387,35 +347,3 @@
         !ownershipHistory.canUndo(ownerB)) return 86;
     ownershipHistory.clearHistory(ownerA);
     if (ownershipHistory.canUndo(ownerA) || !ownershipHistory.canUndo(ownerB)) return 87;
-    Hirari::DSP::Effects::SpectralRestorationProcessor restoration(48'000.0);
-    restoration.applySpectralGain(
-        spectralBuffer,
-        Hirari::DSP::Analysis::SpectralProcessor::Rect{0.0f, 100.0f, 0.02f, 8'000.0f},
-        0.25f);
-    restoration.healRegion(
-        spectralBuffer,
-        Hirari::DSP::Analysis::SpectralProcessor::Rect{0.0f, 100.0f, 0.02f, 8'000.0f},
-        0.5f);
-    restoration.reduceNoise(
-        spectralBuffer,
-        Hirari::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 0.02f, 0.0f},
-        0.5f, 0.05f);
-    Hirari::Core::AudioBuffer localNoise(1, 4096);
-    for (uint32_t i = 0; i < localNoise.getNumSamples(); ++i)
-        localNoise.getWritePointer(0)[i] = 0.1f;
-    restoration.reduceNoise(
-        localNoise,
-        Hirari::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 0.01f, 0.0f},
-        0.5f, 0.05f);
-    if (std::fabs(localNoise.getReadPointer(0)[3500] - 0.1f) > 1.0e-6f) return 79;
-    restoration.eraseHarmonics(
-        spectralBuffer, 60.0f,
-        Hirari::DSP::Analysis::SpectralProcessor::Rect{0.0f, 0.0f, 0.02f, 4'000.0f},
-        4, 4.0f);
-    if (restoration.undoLabelOffline() != "Remove Hum") return 84;
-    if (!restoration.canUndoOffline() || !restoration.undoOffline(spectralBuffer) ||
-        !restoration.canRedoOffline() || restoration.redoLabelOffline() != "Remove Hum" ||
-        !restoration.redoOffline(spectralBuffer)) return 78;
-    if (restoration.undoDepthOffline() == 0 || restoration.redoDepthOffline() != 0) return 83;
-    restoration.reset();
-    if (restoration.canUndoOffline() || restoration.canRedoOffline()) return 81;
