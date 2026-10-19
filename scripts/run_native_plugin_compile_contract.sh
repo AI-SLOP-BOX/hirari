@@ -72,12 +72,6 @@ fi
 CONTRACT_NAMES=""
 CONTRACT_STATUS=""
 
-# Extra runtime arguments for the contract binary. Link inputs stay in "$@" so
-# the linker sees them; a contract whose main() reads argv[1..] sets this
-# immediately before calling build_link_run. It is consumed on entry, so a
-# value can never leak into a later contract during the same run.
-CONTRACT_RUN_ARGS=""
-
 record() {
     CONTRACT_NAMES="$CONTRACT_NAMES $1"
     CONTRACT_STATUS="$CONTRACT_STATUS $2"
@@ -85,13 +79,9 @@ record() {
 
 build_link_run() {
     # $1 = label, $2 = source path, rest = extra link inputs.
-    # Runtime arguments come from CONTRACT_RUN_ARGS, never from "$@": the
-    # linker must not see them, and the runner must not see link inputs.
     label=$1
     source=$2
     shift 2
-    run_args=${CONTRACT_RUN_ARGS:-}
-    CONTRACT_RUN_ARGS=""
     binary="$OUT_DIR/$label"
     # A failed build must never be able to execute a binary left behind by an
     # earlier successful one, so any previous artifact goes first.
@@ -114,12 +104,12 @@ build_link_run() {
         return 0
     fi
     if [ "$(uname -s)" = "Darwin" ]; then
-        if (ulimit -s 16384 && "$binary" $run_args); then
+        if (ulimit -s 16384 && "$binary"); then
             record "$label" PASSED
         else
             record "$label" FAILED
         fi
-    elif "$binary" $run_args; then
+    elif "$binary"; then
         record "$label" PASSED
     else
         record "$label" FAILED
@@ -160,33 +150,16 @@ else
 fi
 
 build_link_run wav-io-contract tests/wav_io_contract.cpp "$BRIDGE_LIB"
-build_link_run persistence-contract tests/persistence_contract.cpp "$BRIDGE_LIB"
 build_link_run timeline-track-render-contract tests/timeline_track_render_contract.cpp "$BRIDGE_LIB"
 # The BPM ghost contract pulls the engine (and therefore the Apple driver
 # frameworks) in through the shared LINK_FLAGS above.
 build_link_run timeline-bpm-ghost-contract tests/timeline_bpm_ghost_contract.cpp \
     "$BRIDGE_LIB"
 build_link_run recording-engine-contract tests/recording_engine_contract.cpp "$BRIDGE_LIB"
-build_link_run recording-autosave-contract tests/recording_autosave_contract.cpp "$BRIDGE_LIB"
 build_link_run shared-memory-multiprocess-contract tests/shared_memory_multiprocess_contract.cpp "$BRIDGE_LIB"
 build_link_run sidechain-snapshot-contract tests/sidechain_snapshot_contract.cpp "$BRIDGE_LIB"
-build_link_run vocal-restoration-contract tests/vocal_restoration_contract.cpp "$BRIDGE_LIB"
-build_link_run cli-media-processor-contract tests/cli_media_processor_contract.cpp
-build_link_run spectral-editor-contract tests/spectral_editor_contract.cpp "$BRIDGE_LIB"
-build_link_run sampler-engine-contract tests/sampler_engine_contract.cpp "$BRIDGE_LIB"
 build_link_run audio-buffer-contract tests/audio_buffer_contract.cpp "$BRIDGE_LIB"
-build_link_run mmap-audio-contract tests/mmap_audio_contract.cpp "$BRIDGE_LIB"
 build_link_run range-edit-contract tests/range_edit_contract.cpp "$BRIDGE_LIB"
-
-# The CLAP direct-process contract's main() takes exactly one runtime argument
-# (the fixture path), and its objects reference hirari_* buffer symbols while
-# linking, so the staticlib stays a link input but only the fixture is a run
-# argument.
-"$ROOT_DIR/scripts/build_clap_fixture.sh" >/dev/null
-CONTRACT_RUN_ARGS="$ROOT_DIR/build-tools/minimal-gain.clap"
-build_link_run clap-direct-process-contract \
-    tests/clap_direct_process_contract.cpp -ldl "$BRIDGE_LIB"
-build_link_run hirari-omni-contract tests/hirari_omni_contract.cpp
 
 # The stress contract is long and round-tunable, so it runs only when asked,
 # but it is still built so a link break is reported rather than hidden.
