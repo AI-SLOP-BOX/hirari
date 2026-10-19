@@ -7,21 +7,22 @@ bool HirariUnifiedEngine::set_time_signature_event(double beat, uint8_t numerato
           denominator == 8 || denominator == 16 || denominator == 32)) return false;
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
     if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return false;
-    const auto before = m_tempoMap.getTimeSignatureAt(beat);
-    m_tempoMap.addTimeSignature(beat, numerator, denominator, sampleRate);
-    auto& tempoMap = m_tempoMap;
+    const auto before = readTempoSignatureAt(m_tempoState, beat);
+    hirari_tempo_map_add_time_signature(m_tempoState, beat, numerator, denominator, sampleRate);
+    auto& tempoMap = m_tempoState;
     const auto apply = [beat, sampleRate, &tempoMap](
-        const std::optional<Hirari::Core::Engine::TempoMap::TimeSignatureEvent>& event) {
+        const std::optional<HirariTimeSignatureEvent>& event) {
         if (event) {
-            tempoMap.addTimeSignature(beat, event->numerator, event->denominator, sampleRate);
+            hirari_tempo_map_add_time_signature(tempoMap, beat, event->numerator,
+                event->denominator, sampleRate);
         } else if (beat > 0.0) {
-            (void)tempoMap.removeTimeSignature(beat, sampleRate);
+            (void)hirari_tempo_map_remove_time_signature(tempoMap, beat, sampleRate);
         }
     };
     m_undoManager.recordAppliedAction(
         "Time Signature", [apply, before] { apply(before); },
         [apply, beat, numerator, denominator] {
-            apply(Hirari::Core::Engine::TempoMap::TimeSignatureEvent{
+            apply(HirariTimeSignatureEvent{
                 0, numerator, denominator, beat});
         });
     return true;
@@ -31,15 +32,16 @@ bool HirariUnifiedEngine::remove_time_signature_event(double beat) {
     if (!std::isfinite(beat) || beat <= 0.0) return false;
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
     if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return false;
-    const auto before = m_tempoMap.getTimeSignatureAt(beat);
+    const auto before = readTempoSignatureAt(m_tempoState, beat);
     if (!before) return false;
-    auto& tempoMap = m_tempoMap;
+    auto& tempoMap = m_tempoState;
     const auto apply = [beat, sampleRate, &tempoMap](
-        const std::optional<Hirari::Core::Engine::TempoMap::TimeSignatureEvent>& event) {
+        const std::optional<HirariTimeSignatureEvent>& event) {
         if (event) {
-            tempoMap.addTimeSignature(beat, event->numerator, event->denominator, sampleRate);
+            hirari_tempo_map_add_time_signature(tempoMap, beat, event->numerator,
+                event->denominator, sampleRate);
         } else {
-            (void)tempoMap.removeTimeSignature(beat, sampleRate);
+            (void)hirari_tempo_map_remove_time_signature(tempoMap, beat, sampleRate);
         }
     };
     m_undoManager.performAction("Remove Time Signature", [apply, before] { apply(before); },
@@ -49,8 +51,8 @@ bool HirariUnifiedEngine::remove_time_signature_event(double beat) {
 
 void HirariUnifiedEngine::clear_tempo_events(double initialBpm) {
     if (!std::isfinite(initialBpm) || initialBpm < 20.0 || initialBpm > 300.0) return;
-    m_tempoMap.clear(m_sampleRate.load(std::memory_order_relaxed), initialBpm);
-    m_tempoMap.setCurrentBpm(static_cast<float>(initialBpm));
+    hirari_tempo_map_clear(m_tempoState, m_sampleRate.load(std::memory_order_relaxed), initialBpm);
+    hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(initialBpm));
 }
 
 bool HirariUnifiedEngine::set_tempo_event(double beat, double bpm, bool ramp) {
@@ -58,17 +60,17 @@ bool HirariUnifiedEngine::set_tempo_event(double beat, double bpm, bool ramp) {
         return false;
     }
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const uint64_t sample = m_tempoMap.beatsToSamples(beat, sampleRate);
-    auto& tempoMap = m_tempoMap;
-    const auto before = tempoMap.getEventAt(sample);
-    const Hirari::Core::Engine::TempoMap::Event after{sample, bpm, ramp, 0.0};
+    const uint64_t sample = hirari_tempo_map_beats_to_samples(m_tempoState, beat, sampleRate);
+    auto& tempoMap = m_tempoState;
+    const auto before = readTempoEventAt(tempoMap, sample);
+    const HirariTempoEvent after{sample, bpm, ramp, 0.0};
     auto apply = [sample, sampleRate, this, &tempoMap](
-                     const std::optional<Hirari::Core::Engine::TempoMap::Event>& event) {
+                     const std::optional<HirariTempoEvent>& event) {
         if (event) {
-            tempoMap.addTempo(sample, event->bpm, sampleRate, event->ramp);
-            if (sample == 0) m_tempoMap.setCurrentBpm(static_cast<float>(event->bpm));
+            hirari_tempo_map_add_tempo(tempoMap, sample, event->bpm, sampleRate, event->ramp);
+            if (sample == 0) hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(event->bpm));
         } else {
-            tempoMap.removeTempo(sample, sampleRate);
+            hirari_tempo_map_remove_tempo(tempoMap, sample, sampleRate);
         }
     };
     m_undoManager.performAction(
@@ -82,8 +84,8 @@ bool HirariUnifiedEngine::set_tempo_transition_event(double beat, double bpm, bo
         return false;
     }
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    auto& tempoMap = m_tempoMap;
-    const auto before = tempoMap.getEvents();
+    auto& tempoMap = m_tempoState;
+    const auto before = readTempoEvents(tempoMap);
     if (before.empty()) return false;
 
     auto after = before;
@@ -117,13 +119,19 @@ bool HirariUnifiedEngine::set_tempo_transition_event(double beat, double bpm, bo
     std::sort(after.begin(), after.end(), [](const auto& left, const auto& right) {
         return left.worldBeats < right.worldBeats;
     });
-    if (!tempoMap.replaceEventsAtBeats(after, sampleRate)) return false;
+    if (!(!after.empty() &&
+          hirari_tempo_map_replace_events_at_beats(tempoMap, after.data(), after.size(),
+                                                   sampleRate)))
+        return false;
 
-    const auto apply = [this, sampleRate](const std::vector<Hirari::Core::Engine::TempoMap::Event>& events) {
-        if (!m_tempoMap.replaceEventsAtBeats(events, sampleRate)) return;
-        if (!events.empty()) m_tempoMap.setCurrentBpm(static_cast<float>(events.front().bpm));
+    const auto apply = [this, sampleRate](const std::vector<HirariTempoEvent>& events) {
+        if (!(!events.empty() &&
+              hirari_tempo_map_replace_events_at_beats(m_tempoState, events.data(),
+                                                       events.size(), sampleRate)))
+            return;
+        if (!events.empty()) hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(events.front().bpm));
     };
-    m_tempoMap.setCurrentBpm(static_cast<float>(after.front().bpm));
+    hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(after.front().bpm));
     m_undoManager.recordAppliedAction(
         "Set Tempo Transition",
         [apply, before] { apply(before); },
@@ -134,17 +142,17 @@ bool HirariUnifiedEngine::set_tempo_transition_event(double beat, double bpm, bo
 bool HirariUnifiedEngine::remove_tempo_event(double beat) {
     if (!std::isfinite(beat) || beat <= 0.0) return false;
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const uint64_t sample = m_tempoMap.beatsToSamples(beat, sampleRate);
-    auto& tempoMap = m_tempoMap;
-    const auto before = tempoMap.getEventAt(sample);
+    const uint64_t sample = hirari_tempo_map_beats_to_samples(m_tempoState, beat, sampleRate);
+    auto& tempoMap = m_tempoState;
+    const auto before = readTempoEventAt(tempoMap, sample);
     if (!before) return false;
     auto apply = [sample, sampleRate, this, &tempoMap](
-                     const std::optional<Hirari::Core::Engine::TempoMap::Event>& event) {
+                     const std::optional<HirariTempoEvent>& event) {
         if (event) {
-            tempoMap.addTempo(sample, event->bpm, sampleRate, event->ramp);
-            if (sample == 0) m_tempoMap.setCurrentBpm(static_cast<float>(event->bpm));
+            hirari_tempo_map_add_tempo(tempoMap, sample, event->bpm, sampleRate, event->ramp);
+            if (sample == 0) hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(event->bpm));
         } else {
-            tempoMap.removeTempo(sample, sampleRate);
+            hirari_tempo_map_remove_tempo(tempoMap, sample, sampleRate);
         }
     };
     m_undoManager.performAction(
@@ -158,19 +166,19 @@ bool HirariUnifiedEngine::move_tempo_event(double from_beat, double to_beat) {
         return false;
     }
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    auto& tempoMap = m_tempoMap;
-    const uint64_t fromSample = tempoMap.beatsToSamples(from_beat, sampleRate);
-    const uint64_t toSample = tempoMap.beatsToSamples(to_beat, sampleRate);
+    auto& tempoMap = m_tempoState;
+    const uint64_t fromSample = hirari_tempo_map_beats_to_samples(tempoMap, from_beat, sampleRate);
+    const uint64_t toSample = hirari_tempo_map_beats_to_samples(tempoMap, to_beat, sampleRate);
     if (fromSample == 0 || toSample == 0 || fromSample == toSample) return false;
-    const auto before = tempoMap.getEventAt(fromSample);
-    if (!before || tempoMap.getEventAt(toSample)) return false;
+    const auto before = readTempoEventAt(tempoMap, fromSample);
+    if (!before || readTempoEventAt(tempoMap, toSample)) return false;
     auto apply = [fromSample, toSample, sampleRate, &tempoMap](bool forward) {
         const uint64_t removeSample = forward ? fromSample : toSample;
-        const auto event = tempoMap.getEventAt(forward ? fromSample : toSample);
+        const auto event = readTempoEventAt(tempoMap, forward ? fromSample : toSample);
         if (!event) return;
-        tempoMap.removeTempo(removeSample, sampleRate);
+        hirari_tempo_map_remove_tempo(tempoMap, removeSample, sampleRate);
         const uint64_t addSample = forward ? toSample : fromSample;
-        tempoMap.addTempo(addSample, event->bpm, sampleRate, event->ramp);
+        hirari_tempo_map_add_tempo(tempoMap, addSample, event->bpm, sampleRate, event->ramp);
     };
     m_undoManager.performAction(
         "Move Tempo Event", [apply] { apply(false); }, [apply] { apply(true); });
@@ -178,7 +186,7 @@ bool HirariUnifiedEngine::move_tempo_event(double from_beat, double to_beat) {
 }
 
 float HirariUnifiedEngine::get_tempo() const {
-    return m_tempoMap.currentBpm();
+    return hirari_tempo_map_get_current_bpm(m_tempoState);
 }
 
 bool HirariUnifiedEngine::set_tempo(float bpm) {
@@ -187,28 +195,28 @@ bool HirariUnifiedEngine::set_tempo(float bpm) {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
     if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return false;
     const uint64_t sample = m_playhead.load(std::memory_order_relaxed);
-    auto& tempoMap = m_tempoMap;
-    const auto beforeEvent = tempoMap.getEventAt(sample);
-    const float beforeTempo = m_tempoMap.currentBpm();
+    auto& tempoMap = m_tempoState;
+    const auto beforeEvent = readTempoEventAt(tempoMap, sample);
+    const float beforeTempo = hirari_tempo_map_get_current_bpm(m_tempoState);
 
     // The ordinary tempo control writes an event at the current playhead.
     // Keep that event and the transport's displayed BPM in one history entry;
     // otherwise Undo changes the number shown by the UI but leaves the tempo
     // map used by beat/sample conversion behind.
-    tempoMap.addTempo(sample, bounded, sampleRate);
-    m_tempoMap.setCurrentBpm(bounded);
+    hirari_tempo_map_add_tempo(tempoMap, sample, bounded, sampleRate, false);
+    hirari_tempo_map_set_current_bpm(m_tempoState, bounded);
 
     const auto restore = [sample, sampleRate, this, &tempoMap, beforeEvent, beforeTempo]() {
         if (beforeEvent) {
-            tempoMap.addTempo(sample, beforeEvent->bpm, sampleRate, beforeEvent->ramp);
+            hirari_tempo_map_add_tempo(tempoMap, sample, beforeEvent->bpm, sampleRate, beforeEvent->ramp);
         } else if (sample != 0) {
-            (void)tempoMap.removeTempo(sample, sampleRate);
+            (void)hirari_tempo_map_remove_tempo(tempoMap, sample, sampleRate);
         }
-        m_tempoMap.setCurrentBpm(beforeTempo);
+        hirari_tempo_map_set_current_bpm(m_tempoState, beforeTempo);
     };
     const auto reapply = [sample, sampleRate, this, &tempoMap, bounded]() {
-        tempoMap.addTempo(sample, bounded, sampleRate);
-        m_tempoMap.setCurrentBpm(bounded);
+        hirari_tempo_map_add_tempo(tempoMap, sample, bounded, sampleRate, false);
+        hirari_tempo_map_set_current_bpm(m_tempoState, bounded);
     };
     m_undoManager.recordAppliedAction("Set Tempo", restore, reapply);
     return true;
@@ -464,7 +472,7 @@ bool HirariUnifiedEngine::execute_auto_arrangement() {
     const auto harmony = Composition::HarmonicContextTracker::getInstance().getState();
     auto sections = ::Hirari::Core::Bridge::analysis_structure_sections(
         rust::Slice<const uint64_t>(regionStarts.data(), regionStarts.size()),
-        projectLen, m_tempoMap.currentBpm(), m_sampleRate.load(), harmony.tension, harmony.valence
+        projectLen, hirari_tempo_map_get_current_bpm(m_tempoState), m_sampleRate.load(), harmony.tension, harmony.valence
     );
 
     // 3. GENERATE MARKERS & NOTIFY UI

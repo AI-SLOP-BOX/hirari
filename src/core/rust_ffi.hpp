@@ -7,6 +7,7 @@
 // failed on `unknown type name 'size_t'`.
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 // Physical limits shared by the C++ engine and the Rust core. These mirror
 // `crate::dsp_limits` exactly; the two sides have to agree because a clamp on
@@ -1951,6 +1952,33 @@ extern "C" size_t hirari_time_signature_remove(
 extern "C" bool hirari_time_signature_find(
     const void* signatures, size_t signature_count, double beat, void* output);
 extern "C" void hirari_time_signature_reset(void* output);
+// C++ mirror of Rust's NativeTempoEvent / NativeTimeSignatureEvent. These two
+// plain shapes are the only form a tempo snapshot takes across the boundary,
+// so the layout contract is asserted here where the offset is consumed.
+struct HirariTempoEvent {
+    uint64_t samplePos;
+    double bpm;
+    bool ramp;
+    double worldBeats;
+};
+static_assert(std::is_standard_layout_v<HirariTempoEvent>);
+static_assert(offsetof(HirariTempoEvent, samplePos) == 0 && offsetof(HirariTempoEvent, bpm) == 8 &&
+              offsetof(HirariTempoEvent, ramp) == 16 &&
+              offsetof(HirariTempoEvent, worldBeats) == 24 && sizeof(HirariTempoEvent) == 32);
+
+struct HirariTimeSignatureEvent {
+    uint64_t samplePos;
+    uint8_t numerator;
+    uint8_t denominator;
+    double beat;
+};
+static_assert(std::is_standard_layout_v<HirariTimeSignatureEvent>);
+static_assert(offsetof(HirariTimeSignatureEvent, samplePos) == 0 &&
+              offsetof(HirariTimeSignatureEvent, numerator) == 8 &&
+              offsetof(HirariTimeSignatureEvent, denominator) == 9 &&
+              offsetof(HirariTimeSignatureEvent, beat) == 16 &&
+              sizeof(HirariTimeSignatureEvent) == 24);
+
 extern "C" void* hirari_tempo_map_create();
 extern "C" void hirari_tempo_map_destroy(void* state);
 extern "C" bool hirari_tempo_map_add_tempo(

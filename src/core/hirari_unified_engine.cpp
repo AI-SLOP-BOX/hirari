@@ -11,7 +11,6 @@
 #include "dsp/effects/console_dsp.hpp"
 #include "dsp/effects/master_limiter.hpp"
 #include "engine/track.hpp"
-#include "engine/tempo_map.hpp"
 #include "concurrency/audio_task_manager.hpp"
 
 #include "network/mobile_bridge_kernel.hpp"
@@ -87,6 +86,47 @@ public:
 // This is deliberately not used for security or cryptography; its purpose is
 // to make generated fills vary without touching the audio callback or libc
 // rand() state, while retaining reproducibility within a process.
+// Rust owns the tempo and time-signature snapshots; only the FFI shape lives
+// here. The retry loop is the exact count/copy dance the deleted compatibility
+// facade ran, kept in one place so a snapshot racing with a writer cannot
+// truncate the vector the caller reads.
+template <typename EventType, size_t (*Count)(const void*), size_t (*Copy)(const void*, void*, size_t)>
+std::vector<EventType> readTempoSnapshot(const void* state) {
+    std::vector<EventType> result(Count(state));
+    while (true) {
+        const size_t count = Copy(state, result.empty() ? nullptr : result.data(), result.size());
+        if (count <= result.size()) {
+            result.resize(count);
+            return result;
+        }
+        result.resize(count);
+    }
+}
+
+std::vector<HirariTempoEvent> readTempoEvents(const void* state) {
+    return readTempoSnapshot<HirariTempoEvent, hirari_tempo_map_get_event_count,
+                             hirari_tempo_map_copy_events>(state);
+}
+
+std::vector<HirariTimeSignatureEvent> readTempoSignatures(const void* state) {
+    return readTempoSnapshot<HirariTimeSignatureEvent, hirari_tempo_map_get_signature_count,
+                             hirari_tempo_map_copy_signatures>(state);
+}
+
+std::optional<HirariTempoEvent> readTempoEventAt(const void* state, uint64_t pos) {
+    HirariTempoEvent event{};
+    return hirari_tempo_map_get_event_at(state, pos, &event)
+        ? std::optional<HirariTempoEvent>(event)
+        : std::nullopt;
+}
+
+std::optional<HirariTimeSignatureEvent> readTempoSignatureAt(const void* state, double beat) {
+    HirariTimeSignatureEvent event{};
+    return hirari_tempo_map_get_signature_at(state, beat, &event)
+        ? std::optional<HirariTimeSignatureEvent>(event)
+        : std::nullopt;
+}
+
 #include "hirari_unified_engine_part_1a.inc"
 #include "hirari_unified_engine_part_1b.inc"
 #include "hirari_unified_engine_part_2a.inc"

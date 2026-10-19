@@ -709,22 +709,21 @@ double HirariUnifiedEngine::get_playhead_beats() const {
 
 double HirariUnifiedEngine::samples_to_beats(uint64_t samples) const {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return m_tempoMap.samplesToBeats(samples, sampleRate);
+    return hirari_tempo_map_samples_to_beats(m_tempoState, samples, sampleRate);
 }
 
 uint64_t HirariUnifiedEngine::beats_to_samples(double beats) const {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return m_tempoMap.beatsToSamples(beats, sampleRate);
+    return hirari_tempo_map_beats_to_samples(m_tempoState, beats, sampleRate);
 }
 
 std::vector<double> HirariUnifiedEngine::get_tempo_events() const {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const auto events = m_tempoMap.getEvents();
+    const auto events = readTempoEvents(m_tempoState);
     std::vector<double> packed;
     packed.reserve(events.size() * 3);
     for (const auto& event : events) {
-        packed.push_back(m_tempoMap.samplesToBeats(
-            event.samplePos, sampleRate));
+        packed.push_back(hirari_tempo_map_samples_to_beats(m_tempoState, event.samplePos, sampleRate));
         packed.push_back(event.bpm);
         packed.push_back(event.ramp ? 1.0 : 0.0);
     }
@@ -733,11 +732,11 @@ std::vector<double> HirariUnifiedEngine::get_tempo_events() const {
 
 std::vector<double> HirariUnifiedEngine::get_time_signature_events() const {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const auto events = m_tempoMap.getTimeSignatures();
+    const auto events = readTempoSignatures(m_tempoState);
     std::vector<double> packed;
     packed.reserve(events.size() * 3);
     for (const auto& event : events) {
-        packed.push_back(m_tempoMap.samplesToBeats(event.samplePos, sampleRate));
+        packed.push_back(hirari_tempo_map_samples_to_beats(m_tempoState, event.samplePos, sampleRate));
         packed.push_back(static_cast<double>(event.numerator));
         packed.push_back(static_cast<double>(event.denominator));
     }
@@ -745,4 +744,4 @@ std::vector<double> HirariUnifiedEngine::get_time_signature_events() const {
 }
 
 void HirariUnifiedEngine::clear_time_signature_events() {
-    m_tempoMap.clearTimeSignatures();
+    hirari_tempo_map_clear_time_signatures(m_tempoState);

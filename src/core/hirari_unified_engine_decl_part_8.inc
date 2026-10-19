@@ -57,7 +57,7 @@
     static constexpr uint32_t kPdcMaxTracks = 512;
     static constexpr uint32_t kPdcMasterDestination = 0xFFFFFFFFu;
     UndoTransactionManager m_undoManager;
-    TempoMap m_tempoMap;
+    void* m_tempoState = hirari_tempo_map_create();
     RoutingEngine m_routingEngine;
     SidechainManager m_sidechainManager;
     BusSystem m_busSystem;
@@ -136,7 +136,7 @@
         // Each target can have a different native source-frame count while
         // sharing one project-timeline quantization map.
         std::vector<std::vector<Region::WarpMarker>> after;
-        std::vector<TempoMap::Event> tempoEvents;
+        std::vector<HirariTempoEvent> tempoEvents;
         double baseTempo = 120.0;
         double sampleRate = 0.0;
     };

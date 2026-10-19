@@ -1240,8 +1240,8 @@ bool HirariUnifiedEngine::quantize_region_sync_group(
         totalChannels += regionChannels;
     }
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const double baseTempo = m_tempoMap.currentBpm();
-    const auto tempoEvents = m_tempoMap.getEvents();
+    const double baseTempo = hirari_tempo_map_get_current_bpm(m_tempoState);
+    const auto tempoEvents = readTempoEvents(m_tempoState);
     const uint64_t key = (static_cast<uint64_t>(tid) << 32) | rid;
     auto job = std::make_shared<RegionQuantizeJob>();
     job->targets = std::move(targets);
@@ -1291,15 +1291,19 @@ bool HirariUnifiedEngine::quantize_region_sync_group(
                         channels.data(), channels.size(), timelineSpan,
                         groupEnvelope.data(), groupEnvelope.size()))
                     throw std::runtime_error("audio group envelope could not be built");
-                TempoMap tempoSnapshot;
-                tempoSnapshot.clear(sampleRate, baseTempo);
+                std::unique_ptr<void, decltype(&hirari_tempo_map_destroy)> tempoSnapshot{
+                    hirari_tempo_map_create(), &hirari_tempo_map_destroy};
+                hirari_tempo_map_clear(tempoSnapshot.get(), sampleRate, baseTempo);
                 for (const auto& event : tempoEvents)
-                    tempoSnapshot.addTempo(event.samplePos, event.bpm, sampleRate, event.ramp);
+                    hirari_tempo_map_add_tempo(tempoSnapshot.get(), event.samplePos, event.bpm,
+                        sampleRate, event.ramp);
                 const auto samplesToBeats = [&tempoSnapshot, sampleRate](uint64_t sample) {
-                    return tempoSnapshot.samplesToBeats(sample, sampleRate);
+                    return hirari_tempo_map_samples_to_beats(tempoSnapshot.get(), sample,
+                        sampleRate);
                 };
                 const auto beatsToSamples = [&tempoSnapshot, sampleRate](double beat) {
-                    return tempoSnapshot.beatsToSamples(beat, sampleRate);
+                    return hirari_tempo_map_beats_to_samples(tempoSnapshot.get(), beat,
+                        sampleRate);
                 };
                 const float* analysisInputs[] = {groupEnvelope.data()};
                 std::vector<std::pair<uint64_t, uint64_t>> map;
@@ -1373,8 +1377,8 @@ bool HirariUnifiedEngine::finalize_region_quantize(uint32_t tid, uint32_t rid) {
             }
         }
     }
-    const auto currentTempoEvents = m_tempoMap.getEvents();
-    if (std::abs(m_tempoMap.currentBpm() - job->baseTempo) > 1.0e-9 ||
+    const auto currentTempoEvents = readTempoEvents(m_tempoState);
+    if (std::abs(hirari_tempo_map_get_current_bpm(m_tempoState) - job->baseTempo) > 1.0e-9 ||
         std::abs(m_sampleRate.load(std::memory_order_relaxed) - job->sampleRate) > 1.0e-9 ||
         currentTempoEvents.size() != job->tempoEvents.size() ||
         !std::equal(currentTempoEvents.begin(), currentTempoEvents.end(), job->tempoEvents.begin(),

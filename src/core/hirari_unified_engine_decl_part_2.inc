@@ -35,7 +35,11 @@
     std::vector<uint64_t> marker_positions() const { std::vector<uint64_t> out; for (const auto& m : m_arrangement.markers()) out.push_back(m.sample); return out; }
     bool set_arranger_parts(std::vector<::Hirari::Core::Composition::ArrangerPart> parts) { return m_arrangement.setArrangerParts(std::move(parts)); }
     std::vector<::Hirari::Core::Composition::ArrangerPart> arranger_parts() const { return m_arrangement.arrangerParts(); }
-    void tap_tempo(uint64_t timestamp_ms) noexcept { m_tapTempo.tap(timestamp_ms); const double bpm = m_tapTempo.bpm(); if (bpm > 0.0) m_tempoMap.setCurrentBpm(static_cast<float>(bpm)); }
+    void tap_tempo(uint64_t timestamp_ms) noexcept {
+        m_tapTempo.tap(timestamp_ms);
+        const double bpm = m_tapTempo.bpm();
+        if (bpm > 0.0) hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(bpm));
+    }
     void clear_tap_tempo() noexcept { m_tapTempo.clear(); }
     double tapped_tempo() const noexcept { return m_tapTempo.bpm(); }
     void midi_clock_tick(uint64_t timestamp) noexcept { m_externalSync.onClockTick(timestamp); }

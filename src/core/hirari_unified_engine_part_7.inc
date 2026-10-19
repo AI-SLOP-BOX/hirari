@@ -222,7 +222,7 @@ std::vector<::Hirari::Core::Composition::ArrangementSection> HirariUnifiedEngine
     const auto harmony = Composition::HarmonicContextTracker::getInstance().getState();
     auto rustSections = ::Hirari::Core::Bridge::analysis_structure_sections(
         rust::Slice<const uint64_t>(regionStarts.data(), regionStarts.size()),
-        maxLen, m_tempoMap.currentBpm(), m_sampleRate.load(), harmony.tension, harmony.valence);
+        maxLen, hirari_tempo_map_get_current_bpm(m_tempoState), m_sampleRate.load(), harmony.tension, harmony.valence);
     std::vector<::Hirari::Core::Composition::ArrangementSection> results;
     results.reserve(rustSections.size());
     for (const auto& section : rustSections) {

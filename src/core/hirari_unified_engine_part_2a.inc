@@ -470,7 +470,7 @@ void HirariUnifiedEngine::new_project() {
     m_routingEngine.resetForProject();
     m_busSystem.resetForProject();
     hirari_control_room_reset(m_controlRoomState);
-    m_tempoMap.setCurrentBpm(120.0f);
+    hirari_tempo_map_set_current_bpm(m_tempoState, 120.0f);
     m_masterGain.store(1.0f, std::memory_order_release);
     // Project tonality (root + scale) is no longer reset here: that state
     // moved into Core, and HirariCore::new_project() resets the same

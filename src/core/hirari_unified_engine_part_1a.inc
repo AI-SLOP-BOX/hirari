@@ -36,6 +36,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     shutdown();
     hirari_control_room_state_destroy(m_controlRoomState);
     hirari_native_pdc_destroy(m_pdcState);
+    hirari_tempo_map_destroy(m_tempoState);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -86,7 +87,7 @@ void HirariUnifiedEngine::publish_talkback_input_block(const float* const* input
 }
 
 void HirariUnifiedEngine::apply_config(const EngineConfig& cfg) {
-    m_tempoMap.setCurrentBpm(cfg.tempo);
+    hirari_tempo_map_set_current_bpm(m_tempoState, cfg.tempo);
     prepareToPlay(cfg.sampleRate, cfg.blockSize);
 }
 
@@ -393,8 +394,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                         if (target) {
                             const double sampleRate = std::max(
                                 1.0, engine.m_sampleRate.load(std::memory_order_relaxed));
-                            const double startBeat = engine.m_tempoMap.samplesToBeats(
-                                note.startSample, sampleRate);
+                            const double startBeat = hirari_tempo_map_samples_to_beats(
+                                engine.m_tempoState, note.startSample, sampleRate);
                             target->forEachTimedTransitionKeySwitchOutput(
                                 note.articulationId,
                                 [&engine, target, startBeat, sampleRate, offset](
@@ -402,8 +403,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                                     uint32_t lengthTicks) {
                                     const double endBeat = startBeat +
                                         static_cast<double>(lengthTicks) / 960.0;
-                                    const uint64_t endSample = engine.m_tempoMap.beatsToSamples(
-                                        endBeat, sampleRate);
+                                    const uint64_t endSample = hirari_tempo_map_beats_to_samples(
+                                        engine.m_tempoState, endBeat, sampleRate);
                                     (void)target->scheduleExpressionNoteOff(
                                         outputChannel, outputPitch, endSample, offset);
                                 });
@@ -416,8 +417,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                                     uint32_t lengthTicks) {
                                     const double endBeat = startBeat +
                                         static_cast<double>(lengthTicks) / 960.0;
-                                    const uint64_t endSample = engine.m_tempoMap.beatsToSamples(
-                                        endBeat, sampleRate);
+                                    const uint64_t endSample = hirari_tempo_map_beats_to_samples(
+                                        engine.m_tempoState, endBeat, sampleRate);
                                     (void)target->scheduleExpressionNoteOff(
                                         outputChannel, outputPitch, endSample, offset);
                                 });
@@ -506,7 +507,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
             if (state.activeTracks[i] && state.activeTracks[i]->canProcess(sz)) {
                 state.activeTracks[i]->setTransportState(
-                    m_tempoMap.currentBpm(),
+                    hirari_tempo_map_get_current_bpm(m_tempoState),
                     m_isPlaying.load(std::memory_order_relaxed));
                 state.activeTracks[i]->clearWorkBuffer(sz);
             }

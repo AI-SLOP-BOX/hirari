@@ -243,7 +243,7 @@
             }
         }
         lock.unlock();
-        m_tempoMap.setCurrentBpm(static_cast<float>(state.bpm));
+        hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(state.bpm));
         m_rootNote.store(state.rootNote, std::memory_order_relaxed);
         m_scaleType.store(state.scaleType, std::memory_order_relaxed);
         // Restore timeline markers as part of the document, not as transient UI state.
@@ -256,9 +256,9 @@
         for (const auto& part : state.arrangerParts)
             arrangerParts.push_back({part.start, part.length, part.name, part.repeats});
         m_arrangement.setArrangerParts(std::move(arrangerParts));
-        m_tempoMap.clear(projectSampleRate, state.bpm);
+        hirari_tempo_map_clear(m_tempoState, projectSampleRate, state.bpm);
         for (const auto& event : state.tempoEvents)
-            m_tempoMap.addTempo(event.sample, event.bpm, projectSampleRate, event.ramp != 0);
+            hirari_tempo_map_add_tempo(m_tempoState, event.sample, event.bpm, projectSampleRate, event.ramp != 0);
         // A project carries its own timeline rate. Re-prepare every track and
         // DSP component so opening a 48/96 kHz project does not leave the
         // engine running at the previous device rate.
@@ -279,7 +279,7 @@
 
 bool HirariUnifiedEngine::saveProject(std::string_view path) {
     ProjectSerializer::ProjectState state;
-    state.bpm = m_tempoMap.currentBpm();
+    state.bpm = hirari_tempo_map_get_current_bpm(m_tempoState);
     state.rootNote = m_rootNote.load(std::memory_order_relaxed);
     state.scaleType = m_scaleType.load(std::memory_order_relaxed);
     state.sampleRate = static_cast<uint32_t>(m_sampleRate.load());
@@ -384,7 +384,7 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         serialized.name = part.name; serialized.repeats = part.repeats;
         state.arrangerParts.push_back(std::move(serialized));
     }
-    for (const auto& event : m_tempoMap.getEvents()) {
+    for (const auto& event : readTempoEvents(m_tempoState)) {
         ProjectSerializer::TempoEventState serialized;
         serialized.sample = event.samplePos; serialized.bpm = event.bpm; serialized.ramp = event.ramp ? 1 : 0;
         state.tempoEvents.push_back(serialized);

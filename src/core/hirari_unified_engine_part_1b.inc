@@ -54,7 +54,7 @@
             m_isPlaying.load(std::memory_order_relaxed) && m_metronome.isEnabled();
         if (renderMetronome) {
             const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-            const double bpm = m_tempoMap.currentBpm();
+            const double bpm = hirari_tempo_map_get_current_bpm(m_tempoState);
             m_metronome.process(clickLeft, clickRight, sz, currentPlayhead, sampleRate, bpm);
         }
 
@@ -75,7 +75,7 @@
                     ? currentPlayhead + sz
                     : std::numeric_limits<uint64_t>::max();
         callbackContext.sampleRate = std::max(1.0, m_sampleRate.load(std::memory_order_acquire));
-        callbackContext.bpm = m_tempoMap.currentBpm();
+        callbackContext.bpm = hirari_tempo_map_get_current_bpm(m_tempoState);
         callbackContext.blockSize = sz;
         callbackContext.audioConfigGeneration = callbackGeneration;
         callbackContext.isPlaying = m_isPlaying.load(std::memory_order_acquire);
