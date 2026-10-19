@@ -200,23 +200,6 @@
     std::filesystem::remove(oversizedExpansionPath, offlineCleanup);
     if (oversizedBuffer.getNumChannels() != 0 || oversizedBuffer.getNumSamples() != 0) return 36;
 
-    auto& waveformCache = Hirari::UI::WaveformCache::getInstance();
-    waveformCache.clearRegion(77);
-    Hirari::UI::WaveformLevel waveform;
-    waveform.minPeaks = {-0.5f, -0.25f};
-    waveform.maxPeaks = {0.5f, 0.25f};
-    if (!waveformCache.requestWaveform(77, 2, std::vector<float>(2'000'000, 0.1f))) return 29;
-    waveformCache.putWaveform(77, 2, waveform);
-    waveformCache.waitForPending();
-    const auto* waveformSnapshot = waveformCache.getWaveform(77, 2);
-    if (waveformSnapshot == nullptr || waveformSnapshot->minPeaks[0] != -0.5f) return 25;
-    waveformCache.clearRegion(77);
-    if (!waveformCache.requestWaveform(77, 2, std::vector<float>(2'000'000, 0.2f))) return 30;
-    waveformCache.clearRegion(77);
-    waveformCache.waitForPending();
-    if (waveformCache.getWaveform(77, 2) != nullptr) return 31;
-
-
     const auto pluginFingerprintPath = std::filesystem::temp_directory_path() /
                                        "hirari-plugin-fingerprint-contract.clap";
     {

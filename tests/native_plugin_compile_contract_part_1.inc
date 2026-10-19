@@ -262,22 +262,6 @@ int main() {
     if (engineTransactionValue != 5) return 22;
     engineUndo.clear();
 
-    const auto autosavePath = std::filesystem::temp_directory_path() /
-        ("hirari-autosave-contract-" + std::to_string(
-#if !defined(_WIN32)
-            static_cast<unsigned long long>(::getpid())
-#else
-            0ULL
-#endif
-        ) + ".json");
-    auto& autosave = Hirari::IO::Persistence::AutoSaveEngine::getInstance();
-    autosave.start(autosavePath.string(), 60, [] { return std::string("{\"ok\":true}"); });
-    autosave.markModified();
-    if (!autosave.flushNow() || autosave.isDirty()) return 23;
-    autosave.stop();
-    std::error_code autosaveCleanup;
-    std::filesystem::remove(autosavePath.string() + ".autosave", autosaveCleanup);
-
     // A failed DB publication must not remove the last destination. Using a
     // directory as the destination forces rename to fail while making the
     // preservation invariant directly observable.

@@ -9,7 +9,6 @@
 #include "src/core/effect_chain.hpp"
 #include "src/core/audio_processor_graph.hpp"
 #include "src/core/project_serializer.hpp"
-#include "src/io/mmap_audio_file.hpp"
 #include "src/io/wav_loader_utils.hpp"
 #include "src/io/audio_export_engine.hpp"
 #include "src/core/io/bounce_system.hpp"
@@ -20,13 +19,11 @@
 #include "src/core/midi_buffer.hpp"
 #include "src/core/plugins/midi_fragment_transport.hpp"
 #include "src/core/recording_engine.hpp"
-#include "src/io/persistence/auto_save_engine.hpp"
 #include "src/network/shared_memory_bridge.hpp"
 #include "src/core/concurrency/audio_task_manager.hpp"
 #include "src/core/concurrency/thread_pool.hpp"
 #include "src/core/engine/bounce_engine.hpp"
 #include "src/core/io/bounce_system.hpp"
-#include "src/graphics/ui_components/support/waveform_cache.hpp"
 #include "src/dsp/analysis/spectral_processor.hpp"
 #include "src/dsp/effects/compressor.hpp"
 #include "src/io/persistence/project_encoder.hpp"
@@ -44,9 +41,6 @@
 #include <limits>
 #include <string>
 #include <thread>
-#if !defined(_WIN32)
-#include <unistd.h>
-#endif
 
 namespace {
 class SDKContractProcessor final : public Hirari::SDK::IProcessor {
