@@ -2132,22 +2132,16 @@ extern "C" void hirari_native_pdc_destroy(void* state);
 extern "C" bool hirari_native_pdc_bind_control_thread(const void* state);
 extern "C" bool hirari_native_pdc_set_track_destination(
     const void* state, uint32_t track, uint32_t destination);
-extern "C" bool hirari_native_pdc_set_bus_destination(
-    const void* state, uint32_t bus, uint32_t destination);
 extern "C" bool hirari_native_pdc_set_send_route(
     const void* state, uint32_t source, uint32_t destination, bool enabled);
 extern "C" bool hirari_native_pdc_set_track_latency(
     const void* state, uint32_t track, uint32_t samples);
-extern "C" bool hirari_native_pdc_set_bus_latency(
-    const void* state, uint32_t bus, uint32_t samples);
 extern "C" bool hirari_native_pdc_set_low_latency_mode(const void* state, bool active);
 extern "C" bool hirari_native_pdc_clear_configuration(const void* state);
-extern "C" bool hirari_native_pdc_mark_dirty(const void* state);
 extern "C" void hirari_native_pdc_reset_for_project(const void* state);
 extern "C" void hirari_native_pdc_recalculate(const void* state);
 extern "C" bool hirari_native_pdc_audit(const void* state);
 extern "C" uint32_t hirari_native_pdc_get_track_offset(const void* state, uint32_t track);
-extern "C" uint32_t hirari_native_pdc_get_bus_offset(const void* state, uint32_t bus);
 extern "C" uint32_t hirari_native_pdc_get_send_offset(
     const void* state, uint32_t source, uint32_t destination);
 extern "C" uint32_t hirari_native_pdc_get_global_latency(const void* state);

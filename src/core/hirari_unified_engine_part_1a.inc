@@ -35,6 +35,7 @@ HirariUnifiedEngine& HirariUnifiedEngine::getInstance() {
 HirariUnifiedEngine::~HirariUnifiedEngine() {
     shutdown();
     hirari_control_room_state_destroy(m_controlRoomState);
+    hirari_native_pdc_destroy(m_pdcState);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -135,7 +136,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     // All PDC graph edits originate from the engine/control owner. Binding
     // this instance prevents an audio callback from accidentally taking the
     // configuration mutex through a mutator.
-    (void)m_pdcManager.bindControlThread();
+    (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_analyzer = std::make_unique<::Hirari::DSP::Analysis::MasterMeter>();
     m_masterLimiter = std::make_unique<::Hirari::DSP::Effects::MasterLimiter>();
     m_scriptManager = std::make_unique<ScriptManager>();

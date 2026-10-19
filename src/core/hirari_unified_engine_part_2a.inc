@@ -272,11 +272,11 @@ float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noe
 }
 
 bool HirariUnifiedEngine::set_low_latency_mode(bool active) noexcept {
-    return m_pdcManager.setLowLatencyMode(active);
+    return hirari_native_pdc_set_low_latency_mode(m_pdcState, active);
 }
 
 bool HirariUnifiedEngine::low_latency_mode() const noexcept {
-    return m_pdcManager.lowLatencyMode();
+    return hirari_native_pdc_low_latency_mode(m_pdcState);
 }
 
 void HirariUnifiedEngine::set_playhead(uint64_t p) { m_playhead.store(p); }
@@ -465,7 +465,7 @@ void HirariUnifiedEngine::new_project() {
     m_midiOrchestrator.reset();
     MPEManager::getInstance().reset();
     m_undoManager.clear();
-    m_pdcManager.resetForProject();
+    hirari_native_pdc_reset_for_project(m_pdcState);
     m_sidechainManager.resetForProject();
     m_routingEngine.resetForProject();
     m_busSystem.resetForProject();

@@ -14,7 +14,6 @@
 #include "engine_types.hpp"
 #include "utils/ring_buffer.hpp"
 #include "concurrency/audio_task_manager.hpp"
-#include "engine/pdc_manager.hpp"
 #include "engine/tempo_map.hpp"
 #include "engine/routing_engine.hpp"
 #include "engine/undo_transaction_manager.hpp"

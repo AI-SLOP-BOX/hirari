@@ -47,8 +47,15 @@
     mutable std::mutex m_cacheMutex;
 
     // PDC is project/session state. It must not be shared through the legacy
-    // process-wide compatibility singleton.
-    PDCManager m_pdcManager;
+    // process-wide compatibility singleton. Rust (native_pdc.rs) owns the
+    // configuration, solving, thread ownership, and atomic publication; this
+    // member is only the handle the control thread edits and reads from.
+    void* m_pdcState = hirari_native_pdc_create();
+    // Node limits checked before a value crosses into Rust. Rust keeps the
+    // authoritative copies (native_pdc.rs: MAX_TRACKS, MASTER_ID); these hold
+    // here so an out-of-range ID never reaches the FFI in the first place.
+    static constexpr uint32_t kPdcMaxTracks = 512;
+    static constexpr uint32_t kPdcMasterDestination = 0xFFFFFFFFu;
     UndoTransactionManager m_undoManager;
     TempoMap m_tempoMap;
     RoutingEngine m_routingEngine;

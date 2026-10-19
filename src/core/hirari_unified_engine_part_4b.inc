@@ -223,7 +223,7 @@
             sidechainManager.removeLinksForTrack(track->getId());
         }
         m_commandQueue.clear();
-        m_pdcManager.resetForProject();
+        hirari_native_pdc_reset_for_project(m_pdcState);
         sidechainManager.resetForProject();
         m_routingEngine.resetForProject();
         m_busSystem.resetForProject();

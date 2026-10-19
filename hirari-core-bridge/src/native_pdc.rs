@@ -296,18 +296,6 @@ impl NativePdcManager {
         true
     }
 
-    fn set_bus_destination(&self, bus: u32, destination: u32) -> bool {
-        if bus as usize >= MAX_BUSES || !self.control_thread_allowed() {
-            return false;
-        }
-        let Ok(mut configuration) = self.configuration.lock() else {
-            return false;
-        };
-        configuration.routing[MAX_TRACKS + bus as usize] = destination;
-        self.mark_dirty_locked();
-        true
-    }
-
     fn set_send_route(&self, source: u32, destination: u32, enabled: bool) -> bool {
         if source as usize >= MAX_TRACKS
             || destination as usize >= MAX_TRACKS
@@ -547,15 +535,6 @@ pub unsafe extern "C" fn hirari_native_pdc_set_track_destination(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_set_bus_destination(
-    handle: *const c_void,
-    bus: u32,
-    destination: u32,
-) -> bool {
-    unsafe { state(handle) }.is_some_and(|state| state.set_bus_destination(bus, destination))
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_native_pdc_set_send_route(
     handle: *const c_void,
     source: u32,
@@ -575,15 +554,6 @@ pub unsafe extern "C" fn hirari_native_pdc_set_track_latency(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_set_bus_latency(
-    handle: *const c_void,
-    bus: u32,
-    samples: u32,
-) -> bool {
-    unsafe { state(handle) }.is_some_and(|state| state.set_latency(true, bus, samples))
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_native_pdc_set_low_latency_mode(
     handle: *const c_void,
     active: bool,
@@ -594,21 +564,6 @@ pub unsafe extern "C" fn hirari_native_pdc_set_low_latency_mode(
 #[no_mangle]
 pub unsafe extern "C" fn hirari_native_pdc_clear_configuration(handle: *const c_void) -> bool {
     unsafe { state(handle) }.is_some_and(NativePdcManager::clear_configuration)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_mark_dirty(handle: *const c_void) -> bool {
-    let Some(state) = (unsafe { state(handle) }) else {
-        return false;
-    };
-    if !state.control_thread_allowed() {
-        return false;
-    }
-    let Ok(_configuration) = state.configuration.lock() else {
-        return false;
-    };
-    state.mark_dirty_locked();
-    true
 }
 
 #[no_mangle]
@@ -643,18 +598,6 @@ pub unsafe extern "C" fn hirari_native_pdc_get_track_offset(
     }
     let active = state.published.active_buffer.load(Ordering::Acquire) as usize;
     state.published.track_offsets[active][track as usize].load(Ordering::Acquire)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_get_bus_offset(handle: *const c_void, bus: u32) -> u32 {
-    let Some(state) = (unsafe { state(handle) }) else {
-        return 0;
-    };
-    if bus as usize >= MAX_BUSES {
-        return 0;
-    }
-    let active = state.published.active_buffer.load(Ordering::Acquire) as usize;
-    state.published.bus_offsets[active][bus as usize].load(Ordering::Acquire)
 }
 
 #[no_mangle]

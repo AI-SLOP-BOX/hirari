@@ -483,43 +483,44 @@ void HirariUnifiedEngine::syncStructuralChanges() {
     // Keep PDC on the same published routing graph as audio processing. The
     // solver runs here on the control thread; Track applies the resulting
     // bounded offset with a preallocated delay line at block boundaries.
-    auto& pdc = m_pdcManager;
+    const void* pdc = m_pdcState;
     // This is a full graph rebuild. Clear stale entries for deleted tracks
     // and buses before applying the current snapshot, while retaining the
     // previous active offsets until recalculate() publishes the new graph.
-    pdc.clearRoutingConfiguration();
+    hirari_native_pdc_clear_configuration(pdc);
     for (const auto& track : m_tracks) {
-        if (!track || track->getId() >= Hirari::Core::Engine::PDCManager::kMaxTracks) continue;
-        pdc.setTrackDest(track->getId(), Hirari::Core::Engine::PDCManager::kMasterID);
-        pdc.setTrackLatency(track->getId(), track->getTotalLatencySamples());
+        if (!track || track->getId() >= kPdcMaxTracks) continue;
+        hirari_native_pdc_set_track_destination(pdc, track->getId(), kPdcMasterDestination);
+        hirari_native_pdc_set_track_latency(pdc, track->getId(), track->getTotalLatencySamples());
     }
     std::vector<Hirari::Core::Engine::RoutingEngine::Connection> connections;
     routing.copyConnections(connections);
     for (const auto& connection : connections) {
         if (connection.send) {
-            if (connection.sourceId < Hirari::Core::Engine::PDCManager::kMaxTracks &&
-                connection.destId < Hirari::Core::Engine::PDCManager::kMaxTracks) {
-                pdc.setSendRoute(connection.sourceId, connection.destId, true);
+            if (connection.sourceId < kPdcMaxTracks &&
+                connection.destId < kPdcMaxTracks) {
+                hirari_native_pdc_set_send_route(pdc, connection.sourceId, connection.destId, true);
             }
             continue;
         }
-        if (connection.sourceId < Hirari::Core::Engine::PDCManager::kMaxTracks &&
-            connection.destId < Hirari::Core::Engine::PDCManager::kMaxTracks) {
-            pdc.setTrackDest(connection.sourceId, connection.destId);
+        if (connection.sourceId < kPdcMaxTracks &&
+            connection.destId < kPdcMaxTracks) {
+            hirari_native_pdc_set_track_destination(pdc, connection.sourceId, connection.destId);
         }
     }
-    pdc.recalculate();
+    hirari_native_pdc_recalculate(pdc);
     for (const auto& connection : connections) {
         if (!connection.send ||
             connection.sourceId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes ||
             connection.destId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes) continue;
         routing.setSendPdcCompensationSamples(
             connection.sourceId, connection.destId,
-            pdc.getSendCompensationSamples(connection.sourceId, connection.destId));
+            hirari_native_pdc_get_send_offset(pdc, connection.sourceId, connection.destId));
     }
     for (const auto& track : m_tracks) {
-        if (track && track->getId() < Hirari::Core::Engine::PDCManager::kMaxTracks) {
-            track->setPdcCompensationSamples(pdc.getCompensationOffset(track->getId()));
+        if (track && track->getId() < kPdcMaxTracks) {
+            track->setPdcCompensationSamples(
+                hirari_native_pdc_get_track_offset(pdc, track->getId()));
         }
     }
 

@@ -11,7 +11,6 @@
 #include "dsp/effects/console_dsp.hpp"
 #include "dsp/effects/master_limiter.hpp"
 #include "engine/track.hpp"
-#include "engine/pdc_manager.hpp"
 #include "engine/tempo_map.hpp"
 #include "concurrency/audio_task_manager.hpp"
 
