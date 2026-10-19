@@ -94,28 +94,51 @@ impl PdcConfiguration {
         // up. Compute the own-path latency separately, over the same routing.
         let mut own_path = vec![0u64; ROUTED_NODE_COUNT];
         let mut own_path_valid = vec![false; ROUTED_NODE_COUNT];
-        // Walk each node's route to master once, in reverse topological order,
-        // accumulating only the latencies that lie downstream of the node.
-        for index in (0..ROUTED_NODE_COUNT).rev() {
-            let destination = self.routing[index];
-            let downstream = if destination == MASTER_ID
-                || (destination as usize) >= ROUTED_NODE_COUNT
-            {
-                0
-            } else if own_path_valid[destination as usize] {
-                own_path[destination as usize]
-            } else {
-                // Unresolved destination means a cycle the shared solver will
-                // reject; leave this node at zero rather than guess.
-                0
-            };
-            let own = if index < MAX_TRACKS {
-                u64::from(self.track_latencies[index])
-            } else {
-                u64::from(self.bus_latencies[index - MAX_TRACKS])
-            };
-            own_path[index] = own.saturating_add(downstream);
-            own_path_valid[index] = true;
+        // A node's path depends on its destination's path, and a destination's
+        // index is unrelated to its source's: track 5 may route into track 2,
+        // just as a track routes into a higher-numbered bus. One fixed iteration
+        // order therefore cannot reach reverse topological order for every
+        // topology — walking down by index leaves a lower-numbered destination
+        // unresolved and silently drops the latency downstream of it. Follow
+        // each still-unresolved chain to its end and fill it back to front
+        // instead, which is the reverse topological order this needs.
+        let mut on_current_path = vec![false; ROUTED_NODE_COUNT];
+        for start in 0..ROUTED_NODE_COUNT {
+            if own_path_valid[start] {
+                continue;
+            }
+            let mut chain = Vec::new();
+            let mut current = start;
+            while !own_path_valid[current] && !on_current_path[current] {
+                on_current_path[current] = true;
+                chain.push(current);
+                let destination = self.routing[current] as usize;
+                if destination >= ROUTED_NODE_COUNT {
+                    break;
+                }
+                current = destination;
+            }
+            for &index in chain.iter().rev() {
+                let destination = self.routing[index] as usize;
+                let downstream = if destination >= ROUTED_NODE_COUNT {
+                    0
+                } else if own_path_valid[destination] {
+                    own_path[destination]
+                } else {
+                    // A routing cycle: the shared solver rejects this graph and
+                    // the caller discards the solution, so leave this node at
+                    // zero rather than guess.
+                    0
+                };
+                let own = if index < MAX_TRACKS {
+                    u64::from(self.track_latencies[index])
+                } else {
+                    u64::from(self.bus_latencies[index - MAX_TRACKS])
+                };
+                own_path[index] = own.saturating_add(downstream);
+                own_path_valid[index] = true;
+                on_current_path[index] = false;
+            }
         }
 
         let mut node_own_compensation = vec![0u32; ROUTED_NODE_COUNT];
@@ -706,6 +729,28 @@ mod tests {
         pdc.reset_for_project();
         assert_eq!(pdc.published.max_global.load(Ordering::Acquire), 0);
         assert!(pdc.dirty.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn own_path_walk_covers_routes_into_lower_indexed_tracks() {
+        // Regression: a route whose destination has a *lower* index than its
+        // source (track 2 feeding track 1) still has to contribute its
+        // downstream latency. Walking the configuration in descending index
+        // order saw track 1 as still unknown, read track 2's path as zero, and
+        // published a 100-sample delay for a track that already carries track
+        // 1's full 100-sample latency — double-counting the same signal.
+        let pdc = NativePdcManager::new();
+        assert!(pdc.bind_control_thread());
+        pdc.reset_for_project();
+        assert!(pdc.set_latency(false, 1, 100));
+        assert!(pdc.set_latency(false, 2, 0));
+        assert!(pdc.set_track_destination(2, 1));
+        pdc.recalculate();
+
+        assert_eq!(pdc.get_track_offset_for_test(1), 0);
+        assert_eq!(pdc.get_track_offset_for_test(2), 0);
+        assert_eq!(pdc.published.max_global.load(Ordering::Acquire), 100);
+        assert!(pdc.audit());
     }
 
     impl NativePdcManager {
