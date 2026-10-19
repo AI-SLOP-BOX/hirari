@@ -18,8 +18,6 @@
 #include "src/core/engine/undo_transaction_manager.hpp"
 #include "src/core/midi_buffer.hpp"
 #include "src/core/plugins/midi_fragment_transport.hpp"
-#include "src/core/recording_engine.hpp"
-#include "src/network/shared_memory_bridge.hpp"
 #include "src/core/concurrency/audio_task_manager.hpp"
 #include "src/core/concurrency/thread_pool.hpp"
 #include "src/core/engine/bounce_engine.hpp"

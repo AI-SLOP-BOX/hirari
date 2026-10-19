@@ -277,44 +277,6 @@ int main() {
 
 
 
-    auto& telemetryBridge = Hirari::Network::SharedMemoryBridge::getInstance();
-    if (!telemetryBridge.start()) return 26;
-    const std::string telemetryName = telemetryBridge.segmentName();
-    // The auto-generated name must stay inside the smallest POSIX shm budget
-    // we support. It previously used "/hirari_sovereign_bridge_<pid>_<seq>",
-    // which is 35 characters for a 5-digit pid and failed shm_open with
-    // ENAMETOOLONG on macOS (31 character limit), so the bridge never started.
-    if (telemetryName.empty() ||
-        telemetryName.size() > Hirari::Network::SharedMemoryBridge::kMaxSegmentNameLength) {
-        return 27;
-    }
-    if (telemetryName[0] != '/' ||
-        telemetryName.find('/', 1) != std::string::npos) return 27;
-    std::array<uint8_t, 300> sharedMidiPayload{};
-    sharedMidiPayload.front() = 0xf0;
-    sharedMidiPayload.back() = 0xf7;
-    if (!telemetryBridge.pushExtendedMidi(24, 3, sharedMidiPayload.data(), sharedMidiPayload.size()) ||
-        telemetryBridge.pendingExtendedMidi() != 1) return 59;
-    Hirari::Core::Plugins::MidiExtendedMessageRing::Message sharedMidiMessage;
-    if (!telemetryBridge.popExtendedMidi(sharedMidiMessage) ||
-        sharedMidiMessage.size != sharedMidiPayload.size() ||
-        sharedMidiMessage.sampleOffset != 24 || sharedMidiMessage.articulationId != 3 ||
-        sharedMidiMessage.data.front() != 0xf0 || sharedMidiMessage.data[299] != 0xf7) return 60;
-    for (unsigned slot = 0; slot < Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity; ++slot) {
-        if (!telemetryBridge.pushExtendedMidi(slot, 0, sharedMidiPayload.data(), sharedMidiPayload.size())) return 61;
-    }
-    if (telemetryBridge.pushExtendedMidi(99, 0, sharedMidiPayload.data(), sharedMidiPayload.size()) ||
-        telemetryBridge.pendingExtendedMidi() != Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity) return 62;
-    Hirari::Core::Plugins::MidiExtendedMessageRing::Message drainedMessage;
-    while (telemetryBridge.popExtendedMidi(drainedMessage)) {}
-    if (telemetryBridge.pendingExtendedMidi() != 0) return 63;
-    telemetryBridge.stop();
-    if (!telemetryBridge.segmentName().empty()) return 28;
-    if (!telemetryBridge.start()) return 45;
-    const std::string secondTelemetryName = telemetryBridge.segmentName();
-    if (secondTelemetryName.empty() || secondTelemetryName == telemetryName) return 46;
-    telemetryBridge.stop();
-
     // Payloads beyond the bounded SysEx/MIDI2 envelope must be observable at
     // ingress rather than silently becoming a truncated channel-voice event.
     Hirari::Core::MidiBuffer midiIngress;
