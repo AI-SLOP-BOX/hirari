@@ -23,6 +23,11 @@ resolver = "2"
 # do not read this setting as a cleanup.
 [profile.dev]
 debug = "line-tables-only"
+# target/debug/incremental grew to 9.9G in a single worktree and filled a 228Gi
+# volume (459Mi left mid-build, gate died with "No space left on device").
+# Debug info is already narrowed above; this keeps the dev profile's footprint
+# stable at about 9.7G per worktree so parallel worktrees stay affordable.
+incremental = false
 
 [profile.release]
 panic = "abort"
