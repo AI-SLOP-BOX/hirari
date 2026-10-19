@@ -21,7 +21,6 @@
 - **役割**: 信号処理、エフェクト、ダイナミクス、メーター、ピッチ補正などの「肉付け」機能群。
 - **重要ファイル**:
   - `effects/auto_pitch_corrector.hpp`: ボーカルのリアルタイム・ピッチ補正（オートチューン）。
-  - `mixing/master_suite.hpp`: マスターバスの最終段。**Dither（ディザー）は必ずここの一番最後で行うこと。**
   - `analysis/master_meter.hpp`: 真のTrue-Peak（ISP）推定と指数減衰（Decay）を持ったプロ仕様メーター。
   - `effects/deesser.hpp`: ノイズゲートおよびディエッサー。ジッパーノイズを防ぐエンベロープホールドを搭載。
 ### 3. `src/synthesis/` (内蔵インストゥルメント)
