@@ -528,10 +528,10 @@ uint32_t HirariUnifiedEngine::duplicate_track(uint32_t tid) {
     std::vector<std::vector<uint8_t>> pluginStates;
     std::vector<bool> pluginBypasses;
     std::vector<std::string> sandboxPaths;
-    std::vector<ProjectSerializer::AutomationPoint> volumeAutomation;
-    std::vector<ProjectSerializer::AutomationPoint> panAutomation;
-    std::vector<ProjectSerializer::AutomationPoint> delayAutomation;
-    std::vector<ProjectSerializer::PluginAutomationLane> pluginAutomation;
+    std::vector<ProjectAutomationPoint> volumeAutomation;
+    std::vector<ProjectAutomationPoint> panAutomation;
+    std::vector<ProjectAutomationPoint> delayAutomation;
+    std::vector<ProjectPluginAutomationLane> pluginAutomation;
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         auto source = std::find_if(m_tracks.begin(), m_tracks.end(),

@@ -6,6 +6,7 @@
 //! the native engine, while `project inspect` must not reject a real `.hirari`
 //! file with a JSON parser error.
 
+use crate::ffi::NativeProjectState;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::io::Read;
@@ -15,6 +16,190 @@ pub(crate) const MAGIC: u32 = 0x4155_5241;
 const MAX_PROJECT_BYTES: usize = 256 * 1024 * 1024;
 const MIN_PROJECT_SAMPLE_RATE: u32 = 8_000;
 const MAX_PROJECT_SAMPLE_RATE: u32 = 384_000;
+const MAX_PROJECT_VERSION: u32 = 42;
+
+/// Header fields shared by the reader and the writer.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NativeProjectHeader {
+    pub version: u32,
+    pub sample_rate: u32,
+    pub header_size: usize,
+    pub track_count: u32,
+    pub bpm: f64,
+    pub root_note: i32,
+    pub scale_type: i32,
+}
+
+/// Reads an `ARUA` payload, validating the envelope and removing the checksum
+/// trailer. The returned bytes are the versioned payload only.
+pub(crate) fn read_payload(path: &str) -> Option<(Vec<u8>, NativeProjectHeader)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    // Reject oversized inputs from their metadata, before the whole file is
+    // pulled into memory. The old native loader did the same, and a sparse
+    // multi-hundred-megabyte file must not cost an allocation to reject.
+    if !metadata.is_file()
+        || metadata.len() < 8
+        || metadata.len() > MAX_PROJECT_BYTES as u64
+    {
+        return None;
+    }
+    let mut bytes = std::fs::read(path).ok()?;
+    if bytes.len() < 8 || bytes.len() > MAX_PROJECT_BYTES {
+        return None;
+    }
+    let magic = u32::from_ne_bytes(bytes[..4].try_into().ok()?);
+    let version = u32::from_ne_bytes(bytes[4..8].try_into().ok()?);
+    if magic != MAGIC || !(1..=MAX_PROJECT_VERSION).contains(&version) {
+        return None;
+    }
+    let header_size = if version >= 14 { 28 } else { 20 };
+    if bytes.len() < header_size {
+        return None;
+    }
+    let sample_rate = u32::from_ne_bytes(bytes[8..12].try_into().ok()?);
+    let bpm = f64::from_ne_bytes(bytes[12..20].try_into().ok()?);
+    let (root_note, scale_type) = if version >= 14 {
+        (
+            i32::from_ne_bytes(bytes[20..24].try_into().ok()?),
+            i32::from_ne_bytes(bytes[24..28].try_into().ok()?),
+        )
+    } else {
+        (0, 0)
+    };
+    if sample_rate == 0
+        || !bpm.is_finite()
+        || !(20.0..=300.0).contains(&bpm)
+        || !(0..=11).contains(&root_note)
+        || !(0..=32).contains(&scale_type)
+    {
+        return None;
+    }
+    let track_count =
+        u32::from_ne_bytes(bytes.get(header_size..header_size + 4)?.try_into().ok()?);
+    if track_count > 100_000 {
+        return None;
+    }
+    if version >= 27 {
+        if bytes.len() < 12 {
+            return None;
+        }
+        let payload_size = bytes.len() - 4;
+        let stored = u32::from_ne_bytes(bytes[payload_size..].try_into().ok()?);
+        if crc32(&bytes[..payload_size]) != stored {
+            return None;
+        }
+        bytes.truncate(payload_size);
+    }
+    Some((
+        bytes,
+        NativeProjectHeader {
+            version,
+            sample_rate,
+            header_size,
+            track_count,
+            bpm,
+            root_note,
+            scale_type,
+        },
+    ))
+}
+
+/// Decodes an `ARUA` container into the engine-facing state record.
+pub(crate) fn load_state(path: &str) -> NativeProjectState {
+    let mut state = NativeProjectState::default();
+    let Some((bytes, header)) = read_payload(path) else {
+        return state;
+    };
+    let Some((tracks, track_offset, total_strings)) = crate::project_track_decoder::decode_tracks(
+        &bytes,
+        header.header_size as u32,
+        header.version,
+        header.track_count,
+    ) else {
+        return NativeProjectState::default();
+    };
+    let track_ids: Vec<u32> = tracks.iter().map(|track| track.id).collect();
+    let Some((regions, region_offset)) = crate::project_region_decoder::decode_regions(
+        &bytes,
+        track_offset,
+        header.version,
+        header.sample_rate,
+        &track_ids,
+        total_strings,
+    ) else {
+        return NativeProjectState::default();
+    };
+    let Some((sidechains, routes, markers, arranger_parts, tempo_events, tail_offset)) =
+        crate::project_tail_decoder::decode_tail(&bytes, region_offset, header.version)
+    else {
+        return NativeProjectState::default();
+    };
+    if tail_offset != bytes.len() {
+        return NativeProjectState::default();
+    }
+    state.bpm = header.bpm;
+    state.rootNote = header.root_note;
+    state.scaleType = header.scale_type;
+    state.sampleRate = header.sample_rate;
+    state.version = header.version;
+    state.tracks = tracks;
+    state.regions = regions;
+    state.sidechains = sidechains;
+    state.routes = routes;
+    state.markers = markers;
+    state.arrangerParts = arranger_parts;
+    state.tempoEvents = tempo_events;
+    state.valid = true;
+    state
+}
+
+/// Encodes an engine state record as an `ARUA` container and stores it.
+pub(crate) fn save_state(path: &str, state: &NativeProjectState) -> bool {
+    if path.is_empty() || !(1..=MAX_PROJECT_VERSION).contains(&state.version) {
+        return false;
+    }
+    let version = state.version;
+    let Some(tracks) = crate::project_track_decoder::encode_tracks(version, &state.tracks) else {
+        return false;
+    };
+    let Some(regions) =
+        crate::project_region_decoder::encode_regions(version, state.sampleRate, &state.regions)
+    else {
+        return false;
+    };
+    let Some(tail) = crate::project_tail_decoder::encode_tail(
+        version,
+        &state.sidechains,
+        &state.routes,
+        &state.markers,
+        &state.arrangerParts,
+        &state.tempoEvents,
+    ) else {
+        return false;
+    };
+    let Some(mut payload) = crate::project_tail_decoder::assemble_payload(
+        version,
+        state.sampleRate,
+        state.bpm,
+        state.rootNote,
+        state.scaleType,
+        &tracks,
+        &regions,
+        &tail,
+    ) else {
+        return false;
+    };
+    if payload.len() > MAX_PROJECT_BYTES - 4 {
+        return false;
+    }
+    if version >= 27 {
+        let checksum = crc32(&payload);
+        payload.extend_from_slice(&checksum.to_ne_bytes());
+    }
+    crate::project_asset_orchestrator::ProjectOrchestrator::new()
+        .save_project_checked(path, &payload)
+        .is_ok()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NativeProjectInspection {
@@ -261,6 +446,16 @@ pub unsafe extern "C" fn hirari_crc32_bytes(data: *const u8, size: usize) -> u32
     crc32(std::slice::from_raw_parts(data, size))
 }
 
+/// Bridge entrypoint: decode an `ARUA` container into the engine state record.
+pub fn native_project_load(path: &str) -> NativeProjectState {
+    load_state(path)
+}
+
+/// Bridge entrypoint: encode and store an engine state record as `ARUA`.
+pub fn native_project_save(path: &str, state: &NativeProjectState) -> bool {
+    save_state(path, state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +533,92 @@ mod tests {
             .unwrap();
         assert!(inspect(&path).is_err());
         let _ = std::fs::remove_file(path);
+    }
+
+    fn native_project_path(suffix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "hirari-native-contract-{}-{}.hirari",
+            std::process::id(),
+            suffix
+        ))
+    }
+
+    // The retired C++ contract exercised these rejections through
+    // `ProjectSerializer`. They belong to the Rust codec now, so assert the
+    // same behavior at the entrypoints the engine actually calls.
+    #[test]
+    fn rejects_duplicate_tracks_orphan_regions_corruption_and_oversize() {
+        use crate::ffi::{NativeRegionState, NativeTrackState};
+
+        let track = NativeTrackState {
+            id: 7,
+            volume: 1.0,
+            ..Default::default()
+        };
+        let region = NativeRegionState {
+            id: 9001,
+            trackId: 7,
+            samplePosition: 0,
+            sampleLength: 128,
+            filePath: "contract.wav".into(),
+            warpRatio: 1.0,
+            loopCount: 1,
+            ..Default::default()
+        };
+        let state = NativeProjectState {
+            version: 28,
+            sampleRate: 48_000,
+            bpm: 120.0,
+            tracks: vec![track.clone()],
+            regions: vec![region],
+            ..Default::default()
+        };
+
+        let path = native_project_path("roundtrip");
+        let path_text = path.to_string_lossy().into_owned();
+        assert!(native_project_save(&path_text, &state));
+        let restored = native_project_load(&path_text);
+        assert!(restored.valid);
+        assert_eq!(restored.regions.len(), 1);
+        assert_eq!(restored.regions[0].id, 9001);
+
+        let mut duplicate = state.clone();
+        duplicate.tracks = vec![track.clone(), track];
+        assert!(native_project_save(&path_text, &duplicate));
+        assert!(
+            !native_project_load(&path_text).valid,
+            "a container with duplicate track ids must be rejected on load"
+        );
+
+        let mut orphan = state.clone();
+        orphan.regions[0].trackId = 999;
+        assert!(native_project_save(&path_text, &orphan));
+        assert!(
+            !native_project_load(&path_text).valid,
+            "a region whose track is absent must be rejected on load"
+        );
+
+        assert!(native_project_save(&path_text, &state));
+        let mut bytes = std::fs::read(&path).expect("saved container is readable");
+        bytes[12] ^= 0x5a;
+        std::fs::write(&path, &bytes).expect("corrupted container is writable");
+        assert!(
+            !native_project_load(&path_text).valid,
+            "a checksum mismatch must be rejected on load"
+        );
+
+        let oversized = native_project_path("oversized");
+        let oversized_text = oversized.to_string_lossy().into_owned();
+        let file = std::fs::File::create(&oversized).expect("oversized container is creatable");
+        file.set_len(MAX_PROJECT_BYTES as u64 + 1)
+            .expect("sparse container is sized");
+        drop(file);
+        assert!(
+            !native_project_load(&oversized_text).valid,
+            "an oversized container must be rejected before reading"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&oversized);
     }
 }

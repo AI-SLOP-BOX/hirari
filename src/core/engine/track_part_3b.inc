@@ -37,7 +37,7 @@
         setPanAutomation(pan);
         return static_cast<uint32_t>(std::min<size_t>(drained, UINT32_MAX));
     }
-    void setVolumeAutomation(const std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>& points) {
+    void setVolumeAutomation(const std::vector<Hirari::Core::ProjectAutomationPoint>& points) {
         invalidateFrozenForEdit();
         auto copy = std::make_unique<AutomationList>(points);
         std::sort(copy->begin(), copy->end(), [](const auto& a, const auto& b) { return a.time < b.time; });
@@ -46,7 +46,7 @@
         m_volumeAutomation.store(rawPtr, std::memory_order_release);
         markProjectLayoutChanged();
     }
-    void setPanAutomation(const std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>& points) {
+    void setPanAutomation(const std::vector<Hirari::Core::ProjectAutomationPoint>& points) {
         // Pan automation is stored in the live -1..1 fader domain.
         invalidateFrozenForEdit();
         auto copy = std::make_unique<AutomationList>(points);
@@ -56,7 +56,7 @@
         m_panAutomation.store(rawPtr, std::memory_order_release);
         markProjectLayoutChanged();
     }
-    void setTrackDelayAutomation(const std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>& points) {
+    void setTrackDelayAutomation(const std::vector<Hirari::Core::ProjectAutomationPoint>& points) {
         invalidateFrozenForEdit();
         auto copy = std::make_unique<AutomationList>(points);
         std::sort(copy->begin(), copy->end(), [](const auto& a, const auto& b) { return a.time < b.time; });
@@ -65,17 +65,17 @@
         m_trackDelayAutomation.store(rawPtr, std::memory_order_release);
         markProjectLayoutChanged();
     }
-    std::vector<Hirari::Core::ProjectSerializer::AutomationPoint> getVolumeAutomationPoints() const {
+    std::vector<Hirari::Core::ProjectAutomationPoint> getVolumeAutomationPoints() const {
         const auto* points = m_volumeAutomation.load(std::memory_order_acquire);
-        return points ? *points : std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>{};
+        return points ? *points : std::vector<Hirari::Core::ProjectAutomationPoint>{};
     }
-    std::vector<Hirari::Core::ProjectSerializer::AutomationPoint> getPanAutomationPoints() const {
+    std::vector<Hirari::Core::ProjectAutomationPoint> getPanAutomationPoints() const {
         const auto* points = m_panAutomation.load(std::memory_order_acquire);
-        return points ? *points : std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>{};
+        return points ? *points : std::vector<Hirari::Core::ProjectAutomationPoint>{};
     }
-    std::vector<Hirari::Core::ProjectSerializer::AutomationPoint> getTrackDelayAutomationPoints() const {
+    std::vector<Hirari::Core::ProjectAutomationPoint> getTrackDelayAutomationPoints() const {
         const auto* points = m_trackDelayAutomation.load(std::memory_order_acquire);
-        return points ? *points : std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>{};
+        return points ? *points : std::vector<Hirari::Core::ProjectAutomationPoint>{};
     }
     void setPluginAutomation(const PluginAutomationList& lanes) {
         invalidateFrozenForEdit();

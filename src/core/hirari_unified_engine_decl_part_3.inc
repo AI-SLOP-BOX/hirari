@@ -79,7 +79,7 @@
     std::string get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const;
     bool set_plugin_parameter(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId, float value);
     bool set_plugin_automation(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId,
-                               const std::vector<ProjectSerializer::AutomationPoint>& points);
+                               const std::vector<ProjectAutomationPoint>& points);
     // Internal automation/hydration path. It applies the value without
     // creating a user-facing Undo step for every generated control event.
     bool set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,

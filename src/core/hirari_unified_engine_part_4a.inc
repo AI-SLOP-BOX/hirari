@@ -941,7 +941,8 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
     const std::filesystem::path projectDir = projectPath.has_parent_path()
         ? projectPath.parent_path()
         : std::filesystem::current_path();
-    auto state = ProjectSerializer::load(std::string(path));
+    auto state = ::Hirari::Core::Bridge::native_project_load(
+        rust::Str(path.data(), path.size()));
     if (state.valid && std::isfinite(state.bpm) && state.bpm >= 20.0 && state.bpm <= 300.0) {
         const double projectSampleRate = static_cast<double>(state.sampleRate);
         const uint32_t configuredBlockSize = m_context ? m_context->blockSize : 0u;
@@ -959,7 +960,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             if (ts.id == std::numeric_limits<uint32_t>::max() ||
                 std::find(trackIds.begin(), trackIds.end(), ts.id) != trackIds.end()) return false;
             trackIds.push_back(ts.id);
-            if (ts.type == static_cast<uint32_t>(Track::Bus)) busTrackIds.insert(ts.id);
+            if (ts.trackType == static_cast<uint32_t>(Track::Bus)) busTrackIds.insert(ts.id);
         }
         std::unordered_set<uint32_t> serializedRegionIds;
         for (const auto& rs : state.regions) {
@@ -1010,14 +1011,47 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
         std::unique_lock<std::mutex> lock(m_tracksMutex);
         std::vector<std::shared_ptr<Track>> loadedTracks;
         loadedTracks.reserve(state.tracks.size());
+        // The bridge state is Rust-owned, so the few engine setters that take
+        // standard containers materialize a control-side copy here.
+        const auto toAutomation = [](const rust::Vec<::Hirari::Core::Bridge::NativeAutomationPoint>& points) {
+            std::vector<ProjectAutomationPoint> converted;
+            converted.reserve(points.size());
+            for (const auto& point : points) {
+                converted.push_back({point.time, point.value, point.curve});
+            }
+            return converted;
+        };
+        const auto toBlob = [](const rust::Vec<uint8_t>& bytes) {
+            return std::vector<uint8_t>(bytes.begin(), bytes.end());
+        };
+        const auto toPluginAutomation =
+            [&toAutomation](const rust::Vec<::Hirari::Core::Bridge::NativePluginAutomationLane>& lanes) {
+                std::vector<ProjectPluginAutomationLane> converted;
+                converted.reserve(lanes.size());
+                for (const auto& lane : lanes) {
+                    ProjectPluginAutomationLane value;
+                    value.pluginIndex = lane.pluginIndex;
+                    value.parameterId = lane.parameterId;
+                    value.points = toAutomation(lane.points);
+                    converted.push_back(std::move(value));
+                }
+                return converted;
+            };
+        const auto readPluginType = [](const rust::Vec<uint8_t>& bytes, size_t offset) {
+            return static_cast<uint32_t>(bytes[offset]) |
+                   (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
+                   (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
+                   (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+        };
 
         // 1. Hydrate Tracks
         for (const auto& ts : state.tracks) {
-            const auto trackType = static_cast<Track::Type>(ts.type);
+            const auto trackType = static_cast<Track::Type>(ts.trackType);
+            const std::string trackName = std::string(ts.pluginName);
             std::shared_ptr<Track> t;
             if (trackType == Track::Type::Bus) {
                 auto busTrack = std::make_shared<BusTrack>(
-                    ts.id, ts.pluginName.empty() ? "Bus" : ts.pluginName, ts.id,
+                    ts.id, trackName.empty() ? "Bus" : trackName, ts.id,
                     &m_sidechainManager, m_projectLayoutRevision);
                 // Do not mutate the process/session BusSystem while the
                 // replacement document is still provisional. If hydration
@@ -1026,7 +1060,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
                 t = std::move(busTrack);
             } else {
                 t = std::make_shared<Track>(ts.id,
-                    ts.pluginName.empty() ? "Track" : ts.pluginName, trackType,
+                    trackName.empty() ? "Track" : trackName, trackType,
                     &m_sidechainManager, m_projectLayoutRevision);
             }
             // Plugin arrays are positional within a serialized track. Do not
@@ -1047,9 +1081,9 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             t->setRecordArmed(ts.recordArmed);
             t->setTrackDelaySamples(ts.trackDelaySamples);
             t->setSpatialPosition(ts.pan3d_x, ts.pan3d_y, ts.pan3d_z);
-            if (!ts.volumeAutomation.empty()) t->setVolumeAutomation(ts.volumeAutomation);
-            if (!ts.panAutomation.empty()) t->setPanAutomation(ts.panAutomation);
-            if (!ts.trackDelayAutomation.empty()) t->setTrackDelayAutomation(ts.trackDelayAutomation);
+            if (!ts.volumeAutomation.empty()) t->setVolumeAutomation(toAutomation(ts.volumeAutomation));
+            if (!ts.panAutomation.empty()) t->setPanAutomation(toAutomation(ts.panAutomation));
+            if (!ts.trackDelayAutomation.empty()) t->setTrackDelayAutomation(toAutomation(ts.trackDelayAutomation));
             // pluginData stores plugin type IDs as little-endian u32 values.
             // 0xffffffff is the serialized marker for a sandbox plugin. Build
             // the processor chain in the same order in which it was saved;
@@ -1058,14 +1092,14 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             size_t sandboxPathIndex = 0;
             for (size_t offset = 0; offset + sizeof(uint32_t) <= ts.pluginData.size();
                  offset += sizeof(uint32_t)) {
-                const uint32_t pluginType = read_le_u32(ts.pluginData, offset);
+                const uint32_t pluginType = readPluginType(ts.pluginData, offset);
                 if (pluginType == 0xFFFFFFFFu) {
                     if (sandboxPathIndex >= ts.sandboxedPluginPaths.size()) return false;
                     // An unavailable external binary is represented as a
                     // quarantined/missing plugin and does not invalidate the
                     // rest of the project. The path is still consumed so the
                     // following serialized plugin keeps its position.
-                    (void)t->addSandboxedPlugin(ts.sandboxedPluginPaths[sandboxPathIndex]);
+                    (void)t->addSandboxedPlugin(std::string(ts.sandboxedPluginPaths[sandboxPathIndex]));
                     ++sandboxPathIndex;
                 } else if (!t->addPlugin(pluginType)) {
                     return false;
@@ -1074,10 +1108,10 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             // Older files may have sandbox paths without the marker in
             // pluginData. Preserve compatibility by appending those entries.
             while (sandboxPathIndex < ts.sandboxedPluginPaths.size()) {
-                (void)t->addSandboxedPlugin(ts.sandboxedPluginPaths[sandboxPathIndex++]);
+                (void)t->addSandboxedPlugin(std::string(ts.sandboxedPluginPaths[sandboxPathIndex++]));
             }
             for (const auto& lane : ts.pluginAutomation) {
                 if (lane.pluginIndex >= t->getPluginTypes().size()) return false;
             }
-            if (!ts.pluginAutomation.empty()) t->setPluginAutomation(ts.pluginAutomation);
+            if (!ts.pluginAutomation.empty()) t->setPluginAutomation(toPluginAutomation(ts.pluginAutomation));
             for (size_t stateIndex = 0; stateIndex < ts.pluginStates.size(); ++stateIndex) {

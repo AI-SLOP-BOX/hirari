@@ -1,72 +1,39 @@
-    const auto project = std::filesystem::temp_directory_path() / "hirari-region-id-contract.bin";
-    Hirari::Core::ProjectSerializer::ProjectState state;
-    state.version = 28;
-    state.sampleRate = 48'000;
-    state.bpm = 120.0;
-    Hirari::Core::ProjectSerializer::TrackState baseTrack{};
-    baseTrack.id = 7;
-    baseTrack.volume = 1.0f;
-    baseTrack.pan = 0.0f;
-    state.tracks.push_back(baseTrack);
-    Hirari::Core::ProjectSerializer::RegionState region;
-    region.id = 9001;
-    region.trackId = 7;
-    region.samplePosition = 0;
-    region.sampleLength = 128;
-    region.filePath = "contract.wav";
-    state.regions.push_back(region);
-    if (!Hirari::Core::ProjectSerializer::saveAtomic(project.string(), state)) return 5;
-    const auto restored = Hirari::Core::ProjectSerializer::load(project.string());
-    if (!restored.valid || restored.regions.size() != 1 || restored.regions[0].id != 9001) return 6;
-
-    Hirari::Core::ProjectSerializer::ProjectState duplicateIds = state;
-    Hirari::Core::ProjectSerializer::TrackState firstTrack = baseTrack;
-    Hirari::Core::ProjectSerializer::TrackState duplicateTrack = firstTrack;
-    duplicateIds.tracks = {firstTrack, duplicateTrack};
-    const auto duplicateTrackProject = std::filesystem::temp_directory_path() /
-                                       "hirari-duplicate-track-id-contract.bin";
-    if (!Hirari::Core::ProjectSerializer::saveAtomic(duplicateTrackProject.string(), duplicateIds)) return 61;
-    const auto rejectedDuplicateTrack = Hirari::Core::ProjectSerializer::load(duplicateTrackProject.string());
-    std::filesystem::remove(duplicateTrackProject, cleanup);
-    if (rejectedDuplicateTrack.valid) return 62;
-
-    Hirari::Core::ProjectSerializer::ProjectState orphanRegion = state;
-    orphanRegion.regions[0].trackId = 999;
-    const auto orphanRegionProject = std::filesystem::temp_directory_path() /
-                                     "hirari-orphan-region-contract.bin";
-    if (!Hirari::Core::ProjectSerializer::saveAtomic(orphanRegionProject.string(), orphanRegion)) return 63;
-    const auto rejectedOrphanRegion = Hirari::Core::ProjectSerializer::load(orphanRegionProject.string());
-    std::filesystem::remove(orphanRegionProject, cleanup);
-    if (rejectedOrphanRegion.valid) return 64;
-
+    // The ARUA container now lives in the Rust bridge, so the contract drives
+    // the same entrypoints the engine calls to keep the cxx marshalling and
+    // link surface covered. The full rejection matrix (duplicate track ids,
+    // orphan regions, corruption and oversized sparse input) lives beside the
+    // codec in
+    // `native_project::tests::rejects_duplicate_tracks_orphan_regions_corruption_and_oversize`.
     {
-        std::fstream corrupt(project, std::ios::in | std::ios::out | std::ios::binary);
-        corrupt.seekg(12, std::ios::beg);
-        char byte = 0;
-        corrupt.read(&byte, 1);
-        corrupt.seekp(12, std::ios::beg);
-        byte ^= static_cast<char>(0x5a);
-        corrupt.write(&byte, 1);
+        const auto project =
+            std::filesystem::temp_directory_path() / "hirari-region-id-contract.bin";
+        Hirari::Core::Bridge::NativeProjectState state;
+        state.version = 28;
+        state.sampleRate = 48'000;
+        state.bpm = 120.0;
+        Hirari::Core::Bridge::NativeTrackState track;
+        track.id = 7;
+        track.volume = 1.0f;
+        track.pan = 0.0f;
+        Hirari::Core::Bridge::NativeRegionState region;
+        region.id = 9001;
+        region.trackId = 7;
+        region.samplePosition = 0;
+        region.sampleLength = 128;
+        region.filePath = "contract.wav";
+        // The version-28 decoder requires a usable warp ratio and a positive
+        // loop count; the C++ `RegionState` defaults supplied both.
+        region.warpRatio = 1.0;
+        region.loopCount = 1;
+        state.tracks.push_back(std::move(track));
+        state.regions.push_back(std::move(region));
+        if (!Hirari::Core::Bridge::native_project_save(project.string(), state)) return 5;
+        const auto restored = Hirari::Core::Bridge::native_project_load(project.string());
+        if (!restored.valid || restored.regions.size() != 1 || restored.regions[0].id != 9001) {
+            return 6;
+        }
+        std::filesystem::remove(project, cleanup);
     }
-    const auto rejectedCorruption = Hirari::Core::ProjectSerializer::load(project.string());
-    std::filesystem::remove(project, cleanup);
-    if (rejectedCorruption.valid) return 34;
-
-    // The loader must reject an oversized project before allocating the file
-    // buffer.  This is intentionally sparse so the contract stays cheap.
-    const auto oversizedProject = std::filesystem::temp_directory_path() /
-                                  "hirari-oversized-project-contract.bin";
-    {
-        std::ofstream oversized(oversizedProject, std::ios::binary | std::ios::trunc);
-        if (!oversized) return 59;
-        oversized.seekp(static_cast<std::streamoff>(Hirari::Core::ProjectSerializer::kMaxProjectBytes));
-        oversized.put('\0');
-    }
-    const auto rejectedOversized = Hirari::Core::ProjectSerializer::load(oversizedProject.string());
-    std::filesystem::remove(oversizedProject, cleanup);
-    if (rejectedOversized.valid) return 60;
-
-
 
     // Exercise the production scheduler rather than only compiling its
     // headers. In particular, stolen tasks must execute exactly once and the

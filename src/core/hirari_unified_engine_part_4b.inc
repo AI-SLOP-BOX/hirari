@@ -2,11 +2,11 @@
                 // Missing sandbox binaries intentionally leave a hole in the
                 // live chain; their state is retained in the serialized
                 // document but cannot be applied until the plugin is relinked.
-                (void)t->setPluginState(stateIndex, ts.pluginStates[stateIndex]);
+                (void)t->setPluginState(stateIndex, toBlob(ts.pluginStates[stateIndex].bytes));
             }
             for (size_t guiIndex = 0; guiIndex < ts.pluginGuiStates.size(); ++guiIndex) {
                 if (guiIndex >= t->getPluginTypes().size()) break;
-                (void)t->setPluginGuiState(guiIndex, ts.pluginGuiStates[guiIndex]);
+                (void)t->setPluginGuiState(guiIndex, toBlob(ts.pluginGuiStates[guiIndex].bytes));
             }
             for (size_t bypassIndex = 0; bypassIndex < ts.pluginBypass.size(); ++bypassIndex) {
                 if (bypassIndex >= t->getPluginTypes().size()) break;
@@ -20,7 +20,7 @@
         for (const auto& rs : state.regions) {
             for (auto& t : loadedTracks) {
                 if (t->getId() == rs.trackId) {
-                    const std::filesystem::path storedPath(rs.filePath);
+                    const std::filesystem::path storedPath(std::string(rs.filePath));
                     const std::filesystem::path resolvedPath = storedPath.is_absolute()
                         ? storedPath
                         : projectDir / storedPath;
@@ -45,7 +45,8 @@
                     r.baseSourceOffset = rs.baseSourceOffset;
                     r.baseLength = rs.baseLength == 0 ? r.len : rs.baseLength;
                     r.muted = rs.isMuted;
-                    r.name = rs.name.empty() ? resolvedFilePath : rs.name;
+                    const std::string regionName(rs.name);
+                    r.name = regionName.empty() ? resolvedFilePath : regionName;
                     r.clipGain = std::clamp(rs.clipGain, 0.0f, 2.0f);
                     r.fadeInSamples = std::min(rs.fadeInSamples, r.len);
                     r.fadeOutSamples = std::min(rs.fadeOutSamples, r.len);
@@ -63,9 +64,31 @@
                                                  marker.transient});
                     }
                     for (const auto& step : rs.processingHistory) {
-                        if (!r.processingHistory.append(step)) break;
+                        ::hirari::editing::EventProcessingStep converted;
+                        converted.id = step.id;
+                        converted.operation = std::string(step.operation);
+                        converted.parameter = step.parameter;
+                        converted.enabled = step.enabled;
+                        if (!r.processingHistory.append(converted)) break;
                     }
-                    if (!r.noteEdits.assignRepaired(rs.audioNoteSegments)) return false;
+                    std::vector<::hirari::editing::AudioNoteSegment> noteSegments;
+                    noteSegments.reserve(rs.audioNoteSegments.size());
+                    for (const auto& segment : rs.audioNoteSegments) {
+                        ::hirari::editing::AudioNoteSegment converted;
+                        converted.startSeconds = segment.startSeconds;
+                        converted.endSeconds = segment.endSeconds;
+                        converted.detectedPitchCents = segment.detectedPitchCents;
+                        converted.pitchOffsetCents = segment.pitchOffsetCents;
+                        converted.formantOffsetCents = segment.formantOffsetCents;
+                        converted.anchors.reserve(segment.anchors.size());
+                        for (const auto& anchor : segment.anchors) {
+                            converted.anchors.push_back({anchor.positionSeconds,
+                                                         anchor.pitchCents,
+                                                         anchor.formantCents});
+                        }
+                        noteSegments.push_back(std::move(converted));
+                    }
+                    if (!r.noteEdits.assignRepaired(noteSegments)) return false;
                     r.rangeEdits.clear();
                     r.rangeEdits.reserve(std::min<size_t>(rs.rangeEdits.size(), 4096));
                     for (const auto& edit : rs.rangeEdits) {
@@ -249,12 +272,12 @@
         // Restore timeline markers as part of the document, not as transient UI state.
         m_arrangement.clearMarkers();
         for (const auto& marker : state.markers) {
-            m_arrangement.upsertMarker({marker.sample, marker.name, marker.color});
+            m_arrangement.upsertMarker({marker.sample, std::string(marker.name), marker.color});
         }
         std::vector<Composition::ArrangerPart> arrangerParts;
         arrangerParts.reserve(state.arrangerParts.size());
         for (const auto& part : state.arrangerParts)
-            arrangerParts.push_back({part.start, part.length, part.name, part.repeats});
+            arrangerParts.push_back({part.start, part.length, std::string(part.name), part.repeats});
         m_arrangement.setArrangerParts(std::move(arrangerParts));
         hirari_tempo_map_clear(m_tempoState, projectSampleRate, state.bpm);
         for (const auto& event : state.tempoEvents)
@@ -278,18 +301,48 @@
 }
 
 bool HirariUnifiedEngine::saveProject(std::string_view path) {
-    ProjectSerializer::ProjectState state;
+    namespace Bridge = ::Hirari::Core::Bridge;
+    Bridge::NativeProjectState state;
+    state.version = 42;
     state.bpm = hirari_tempo_map_get_current_bpm(m_tempoState);
     state.rootNote = m_rootNote.load(std::memory_order_relaxed);
     state.scaleType = m_scaleType.load(std::memory_order_relaxed);
     state.sampleRate = static_cast<uint32_t>(m_sampleRate.load());
-    
+
+    const auto appendBlob = [](rust::Vec<uint8_t>& destination,
+                               const std::vector<uint8_t>& source) {
+        destination.reserve(source.size());
+        for (uint8_t byte : source) destination.push_back(byte);
+    };
+    const auto convertAutomation = [](const std::vector<ProjectAutomationPoint>& points) {
+        rust::Vec<Bridge::NativeAutomationPoint> converted;
+        converted.reserve(points.size());
+        for (const auto& point : points) {
+            Bridge::NativeAutomationPoint value;
+            value.time = point.time;
+            value.value = point.value;
+            value.curve = point.curve;
+            converted.push_back(value);
+        }
+        return converted;
+    };
+    const auto convertBlobs = [&appendBlob](const std::vector<std::vector<uint8_t>>& blobs) {
+        rust::Vec<Bridge::NativeBlob> converted;
+        converted.reserve(blobs.size());
+        for (const auto& blob : blobs) {
+            Bridge::NativeBlob convertedBlob;
+            appendBlob(convertedBlob.bytes, blob);
+            converted.push_back(std::move(convertedBlob));
+        }
+        return converted;
+    };
+
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for(auto& t : m_tracks) {
-        ProjectSerializer::TrackState ts;
-        ts.id = t->getId(); 
-        ts.type = static_cast<uint32_t>(t->getType());
-        ts.volume = t->getVolume(); 
+        Bridge::NativeTrackState ts;
+        ts.id = t->getId();
+        ts.trackType = static_cast<uint32_t>(t->getType());
+        ts.volume = t->getVolume();
         ts.pan = t->getPan();
         ts.muted = t->isMuted();
         ts.solo = t->isSolo();
@@ -302,25 +355,37 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         // Drain callback-side write automation before serializing so a save
         // cannot silently omit the last recorded control-surface blocks.
         t->flushRecordedAutomation();
-        ts.volumeAutomation = t->getVolumeAutomationPoints();
-        ts.panAutomation = t->getPanAutomationPoints();
-        ts.trackDelayAutomation = t->getTrackDelayAutomationPoints();
-        ts.pluginAutomation = t->getPluginAutomation();
-        ts.pluginName = t->getName();
-        for (uint32_t pluginType : t->getPluginTypes()) {
-            append_le_u32(ts.pluginData, pluginType);
+        ts.volumeAutomation = convertAutomation(t->getVolumeAutomationPoints());
+        ts.panAutomation = convertAutomation(t->getPanAutomationPoints());
+        ts.trackDelayAutomation = convertAutomation(t->getTrackDelayAutomationPoints());
+        for (const auto& lane : t->getPluginAutomation()) {
+            Bridge::NativePluginAutomationLane converted;
+            converted.pluginIndex = lane.pluginIndex;
+            converted.parameterId = lane.parameterId;
+            converted.points = convertAutomation(lane.points);
+            ts.pluginAutomation.push_back(std::move(converted));
         }
-        ts.pluginStates = t->getPluginStates();
-        ts.pluginGuiStates = t->getPluginGuiStates();
+        ts.pluginName = rust::String(t->getName());
+        // Plugin type IDs are positionally meaningful inside a track; store
+        // them little-endian so a project file is portable across hosts.
+        for (uint32_t pluginType : t->getPluginTypes()) {
+            for (uint32_t shift = 0; shift < 32; shift += 8) {
+                ts.pluginData.push_back(static_cast<uint8_t>((pluginType >> shift) & 0xffu));
+            }
+        }
+        ts.pluginStates = convertBlobs(t->getPluginStates());
+        ts.pluginGuiStates = convertBlobs(t->getPluginGuiStates());
         ts.pluginBypass.reserve(t->getPluginTypes().size());
         for (uint32_t pluginIndex = 0; pluginIndex < t->getPluginTypes().size(); ++pluginIndex) {
             ts.pluginBypass.push_back(t->getPluginBypass(pluginIndex) ? 1 : 0);
         }
-        ts.sandboxedPluginPaths = t->getSandboxedPluginPaths();
-        ts.sandboxedPluginStates = t->getSandboxedPluginStates();
-        state.tracks.push_back(ts);
+        for (const auto& sandboxPath : t->getSandboxedPluginPaths()) {
+            ts.sandboxedPluginPaths.push_back(rust::String(sandboxPath));
+        }
+        ts.sandboxedPluginStates = convertBlobs(t->getSandboxedPluginStates());
+        state.tracks.push_back(std::move(ts));
         for (const auto& region : t->getRegions()) {
-            ProjectSerializer::RegionState rs;
+            Bridge::NativeRegionState rs;
             rs.id = region.id;
             rs.trackId = t->getId();
             rs.samplePosition = region.start;
@@ -334,8 +399,8 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
             rs.baseSourceOffset = region.baseSourceOffset;
             rs.baseLength = region.baseLength;
             rs.isMuted = region.muted;
-            rs.filePath = region.path;
-            rs.name = region.name;
+            rs.filePath = rust::String(region.path);
+            rs.name = rust::String(region.name);
             rs.clipGain = region.clipGain;
             rs.fadeInSamples = region.fadeInSamples;
             rs.fadeOutSamples = region.fadeOutSamples;
@@ -346,23 +411,57 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
             rs.loopCount = region.loopCount;
             rs.locked = region.locked;
             rs.syncGroup = region.syncGroup;
-            rs.warpMarkers.clear();
             rs.warpMarkers.reserve(region.warpMarkers.size());
             for (const auto& marker : region.warpMarkers) {
-                rs.warpMarkers.push_back({marker.sourceSample, marker.timelineSample,
-                                          marker.transient});
+                Bridge::NativeWarpMarker converted;
+                converted.sourceSample = marker.sourceSample;
+                converted.timelineSample = marker.timelineSample;
+                converted.transient = marker.transient;
+                rs.warpMarkers.push_back(converted);
             }
-            if (!region.processingHistory.copy(rs.processingHistory)) return {};
-            if (!region.noteEdits.copy(rs.audioNoteSegments)) return {};
-            rs.rangeEdits.clear();
+            std::vector<::hirari::editing::EventProcessingStep> history;
+            if (!region.processingHistory.copy(history)) return {};
+            for (const auto& step : history) {
+                Bridge::NativeProcessingStep converted;
+                converted.id = step.id;
+                converted.operation = rust::String(step.operation);
+                converted.parameter = step.parameter;
+                converted.enabled = step.enabled;
+                rs.processingHistory.push_back(std::move(converted));
+            }
+            std::vector<::hirari::editing::AudioNoteSegment> noteSegments;
+            if (!region.noteEdits.copy(noteSegments)) return {};
+            for (const auto& segment : noteSegments) {
+                Bridge::NativeNoteSegment converted;
+                converted.startSeconds = segment.startSeconds;
+                converted.endSeconds = segment.endSeconds;
+                converted.detectedPitchCents = segment.detectedPitchCents;
+                converted.pitchOffsetCents = segment.pitchOffsetCents;
+                converted.formantOffsetCents = segment.formantOffsetCents;
+                converted.anchors.reserve(segment.anchors.size());
+                for (const auto& anchor : segment.anchors) {
+                    Bridge::NativeNoteAnchor value;
+                    value.positionSeconds = anchor.positionSeconds;
+                    value.pitchCents = anchor.pitchCents;
+                    value.formantCents = anchor.formantCents;
+                    converted.anchors.push_back(value);
+                }
+                rs.audioNoteSegments.push_back(std::move(converted));
+            }
             for (const auto& edit : region.rangeEdits) {
-                rs.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
+                Bridge::NativeRangeEdit converted;
+                converted.start = edit.start;
+                converted.end = edit.end;
+                converted.gain = edit.gain;
+                converted.fadeIn = edit.fadeIn;
+                converted.fadeOut = edit.fadeOut;
+                rs.rangeEdits.push_back(converted);
             }
-            state.regions.push_back(rs);
+            state.regions.push_back(std::move(rs));
         }
     }
     for (const auto& sidechain : m_sidechainRoutes) {
-        ProjectSerializer::SidechainState serialized;
+        Bridge::NativeSidechainState serialized;
         serialized.sourceId = sidechain.sourceId;
         serialized.destinationId = sidechain.destinationId;
         serialized.pluginIndex = sidechain.pluginIndex;
@@ -372,20 +471,20 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         state.sidechains.push_back(serialized);
     }
     for (const auto& marker : m_arrangement.markers()) {
-        ProjectSerializer::MarkerState serialized;
+        Bridge::NativeMarkerState serialized;
         serialized.sample = marker.sample;
-        serialized.name = marker.name;
+        serialized.name = rust::String(marker.name);
         serialized.color = marker.color;
         state.markers.push_back(std::move(serialized));
     }
     for (const auto& part : m_arrangement.arrangerParts()) {
-        ProjectSerializer::ArrangerPartState serialized;
+        Bridge::NativeArrangerPartState serialized;
         serialized.start = part.start; serialized.length = part.length;
-        serialized.name = part.name; serialized.repeats = part.repeats;
+        serialized.name = rust::String(part.name); serialized.repeats = part.repeats;
         state.arrangerParts.push_back(std::move(serialized));
     }
     for (const auto& event : readTempoEvents(m_tempoState)) {
-        ProjectSerializer::TempoEventState serialized;
+        Bridge::NativeTempoEventState serialized;
         serialized.sample = event.samplePos; serialized.bpm = event.bpm; serialized.ramp = event.ramp ? 1 : 0;
         state.tempoEvents.push_back(serialized);
     }
@@ -393,7 +492,7 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
     m_routingEngine.copyConnections(routeConnections);
     state.routes.reserve(routeConnections.size());
     for (const auto& connection : routeConnections) {
-        ProjectSerializer::RouteState serialized;
+        Bridge::NativeRouteState serialized;
         serialized.sourceId = connection.sourceId;
         serialized.destinationId = connection.destId;
         serialized.gain = connection.gain;
@@ -401,11 +500,9 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         serialized.preFader = connection.preFader;
         state.routes.push_back(serialized);
     }
-    
-    // Note: SBF-v6 enables CRC32 and Endian-Safety automatically in saveAtomic
-    return ProjectSerializer::saveAtomic(std::string(path), state);
-}
 
+    return Bridge::native_project_save(rust::Str(path.data(), path.size()), state);
+}
 
 rust::Vec<uint8_t> HirariUnifiedEngine::get_video_frame() {
     rust::Vec<uint8_t> frame;

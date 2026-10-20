@@ -88,6 +88,42 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    // The legacy native writer is the reference the Rust port must reproduce.
+    // Before comparing bytes across implementations, pin the stronger property
+    // that matters for a golden file: two saves of the same state are equal.
+    #[test]
+    fn legacy_native_save_is_byte_stable_for_identical_state() {
+        let core = crate::HirariCore::new_offline().expect("offline core initializes");
+        let track = core.add_midi_track();
+        assert!(core.set_track_name(track, "Golden"));
+
+        let path = temp_path("golden-native");
+        let path_text = path.to_string_lossy().into_owned();
+        assert!(core.save_project(&path_text));
+        let first = std::fs::read(&path).expect("first save is readable");
+        assert!(!first.is_empty());
+
+        assert!(core.save_project(&path_text));
+        let second = std::fs::read(&path).expect("second save is readable");
+        assert_eq!(
+            first, second,
+            "saving unchanged state twice must produce identical bytes; a              timestamp, path or per-save identifier in the container would              make a byte-level golden impossible"
+        );
+
+        let checksum = first.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        // Pinned against the C++ writer. The Rust port must produce exactly
+        // these bytes for the same state before it replaces the writer.
+        assert_eq!(first.len(), 146, "golden container length changed");
+        assert_eq!(
+            checksum, 0x455b_f7ab_65ff_a420,
+            "golden container checksum changed; the save format moved"
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn saving_v2_over_a_legacy_native_project_migrates_and_keeps_midi_notes() {
         let core = crate::HirariCore::new_offline().expect("offline core initializes");

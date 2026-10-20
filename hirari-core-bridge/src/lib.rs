@@ -780,7 +780,212 @@ pub mod ffi {
         fn initialize_gpu_with_status() -> bool;
     }
 
+    // ---------------------------------------------------------------------
+    // Native project container (`ARUA`) codec.
+    //
+    // Rust owns the binary layout, version compatibility branches, checksum
+    // policy and file I/O. The C++ engine only extracts its live state into
+    // these structs on save, and hydrates its graph from them on load.
+    // Field names intentionally mirror the former C++ `ProjectState` so the
+    // engine adapter stays a direct field-by-field copy.
+    // ---------------------------------------------------------------------
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeAutomationPoint {
+        pub time: f64,
+        pub value: f32,
+        pub curve: f32,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativePluginAutomationLane {
+        pub pluginIndex: u32,
+        pub parameterId: u32,
+        pub points: Vec<NativeAutomationPoint>,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeBlob {
+        pub bytes: Vec<u8>,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeTrackState {
+        pub id: u32,
+        pub trackType: u32,
+        pub volume: f32,
+        pub pan: f32,
+        pub pan3d_x: f32,
+        pub pan3d_y: f32,
+        pub pan3d_z: f32,
+        pub muted: bool,
+        pub solo: bool,
+        pub phaseInvert: bool,
+        pub recordArmed: bool,
+        pub trackDelaySamples: u32,
+        pub pluginName: String,
+        pub pluginData: Vec<u8>,
+        pub pluginStates: Vec<NativeBlob>,
+        pub pluginGuiStates: Vec<NativeBlob>,
+        pub pluginBypass: Vec<u8>,
+        pub sandboxedPluginPaths: Vec<String>,
+        pub sandboxedPluginStates: Vec<NativeBlob>,
+        pub volumeAutomation: Vec<NativeAutomationPoint>,
+        pub panAutomation: Vec<NativeAutomationPoint>,
+        pub trackDelayAutomation: Vec<NativeAutomationPoint>,
+        pub pluginAutomation: Vec<NativePluginAutomationLane>,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeRangeEdit {
+        pub start: u64,
+        pub end: u64,
+        pub gain: f32,
+        pub fadeIn: u64,
+        pub fadeOut: u64,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeWarpMarker {
+        pub sourceSample: u64,
+        pub timelineSample: u64,
+        pub transient: bool,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeProcessingStep {
+        pub id: u32,
+        pub operation: String,
+        pub parameter: f32,
+        pub enabled: bool,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeNoteAnchor {
+        pub positionSeconds: f64,
+        pub pitchCents: f64,
+        pub formantCents: f64,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeNoteSegment {
+        pub startSeconds: f64,
+        pub endSeconds: f64,
+        pub detectedPitchCents: f64,
+        pub pitchOffsetCents: f64,
+        pub formantOffsetCents: f64,
+        pub anchors: Vec<NativeNoteAnchor>,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeRegionState {
+        pub id: u32,
+        pub trackId: u32,
+        pub samplePosition: u64,
+        pub sampleLength: u64,
+        pub sourceLength: u64,
+        pub sourceSampleRate: u32,
+        pub sourceOffset: u64,
+        pub baseStart: u64,
+        pub baseSourceOffset: u64,
+        pub baseLength: u64,
+        pub isMuted: bool,
+        pub filePath: String,
+        pub name: String,
+        pub clipGain: f32,
+        pub fadeInSamples: u64,
+        pub fadeOutSamples: u64,
+        pub reverse: bool,
+        pub warpRatio: f64,
+        pub pitchPreserveWarp: bool,
+        pub pitchSemitones: f32,
+        pub loopCount: u32,
+        pub locked: bool,
+        pub syncGroup: u32,
+        pub rangeEdits: Vec<NativeRangeEdit>,
+        pub processingHistory: Vec<NativeProcessingStep>,
+        pub audioNoteSegments: Vec<NativeNoteSegment>,
+        pub warpMarkers: Vec<NativeWarpMarker>,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeSidechainState {
+        pub sourceId: u32,
+        pub destinationId: u32,
+        pub pluginIndex: u32,
+        pub tapPoint: u32,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeRouteState {
+        pub sourceId: u32,
+        pub destinationId: u32,
+        pub gain: f32,
+        pub send: bool,
+        pub preFader: bool,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeMarkerState {
+        pub sample: u64,
+        pub name: String,
+        pub color: u32,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeArrangerPartState {
+        pub start: u64,
+        pub length: u64,
+        pub name: String,
+        pub repeats: u32,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeTempoEventState {
+        pub sample: u64,
+        pub bpm: f64,
+        pub ramp: u8,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Clone, Default)]
+    pub struct NativeProjectState {
+        pub bpm: f64,
+        pub rootNote: i32,
+        pub scaleType: i32,
+        pub tracks: Vec<NativeTrackState>,
+        pub regions: Vec<NativeRegionState>,
+        pub sampleRate: u32,
+        pub routes: Vec<NativeRouteState>,
+        pub sidechains: Vec<NativeSidechainState>,
+        pub markers: Vec<NativeMarkerState>,
+        pub arrangerParts: Vec<NativeArrangerPartState>,
+        pub tempoEvents: Vec<NativeTempoEventState>,
+        pub version: u32,
+        pub valid: bool,
+    }
+
     extern "Rust" {
+        /// Decodes an `ARUA` container. An unreadable or malformed file yields
+        /// a default state with `valid == false`.
+        fn native_project_load(path: &str) -> NativeProjectState;
+        /// Encodes and atomically stores an `ARUA` container.
+        fn native_project_save(path: &str, state: &NativeProjectState) -> bool;
+
         fn report_hirari_log(level: u32, msg: &str);
 
         fn interleave_planar_audio_input(
@@ -878,4 +1083,6 @@ pub fn analysis_structure_sections(
     })
     .collect()
 }
+pub use native_project::{native_project_load, native_project_save};
+
 include!("lib_runtime.rs");

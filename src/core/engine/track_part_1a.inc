@@ -1,8 +1,8 @@
 public:
     enum Type { Audio=0, Midi=1, Instrument=2, Bus=3, Vocal=4 };
-    using AutomationList = std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>;
+    using AutomationList = std::vector<Hirari::Core::ProjectAutomationPoint>;
     using PluginAutomationList =
-        std::vector<Hirari::Core::ProjectSerializer::PluginAutomationLane>;
+        std::vector<Hirari::Core::ProjectPluginAutomationLane>;
 
     Track(uint32_t id, const std::string& n, Type t,
           SidechainManager* sidechainManager = nullptr,
@@ -454,7 +454,7 @@ private:
             Hirari::Core::Plugins::SandboxProtocol::kMaxParameterChanges;
         static_assert(sizeof(DSP::TimedParameterEvent) == 16);
         static_assert(offsetof(DSP::TimedParameterEvent, sampleOffset) == 8);
-        static_assert(sizeof(Hirari::Core::ProjectSerializer::AutomationPoint) == 16);
+        static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) == 16);
         std::array<DSP::TimedParameterEvent, kMaxPluginAutomationEventsPerBlock>
             pluginAutomationEvents{};
         size_t pluginAutomationEventCount = 0;

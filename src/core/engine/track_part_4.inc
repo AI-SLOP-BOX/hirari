@@ -131,9 +131,9 @@
     }
 
     static float evaluateAutomation(const AutomationList& points, double time, size_t& lastIndexHint) {
-        static_assert(sizeof(ProjectSerializer::AutomationPoint) == 16);
-        static_assert(offsetof(ProjectSerializer::AutomationPoint, value) == 8);
-        static_assert(offsetof(ProjectSerializer::AutomationPoint, curve) == 12);
+        static_assert(sizeof(ProjectAutomationPoint) == 16);
+        static_assert(offsetof(ProjectAutomationPoint, value) == 8);
+        static_assert(offsetof(ProjectAutomationPoint, curve) == 12);
         return hirari_realtime_automation_evaluate(
             points.data(), points.size(), time, &lastIndexHint);
     }

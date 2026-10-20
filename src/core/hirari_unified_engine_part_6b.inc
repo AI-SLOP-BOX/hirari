@@ -46,10 +46,10 @@ bool HirariUnifiedEngine::set_automation_data(uint32_t tid, uint32_t param_id, c
         }
         previousTime = point.time;
     }
-    std::vector<Hirari::Core::ProjectSerializer::AutomationPoint> serializedPoints;
+    std::vector<Hirari::Core::ProjectAutomationPoint> serializedPoints;
     serializedPoints.reserve(points.size());
     for (const auto& p : points) {
-        Hirari::Core::ProjectSerializer::AutomationPoint sp;
+        Hirari::Core::ProjectAutomationPoint sp;
         sp.time = p.time;
         sp.value = p.value;
         sp.curve = p.curve;
@@ -59,7 +59,7 @@ bool HirariUnifiedEngine::set_automation_data(uint32_t tid, uint32_t param_id, c
     // Snapshot the previous curve while holding the model lock, then release
     // it before registering the undo transaction. Undo callbacks reacquire the
     // lock later, so the audio/model lock is never held across a callback.
-    std::vector<Hirari::Core::ProjectSerializer::AutomationPoint> previousPoints;
+    std::vector<Hirari::Core::ProjectAutomationPoint> previousPoints;
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         for (const auto& t : m_tracks) {
@@ -86,7 +86,7 @@ bool HirariUnifiedEngine::set_automation_data(uint32_t tid, uint32_t param_id, c
         }
     }
 
-    auto apply = [this, tid, param_id](const std::vector<Hirari::Core::ProjectSerializer::AutomationPoint>& curve) {
+    auto apply = [this, tid, param_id](const std::vector<Hirari::Core::ProjectAutomationPoint>& curve) {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         for (const auto& track : m_tracks) {
             if (track->getId() != tid) continue;
@@ -107,7 +107,7 @@ bool HirariUnifiedEngine::set_automation_data(uint32_t tid, uint32_t param_id, c
 
 bool HirariUnifiedEngine::set_plugin_automation(
     uint32_t tid, uint32_t pluginIndex, uint32_t parameterId,
-    const std::vector<ProjectSerializer::AutomationPoint>& points) {
+    const std::vector<ProjectAutomationPoint>& points) {
     if (points.size() > 100'000) return false;
     double previousTime = -1.0;
     for (const auto& point : points) {
@@ -121,8 +121,8 @@ bool HirariUnifiedEngine::set_plugin_automation(
     }
 
     std::shared_ptr<Track> target;
-    std::vector<ProjectSerializer::PluginAutomationLane> before;
-    std::vector<ProjectSerializer::PluginAutomationLane> after;
+    std::vector<ProjectPluginAutomationLane> before;
+    std::vector<ProjectPluginAutomationLane> after;
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         for (const auto& track : m_tracks) {
@@ -175,7 +175,7 @@ bool HirariUnifiedEngine::set_track_delay_automation(uint32_t tid, const std::ve
     }
     if (!target) return false;
     auto apply = [target](const std::vector<AutomationPoint>& curve) {
-        std::vector<Hirari::Core::ProjectSerializer::AutomationPoint> serialized;
+        std::vector<Hirari::Core::ProjectAutomationPoint> serialized;
         serialized.reserve(curve.size());
         for (const auto& point : curve) {
             serialized.push_back({point.time, point.value, point.curve});

@@ -21,7 +21,7 @@
 #include "composition/harmony_engine.hpp"
 #include "engine/script_manager.hpp"
 #include <thread>
-#include "project_serializer.hpp"
+#include "project_automation.hpp"
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
@@ -53,19 +53,6 @@
 
 namespace {
 
-uint32_t read_le_u32(const std::vector<uint8_t>& bytes, size_t offset) {
-    return static_cast<uint32_t>(bytes[offset]) |
-           (static_cast<uint32_t>(bytes[offset + 1]) << 8u) |
-           (static_cast<uint32_t>(bytes[offset + 2]) << 16u) |
-           (static_cast<uint32_t>(bytes[offset + 3]) << 24u);
-}
-
-void append_le_u32(std::vector<uint8_t>& bytes, uint32_t value) {
-    bytes.push_back(static_cast<uint8_t>(value & 0xffu));
-    bytes.push_back(static_cast<uint8_t>((value >> 8u) & 0xffu));
-    bytes.push_back(static_cast<uint8_t>((value >> 16u) & 0xffu));
-    bytes.push_back(static_cast<uint8_t>((value >> 24u) & 0xffu));
-}
 
 } // namespace
 

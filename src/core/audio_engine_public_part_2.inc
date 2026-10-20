@@ -165,7 +165,7 @@
     bool set_plugin_automation(uint32_t tid, uint32_t pluginIndex,
                                uint32_t parameterId, rust::Vec<double> packedPoints) const {
         if (!m_engine || packedPoints.size() % 3 != 0 || packedPoints.size() > 300'000) return false;
-        std::vector<::Hirari::Core::ProjectSerializer::AutomationPoint> points;
+        std::vector<::Hirari::Core::ProjectAutomationPoint> points;
         points.reserve(packedPoints.size() / 3);
         double previousTime = -1.0;
         for (size_t i = 0; i < packedPoints.size(); i += 3) {
