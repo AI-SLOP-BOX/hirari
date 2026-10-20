@@ -187,15 +187,6 @@ bool HirariUnifiedEngine::set_track_delay_automation(uint32_t tid, const std::ve
         [apply, before] { apply(before); }, [apply, points] { apply(points); });
     return true;
 }
-void HirariUnifiedEngine::set_spatial_mode(uint32_t tid, uint32_t mode) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() == tid) {
-            track->setSpatialMode(mode);
-            return;
-        }
-    }
-}
 bool HirariUnifiedEngine::set_spatial_position(uint32_t tid, float x, float y, float z) {
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
     // C-4 fix: use m_tracks under mutex instead of raw audioState pointers

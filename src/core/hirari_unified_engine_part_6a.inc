@@ -703,9 +703,6 @@ HirariUnifiedEngine::MeterData HirariUnifiedEngine::getMasterMeterData() const {
     return {};
 }
 
-double HirariUnifiedEngine::get_playhead_beats() const {
-    return samples_to_beats(m_playhead.load(std::memory_order_relaxed));
-}
 
 double HirariUnifiedEngine::samples_to_beats(uint64_t samples) const {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);

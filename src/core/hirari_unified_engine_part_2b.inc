@@ -231,26 +231,8 @@ bool HirariUnifiedEngine::set_track_volume(uint32_t tid, float value) {
     return true;
 }
 
-bool HirariUnifiedEngine::save_track_preset(std::string_view name, uint32_t track_id) {
-    if (name.empty()) return false;
-    std::shared_ptr<Track> t;
-    { std::lock_guard<std::mutex> lock(m_tracksMutex); for (auto& x : m_tracks) if (x && x->getId() == track_id) { t = x; break; } }
-    if (!t) return false;
-    Hirari::Core::Mixing::ChannelConfiguration c;
-    c.faderDb = 20.0f * std::log10(std::max(1.0e-6f, t->getVolume()));
-    c.pan = t->getPan(); c.mute = t->isMuted();
-    return m_trackPresets.save(std::string(name), c);
-}
 
-bool HirariUnifiedEngine::apply_track_preset(std::string_view name, uint32_t track_id) {
-    const auto* c = m_trackPresets.find(std::string(name)); if (!c) return false;
-    std::shared_ptr<Track> t;
-    { std::lock_guard<std::mutex> lock(m_tracksMutex); for (auto& x : m_tracks) if (x && x->getId() == track_id) { t = x; break; } }
-    if (!t) return false;
-    t->setVolume(std::clamp(std::pow(10.0f, c->faderDb / 20.0f), 0.0f, 2.0f)); t->setPan(c->pan); t->setMuted(c->mute); return true;
-}
 
-bool HirariUnifiedEngine::remove_track_preset(std::string_view name) { return m_trackPresets.remove(std::string(name)); }
 
 float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);

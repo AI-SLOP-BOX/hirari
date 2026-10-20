@@ -9,7 +9,6 @@
     }
 
     // Spatial
-    void set_spatial_mode(uint32_t tid, uint32_t mode);
     bool set_spatial_position(uint32_t tid, float x, float y, float z);
     bool set_hrtf_kernel(uint32_t tid, const std::vector<float>& left,
                          const std::vector<float>& right);
@@ -64,20 +63,15 @@
     bool set_track_eq(uint32_t trackId, float lowBoostDb, float lowCutDb,
                       float highBoostDb, float highCutDb);
     bool set_project_scale(int32_t root, int32_t type);
-    std::map<std::string, float> get_vibe_scores() const;
-    void perform_autonomous_correction();
     
     // Phase 11: Neural Telemetry
-    rust::Vec<Bridge::PlainClash> run_masking_analysis(uint32_t trackA);
     
     // Phase 14: Compositional Telemetry
     std::vector<Hirari::Core::Composition::ArrangementSection> run_structural_analysis();
     
     // Phase 16: Plugin Sovereignty
-    void autonomous_plugin_audit();
     
     // Diagnostics & Health
-    bool checkSystemHealth() const;
 
     void shutdown();
 

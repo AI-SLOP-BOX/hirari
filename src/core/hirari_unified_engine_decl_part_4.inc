@@ -106,16 +106,11 @@ public:
     bool cancel_bounce() noexcept;
     bool pause_bounce() noexcept;
     bool resume_bounce() noexcept;
-    bool generate_drum_fill(uint32_t track_id, uint32_t bar, float complexity);
-    void set_show_video(bool s);
-    void set_ascended_mode(bool enabled);
     void execute_restoration(uint32_t trackId, float intensity);
     bool execute_vocal_remover(uint32_t tid);
     bool set_automation_record_mode(uint32_t mode);
     void set_automation_punch_range(uint64_t start, uint64_t end) noexcept;
     float get_track_correlation(uint32_t trackId) const;
-    void sync_sharding_node(uint32_t node_id);
-    void browser_preview(std::string_view path);
     rust::Vec<uint8_t> get_video_frame();
     uint64_t get_video_frame_revision() const noexcept;
     bool request_video_frame(double seconds);

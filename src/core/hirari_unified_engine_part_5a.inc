@@ -364,54 +364,6 @@ uint32_t HirariUnifiedEngine::get_region_channel_count(uint32_t tid, uint32_t ri
     return audio ? audio->getNumChannels() : 0;
 }
 
-void HirariUnifiedEngine::browser_preview(std::string_view path) {
-    // Browser actions run on the control/UI side, never from processBlock.
-    // Decode before publishing the immutable snapshot so the audio callback
-    // only performs bounded sample reads and interpolation.
-    if (path.empty()) {
-        clear_preview_sample();
-        return;
-    }
-
-    ::Hirari::Core::IO::WavDecoder decoder;
-    const std::string filePath(path);
-    if (!decoder.open(filePath)) {
-        clear_preview_sample();
-        return;
-    }
-
-    AudioBuffer decoded;
-    decoder.decodeFull(decoded);
-    if (decoded.getNumChannels() == 0 || decoded.getNumSamples() == 0) {
-        clear_preview_sample();
-        return;
-    }
-
-    const uint32_t channels = decoded.getNumChannels();
-    const uint32_t frames = decoded.getNumSamples();
-    std::vector<float> mono(frames, 0.0f);
-    for (uint32_t frame = 0; frame < frames; ++frame) {
-        float sum = 0.0f;
-        uint32_t validChannels = 0;
-        for (uint32_t channel = 0; channel < channels; ++channel) {
-            const float* source = decoded.getReadPointer(channel);
-            if (source && std::isfinite(source[frame])) {
-                sum += source[frame];
-                ++validChannels;
-            }
-        }
-        mono[frame] = validChannels == 0
-            ? 0.0f
-            : std::clamp(sum / static_cast<float>(validChannels), -1.0f, 1.0f);
-    }
-    const double sampleRate = decoder.getSampleRate();
-    if (!std::isfinite(sampleRate) || sampleRate <= 0.0) {
-        clear_preview_sample();
-        return;
-    }
-    set_preview_sample(mono.data(), mono.size(), sampleRate);
-    trigger_preview_sample();
-}
 
 
 bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {

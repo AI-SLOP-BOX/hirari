@@ -15,7 +15,6 @@
     void set_playing(bool playing);
     uint64_t get_playhead() const;
     void set_playhead(uint64_t pos);
-    double get_playhead_beats() const;
     double samples_to_beats(uint64_t samples) const;
     uint64_t beats_to_samples(double beats) const;
     // Tempo and time-signature editing moved to Rust; only these two reads
@@ -58,9 +57,6 @@
                    dynamic_cast<BusTrack*>(track.get()) != nullptr;
         }) != m_tracks.end();
     }
-    bool save_track_preset(std::string_view name, uint32_t track_id);
-    bool apply_track_preset(std::string_view name, uint32_t track_id);
-    bool remove_track_preset(std::string_view name);
     std::string plugin_compatibility_snapshot_json() const;
     void record_plugin_scan_failure(std::string_view id, std::string_view error);
     void record_plugin_crash(std::string_view id);
