@@ -156,18 +156,18 @@ bool HirariUnifiedEngine::set_track_input_monitor_channels(
 
 void HirariUnifiedEngine::set_macro_value(uint32_t macroIndex, float value) {
     if (!std::isfinite(value)) return;
-    m_macroControlManager.setMacroValue(macroIndex, value);
+    hirari_macro_control_set_value(m_macroControl, macroIndex, value);
 }
 bool HirariUnifiedEngine::bind_midi_cc_to_macro(uint8_t channel, uint8_t cc,
                                                uint32_t macroIndex, float minimum,
                                                float maximum, float curve,
                                                bool pickup) noexcept {
-    if (macroIndex >= MacroControlManager::kMaxMacros || channel > 16 || cc > 127 ||
+    if (macroIndex >= kMaxMacros || channel > 16 || cc > 127 ||
         !std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum ||
         !std::isfinite(curve) || curve < -1.0f || curve > 1.0f) {
         return false;
     }
-    const void* targetState = m_macroControlManager.midiLearnState();
+    const void* targetState = m_macroControl;
     if (targetState == nullptr) return false;
     m_midiLearnManager.addMappingAdvanced(
         cc, channel, targetState, macroIndex, minimum, maximum, curve, pickup);
@@ -177,12 +177,12 @@ bool HirariUnifiedEngine::bind_midi_cc14_to_macro(uint8_t channel, uint16_t cont
                                                  uint32_t macroIndex, float minimum,
                                                  float maximum, float curve,
                                                  bool pickup) noexcept {
-    if (macroIndex >= MacroControlManager::kMaxMacros || channel > 16 || controller > 16383 ||
+    if (macroIndex >= kMaxMacros || channel > 16 || controller > 16383 ||
         !std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum ||
         !std::isfinite(curve) || curve < -1.0f || curve > 1.0f) {
         return false;
     }
-    const void* targetState = m_macroControlManager.midiLearnState();
+    const void* targetState = m_macroControl;
     if (targetState == nullptr) return false;
     m_midiLearnManager.addMapping14Bit(
         controller, channel, targetState, macroIndex, minimum, maximum, curve, pickup);

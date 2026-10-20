@@ -1,7 +1,7 @@
     void recordCurrentState(uint64_t samplePosition) noexcept {
         const bool recorded = hirari_track_automation_capture_record(
             m_trackAutomationCaptureState,
-            AutomationRecorder::getInstance().stateForTrackCapture(),
+            hirari_automation_recorder_instance(),
             m_id, samplePosition,
             m_volume.load(std::memory_order_relaxed),
             m_pan.load(std::memory_order_relaxed));

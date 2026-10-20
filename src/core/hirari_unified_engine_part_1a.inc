@@ -37,6 +37,11 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_control_room_state_destroy(m_controlRoomState);
     hirari_native_pdc_destroy(m_pdcState);
     hirari_tempo_map_destroy(m_tempoState);
+    hirari_tap_tempo_destroy(m_tapTempo);
+    hirari_metronome_destroy(m_metronome);
+    hirari_mixer_telemetry_destroy(m_mixerTelemetry);
+    hirari_macro_mapping_destroy(m_macroControl);
+    hirari_mpe_state_free(m_mpeState);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -442,18 +447,19 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                 m_previousMidiSnapshotRevision = midiSnapshotRevision;
             m_hasPreviousMidiBlock = true;
         }
-        m_midiOrchestrator.processBlock(m_blockMidi);
+        hirari_midi_process_mpe(m_mpeState, m_blockMidi.getEvents(), m_blockMidi.size());
+        hirari_midi_apply_articulations_from_state(
+            m_mpeState, m_blockMidi.getMutableEvents(), m_blockMidi.size());
 
         // Deterministic built-in preview instrument. This is intentionally a
         // small built-in voice so MIDI playback can be verified without plugins.
         const double sr = std::max(1.0, m_sampleRate.load(std::memory_order_relaxed));
-        const auto& macro = m_macroControlManager;
-        const float morph = macro.getMacroValue(0);
-        const double detuneRatio = std::pow(2.0, (static_cast<double>(macro.getMacroValue(1)) - 0.5) * 40.0 / 1200.0);
-        const float drive = 0.75f + macro.getMacroValue(2) * 3.0f;
-        const float cutoff = 0.01f + macro.getMacroValue(3) * 0.35f;
-        const float resonance = macro.getMacroValue(4) * 0.25f;
-        const float synthGain = 0.25f + macro.getMacroValue(5) * 1.25f;
+        const float morph = hirari_macro_control_get_value(m_macroControl, 0);
+        const double detuneRatio = std::pow(2.0, (static_cast<double>(hirari_macro_control_get_value(m_macroControl, 1)) - 0.5) * 40.0 / 1200.0);
+        const float drive = 0.75f + hirari_macro_control_get_value(m_macroControl, 2) * 3.0f;
+        const float cutoff = 0.01f + hirari_macro_control_get_value(m_macroControl, 3) * 0.35f;
+        const float resonance = hirari_macro_control_get_value(m_macroControl, 4) * 0.25f;
+        const float synthGain = 0.25f + hirari_macro_control_get_value(m_macroControl, 5) * 1.25f;
         m_previewSynth.process(m_blockMidi.getEvents(), m_blockMidi.size(),
             output.getWritePointer(0, off), output.getWritePointer(1, off), sz,
             currentPlayhead, sr, morph, detuneRatio, drive, cutoff, resonance, synthGain);

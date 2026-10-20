@@ -115,7 +115,6 @@ int main() {
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }
-    Hirari::Core::Engine::MIDIOrchestrator midiOrchestrator;
     // The sandbox host owns bounded shared-memory staging arrays sized for
     // the maximum plugin protocol block. Allocate it on the heap to keep
     // this broad native contract below the platform thread-stack limit.
@@ -135,7 +134,6 @@ int main() {
         Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
             Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
     (void)vst3;
-    (void)midiOrchestrator;
     (void)sandbox;
     (void)chain;
     (void)recovery;

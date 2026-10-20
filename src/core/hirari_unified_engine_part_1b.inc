@@ -33,7 +33,7 @@
                 }
             }
             hirari_mixer_track_peaks(
-                m_mixerTelemetry.nativeState(), telemetryTrackIds.data(),
+                m_mixerTelemetry, telemetryTrackIds.data(),
                 trackPeaksLeft.data(), trackPeaksRight.data(), telemetry.count, sz,
                 telemetry.peaksL, telemetry.peaksR);
             telemetry.version++;
@@ -51,11 +51,11 @@
         std::fill_n(clickLeft, sz, 0.0f);
         std::fill_n(clickRight, sz, 0.0f);
         const bool renderMetronome =
-            m_isPlaying.load(std::memory_order_relaxed) && m_metronome.isEnabled();
+            m_isPlaying.load(std::memory_order_relaxed) && hirari_metronome_is_enabled(m_metronome);
         if (renderMetronome) {
             const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
             const double bpm = hirari_tempo_map_get_current_bpm(m_tempoState);
-            m_metronome.process(clickLeft, clickRight, sz, currentPlayhead, sampleRate, bpm);
+            hirari_metronome_process(m_metronome, clickLeft, clickRight, sz, currentPlayhead, sampleRate, bpm);
         }
 
         float* dest_l = output.getWritePointer(0, off);

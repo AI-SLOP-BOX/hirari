@@ -46,7 +46,7 @@ private:
     std::atomic<bool> m_loopEnabled{false};
     std::atomic<uint64_t> m_cycleStart{0};
     std::atomic<uint64_t> m_cycleEnd{0};
-    ::Hirari::Core::Engine::Metronome m_metronome;
+    void* m_metronome = hirari_metronome_create(44100.0);
     std::atomic<float> m_masterGain{1.0f};
     std::atomic<double> m_sampleRate{44100.0};
     // Generation zero is reserved for an unavailable/uninitialized engine.
@@ -97,7 +97,7 @@ private:
     // The native MIDI policy layer runs after timeline scheduling and before
     // preview/plugin dispatch, so articulation and MPE transformations affect
     // every downstream instrument consistently.
-    ::Hirari::Core::Engine::MIDIOrchestrator m_midiOrchestrator;
+    HirariMpeState* m_mpeState = hirari_mpe_state_create();
     PreviewSynth m_previewSynth;
     // Audio-thread ownership. This preserves the preview routing decision for
     // a held note even if a plug-in is inserted or removed before Note Off.

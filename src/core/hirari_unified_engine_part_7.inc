@@ -71,18 +71,18 @@ bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
     m_autoRecordMode.store(normalized, std::memory_order_release);
     // Keep the standalone recorder and the engine transport state in lockstep
     // so control-surface/API writes are captured by the same mode semantics.
-    using RecorderMode = ::Hirari::Core::Engine::AutomationRecorder::Mode;
-    auto& recorder = ::Hirari::Core::Engine::AutomationRecorder::getInstance();
-    recorder.setMode(normalized == 0u ? RecorderMode::Off
+    enum class RecorderMode : uint32_t { Off = 0, Touch = 1, Latch = 2, Write = 3, AutoPunch = 4 };
+    hirari_automation_recorder_set_mode(hirari_automation_recorder_instance(),
+        static_cast<uint32_t>(normalized == 0u ? RecorderMode::Off
         : normalized == 1u ? RecorderMode::Write
         : normalized == 2u ? RecorderMode::Touch
         : normalized == 3u ? RecorderMode::Latch
-        : RecorderMode::AutoPunch);
+        : RecorderMode::AutoPunch));
     return true;
 }
 
 void HirariUnifiedEngine::set_automation_punch_range(uint64_t start, uint64_t end) noexcept {
-    ::Hirari::Core::Engine::AutomationRecorder::getInstance().setPunchRange(start, end);
+    hirari_automation_recorder_set_punch_range(hirari_automation_recorder_instance(), start, end);
 }
 
 void HirariUnifiedEngine::record_plugin_scan_failure(std::string_view id, std::string_view error) {

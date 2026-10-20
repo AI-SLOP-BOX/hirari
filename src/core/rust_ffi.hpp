@@ -483,13 +483,6 @@ extern "C" void hirari_linear_ramp_smoother_set_target(void* state, float target
 extern "C" float hirari_linear_ramp_smoother_next(void* state);
 extern "C" void hirari_linear_ramp_smoother_skip(void* state, uint32_t samples);
 extern "C" float hirari_linear_ramp_smoother_current(const void* state);
-extern "C" void* hirari_automation_curve_create();
-extern "C" void hirari_automation_curve_destroy(void* state);
-extern "C" void hirari_automation_curve_add_point(
-    void* state, double time, float value, int32_t interpolation);
-extern "C" float hirari_automation_curve_value_at(const void* state, double time);
-extern "C" size_t hirari_automation_curve_copy_points(
-    const void* state, void* output, size_t capacity);
 extern "C" void* hirari_param_tree_create();
 extern "C" void hirari_param_tree_destroy(void* tree);
 extern "C" bool hirari_param_tree_set(const void* tree, uint32_t id, float value);
@@ -2498,6 +2491,7 @@ struct HirariTrackAutomationCapturePoint {
 };
 extern "C" void* hirari_automation_recorder_create();
 extern "C" void hirari_automation_recorder_destroy(void* state);
+extern "C" void* hirari_automation_recorder_instance();
 extern "C" void hirari_automation_recorder_set_mode(const void* state, uint32_t mode);
 extern "C" uint32_t hirari_automation_recorder_get_mode(const void* state);
 extern "C" void hirari_automation_recorder_set_punch_range(

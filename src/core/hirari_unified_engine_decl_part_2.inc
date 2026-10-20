@@ -28,12 +28,12 @@
     bool set_arranger_parts(std::vector<::Hirari::Core::Composition::ArrangerPart> parts) { return m_arrangement.setArrangerParts(std::move(parts)); }
     std::vector<::Hirari::Core::Composition::ArrangerPart> arranger_parts() const { return m_arrangement.arrangerParts(); }
     void tap_tempo(uint64_t timestamp_ms) noexcept {
-        m_tapTempo.tap(timestamp_ms);
-        const double bpm = m_tapTempo.bpm();
+        hirari_tap_tempo_tap(m_tapTempo, timestamp_ms);
+        const double bpm = hirari_tap_tempo_bpm(m_tapTempo);
         if (bpm > 0.0) hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(bpm));
     }
-    void clear_tap_tempo() noexcept { m_tapTempo.clear(); }
-    double tapped_tempo() const noexcept { return m_tapTempo.bpm(); }
+    void clear_tap_tempo() noexcept { hirari_tap_tempo_clear(m_tapTempo); }
+    double tapped_tempo() const noexcept { return hirari_tap_tempo_bpm(m_tapTempo); }
     void midi_clock_tick(uint64_t timestamp) noexcept { m_externalSync.onClockTick(timestamp); }
     uint64_t midi_clock_ticks() const noexcept { return m_externalSync.tickCount(); }
     uint64_t midi_clock_last_tick() const noexcept { return m_externalSync.lastTick(); }

@@ -16,7 +16,6 @@
 #include <filesystem>
 #include <atomic>
 #include <unordered_set>
-#include "engine/automation_curve.hpp"
 #include "editing/audio_note_segment.hpp"
 #include "editing/event_processing_history.hpp"
 #include "rust_ffi.hpp"

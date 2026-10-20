@@ -61,7 +61,8 @@
     RoutingEngine m_routingEngine;
     SidechainManager m_sidechainManager;
     BusSystem m_busSystem;
-    MacroControlManager m_macroControlManager;
+    static constexpr size_t kMaxMacros = 128;
+    void* m_macroControl = hirari_macro_mapping_create();
     ::Hirari::Core::MidiLearnManager m_midiLearnManager;
     ::Hirari::Core::Diagnostics::EngineDiagnostics m_engineDiagnostics;
     ::Hirari::Core::Diagnostics::ForensicJournaler m_forensicJournaler;
@@ -82,7 +83,7 @@
     ::Hirari::Core::Mixing::TrackPresetStore m_trackPresets;
     ::Hirari::Core::Plugins::PluginCompatibilityRegistry m_pluginCompatibility;
     ::Hirari::Core::Engine::AutomationLaneGroup m_automationLanes;
-    ::Hirari::Core::Engine::TapTempo m_tapTempo;
+    void* m_tapTempo = hirari_tap_tempo_create(8);
     ::Hirari::Core::MIDI::ExternalSync m_externalSync;
     ::Hirari::Core::Composition::ArrangementEditModel m_arrangement;
     mutable std::atomic<bool> m_ecoModeLogTriggered{false};

@@ -9,7 +9,6 @@
 #include "src/io/audio_export_engine.hpp"
 #include "src/core/io/bounce_system.hpp"
 #include "src/core/io/ffmpeg_engine.hpp"
-#include "src/core/engine/midi_orchestrator.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"
 #include "src/core/engine/undo_transaction_manager.hpp"
 #include "src/core/midi_buffer.hpp"

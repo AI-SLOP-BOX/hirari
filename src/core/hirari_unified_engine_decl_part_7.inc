@@ -12,7 +12,7 @@
     TelemetryData m_telemetryBuffers[2];
     // Per-engine Rust telemetry is allocated on the control thread and reused
     // by the audio callback; it must not lazily initialize on first process.
-    MixerTelemetryHub m_mixerTelemetry;
+    void* m_mixerTelemetry = hirari_mixer_telemetry_create();
     std::atomic<uint32_t> m_activeTelemetryIdx{0};
     // Even values are stable snapshots; audio publication brackets writes
     // with odd/even values so control-rate readers can retry instead of

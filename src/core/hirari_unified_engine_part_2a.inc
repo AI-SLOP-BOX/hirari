@@ -295,10 +295,10 @@ bool HirariUnifiedEngine::is_loop_enabled() const noexcept {
 uint64_t HirariUnifiedEngine::cycle_start() const noexcept { return m_cycleStart.load(std::memory_order_acquire); }
 uint64_t HirariUnifiedEngine::cycle_end() const noexcept { return m_cycleEnd.load(std::memory_order_acquire); }
 void HirariUnifiedEngine::set_metronome_enabled(bool enabled) noexcept {
-    m_metronome.setEnabled(enabled);
+    hirari_metronome_set_enabled(m_metronome, enabled);
 }
 bool HirariUnifiedEngine::is_metronome_enabled() const noexcept {
-    return m_metronome.isEnabled();
+    return hirari_metronome_is_enabled(m_metronome);
 }
 void HirariUnifiedEngine::set_test_tone(bool enabled) { m_testTone.store(enabled, std::memory_order_release); }
 
@@ -415,9 +415,8 @@ uint32_t HirariUnifiedEngine::add_track(uint32_t type) {
 
 bool HirariUnifiedEngine::add_vca_group(uint32_t groupId, float gain) {
     if (groupId == 0 || !std::isfinite(gain) || gain < 0.0f || gain > 8.0f) return false;
-    auto& vca = VCAManager::getInstance();
-    vca.addGroup(groupId, gain);
-    vca.resolveHierarchy();
+    hirari_vca_add_group(groupId, gain);
+    hirari_vca_resolve_hierarchy();
     return true;
 }
 
@@ -429,27 +428,30 @@ bool HirariUnifiedEngine::assign_track_to_vca(uint32_t trackId, uint32_t groupId
             [trackId](const auto& track) { return track && track->getId() == trackId; });
         if (!exists) return false;
     }
-    return VCAManager::getInstance().assignTrack(trackId, groupId);
+    return hirari_vca_assign_track(trackId, groupId);
 }
 
 bool HirariUnifiedEngine::set_vca_group_gain(uint32_t groupId, float gain) {
     if (groupId == 0 || !std::isfinite(gain) || gain < 0.0f || gain > 8.0f) return false;
-    auto& vca = VCAManager::getInstance();
-    vca.addGroup(groupId, gain);
-    vca.resolveHierarchy();
+    hirari_vca_add_group(groupId, gain);
+    hirari_vca_resolve_hierarchy();
     return true;
 }
 
 float HirariUnifiedEngine::get_vca_track_gain(uint32_t trackId) const {
-    return VCAManager::getInstance().getCumulativeGain(trackId);
+    return hirari_vca_get_cumulative_gain(trackId);
 }
 
 rust::String HirariUnifiedEngine::get_vca_snapshot_json() const {
-    return rust::String(VCAManager::getInstance().snapshotGroupsJson());
+    const size_t required = hirari_vca_snapshot_json(nullptr, 0);
+    if (required == 0) return rust::String("[]");
+    std::string json(required - 1, '\0');
+    hirari_vca_snapshot_json(reinterpret_cast<uint8_t*>(json.data()), required);
+    return rust::String(std::move(json));
 }
 
 void HirariUnifiedEngine::clear_vca_groups() {
-    VCAManager::getInstance().clear();
+    hirari_vca_clear();
 }
 
 void HirariUnifiedEngine::new_project() {
@@ -462,7 +464,7 @@ void HirariUnifiedEngine::new_project() {
     m_commandQueue.clear();
     set_test_tone(false);
     set_playhead(0);
-    m_midiOrchestrator.reset();
+    hirari_mpe_state_reset(m_mpeState);
     MPEManager::getInstance().reset();
     m_undoManager.clear();
     hirari_native_pdc_reset_for_project(m_pdcState);

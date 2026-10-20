@@ -221,6 +221,12 @@ pub unsafe extern "C" fn hirari_automation_recorder_destroy(state: *mut c_void) 
 }
 
 #[no_mangle]
+pub extern "C" fn hirari_automation_recorder_instance() -> *mut c_void {
+    static INSTANCE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *INSTANCE.get_or_init(|| hirari_automation_recorder_create() as usize) as *mut c_void
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn hirari_automation_recorder_set_mode(state: *const c_void, mode: u32) {
     if let Some(state) = unsafe { state.cast::<AutomationRecorderState>().as_ref() } {
         state.mode.store(mode.min(4), Ordering::Release);
