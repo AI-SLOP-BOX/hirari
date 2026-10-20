@@ -209,25 +209,10 @@ bool HirariUnifiedEngine::set_region_warp_ratio(uint32_t tid, uint32_t rid, doub
     return true;
 }
 
-bool HirariUnifiedEngine::set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            const auto current = track->getRegionPitchPreserveWarp(rid);
-            if (!current) return false;
-            target = track;
-            before = *current;
-            break;
-        }
-    }
-    if (!target) return false;
-    auto apply = [target, rid](bool value) { target->setRegionPitchPreserveWarp(rid, value); };
-    m_undoManager.performAction(
-        "Preserve Warp Pitch", [apply, before] { apply(before); }, [apply, enabled] { apply(enabled); });
-    return true;
+bool HirariUnifiedEngine::set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid,
+                                                        bool enabled) {
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarPitchPreserveWarp,
+                                     enabled ? 1.0f : 0.0f, 0.0f);
 }
 
 bool HirariUnifiedEngine::set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones) {
@@ -662,9 +647,8 @@ bool HirariUnifiedEngine::set_region_loop_count(uint32_t tid, uint32_t rid, uint
 }
 
 bool HirariUnifiedEngine::set_region_locked(uint32_t tid, uint32_t rid, bool locked) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) if (track->getId() == tid) return track->setRegionLocked(rid, locked);
-    return false;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarLocked,
+                                     locked ? 1.0f : 0.0f, 0.0f);
 }
 bool HirariUnifiedEngine::set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group) {
     return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarSyncGroup,

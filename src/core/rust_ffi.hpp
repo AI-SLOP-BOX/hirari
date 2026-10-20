@@ -552,6 +552,8 @@ enum HirariRegionScalarField : int32_t {
     kHirariRegionScalarLoopCount = 5,
     kHirariRegionScalarSyncGroup = 6,
     kHirariRegionScalarFades = 7,
+    kHirariRegionScalarLocked = 8,
+    kHirariRegionScalarPitchPreserveWarp = 9,
 };
 
 // Region edit host bridge.

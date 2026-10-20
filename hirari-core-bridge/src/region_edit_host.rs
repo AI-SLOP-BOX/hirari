@@ -156,13 +156,16 @@ fn scalar_field(value: i32) -> Option<HirariRegionScalarField> {
         5 => HirariRegionScalarField::LoopCount,
         6 => HirariRegionScalarField::SyncGroup,
         7 => HirariRegionScalarField::Fades,
+        8 => HirariRegionScalarField::Locked,
+        9 => HirariRegionScalarField::PitchPreserveWarp,
         _ => return None,
     })
 }
 
 /// Undo labels, kept identical to the strings the C++ layer used to record.
-fn field_name(field: HirariRegionScalarField) -> &'static [u8] {
-    match field {
+/// The undo label, or `None` for fields the engine edited without one.
+fn field_name(field: HirariRegionScalarField) -> Option<&'static [u8]> {
+    Some(match field {
         HirariRegionScalarField::ClipGain => b"Region Gain\0",
         HirariRegionScalarField::Muted => b"Mute Region\0",
         HirariRegionScalarField::Reverse => b"Reverse Region\0",
@@ -170,7 +173,9 @@ fn field_name(field: HirariRegionScalarField) -> &'static [u8] {
         HirariRegionScalarField::LoopCount => b"Region Loop\0",
         HirariRegionScalarField::SyncGroup => b"Region Sync Group\0",
         HirariRegionScalarField::Fades => b"Region Fades\0",
-    }
+        HirariRegionScalarField::Locked => return None,
+        HirariRegionScalarField::PitchPreserveWarp => b"Preserve Warp Pitch\0",
+    })
 }
 
 /// Applies the accepted decision to a copy of the current state. Only the
@@ -189,6 +194,15 @@ fn edited_state(
         HirariRegionScalarField::PitchSemitones => after.pitch_semitones = decision.value_a,
         HirariRegionScalarField::LoopCount => after.loop_count = decision.value_a.to_bits(),
         HirariRegionScalarField::SyncGroup => after.sync_group = decision.value_a.to_bits(),
+        HirariRegionScalarField::Locked => after.locked = raw_a != 0.0,
+        HirariRegionScalarField::PitchPreserveWarp => {
+            // The C++ setter backfilled the untrimmed source length before the
+            // flag could be honoured by the renderer.
+            if after.source_length == 0 {
+                after.source_length = after.len;
+            }
+            after.pitch_preserve_warp = raw_a != 0.0;
+        }
         HirariRegionScalarField::Fades => {
             after.fade_in_samples =
                 unsafe { hirari_region_fade_samples(decision.value_a, state.len) };
@@ -263,7 +277,9 @@ fn edit_scalar_with(
     if !unsafe { apply(host, &after_payload) } {
         return false;
     }
-    record(ops, host, field_name(field), &[before_payload], &[after_payload]);
+    if let Some(name) = field_name(field) {
+        record(ops, host, name, &[before_payload], &[after_payload]);
+    }
     true
 }
 
@@ -668,5 +684,47 @@ mod tests {
         assert_eq!(guard.undo_name, "Move Region Sync Group");
         drop(guard);
 
+    }
+
+    #[test]
+    fn locking_a_region_ignores_the_lock_and_records_no_undo() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            locked: true,
+            ..Default::default()
+        });
+
+        assert!(edit_scalar_with(&ops, host, 1, 2, 8, 1.0, 0.0));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert!(guard.applied[0].state.locked);
+        assert!(guard.undo.is_empty());
+        assert!(guard.redo.is_empty());
+        drop(guard);
+    }
+
+    #[test]
+    fn pitch_preserve_backfills_the_source_length_before_recording() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            source_length: 0,
+            ..Default::default()
+        });
+
+        assert!(edit_scalar_with(&ops, host, 1, 2, 9, 1.0, 0.0));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert!(guard.applied[0].state.pitch_preserve_warp);
+        assert_eq!(guard.applied[0].state.source_length, 100);
+        assert_eq!(guard.undo_name, "Preserve Warp Pitch");
+        drop(guard);
     }
 }

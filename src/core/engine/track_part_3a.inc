@@ -538,6 +538,13 @@
             region.syncGroup = state.syncGroup;
             region.fadeInSamples = state.fadeInSamples;
             region.fadeOutSamples = state.fadeOutSamples;
+            region.locked = state.locked;
+            if (state.pitchPreserveWarp != region.pitchPreserveWarp) {
+                // The renderer needs the untrimmed length to build the warp
+                // map, so backfill it the way the old setter did.
+                if (region.sourceLength == 0) region.sourceLength = region.len;
+                region.pitchPreserveWarp = state.pitchPreserveWarp;
+            }
             publishRegionSnapshot();
             return true;
         }

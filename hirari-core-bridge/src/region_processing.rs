@@ -433,6 +433,8 @@ pub enum HirariRegionScalarField {
     LoopCount = 5,
     SyncGroup = 6,
     Fades = 7,
+    Locked = 8,
+    PitchPreserveWarp = 9,
 }
 
 #[repr(C)]
@@ -531,6 +533,15 @@ impl HirariRegionScalarDecision {
                 }
                 // An unrestricted u32 tag carried verbatim in `value_a`.
                 Self::accept(edit.value_a, 0.0)
+            }
+            // The lock is the one field a locked region may still change, so
+            // it deliberately ignores `edit.locked`.
+            HirariRegionScalarField::Locked => Self::accept(0.0, 0.0),
+            HirariRegionScalarField::PitchPreserveWarp => {
+                if edit.locked {
+                    return Self::reject();
+                }
+                Self::accept(0.0, 0.0)
             }
             HirariRegionScalarField::Fades => {
                 if !edit.value_a.is_finite() || !edit.value_b.is_finite() || edit.locked {
