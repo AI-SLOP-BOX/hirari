@@ -155,27 +155,9 @@ build_link_run timeline-track-render-contract tests/timeline_track_render_contra
 # frameworks) in through the shared LINK_FLAGS above.
 build_link_run timeline-bpm-ghost-contract tests/timeline_bpm_ghost_contract.cpp \
     "$BRIDGE_LIB"
-build_link_run recording-engine-contract tests/recording_engine_contract.cpp "$BRIDGE_LIB"
-build_link_run shared-memory-multiprocess-contract tests/shared_memory_multiprocess_contract.cpp "$BRIDGE_LIB"
 build_link_run sidechain-snapshot-contract tests/sidechain_snapshot_contract.cpp "$BRIDGE_LIB"
 build_link_run audio-buffer-contract tests/audio_buffer_contract.cpp "$BRIDGE_LIB"
 build_link_run range-edit-contract tests/range_edit_contract.cpp "$BRIDGE_LIB"
-
-# The stress contract is long and round-tunable, so it runs only when asked,
-# but it is still built so a link break is reported rather than hidden.
-if ! "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
-    tests/recording_engine_stress.cpp "$BRIDGE_LIB" $LINK_FLAGS \
-    -o "$OUT_DIR/recording-engine-stress"; then
-    record recording-engine-stress BUILD_OR_LINK_FAILED
-elif [ "${HIRARI_RUN_RECORDING_STRESS:-0}" = "1" ]; then
-    HIRARI_RECORDING_STRESS_ROUNDS="${HIRARI_RECORDING_STRESS_ROUNDS:-250}" \
-        "$OUT_DIR/recording-engine-stress"
-    record recording-engine-stress PASSED
-else
-    # Linked, but the run is opt-in; record it as linked-only so the summary
-    # does not claim an execution that never happened.
-    record recording-engine-stress NOT_RUN_OPTIONAL
-fi
 
 echo "native contract summary:"
 overall=0

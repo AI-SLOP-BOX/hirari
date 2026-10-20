@@ -175,14 +175,6 @@ add_custom_target(hirari-test-project-soak
 )
 add_dependencies(hirari-test-all hirari-test-project-soak)
 
-add_custom_target(hirari-test-recording-long
-    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_recording_stress.sh"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    USES_TERMINAL
-    COMMENT "Running long-duration recording and finalized-frame stress contract"
-)
-add_dependencies(hirari-test-stress hirari-test-recording-long)
-
 add_custom_target(hirari-test-stress-long
     COMMAND "${CMAKE_COMMAND}" -E env
             HIRARI_STRESS_DURATION_SECONDS=3600

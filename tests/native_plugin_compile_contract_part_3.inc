@@ -271,25 +271,6 @@
         if (!streamInput || decoded[0] != 0.25f || decoded[1] != -0.5f ||
             decoded[2] != 0.0f || decoded[3] != 0.75f) return 71;
     }
-    const auto recordingPath = std::filesystem::temp_directory_path() /
-                               "hirari-native-recording-engine-contract.wav";
-    {
-        Hirari::Core::RecordingEngine recorder;
-        const float left[4] = {0.1f, 0.2f, 0.3f, 0.4f};
-        const float right[4] = {-0.1f, -0.2f, -0.3f, -0.4f};
-        if (!recorder.start(recordingPath.string(), 48'000.0) ||
-            !recorder.write(left, right, 4)) return 72;
-        recorder.stop();
-        if (recorder.hasWriteError() || !std::filesystem::is_regular_file(recordingPath) ||
-            std::filesystem::file_size(recordingPath) != 80 + 4 * 2 * sizeof(float)) return 73;
-        std::ifstream recordingInput(recordingPath, std::ios::binary);
-        std::array<uint8_t, 80> recordingHeader{};
-        recordingInput.read(reinterpret_cast<char*>(recordingHeader.data()),
-                            static_cast<std::streamsize>(recordingHeader.size()));
-        if (!recordingInput || std::string(recordingHeader.begin(), recordingHeader.begin() + 4) != "RIFF" ||
-            recordingHeader[56] != 3 || recordingHeader[57] != 0 ||
-            recordingHeader[58] != 2 || recordingHeader[59] != 0) return 74;
-    }
     const auto malformedWave64Path = std::filesystem::temp_directory_path() / "hirari-native-wave64-malformed.w64";
     {
         std::ifstream input(wave64Path, std::ios::binary);

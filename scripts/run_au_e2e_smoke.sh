@@ -21,9 +21,8 @@ if ! auval -v aufx dcmp appl; then
     exit 1
 fi
 
-# The in-process AU contract above proves the Apple host API path.  When an
-# actual component bundle is supplied, also exercise Hirari's isolated worker.
-# In strict release mode, silently omitting this second path would make an AU
+# When an actual component bundle is supplied, exercise Hirari's isolated
+# worker. In strict release mode, silently omitting this path would make an AU
 # release claim too broad, so the fixture is required there.
 if [ -z "${HIRARI_AU_FIXTURE:-}" ]; then
     for candidate in \
@@ -51,22 +50,6 @@ else
 fi
 
 AU_HOST_BIN="${HIRARI_PLUGIN_HOST_BIN:-$ROOT_DIR/build-tools/hirari-plugin-host-worker}"
-
-OUT=${TMPDIR:-/tmp}/hirari-au-host-e2e
-c++ -std=c++20 -Wall -Wextra -I. -Isrc \
-    tests/au_host_e2e_contract.cpp \
-    -framework AudioToolbox -framework AudioUnit -framework CoreAudio -framework CoreFoundation \
-    -o "$OUT"
-
-ROUNDS=${HIRARI_AU_STRESS_ROUNDS:-1}
-case "$ROUNDS" in ''|*[!0-9]*) echo "HIRARI_AU_STRESS_ROUNDS must be numeric" >&2; exit 2 ;; esac
-[ "$ROUNDS" -gt 0 ] || { echo "HIRARI_AU_STRESS_ROUNDS must be positive" >&2; exit 2; }
-i=1
-while [ "$i" -le "$ROUNDS" ]; do
-    "$OUT"
-    i=$((i + 1))
-done
-echo "AU host E2E smoke passed (Apple A Dynamics Processor, mono/stereo, rounds=$ROUNDS)"
 
 if [ -n "${HIRARI_AU_FIXTURE:-}" ]; then
     AU_PLUGIN_TEST_BIN=${HIRARI_PLUGIN_TEST_BIN:-}

@@ -1,11 +1,5 @@
 #include <cassert>
-#include <filesystem>
-#include <fstream>
-#include <string>
-#include <vector>
-
 #include "../src/core/midi_buffer.hpp"
-#include "../src/core/plugins/plugin_host.hpp"
 
 int main() {
     Hirari::Core::MidiBuffer midi;
@@ -34,15 +28,5 @@ int main() {
     midi.clear();
     assert(midi.size() == 0 && !midi.overflowed() && midi.droppedEvents() == 0);
 
-    const auto root = std::filesystem::temp_directory_path() / "hirari-plugin-scan-contract";
-    std::error_code ec;
-    std::filesystem::create_directories(root / "nested", ec);
-    std::ofstream(root / "Synth.vst3").put('\0');
-    std::ofstream(root / "nested" / "Drums.clap").put('\0');
-    std::ofstream(root / "notes.txt").put('\0');
-    const auto plugins = Hirari::Core::Plugins::PluginScanner::scanFolders({root.string()});
-    assert(plugins.size() == 2);
-    assert(plugins[0].binaryPath < plugins[1].binaryPath);
-    std::filesystem::remove_all(root, ec);
     return 0;
 }

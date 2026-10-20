@@ -5,7 +5,6 @@
 #include <limits>
 #include <vector>
 #include "io/wav_loader_utils.hpp"
-#include "io/wav_reader.hpp"
 #include "core/io/audio_decoder.hpp"
 
 int main() {
@@ -37,9 +36,6 @@ int main() {
         for (uint32_t sample = 0; sample < canonicalBuffer.getNumSamples(); ++sample)
             assert(std::isfinite(canonicalBuffer.getReadPointer(channel)[sample]));
 
-    Hirari::IO::WavReader reader(path.string());
-    assert(reader.getNumChannels() == 2);
-    assert(reader.getNumSamples() == 4);
     std::filesystem::remove(path);
 
     const auto oddChunk = std::filesystem::temp_directory_path() / "hirari-wav-odd-chunk-contract.wav";

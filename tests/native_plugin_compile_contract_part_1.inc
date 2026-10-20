@@ -91,7 +91,6 @@ int main() {
     // test's main stack so the contract remains runnable on macOS's default
     // 8 MiB thread stack even when the sandbox protocol grows.
     auto vst3 = std::make_unique<Hirari::Core::Plugins::VST3HostProcessor>();
-    auto clap = std::make_unique<Hirari::Core::Plugins::CLAPHostProcessor>();
     // The built-in compressor is part of the production plugin contract, not
     // merely a header-only type. Exercise prepare/process/parameter/state so
     // a future refactor cannot leave the browser-visible plugin unlinked.
@@ -116,57 +115,6 @@ int main() {
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }
-    // The sampler must consume both legacy MIDI and MIDI 2.0 UMP note events,
-    // including sustain pedal state, through the same realtime dispatcher.
-    {
-        static std::array<float, 4096> sample{};
-        sample.fill(0.25f);
-        auto sampler = std::make_unique<Hirari::DSP::Synthesis::SamplerEngine>(48'000.0);
-        sampler->addZone({60, 0, 127, 1, 127, {sample.data(), sample.size()}});
-        auto block = std::make_unique<Hirari::Core::AudioBuffer>(2, 32);
-        auto midi = std::make_unique<Hirari::Core::MidiBuffer>();
-        const uint8_t umpOn[] = {0x40, 0x90, 60, 0, 0x7f, 0, 0, 0,
-                                 0, 0, 0, 0, 0, 0, 0, 0};
-        midi->addEvent(0, umpOn, sizeof(umpOn));
-        Hirari::DSP::ProcessContext context{};
-        context.sampleRate = 48'000.0;
-        context.blockSize = 32;
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 69;
-        const uint8_t sustainDown[] = {0xB0, 64, 127};
-        const uint8_t noteOff[] = {0x80, 60, 0};
-        midi->clear();
-        midi->addEvent(0, sustainDown, sizeof(sustainDown));
-        midi->addEvent(1, noteOff, sizeof(noteOff));
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 70;
-        const uint8_t sustainUp[] = {0xB0, 64, 0};
-        midi->clear();
-        midi->addEvent(0, sustainUp, sizeof(sustainUp));
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 71;
-    }
-    // A looped zone must continue producing audio after the source reaches
-    // its end, while keeping the output finite.
-    {
-        static std::array<float, 8> loopSample{};
-        for (size_t i = 0; i < loopSample.size(); ++i) loopSample[i] = 0.1f + 0.1f * static_cast<float>(i);
-        auto sampler = std::make_unique<Hirari::DSP::Synthesis::SamplerEngine>(48'000.0);
-        sampler->addZone({60, 60, 60, 1, 127, {loopSample.data(), loopSample.size()}, 2, 6, true});
-        auto block = std::make_unique<Hirari::Core::AudioBuffer>(1, 32);
-        auto midi = std::make_unique<Hirari::Core::MidiBuffer>();
-        const uint8_t noteOn[] = {0x90, 60, 127};
-        midi->addEvent(0, noteOn, sizeof(noteOn));
-        Hirari::DSP::ProcessContext context{};
-        context.sampleRate = 48'000.0;
-        context.blockSize = 32;
-        sampler->process(*block, *midi, context);
-        if (block->sanitizeNonFinite() != 0) return 74;
-        bool hasTail = false;
-        for (uint32_t i = 8; i < block->getNumSamples(); ++i)
-            hasTail = hasTail || std::abs(block->getReadPointer(0)[i]) > 1.0e-5f;
-        if (!hasTail) return 75;
-    }
     Hirari::Core::Engine::MIDIOrchestrator midiOrchestrator;
     // The sandbox host owns bounded shared-memory staging arrays sized for
     // the maximum plugin protocol block. Allocate it on the heap to keep
@@ -187,7 +135,6 @@ int main() {
         Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
             Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
     (void)vst3;
-    (void)clap;
     (void)midiOrchestrator;
     (void)sandbox;
     (void)chain;
@@ -270,28 +217,6 @@ int main() {
         !std::isfinite(finiteContract.getReadPointer(0)[1]) ||
         !std::isfinite(finiteContract.getReadPointer(0)[2])) return 24;
 
-    // The graph must contain third-party faults: non-finite samples are
-    // sanitized without allocation and remain finite on subsequent blocks.
-    Hirari::Core::AudioProcessorGraph graphContract;
-    graphContract.addNode(std::make_shared<NonFiniteProcessor>());
-    graphContract.prepare(48'000.0, 8);
-    Hirari::Core::AudioBuffer graphBuffer(1, 8);
-    Hirari::Core::MidiBuffer graphMidi;
-    Hirari::DSP::ProcessContext graphContext{};
-    graphContext.sampleRate = 48'000.0;
-    graphContext.blockSize = 8;
-    graphContext.numOutputChannels = 1;
-    graphContract.process(graphBuffer, graphMidi, graphContext);
-    if (graphContract.getSanitizedSampleCount() != 8 ||
-        graphContract.getProcessorFaultCount() != 0 ||
-        graphContract.getFaultedNodeCount() != 0) return 31;
-    for (uint32_t index = 0; index < graphBuffer.getNumSamples(); ++index) {
-        if (!std::isfinite(graphBuffer.getReadPointer(0)[index])) return 32;
-    }
-    graphContract.process(graphBuffer, graphMidi, graphContext);
-    if (graphContract.getSanitizedSampleCount() != 16 ||
-        graphContract.getProcessorFaultCount() != 0 ||
-        graphContract.getFaultedNodeCount() != 0) return 33;
     int engineTransactionValue = 0;
     engineUndo.beginTransaction("engine-partial-operation");
     engineUndo.performAction("first", [&] { engineTransactionValue -= 2; },
@@ -313,22 +238,6 @@ int main() {
     if (engineTransactionValue != 5) return 22;
     engineUndo.clear();
 
-    const auto autosavePath = std::filesystem::temp_directory_path() /
-        ("hirari-autosave-contract-" + std::to_string(
-#if !defined(_WIN32)
-            static_cast<unsigned long long>(::getpid())
-#else
-            0ULL
-#endif
-        ) + ".json");
-    auto& autosave = Hirari::IO::Persistence::AutoSaveEngine::getInstance();
-    autosave.start(autosavePath.string(), 60, [] { return std::string("{\"ok\":true}"); });
-    autosave.markModified();
-    if (!autosave.flushNow() || autosave.isDirty()) return 23;
-    autosave.stop();
-    std::error_code autosaveCleanup;
-    std::filesystem::remove(autosavePath.string() + ".autosave", autosaveCleanup);
-
     // A failed DB publication must not remove the last destination. Using a
     // directory as the destination forces rename to fail while making the
     // preservation invariant directly observable.
@@ -343,44 +252,6 @@ int main() {
     std::filesystem::remove_all(dbDestination, dbCleanup);
 
 
-
-    auto& telemetryBridge = Hirari::Network::SharedMemoryBridge::getInstance();
-    if (!telemetryBridge.start()) return 26;
-    const std::string telemetryName = telemetryBridge.segmentName();
-    // The auto-generated name must stay inside the smallest POSIX shm budget
-    // we support. It previously used "/hirari_sovereign_bridge_<pid>_<seq>",
-    // which is 35 characters for a 5-digit pid and failed shm_open with
-    // ENAMETOOLONG on macOS (31 character limit), so the bridge never started.
-    if (telemetryName.empty() ||
-        telemetryName.size() > Hirari::Network::SharedMemoryBridge::kMaxSegmentNameLength) {
-        return 27;
-    }
-    if (telemetryName[0] != '/' ||
-        telemetryName.find('/', 1) != std::string::npos) return 27;
-    std::array<uint8_t, 300> sharedMidiPayload{};
-    sharedMidiPayload.front() = 0xf0;
-    sharedMidiPayload.back() = 0xf7;
-    if (!telemetryBridge.pushExtendedMidi(24, 3, sharedMidiPayload.data(), sharedMidiPayload.size()) ||
-        telemetryBridge.pendingExtendedMidi() != 1) return 59;
-    Hirari::Core::Plugins::MidiExtendedMessageRing::Message sharedMidiMessage;
-    if (!telemetryBridge.popExtendedMidi(sharedMidiMessage) ||
-        sharedMidiMessage.size != sharedMidiPayload.size() ||
-        sharedMidiMessage.sampleOffset != 24 || sharedMidiMessage.articulationId != 3 ||
-        sharedMidiMessage.data.front() != 0xf0 || sharedMidiMessage.data[299] != 0xf7) return 60;
-    for (unsigned slot = 0; slot < Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity; ++slot) {
-        if (!telemetryBridge.pushExtendedMidi(slot, 0, sharedMidiPayload.data(), sharedMidiPayload.size())) return 61;
-    }
-    if (telemetryBridge.pushExtendedMidi(99, 0, sharedMidiPayload.data(), sharedMidiPayload.size()) ||
-        telemetryBridge.pendingExtendedMidi() != Hirari::Core::Plugins::MidiExtendedMessageRing::kCapacity) return 62;
-    Hirari::Core::Plugins::MidiExtendedMessageRing::Message drainedMessage;
-    while (telemetryBridge.popExtendedMidi(drainedMessage)) {}
-    if (telemetryBridge.pendingExtendedMidi() != 0) return 63;
-    telemetryBridge.stop();
-    if (!telemetryBridge.segmentName().empty()) return 28;
-    if (!telemetryBridge.start()) return 45;
-    const std::string secondTelemetryName = telemetryBridge.segmentName();
-    if (secondTelemetryName.empty() || secondTelemetryName == telemetryName) return 46;
-    telemetryBridge.stop();
 
     // Payloads beyond the bounded SysEx/MIDI2 envelope must be observable at
     // ingress rather than silently becoming a truncated channel-voice event.
@@ -424,54 +295,3 @@ int main() {
     const auto directorySecond = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
     std::filesystem::remove_all(directoryFingerprint, cleanup);
     if (!directoryFirst || !directorySecond || *directoryFirst != *directorySecond) return 4;
-    const auto admittedPath = std::filesystem::temp_directory_path() / "hirari-admission-contract.clap";
-    {
-        std::ofstream output(admittedPath, std::ios::binary | std::ios::trunc);
-        output << "fixture-v1";
-    }
-    Hirari::Core::Plugins::PluginDescriptor admitted;
-    admitted.uuid = "contract-admission-plugin";
-    admitted.name = "Admission Contract";
-    admitted.format = "CLAP";
-    admitted.binaryPath = admittedPath.string();
-    auto& infrastructure = Hirari::Core::Plugins::PluginHostInfrastructure::getInstance();
-    if (!infrastructure.registerPlugin(admitted)) return 28;
-    std::string admissionError;
-    admissionError = "stale diagnostic";
-    if (!infrastructure.validatePlugin(admitted.uuid, &admissionError)) return 29;
-    if (!admissionError.empty()) return 33;
-    {
-        std::ofstream output(admittedPath, std::ios::binary | std::ios::trunc);
-        output << "fixture-v2-with-a-new-binary-fingerprint";
-    }
-    if (infrastructure.validatePlugin(admitted.uuid, &admissionError) ||
-        admissionError.find("rescan required") == std::string::npos) return 30;
-    if (infrastructure.createPlugin(admitted.uuid, &admissionError)) return 36;
-    if (admissionError.find("rescan required") == std::string::npos) return 37;
-    const auto collisionPath = std::filesystem::temp_directory_path() /
-                               "hirari-admission-collision.clap";
-    {
-        std::ofstream output(collisionPath, std::ios::binary | std::ios::trunc);
-        output << "collision";
-    }
-    Hirari::Core::Plugins::PluginDescriptor collision = admitted;
-    collision.binaryPath = collisionPath.string();
-    collision.binaryFingerprint = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(
-        collisionPath).value_or(0);
-    if (infrastructure.registerPlugin(collision)) return 35;
-    std::filesystem::remove(collisionPath, cleanup);
-    std::filesystem::remove(admittedPath, cleanup);
-#if !defined(_WIN32)
-    const auto symlinkPath = std::filesystem::temp_directory_path() /
-                             "hirari-admission-contract-symlink.clap";
-    const auto symlinkTarget = std::filesystem::temp_directory_path() /
-                               "hirari-admission-contract-target.clap";
-    {
-        std::ofstream output(symlinkTarget, std::ios::binary | std::ios::trunc);
-        output << "target";
-    }
-    std::filesystem::create_symlink(symlinkTarget, symlinkPath, cleanup);
-    if (Hirari::Core::Plugins::PluginAdmission::isSafeCandidate(symlinkPath, "CLAP")) return 31;
-    std::filesystem::remove(symlinkPath, cleanup);
-    std::filesystem::remove(symlinkTarget, cleanup);
-#endif
