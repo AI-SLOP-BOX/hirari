@@ -477,7 +477,7 @@ impl HirariRegionScalarDecision {
         }
     }
 
-    fn decide(edit: &HirariRegionScalarEdit) -> Self {
+    pub(crate) fn decide(edit: &HirariRegionScalarEdit) -> Self {
         // Clip gain and the fade pair clamp into range; the other scalar fields
         // reject out-of-range input outright so callers keep their own bounds.
         //

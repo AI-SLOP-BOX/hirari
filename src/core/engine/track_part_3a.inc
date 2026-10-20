@@ -522,84 +522,70 @@
             m_regionSnapshots.end());
     }
 
-    // The numeric bounds for every scalar region field are owned by
-    // hirari_region_scalar_edit_decision in the Rust core. This layer keeps only
-    // the storage lookup, the lock, and snapshot publication.
-    HirariRegionScalarDecision decideScalarEdit(
-        HirariRegionScalarField field, const Region& region, float valueA,
-        float valueB = 0.0f) const {
-        HirariRegionScalarEdit edit{};
-        edit.field = field;
-        edit.locked = region.locked;
-        edit.value_a = valueA;
-        edit.value_b = valueB;
-        edit.region_len = region.len;
-        edit.region_start = region.start;
-        HirariRegionScalarDecision decision{};
-        hirari_region_scalar_edit_decision(edit, &decision);
-        return decision;
-    }
-
-    // Single lookup/lock/publish path for every scalar region field that
-    // routes through the Rust edit policy. The bounds, the accept/reject
-    // decision and the resolved values all come from
-    // hirari_region_scalar_edit_decision; this only stores the decision in
-    // the field it names, so adding a scalar field never means adding a ninth
-    // copy of the scan/lock/publish sequence.
-    //
-    // Booleans are the exception that proves the contract: Rust returns no
-    // payload for Muted/Reverse, so `valueA` (the caller's own 0/1) is what
-    // gets stored.
-    bool applyScalarRegionEdit(uint32_t rid, HirariRegionScalarField field,
-                               float valueA, float valueB = 0.0f) {
+    // Host entry point for the scalar fields the Rust policy owns. Rust has
+    // already decided and resolved every value, so this only stores them and
+    // republishes; no second validation can disagree with it.
+    bool applyRegionScalarFields(uint32_t rid, const HirariRegionState& state) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid) continue;
-            const auto decision = decideScalarEdit(field, region, valueA, valueB);
-            if (!decision.accepted) return false;
-            switch (field) {
-                case kHirariRegionScalarClipGain:
-                    region.clipGain = decision.value_a;
-                    break;
-                case kHirariRegionScalarMuted:
-                    region.muted = valueA != 0.0f;
-                    break;
-                case kHirariRegionScalarReverse:
-                    region.reverse = valueA != 0.0f;
-                    break;
-                case kHirariRegionScalarPitchSemitones:
-                    region.pitchSemitones = decision.value_a;
-                    break;
-                case kHirariRegionScalarLoopCount:
-                    // The integer travels as the raw float bit pattern so the
-                    // Rust policy owns the range and overflow guards.
-                    region.loopCount = std::bit_cast<uint32_t>(decision.value_a);
-                    break;
-                case kHirariRegionScalarSyncGroup:
-                    region.syncGroup = std::bit_cast<uint32_t>(decision.value_a);
-                    break;
-                case kHirariRegionScalarFades:
-                    region.fadeInSamples =
-                        hirari_region_fade_samples(decision.value_a, region.len);
-                    region.fadeOutSamples =
-                        hirari_region_fade_samples(decision.value_b, region.len);
-                    break;
-            }
+            region.clipGain = state.clipGain;
+            region.muted = state.muted;
+            region.reverse = state.reverse;
+            region.pitchSemitones = state.pitchSemitones;
+            region.loopCount = state.loopCount;
+            region.syncGroup = state.syncGroup;
+            region.fadeInSamples = state.fadeInSamples;
+            region.fadeOutSamples = state.fadeOutSamples;
             publishRegionSnapshot();
             return true;
         }
         return false;
     }
 
-    bool setRegionGain(uint32_t rid, float gain) {
-        return applyScalarRegionEdit(rid, kHirariRegionScalarClipGain, gain);
+    // Host entry point for edits that move or re-trim a region. Re-adding the
+    // replacement runs the same normalisation (`addRegion`) the previous
+    // remove/add path used, including the sorted insert into `m_regions`.
+    bool applyRegionState(uint32_t rid, const HirariRegionState& state) {
+        invalidateFrozenForEdit();
+        Region replacement;
+        {
+            std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+            bool found = false;
+            for (const auto& region : m_regions) {
+                if (region.id != rid) continue;
+                replacement = region;
+                found = true;
+                break;
+            }
+            if (!found) return false;
+        }
+        replacement.start = state.start;
+        replacement.len = state.len;
+        replacement.baseStart = state.baseStart;
+        replacement.baseLength = state.baseLength;
+        replacement.sourceOffset = state.sourceOffset;
+        replacement.baseSourceOffset = state.baseSourceOffset;
+        replacement.sourceLength = state.sourceLength;
+        replacement.fadeInSamples = state.fadeInSamples;
+        replacement.fadeOutSamples = state.fadeOutSamples;
+        replacement.warpRatio = state.warpRatio;
+        replacement.sourceSampleRate = state.sourceSampleRate;
+        replacement.timelineSampleRate = state.timelineSampleRate;
+        replacement.clipGain = state.clipGain;
+        replacement.pitchSemitones = state.pitchSemitones;
+        replacement.loopCount = state.loopCount;
+        replacement.syncGroup = state.syncGroup;
+        replacement.muted = state.muted;
+        replacement.reverse = state.reverse;
+        replacement.locked = state.locked;
+        replacement.pitchPreserveWarp = state.pitchPreserveWarp;
+        removeRegion(rid);
+        addRegion(replacement);
+        return true;
     }
 
-    bool setRegionMuted(uint32_t rid, bool muted) {
-        return applyScalarRegionEdit(rid, kHirariRegionScalarMuted,
-                                     muted ? 1.0f : 0.0f);
-    }
 
     bool setRegionCompRanges(
         uint32_t rid,
@@ -627,9 +613,6 @@
         return false;
     }
 
-    bool setRegionFades(uint32_t rid, float fadeIn, float fadeOut) {
-        return applyScalarRegionEdit(rid, kHirariRegionScalarFades, fadeIn, fadeOut);
-    }
 
     // Adopts the result of a Rust range-edit transform.
     //
@@ -715,10 +698,6 @@
         return replaceRegionRangeEdits(rid, {});
     }
 
-    bool setRegionReverse(uint32_t rid, bool reverse) {
-        return applyScalarRegionEdit(rid, kHirariRegionScalarReverse,
-                                     reverse ? 1.0f : 0.0f);
-    }
 
     bool setRegionWarpRatio(uint32_t rid, double ratio) {
         invalidateFrozenForEdit();
@@ -778,10 +757,6 @@
         return std::nullopt;
     }
 
-    bool setRegionPitchSemitones(uint32_t rid, float semitones) {
-        return applyScalarRegionEdit(rid, kHirariRegionScalarPitchSemitones,
-                                     semitones);
-    }
 
     std::optional<float> getRegionPitchSemitones(uint32_t rid) const {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
@@ -791,25 +766,11 @@
         return std::nullopt;
     }
 
-    bool setRegionLoopCount(uint32_t rid, uint32_t count) {
-        // The integer travels as the raw float bit pattern so the Rust
-        // policy owns the range and overflow guards without an extra ABI type.
-        return applyScalarRegionEdit(rid, kHirariRegionScalarLoopCount,
-                                     std::bit_cast<float>(count));
-    }
 
     bool setRegionLocked(uint32_t rid, bool locked) {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         auto it = std::find_if(m_regions.begin(), m_regions.end(), [rid](const Region& r){ return r.id == rid; });
         if (it == m_regions.end()) return false; it->locked = locked; publishRegionSnapshot(); return true;
-    }
-    bool setRegionSyncGroup(uint32_t rid, uint32_t group) {
-        // Delegates to the shared scalar path. Unlike before, a no-op set now
-        // publishes a snapshot like the other six fields do; that costs one
-        // snapshot copy on a redundant user action and removes the last
-        // hand-written scan/lock/publish sequence.
-        return applyScalarRegionEdit(rid, kHirariRegionScalarSyncGroup,
-                                     std::bit_cast<float>(group));
     }
 
     // Validates and orders warp markers through the Rust pure transform.

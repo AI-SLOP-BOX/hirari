@@ -1,121 +1,9 @@
 bool HirariUnifiedEngine::move_region(uint32_t tid, uint32_t rid, double startBeat) {
-    if (!std::isfinite(startBeat) || startBeat < 0.0) return false;
-    std::shared_ptr<Track> target;
-    Region before;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id != rid) continue;
-                target = track;
-                before = region;
-                break;
-            }
-            break;
-        }
-    }
-    if (!target) return false;
-    if (startBeat > static_cast<double>(UINT64_MAX)) return false;
-
-    Region moved = before;
-    moved.start = static_cast<uint64_t>(startBeat);
-    const uint64_t sourceTrim = moved.sourceOffset >= moved.baseSourceOffset
-        ? moved.sourceOffset - moved.baseSourceOffset : 0;
-    const long double timelineTrim = std::ceil(
-        static_cast<long double>(sourceTrim) / moved.sourceFramesPerTimelineFrame());
-    if (!std::isfinite(static_cast<double>(timelineTrim)) || timelineTrim < 0.0L ||
-        timelineTrim > static_cast<long double>(moved.start)) return false;
-    moved.baseStart = moved.start - static_cast<uint64_t>(timelineTrim);
-    const auto apply = [this, target, moved, rid]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target->removeRegion(rid);
-        target->addRegion(moved);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
-    };
-    const auto undo = [this, target, before, rid]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target->removeRegion(rid);
-        target->addRegion(before);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
-    };
-    m_undoManager.performAction("Move Region", undo, apply);
-    return true;
+    return hirari_region_edit_move(this, tid, rid, startBeat);
 }
 
 bool HirariUnifiedEngine::move_region_sync_group(uint32_t tid, uint32_t rid, double startSample) {
-    if (tid == 0 || rid == 0 || !std::isfinite(startSample) || startSample < 0.0 ||
-        startSample >= static_cast<double>(UINT64_MAX)) return false;
-
-    struct RegionState {
-        std::shared_ptr<Track> track;
-        Region region;
-    };
-    std::vector<RegionState> before;
-    std::vector<RegionState> after;
-    std::vector<uint64_t> regionStarts;
-    std::vector<uint64_t> baseStarts;
-    std::vector<uint64_t> movedStarts;
-    std::vector<uint64_t> movedBaseStarts;
-    uint32_t group = 0;
-    uint64_t anchorStart = 0;
-    const uint64_t newAnchorStart = static_cast<uint64_t>(startSample);
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        std::shared_ptr<Track> anchorTrack;
-        for (const auto& track : m_tracks) {
-            if (!track || track->getId() != tid) continue;
-            anchorTrack = track;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == rid) {
-                    group = region.syncGroup;
-                    anchorStart = region.start;
-                    if (region.locked) return false;
-                    break;
-                }
-            }
-            break;
-        }
-        if (!anchorTrack || group == 0) return false;
-
-        for (const auto& track : m_tracks) {
-            if (!track) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.syncGroup != group) continue;
-                if (region.locked) return false;
-                before.push_back({track, region});
-                after.push_back({track, region});
-                regionStarts.push_back(region.start);
-                baseStarts.push_back(region.baseStart);
-            }
-        }
-    }
-    if (before.size() < 2 || before.size() != after.size()) return false;
-    movedStarts.resize(regionStarts.size());
-    movedBaseStarts.resize(baseStarts.size());
-    if (!hirari_region_sync_move_positions(
-            regionStarts.data(), baseStarts.data(), regionStarts.size(),
-            anchorStart, newAnchorStart, movedStarts.data(), movedBaseStarts.data())) return false;
-    for (size_t index = 0; index < after.size(); ++index) {
-        after[index].region.start = movedStarts[index];
-        after[index].region.baseStart = movedBaseStarts[index];
-    }
-    const auto apply = [this](const std::vector<RegionState>& states) {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& state : states) {
-            state.track->removeRegion(state.region.id);
-            state.track->addRegion(state.region);
-            std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-            m_peakCache.erase(state.region.id);
-        }
-    };
-    m_undoManager.performAction(
-        "Move Region Sync Group",
-        [apply, before] { apply(before); },
-        [apply, after] { apply(after); });
-    return true;
+    return hirari_region_edit_move_sync_group(this, tid, rid, startSample);
 }
 
 bool HirariUnifiedEngine::remove_region(uint32_t tid, uint32_t rid) {
@@ -155,57 +43,12 @@ bool HirariUnifiedEngine::remove_region(uint32_t tid, uint32_t rid) {
 }
 
 bool HirariUnifiedEngine::set_region_gain(uint32_t tid, uint32_t rid, float gain) {
-    // The Rust policy owns the accept/reject and clamp decision; the engine
-    // layer only resolves the track and records the undo snapshot.
-    const auto precheck = decideScalarEdit(
-        kHirariRegionScalarClipGain, gain);
-    if (!precheck.accepted) return false;
-    std::shared_ptr<Track> target;
-    float before = 1.0f;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == rid) {
-                    target = track;
-                    before = region.clipGain;
-                    break;
-                }
-            }
-            break;
-        }
-    }
-    if (!target) return false;
-    const float bounded = precheck.value_a;
-    auto apply = [target, rid](float value) { target->setRegionGain(rid, value); };
-    m_undoManager.performAction(
-        "Region Gain", [apply, before] { apply(before); }, [apply, bounded] { apply(bounded); });
-    return true;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarClipGain, gain, 0.0f);
 }
 
 bool HirariUnifiedEngine::set_region_muted(uint32_t tid, uint32_t rid, bool muted) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == rid) {
-                    target = track;
-                    before = region.muted;
-                    break;
-                }
-            }
-            break;
-        }
-    }
-    if (!target) return false;
-    auto apply = [target, rid](bool value) { target->setRegionMuted(rid, value); };
-    m_undoManager.performAction(
-        "Mute Region", [apply, before] { apply(before); }, [apply, muted] { apply(muted); });
-    return true;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarMuted,
+                                     muted ? 1.0f : 0.0f, 0.0f);
 }
 
 bool HirariUnifiedEngine::set_region_comp_ranges(
@@ -234,37 +77,7 @@ bool HirariUnifiedEngine::set_region_comp_ranges(
 }
 
 bool HirariUnifiedEngine::set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) {
-    const auto precheck = decideScalarEdit(
-        kHirariRegionScalarFades, fadeIn, fadeOut);
-    if (!precheck.accepted) return false;
-    std::shared_ptr<Track> target;
-    float beforeIn = 0.0f;
-    float beforeOut = 0.0f;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == rid) {
-                    target = track;
-                    if (region.len > 0) {
-                        beforeIn = static_cast<float>(region.fadeInSamples) / region.len;
-                        beforeOut = static_cast<float>(region.fadeOutSamples) / region.len;
-                    }
-                    break;
-                }
-            }
-            break;
-        }
-    }
-    if (!target) return false;
-    const float boundedIn = precheck.value_a;
-    const float boundedOut = precheck.value_b;
-    auto apply = [target, rid](float in, float out) { target->setRegionFades(rid, in, out); };
-    m_undoManager.performAction(
-        "Region Fades", [apply, beforeIn, beforeOut] { apply(beforeIn, beforeOut); },
-        [apply, boundedIn, boundedOut] { apply(boundedIn, boundedOut); });
-    return true;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarFades, fadeIn, fadeOut);
 }
 
 bool HirariUnifiedEngine::set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start,
@@ -315,27 +128,8 @@ bool HirariUnifiedEngine::clear_region_range_edits(uint32_t tid, uint32_t rid) {
 }
 
 bool HirariUnifiedEngine::set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == rid) {
-                    target = track;
-                    before = region.reverse;
-                    break;
-                }
-            }
-            break;
-        }
-    }
-    if (!target) return false;
-    auto apply = [target, rid](bool value) { target->setRegionReverse(rid, value); };
-    m_undoManager.performAction(
-        "Reverse Region", [apply, before] { apply(before); }, [apply, reverse] { apply(reverse); });
-    return true;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarReverse,
+                                     reverse ? 1.0f : 0.0f, 0.0f);
 }
 
 bool HirariUnifiedEngine::set_region_trim(uint32_t tid, uint32_t rid, float startNorm, float endNorm) {
@@ -437,27 +231,8 @@ bool HirariUnifiedEngine::set_region_pitch_preserve_warp(uint32_t tid, uint32_t 
 }
 
 bool HirariUnifiedEngine::set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones) {
-    const auto precheck = decideScalarEdit(
-        kHirariRegionScalarPitchSemitones, semitones);
-    if (!precheck.accepted) return false;
-    std::shared_ptr<Track> target;
-    float before = 0.0f;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            const auto current = track->getRegionPitchSemitones(rid);
-            if (!current) return false;
-            target = track;
-            before = *current;
-            break;
-        }
-    }
-    if (!target) return false;
-    auto apply = [target, rid](float value) { target->setRegionPitchSemitones(rid, value); };
-    m_undoManager.performAction(
-        "Flex Pitch", [apply, before] { apply(before); }, [apply, semitones] { apply(semitones); });
-    return true;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarPitchSemitones, semitones,
+                                     0.0f);
 }
 
 bool HirariUnifiedEngine::set_region_audio_note_segment(
@@ -882,27 +657,8 @@ bool HirariUnifiedEngine::finalize_region_audio_note_analysis(uint32_t tid, uint
 }
 
 bool HirariUnifiedEngine::set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count) {
-    const auto precheck = decideScalarEdit(
-        kHirariRegionScalarLoopCount, std::bit_cast<float>(count));
-    if (!precheck.accepted) return false;
-    std::shared_ptr<Track> target;
-    uint32_t before = 1;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            const auto current = track->getRegionLoopCount(rid);
-            if (!current) return false;
-            target = track;
-            before = *current;
-            break;
-        }
-    }
-    if (!target) return false;
-    auto apply = [target, rid](uint32_t value) { target->setRegionLoopCount(rid, value); };
-    m_undoManager.performAction(
-        "Region Loop", [apply, before] { apply(before); }, [apply, count] { apply(count); });
-    return true;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarLoopCount,
+                                     std::bit_cast<float>(count), 0.0f);
 }
 
 bool HirariUnifiedEngine::set_region_locked(uint32_t tid, uint32_t rid, bool locked) {
@@ -911,25 +667,8 @@ bool HirariUnifiedEngine::set_region_locked(uint32_t tid, uint32_t rid, bool loc
     return false;
 }
 bool HirariUnifiedEngine::set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group) {
-    if (tid == 0 || rid == 0) return false;
-    std::shared_ptr<Track> target;
-    uint32_t before = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (!track || track->getId() != tid) continue;
-            const auto current = track->getRegionSyncGroup(rid);
-            if (!current) return false;
-            target = track;
-            before = *current;
-            break;
-        }
-    }
-    if (!target) return false;
-    auto apply = [target, rid](uint32_t value) { (void)target->setRegionSyncGroup(rid, value); };
-    m_undoManager.performAction(
-        "Region Sync Group", [apply, before] { apply(before); }, [apply, group] { apply(group); });
-    return true;
+    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarSyncGroup,
+                                     std::bit_cast<float>(group), 0.0f);
 }
 bool HirariUnifiedEngine::set_region_warp_markers(
     uint32_t tid, uint32_t rid,

@@ -135,6 +135,7 @@ std::optional<HirariTimeSignatureEvent> readTempoSignatureAt(const void* state, 
 #include "hirari_unified_engine_part_3b.inc"
 #include "hirari_unified_engine_part_4a.inc"
 #include "hirari_unified_engine_part_4b.inc"
+#include "hirari_unified_engine_part_4z.inc"
 #include "hirari_unified_engine_part_5a.inc"
 #include "hirari_unified_engine_part_5b.inc"
 #include "hirari_unified_engine_part_6a.inc"

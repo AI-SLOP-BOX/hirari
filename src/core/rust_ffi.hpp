@@ -554,32 +554,79 @@ enum HirariRegionScalarField : int32_t {
     kHirariRegionScalarFades = 7,
 };
 
-struct HirariRegionScalarEdit {
-    HirariRegionScalarField field = kHirariRegionScalarClipGain;
-    bool locked = false;
-    float value_a = 0.0f;
-    float value_b = 0.0f;
-    uint64_t region_len = 0;
-    uint64_t region_start = 0;
-};
-
-struct HirariRegionScalarDecision {
-    bool accepted = false;
-    float value_a = 0.0f;
-    float value_b = 0.0f;
-};
-
-// Authoritative scalar-edit policy. LoopCount and SyncGroup carry their integer
-// value as the raw float bit pattern of `value_a`.
+// Region edit host bridge.
 //
-// Returns true when `out` was filled in. The decision is written through the
-// out-pointer rather than returned by value because a C++ struct return is not
-// a C-compatible calling convention, and this boundary is plain C ABI.
-extern "C" bool hirari_region_scalar_edit_decision(
-    HirariRegionScalarEdit edit, HirariRegionScalarDecision* out);
+// Region storage stays in the engine because it owns the audio buffers and the
+// immutable snapshot the audio callback reads. Rust owns the edit policy: it
+// reads the current state through the host, decides, asks the host to apply,
+// and asks the host to record exactly one undo entry. Every callback runs on
+// the control thread; none of them is reachable from the audio callback.
+//
+// The structs below mirror `hirari-core-bridge/src/region_edit_host.rs` byte
+// for byte. Keep the field order and the primitive types in sync.
+struct HirariRegionState {
+    uint64_t start = 0;
+    uint64_t len = 0;
+    uint64_t baseStart = 0;
+    uint64_t baseLength = 0;
+    uint64_t sourceOffset = 0;
+    uint64_t baseSourceOffset = 0;
+    uint64_t sourceLength = 0;
+    uint64_t fadeInSamples = 0;
+    uint64_t fadeOutSamples = 0;
+    double warpRatio = 1.0;
+    double sourceSampleRate = 0.0;
+    double timelineSampleRate = 0.0;
+    float clipGain = 1.0f;
+    float pitchSemitones = 0.0f;
+    uint32_t loopCount = 1;
+    uint32_t syncGroup = 0;
+    bool muted = false;
+    bool reverse = false;
+    bool locked = false;
+    bool pitchPreserveWarp = false;
+};
 
-// Converts a normalized fade (0..1) into sample counts for a region length.
-extern "C" uint64_t hirari_region_fade_samples(float fade_norm, uint64_t region_len);
+enum HirariRegionEditOp : int32_t {
+    // Replace the editable state and republish it (normalising add path).
+    kHirariRegionEditState = 1,
+    // Write the policy-controlled scalar fields in place.
+    kHirariRegionEditInPlace = 2,
+};
+
+struct HirariRegionEditPayload {
+    uint32_t trackId = 0;
+    uint32_t regionId = 0;
+    int32_t op = kHirariRegionEditInPlace;
+    HirariRegionState state;
+};
+
+struct HirariRegionGroupMember {
+    uint32_t trackId = 0;
+    uint32_t regionId = 0;
+    uint64_t start = 0;
+    uint64_t baseStart = 0;
+    bool locked = false;
+};
+
+struct HirariRegionHostOps {
+    bool (*findRegion)(void* host, uint32_t trackId, uint32_t regionId,
+                       HirariRegionState* out) = nullptr;
+    bool (*applyEdit)(void* host, const HirariRegionEditPayload* payload) = nullptr;
+    size_t (*listSyncGroup)(void* host, uint32_t group, HirariRegionGroupMember* out,
+                            size_t capacity) = nullptr;
+    void (*recordUndo)(void* host, const char* name,
+                       const HirariRegionEditPayload* undo, size_t undoCount,
+                       const HirariRegionEditPayload* redo, size_t redoCount) = nullptr;
+};
+
+extern "C" void hirari_region_host_install(const HirariRegionHostOps* ops);
+extern "C" bool hirari_region_edit_scalar(void* host, uint32_t trackId, uint32_t regionId,
+                                          int32_t field, float valueA, float valueB);
+extern "C" bool hirari_region_edit_move(void* host, uint32_t trackId, uint32_t regionId,
+                                        double start);
+extern "C" bool hirari_region_edit_move_sync_group(void* host, uint32_t trackId,
+                                                   uint32_t regionId, double start);
 
 struct HirariRegionBlockConfig {
     uint64_t regionOffset = 0;
