@@ -114,6 +114,14 @@ pub struct HirariCore {
     /// handle means "no engine", which those functions already treat as the
     /// same falsy/defaults their null-`m_engine` branches returned.
     control_room_state: usize,
+    /// Addresses of the Rust-owned tempo map, the undo history and the
+    /// diagnostic ring this Core writes into. Captured here for the same
+    /// reason as `control_room_state` above: tempo and time-signature edits
+    /// call the very objects the engine's render path and the history read,
+    /// without a round trip through the C++ shims that used to forward them.
+    tempo_state: usize,
+    undo_state: usize,
+    log_state: usize,
     gpu_initialized: bool,
     preview_audio: std::sync::Mutex<preview_audio_runtime::PreviewAudioRuntime>,
     recording_session: std::sync::Mutex<Option<recording_session::RecordingSession>>,

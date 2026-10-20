@@ -441,7 +441,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return Err("audio engine unavailable".into());
         };
-        let packed_tempo = engine.get_tempo_events();
+        let packed_tempo = self.tempo_read_events();
         if !packed_tempo.len().is_multiple_of(3) {
             return Err("native tempo map is malformed".into());
         }
@@ -462,7 +462,7 @@ impl HirariCore {
                 ramp: false,
             });
         }
-        let packed_time_signatures = engine.get_time_signature_events();
+        let packed_time_signatures = self.tempo_read_signatures();
         if !packed_time_signatures.len().is_multiple_of(3) {
             return Err("native time signature map is malformed".into());
         }

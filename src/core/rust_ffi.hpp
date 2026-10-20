@@ -2010,6 +2010,11 @@ extern "C" double hirari_tempo_map_bpm_at_sample(const void* state, uint64_t sam
 extern "C" bool hirari_tempo_map_set_bpm(void* state, double bpm);
 extern "C" float hirari_tempo_map_get_current_bpm(const void* state);
 extern "C" void hirari_tempo_map_set_current_bpm(void* state, float bpm);
+// The engine's set_tempo entry point, implemented in Rust like every other
+// tempo edit and reached only from here because a native contract test drives
+// that method straight off the engine singleton.
+extern "C" bool hirari_tempo_edit_set_tempo(void* tempo, void* undo, const void* log,
+                                             uint64_t playhead, double sample_rate, float bpm);
 extern "C" void* hirari_routing_graph_create();
 extern "C" void hirari_routing_graph_destroy(void* state);
 extern "C" bool hirari_routing_graph_add_connection(

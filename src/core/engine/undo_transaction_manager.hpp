@@ -82,6 +82,10 @@ public:
     size_t getUndoCount() const { return hirari_undo_manager_undo_count(m_rustState); }
     size_t getRedoCount() const { return hirari_undo_manager_redo_count(m_rustState); }
 
+    /** Address of the Rust history this facade wraps, so Rust callers can
+     *  record into the same one instead of routing through here. */
+    void* rustState() const noexcept { return m_rustState; }
+
 private:
     static void invokeNative(void* context) noexcept {
         auto* callback = static_cast<std::function<void()>*>(context);

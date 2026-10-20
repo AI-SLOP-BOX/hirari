@@ -276,17 +276,17 @@ impl HirariCore {
                 "project contains an unsupported tonal scale"
             )));
         }
-        engine.clear_tempo_events(document.metadata.bpm as f64);
-        engine.clear_time_signature_events();
+        self.tempo_clear_events(document.metadata.bpm as f64);
+        self.tempo_clear_signatures();
         for event in &document.tempo_events {
-            if !engine.set_tempo_event(event.beat, event.bpm, event.ramp) {
+            if !self.tempo_write_event(event.beat, event.bpm, event.ramp) {
                 return Err(rollback_error(anyhow::anyhow!(
                     "loaded project contains an invalid tempo event"
                 )));
             }
         }
         for event in &document.time_signature_events {
-            if !engine.set_time_signature_event(event.beat, event.numerator, event.denominator) {
+            if !self.tempo_write_signature(event.beat, event.numerator, event.denominator) {
                 return Err(rollback_error(anyhow::anyhow!(
                     "loaded project contains an invalid time signature event"
                 )));

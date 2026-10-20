@@ -61,10 +61,16 @@ impl HirariCore {
         engine_ref.clear_undo_history();
 
         let control_room_state = engine_ref.control_room_state();
+        let tempo_state = engine_ref.tempo_state();
+        let undo_state = engine_ref.undo_state();
+        let log_state = engine_ref.log_state();
 
         Ok(Self {
             engine,
             control_room_state,
+            tempo_state,
+            undo_state,
+            log_state,
             gpu_initialized,
             preview_audio: std::sync::Mutex::new(preview_audio_runtime::PreviewAudioRuntime::new()),
             recording_session: std::sync::Mutex::new(None),

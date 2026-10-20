@@ -138,21 +138,11 @@ pub mod ffi {
         fn get_playhead(self: &AudioEngine) -> u64;
         fn samples_to_beats(self: &AudioEngine, samples: u64) -> f64;
         fn beats_to_samples(self: &AudioEngine, beats: f64) -> u64;
-        fn get_tempo_events(self: &AudioEngine) -> Vec<f64>;
-        fn get_time_signature_events(self: &AudioEngine) -> Vec<f64>;
-        fn set_time_signature_event(
-            self: &AudioEngine,
-            beat: f64,
-            numerator: u8,
-            denominator: u8,
-        ) -> bool;
-        fn remove_time_signature_event(self: &AudioEngine, beat: f64) -> bool;
-        fn clear_time_signature_events(self: &AudioEngine);
-        fn clear_tempo_events(self: &AudioEngine, initial_bpm: f64);
-        fn set_tempo_event(self: &AudioEngine, beat: f64, bpm: f64, ramp: bool) -> bool;
-        fn set_tempo_transition_event(self: &AudioEngine, beat: f64, bpm: f64, ramp: bool) -> bool;
-        fn remove_tempo_event(self: &AudioEngine, beat: f64) -> bool;
-        fn move_tempo_event(self: &AudioEngine, from_beat: f64, to_beat: f64) -> bool;
+        // Tempo and time-signature editing is not declared here: those
+        // operations live in hirari_core_engine_tempo.rs and work on the
+        // addresses above. These two remain on the C++ path because the
+        // native contract tests drive it directly -- and both land in the
+        // same Rust implementation.
         fn get_tempo(self: &AudioEngine) -> f32;
         fn set_tempo(self: &AudioEngine, bpm: f32) -> bool;
         fn set_master_gain(self: &AudioEngine, value: f32) -> bool;
@@ -164,6 +154,17 @@ pub mod ffi {
         // boundary: the handle itself, and the BusTrack-existence check that
         // answers against the C++-owned track list.
         fn control_room_state(self: &AudioEngine) -> usize;
+        // The tempo map, the undo history and the diagnostic ring are owned
+        // by Rust; these three hand Rust their addresses so an edit can call
+        // the same objects the engine's render path reads, without the
+        // forwarding shims that used to relay each operation out to C++ and
+        // straight back in again.
+        fn tempo_state(self: &AudioEngine) -> usize;
+        fn undo_state(self: &AudioEngine) -> usize;
+        fn log_state(self: &AudioEngine) -> usize;
+        // "The project changed" revision the UI polls. The shims that used to
+        // bump it after an edit moved into Rust along with the edit itself.
+        fn mark_project_state_changed(self: &AudioEngine);
         fn bus_track_exists(self: &AudioEngine, bus_track_id: u32) -> bool;
         fn get_master_gain(self: &AudioEngine) -> f32;
         fn set_track_volume(self: &AudioEngine, tid: u32, value: f32) -> bool;

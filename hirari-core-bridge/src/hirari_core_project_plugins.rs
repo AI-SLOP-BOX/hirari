@@ -94,8 +94,8 @@ impl HirariCore {
         }
         let mut time_signatures = Vec::new();
         let mut tempo_events = Vec::new();
-        if let Some(engine) = self.engine.as_ref() {
-            let packed = engine.get_time_signature_events();
+        if !self.engine.is_null() {
+            let packed = self.tempo_read_signatures();
             if packed.len() % 3 != 0 {
                 return Err(anyhow::anyhow!("project time-signature map is invalid"));
             }
@@ -106,7 +106,7 @@ impl HirariCore {
                     beat: event[0], numerator, denominator,
                 });
             }
-            let packed = engine.get_tempo_events();
+            let packed = self.tempo_read_events();
             if packed.len() % 3 != 0 {
                 return Err(anyhow::anyhow!("project tempo map is invalid"));
             }

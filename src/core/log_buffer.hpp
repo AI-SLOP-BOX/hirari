@@ -49,6 +49,9 @@ public:
         }
     };
 
+    /** Address of the ring Rust writes into, for Rust-side callers that log. */
+    static void* state() noexcept { return storage().state; }
+
 private:
     static constexpr size_t kStateStorageBytes = 128 * 1024;
 

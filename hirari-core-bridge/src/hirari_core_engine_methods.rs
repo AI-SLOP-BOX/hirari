@@ -64,6 +64,7 @@ fn copy_file_atomic_replace(source: &std::path::Path, destination: &std::path::P
 include!("hirari_core_engine_midi_monitor.rs");
 include!("hirari_core_engine_midi_io.rs");
 include!("hirari_core_engine_comping.rs");
+include!("hirari_core_engine_tempo.rs");
 include!("hirari_core_engine_transport.rs");
 include!("hirari_core_engine_control_room.rs");
 include!("hirari_core_engine_plugins.rs");

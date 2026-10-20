@@ -717,31 +717,3 @@ uint64_t HirariUnifiedEngine::beats_to_samples(double beats) const {
     return hirari_tempo_map_beats_to_samples(m_tempoState, beats, sampleRate);
 }
 
-std::vector<double> HirariUnifiedEngine::get_tempo_events() const {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const auto events = readTempoEvents(m_tempoState);
-    std::vector<double> packed;
-    packed.reserve(events.size() * 3);
-    for (const auto& event : events) {
-        packed.push_back(hirari_tempo_map_samples_to_beats(m_tempoState, event.samplePos, sampleRate));
-        packed.push_back(event.bpm);
-        packed.push_back(event.ramp ? 1.0 : 0.0);
-    }
-    return packed;
-}
-
-std::vector<double> HirariUnifiedEngine::get_time_signature_events() const {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const auto events = readTempoSignatures(m_tempoState);
-    std::vector<double> packed;
-    packed.reserve(events.size() * 3);
-    for (const auto& event : events) {
-        packed.push_back(hirari_tempo_map_samples_to_beats(m_tempoState, event.samplePos, sampleRate));
-        packed.push_back(static_cast<double>(event.numerator));
-        packed.push_back(static_cast<double>(event.denominator));
-    }
-    return packed;
-}
-
-void HirariUnifiedEngine::clear_time_signature_events() {
-    hirari_tempo_map_clear_time_signatures(m_tempoState);

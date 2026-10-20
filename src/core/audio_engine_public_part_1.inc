@@ -32,45 +32,12 @@ public:
     uint64_t get_playhead() const { return m_engine ? m_engine->get_playhead() : 0; }
     double samples_to_beats(uint64_t samples) const { return m_engine ? m_engine->samples_to_beats(samples) : 0.0; }
     uint64_t beats_to_samples(double beats) const { return m_engine ? m_engine->beats_to_samples(beats) : 0; }
-    rust::Vec<double> get_tempo_events() const {
-        rust::Vec<double> result;
-        if (!m_engine) return result;
-        const auto values = m_engine->get_tempo_events();
-        result.reserve(values.size());
-        for (const double value : values) result.push_back(value);
-        return result;
-    }
-    rust::Vec<double> get_time_signature_events() const {
-        rust::Vec<double> result;
-        if (!m_engine) return result;
-        const auto values = m_engine->get_time_signature_events();
-        result.reserve(values.size());
-        for (const double value : values) result.push_back(value);
-        return result;
-    }
-    bool set_time_signature_event(double beat, uint8_t numerator, uint8_t denominator) const {
-        if (!m_engine || !m_engine->set_time_signature_event(beat, numerator, denominator)) return false;
-        m_engine->mark_project_state_changed(); return true;
-    }
-    bool remove_time_signature_event(double beat) const {
-        if (!m_engine || !m_engine->remove_time_signature_event(beat)) return false;
-        m_engine->mark_project_state_changed(); return true;
-    }
-    void clear_time_signature_events() const { if (m_engine) { m_engine->clear_time_signature_events(); m_engine->mark_project_state_changed(); } }
-    void clear_tempo_events(double initial_bpm) const { if (m_engine) { m_engine->clear_tempo_events(initial_bpm); m_engine->mark_project_state_changed(); } }
-    bool set_tempo_event(double beat, double bpm, bool ramp) const {
-        if (!m_engine || !m_engine->set_tempo_event(beat, bpm, ramp)) return false;
-        m_engine->mark_project_state_changed(); return true;
-    }
-    bool set_tempo_transition_event(double beat, double bpm, bool ramp) const {
-        if (!m_engine || !m_engine->set_tempo_transition_event(beat, bpm, ramp)) return false;
-        m_engine->mark_project_state_changed(); return true;
-    }
-    bool remove_tempo_event(double beat) const { if (!m_engine || !m_engine->remove_tempo_event(beat)) return false; m_engine->mark_project_state_changed(); return true; }
-    bool move_tempo_event(double from_beat, double to_beat) const {
-        if (!m_engine || !m_engine->move_tempo_event(from_beat, to_beat)) return false;
-        m_engine->mark_project_state_changed(); return true;
-    }
+    // Tempo and time-signature editing moved to Rust with the objects it
+    // touches (hirari_core_engine_tempo.rs), which reach them through the
+    // three handles above; nothing about it is relayed through here now. The
+    // two entry points below still cross C++ on purpose: the native contract
+    // tests drive exactly this path, and the driver config reads BPM through
+    // it. Both land in the same Rust implementation.
     float get_tempo() const { return m_engine ? m_engine->get_tempo() : 120.0f; }
     bool set_tempo(float bpm) const { if (!m_engine || !m_engine->set_tempo(bpm)) return false; m_engine->mark_project_state_changed(); return true; }
     void midi_clock_tick(uint64_t timestamp) const { if (m_engine) m_engine->midi_clock_tick(timestamp); }
@@ -90,6 +57,22 @@ public:
     }
     uintptr_t control_room_state() const {
         return m_engine ? reinterpret_cast<uintptr_t>(m_engine->control_room_state()) : 0;
+    }
+    // Addresses of the Rust-owned tempo map, undo history and diagnostic ring.
+    // Rust reads them once at construction; from then on an edit reaches those
+    // objects directly instead of coming back through these shims. A zero means
+    // "no engine", which is the same branch these shims used to take themselves.
+    uintptr_t tempo_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->tempo_state()) : 0;
+    }
+    uintptr_t undo_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->undo_state()) : 0;
+    }
+    uintptr_t log_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->log_state()) : 0;
+    }
+    void mark_project_state_changed() const {
+        if (m_engine) m_engine->mark_project_state_changed();
     }
     bool bus_track_exists(uint32_t busTrackId) const {
         return m_engine && m_engine->bus_track_exists(busTrackId);

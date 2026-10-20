@@ -132,30 +132,22 @@ impl HirariCore {
             .map_or(0, |e| e.beats_to_samples(beats))
     }
     pub fn get_tempo_events(&self) -> Vec<f64> {
-        self.engine
-            .as_ref()
-            .map_or_else(Vec::new, |e| e.get_tempo_events().into_iter().collect())
+        self.tempo_read_events()
     }
     pub fn get_time_signature_events(&self) -> Vec<f64> {
-        self.engine.as_ref().map_or_else(Vec::new, |e| {
-            e.get_time_signature_events().into_iter().collect()
-        })
+        self.tempo_read_signatures()
     }
     pub fn set_time_signature_event(&self, beat: f64, numerator: u8, denominator: u8) -> bool {
         if !beat.is_finite() || beat < 0.0 {
             return false;
         }
-        self.engine
-            .as_ref()
-            .is_some_and(|e| e.set_time_signature_event(beat, numerator, denominator))
+        self.tempo_write_signature(beat, numerator, denominator)
     }
     pub fn remove_time_signature_event(&self, beat: f64) -> bool {
         if !beat.is_finite() || beat <= 0.0 {
             return false;
         }
-        self.engine
-            .as_ref()
-            .is_some_and(|e| e.remove_time_signature_event(beat))
+        self.tempo_erase_signature(beat)
     }
     pub fn set_time_signature_event_diagnostic_json(
         &self,
@@ -196,10 +188,7 @@ impl HirariCore {
         if !beat.is_finite() || beat < 0.0 || !bpm.is_finite() {
             return false;
         }
-        let changed = self
-            .engine
-            .as_ref()
-            .is_some_and(|e| e.set_tempo_event(beat, bpm, ramp));
+        let changed = self.tempo_write_event(beat, bpm, ramp);
         if changed {
             self.publish_production_event(
                 crate::production_events::ProductionEvent::TempoMapChanged,
@@ -211,10 +200,7 @@ impl HirariCore {
         if !beat.is_finite() || beat < 0.0 || !bpm.is_finite() || !(20.0..=300.0).contains(&bpm) {
             return false;
         }
-        let changed = self
-            .engine
-            .as_ref()
-            .is_some_and(|engine| engine.set_tempo_transition_event(beat, bpm, ramp));
+        let changed = self.tempo_write_transition(beat, bpm, ramp);
         if changed {
             self.publish_production_event(
                 crate::production_events::ProductionEvent::TempoMapChanged,
@@ -246,10 +232,7 @@ impl HirariCore {
         if !beat.is_finite() || beat <= 0.0 {
             return false;
         }
-        let changed = self
-            .engine
-            .as_ref()
-            .is_some_and(|e| e.remove_tempo_event(beat));
+        let changed = self.tempo_erase_event(beat);
         if changed {
             self.publish_production_event(
                 crate::production_events::ProductionEvent::TempoMapChanged,
@@ -278,10 +261,7 @@ impl HirariCore {
         if !from_beat.is_finite() || !to_beat.is_finite() || from_beat <= 0.0 || to_beat <= 0.0 {
             return false;
         }
-        let changed = self
-            .engine
-            .as_ref()
-            .is_some_and(|e| e.move_tempo_event(from_beat, to_beat));
+        let changed = self.tempo_move_event(from_beat, to_beat);
         if changed {
             self.publish_production_event(
                 crate::production_events::ProductionEvent::TempoMapChanged,
@@ -290,13 +270,13 @@ impl HirariCore {
         changed
     }
     pub fn get_tempo(&self) -> f32 {
-        self.engine.as_ref().map_or(0.0, |e| e.get_tempo())
+        self.tempo_read()
     }
     pub fn set_tempo(&self, bpm: f32) -> bool {
         if !bpm.is_finite() {
             return false;
         }
-        self.engine.as_ref().is_some_and(|e| e.set_tempo(bpm))
+        self.tempo_write(bpm)
     }
     pub fn set_tempo_diagnostic_json(&self, bpm: f32) -> String {
         if !bpm.is_finite() {

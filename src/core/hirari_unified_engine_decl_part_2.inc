@@ -18,16 +18,8 @@
     double get_playhead_beats() const;
     double samples_to_beats(uint64_t samples) const;
     uint64_t beats_to_samples(double beats) const;
-    std::vector<double> get_tempo_events() const;
-    std::vector<double> get_time_signature_events() const;
-    void clear_time_signature_events();
-    bool set_time_signature_event(double beat, uint8_t numerator, uint8_t denominator);
-    bool remove_time_signature_event(double beat);
-    void clear_tempo_events(double initial_bpm);
-    bool set_tempo_event(double beat, double bpm, bool ramp);
-    bool set_tempo_transition_event(double beat, double bpm, bool ramp);
-    bool remove_tempo_event(double beat);
-    bool move_tempo_event(double from_beat, double to_beat);
+    // Tempo and time-signature editing moved to Rust; only these two reads
+    // survive here, for the driver config and the native contract test.
     float get_tempo() const;
     bool set_tempo(float bpm);
     bool add_marker(uint64_t sample, std::string_view name, uint32_t color) { return m_arrangement.upsertMarker({sample, std::string(name), color}); }
@@ -49,6 +41,15 @@
     void set_midi_clock_rate(double bpm) noexcept { m_externalSync.setClockRate(bpm); }
     bool set_master_gain(float value);
     void* control_room_state() const noexcept { return m_controlRoomState; }
+    // Rust owns the tempo map, the undo history and the diagnostic ring; these
+    // hand those addresses to Rust callers so an edit can work on the very
+    // objects this engine's render path and history read, instead of crossing
+    // into C++ only to be sent straight back.
+    void* tempo_state() const noexcept { return m_tempoState; }
+    void* undo_state() const noexcept { return m_undoManager.rustState(); }
+    void* log_state() const noexcept {
+        return ::Hirari::Core::Diagnostics::LogBuffer::state();
+    }
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;
         std::lock_guard<std::mutex> lock(m_tracksMutex);
