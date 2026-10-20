@@ -11,12 +11,15 @@
 
 use std::ffi::c_char;
 
-use crate::audio_note_curve::{hirari_audio_note_curve_component_anchor, HirariAudioNoteAnchor};
+use crate::audio_note_curve::{
+    hirari_audio_note_curve_component_anchor, hirari_audio_note_curve_move_anchor,
+    HirariAudioNoteAnchor,
+};
 use crate::vari_audio::{
     hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_remove,
-    hirari_region_vari_audio_store_upsert_anchor, hirari_region_vari_audio_store_warp,
-    vari_store_clone, vari_store_release, vari_store_restore, vari_store_view,
-    HirariRegionVariAudioStore,
+    hirari_region_vari_audio_store_upsert, hirari_region_vari_audio_store_upsert_anchor,
+    hirari_region_vari_audio_store_warp, vari_store_clone, vari_store_release, vari_store_restore,
+    vari_store_view, HirariAudioNoteSegment, HirariRegionVariAudioStore,
 };
 use std::os::raw::c_void;
 use std::ptr;
@@ -892,6 +895,225 @@ fn note_warp_with(
     )
 }
 
+#[repr(C)]
+struct SegmentContext {
+    start: f64,
+    end: f64,
+    pitch_cents: f64,
+    formant_cents: f64,
+}
+
+unsafe extern "C" fn mutate_segment(
+    context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let context = &*(context as *const SegmentContext);
+    // Re-editing the same span keeps its detected pitch and curve anchors, the
+    // way the C++ version reused the existing segment before overwriting the
+    // offsets.
+    let existing = vari_store_view(store, context.start)
+        .filter(|view| (view.end - context.end).abs() < 1e-9);
+    let (detected_pitch, anchors) = match existing {
+        Some(view) => (view.detected_pitch, view.anchors),
+        None => (0.0, Vec::new()),
+    };
+    let segment = HirariAudioNoteSegment {
+        start_seconds: context.start,
+        end_seconds: context.end,
+        detected_pitch_cents: detected_pitch,
+        pitch_offset_cents: context.pitch_cents.clamp(-4800.0, 4800.0),
+        formant_offset_cents: context.formant_cents.clamp(-2400.0, 2400.0),
+    };
+    hirari_region_vari_audio_store_upsert(store, segment, anchors.as_ptr(), anchors.len())
+}
+
+#[repr(C)]
+struct MoveAnchorContext {
+    segment_start: f64,
+    old_position: f64,
+    new_position: f64,
+    value_cents: f64,
+    formant: bool,
+}
+
+unsafe extern "C" fn mutate_move_anchor(
+    context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let context = &*(context as *const MoveAnchorContext);
+    let Some(view) = vari_store_view(store, context.segment_start) else {
+        return false;
+    };
+    if context.new_position < view.start || context.new_position > view.end {
+        return false;
+    }
+    let mut anchors = view.anchors;
+    let moved = hirari_audio_note_curve_move_anchor(
+        anchors.as_mut_ptr(),
+        anchors.len(),
+        view.start,
+        view.end,
+        context.old_position,
+        context.new_position,
+        context.value_cents,
+        if context.formant { 1 } else { 0 },
+        view.pitch_offset,
+        view.formant_offset,
+    );
+    if moved > anchors.len() {
+        return false;
+    }
+    anchors.truncate(moved);
+    let segment = HirariAudioNoteSegment {
+        start_seconds: view.start,
+        end_seconds: view.end,
+        detected_pitch_cents: view.detected_pitch,
+        pitch_offset_cents: view.pitch_offset,
+        formant_offset_cents: view.formant_offset,
+    };
+    hirari_region_vari_audio_store_upsert(store, segment, anchors.as_ptr(), anchors.len())
+}
+
+fn note_segment_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start: f64,
+    end: f64,
+    pitch_cents: f64,
+    formant_cents: f64,
+) -> bool {
+    if !start.is_finite()
+        || !end.is_finite()
+        || end <= start
+        || end - start > 24.0 * 60.0
+        || !pitch_cents.is_finite()
+        || !formant_cents.is_finite()
+        || pitch_cents.abs() > 4800.0
+        || formant_cents.abs() > 2400.0
+    {
+        return false;
+    }
+    let name = note_action_name("Edit Audio Pitch Segments", track_id, region_id);
+    let mut context = SegmentContext {
+        start,
+        end,
+        pitch_cents,
+        formant_cents,
+    };
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        &name,
+        &mut context as *mut SegmentContext as *mut c_void,
+        mutate_segment,
+        true,
+    )
+}
+
+fn note_move_anchor_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    old_position: f64,
+    new_position: f64,
+    value_cents: f64,
+    formant: bool,
+) -> bool {
+    let max_cents = if formant { 2400.0 } else { 4800.0 };
+    if !segment_start.is_finite()
+        || segment_start < 0.0
+        || !old_position.is_finite()
+        || old_position < 0.0
+        || !new_position.is_finite()
+        || new_position < 0.0
+        || !value_cents.is_finite()
+        || value_cents.abs() > max_cents
+    {
+        return false;
+    }
+    let prefix = if formant {
+        "Move Audio Formant Anchor"
+    } else {
+        "Move Audio Pitch Anchor"
+    };
+    let name = note_action_name(prefix, track_id, region_id);
+    let mut context = MoveAnchorContext {
+        segment_start,
+        old_position,
+        new_position,
+        value_cents,
+        formant,
+    };
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        &name,
+        &mut context as *mut MoveAnchorContext as *mut c_void,
+        mutate_move_anchor,
+        true,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_segment(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start: f64,
+    end: f64,
+    pitch_cents: f64,
+    formant_cents: f64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_segment_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        start,
+        end,
+        pitch_cents,
+        formant_cents,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_move_anchor(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    old_position: f64,
+    new_position: f64,
+    value_cents: f64,
+    formant: bool,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_move_anchor_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        segment_start,
+        old_position,
+        new_position,
+        value_cents,
+        formant,
+    )
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_edit_note_anchor(
     host: *mut c_void,
@@ -1026,9 +1248,9 @@ mod tests {
 
 use crate::vari_audio::{
     hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_remove,
-    hirari_region_vari_audio_store_upsert_anchor, hirari_region_vari_audio_store_warp,
-    vari_store_clone, vari_store_release, vari_store_restore, vari_store_view,
-    HirariRegionVariAudioStore,
+    hirari_region_vari_audio_store_upsert, hirari_region_vari_audio_store_upsert_anchor,
+    hirari_region_vari_audio_store_warp, vari_store_clone, vari_store_release, vari_store_restore,
+    vari_store_view, HirariAudioNoteSegment, HirariRegionVariAudioStore,
 };
 use crate::audio_note_curve::{
     hirari_audio_note_curve_component_anchor, HirariAudioNoteAnchor,
@@ -1371,5 +1593,92 @@ use crate::audio_note_curve::{
         assert!(!note_anchor_with(&ops, host, 1, 2, 0.0, 0.5, 5000.0, 0.0));
         assert!(!note_warp_with(&ops, host, 1, 2, 0.0, 1.0, 1.0));
         assert!(fake().lock().unwrap().undo.is_empty());
+    }
+
+    fn store_with_segment(detected: f64, anchor_position: f64) -> *mut HirariRegionVariAudioStore {
+        use crate::vari_audio::{
+            hirari_region_vari_audio_store_new, hirari_region_vari_audio_store_upsert,
+            HirariAudioNoteSegment,
+        };
+
+        let store = unsafe { hirari_region_vari_audio_store_new() };
+        let segment = HirariAudioNoteSegment {
+            start_seconds: 0.0,
+            end_seconds: 1.0,
+            detected_pitch_cents: detected,
+            pitch_offset_cents: 0.0,
+            formant_offset_cents: 0.0,
+        };
+        let anchor = HirariAudioNoteAnchor {
+            position_seconds: anchor_position,
+            pitch_cents: 50.0,
+            formant_cents: 0.0,
+        };
+        assert!(unsafe { hirari_region_vari_audio_store_upsert(store, segment, &anchor, 1) });
+        store
+    }
+
+    #[test]
+    fn note_segment_edit_keeps_the_detected_pitch_and_curve() {
+        use crate::vari_audio::{hirari_region_vari_audio_store_get, vari_store_release};
+
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState::default());
+        let store = store_with_segment(42.0, 0.5);
+        fake().lock().unwrap().note_store = store as usize;
+
+        assert!(note_segment_with(&ops, host, 1, 2, 0.0, 1.0, 100.0, -30.0));
+
+        let mut stored = crate::vari_audio::HirariAudioNoteSegment::default();
+        assert!(unsafe { hirari_region_vari_audio_store_get(store, 0, &mut stored) });
+        assert_eq!(stored.detected_pitch_cents, 42.0);
+        assert_eq!(stored.pitch_offset_cents, 100.0);
+        assert_eq!(stored.formant_offset_cents, -30.0);
+        assert_eq!(unsafe { crate::vari_audio::vari_store_view(store, 0.0) }.unwrap().anchors.len(), 1);
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.undo_name, "Edit Audio Pitch Segments 1:2");
+        assert!(guard.coalesce);
+        let undo = guard.undo[0].blob as *mut HirariRegionVariAudioStore;
+        let redo = guard.redo[0].blob as *mut HirariRegionVariAudioStore;
+        drop(guard);
+        unsafe {
+            vari_store_release(undo);
+            vari_store_release(redo);
+            vari_store_release(store);
+        }
+        fake().lock().unwrap().note_store = 0;
+    }
+
+    #[test]
+    fn note_move_anchor_repositions_the_anchor() {
+        use crate::vari_audio::vari_store_release;
+
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState::default());
+        let store = store_with_segment(0.0, 0.5);
+        fake().lock().unwrap().note_store = store as usize;
+
+        assert!(note_move_anchor_with(&ops, host, 1, 2, 0.0, 0.5, 0.8, 70.0, false));
+        let view = unsafe { crate::vari_audio::vari_store_view(store, 0.0) }.unwrap();
+        assert_eq!(view.anchors.len(), 1);
+        assert!((view.anchors[0].position_seconds - 0.8).abs() < 1e-9);
+        assert!((view.anchors[0].pitch_cents - 70.0).abs() < 1e-9);
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.undo_name, "Move Audio Pitch Anchor 1:2");
+        let undo = guard.undo[0].blob as *mut HirariRegionVariAudioStore;
+        let redo = guard.redo[0].blob as *mut HirariRegionVariAudioStore;
+        drop(guard);
+        unsafe {
+            vari_store_release(undo);
+            vari_store_release(redo);
+            vari_store_release(store);
+        }
+        fake().lock().unwrap().note_store = 0;
     }
 }

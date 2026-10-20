@@ -223,47 +223,8 @@ bool HirariUnifiedEngine::set_region_pitch_semitones(uint32_t tid, uint32_t rid,
 bool HirariUnifiedEngine::set_region_audio_note_segment(
     uint32_t tid, uint32_t rid, double startSeconds, double endSeconds,
     double pitchOffsetCents, double formantOffsetCents) {
-    if (!std::isfinite(startSeconds) || !std::isfinite(endSeconds) ||
-        endSeconds <= startSeconds || endSeconds - startSeconds > 24.0 * 60.0 ||
-        !std::isfinite(pitchOffsetCents) || !std::isfinite(formantOffsetCents) ||
-        std::abs(pitchOffsetCents) > hirari::limits::kMaxPitchCents || std::abs(formantOffsetCents) > hirari::limits::kMaxFormantCents) {
-        return false;
-    }
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() == tid) { target = track; break; }
-        }
-    }
-    if (!target) return false;
-    std::vector<::hirari::editing::AudioNoteSegment> before;
-    if (!target->copyAudioNoteSegments(rid, before)) return false;
-    ::hirari::editing::AudioNoteSegment segment;
-    segment.startSeconds = startSeconds;
-    segment.endSeconds = endSeconds;
-    const auto existing = std::find_if(before.begin(), before.end(),
-        [startSeconds, endSeconds](const auto& current) {
-            return std::abs(current.startSeconds - startSeconds) < 1e-9 &&
-                   std::abs(current.endSeconds - endSeconds) < 1e-9;
-        });
-    if (existing != before.end()) segment = *existing;
-    segment.startSeconds = startSeconds;
-    segment.endSeconds = endSeconds;
-    segment.setPitchOffset(pitchOffsetCents);
-    segment.setFormantOffset(formantOffsetCents);
-    if (!target->upsertAudioNoteSegment(rid, std::move(segment))) return false;
-    std::vector<::hirari::editing::AudioNoteSegment> after;
-    if (!target->copyAudioNoteSegments(rid, after)) return false;
-    const auto apply = [target, rid](const auto& segments) {
-        (void)target->setAudioNoteSegments(rid, segments);
-    };
-    const auto actionName = "Edit Audio Pitch Segments " +
-        std::to_string(tid) + ":" + std::to_string(rid);
-    m_undoManager.recordAppliedAction(
-        actionName, [apply, before] { apply(before); },
-        [apply, after] { apply(after); }, true);
-    return true;
+    return hirari_region_edit_note_segment(this, tid, rid, startSeconds, endSeconds,
+                                           pitchOffsetCents, formantOffsetCents);
 }
 
 bool HirariUnifiedEngine::set_region_audio_note_anchor(
@@ -291,48 +252,9 @@ bool HirariUnifiedEngine::move_region_audio_note_anchor(
     uint32_t tid, uint32_t rid, double segmentStartSeconds,
     double oldPositionSeconds, double newPositionSeconds,
     double valueCents, bool editFormant) {
-    const double maxCents = editFormant ? hirari::limits::kMaxFormantCents : hirari::limits::kMaxPitchCents;
-    if (!std::isfinite(segmentStartSeconds) || segmentStartSeconds < 0.0 ||
-        !std::isfinite(oldPositionSeconds) || oldPositionSeconds < 0.0 ||
-        !std::isfinite(newPositionSeconds) || newPositionSeconds < 0.0 ||
-        !std::isfinite(valueCents) || std::abs(valueCents) > maxCents) return false;
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() == tid) { target = track; break; }
-        }
-    }
-    if (!target) return false;
-    std::vector<::hirari::editing::AudioNoteSegment> before;
-    if (!target->copyAudioNoteSegments(rid, before)) return false;
-    auto segment = std::find_if(before.begin(), before.end(), [&](const auto& item) {
-        return std::abs(item.startSeconds - segmentStartSeconds) < 1e-9;
-    });
-    if (segment == before.end() || newPositionSeconds < segment->startSeconds ||
-        newPositionSeconds > segment->endSeconds) return false;
-    auto movedAnchors = segment->anchors;
-    const size_t movedCount = hirari_audio_note_curve_move_anchor(
-        movedAnchors.data(), movedAnchors.size(), segment->startSeconds, segment->endSeconds,
-        oldPositionSeconds, newPositionSeconds, valueCents, editFormant ? 1 : 0,
-        segment->pitchOffsetCents, segment->formantOffsetCents);
-    if (movedCount > movedAnchors.size()) return false;
-    movedAnchors.resize(movedCount);
-    segment->anchors = std::move(movedAnchors);
-    segment->rebuildPitchRatioIntegral();
-    if (!target->upsertAudioNoteSegment(rid, *segment)) return false;
-    std::vector<::hirari::editing::AudioNoteSegment> after;
-    if (!target->copyAudioNoteSegments(rid, after)) return false;
-    const auto apply = [target, rid](const auto& segments) {
-        (void)target->setAudioNoteSegments(rid, segments);
-    };
-    const auto actionName = std::string(editFormant ? "Move Audio Formant Anchor " :
-                                                    "Move Audio Pitch Anchor ") +
-        std::to_string(tid) + ":" + std::to_string(rid);
-    m_undoManager.recordAppliedAction(
-        actionName, [apply, before] { apply(before); },
-        [apply, after] { apply(after); }, true);
-    return true;
+    return hirari_region_edit_note_move_anchor(this, tid, rid, segmentStartSeconds,
+                                               oldPositionSeconds, newPositionSeconds,
+                                               valueCents, editFormant);
 }
 
 bool HirariUnifiedEngine::clear_region_audio_note_segments(uint32_t tid, uint32_t rid) {

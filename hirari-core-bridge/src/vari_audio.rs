@@ -173,6 +173,7 @@ pub struct HirariRegionVariAudioStore {
 pub(crate) struct VariSegmentView {
     pub start: f64,
     pub end: f64,
+    pub detected_pitch: f64,
     pub pitch_offset: f64,
     pub formant_offset: f64,
     pub anchors: Vec<HirariAudioNoteAnchor>,
@@ -222,6 +223,7 @@ pub(crate) unsafe fn vari_store_view(
     Some(VariSegmentView {
         start: segment.value.start_seconds,
         end: segment.value.end_seconds,
+        detected_pitch: segment.value.detected_pitch_cents,
         pitch_offset: segment.value.pitch_offset_cents,
         formant_offset: segment.value.formant_offset_cents,
         anchors: segment.anchors.clone(),

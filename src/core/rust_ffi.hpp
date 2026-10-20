@@ -656,6 +656,13 @@ extern "C" bool hirari_region_edit_note_formant_anchor(void* host, uint32_t trac
 extern "C" bool hirari_region_edit_note_remove(void* host, uint32_t trackId, uint32_t regionId,
                                                 double segmentStart);
 extern "C" bool hirari_region_edit_note_clear(void* host, uint32_t trackId, uint32_t regionId);
+extern "C" bool hirari_region_edit_note_segment(void* host, uint32_t trackId, uint32_t regionId,
+                                                 double start, double end, double pitchCents,
+                                                 double formantCents);
+extern "C" bool hirari_region_edit_note_move_anchor(void* host, uint32_t trackId,
+                                                     uint32_t regionId, double segmentStart,
+                                                     double oldPosition, double newPosition,
+                                                     double valueCents, bool editFormant);
 extern "C" bool hirari_region_edit_note_warp(void* host, uint32_t trackId, uint32_t regionId,
                                               double segmentStart, double newStart,
                                               double newEnd);
