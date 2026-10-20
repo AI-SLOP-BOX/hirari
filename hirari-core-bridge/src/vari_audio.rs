@@ -168,6 +168,66 @@ pub struct HirariRegionVariAudioStore {
     segments: Vec<Segment>,
 }
 
+/// What the edit bridge needs to compute a curve anchor without exposing the
+/// table's internals: the segment bounds, its offsets and a copy of its anchors.
+pub(crate) struct VariSegmentView {
+    pub start: f64,
+    pub end: f64,
+    pub pitch_offset: f64,
+    pub formant_offset: f64,
+    pub anchors: Vec<HirariAudioNoteAnchor>,
+}
+
+/// Clones a table into a fresh handle. The caller owns the result and releases
+/// it with `hirari_region_vari_audio_store_clear`.
+pub(crate) unsafe fn vari_store_clone(
+    store: *mut HirariRegionVariAudioStore,
+) -> *mut HirariRegionVariAudioStore {
+    if store.is_null() {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new(HirariRegionVariAudioStore {
+        segments: (*store).segments.clone(),
+    }))
+}
+
+pub(crate) unsafe fn vari_store_restore(
+    destination: *mut HirariRegionVariAudioStore,
+    snapshot: *mut HirariRegionVariAudioStore,
+) -> bool {
+    if destination.is_null() || snapshot.is_null() {
+        return false;
+    }
+    (*destination).segments = (*snapshot).segments.clone();
+    true
+}
+
+pub(crate) unsafe fn vari_store_release(store: *mut HirariRegionVariAudioStore) {
+    if !store.is_null() {
+        let _ = Box::from_raw(store);
+    }
+}
+
+pub(crate) unsafe fn vari_store_view(
+    store: *mut HirariRegionVariAudioStore,
+    segment_start: f64,
+) -> Option<VariSegmentView> {
+    if store.is_null() {
+        return None;
+    }
+    let segment = (*store)
+        .segments
+        .iter()
+        .find(|segment| (segment.value.start_seconds - segment_start).abs() < 1e-9)?;
+    Some(VariSegmentView {
+        start: segment.value.start_seconds,
+        end: segment.value.end_seconds,
+        pitch_offset: segment.value.pitch_offset_cents,
+        formant_offset: segment.value.formant_offset_cents,
+        anchors: segment.anchors.clone(),
+    })
+}
+
 /// Immutable rendered snapshot prepared on the control thread and read
 /// on the audio thread. Curve views point into the snapshot's own
 /// backing arrays and are stable for its lifetime.

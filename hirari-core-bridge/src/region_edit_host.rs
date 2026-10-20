@@ -10,6 +10,14 @@
 //! reachable from the audio callback.
 
 use std::ffi::c_char;
+
+use crate::audio_note_curve::{hirari_audio_note_curve_component_anchor, HirariAudioNoteAnchor};
+use crate::vari_audio::{
+    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_remove,
+    hirari_region_vari_audio_store_upsert_anchor, hirari_region_vari_audio_store_warp,
+    vari_store_clone, vari_store_release, vari_store_restore, vari_store_view,
+    HirariRegionVariAudioStore,
+};
 use std::os::raw::c_void;
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
@@ -85,8 +93,17 @@ pub struct HirariRegionEditPayload {
     pub track_id: u32,
     pub region_id: u32,
     pub op: i32,
+    /// Packed payload, or an owned note-table snapshot handle for
+    /// `HIRARI_REGION_EDIT_NOTE_STORE`. The host takes ownership in that case.
+    pub blob: *const u8,
+    pub blob_len: usize,
     pub state: HirariRegionState,
 }
+
+// The payload only borrows a buffer (or hands over an opaque snapshot handle)
+// for the duration of one host call; Rust never dereferences it.
+unsafe impl Send for HirariRegionEditPayload {}
+unsafe impl Sync for HirariRegionEditPayload {}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -104,6 +121,15 @@ pub type HirariRegionApplyFn =
     unsafe extern "C" fn(*mut c_void, *const HirariRegionEditPayload) -> bool;
 pub type HirariRegionListGroupFn =
     unsafe extern "C" fn(*mut c_void, u32, *mut HirariRegionGroupMember, usize) -> usize;
+pub type HirariRegionNoteEditFn =
+    unsafe extern "C" fn(*mut c_void, *mut HirariRegionVariAudioStore) -> bool;
+pub type HirariRegionNoteEditHostFn = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    u32,
+    *mut c_void,
+    HirariRegionNoteEditFn,
+) -> bool;
 pub type HirariRegionRecordUndoFn = unsafe extern "C" fn(
     *mut c_void,
     *const c_char,
@@ -111,6 +137,7 @@ pub type HirariRegionRecordUndoFn = unsafe extern "C" fn(
     usize,
     *const HirariRegionEditPayload,
     usize,
+    bool,
 );
 
 #[repr(C)]
@@ -120,6 +147,7 @@ pub struct HirariRegionHostOps {
     pub apply_edit: Option<HirariRegionApplyFn>,
     pub list_sync_group: Option<HirariRegionListGroupFn>,
     pub record_undo: Option<HirariRegionRecordUndoFn>,
+    pub note_edit: Option<HirariRegionNoteEditHostFn>,
 }
 
 // The table only holds function pointers supplied by the native engine; it
@@ -216,9 +244,10 @@ fn edited_state(
 fn record(
     ops: &HirariRegionHostOps,
     host: *mut c_void,
-    name: &'static [u8],
+    name: &[u8],
     undo: &[HirariRegionEditPayload],
     redo: &[HirariRegionEditPayload],
+    coalesce: bool,
 ) {
     if let Some(record_undo) = ops.record_undo {
         unsafe {
@@ -229,6 +258,7 @@ fn record(
                 undo.len(),
                 redo.as_ptr(),
                 redo.len(),
+                coalesce,
             );
         }
     }
@@ -278,7 +308,7 @@ fn edit_scalar_with(
         return false;
     }
     if let Some(name) = field_name(field) {
-        record(ops, host, name, &[before_payload], &[after_payload]);
+        record(ops, host, name, &[before_payload], &[after_payload], true);
     }
     true
 }
@@ -294,6 +324,7 @@ fn state_payload(
         region_id,
         op,
         state,
+        ..Default::default()
     }
 }
 
@@ -338,7 +369,7 @@ fn edit_move_with(
     if !unsafe { apply(host, &redo) } {
         return false;
     }
-    record(ops, host, b"Move Region\0", &[before], &[redo]);
+    record(ops, host, b"Move Region\0", &[before], &[redo], true);
     true
 }
 
@@ -423,7 +454,7 @@ fn edit_move_sync_group_with(
         // C++ loop ignored apply failures too, so the group stays consistent.
         unsafe { apply(host, payload) };
     }
-    record(ops, host, b"Move Region Sync Group\0", &undo, &redo);
+    record(ops, host, b"Move Region Sync Group\0", &undo, &redo, true);
     true
 }
 
@@ -469,10 +500,539 @@ pub unsafe extern "C" fn hirari_region_edit_move_sync_group(
     edit_move_sync_group_with(&ops, host, track_id, region_id, start)
 }
 
+
+/// Payload op: restore the note table from an owned Rust snapshot handle.
+pub const HIRARI_REGION_EDIT_NOTE_STORE: i32 = 11;
+
+/// One note-table mutation plus the snapshots the trampoline collects while
+/// the host holds the region lock.
+struct NoteEditContext {
+    inner: *mut c_void,
+    mutate: HirariRegionNoteEditFn,
+    before: *mut HirariRegionVariAudioStore,
+    after: *mut HirariRegionVariAudioStore,
+}
+
+unsafe extern "C" fn note_edit_trampoline(
+    context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let context = &mut *(context as *mut NoteEditContext);
+    if store.is_null() {
+        return false;
+    }
+    context.before = vari_store_clone(store);
+    if !(context.mutate)(context.inner, store) {
+        return false;
+    }
+    context.after = vari_store_clone(store);
+    true
+}
+
+fn note_store_payload(
+    track_id: u32,
+    region_id: u32,
+    snapshot: *mut HirariRegionVariAudioStore,
+) -> HirariRegionEditPayload {
+    HirariRegionEditPayload {
+        track_id,
+        region_id,
+        op: HIRARI_REGION_EDIT_NOTE_STORE,
+        blob: snapshot as *const u8,
+        ..Default::default()
+    }
+}
+
+fn note_action_name(prefix: &str, track_id: u32, region_id: u32) -> Vec<u8> {
+    let mut name = format!("{prefix} {track_id}:{region_id}").into_bytes();
+    name.push(0);
+    name
+}
+
+/// Runs `mutate` under the host's region lock, then records the before/after
+/// tables as one undo entry. The host takes ownership of both snapshots.
+fn note_edit_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    name: &[u8],
+    inner: *mut c_void,
+    mutate: HirariRegionNoteEditFn,
+    coalesce: bool,
+) -> bool {
+    let (Some(note_edit), Some(find)) = (ops.note_edit, ops.find_region) else {
+        return false;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return false;
+    }
+    let mut context = NoteEditContext {
+        inner,
+        mutate,
+        before: std::ptr::null_mut(),
+        after: std::ptr::null_mut(),
+    };
+    let applied = unsafe {
+        note_edit(
+            host,
+            track_id,
+            region_id,
+            &mut context as *mut NoteEditContext as *mut c_void,
+            note_edit_trampoline,
+        )
+    };
+    if !applied || ops.record_undo.is_none() {
+        unsafe {
+            vari_store_release(context.before);
+            vari_store_release(context.after);
+        }
+        return applied;
+    }
+    let undo = note_store_payload(track_id, region_id, context.before);
+    let redo = note_store_payload(track_id, region_id, context.after);
+    record(ops, host, name, &[undo], &[redo], coalesce);
+    true
+}
+
+#[repr(C)]
+struct AnchorContext {
+    segment_start: f64,
+    position: f64,
+    pitch_cents: f64,
+    formant_cents: f64,
+}
+
+unsafe extern "C" fn mutate_anchor(
+    context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let context = &*(context as *const AnchorContext);
+    hirari_region_vari_audio_store_upsert_anchor(
+        store,
+        context.segment_start,
+        context.position,
+        context.pitch_cents,
+        context.formant_cents,
+    )
+}
+
+#[repr(C)]
+struct ComponentContext {
+    segment_start: f64,
+    position: f64,
+    cents: f64,
+    formant: bool,
+}
+
+unsafe extern "C" fn mutate_component_anchor(
+    context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let context = &*(context as *const ComponentContext);
+    let Some(view) = vari_store_view(store, context.segment_start) else {
+        return false;
+    };
+    if context.position < view.start || context.position > view.end {
+        return false;
+    }
+    let mut anchor = HirariAudioNoteAnchor::default();
+    if !hirari_audio_note_curve_component_anchor(
+        view.anchors.as_ptr(),
+        view.anchors.len(),
+        view.start,
+        view.end,
+        context.position,
+        context.cents,
+        if context.formant { 1 } else { 0 },
+        view.pitch_offset,
+        view.formant_offset,
+        &mut anchor,
+    ) {
+        return false;
+    }
+    hirari_region_vari_audio_store_upsert_anchor(
+        store,
+        context.segment_start,
+        anchor.position_seconds,
+        anchor.pitch_cents,
+        anchor.formant_cents,
+    )
+}
+
+#[repr(C)]
+struct RemoveContext {
+    segment_start: f64,
+}
+
+unsafe extern "C" fn mutate_remove(
+    context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let context = &*(context as *const RemoveContext);
+    hirari_region_vari_audio_store_remove(store, context.segment_start)
+}
+
+unsafe extern "C" fn mutate_clear(
+    _context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    hirari_region_vari_audio_store_clear_segments(store)
+}
+
+#[repr(C)]
+struct WarpContext {
+    segment_start: f64,
+    new_start: f64,
+    new_end: f64,
+}
+
+unsafe extern "C" fn mutate_warp(
+    context: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let context = &*(context as *const WarpContext);
+    hirari_region_vari_audio_store_warp(
+        store,
+        context.segment_start,
+        context.new_start,
+        context.new_end,
+    )
+}
+
+fn note_anchor_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    position: f64,
+    pitch_cents: f64,
+    formant_cents: f64,
+) -> bool {
+    if !segment_start.is_finite()
+        || segment_start < 0.0
+        || !position.is_finite()
+        || position < 0.0
+        || !pitch_cents.is_finite()
+        || pitch_cents.abs() > 4800.0
+        || !formant_cents.is_finite()
+        || formant_cents.abs() > 2400.0
+    {
+        return false;
+    }
+    let name = note_action_name("Edit Audio Pitch Curve", track_id, region_id);
+    let mut context = AnchorContext {
+        segment_start,
+        position,
+        pitch_cents,
+        formant_cents,
+    };
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        &name,
+        &mut context as *mut AnchorContext as *mut c_void,
+        mutate_anchor,
+        true,
+    )
+}
+
+fn note_pitch_anchor_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    position: f64,
+    pitch_cents: f64,
+) -> bool {
+    if !segment_start.is_finite()
+        || segment_start < 0.0
+        || !position.is_finite()
+        || position < 0.0
+        || !pitch_cents.is_finite()
+        || pitch_cents.abs() > 4800.0
+    {
+        return false;
+    }
+    let name = note_action_name("Edit Audio Pitch Curve", track_id, region_id);
+    let mut context = ComponentContext {
+        segment_start,
+        position,
+        cents: pitch_cents,
+        formant: false,
+    };
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        &name,
+        &mut context as *mut ComponentContext as *mut c_void,
+        mutate_component_anchor,
+        true,
+    )
+}
+
+fn note_formant_anchor_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    position: f64,
+    formant_cents: f64,
+) -> bool {
+    if !segment_start.is_finite()
+        || segment_start < 0.0
+        || !position.is_finite()
+        || position < 0.0
+        || !formant_cents.is_finite()
+        || formant_cents.abs() > 2400.0
+    {
+        return false;
+    }
+    let name = note_action_name("Edit Audio Formant Curve", track_id, region_id);
+    let mut context = ComponentContext {
+        segment_start,
+        position,
+        cents: formant_cents,
+        formant: true,
+    };
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        &name,
+        &mut context as *mut ComponentContext as *mut c_void,
+        mutate_component_anchor,
+        true,
+    )
+}
+
+fn note_remove_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+) -> bool {
+    if !segment_start.is_finite() || segment_start < 0.0 {
+        return false;
+    }
+    let mut context = RemoveContext { segment_start };
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        b"Remove Audio Pitch Segment\0",
+        &mut context as *mut RemoveContext as *mut c_void,
+        mutate_remove,
+        false,
+    )
+}
+
+fn note_clear_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> bool {
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        b"Clear Audio Pitch Segments\0",
+        std::ptr::null_mut(),
+        mutate_clear,
+        false,
+    )
+}
+
+fn note_warp_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    new_start: f64,
+    new_end: f64,
+) -> bool {
+    if !segment_start.is_finite()
+        || segment_start < 0.0
+        || !new_start.is_finite()
+        || new_start < 0.0
+        || !new_end.is_finite()
+        || new_end <= new_start
+        || new_end - new_start > 24.0 * 60.0
+    {
+        return false;
+    }
+    let mut context = WarpContext {
+        segment_start,
+        new_start,
+        new_end,
+    };
+    note_edit_with(
+        ops,
+        host,
+        track_id,
+        region_id,
+        b"Warp Audio Pitch Segment\0",
+        &mut context as *mut WarpContext as *mut c_void,
+        mutate_warp,
+        false,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_anchor(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    position: f64,
+    pitch_cents: f64,
+    formant_cents: f64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_anchor_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        segment_start,
+        position,
+        pitch_cents,
+        formant_cents,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_pitch_anchor(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    position: f64,
+    pitch_cents: f64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_pitch_anchor_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        segment_start,
+        position,
+        pitch_cents,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_formant_anchor(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    position: f64,
+    formant_cents: f64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_formant_anchor_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        segment_start,
+        position,
+        formant_cents,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_remove(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_remove_with(&ops, host, track_id, region_id, segment_start)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_clear(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_clear_with(&ops, host, track_id, region_id)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_note_warp(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    segment_start: f64,
+    new_start: f64,
+    new_end: f64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    note_warp_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        segment_start,
+        new_start,
+        new_end,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_note_store_restore(
+    snapshot: *mut c_void,
+    store: *mut HirariRegionVariAudioStore,
+) -> bool {
+    vari_store_restore(store, snapshot as *mut HirariRegionVariAudioStore)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::slice;
+
+use crate::vari_audio::{
+    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_remove,
+    hirari_region_vari_audio_store_upsert_anchor, hirari_region_vari_audio_store_warp,
+    vari_store_clone, vari_store_release, vari_store_restore, vari_store_view,
+    HirariRegionVariAudioStore,
+};
+use crate::audio_note_curve::{
+    hirari_audio_note_curve_component_anchor, HirariAudioNoteAnchor,
+};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -483,6 +1043,8 @@ mod tests {
         undo: Vec<HirariRegionEditPayload>,
         redo: Vec<HirariRegionEditPayload>,
         undo_name: String,
+        coalesce: bool,
+        note_store: usize,
     }
 
     static FAKE: OnceLock<Mutex<FakeHost>> = OnceLock::new();
@@ -544,6 +1106,26 @@ mod tests {
         2
     }
 
+    unsafe extern "C" fn fake_note_edit(
+        _host: *mut c_void,
+        _track_id: u32,
+        _region_id: u32,
+        context: *mut c_void,
+        mutate: HirariRegionNoteEditFn,
+    ) -> bool {
+        let store = {
+            let guard = fake().lock().unwrap();
+            if !guard.present {
+                return false;
+            }
+            guard.note_store as *mut HirariRegionVariAudioStore
+        };
+        if store.is_null() {
+            return false;
+        }
+        unsafe { mutate(context, store) }
+    }
+
     unsafe extern "C" fn fake_record_undo(
         _host: *mut c_void,
         name: *const c_char,
@@ -551,8 +1133,10 @@ mod tests {
         undo_count: usize,
         redo: *const HirariRegionEditPayload,
         redo_count: usize,
+        coalesce: bool,
     ) {
         let mut guard = fake().lock().unwrap();
+        guard.coalesce = coalesce;
         guard.undo_name = unsafe { std::ffi::CStr::from_ptr(name) }
             .to_string_lossy()
             .into_owned();
@@ -566,6 +1150,7 @@ mod tests {
             apply_edit: Some(fake_apply),
             list_sync_group: Some(fake_list),
             record_undo: Some(fake_record_undo),
+            note_edit: Some(fake_note_edit),
         }
     }
 
@@ -726,5 +1311,65 @@ mod tests {
         assert_eq!(guard.applied[0].state.source_length, 100);
         assert_eq!(guard.undo_name, "Preserve Warp Pitch");
         drop(guard);
+    }
+
+    #[test]
+    fn note_anchor_edit_records_the_whole_table_before_and_after() {
+        use crate::vari_audio::{
+            hirari_region_vari_audio_store_new, hirari_region_vari_audio_store_upsert,
+            HirariAudioNoteSegment,
+        };
+
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 44_100,
+            ..Default::default()
+        });
+        let store = unsafe { hirari_region_vari_audio_store_new() };
+        let segment = HirariAudioNoteSegment {
+            start_seconds: 0.0,
+            end_seconds: 1.0,
+            detected_pitch_cents: 0.0,
+            pitch_offset_cents: 0.0,
+            formant_offset_cents: 0.0,
+        };
+        assert!(unsafe {
+            hirari_region_vari_audio_store_upsert(store, segment, ptr::null(), 0)
+        });
+        fake().lock().unwrap().note_store = store as usize;
+        assert!(note_anchor_with(&ops, host, 1, 2, 0.0, 0.5, 100.0, 0.0));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.undo.len(), 1);
+        assert_eq!(guard.redo.len(), 1);
+        assert_eq!(guard.undo[0].op, HIRARI_REGION_EDIT_NOTE_STORE);
+        assert_eq!(guard.redo[0].op, HIRARI_REGION_EDIT_NOTE_STORE);
+        assert!(!guard.undo[0].blob.is_null());
+        assert!(!guard.redo[0].blob.is_null());
+        assert_eq!(guard.undo_name, "Edit Audio Pitch Curve 1:2");
+        let before = guard.undo[0].blob as *mut HirariRegionVariAudioStore;
+        let after = guard.redo[0].blob as *mut HirariRegionVariAudioStore;
+        drop(guard);
+
+        unsafe {
+            crate::vari_audio::vari_store_release(before);
+            crate::vari_audio::vari_store_release(after);
+            crate::vari_audio::vari_store_release(store);
+        }
+        fake().lock().unwrap().note_store = 0;
+    }
+
+    #[test]
+    fn note_anchor_edit_rejects_out_of_range_input_before_touching_the_host() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState::default());
+
+        assert!(!note_anchor_with(&ops, host, 1, 2, 0.0, 0.5, 5000.0, 0.0));
+        assert!(!note_warp_with(&ops, host, 1, 2, 0.0, 1.0, 1.0));
+        assert!(fake().lock().unwrap().undo.is_empty());
     }
 }

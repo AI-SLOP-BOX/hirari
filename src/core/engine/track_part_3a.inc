@@ -282,6 +282,22 @@
         return it->noteEdits.copy(output);
     }
 
+    // Runs a Rust note-table mutation under the region lock and republishes.
+    // The table handle is borrowed for the duration of the callback only.
+    bool editRegionNoteStore(uint32_t regionId, void* context,
+                             HirariRegionNoteMutateFn mutate) {
+        if (!mutate || audioPitchAnalysisRunning()) return false;
+        invalidateFrozenForEdit();
+        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+        for (auto& region : m_regions) {
+            if (region.id != regionId) continue;
+            if (!mutate(context, region.noteEdits.storeHandle())) return false;
+            publishRegionSnapshot();
+            return true;
+        }
+        return false;
+    }
+
     bool beginAudioPitchAnalysis() noexcept {
         bool expected = false;
         return m_audioPitchAnalysisRunning.compare_exchange_strong(

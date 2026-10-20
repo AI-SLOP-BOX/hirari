@@ -185,6 +185,9 @@ public:
 
     bool valid() const noexcept { return static_cast<bool>(store_); }
 
+    /// Borrowed handle for the Rust edit bridge; the table stays owned here.
+    HirariRegionVariAudioStore* storeHandle() const noexcept { return store_.get(); }
+
     /// Rebuilds the immutable projection from the store. Control thread only;
     /// the audio thread reads `ranges()` / `curves()` without a lock.
     void publish() noexcept {

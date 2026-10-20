@@ -594,12 +594,18 @@ enum HirariRegionEditOp : int32_t {
     kHirariRegionEditState = 1,
     // Write the policy-controlled scalar fields in place.
     kHirariRegionEditInPlace = 2,
+    // Restore a whole note table from a Rust-owned snapshot handle.
+    kHirariRegionEditNoteStore = 11,
 };
 
 struct HirariRegionEditPayload {
     uint32_t trackId = 0;
     uint32_t regionId = 0;
     int32_t op = kHirariRegionEditInPlace;
+    // Packed payload or, for kHirariRegionEditNoteStore, an owned snapshot
+    // handle the host takes over.
+    const uint8_t* blob = nullptr;
+    size_t blobLen = 0;
     HirariRegionState state;
 };
 
@@ -611,6 +617,11 @@ struct HirariRegionGroupMember {
     bool locked = false;
 };
 
+// Runs one note-table edit while the host holds the track's region lock, then
+// publishes the snapshot. The table itself is Rust-owned, so the host never
+// interprets the mutation.
+using HirariRegionNoteMutateFn = bool (*)(void* context, HirariRegionVariAudioStore* store);
+
 struct HirariRegionHostOps {
     bool (*findRegion)(void* host, uint32_t trackId, uint32_t regionId,
                        HirariRegionState* out) = nullptr;
@@ -619,7 +630,11 @@ struct HirariRegionHostOps {
                             size_t capacity) = nullptr;
     void (*recordUndo)(void* host, const char* name,
                        const HirariRegionEditPayload* undo, size_t undoCount,
-                       const HirariRegionEditPayload* redo, size_t redoCount) = nullptr;
+                       const HirariRegionEditPayload* redo, size_t redoCount,
+                       bool coalesce) = nullptr;
+    // Runs a Rust note-table mutation under the region lock and publishes.
+    bool (*noteEdit)(void* host, uint32_t trackId, uint32_t regionId, void* context,
+                     HirariRegionNoteMutateFn mutate) = nullptr;
 };
 
 extern "C" void hirari_region_host_install(const HirariRegionHostOps* ops);
@@ -629,6 +644,24 @@ extern "C" bool hirari_region_edit_move(void* host, uint32_t trackId, uint32_t r
                                         double start);
 extern "C" bool hirari_region_edit_move_sync_group(void* host, uint32_t trackId,
                                                    uint32_t regionId, double start);
+extern "C" bool hirari_region_edit_note_anchor(void* host, uint32_t trackId, uint32_t regionId,
+                                                double segmentStart, double position,
+                                                double pitchCents, double formantCents);
+extern "C" bool hirari_region_edit_note_pitch_anchor(void* host, uint32_t trackId,
+                                                      uint32_t regionId, double segmentStart,
+                                                      double position, double pitchCents);
+extern "C" bool hirari_region_edit_note_formant_anchor(void* host, uint32_t trackId,
+                                                        uint32_t regionId, double segmentStart,
+                                                        double position, double formantCents);
+extern "C" bool hirari_region_edit_note_remove(void* host, uint32_t trackId, uint32_t regionId,
+                                                double segmentStart);
+extern "C" bool hirari_region_edit_note_clear(void* host, uint32_t trackId, uint32_t regionId);
+extern "C" bool hirari_region_edit_note_warp(void* host, uint32_t trackId, uint32_t regionId,
+                                              double segmentStart, double newStart,
+                                              double newEnd);
+// Restores `store` from a snapshot handle produced by the Rust side.
+extern "C" bool hirari_region_note_store_restore(void* snapshot,
+                                                  HirariRegionVariAudioStore* store);
 
 struct HirariRegionBlockConfig {
     uint64_t regionOffset = 0;

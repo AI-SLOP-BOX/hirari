@@ -30,6 +30,14 @@ void fillRegionHostState(const Region& region, HirariRegionState& out) {
     out.pitchPreserveWarp = region.pitchPreserveWarp;
 }
 
+// The undo registry keeps its callbacks alive for the life of the process, so
+// a note-table snapshot handed over by Rust is owned here and freed with the
+// undo entry.
+struct OwnedRegionEdit {
+    HirariRegionEditPayload payload;
+    std::shared_ptr<HirariRegionVariAudioStore> noteStore;
+};
+
 }  // namespace
 
 bool HirariUnifiedEngine::regionHostFind(void* host, uint32_t trackId, uint32_t regionId,
@@ -56,9 +64,20 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     for (auto& track : engine->m_tracks) {
         if (!track || track->getId() != payload->trackId) continue;
-        const bool applied = payload->op == kHirariRegionEditState
-            ? track->applyRegionState(payload->regionId, payload->state)
-            : track->applyRegionScalarFields(payload->regionId, payload->state);
+        bool applied = false;
+        switch (payload->op) {
+        case kHirariRegionEditState:
+            applied = track->applyRegionState(payload->regionId, payload->state);
+            break;
+        case kHirariRegionEditNoteStore:
+            applied = track->editRegionNoteStore(
+                payload->regionId, const_cast<uint8_t*>(payload->blob),
+                &hirari_region_note_store_restore);
+            break;
+        default:
+            applied = track->applyRegionScalarFields(payload->regionId, payload->state);
+            break;
+        }
         if (applied) {
             std::lock_guard<std::mutex> cacheLock(engine->m_cacheMutex);
             engine->m_peakCache.erase(payload->regionId);
@@ -92,21 +111,52 @@ size_t HirariUnifiedEngine::regionHostListSyncGroup(void* host, uint32_t group,
     return count;
 }
 
+bool HirariUnifiedEngine::regionHostNoteEdit(void* host, uint32_t trackId, uint32_t regionId,
+                                             void* context, HirariRegionNoteMutateFn mutate) {
+    if (!host || !mutate) return false;
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+    for (auto& track : engine->m_tracks) {
+        if (!track || track->getId() != trackId) continue;
+        return track->editRegionNoteStore(regionId, context, mutate);
+    }
+    return false;
+}
+
 void HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
                                                const HirariRegionEditPayload* undo,
                                                size_t undoCount,
                                                const HirariRegionEditPayload* redo,
-                                               size_t redoCount) {
+                                               size_t redoCount, bool coalesce) {
     if (!host || !name) return;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
-    std::vector<HirariRegionEditPayload> undoCopy;
-    undoCopy.reserve(undoCount);
-    for (size_t index = 0; index < undoCount; ++index) undoCopy.push_back(undo[index]);
-    std::vector<HirariRegionEditPayload> redoCopy;
-    redoCopy.reserve(redoCount);
-    for (size_t index = 0; index < redoCount; ++index) redoCopy.push_back(redo[index]);
-    auto applyAll = [host](const std::vector<HirariRegionEditPayload>& payloads) {
-        for (const auto& payload : payloads) {
+    auto capture = [](const HirariRegionEditPayload* source, size_t count) {
+        std::vector<OwnedRegionEdit> entries;
+        entries.reserve(count);
+        for (size_t index = 0; index < count; ++index) {
+            OwnedRegionEdit entry;
+            entry.payload = source[index];
+            if (source[index].op == kHirariRegionEditNoteStore && source[index].blob) {
+                auto* handle = reinterpret_cast<HirariRegionVariAudioStore*>(
+                    const_cast<uint8_t*>(source[index].blob));
+                entry.noteStore = std::shared_ptr<HirariRegionVariAudioStore>(
+                    handle, [](HirariRegionVariAudioStore* store) {
+                        hirari_region_vari_audio_store_clear(store);
+                    });
+            }
+            entries.push_back(std::move(entry));
+        }
+        return entries;
+    };
+    const auto undoCopy = capture(undo, undoCount);
+    const auto redoCopy = capture(redo, redoCount);
+    auto applyAll = [host](const std::vector<OwnedRegionEdit>& entries) {
+        for (const auto& entry : entries) {
+            HirariRegionEditPayload payload = entry.payload;
+            if (entry.noteStore) {
+                payload.blob = reinterpret_cast<const uint8_t*>(entry.noteStore.get());
+                payload.blobLen = 0;
+            }
             (void)HirariUnifiedEngine::regionHostApply(host, &payload);
         }
     };
@@ -116,7 +166,7 @@ void HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
         name,
         [applyAll, undoCopy] { applyAll(undoCopy); },
         [applyAll, redoCopy] { applyAll(redoCopy); },
-        /*coalesce=*/true);
+        coalesce);
 }
 
 namespace {
@@ -126,6 +176,7 @@ const HirariRegionHostOps kRegionEditHostOps = {
     &HirariUnifiedEngine::regionHostApply,
     &HirariUnifiedEngine::regionHostListSyncGroup,
     &HirariUnifiedEngine::regionHostRecordUndo,
+    &HirariUnifiedEngine::regionHostNoteEdit,
 };
 
 [[maybe_unused]] const bool kRegionEditHostInstalled = [] {

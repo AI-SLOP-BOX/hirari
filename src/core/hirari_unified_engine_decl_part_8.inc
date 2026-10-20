@@ -168,9 +168,12 @@ public:
     static bool regionHostApply(void* host, const HirariRegionEditPayload* payload);
     static size_t regionHostListSyncGroup(void* host, uint32_t group,
                                           HirariRegionGroupMember* out, size_t capacity);
+    static bool regionHostNoteEdit(void* host, uint32_t trackId, uint32_t regionId,
+                                   void* context, HirariRegionNoteMutateFn mutate);
     static void regionHostRecordUndo(void* host, const char* name,
                                      const HirariRegionEditPayload* undo, size_t undoCount,
-                                     const HirariRegionEditPayload* redo, size_t redoCount);
+                                     const HirariRegionEditPayload* redo, size_t redoCount,
+                                     bool coalesce);
 
 private:
 
