@@ -185,3 +185,47 @@ const HirariRegionHostOps kRegionEditHostOps = {
 }();
 
 }  // namespace
+
+// Differential check for the Rust region-table mirror: true when the mirror
+// of the track with id trackId equals its authoritative C++ region list, entry for entry.
+bool HirariUnifiedEngine::region_table_mirror_matches(uint32_t trackId) const {
+    std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (const auto& track : m_tracks) {
+        if (track->getId() != trackId) continue;
+        const auto& regions = track->getRegions();
+        const HirariRegionTable* mirror = track->regionTableMirror();
+        if (hirari_region_table_len(mirror) != regions.size()) return false;
+        for (size_t index = 0; index < regions.size(); ++index) {
+            uint32_t id = 0;
+            HirariRegionState mirrored;
+            if (!hirari_region_table_get(mirror, index, &id, &mirrored)) return false;
+            HirariRegionState expected;
+            fillRegionHostState(regions[index], expected);
+            const auto& r = regions[index];
+            const auto sameBits = [](double a, double b) {
+                return std::memcmp(&a, &b, sizeof(a)) == 0;
+            };
+            if (id != r.id ||
+                mirrored.start != expected.start || mirrored.len != expected.len ||
+                mirrored.baseStart != expected.baseStart ||
+                mirrored.baseLength != expected.baseLength ||
+                mirrored.sourceOffset != expected.sourceOffset ||
+                mirrored.baseSourceOffset != expected.baseSourceOffset ||
+                mirrored.sourceLength != expected.sourceLength ||
+                mirrored.fadeInSamples != expected.fadeInSamples ||
+                mirrored.fadeOutSamples != expected.fadeOutSamples ||
+                !sameBits(mirrored.warpRatio, expected.warpRatio) ||
+                !sameBits(mirrored.sourceSampleRate, expected.sourceSampleRate) ||
+                !sameBits(mirrored.timelineSampleRate, expected.timelineSampleRate) ||
+                !sameBits(mirrored.clipGain, expected.clipGain) ||
+                !sameBits(mirrored.pitchSemitones, expected.pitchSemitones) ||
+                mirrored.loopCount != expected.loopCount ||
+                mirrored.syncGroup != expected.syncGroup ||
+                mirrored.muted != expected.muted || mirrored.reverse != expected.reverse ||
+                mirrored.locked != expected.locked ||
+                mirrored.pitchPreserveWarp != expected.pitchPreserveWarp) return false;
+        }
+        return true;
+    }
+    return false;
+}

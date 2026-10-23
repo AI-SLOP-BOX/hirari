@@ -36,6 +36,9 @@
     bool freeze_track_to_project_end(uint32_t tid, uint32_t sampleRate) const {
         return m_engine && m_engine->freeze_track_to_project_end(tid, sampleRate);
     }
+    bool region_table_mirror_matches(uint32_t tid) const {
+        return m_engine && m_engine->region_table_mirror_matches(tid);
+    }
     bool add_region(uint32_t tid, rust::Str path, double startBeat) const {
         return m_engine && m_engine->add_region(tid, std::string_view(path.data(), path.size()), startBeat);
     }

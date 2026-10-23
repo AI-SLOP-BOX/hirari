@@ -333,6 +333,7 @@ pub mod ffi {
         ) -> String;
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
+        fn region_table_mirror_matches(self: &AudioEngine, tid: u32) -> bool;
         fn queue_region_import(self: &AudioEngine, tid: u32, path: &str, start_sample: u64) -> u64;
         fn complete_region_import(self: &AudioEngine, ticket: u64) -> u8;
         fn replace_region_audio(self: &AudioEngine, tid: u32, rid: u32, path: &str) -> bool;

@@ -244,17 +244,8 @@
     const std::vector<Region>* getRegionSnapshot() const noexcept {
         return m_regionSnapshot.load(std::memory_order_acquire);
     }
-    [[deprecated("Use typed region mutators or clearRegions()")]]
-    std::vector<Region>& getRegionsMutable() {
-        // Legacy callers mutate this vector directly and cannot publish an
-        // immutable region snapshot. Conservatively invalidate before handing
-        // out the reference so cheap observers never miss the edit.
-        markProjectLayoutChanged();
-        return m_regions;
-    }
-    // Rust mirror of the region table as of the last snapshot publish. Callers
-    // that mutate the vector through the legacy reference above bypass the
-    // publish and therefore the mirror; stage 3 removes that path.
+    // Rust mirror of the region table as of the last snapshot publish. Every
+    // mutation of m_regions ends in publishRegionSnapshot(), which refreshes it.
     const HirariRegionTable* regionTableMirror() const noexcept { return m_regionTable; }
     void clearRegions() {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);

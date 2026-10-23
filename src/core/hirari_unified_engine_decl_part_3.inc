@@ -30,6 +30,7 @@
 
     // Regions & Plugins
     bool add_region(uint32_t trackId, std::string_view path, double start_beat);
+    bool region_table_mirror_matches(uint32_t trackId) const;
     uint64_t queue_region_import(uint32_t trackId, std::string_view path,
                                  uint64_t start_sample);
     // 0 = still decoding, 1 = committed, 2 = failed or stale, 3 = unknown ticket.
