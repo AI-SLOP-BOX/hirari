@@ -1,10 +1,4 @@
 #pragma once
-#if defined(__x86_64__) || defined(_M_X64)
-#include <immintrin.h>
-#elif defined(__arm64__) || defined(__aarch64__)
-#include <arm_neon.h>
-#endif
-
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
@@ -20,31 +14,18 @@
 #include <functional>
 #include <type_traits>
 
-inline thread_local bool g_is_rt_thread = false;
+extern "C" uint64_t hirari_denormal_control_enter();
+extern "C" void hirari_denormal_control_leave(uint64_t state);
+extern "C" void hirari_realtime_thread_set(bool active);
+extern "C" bool hirari_realtime_thread_is_active();
 
 namespace Hirari::Core::Concurrency {
 
 struct ScopedDenormalGuard {
-    ScopedDenormalGuard() {
-#if defined(__x86_64__) || defined(_M_X64)
-        m_oldReg = _mm_getcsr();
-        _mm_setcsr(m_oldReg | 0x8040);
-#elif defined(__arm64__) || defined(__aarch64__)
-        uint64_t fpcr;
-        asm volatile("mrs %0, fpcr" : "=r"(fpcr));
-        m_oldReg = fpcr;
-        asm volatile("msr fpcr, %0" : : "r"(fpcr | (1ULL << 24)));
-#endif
-    }
-    ~ScopedDenormalGuard() {
-#if defined(__x86_64__) || defined(_M_X64)
-        _mm_setcsr(static_cast<uint32_t>(m_oldReg));
-#elif defined(__arm64__) || defined(__aarch64__)
-        asm volatile("msr fpcr, %0" : : "r"(m_oldReg));
-#endif
-    }
+    ScopedDenormalGuard() : m_oldReg(hirari_denormal_control_enter()) {}
+    ~ScopedDenormalGuard() { hirari_denormal_control_leave(m_oldReg); }
 private:
-    uint64_t m_oldReg;
+    uint64_t m_oldReg = 0;
 };
 
 struct AudioTask {
@@ -68,16 +49,8 @@ extern "C" inline void hirari_audio_task_dispatch_ffi(void* data) {
 }
 
 extern "C" inline uint64_t hirari_audio_worker_enter(uint32_t index) {
-    uint64_t state = 0;
-#if defined(__x86_64__) || defined(_M_X64)
-    state = _mm_getcsr();
-    _mm_setcsr(static_cast<uint32_t>(state) | 0x8040);
-#elif defined(__arm64__) || defined(__aarch64__)
-    asm volatile("mrs %0, fpcr" : "=r"(state));
-    const uint64_t enabled = state | (1ULL << 24);
-    asm volatile("msr fpcr, %0" : : "r"(enabled));
-#endif
-    ::g_is_rt_thread = true;
+    const uint64_t state = hirari_denormal_control_enter();
+    hirari_realtime_thread_set(true);
 #if defined(__APPLE__)
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
     thread_affinity_policy_data_t affinity = { static_cast<integer_t>(index) };
@@ -95,14 +68,8 @@ extern "C" inline uint64_t hirari_audio_worker_enter(uint32_t index) {
 }
 
 extern "C" inline void hirari_audio_worker_leave(uint64_t state) {
-#if defined(__x86_64__) || defined(_M_X64)
-    _mm_setcsr(static_cast<uint32_t>(state));
-#elif defined(__arm64__) || defined(__aarch64__)
-    asm volatile("msr fpcr, %0" : : "r"(state));
-#else
-    (void)state;
-#endif
-    ::g_is_rt_thread = false;
+    hirari_realtime_thread_set(false);
+    hirari_denormal_control_leave(state);
 }
 
 extern "C" inline uint64_t hirari_audio_background_worker_enter(uint32_t) { return 0; }
@@ -250,15 +217,15 @@ public:
     }
 
     struct ScopedRTGuard {
-        ScopedRTGuard() { ::g_is_rt_thread = true; }
-        ~ScopedRTGuard() { ::g_is_rt_thread = false; }
+        ScopedRTGuard() { hirari_realtime_thread_set(true); }
+        ~ScopedRTGuard() { hirari_realtime_thread_set(false); }
     };
 
     /**
      * @brief ENSURES RT-SAFETY: Aborts or logs if called in a non-safe context.
      */
     #define HIRARI_ASSERT_RT_SAFE() \
-        if (::g_is_rt_thread) { \
+        if (hirari_realtime_thread_is_active()) { \
             /* Implementation: In a debug build, this could check for thread-local 'unsafe' flags */ \
         }
 

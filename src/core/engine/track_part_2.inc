@@ -147,33 +147,11 @@
     }
 
     bool addSandboxedPlugin(const std::string& pluginPath) {
-        if (pluginPath.empty()) {
-            m_lastSandboxFailureText = "invalid-plugin-path";
-            return false;
-        }
-        const std::filesystem::path path(pluginPath);
-        const bool builtin = pluginPath.rfind("builtin://", 0) == 0;
-        if (!builtin) {
-            std::error_code ec;
-            // macOS CLAP/AU/VST3 entries are directory bundles, not regular
-            // files.  Validate existence here and let the isolated worker
-            // resolve the bundle's executable image.
-            if (!std::filesystem::exists(path, ec) || ec) {
-                m_lastSandboxFailureText = "plugin-path-missing";
-                return false;
-            }
-            const auto extension = path.extension().string();
-#if defined(__APPLE__)
-            if (extension != ".clap" && extension != ".vst3" && extension != ".component") {
-                m_lastSandboxFailureText = "plugin-format-unsupported";
-                return false;
-            }
-#else
-            if (extension != ".clap" && extension != ".vst3") {
-                m_lastSandboxFailureText = "plugin-format-unsupported";
-                return false;
-            }
-#endif
+        switch (hirari_plugin_admission_error(pluginPath.c_str())) {
+            case 1: m_lastSandboxFailureText = "invalid-plugin-path"; return false;
+            case 2: m_lastSandboxFailureText = "plugin-path-missing"; return false;
+            case 3: m_lastSandboxFailureText = "plugin-format-unsupported"; return false;
+            default: break;
         }
         if (std::find(m_sandboxedPluginPaths.begin(), m_sandboxedPluginPaths.end(), pluginPath) !=
             m_sandboxedPluginPaths.end()) {

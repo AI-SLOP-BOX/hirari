@@ -1,32 +1,19 @@
 #pragma once
-#include <string>
-#include <vector>
-#include <fstream>
-#include <thread>
+
 #include <atomic>
-#include <functional>
-#include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include <cmath>
-#include <limits>
-#include <filesystem>
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <unistd.h>
-#endif
-#include "../../io/persistence/wav_writer.hpp"
+#include <exception>
+#include <functional>
+#include <string>
+
+extern "C" uint8_t hirari_legacy_bounce_render(
+    double duration_sec, double sample_rate, const uint8_t* path, size_t path_size,
+    void* context, bool (*render)(void*, float*, float*, uint32_t),
+    bool (*cancelled)(void*), void (*progress)(void*, float));
 
 namespace Hirari::Core::Engine {
 
-/**
- * @class BounceEngine
- * @brief High-performance background rendering engine.
- * HONEST FIX: Implemented RIFF/WAV writing and safe thread management.
- */
-// Legacy callback-based renderer retained for source compatibility. The
-// public export workflow lives in rendering/bounce/bounce_engine.hpp; keeping
-// a distinct name prevents two different BounceEngine classes from colliding
-// in Hirari::Core::Engine when both headers are included.
 class LegacyBounceEngine {
 public:
     struct ExportProgress {
@@ -34,55 +21,39 @@ public:
         std::atomic<bool> isDone{false};
         std::atomic<bool> cancelled{false};
     };
-
     using RenderProc = std::function<void(float*, float*, uint32_t)>;
 
-    /**
-     * @brief RENDER: Renders the project to a file with industrial precision and export sovereignty.
-     * INDUSTRIAL: Delegating project rendering and file writing to the Rust 'ExportOrchestrator'.
-     */
-    static void renderToFile(const std::string& path, double durationSec, double sr, ExportProgress& prog, RenderProc proc) {
-        prog.progress.store(0.0f, std::memory_order_release);
-        prog.isDone.store(false, std::memory_order_release);
-        prog.cancelled.store(false, std::memory_order_release);
-        if (path.empty() || !proc || !std::isfinite(durationSec) || !std::isfinite(sr) ||
-            durationSec <= 0.0 || sr < 1000.0 || sr > 384000.0) {
-            prog.isDone.store(true, std::memory_order_release);
+    static void renderToFile(const std::string& path, double durationSec, double sr,
+                             ExportProgress& progress, RenderProc render) {
+        progress.progress.store(0.0f, std::memory_order_release);
+        progress.isDone.store(false, std::memory_order_release);
+        progress.cancelled.store(false, std::memory_order_release);
+        if (path.empty() || !render) {
+            progress.isDone.store(true, std::memory_order_release);
             return;
         }
-        const double total = durationSec * sr;
-        if (total > static_cast<double>(std::numeric_limits<uint32_t>::max()) * 8.0) {
-            prog.isDone.store(true, std::memory_order_release);
-            return;
-        }
-        const uint64_t totalSamples = static_cast<uint64_t>(total);
-        if (totalSamples == 0 || totalSamples > 0x3FFFFFFFull) {
-            prog.isDone.store(true, std::memory_order_release);
-            return;
-        }
-        ::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter stream(
-            path, totalSamples, static_cast<uint32_t>(sr));
-        if (!stream.isOpen()) { prog.isDone.store(true, std::memory_order_release); return; }
-        constexpr uint32_t kBlock = 1024;
-        std::vector<float> left(kBlock), right(kBlock);
-        uint64_t rendered = 0;
-        while (rendered < totalSamples && !prog.cancelled.load(std::memory_order_acquire)) {
-            const uint32_t count = static_cast<uint32_t>(std::min<uint64_t>(kBlock, totalSamples - rendered));
-            std::fill(left.begin(), left.begin() + count, 0.0f);
-            std::fill(right.begin(), right.begin() + count, 0.0f);
-            proc(left.data(), right.data(), count);
-            if (!stream.writeFrames(left.data(), right.data(), count)) break;
-            rendered += count;
-            prog.progress.store(static_cast<float>(rendered) / static_cast<float>(totalSamples), std::memory_order_release);
-        }
-        const bool completed = rendered == totalSamples &&
-            !prog.cancelled.load(std::memory_order_acquire) && stream.finish();
-        if (!completed) {
-            prog.cancelled.store(true, std::memory_order_release);
-            prog.isDone.store(true, std::memory_order_release);
-            return;
-        }
-        prog.isDone.store(true, std::memory_order_release);
+        Context context{&progress, &render, {}};
+        const auto result = hirari_legacy_bounce_render(
+            durationSec, sr, reinterpret_cast<const uint8_t*>(path.data()),
+            path.size(), &context, &renderBlock, &isCancelled, &setProgress);
+        if (context.exception) std::rethrow_exception(context.exception);
+        if (result == 2) progress.cancelled.store(true, std::memory_order_release);
+        progress.isDone.store(true, std::memory_order_release);
+    }
+
+private:
+    struct Context { ExportProgress* progress; RenderProc* render; std::exception_ptr exception; };
+
+    static bool renderBlock(void* opaque, float* left, float* right, uint32_t count) {
+        auto* context = static_cast<Context*>(opaque);
+        try { (*context->render)(left, right, count); return true; }
+        catch (...) { context->exception = std::current_exception(); return false; }
+    }
+    static bool isCancelled(void* opaque) {
+        return static_cast<Context*>(opaque)->progress->cancelled.load(std::memory_order_acquire);
+    }
+    static void setProgress(void* opaque, float value) {
+        static_cast<Context*>(opaque)->progress->progress.store(value, std::memory_order_release);
     }
 };
 

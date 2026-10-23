@@ -495,98 +495,24 @@ bool HirariUnifiedEngine::save_plugin_preset(uint32_t tid, uint32_t pluginIndex,
         const auto states = track->getPluginStates();
         const auto& pluginTypes = track->getPluginTypes();
         if (pluginIndex >= states.size() || pluginIndex >= pluginTypes.size() || states[pluginIndex].empty()) return false;
-        const std::filesystem::path target(path);
-        static std::atomic<uint64_t> presetSequence{0};
-        const auto sequence = presetSequence.fetch_add(1, std::memory_order_relaxed);
-        std::string temporaryName = target.string() + ".tmp-";
-#if defined(_WIN32)
-        temporaryName += "process-";
-#else
-        temporaryName += std::to_string(static_cast<unsigned long>(::getpid())) + "-";
-#endif
-        temporaryName += std::to_string(sequence);
-        const std::filesystem::path temporary(temporaryName);
-        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-        if (!file) return false;
-        const uint32_t magic = 0x41555053u;
-        const uint32_t version = 3;
         const uint32_t pluginType = pluginTypes[pluginIndex];
-        constexpr size_t kMaxPresetStateBytes = 16u * 1024u * 1024u;
-        if (states[pluginIndex].size() > kMaxPresetStateBytes ||
-            states[pluginIndex].size() > std::numeric_limits<uint32_t>::max()) return false;
-        const uint32_t size = static_cast<uint32_t>(states[pluginIndex].size());
-        uint64_t checksum = 1469598103934665603ull;
-        for (const uint8_t byte : states[pluginIndex]) {
-            checksum ^= byte;
-            checksum *= 1099511628211ull;
-        }
-        file.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
-        file.write(reinterpret_cast<const char*>(&version), sizeof(version));
-        file.write(reinterpret_cast<const char*>(&pluginType), sizeof(pluginType));
-        file.write(reinterpret_cast<const char*>(&size), sizeof(size));
-        file.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
-        file.write(reinterpret_cast<const char*>(states[pluginIndex].data()), size);
-        file.flush();
-        if (!file) {
-            file.close();
-            std::error_code removeError;
-            std::filesystem::remove(temporary, removeError);
-            return false;
-        }
-        file.close();
-#if !defined(_WIN32)
-        const int fd = ::open(temporary.c_str(), O_RDONLY);
-        if (fd < 0 || ::fsync(fd) != 0) {
-            if (fd >= 0) ::close(fd);
-            std::error_code removeError;
-            std::filesystem::remove(temporary, removeError);
-            return false;
-        }
-        ::close(fd);
-#endif
-        std::error_code renameError;
-        std::filesystem::rename(temporary, target, renameError);
-        if (renameError) {
-            std::error_code removeError;
-            std::filesystem::remove(temporary, removeError);
-            return false;
-        }
-#if !defined(_WIN32)
-        const auto parent = target.parent_path().empty() ? std::filesystem::path(".") : target.parent_path();
-        const int dirFd = ::open(parent.c_str(), O_RDONLY | O_DIRECTORY);
-        if (dirFd >= 0) {
-            const int syncResult = ::fsync(dirFd);
-            ::close(dirFd);
-            if (syncResult != 0) return false;
-        }
-#endif
-        return true;
+        return hirari_plugin_preset_file_save(
+            reinterpret_cast<const uint8_t*>(path.data()), path.size(), pluginType,
+            states[pluginIndex].data(), states[pluginIndex].size());
     }
     return false;
 }
 bool HirariUnifiedEngine::load_plugin_preset(uint32_t tid, uint32_t pluginIndex,
                                            std::string_view path) {
-    if (path.empty()) return false;
-    std::ifstream file(std::string(path), std::ios::binary);
-    if (!file) return false;
-    uint32_t magic = 0, version = 0, pluginType = 0, size = 0;
-    uint64_t expectedChecksum = 0;
-    file.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-    file.read(reinterpret_cast<char*>(&version), sizeof(version));
-    file.read(reinterpret_cast<char*>(&pluginType), sizeof(pluginType));
-    file.read(reinterpret_cast<char*>(&size), sizeof(size));
-    file.read(reinterpret_cast<char*>(&expectedChecksum), sizeof(expectedChecksum));
-    if (!file || magic != 0x41555053u || version != 3 || size == 0 || size > 16u * 1024u * 1024u)
-        return false;
-    std::vector<uint8_t> state(size);
-    file.read(reinterpret_cast<char*>(state.data()), static_cast<std::streamsize>(size));
-    if (!file) return false;
-    uint64_t actualChecksum = 1469598103934665603ull;
-    for (const uint8_t byte : state) {
-        actualChecksum ^= byte;
-        actualChecksum *= 1099511628211ull;
-    }
-    if (actualChecksum != expectedChecksum) return false;
+    void* rawPreset = hirari_plugin_preset_file_load(
+        reinterpret_cast<const uint8_t*>(path.data()), path.size());
+    if (!rawPreset) return false;
+    std::unique_ptr<void, void (*)(void*)> preset(rawPreset, hirari_plugin_preset_file_free);
+    const uint32_t pluginType = hirari_plugin_preset_file_type(preset.get());
+    const uint8_t* stateData = hirari_plugin_preset_file_data(preset.get());
+    const size_t stateSize = hirari_plugin_preset_file_size(preset.get());
+    if (!stateData || stateSize == 0) return false;
+    std::vector<uint8_t> state(stateData, stateData + stateSize);
     std::shared_ptr<Track> target;
     std::vector<uint8_t> before;
     {

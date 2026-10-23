@@ -424,29 +424,6 @@
         for (uint32_t channel = 0; channel < channels; ++channel) {
             channelData[channel] = audio->getReadPointer(channel);
         }
-        const size_t stride = std::max<size_t>(
-            1, static_cast<size_t>(std::ceil(sourceSampleRate / 12000.0)));
-        const size_t decimatedCount =
-            (static_cast<size_t>(sourceSpan) - 1) / stride + 1;
-        std::vector<float> decimated(decimatedCount);
-        if (hirari_audio_pitch_select_and_decimate(
-                channelData.data(), channelData.size(),
-                static_cast<size_t>(analysisRegion.sourceOffset),
-                static_cast<size_t>(sourceSpan), stride,
-                analysisRegion.reverse ? 1 : 0,
-                decimated.data(), decimated.size()) != decimated.size()) return false;
-        // A 64–1200 Hz vocal range fits comfortably below the decimated
-        // Nyquist rate. This keeps a multi-minute region practical while the
-        // 85 ms window and 43 ms hop retain useful note-boundary resolution.
-        config.window = 1024;
-        config.hop = 512;
-        auto detected = ::hirari::editing::AudioPitchAnalyzer::analyze(
-            decimated.data(), decimated.size(),
-            sourceSampleRate / static_cast<double>(stride), config);
-
-        // Pitch analysis works in source playback order. Convert its note and
-        // pitch-anchor positions back to the region timeline so trimmed,
-        // reversed, and warped clips use the same coordinates as the renderer.
         std::vector<::HirariWarpMarker> pitchWarpMarkers;
         pitchWarpMarkers.reserve(analysisRegion.warpMarkers.size());
         for (const auto& marker : analysisRegion.warpMarkers) {
@@ -455,23 +432,18 @@
         const double sourceFramesPerTimelineFrame = std::isfinite(analysisRegion.warpRatio) &&
             analysisRegion.sourceFramesPerTimelineFrame() > 0.0
             ? analysisRegion.sourceFramesPerTimelineFrame() : 1.0;
-        for (auto& segment : detected) {
-            size_t anchorCount = segment.anchors.size();
-            if (!hirari_audio_pitch_map_segment_to_timeline(
-                    &segment.startSeconds, &segment.endSeconds,
-                    segment.anchors.data(), &anchorCount,
-                    sourceSampleRate, timelineSampleRate, sourceSpan, analysisRegion.len,
-                    sourceFramesPerTimelineFrame, pitchWarpMarkers.data(), pitchWarpMarkers.size())) {
-                return false;
-            }
-            segment.anchors.resize(anchorCount);
-            segment.rebuildPitchRatioIntegral();
-        }
-        detected.erase(std::remove_if(detected.begin(), detected.end(),
-            [](const auto& segment) { return !segment.valid(); }), detected.end());
-        // The store rebuilds the integral prefixes and the phase corrections
-        // when the batch is handed over, so the C++ side only has to drop
-        // malformed detections first.
+        void* rawAnalysis = hirari_audio_pitch_analyze_region(
+            channelData.data(), channelData.size(),
+            static_cast<size_t>(analysisRegion.sourceOffset), static_cast<size_t>(sourceSpan),
+            analysisRegion.reverse ? 1 : 0, sourceSampleRate, timelineSampleRate,
+            analysisRegion.len, sourceFramesPerTimelineFrame,
+            pitchWarpMarkers.data(), pitchWarpMarkers.size(), config.minHz, config.maxHz,
+            config.threshold, config.noteChangeThresholdCents,
+            config.noteChangeConfirmationFrames);
+        if (!rawAnalysis) return false;
+        std::unique_ptr<void, decltype(&hirari_audio_pitch_result_destroy)>
+            analysis(rawAnalysis, &hirari_audio_pitch_result_destroy);
+
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         auto it = std::find_if(m_regions.begin(), m_regions.end(),
             [regionId](const Region& region) { return region.id == regionId; });
@@ -487,7 +459,8 @@
             if (it->warpMarkers[index].sourceSample != analysisRegion.warpMarkers[index].sourceSample ||
                 it->warpMarkers[index].timelineSample != analysisRegion.warpMarkers[index].timelineSample) return false;
         }
-        it->noteEdits.assignRepaired(detected);
+        if (!hirari_audio_pitch_commit_region_result(
+                analysis.get(), it->noteEdits.storeHandle())) return false;
         publishRegionSnapshot();
         return true;
     }

@@ -507,13 +507,9 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
     // for an otherwise MIDI-only project, can look like a silent export).
     // Snapshot the active note list under the control-side mutex so a note
     // publication cannot race this offline render's extent calculation.
-    {
-        std::lock_guard<std::mutex> lock(m_midiNotesMutex);
-        const uint32_t midiSlot = m_activeMidiSnapshot.load(std::memory_order_acquire);
-        for (const auto& note : m_midiNoteSnapshots[midiSlot].notesByStart) {
-            projectEnd = std::max(projectEnd, ScheduledMidiSnapshot::noteEnd(note));
-        }
-    }
+    for (const auto& note : midi_notes_snapshot())
+        projectEnd = std::max(projectEnd, hirari_midi_scheduled_note_end(
+            reinterpret_cast<const HirariScheduledMidiNote*>(&note)));
 
     // Empty projects still need a valid, non-zero render for preview/export
     // callers, but a thirty-second silent fallback makes retries needlessly

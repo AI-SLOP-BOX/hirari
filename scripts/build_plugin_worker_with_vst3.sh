@@ -10,7 +10,7 @@ ROOT_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT_DIR/target}
 case "$ROOT_TARGET_DIR" in /*) ;; *) ROOT_TARGET_DIR="$ROOT_DIR/$ROOT_TARGET_DIR" ;; esac
 
 cargo rustc --manifest-path "$ROOT_DIR/Cargo.toml" -p hirari-plugin-protocol \
-    --release --features standalone-static -- --crate-type staticlib
+    --release --features standalone-static,worker-runtime -- --crate-type staticlib
 PROTOCOL_LIB=$(find "$ROOT_TARGET_DIR/release/deps" -maxdepth 1 -name 'libhirari_plugin_protocol-*.a' -print | head -n 1)
 if [ ! -f "$PROTOCOL_LIB" ]; then
     echo "Rust plugin protocol archive was not produced: $PROTOCOL_LIB" >&2

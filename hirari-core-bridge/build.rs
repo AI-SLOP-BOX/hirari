@@ -150,9 +150,37 @@ fn main() {
         build.file("../src/core/engine/video_system_bridge.mm");
     }
 
+    // The plugin sandbox host lives in its own cxx bridge so its generated
+    // header is self-contained (it pulls in no engine headers), which lets the
+    // header-only C++ facade include it from plugin code without cycles.
+    let mut sandbox_build = cxx_build::bridge("src/plugin_sandbox_host.rs");
+    sandbox_build
+        .include("../src")
+        .include("../src/core")
+        .include("../src/external")
+        .flag_if_supported("-std=c++20")
+        .flag_if_supported("-fobjc-arc")
+        .flag("-O3")
+        .flag("-flto")
+        .flag("-fomit-frame-pointer")
+        .flag("-fstack-protector-strong")
+        .flag("-DNDEBUG")
+        .flag("-fvisibility=hidden")
+        .flag("-fvisibility-inlines-hidden");
+    if target_arch == "aarch64"
+        && target_os == "macos"
+        && std::env::var_os("HIRARI_ENABLE_APPLE_M1").is_some()
+    {
+        sandbox_build.flag("-mcpu=apple-m1");
+    } else if target_arch == "x86_64" && std::env::var_os("HIRARI_ENABLE_AVX2").is_some() {
+        sandbox_build.flag("-mavx2").flag("-mfma");
+    }
+    sandbox_build.compile("hirari-core-bridge-sandbox");
+
     build.compile("hirari-core-bridge");
 
     println!("cargo:rerun-if-changed=src/lib.rs");
+    println!("cargo:rerun-if-changed=src/plugin_sandbox_host.rs");
     println!("cargo:rerun-if-changed=src/hirari_core_ref.cpp");
     println!("cargo:rerun-if-changed=src/metal_audio_kernel.mm");
     // The spatial Metal kernel is a separate translation unit from the bridge

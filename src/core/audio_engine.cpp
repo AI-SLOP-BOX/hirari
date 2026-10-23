@@ -86,6 +86,7 @@ bool AudioEngine::start_audio_device() const {
 }
 
     AudioEngine::~AudioEngine() {
+        hirari_layout_snapshot_owner_release(m_layoutSnapshotOwnerId);
         std::lock_guard<std::mutex> lock(m_configMutex);
         if (m_driver) {
             m_driver->stop();

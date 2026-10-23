@@ -8,13 +8,14 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 chain_file="$root_dir/src/core/effect_chain.hpp"
 
-# The unified engine and the sandbox host are both split across *.inc parts, so
-# search every part rather than a single hardcoded file name. A guard that
-# points at a stale path silently stops guarding anything.
+# The unified engine is split across *.inc parts, so search every part rather
+# than a single hardcoded file name. A guard that points at a stale path
+# silently stops guarding anything. The sandbox host is now a single C++
+# forwarding facade over the Rust lifecycle owner.
 shopt -s nullglob
 engine_parts=("$root_dir"/src/core/hirari_unified_engine_part_*.inc)
-sandbox_parts=("$root_dir"/src/core/plugins/plugin_sandbox_host_part_*.inc)
 shopt -u nullglob
+sandbox_parts=("$root_dir/src/core/plugins/plugin_sandbox_host.hpp")
 
 if [ "${#engine_parts[@]}" -eq 0 ]; then
     echo "realtime boundary check error: no unified engine sources found" >&2

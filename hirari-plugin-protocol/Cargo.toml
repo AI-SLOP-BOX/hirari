@@ -10,3 +10,4 @@ path = "src/lib.rs"
 
 [features]
 standalone-static = []
+worker-runtime = []

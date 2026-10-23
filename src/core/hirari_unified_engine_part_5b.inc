@@ -277,29 +277,8 @@ bool HirariUnifiedEngine::set_expression_map(uint32_t trackId,
                                              const std::vector<uint32_t>& packed,
                                              const std::string& json,
                                              uint32_t articulationId) {
-    if (packed.size() % 6 != 0 || packed.size() > 24480 || json.size() > 1024 * 1024 ||
-        articulationId > 255) return false;
-    std::array<uint8_t, 256> counts{};
-    for (size_t index = 0; index < packed.size(); index += 6) {
-        const uint32_t articulationId = packed[index];
-        const uint32_t channel = packed[index + 1];
-        const uint32_t kind = packed[index + 2];
-        const uint32_t a = packed[index + 3];
-        const uint32_t b = packed[index + 4];
-        const uint32_t c = packed[index + 5];
-        if (articulationId == 0 || articulationId >= counts.size() || channel >= 16 ||
-            kind < 1 || kind > 16 || counts[articulationId] >= 16) return false;
-        const uint32_t baseKind = kind > 5 && kind < 11 ? kind - 5 :
-            kind > 10 && kind < 16 ? kind - 10 : kind;
-        const bool validOutput = kind == 16 ? a >= 1 && a <= 16 && b == 0 && c == 0 :
-            baseKind == 1 ? a < 128 && b >= 1 && b <= 127 && c <= 96000 :
-            baseKind == 2 ? a < 128 && (b < 128 || b == 255) && (c < 128 || c == 255) :
-            baseKind == 3 ? a < 128 && b < 128 :
-            baseKind == 4 ? a < 128 :
-            baseKind == 5 ? a < 128 && b < 128 : false;
-        if (!validOutput) return false;
-        ++counts[articulationId];
-    }
+    if (!hirari_expression_map_validate_packed(
+            packed.data(), packed.size(), json.size(), articulationId)) return false;
     const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
     for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
         auto* track = state.activeTracks[i];
@@ -314,28 +293,21 @@ bool HirariUnifiedEngine::set_expression_map(uint32_t trackId,
             for (uint32_t index = 0; index < current.trackCount && index < 256; ++index) {
                 auto* target = current.activeTracks[index];
                 if (!target || target->getId() != trackId) continue;
-                std::array<std::array<std::array<uint32_t, 5>, 16>, 256> snapshotOutputs{};
-                std::array<uint8_t, 256> outputCounts{};
-                for (size_t offset = 0; offset < values.size(); offset += 6) {
-                    const auto id = static_cast<uint8_t>(values[offset]);
-                    const auto slot = outputCounts[id]++;
-                    snapshotOutputs[id][slot] = {
-                        values[offset + 2], values[offset + 1], values[offset + 3],
-                        values[offset + 4], values[offset + 5],
-                    };
-                }
-                for (uint16_t rawId = 1; rawId < 256; ++rawId) {
-                    const auto id = static_cast<uint8_t>(rawId);
-                    if (!target->beginArticulationMapUpdate(id)) return;
-                    for (uint8_t slot = 0; slot < outputCounts[rawId]; ++slot) {
-                        const auto& output = snapshotOutputs[rawId][slot];
-                        if (!target->setArticulationOutput(id, slot,
-                                static_cast<uint8_t>(output[0]), static_cast<uint8_t>(output[1]),
-                                static_cast<uint8_t>(output[2]), static_cast<uint8_t>(output[3]),
-                                static_cast<uint8_t>(output[4]))) return;
-                    }
-                    if (!target->finishArticulationMapUpdate(id, outputCounts[rawId])) return;
-                }
+                struct ApplyContext { Track* track; } context{target};
+                const bool applied = hirari_expression_map_visit_packed(
+                    values.data(), values.size(), &context,
+                    +[](void* opaque, uint8_t operation, uint8_t id, uint8_t slot,
+                        uint32_t kind, uint32_t channel, uint32_t a, uint32_t b,
+                        uint32_t c, uint8_t outputCount) -> bool {
+                        auto* track = static_cast<ApplyContext*>(opaque)->track;
+                        if (operation == 0) return track->beginArticulationMapUpdate(id);
+                        if (operation == 1) return track->setArticulationOutput(
+                            id, slot, static_cast<uint8_t>(kind), static_cast<uint8_t>(channel),
+                            static_cast<uint8_t>(a), static_cast<uint8_t>(b), static_cast<uint8_t>(c));
+                        if (operation == 2) return track->finishArticulationMapUpdate(id, outputCount);
+                        return false;
+                    });
+                if (!applied) return;
                 target->setExpressionMapJson(serialized);
                 return;
             }

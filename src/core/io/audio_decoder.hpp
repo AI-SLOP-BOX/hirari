@@ -1,17 +1,12 @@
 #pragma once
 
 #include "../audio_buffer.hpp"
-#include <algorithm>
-#include <cctype>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <limits>
 #include <string>
 
 // The native engine keeps this small adapter for its existing AudioBuffer
@@ -27,7 +22,17 @@ struct HirariNativeDecodedAudio {
     uint32_t status;
 };
 HirariNativeDecodedAudio hirari_decode_audio_file(const char* path);
+HirariNativeDecodedAudio hirari_import_audio_file(const uint8_t* path, size_t path_size);
 void hirari_free_decoded_audio(float* samples, size_t sample_count);
+void* hirari_wav_decoder_create();
+void hirari_wav_decoder_destroy(void* state);
+bool hirari_wav_decoder_open(void* state, const uint8_t* path, size_t path_size);
+bool hirari_wav_decoder_copy_to_channels(
+    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
+uint32_t hirari_wav_decoder_frames(const void* state);
+double hirari_wav_decoder_sample_rate(const void* state);
+uint32_t hirari_wav_decoder_channels(const void* state);
+uint32_t hirari_wav_decoder_bits_per_sample(const void* state);
 }
 
 namespace Hirari::Core::IO {
@@ -36,56 +41,39 @@ namespace Hirari::Core::IO {
 // no parsing itself: the exact same Rust decoder supplies its channel data.
 class WavDecoder {
 public:
+    WavDecoder() : m_state(hirari_wav_decoder_create()) {}
+    ~WavDecoder() { hirari_wav_decoder_destroy(m_state); }
+    WavDecoder(const WavDecoder&) = delete;
+    WavDecoder& operator=(const WavDecoder&) = delete;
+    WavDecoder(WavDecoder&& other) noexcept : m_state(other.m_state) { other.m_state = nullptr; }
+    WavDecoder& operator=(WavDecoder&& other) noexcept {
+        if (this != &other) {
+            hirari_wav_decoder_destroy(m_state);
+            m_state = other.m_state;
+            other.m_state = nullptr;
+        }
+        return *this;
+    }
+
     bool open(const std::string& path) {
-        m_buffer = AudioBuffer{};
-        m_sampleRate = 0.0;
-        m_bitsPerSample = 0;
-        const auto dot = path.find_last_of('.');
-        const auto separator = path.find_last_of("/\\");
-        if (dot == std::string::npos || (separator != std::string::npos && dot < separator)) return false;
-        std::string extension = path.substr(dot + 1);
-        std::transform(extension.begin(), extension.end(), extension.begin(),
-                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        if (extension != "wav" && extension != "wave" && extension != "rf64") return false;
-        const auto decoded = hirari_decode_audio_file(path.c_str());
-        struct Guard {
-            float* samples;
-            size_t count;
-            ~Guard() { hirari_free_decoded_audio(samples, count); }
-        } guard{decoded.samples, decoded.sample_count};
-        if (decoded.status != 0 || !decoded.samples || decoded.channels == 0 ||
-            decoded.channels > 32 || decoded.sample_count == 0 ||
-            decoded.sample_count % decoded.channels != 0 ||
-            decoded.sample_count > (512ull * 1024ull * 1024ull) / sizeof(float) ||
-            !std::isfinite(decoded.sample_rate) || decoded.sample_rate < 8000.0 ||
-            decoded.sample_rate > 384000.0) return false;
-        const auto frames = decoded.sample_count / decoded.channels;
-        if (frames > std::numeric_limits<uint32_t>::max() ||
-            !m_buffer.resize(decoded.channels, static_cast<uint32_t>(frames))) return false;
-        if (!hirari_audio_buffer_deinterleave_interleaved(
-                decoded.samples, decoded.sample_count, m_buffer.getArrayOfWritePointers(),
-                decoded.channels, static_cast<uint32_t>(frames))) return false;
-        m_sampleRate = decoded.sample_rate;
-        m_bitsPerSample = decoded.bits_per_sample;
-        return true;
+        return m_state && hirari_wav_decoder_open(
+            m_state, reinterpret_cast<const uint8_t*>(path.data()), path.size());
     }
 
     void decodeFull(AudioBuffer& out) const {
-        if (!out.resize(m_buffer.getNumChannels(), m_buffer.getNumSamples())) return;
-        for (uint32_t channel = 0; channel < m_buffer.getNumChannels(); ++channel) {
-            std::copy_n(m_buffer.getReadPointer(channel), m_buffer.getNumSamples(),
-                        out.getWritePointer(channel));
-        }
+        const uint32_t channels = getNumChannels();
+        const uint32_t frames = hirari_wav_decoder_frames(m_state);
+        if (!out.resize(channels, frames)) return;
+        (void)hirari_wav_decoder_copy_to_channels(
+            m_state, out.getArrayOfWritePointers(), channels, frames);
     }
     std::string getFormatName() const { return "WAV"; }
-    double getSampleRate() const { return m_sampleRate; }
-    uint32_t getNumChannels() const { return m_buffer.getNumChannels(); }
-    uint32_t getBitsPerSample() const { return m_bitsPerSample; }
+    double getSampleRate() const { return hirari_wav_decoder_sample_rate(m_state); }
+    uint32_t getNumChannels() const { return hirari_wav_decoder_channels(m_state); }
+    uint32_t getBitsPerSample() const { return hirari_wav_decoder_bits_per_sample(m_state); }
 
 private:
-    AudioBuffer m_buffer;
-    double m_sampleRate = 0.0;
-    uint32_t m_bitsPerSample = 0;
+    void* m_state = nullptr;
 };
 
 class AudioDecoderManager {
@@ -143,52 +131,25 @@ public:
             m_lastImportStatus = ImportStatus::FileNotFound;
             return nullptr;
         }
-        const auto dot = path.find_last_of('.');
-        const auto separator = path.find_last_of("/\\");
-        if (dot == std::string::npos || (separator != std::string::npos && dot < separator) ||
-            dot + 1 >= path.size()) {
-            m_lastImportStatus = ImportStatus::UnsupportedFormat;
-            return nullptr;
-        }
-        std::string extension = path.substr(dot + 1);
-        std::transform(extension.begin(), extension.end(), extension.begin(),
-                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        if (extension != "wav" && extension != "wave" && extension != "rf64" &&
-            extension != "mp3" && extension != "flac" && extension != "aif" &&
-            extension != "aiff" && extension != "m4a" && extension != "ogg" &&
-            extension != "aac") {
-            m_lastImportStatus = ImportStatus::UnsupportedFormat;
-            return nullptr;
-        }
-
         // Rust decoding can be expensive. Do not block status queries or
         // unrelated import requests while Symphonia reads the media file.
         lock.unlock();
-        const auto decoded = hirari_decode_audio_file(path.c_str());
+        const auto decoded = hirari_import_audio_file(
+            reinterpret_cast<const uint8_t*>(path.data()), path.size());
         struct DecodedAudioGuard {
             float* samples;
             size_t count;
             ~DecodedAudioGuard() { hirari_free_decoded_audio(samples, count); }
         } decodedGuard{decoded.samples, decoded.sample_count};
 
-        if (decoded.status != 0 || !decoded.samples || decoded.channels == 0 ||
-            decoded.channels > 32 || decoded.sample_count == 0 ||
-            decoded.sample_count % decoded.channels != 0 ||
-            decoded.sample_count > (512ull * 1024ull * 1024ull) / sizeof(float) ||
-            !std::isfinite(decoded.sample_rate) || decoded.sample_rate < 8000.0 ||
-            decoded.sample_rate > 384000.0) {
+        if (decoded.status != 0 || !decoded.samples) {
             lock.lock();
-            m_lastImportStatus = decoded.status == 3
-                ? ImportStatus::InvalidAudioFile : ImportStatus::DecodeFailed;
+            m_lastImportStatus = decoded.status == 4 ? ImportStatus::UnsupportedFormat :
+                (decoded.status == 3 ? ImportStatus::InvalidAudioFile : ImportStatus::DecodeFailed);
             return nullptr;
         }
 
         const size_t frames = decoded.sample_count / decoded.channels;
-        if (frames > std::numeric_limits<uint32_t>::max()) {
-            lock.lock();
-            m_lastImportStatus = ImportStatus::DecodeFailed;
-            return nullptr;
-        }
         auto audio = std::make_shared<AudioBuffer>();
         try {
             if (!audio->resize(decoded.channels, static_cast<uint32_t>(frames))) {

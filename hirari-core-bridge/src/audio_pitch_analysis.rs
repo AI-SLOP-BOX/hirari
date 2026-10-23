@@ -507,6 +507,131 @@ pub unsafe extern "C" fn hirari_audio_pitch_analyze(
     Box::into_raw(Box::new(AnalysisResult { segments })).cast()
 }
 
+/// Runs the complete region-analysis preparation path in Rust: channel
+/// selection, bounded decimation, pitch analysis, and source-to-timeline
+/// coordinate mapping. The returned opaque result remains consumable by the
+/// existing segment and anchor accessors.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_pitch_analyze_region(
+    channels: *const *const f32,
+    channel_count: usize,
+    source_offset: usize,
+    source_span: usize,
+    reverse: u8,
+    source_sample_rate: f64,
+    timeline_sample_rate: f64,
+    timeline_length: u64,
+    source_frames_per_timeline_frame: f64,
+    warp_markers: *const HirariWarpMarker,
+    warp_marker_count: usize,
+    min_hz: f64,
+    max_hz: f64,
+    threshold: f64,
+    note_change_threshold_cents: f64,
+    note_change_confirmation_frames: usize,
+) -> *mut c_void {
+    if channels.is_null() || channel_count == 0 || source_span == 0
+        || source_span > MAX_SAMPLES || source_offset > MAX_SAMPLES
+        || source_offset.checked_add(source_span).is_none_or(|end| end > MAX_SAMPLES)
+        || !source_sample_rate.is_finite() || source_sample_rate <= 0.0
+        || !timeline_sample_rate.is_finite() || timeline_sample_rate <= 0.0
+        || (warp_marker_count > 0 && warp_markers.is_null())
+    {
+        return std::ptr::null_mut();
+    }
+    let stride = (source_sample_rate / 12_000.0).ceil().max(1.0) as usize;
+    let decimated_count = (source_span - 1) / stride + 1;
+    let mut decimated = vec![0.0_f32; decimated_count];
+    let copied = unsafe {
+        hirari_audio_pitch_select_and_decimate(
+            channels, channel_count, source_offset, source_span, stride, reverse,
+            decimated.as_mut_ptr(), decimated.len(),
+        )
+    };
+    if copied != decimated_count { return std::ptr::null_mut(); }
+    let config = Config {
+        min_hz,
+        max_hz,
+        window: 1024,
+        hop: 512,
+        threshold,
+        note_change_threshold_cents,
+        note_change_confirmation_frames,
+    };
+    let mut segments = analyze(&decimated, source_sample_rate / stride as f64, config);
+    let markers = if warp_marker_count == 0 { &[][..] } else {
+        unsafe { std::slice::from_raw_parts(warp_markers, warp_marker_count) }
+    };
+    for segment in &mut segments {
+        let mut anchors: Vec<HirariAudioNoteAnchor> = segment.anchors.iter().map(|anchor| {
+            HirariAudioNoteAnchor {
+                position_seconds: anchor.position_seconds,
+                pitch_cents: anchor.pitch_cents,
+                formant_cents: anchor.formant_cents,
+            }
+        }).collect();
+        let mut anchor_count = anchors.len();
+        let mut start = segment.start_seconds;
+        let mut end = segment.end_seconds;
+        if !unsafe {
+            hirari_audio_pitch_map_segment_to_timeline(
+                &mut start, &mut end, anchors.as_mut_ptr(), &mut anchor_count,
+                source_sample_rate, timeline_sample_rate, source_span as u64,
+                timeline_length, source_frames_per_timeline_frame,
+                markers.as_ptr(), markers.len(),
+            )
+        } {
+            return std::ptr::null_mut();
+        }
+        segment.start_seconds = start;
+        segment.end_seconds = end;
+        segment.anchors = anchors[..anchor_count].iter().map(|anchor| Anchor {
+            position_seconds: anchor.position_seconds,
+            pitch_cents: anchor.pitch_cents,
+            formant_cents: anchor.formant_cents,
+        }).collect();
+    }
+    segments.retain(|segment| segment.start_seconds.is_finite()
+        && segment.end_seconds.is_finite() && segment.end_seconds > segment.start_seconds
+        && segment.detected_pitch_cents.is_finite());
+    Box::into_raw(Box::new(AnalysisResult { segments })).cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_pitch_commit_region_result(
+    result: *const c_void,
+    region_note_store: *mut c_void,
+) -> bool {
+    if result.is_null() || region_note_store.is_null() { return false; }
+    let result = unsafe { &*result.cast::<AnalysisResult>() };
+    let mut segments = Vec::with_capacity(result.segments.len());
+    let mut anchors = Vec::new();
+    let mut offsets = Vec::with_capacity(result.segments.len());
+    let mut counts = Vec::with_capacity(result.segments.len());
+    for segment in &result.segments {
+        offsets.push(anchors.len());
+        counts.push(segment.anchors.len());
+        segments.push(crate::vari_audio::HirariAudioNoteSegment {
+            start_seconds: segment.start_seconds,
+            end_seconds: segment.end_seconds,
+            detected_pitch_cents: segment.detected_pitch_cents,
+            pitch_offset_cents: 0.0,
+            formant_offset_cents: 0.0,
+        });
+        anchors.extend(segment.anchors.iter().map(|anchor| HirariAudioNoteAnchor {
+            position_seconds: anchor.position_seconds,
+            pitch_cents: anchor.pitch_cents,
+            formant_cents: anchor.formant_cents,
+        }));
+    }
+    unsafe {
+        crate::vari_audio::hirari_region_vari_audio_store_load(
+            region_note_store.cast(), segments.as_ptr(), segments.len(),
+            anchors.as_ptr(), offsets.as_ptr(), counts.as_ptr(),
+        )
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_audio_pitch_result_destroy(state: *mut c_void) {
     if !state.is_null() {

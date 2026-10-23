@@ -1,30 +1,19 @@
 #pragma once
 #include <vector>
-#include <array>
+#include <algorithm>
 #include <string>
 #include <memory>
-#include <fstream>
 #include <limits>
 #include <cmath>
-#include <filesystem>
 #include <atomic>
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 #include "../engine/timeline_system.hpp"
-#include "../../dsp/utils/dither.hpp"
-#include "../../io/persistence/wav_writer.hpp"
+#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::IO {
 
-/**
- * @class BounceEngine
- * @brief High-precision Offline Rendering & Stem Export System.
- * HONEST FIX: Implements 64-bit double-precision summing and normalization.
- * Mirrors the master-grade bounce processes of Logic Pro and Pro Tools, 
- * ensuring that the final 'Master' file is mathematically perfect.
- */
+/** Offline render facade. Rust owns block mixing, normalization, dither and
+ * transactional stream writing; the callback below only invokes native track
+ * rendering, which still depends on the engine's processor objects. */
 class BounceEngine {
 public:
     struct Options {
@@ -34,189 +23,107 @@ public:
         bool normalize = false;
         bool dither = true;
         bool renderStems = false;
-        // 0=post-fader, 1=pre-insert, 2=pre-fader.
         uint32_t renderTap = 0;
-        // Control-side cancellation. Stream writers discard their temporary
-        // file when render() exits before finish().
         const std::atomic<bool>* cancellation = nullptr;
-        // Internal selector used by renderStems. Zero means the full mix.
         uint32_t stemTrackId = 0;
     };
 
-    /**
-     * @brief OFFLINE RENDER: Bounces the entire project timeline to disk.
-     */
     void render(const Options& options, const Engine::TimelineSystem& timeline) {
         m_progress.store(0.0f);
         m_maxPeak = 0.0f;
+        if (!hirari_bounce_options_valid(options.path.size(), options.sampleRate,
+                                         options.bitDepth, options.renderTap)) return;
 
-        if (options.path.empty() || options.sampleRate == 0 || options.sampleRate > 384000 ||
-            (options.bitDepth != 16 && options.bitDepth != 24 && options.bitDepth != 32) ||
-            options.renderTap > 2u) return;
-
+        const auto tracks = timeline.getTracksSnapshot();
         if (options.renderStems && options.stemTrackId == 0) {
-            const auto tracks = timeline.getTracksSnapshot();
             if (tracks.empty()) return;
-            std::filesystem::path masterPath(options.path);
-            const std::string extension = masterPath.extension().string().empty()
-                ? ".wav" : masterPath.extension().string();
-            const std::string stemBase = masterPath.replace_extension().string();
-            size_t renderedStems = 0;
-            for (const auto& track : tracks) {
-                if (options.cancellation &&
-                    options.cancellation->load(std::memory_order_acquire)) return;
-                if (!track) continue;
-                std::string label = track->getName();
-                for (char& character : label) {
-                    const bool safe = (character >= 'a' && character <= 'z') ||
-                        (character >= 'A' && character <= 'Z') ||
-                        (character >= '0' && character <= '9') ||
-                        character == '-' || character == '_';
-                    if (!safe) character = '_';
-                }
-                if (label.empty()) label = "track";
-                Options stem = options;
-                stem.path = stemBase + ".stem-" +
-                    std::to_string(track->getId()) + "-" + label + extension;
-                stem.renderStems = false;
-                stem.stemTrackId = track->getId();
-                render(stem, timeline);
-                ++renderedStems;
-                m_progress.store(static_cast<float>(renderedStems) /
-                                 static_cast<float>(tracks.size()),
-                                 std::memory_order_release);
-            }
-            m_progress.store(renderedStems == 0 ? 0.0f : 1.0f,
-                             std::memory_order_release);
+            AudioBuffer block(2, 1024);
+            RenderContext context{&timeline, &tracks, &block,
+                static_cast<Engine::Track::OfflineRenderTap>(options.renderTap),
+                options.cancellation, &m_progress, {}};
+            (void)hirari_bounce_render_stems(
+                reinterpret_cast<const uint8_t*>(options.path.data()), options.path.size(),
+                options.sampleRate, options.bitDepth, options.normalize, options.dither,
+                options.renderTap, timeline.getSelectionLength(), timeline.getBPM(),
+                tracks.size(), &context, trackInfo, renderTrackBlock, cancelled,
+                setProgress, &m_maxPeak);
             return;
         }
 
-        double durationBeats = timeline.getSelectionLength();
-        if (durationBeats <= 0.0) durationBeats = 128.0;
-        const double durationSamples = durationBeats * (60.0 / timeline.getBPM()) * options.sampleRate;
-        if (!std::isfinite(durationSamples) || durationSamples <= 0.0 ||
-            durationSamples > static_cast<double>(std::numeric_limits<uint64_t>::max())) return;
-        const uint64_t totalSamples = static_cast<uint64_t>(durationSamples);
-        uint32_t blockSize = 1024;
-        std::vector<float> blockL(blockSize), blockR(blockSize);
-        AudioBuffer renderedBlock(2, blockSize);
-        const auto tracks = timeline.getTracksSnapshot();
+        const uint64_t totalSamples = hirari_bounce_total_samples(
+            timeline.getSelectionLength(), timeline.getBPM(), options.sampleRate);
+        if (totalSamples == 0) return;
 
-        const auto mixBlock = [&](uint64_t start, uint32_t count) -> bool {
-            std::fill(blockL.begin(), blockL.end(), 0.0f);
-            std::fill(blockR.begin(), blockR.end(), 0.0f);
-            for (const auto& track : tracks) {
-                if (!track) continue;
-                if (options.stemTrackId != 0 &&
-                    track->getId() != options.stemTrackId) continue;
-                renderedBlock.clear(count);
-                if (!timeline.renderTrackInto(
-                        track->getId(), renderedBlock, count, start,
-                        static_cast<Engine::Track::OfflineRenderTap>(options.renderTap))) {
-                    return false;
-                }
-                const float* renderedLeft = renderedBlock.getReadPointer(0);
-                const float* renderedRight = renderedBlock.getReadPointer(1);
-                if (!renderedLeft || !renderedRight) return false;
-                for (uint32_t i = 0; i < count; ++i) {
-                    blockL[i] += std::isfinite(renderedLeft[i]) ? renderedLeft[i] : 0.0f;
-                    blockR[i] += std::isfinite(renderedRight[i]) ? renderedRight[i] : 0.0f;
-                }
-            }
-            return true;
-        };
-
-        // Normalization is a two-pass operation.  Measuring the complete
-        // graph before opening the destination prevents a later peak from
-        // invalidating an already-published file.
-        if (options.normalize) {
-            for (uint64_t s = 0; s < totalSamples; s += blockSize) {
-                if (options.cancellation &&
-                    options.cancellation->load(std::memory_order_acquire)) return;
-                const uint32_t currentBlock = static_cast<uint32_t>(
-                    std::min<uint64_t>(blockSize, totalSamples - s));
-                if (!mixBlock(s, currentBlock)) return;
-                for (uint32_t i = 0; i < currentBlock; ++i) {
-                    m_maxPeak = std::max({m_maxPeak, std::abs(blockL[i]), std::abs(blockR[i])});
-                }
-            }
+        AudioBuffer block(2, 1024);
+        std::vector<uint32_t> trackIds;
+        trackIds.reserve(tracks.size());
+        for (const auto& track : tracks) {
+            if (track && (options.stemTrackId == 0 || track->getId() == options.stemTrackId))
+                trackIds.push_back(track->getId());
         }
-
-        std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter> pcm16;
-        std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter> pcm24;
-        std::unique_ptr<::Hirari::IO::Persistence::WavWriter::Float32StreamWriter> float32;
-        if (options.bitDepth == 16) {
-            pcm16 = std::make_unique<
-                ::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter>(
-                    options.path, totalSamples, options.sampleRate);
-            if (!pcm16->isOpen()) return;
-        } else if (options.bitDepth == 24) {
-            pcm24 = std::make_unique<
-                ::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter>(
-                    options.path, totalSamples, options.sampleRate);
-            if (!pcm24->isOpen()) return;
-        } else {
-            float32 = std::make_unique<
-                ::Hirari::IO::Persistence::WavWriter::Float32StreamWriter>(
-                    options.path, options.sampleRate, 2);
-            if (!float32->isOpen()) return;
-        }
-
-        ::Hirari::DSP::Utils::TPDFDither ditherL{Hirari::DSP::Utils::kTpdfDitherLeftSeed};
-        ::Hirari::DSP::Utils::TPDFDither ditherR{Hirari::DSP::Utils::kTpdfDitherRightSeed};
-        const float normalizationGain = options.normalize && m_maxPeak > 0.0f
-            ? 1.0f / m_maxPeak : 1.0f;
-        for (uint64_t s = 0; s < totalSamples; s += blockSize) {
-            if (options.cancellation &&
-                options.cancellation->load(std::memory_order_acquire)) return;
-            const uint32_t currentBlock = static_cast<uint32_t>(
-                std::min<uint64_t>(blockSize, totalSamples - s));
-            if (!mixBlock(s, currentBlock)) return;
-
-            for (uint32_t i = 0; i < currentBlock; ++i) {
-                float lVal = blockL[i] * normalizationGain;
-                float rVal = blockR[i] * normalizationGain;
-
-                // Peak Detection
-                if (!options.normalize) {
-                    m_maxPeak = std::max({m_maxPeak, std::abs(lVal), std::abs(rVal)});
-                }
-
-                if (options.dither && options.bitDepth < 32) {
-                    lVal += ditherL.process();
-                    rVal += ditherR.process();
-                }
-                blockL[i] = lVal;
-                blockR[i] = rVal;
-
-            }
-
-            const bool written = pcm16
-                ? pcm16->writeFrames(blockL.data(), blockR.data(), currentBlock)
-                : (pcm24
-                    ? pcm24->writeFrames(blockL.data(), blockR.data(), currentBlock)
-                    : float32->writeFrames(
-                        std::array<const float*, 2>{blockL.data(), blockR.data()}.data(),
-                        currentBlock));
-            if (!written) return;
-
-            if (options.cancellation &&
-                options.cancellation->load(std::memory_order_acquire)) return;
-
-            m_progress.store(static_cast<float>(s + currentBlock) /
-                             static_cast<float>(totalSamples));
-        }
-
-        m_progress.store(1.0f);
-        const bool finished = pcm16 ? pcm16->finish()
-            : (pcm24 ? pcm24->finish() : float32->finish());
-        if (!finished) m_progress.store(0.0f);
+        RenderContext context{&timeline, &tracks, &block,
+            static_cast<Engine::Track::OfflineRenderTap>(options.renderTap),
+            options.cancellation, &m_progress, {}};
+        float peak = 0.0f;
+        const bool finished = hirari_bounce_render_stream(
+            reinterpret_cast<const uint8_t*>(options.path.data()), options.path.size(),
+            options.sampleRate, options.bitDepth, options.normalize, options.dither,
+            totalSamples, trackIds.data(), trackIds.size(), &context,
+            renderTrackBlock, cancelled, setProgress, &peak);
+        m_maxPeak = peak;
+        if (finished) m_progress.store(1.0f);
+        else m_progress.store(0.0f);
     }
 
     float getProgress() const { return m_progress.load(); }
     float getMaxPeak() const { return m_maxPeak; }
 
 private:
+    struct RenderContext {
+        const Engine::TimelineSystem* timeline;
+        const std::vector<std::shared_ptr<Engine::Track>>* tracks;
+        AudioBuffer* block;
+        Engine::Track::OfflineRenderTap tap;
+        const std::atomic<bool>* cancellation;
+        std::atomic<float>* progress;
+        std::string currentTrackName;
+    };
+
+    static bool trackInfo(void* opaque, size_t index, uint32_t* id,
+                          const uint8_t** name, size_t* nameSize) {
+        auto* context = static_cast<RenderContext*>(opaque);
+        if (!id || !name || !nameSize || index >= context->tracks->size()) return false;
+        const auto& track = (*context->tracks)[index];
+        if (!track) return false;
+        *id = track->getId();
+        context->currentTrackName = track->getName();
+        *name = reinterpret_cast<const uint8_t*>(context->currentTrackName.data());
+        *nameSize = context->currentTrackName.size();
+        return true;
+    }
+
+    static bool cancelled(void* opaque) {
+        const auto* context = static_cast<const RenderContext*>(opaque);
+        return context->cancellation && context->cancellation->load(std::memory_order_acquire);
+    }
+    static void setProgress(void* opaque, float value) {
+        auto* context = static_cast<RenderContext*>(opaque);
+        context->progress->store(value, std::memory_order_release);
+    }
+    static bool renderTrackBlock(void* opaque, uint32_t trackId, uint64_t start,
+                                 float* left, float* right, uint32_t count) {
+        auto* context = static_cast<RenderContext*>(opaque);
+        context->block->clear(count);
+        if (!context->timeline->renderTrackInto(trackId, *context->block, count, start, context->tap))
+            return false;
+        const float* sourceLeft = context->block->getReadPointer(0);
+        const float* sourceRight = context->block->getReadPointer(1);
+        if (!sourceLeft || !sourceRight) return false;
+        std::copy_n(sourceLeft, count, left);
+        std::copy_n(sourceRight, count, right);
+        return true;
+    }
+
     std::atomic<float> m_progress{0.0f};
     float m_maxPeak = 0.0f;
 };

@@ -1,5 +1,157 @@
 use std::slice;
 
+use crate::region_warp::{hirari_region_source_position_at, HirariWarpMarker};
+
+/// Splits a piecewise-linear source/timeline warp map at a region-relative
+/// timeline sample. The outputs are caller-owned buffers sized to `count + 2`.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_split_warp_markers(
+    markers: *const HirariWarpMarker,
+    count: usize,
+    source_span: u64,
+    timeline_length: u64,
+    split_offset: u64,
+    source_frames_per_timeline_frame: f64,
+    left_output: *mut HirariWarpMarker,
+    left_capacity: usize,
+    left_count: *mut usize,
+    right_output: *mut HirariWarpMarker,
+    right_capacity: usize,
+    right_count: *mut usize,
+    source_split_output: *mut u64,
+) -> bool {
+    if left_count.is_null()
+        || right_count.is_null()
+        || source_split_output.is_null()
+        || timeline_length == 0
+        || split_offset == 0
+        || split_offset >= timeline_length
+        || source_span <= 1
+        || count > 100_000
+        || (count != 0 && markers.is_null())
+        || left_capacity < count.saturating_add(2)
+        || right_capacity < count.saturating_add(2)
+        || left_output.is_null()
+        || right_output.is_null()
+    {
+        return false;
+    }
+
+    let input = if count == 0 {
+        &[][..]
+    } else {
+        unsafe { slice::from_raw_parts(markers, count) }
+    };
+    let source_at = |sample| {
+        if input.len() < 2 {
+            (sample as f64 * source_frames_per_timeline_frame).clamp(0.0, source_span as f64)
+        } else {
+            unsafe {
+                hirari_region_source_position_at(
+                    input.as_ptr(),
+                    input.len(),
+                    sample,
+                    1.0,
+                    source_span,
+                )
+            }
+        }
+    };
+    let mapped_split = source_at(split_offset);
+    let mapped_end = source_at(timeline_length);
+    let mapped_start = source_at(0);
+    if !mapped_split.is_finite() || !mapped_end.is_finite() || !mapped_start.is_finite() {
+        return false;
+    }
+    let source_split = mapped_split.round().clamp(1.0, (source_span - 1) as f64) as u64;
+    let right_source_length = source_span - source_split;
+    let left_start = HirariWarpMarker {
+        source_sample: mapped_start.round().clamp(0.0, source_split as f64) as u64,
+        timeline_sample: 0,
+        transient: 0,
+    };
+    let left_boundary = HirariWarpMarker {
+        source_sample: source_split,
+        timeline_sample: split_offset,
+        transient: 0,
+    };
+    let right_boundary = HirariWarpMarker {
+        source_sample: 0,
+        timeline_sample: 0,
+        transient: 0,
+    };
+    let right_end_source =
+        (mapped_end.round() - source_split as f64).clamp(0.0, right_source_length as f64) as u64;
+    let mut left = Vec::with_capacity(count + 2);
+    let mut right = Vec::with_capacity(count + 2);
+    if input.len() >= 2 {
+        for marker in input {
+            if marker.timeline_sample < split_offset
+                && marker.source_sample > left_start.source_sample
+                && marker.source_sample < source_split
+            {
+                left.push(*marker);
+            } else if marker.timeline_sample == split_offset {
+                left.push(left_boundary);
+            }
+            if marker.timeline_sample > split_offset
+                && marker.source_sample > source_split
+                && marker.source_sample - source_split < right_end_source
+            {
+                right.push(HirariWarpMarker {
+                    source_sample: marker.source_sample - source_split,
+                    timeline_sample: marker.timeline_sample - split_offset,
+                    transient: marker.transient,
+                });
+            }
+        }
+        if left
+            .last()
+            .map_or(true, |marker| marker.timeline_sample != split_offset)
+        {
+            left.push(left_boundary);
+        } else if let Some(last) = left.last_mut() {
+            *last = left_boundary;
+        }
+        if right
+            .first()
+            .map_or(true, |marker| marker.timeline_sample != 0)
+        {
+            right.insert(0, right_boundary);
+        } else if let Some(first) = right.first_mut() {
+            *first = right_boundary;
+        }
+        if left
+            .first()
+            .map_or(true, |marker| marker.timeline_sample != 0)
+        {
+            left.insert(0, left_start);
+        } else if let Some(first) = left.first_mut() {
+            *first = left_start;
+        }
+        let right_end = HirariWarpMarker {
+            source_sample: right_end_source,
+            timeline_sample: timeline_length - split_offset,
+            transient: 0,
+        };
+        if right.last().map_or(true, |marker| {
+            marker.timeline_sample != right_end.timeline_sample
+        }) {
+            right.push(right_end);
+        } else if let Some(last) = right.last_mut() {
+            *last = right_end;
+        }
+    }
+    unsafe {
+        slice::from_raw_parts_mut(left_output, left.len()).copy_from_slice(&left);
+        slice::from_raw_parts_mut(right_output, right.len()).copy_from_slice(&right);
+        *left_count = left.len();
+        *right_count = right.len();
+        *source_split_output = source_split;
+    }
+    true
+}
+
 /// Applies a synchronized timeline delta to a snapshot of region and base
 /// positions. All overflow checks complete before outputs are committed.
 #[no_mangle]

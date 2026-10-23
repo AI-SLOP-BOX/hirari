@@ -456,21 +456,12 @@ bool HirariUnifiedEngine::set_region_warp_markers(
 
 bool HirariUnifiedEngine::align_regions_to_reference(
     uint32_t referenceTid, uint32_t referenceRid,
-    const std::vector<std::pair<uint32_t, uint32_t>>& targets) {
-    constexpr size_t kMaxTargets = 32;
-    if (referenceTid == 0 || referenceRid == 0 || targets.empty() ||
-        targets.size() > kMaxTargets) return false;
+    const std::vector<::HirariRegionAlignmentTargetId>& targets) {
+    if (targets.empty() || targets.size() > 32) return false;
+    if (!hirari_region_alignment_target_ids_valid(referenceTid, referenceRid,
+            targets.data(), targets.size())) return false;
 
     auto job = std::make_shared<RegionAlignmentJob>();
-    std::vector<std::pair<uint32_t, uint32_t>> uniqueTargets;
-    uniqueTargets.reserve(targets.size());
-    for (const auto& target : targets) {
-        if (target.first == 0 || target.second == 0 ||
-            (target.first == referenceTid && target.second == referenceRid) ||
-            std::find(uniqueTargets.begin(), uniqueTargets.end(), target) != uniqueTargets.end())
-            return false;
-        uniqueTargets.push_back(target);
-    }
 
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -482,12 +473,12 @@ bool HirariUnifiedEngine::align_regions_to_reference(
                     job->referenceTrack = track;
                     job->referenceRegion = region;
                 }
-                for (const auto& targetId : uniqueTargets) {
-                    if (track->getId() == targetId.first && region.id == targetId.second) {
+                for (const auto& targetId : targets) {
+                    if (track->getId() == targetId.track_id && region.id == targetId.region_id) {
                         auto it = std::find_if(job->targets.begin(), job->targets.end(),
                             [&targetId](const auto& candidate) {
-                                return candidate.region.id == targetId.second &&
-                                    candidate.track && candidate.track->getId() == targetId.first;
+                                return candidate.region.id == targetId.region_id &&
+                                    candidate.track && candidate.track->getId() == targetId.track_id;
                             });
                         if (it == job->targets.end()) {
                             RegionAlignmentJob::Target target;
@@ -501,7 +492,7 @@ bool HirariUnifiedEngine::align_regions_to_reference(
                 }
             }
         }
-        if (!job->referenceTrack || job->targets.size() != uniqueTargets.size()) return false;
+        if (!job->referenceTrack || job->targets.size() != targets.size()) return false;
         job->referenceRegionGeneration = job->referenceTrack->regionGeneration();
     }
 
@@ -563,32 +554,36 @@ bool HirariUnifiedEngine::align_regions_to_reference(
                     referenceChannels[channel] =
                         job->referenceRegion.audio->getReadPointer(channel);
                 }
+                std::vector<const float*> targetChannels;
+                std::vector<::HirariRegionAlignmentTargetView> targetViews;
+                targetViews.reserve(job->targets.size());
                 for (auto& target : job->targets) {
                     const uint64_t span = target.region.sourceLength > 0
                         ? target.region.sourceLength : target.region.len;
-                    std::vector<const float*> targetChannels(
-                        target.region.audio->getNumChannels(), nullptr);
-                    for (uint32_t channel = 0; channel < targetChannels.size(); ++channel) {
-                        targetChannels[channel] = target.region.audio->getReadPointer(channel);
+                    const size_t channelOffset = targetChannels.size();
+                    const uint32_t channelCount = target.region.audio->getNumChannels();
+                    for (uint32_t channel = 0; channel < channelCount; ++channel) {
+                        targetChannels.push_back(
+                            target.region.audio->getReadPointer(channel));
                     }
+                    targetViews.push_back({channelOffset, channelCount,
+                        static_cast<size_t>(target.region.sourceOffset),
+                        static_cast<size_t>(span), target.region.len});
+                }
+                std::unique_ptr<void, decltype(&hirari_region_alignment_group_maps_destroy)>
+                    maps{hirari_region_align_audio_group(
+                        referenceChannels.data(), referenceChannels.size(),
+                        static_cast<size_t>(job->referenceRegion.sourceOffset),
+                        static_cast<size_t>(referenceSpan), targetChannels.data(),
+                        targetChannels.size(), targetViews.data(), targetViews.size()),
+                        &hirari_region_alignment_group_maps_destroy};
+                if (!maps) throw std::runtime_error("region alignment analysis failed");
+                for (size_t index = 0; index < job->targets.size(); ++index) {
                     std::array<::HirariWarpMarker, 257> markers{};
-                    size_t markerCount = 0;
-                    if (!hirari_region_align_audio(
-                            referenceChannels.data(), referenceChannels.size(),
-                            static_cast<size_t>(job->referenceRegion.sourceOffset),
-                            static_cast<size_t>(referenceSpan),
-                            targetChannels.data(), targetChannels.size(),
-                            static_cast<size_t>(target.region.sourceOffset),
-                            static_cast<size_t>(span), target.region.len,
-                            markers.data(), markers.size(), &markerCount)) {
-                        throw std::runtime_error("region alignment analysis failed");
-                    }
-                    target.after.clear();
-                    target.after.reserve(markerCount);
-                    for (size_t index = 0; index < markerCount; ++index) {
-                        target.after.push_back({markers[index].sourceSample,
-                            markers[index].timelineSample, markers[index].transient});
-                    }
+                    const size_t markerCount = hirari_region_alignment_group_map_copy(
+                        maps.get(), index, markers.data(), markers.size());
+                    if (markerCount < 2) throw std::runtime_error("region alignment map is empty");
+                    job->targets[index].after.assign(markers.begin(), markers.begin() + markerCount);
                 }
                 job->status.store(2, std::memory_order_release);
             } catch (...) { job->status.store(4, std::memory_order_release); }
@@ -666,15 +661,8 @@ bool HirariUnifiedEngine::finalize_region_alignment(uint32_t referenceTid, uint3
 
 bool HirariUnifiedEngine::quantize_region_sync_group(
     uint32_t tid, uint32_t rid, float strength, double gridBeats, float swing) {
-    constexpr std::array<double, 13> supportedGrids{
-        1.0, 0.5, 0.25, 0.125, 0.0625,
-        2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0, 1.0 / 12.0,
-        1.5, 0.75, 0.375, 0.1875};
-    if (tid == 0 || rid == 0 || !std::isfinite(strength) || strength < 0.0f || strength > 1.0f ||
-        !std::isfinite(gridBeats) ||
-        std::none_of(supportedGrids.begin(), supportedGrids.end(), [gridBeats](double grid) {
-            return std::abs(grid - gridBeats) < 1.0e-9;
-        }) || !std::isfinite(swing) || swing < -1.0f || swing > 1.0f) return false;
+    if (!hirari_audio_quantizer_settings_validate(tid, rid, strength, gridBeats, swing))
+        return false;
 
     std::vector<RegionQuantizeTarget> targets;
     Region sourceRegion;
@@ -711,7 +699,7 @@ bool HirariUnifiedEngine::quantize_region_sync_group(
     }
     const uint64_t timelineSpan = sourceRegion.len;
     if (targets.empty() || timelineSpan < 2 ||
-        timelineSpan > AudioQuantizer::kMaxWarpSamples ||
+        timelineSpan > hirari::limits::kMaxAudioQuantizerWarpSamples ||
         sourceRegion.sourceOffset > sourceRegion.audio->getNumSamples() ||
         (sourceRegion.sourceLength > 0 ? sourceRegion.sourceLength : sourceRegion.len) >
             sourceRegion.audio->getNumSamples() - sourceRegion.sourceOffset ||
@@ -774,56 +762,32 @@ bool HirariUnifiedEngine::quantize_region_sync_group(
                         channels.push_back({data + target.region.sourceOffset, sourceSpan, sourceRate});
                     }
                 }
-                // Analyze every microphone at the project timeline rate. A
-                // compact RMS envelope keeps the working set bounded while
-                // mapping the resulting anchors back to each native source.
-                std::vector<float> groupEnvelope(static_cast<size_t>(timelineSpan));
-                if (!hirari_audio_quantizer_build_group_envelope(
-                        channels.data(), channels.size(), timelineSpan,
-                        groupEnvelope.data(), groupEnvelope.size()))
-                    throw std::runtime_error("audio group envelope could not be built");
-                std::unique_ptr<void, decltype(&hirari_tempo_map_destroy)> tempoSnapshot{
-                    hirari_tempo_map_create(), &hirari_tempo_map_destroy};
-                hirari_tempo_map_clear(tempoSnapshot.get(), sampleRate, baseTempo);
-                for (const auto& event : tempoEvents)
-                    hirari_tempo_map_add_tempo(tempoSnapshot.get(), event.samplePos, event.bpm,
-                        sampleRate, event.ramp);
-                const auto samplesToBeats = [&tempoSnapshot, sampleRate](uint64_t sample) {
-                    return hirari_tempo_map_samples_to_beats(tempoSnapshot.get(), sample,
-                        sampleRate);
-                };
-                const auto beatsToSamples = [&tempoSnapshot, sampleRate](double beat) {
-                    return hirari_tempo_map_beats_to_samples(tempoSnapshot.get(), beat,
-                        sampleRate);
-                };
-                const float* analysisInputs[] = {groupEnvelope.data()};
-                std::vector<std::pair<uint64_t, uint64_t>> map;
-                if (!AudioQuantizer::buildGroupWarpMap(analysisInputs, 1,
-                        timelineSpan, timelineStart,
-                        gridBeats, {strength, swing}, samplesToBeats, beatsToSamples, map))
-                    throw std::runtime_error("transient map could not be built");
-                std::vector<::HirariAudioQuantizerMapPoint> nativeMap;
-                nativeMap.reserve(map.size());
-                for (const auto& point : map) nativeMap.push_back({point.first, point.second});
+                std::vector<::HirariAudioQuantizerTargetView> targetViews;
+                targetViews.reserve(job->targets.size());
+                for (const auto& target : job->targets) {
+                    targetViews.push_back({
+                        target.region.sourceLength > 0
+                            ? target.region.sourceLength : target.region.len,
+                        target.region.sourceFramesPerTimelineFrame()});
+                }
+                std::unique_ptr<void, decltype(&hirari_audio_quantizer_group_warp_maps_destroy)>
+                    projected{hirari_audio_quantizer_build_group_warp_maps(
+                        channels.data(), channels.size(), targetViews.data(), targetViews.size(),
+                        timelineSpan, timelineStart, gridBeats, strength, swing, sampleRate,
+                        baseTempo, tempoEvents.data(), tempoEvents.size()),
+                        &hirari_audio_quantizer_group_warp_maps_destroy};
+                if (!projected) throw std::runtime_error("synchronized warp maps could not be built");
                 job->after.resize(job->targets.size());
                 for (size_t targetIndex = 0; targetIndex < job->targets.size(); ++targetIndex) {
-                    const auto& region = job->targets[targetIndex].region;
-                    const uint64_t sourceSpan = region.sourceLength > 0
-                        ? region.sourceLength : region.len;
-                    const double sourceRate = region.sourceFramesPerTimelineFrame();
-                    std::vector<::HirariWarpMarker> projected(nativeMap.size() + 2);
-                    size_t projectedCount = 0;
-                    if (!hirari_audio_quantizer_project_group_map(
-                            nativeMap.data(), nativeMap.size(), sourceSpan, timelineSpan,
-                            sourceRate, projected.data(), projected.size(), &projectedCount))
-                        throw std::runtime_error("group warp map projection failed");
+                    const size_t projectedCount = hirari_audio_quantizer_group_warp_map_count(
+                        projected.get(), targetIndex);
+                    if (projectedCount < 2)
+                        throw std::runtime_error("synchronized warp map is empty");
                     auto& markers = job->after[targetIndex];
-                    markers.clear();
-                    markers.reserve(projectedCount);
-                    for (size_t index = 0; index < projectedCount; ++index) {
-                        markers.push_back({projected[index].sourceSample,
-                            projected[index].timelineSample, projected[index].transient});
-                    }
+                    markers.resize(projectedCount);
+                    if (!hirari_audio_quantizer_group_warp_map_copy(
+                            projected.get(), targetIndex, markers.data(), markers.size()))
+                        throw std::runtime_error("synchronized warp map could not be copied");
                 }
                 job->status.store(2, std::memory_order_release);
             } catch (...) {

@@ -95,6 +95,31 @@ pub unsafe extern "C" fn hirari_track_freeze_render(
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(render)).unwrap_or(false)
 }
 
+/// Streams a completed stereo freeze buffer to a Float32 WAV without making
+/// another full-length copy. The writer remains Rust-owned alongside the
+/// bounded render loop above.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_track_freeze_write_float32(
+    path: *const u8,
+    path_size: usize,
+    sample_rate: u32,
+    left: *const f32,
+    right: *const f32,
+    total_samples: u64,
+) -> bool {
+    if path.is_null() || path_size == 0 || path_size > 1024 * 1024
+        || left.is_null() || right.is_null() || sample_rate == 0
+        || total_samples == 0 || total_samples > MAX_TRACK_FREEZE_SAMPLES
+    {
+        return false;
+    }
+    let Ok(total_samples) = usize::try_from(total_samples) else { return false };
+    let left = unsafe { slice::from_raw_parts(left, total_samples) };
+    let right = unsafe { slice::from_raw_parts(right, total_samples) };
+    crate::export::write_stereo_float32_stream(path, path_size, sample_rate, left, right)
+}
+
+
 /// All pre-insert realtime work for one track block. Storage and snapshots are
 /// owned by Track; Rust coordinates the bounded block pipeline without taking
 /// ownership or allocating on the audio thread.

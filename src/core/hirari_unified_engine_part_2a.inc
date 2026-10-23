@@ -48,93 +48,51 @@ void HirariUnifiedEngine::clear_midi_notes() {
 }
 
 bool HirariUnifiedEngine::replace_midi_notes(const std::vector<ScheduledMidiNote>& notes, bool recordUndo) {
-    if (notes.size() > 100000) return false;
-    for (const auto& note : notes) {
-        if (note.pitch > 127 || note.velocity == 0 || note.midiChannel > 15 ||
-            note.probability > 100 ||
-            note.lengthSamples == 0 || note.startSample > UINT64_MAX - note.lengthSamples) {
-            return false;
-        }
-    }
-
-    const auto makeSnapshot = [](const std::vector<ScheduledMidiNote>& source) {
-        ScheduledMidiSnapshot snapshot;
-        snapshot.notesByStart = source;
-        std::stable_sort(snapshot.notesByStart.begin(), snapshot.notesByStart.end(),
-            [](const ScheduledMidiNote& lhs, const ScheduledMidiNote& rhs) {
-                return lhs.startSample < rhs.startSample;
-            });
-        snapshot.noteIndicesByEnd.resize(snapshot.notesByStart.size());
-        for (size_t index = 0; index < snapshot.noteIndicesByEnd.size(); ++index)
-            snapshot.noteIndicesByEnd[index] = index;
-        std::stable_sort(snapshot.noteIndicesByEnd.begin(), snapshot.noteIndicesByEnd.end(),
-            [&snapshot](size_t lhs, size_t rhs) {
-                return ScheduledMidiSnapshot::noteEnd(snapshot.notesByStart[lhs]) <
-                    ScheduledMidiSnapshot::noteEnd(snapshot.notesByStart[rhs]);
-            });
-        return snapshot;
-    };
-    ScheduledMidiSnapshot before;
-    ScheduledMidiSnapshot after = makeSnapshot(notes);
-    const auto acquireWritableSlot = [this](uint32_t active) {
-        for (;;) {
-            for (uint32_t offset = 1; offset < 3; ++offset) {
-                const uint32_t slot = (active + offset) % 3;
-                if (m_midiSnapshotReaders[slot].load(std::memory_order_acquire) == 0)
-                    return slot;
-            }
-            // This is a control-thread publication path. If overlapping
-            // audio callbacks still pin both retired slots, wait here rather
-            // than ever mutating a vector the audio thread may be traversing.
-            std::this_thread::yield();
-            active = m_activeMidiSnapshot.load(std::memory_order_acquire);
-        }
+    static_assert(sizeof(ScheduledMidiNote) == sizeof(HirariScheduledMidiNote));
+    static_assert(offsetof(ScheduledMidiNote, startSample) ==
+                  offsetof(HirariScheduledMidiNote, start_sample));
+    static_assert(offsetof(ScheduledMidiNote, regionId) ==
+                  offsetof(HirariScheduledMidiNote, region_id));
+    if (!m_midiSnapshotStore || notes.size() > 100'000) return false;
+    std::vector<ScheduledMidiNote> before;
+    const auto after = notes;
+    const auto publish = [this](const std::vector<ScheduledMidiNote>& snapshot) {
+        std::lock_guard<std::mutex> lock(m_midiNotesMutex);
+        (void)hirari_midi_snapshot_store_publish(m_midiSnapshotStore,
+            reinterpret_cast<const HirariScheduledMidiNote*>(snapshot.data()), snapshot.size());
     };
     {
         std::lock_guard<std::mutex> lock(m_midiNotesMutex);
-        const uint32_t active = m_activeMidiSnapshot.load(std::memory_order_relaxed);
-        before = m_midiNoteSnapshots[active];
-        const uint32_t next = acquireWritableSlot(active);
-        m_midiNoteSnapshots[next] = after;
-        m_midiNoteSnapshotRevision.fetch_add(1, std::memory_order_acq_rel);
-        m_activeMidiSnapshot.store(next, std::memory_order_release);
-        m_midiNoteSnapshotRevision.fetch_add(1, std::memory_order_release);
+        before = midi_notes_snapshot();
+        if (!hirari_midi_snapshot_store_publish(m_midiSnapshotStore,
+                reinterpret_cast<const HirariScheduledMidiNote*>(after.data()), after.size()))
+            return false;
     }
-
-    const auto publish = [this, acquireWritableSlot](
-                             const ScheduledMidiSnapshot& snapshot) {
-        std::lock_guard<std::mutex> lock(m_midiNotesMutex);
-        const uint32_t active = m_activeMidiSnapshot.load(std::memory_order_relaxed);
-        const uint32_t next = acquireWritableSlot(active);
-        m_midiNoteSnapshots[next] = snapshot;
-        m_midiNoteSnapshotRevision.fetch_add(1, std::memory_order_acq_rel);
-        m_activeMidiSnapshot.store(next, std::memory_order_release);
-        m_midiNoteSnapshotRevision.fetch_add(1, std::memory_order_release);
-    };
     if (recordUndo) {
         m_undoManager.recordAppliedAction(
-            "Replace MIDI Notes",
-            [publish, before]() { publish(before); },
+            "Replace MIDI Notes", [publish, before]() { publish(before); },
             [publish, after]() { publish(after); });
     }
     return true;
 }
 
 std::vector<HirariUnifiedEngine::ScheduledMidiNote> HirariUnifiedEngine::midi_notes_snapshot() const {
-    std::lock_guard<std::mutex> lock(m_midiNotesMutex);
-    const uint32_t active = m_activeMidiSnapshot.load(std::memory_order_acquire);
-    return m_midiNoteSnapshots[active].notesByStart;
+    if (!m_midiSnapshotStore) return {};
+    HirariMidiSnapshotView snapshot{};
+    while (!hirari_midi_snapshot_store_pin(m_midiSnapshotStore, &snapshot))
+        std::this_thread::yield();
+    std::vector<ScheduledMidiNote> notes;
+    if (snapshot.note_count != 0) {
+        const auto* begin = reinterpret_cast<const ScheduledMidiNote*>(snapshot.notes);
+        notes.assign(begin, begin + snapshot.note_count);
+    }
+    hirari_midi_snapshot_store_release(m_midiSnapshotStore, snapshot.slot);
+    return notes;
 }
 
 bool HirariUnifiedEngine::remove_midi_notes_range(uint32_t trackId, uint64_t startSample,
                                                 uint64_t endSample) {
-    if (trackId == 0 || startSample >= endSample) return false;
     auto next = midi_notes_snapshot();
-    static_assert(sizeof(ScheduledMidiNote) == sizeof(HirariScheduledMidiNote));
-    static_assert(offsetof(ScheduledMidiNote, startSample) ==
-                  offsetof(HirariScheduledMidiNote, start_sample));
-    static_assert(offsetof(ScheduledMidiNote, regionId) ==
-                  offsetof(HirariScheduledMidiNote, region_id));
     const int64_t edited = hirari_midi_edit_range(
         reinterpret_cast<HirariScheduledMidiNote*>(next.data()), next.size(),
         trackId, startSample, endSample, 0, 0);
@@ -145,13 +103,7 @@ bool HirariUnifiedEngine::remove_midi_notes_range(uint32_t trackId, uint64_t sta
 
 bool HirariUnifiedEngine::transpose_midi_notes_range(uint32_t trackId, uint64_t startSample,
                                                    uint64_t endSample, int32_t semitones) {
-    if (trackId == 0 || startSample >= endSample || semitones < -127 || semitones > 127) return false;
     auto next = midi_notes_snapshot();
-    static_assert(sizeof(ScheduledMidiNote) == sizeof(HirariScheduledMidiNote));
-    static_assert(offsetof(ScheduledMidiNote, startSample) ==
-                  offsetof(HirariScheduledMidiNote, start_sample));
-    static_assert(offsetof(ScheduledMidiNote, regionId) ==
-                  offsetof(HirariScheduledMidiNote, region_id));
     const int64_t edited = hirari_midi_edit_range(
         reinterpret_cast<HirariScheduledMidiNote*>(next.data()), next.size(),
         trackId, startSample, endSample, 1, semitones);
@@ -161,13 +113,7 @@ bool HirariUnifiedEngine::transpose_midi_notes_range(uint32_t trackId, uint64_t 
 
 bool HirariUnifiedEngine::move_midi_notes_range(uint32_t trackId, uint64_t startSample,
                                               uint64_t endSample, int64_t deltaSamples) {
-    if (trackId == 0 || startSample >= endSample) return false;
     auto next = midi_notes_snapshot();
-    static_assert(sizeof(ScheduledMidiNote) == sizeof(HirariScheduledMidiNote));
-    static_assert(offsetof(ScheduledMidiNote, startSample) ==
-                  offsetof(HirariScheduledMidiNote, start_sample));
-    static_assert(offsetof(ScheduledMidiNote, regionId) ==
-                  offsetof(HirariScheduledMidiNote, region_id));
     const int64_t edited = hirari_midi_edit_range(
         reinterpret_cast<HirariScheduledMidiNote*>(next.data()), next.size(),
         trackId, startSample, endSample, 2, deltaSamples);
@@ -177,20 +123,14 @@ bool HirariUnifiedEngine::move_midi_notes_range(uint32_t trackId, uint64_t start
 
 void HirariUnifiedEngine::set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
                                       uint64_t startSample, uint64_t lengthSamples) {
-    if (pitch > 127 || velocity == 0 || lengthSamples == 0 ||
-        startSample > UINT64_MAX - lengthSamples) return;
     auto next = midi_notes_snapshot();
-    auto existing = std::find_if(next.begin(), next.end(), [&](const ScheduledMidiNote& note) {
-        return note.trackId == trackId && note.pitch == pitch && note.midiChannel == 0 &&
-            note.startSample == startSample && note.regionId == 0;
-    });
-    if (existing != next.end()) {
-        if (existing->velocity == velocity && existing->lengthSamples == lengthSamples) return;
-        existing->velocity = velocity;
-        existing->lengthSamples = lengthSamples;
-    } else {
-        next.push_back(ScheduledMidiNote{trackId, pitch, velocity, 0, 0, startSample, lengthSamples});
-    }
+    const size_t count = next.size();
+    next.resize(count + 1);
+    const int64_t edited = hirari_midi_note_upsert(
+        reinterpret_cast<HirariScheduledMidiNote*>(next.data()), count, next.size(),
+        trackId, pitch, velocity, startSample, lengthSamples);
+    if (edited < 0) return;
+    next.resize(static_cast<size_t>(edited));
     replace_midi_notes(next, true);
 }
 
@@ -215,31 +155,25 @@ uint32_t HirariUnifiedEngine::get_block_size() const noexcept {
     return m_context ? m_context->blockSize : 0u;
 }
 float HirariUnifiedEngine::get_latency_ms() const noexcept {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    const uint32_t blockSize = get_block_size();
-    if (!std::isfinite(sampleRate) || sampleRate <= 0.0 || blockSize == 0) return 0.0f;
-    uint32_t masterLatency = blockSize;
+    uint32_t masterLatency = get_block_size();
     if (m_masterLimiter) {
         masterLatency += m_masterLimiter->getLatencySamples();
     }
-    return static_cast<float>(1000.0 * static_cast<double>(masterLatency) / sampleRate);
+    return hirari_samples_to_milliseconds(
+        masterLatency, m_sampleRate.load(std::memory_order_relaxed));
 }
 
 float HirariUnifiedEngine::get_master_tail_ms() const noexcept {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    if (!std::isfinite(sampleRate) || sampleRate <= 0.0 || !m_masterLimiter) return 0.0f;
-    return static_cast<float>(static_cast<double>(m_masterLimiter->getTailSamples()) *
-                              1000.0 / sampleRate);
+    return m_masterLimiter ? hirari_samples_to_milliseconds(
+        m_masterLimiter->getTailSamples(), m_sampleRate.load(std::memory_order_relaxed)) : 0.0f;
 }
 
 float HirariUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return 0.0f;
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
         if (track->getId() == tid) {
-            return static_cast<float>(
-                static_cast<double>(track->getTotalLatencySamples()) * 1000.0 / sampleRate);
+            return hirari_samples_to_milliseconds(track->getTotalLatencySamples(), sampleRate);
         }
     }
     return 0.0f;
@@ -247,12 +181,10 @@ float HirariUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
 
 float HirariUnifiedEngine::get_track_tail_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return 0.0f;
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
         if (track && track->getId() == tid) {
-            return static_cast<float>(static_cast<double>(track->getTotalTailSamples()) *
-                                      1000.0 / sampleRate);
+            return hirari_samples_to_milliseconds(track->getTotalTailSamples(), sampleRate);
         }
     }
     return 0.0f;
@@ -260,12 +192,11 @@ float HirariUnifiedEngine::get_track_tail_ms(uint32_t tid) const noexcept {
 
 float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return 0.0f;
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
         if (track->getId() == tid) {
-            return static_cast<float>(
-                static_cast<double>(track->getPdcCompensationSamples()) * 1000.0 / sampleRate);
+            return hirari_samples_to_milliseconds(
+                track->getPdcCompensationSamples(), sampleRate);
         }
     }
     return 0.0f;

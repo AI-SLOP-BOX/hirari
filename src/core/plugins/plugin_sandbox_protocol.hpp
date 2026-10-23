@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <atomic>
 #include "midi_fragment_transport.hpp"
@@ -67,6 +68,11 @@ struct ParameterChange {
     double value = 0.0;
 };
 
+static_assert(sizeof(MidiEvent) == 272);
+static_assert(offsetof(MidiEvent, data) == 12);
+static_assert(offsetof(MidiEvent, articulationId) == 268);
+static_assert(sizeof(ParameterChange) == 16);
+
 // This mailbox is inherited across fork and backed by MAP_SHARED memory.
 // It is deliberately bounded so the audio callback never allocates or waits.
 struct SharedAudioBlock {
@@ -111,5 +117,16 @@ struct SharedAudioBlock {
     MidiEvent outputMidi[kMaxMidiEvents]{};
     alignas(64) uint8_t state[kMaxStateBytes]{};
 };
+
+// The Rust worker views this stable prefix directly while the format-specific
+// C++ adapters own the remainder of the shared block. Keep these offsets in
+// lockstep with SharedAudioPrefix in hirari-plugin-protocol/worker_runtime.rs.
+static_assert(offsetof(SharedAudioBlock, requestSequence) == 8);
+static_assert(offsetof(SharedAudioBlock, heartbeat) == 24);
+static_assert(offsetof(SharedAudioBlock, frames) == 32);
+static_assert(offsetof(SharedAudioBlock, processErrors) == 72);
+static_assert(offsetof(SharedAudioBlock, stateRequestSequence) == 80);
+static_assert(offsetof(SharedAudioBlock, stateChecksum) == 136);
+static_assert(offsetof(SharedAudioBlock, stateError) == 150);
 
 } // namespace Hirari::Core::Plugins::SandboxProtocol

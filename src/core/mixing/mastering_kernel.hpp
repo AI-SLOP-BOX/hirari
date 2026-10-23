@@ -1,115 +1,30 @@
 #pragma once
-#include <cmath>
-#include <atomic>
-#include <algorithm>
-#include <string>
-#include <array>
-#include <limits>
-#include "../diagnostics/forensic_kernel.hpp"
-#include "../composition/harmonic_context_tracker.hpp"
+
+#include <cstdint>
+#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Mixing {
 
-/**
- * @class MasteringKernel
- * @brief Master-bus dynamics and finalization processor.
- * HONEST FIX: Implements functional RMS-driven gain control and limiting.
- */
+/** Native API adapter for the Rust RMS, DC-block and true-peak mastering kernel. */
 class MasteringKernel {
 public:
-    MasteringKernel() : m_gainReduction(1.0f), m_currentRMSdBFS(-std::numeric_limits<float>::infinity()), m_targetRMS(0.18f), m_writePointers{nullptr, nullptr} {} // -15dBFS approx
+    MasteringKernel() : m_state(hirari_mastering_kernel_create()) {}
+    ~MasteringKernel() { hirari_mastering_kernel_destroy(m_state); }
+    MasteringKernel(const MasteringKernel&) = delete;
+    MasteringKernel& operator=(const MasteringKernel&) = delete;
 
-    void setTargetLoudness(float rms) { if (std::isfinite(rms)) m_targetRMS = std::clamp(rms, 1e-6f, 1.0f); }
-
-    void process(float* l, float* r, uint32_t sz) {
-        m_writePointers[0] = l;
-        m_writePointers[1] = r;
-        if (!l || !r || sz == 0) return;
-        double sumSq = 0.0;
-        for (uint32_t i = 0; i < sz; ++i) {
-            const float left = l[i];
-            const float right = r[i];
-            if (std::isfinite(left)) {
-                const double sample = static_cast<double>(left) - m_dcEstimateL;
-                sumSq += sample * sample;
-            }
-            if (std::isfinite(right)) {
-                const double sample = static_cast<double>(right) - m_dcEstimateR;
-                sumSq += sample * sample;
-            }
-        }
-
-        const double sampleCount = static_cast<double>(sz) * 2.0;
-        const float currentRMS = static_cast<float>(
-            std::sqrt(sumSq / sampleCount));
-        const float currentRMSdBFS = 20.0f * std::log10(std::max(currentRMS, 1e-6f));
-        m_currentRMSdBFS.store(currentRMSdBFS, std::memory_order_relaxed);
-        float targetGain = m_targetRMS / (currentRMS + 1e-6f);
-        
-        // Smooth gain transition (very fast attack/release for AGC)
-        float currentGR = m_gainReduction.load(std::memory_order_relaxed);
-        float smoothing = 0.01f;
-        currentGR = currentGR + (targetGain - currentGR) * smoothing;
-        m_gainReduction.store(std::min(1.0f, currentGR), std::memory_order_relaxed);
-
-        float gr = m_gainReduction.load(std::memory_order_relaxed);
-        for (uint32_t i = 0; i < sz; ++i) {
-            if (std::isfinite(l[i])) {
-                m_dcEstimateL += m_dcBlockAlpha * (static_cast<double>(l[i]) - m_dcEstimateL);
-                l[i] = static_cast<float>((static_cast<double>(l[i]) - m_dcEstimateL) * gr);
-            } else l[i] = 0.0f;
-            if (std::isfinite(r[i])) {
-                m_dcEstimateR += m_dcBlockAlpha * (static_cast<double>(r[i]) - m_dcEstimateR);
-                r[i] = static_cast<float>((static_cast<double>(r[i]) - m_dcEstimateR) * gr);
-            } else r[i] = 0.0f;
-            
-            // True-peak guard: check the midpoint between the previous
-            // output sample and this one as well as the sample itself.  The
-            // previous output is retained across blocks so a boundary
-            // transition cannot create an unchecked inter-sample peak.
-            l[i] = limitTruePeak(l[i], m_prevL);
-            r[i] = limitTruePeak(r[i], m_prevR);
-            m_prevL = l[i];
-            m_prevR = r[i];
-        }
+    void setTargetLoudness(float rms) { hirari_mastering_kernel_set_target(m_state, rms); }
+    void process(float* left, float* right, uint32_t samples) {
+        hirari_mastering_kernel_process(m_state, left, right, samples);
     }
-
-    // This is unweighted RMS level, expressed in dBFS; it is not LUFS.
-    float getCurrentRMSdBFS() const {
-        return m_currentRMSdBFS.load(std::memory_order_relaxed);
-    }
-
-    // Kept for source compatibility. The legacy name is misleading: the
-    // returned value is RMS dBFS, not standards-compliant LUFS.
-    float getLoudnessLUFS() const {
-        return getCurrentRMSdBFS();
-    }
-
+    float getCurrentRMSdBFS() const { return hirari_mastering_kernel_rms_dbfs(m_state); }
+    float getLoudnessLUFS() const { return getCurrentRMSdBFS(); }
     float* getWritePointer(int channel) {
-        // For compatibility with the engine's hacky access
-        if (channel < 0 || channel > 1) return nullptr;
-        return m_writePointers[static_cast<size_t>(channel)];
+        return hirari_mastering_kernel_write_pointer(m_state, channel);
     }
 
 private:
-    std::atomic<float> m_gainReduction;
-    std::atomic<float> m_currentRMSdBFS;
-    float m_targetRMS;
-    std::array<float*, 2> m_writePointers;
-    double m_dcEstimateL = 0.0;
-    double m_dcEstimateR = 0.0;
-    static constexpr double m_dcBlockAlpha = 0.0005;
-
-    static float limitTruePeak(float sample, float previous) noexcept {
-        if (!std::isfinite(sample)) return 0.0f;
-        const float midpoint = 0.5f * (previous + sample);
-        const float peak = std::max(std::abs(sample), std::abs(midpoint));
-        if (!std::isfinite(peak) || peak <= 0.99f) return std::clamp(sample, -0.99f, 0.99f);
-        const float gain = 0.99f / peak;
-        return std::clamp(sample * gain, -0.99f, 0.99f);
-    }
-    float m_prevL = 0.0f;
-    float m_prevR = 0.0f;
+    void* m_state = nullptr;
 };
 
 } // namespace Hirari::Core::Mixing

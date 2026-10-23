@@ -48,12 +48,13 @@ impl DynamicCompressorEngine {
     }
 
     pub fn prepare_to_play(&mut self, sample_rate: f64) {
-        self.sample_rate =
-            if sample_rate.is_finite() && crate::dsp_limits::is_supported_sample_rate(sample_rate) {
-                sample_rate
-            } else {
-                44_100.0
-            };
+        self.sample_rate = if sample_rate.is_finite()
+            && crate::dsp_limits::is_supported_sample_rate(sample_rate)
+        {
+            sample_rate
+        } else {
+            44_100.0
+        };
         self.delay_l.fill(0.0);
         self.delay_r.fill(0.0);
         self.write_idx = 0;
@@ -396,14 +397,80 @@ pub unsafe extern "C" fn hirari_dynamic_compressor_get_control(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_dynamic_compressor_restore(
+pub unsafe extern "C" fn hirari_dynamic_compressor_save_state(
+    state: *const c_void,
+    output: *mut u8,
+    capacity: usize,
+) -> usize {
+    const STATE_SIZE: usize = 28;
+    let Some(state) = state.cast::<DynamicCompressorEngine>().as_ref() else {
+        return 0;
+    };
+    if output.is_null() || capacity < STATE_SIZE {
+        return 0;
+    }
+    let values = [
+        0x4152_4350u32.to_ne_bytes(),
+        1u32.to_ne_bytes(),
+        state.threshold_db.to_ne_bytes(),
+        state.ratio.to_ne_bytes(),
+        state.makeup_db.to_ne_bytes(),
+        state.knee_db.to_ne_bytes(),
+        (state.lookahead_samples as u32).to_ne_bytes(),
+    ];
+    let mut offset = 0;
+    for value in values {
+        std::ptr::copy_nonoverlapping(value.as_ptr(), output.add(offset), value.len());
+        offset += value.len();
+    }
+    STATE_SIZE
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_dynamic_compressor_restore_state(
     state: *mut c_void,
-    threshold: f32,
-    ratio: f32,
-    makeup: f32,
-    knee: f32,
-    lookahead: u32,
+    bytes: *const u8,
+    size: usize,
 ) -> bool {
+    if bytes.is_null() || state.is_null() {
+        return false;
+    }
+    let read_u32 = |offset| {
+        u32::from_ne_bytes(
+            std::slice::from_raw_parts(bytes.add(offset), 4)
+                .try_into()
+                .unwrap(),
+        )
+    };
+    let read_f32 = |offset| {
+        f32::from_ne_bytes(
+            std::slice::from_raw_parts(bytes.add(offset), 4)
+                .try_into()
+                .unwrap(),
+        )
+    };
+    let (threshold, ratio, makeup, knee, lookahead) = if size == 20 {
+        (
+            read_f32(0),
+            read_f32(4),
+            read_f32(8),
+            read_f32(12),
+            read_u32(16),
+        )
+    } else if size == 28 {
+        if read_u32(0) != 0x4152_4350 || read_u32(4) > 1 {
+            return false;
+        }
+        (
+            read_f32(8),
+            read_f32(12),
+            read_f32(16),
+            read_f32(20),
+            read_u32(24),
+        )
+    } else {
+        return false;
+    };
     state
         .cast::<DynamicCompressorEngine>()
         .as_mut()

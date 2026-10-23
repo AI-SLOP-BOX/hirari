@@ -1,15 +1,13 @@
 #pragma once
-#include <vector>
-#include <string>
-#include <atomic>
-#include <mutex>
-#include <thread>
-#include <condition_variable>
-#include <deque>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <optional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+#include "../rust_ffi.hpp"
 #import <AVFoundation/AVFoundation.h>
 #import <CoreVideo/CoreVideo.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -17,37 +15,19 @@
 
 namespace Hirari::Core::Engine {
 
-/**
- * @class VideoSystem
- * @brief Industrial Asynchronous Video Sync Engine.
- * HONEST FIX: Implemented background decoding and lock-free frame management.
- */
+/** AVFoundation adapter for the Rust-owned video request and frame worker. */
 class VideoSystem {
 public:
-    static VideoSystem& getInstance() { static VideoSystem i; return i; }
+    static VideoSystem& getInstance() { static VideoSystem instance; return instance; }
 
-    ~VideoSystem() {
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_workerStop = true;
-        }
-        m_workerWake.notify_one();
-        if (m_worker.joinable()) m_worker.join();
-    }
+    ~VideoSystem() { hirari_video_runtime_destroy(m_runtime); }
 
     void loadVideo(const std::string& path) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_hasVideo = false;
-        m_currentFrame.clear();
-        m_currentWidth = m_currentHeight = 0;
-        m_currentSeconds = -1.0;
-        m_frameRevision.store(0, std::memory_order_release);
-        ++m_videoGeneration;
-        m_path.clear();
-        m_duration = 0.0;
-        m_fps = 24.0;
+        const uint64_t generation = hirari_video_runtime_clear(m_runtime);
+        std::lock_guard<std::mutex> lock(m_nativeMutex);
+        m_nativeGeneration = generation;
+        m_nativeHasVideo = false;
         m_generator = nil;
-        m_pendingSeconds.reset();
         if (path.empty()) return;
         @autoreleasepool {
             NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
@@ -59,54 +39,68 @@ public:
                 loadedTracks = tracks;
                 dispatch_semaphore_signal(tracksReady);
             }];
-            const dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC);
-            if (dispatch_semaphore_wait(tracksReady, deadline) != 0) return;
+            if (dispatch_semaphore_wait(
+                    tracksReady, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) != 0) return;
             AVAssetTrack* track = loadedTracks.firstObject;
-            
-            if (track && track.nominalFrameRate > 0.0f) {
-                m_fps = track.nominalFrameRate;
-                m_duration = CMTimeGetSeconds(asset.duration);
-                m_generator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
-                m_generator.appliesPreferredTrackTransform = YES;
-                m_generator.requestedTimeToleranceBefore = kCMTimeZero;
-                m_generator.requestedTimeToleranceAfter = kCMTimeZero;
-                m_path = path;
-                m_hasVideo = true;
-            }
+            if (!track || !(track.nominalFrameRate > 0.0f)) return;
+            const double fps = track.nominalFrameRate;
+            const double duration = CMTimeGetSeconds(asset.duration);
+            AVAssetImageGenerator* generator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
+            generator.appliesPreferredTrackTransform = YES;
+            generator.requestedTimeToleranceBefore = kCMTimeZero;
+            generator.requestedTimeToleranceAfter = kCMTimeZero;
+            m_generator = generator;
+            m_nativeHasVideo = hirari_video_runtime_set_metadata(m_runtime, duration, fps);
         }
     }
 
     void update(uint64_t audioSamplePos, double sampleRate) {
-        if (!m_hasVideo || !std::isfinite(sampleRate) || sampleRate <= 0.0) return;
-        const double seconds = static_cast<double>(audioSamplePos) / sampleRate;
-        double duration = 0.0;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            duration = m_duration;
-        }
-        m_requestedSeconds.store(std::clamp(seconds, 0.0, std::max(0.0, duration)), std::memory_order_release);
+        hirari_video_runtime_update(m_runtime, audioSamplePos, sampleRate);
     }
 
-    // Control/background-thread API. Never call this from the audio callback.
     bool requestFrameAt(double seconds) {
-        double duration = 0.0;
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (!m_hasVideo || !m_generator || !std::isfinite(seconds)) return false;
-            duration = m_duration;
-            m_pendingSeconds = std::clamp(seconds, 0.0, std::max(0.0, duration));
-        }
-        m_workerWake.notify_one();
-        return true;
+        return hirari_video_runtime_request_frame(m_runtime, seconds);
+    }
+
+    bool hasVideo() const noexcept { return hirari_video_runtime_has_video(m_runtime); }
+    double frameRate() const noexcept { return hirari_video_runtime_fps(m_runtime); }
+    double duration() const noexcept { return hirari_video_runtime_duration(m_runtime); }
+    double requestedSeconds() const noexcept {
+        return hirari_video_runtime_requested_seconds(m_runtime);
+    }
+    uint64_t frameRevision() const noexcept { return hirari_video_runtime_revision(m_runtime); }
+
+    bool copyCurrentFrame(std::vector<uint8_t>& out, uint32_t& width,
+                          uint32_t& height, double& seconds) const {
+        struct CopyContext { std::vector<uint8_t>* output; } context{&out};
+        return hirari_video_runtime_copy_frame(
+            m_runtime, &context,
+            +[](void* opaque, const uint8_t* bytes, size_t size) noexcept {
+                auto* context = static_cast<CopyContext*>(opaque);
+                if (!context || !context->output || (!bytes && size != 0)) return;
+                try { context->output->assign(bytes, bytes + size); }
+                catch (...) { context->output->clear(); }
+            }, &width, &height, &seconds);
     }
 
 private:
-    void decodeFrameAt(double position, uint64_t generation) {
+    struct NativeFrame {
+        std::vector<uint8_t> rgba;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        double seconds = 0.0;
+    };
+
+    static bool decodeNativeFrame(void* opaque, double position, uint64_t generation,
+                                  void** output) noexcept {
+        auto* self = static_cast<VideoSystem*>(opaque);
+        if (!self || !output) return false;
         __strong AVAssetImageGenerator* generator = nil;
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (!m_hasVideo || !m_generator || generation != m_videoGeneration) return;
-            generator = m_generator;
+            std::lock_guard<std::mutex> lock(self->m_nativeMutex);
+            if (!self->m_nativeHasVideo || generation != self->m_nativeGeneration ||
+                !self->m_generator) return false;
+            generator = self->m_generator;
         }
         __block CGImageRef image = nil;
         dispatch_semaphore_t imageReady = dispatch_semaphore_create(0);
@@ -117,8 +111,6 @@ private:
                 dispatch_semaphore_signal(imageReady);
             }];
         } else {
-            // The minimum supported SDK is macOS 12, where the async API is
-            // unavailable. Keep the compatibility path isolated here.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
             NSError* error = nil;
@@ -129,92 +121,67 @@ private:
         }
         if (dispatch_semaphore_wait(imageReady, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) != 0) {
             [generator cancelAllCGImageGeneration];
-            return;
+            return false;
         }
-        if (!image) return;
+        if (!image) return false;
         const size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
-        if (width == 0 || height == 0 || width > 8192 || height > 8192) { CGImageRelease(image); return; }
-        // Keep the transport format identical to the UI packet (RGBA8).  A
-        // three-byte CGContext is not portable across CoreGraphics backends
-        // and previously made the bridge reject every decoded frame.
-        std::vector<uint8_t> rgba(width * height * 4u, 0);
+        if (width == 0 || height == 0 || width > 8192 || height > 8192) {
+            CGImageRelease(image);
+            return false;
+        }
+        auto frame = std::make_unique<NativeFrame>();
+        frame->width = static_cast<uint32_t>(width);
+        frame->height = static_cast<uint32_t>(height);
+        frame->seconds = position;
+        frame->rgba.resize(width * height * 4u, 0);
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef context = CGBitmapContextCreate(rgba.data(), width, height, 8, width * 4u,
-                                                       colorSpace, static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
-                                                                   static_cast<uint32_t>(kCGBitmapByteOrder32Big));
-        if (!context) { CGColorSpaceRelease(colorSpace); CGImageRelease(image); return; }
+        CGContextRef context = CGBitmapContextCreate(
+            frame->rgba.data(), width, height, 8, width * 4u, colorSpace,
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big));
+        if (!context) {
+            CGColorSpaceRelease(colorSpace);
+            CGImageRelease(image);
+            return false;
+        }
         CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
-        CGContextRelease(context); CGColorSpaceRelease(colorSpace); CGImageRelease(image);
+        CGContextRelease(context);
+        CGColorSpaceRelease(colorSpace);
+        CGImageRelease(image);
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            // A load can replace the AVAsset while an older decode is still
-            // completing. Never publish a frame from the previous asset.
-            if (generation != m_videoGeneration || !m_hasVideo || generator != m_generator) {
-                return;
-            }
-            m_currentFrame = std::move(rgba);
-            m_currentWidth = static_cast<uint32_t>(width);
-            m_currentHeight = static_cast<uint32_t>(height);
-            m_currentSeconds = position;
-            m_frameRevision.fetch_add(1, std::memory_order_release);
+            std::lock_guard<std::mutex> lock(self->m_nativeMutex);
+            if (!self->m_nativeHasVideo || generation != self->m_nativeGeneration ||
+                generator != self->m_generator) return false;
         }
-    }
-
-    void workerLoop() {
-        for (;;) {
-            double position = 0.0;
-            uint64_t generation = 0;
-            {
-                std::unique_lock<std::mutex> lock(m_mutex);
-                m_workerWake.wait(lock, [this] { return m_workerStop || m_pendingSeconds.has_value(); });
-                if (m_workerStop) return;
-                position = *m_pendingSeconds;
-                m_pendingSeconds.reset();
-                generation = m_videoGeneration;
-            }
-            decodeFrameAt(position, generation);
-        }
-    }
-
-public:
-
-    bool hasVideo() const noexcept { return m_hasVideo; }
-    double frameRate() const noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_fps;
-    }
-    double duration() const noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_duration;
-    }
-    double requestedSeconds() const noexcept { return m_requestedSeconds.load(std::memory_order_acquire); }
-    bool copyCurrentFrame(std::vector<uint8_t>& out, uint32_t& width, uint32_t& height, double& seconds) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (m_currentFrame.empty()) return false;
-        out = m_currentFrame; width = m_currentWidth; height = m_currentHeight; seconds = m_currentSeconds;
+        *output = frame.release();
         return true;
     }
-    uint64_t frameRevision() const noexcept { return m_frameRevision.load(std::memory_order_acquire); }
 
-private:
-    VideoSystem() : m_worker(&VideoSystem::workerLoop, this) {}
-    mutable std::mutex m_mutex;
-    std::condition_variable m_workerWake;
-    std::thread m_worker;
-    bool m_workerStop = false;
-    std::optional<double> m_pendingSeconds;
+    static bool readNativeFrame(void* opaque, uint32_t* width, uint32_t* height,
+                                double* seconds, const uint8_t** pixels,
+                                size_t* size) noexcept {
+        const auto* frame = static_cast<const NativeFrame*>(opaque);
+        if (!frame || !width || !height || !seconds || !pixels || !size) return false;
+        *width = frame->width;
+        *height = frame->height;
+        *seconds = frame->seconds;
+        *pixels = frame->rgba.data();
+        *size = frame->rgba.size();
+        return true;
+    }
+
+    static void destroyNativeFrame(void* opaque) noexcept {
+        delete static_cast<NativeFrame*>(opaque);
+    }
+
+    VideoSystem() : m_runtime(hirari_video_runtime_create(
+        this, &decodeNativeFrame, &readNativeFrame, &destroyNativeFrame)) {}
+
+    void* m_runtime = nullptr;
+    mutable std::mutex m_nativeMutex;
     AVAssetImageGenerator* m_generator = nil;
-    std::string m_path;
-    std::vector<uint8_t> m_currentFrame;
-    uint32_t m_currentWidth = 0, m_currentHeight = 0;
-    double m_currentSeconds = -1.0;
-    double m_duration = 0.0;
-    double m_fps = 24.0;
-    std::atomic<double> m_requestedSeconds{-1.0};
-    std::atomic<bool> m_hasVideo{false};
-    std::atomic<uint64_t> m_frameRevision{0};
-    uint64_t m_videoGeneration = 0;
+    bool m_nativeHasVideo = false;
+    uint64_t m_nativeGeneration = 0;
 };
-
 
 } // namespace Hirari::Core::Engine

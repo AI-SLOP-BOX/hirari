@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <vector>
 
 #include "../iprocessor.hpp"
@@ -44,39 +43,21 @@ public:
 
     std::vector<uint8_t> getState() const override {
         std::vector<uint8_t> state(32, 0);
-        const uint32_t magic = 0x41555241u;
-        const uint16_t version = 1;
-        const uint16_t flags = static_cast<uint16_t>(m_bypassed ? 1u : 0u);
-        const float values[] = {getParameter(0), getParameter(1), getParameter(2)};
-        std::memcpy(state.data(), &magic, sizeof(magic));
-        std::memcpy(state.data() + 4, &version, sizeof(version));
-        std::memcpy(state.data() + 6, &flags, sizeof(flags));
-        std::memcpy(state.data() + 8, &m_mix, sizeof(m_mix));
-        std::memcpy(state.data() + 12, &m_sidechainBusId, sizeof(m_sidechainBusId));
-        std::memcpy(state.data() + 16, values, sizeof(values));
+        if (hirari_tube_saturation_save_state(
+                m_state, m_bypassed ? 1u : 0u, m_mix, m_sidechainBusId,
+                state.data(), state.size()) != state.size()) state.clear();
         return state;
     }
 
     bool setState(const std::vector<uint8_t>& state) override {
-        if (state.size() != 32) return false;
-        uint32_t magic = 0, sidechain = 0;
-        uint16_t version = 0, flags = 0;
-        float mix = 0.0f, values[3]{};
-        std::memcpy(&magic, state.data(), 4);
-        std::memcpy(&version, state.data() + 4, 2);
-        std::memcpy(&flags, state.data() + 6, 2);
-        std::memcpy(&mix, state.data() + 8, 4);
-        std::memcpy(&sidechain, state.data() + 12, 4);
-        std::memcpy(values, state.data() + 16, sizeof(values));
-        if (magic != 0x41555241u || version != 1 || (flags & ~1u) != 0 ||
-            !std::isfinite(mix) || mix < 0.0f || mix > 1.0f) return false;
-        for (float value : values) {
-            if (!std::isfinite(value) || value < 0.0f || value > 1.0f) return false;
-        }
-        m_bypassed = (flags & 1u) != 0;
+        uint8_t bypassed = 0;
+        float mix = 0.0f;
+        uint32_t sidechain = 0;
+        if (!hirari_tube_saturation_restore_state(
+                m_state, state.data(), state.size(), &bypassed, &mix, &sidechain)) return false;
+        m_bypassed = bypassed != 0;
         m_mix = mix;
         m_sidechainBusId = sidechain;
-        for (uint32_t id = 0; id < 3; ++id) setParameter(id, values[id]);
         return true;
     }
     bool restoreStateChecked(const std::vector<uint8_t>& state) override { return setState(state); }

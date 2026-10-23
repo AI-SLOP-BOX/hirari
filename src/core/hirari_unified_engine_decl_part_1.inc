@@ -52,9 +52,8 @@ public:
             inputs[i] = buffers[i];
             outputs[i] = buffers[i];
         }
-        return ::Hirari::Core::Engine::AudioQuantizer::quantizeGroup(
-            inputs.data(), outputs.data(), channels, length, bpm, sampleRate,
-            {strength, swing});
+        return hirari_audio_quantize_group(inputs.data(), outputs.data(), channels,
+                                           length, bpm, sampleRate, strength, swing);
     }
     // Compatibility entry point for older native integrations.  Keep the
     // raw-buffer API routed through the same validated processing path as the

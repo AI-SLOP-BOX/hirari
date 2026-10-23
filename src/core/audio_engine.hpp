@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <string>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -14,7 +15,6 @@
 #include "hirari_unified_engine.hpp"
 #include "plugins/native_editor_host.hpp"
 #include "dsp/vocal/psola_pitch_shifter.hpp"
-#include "dsp/analysis/spectral_processor.hpp"
 #include "bridge_types.hpp"
 #include "../io/wav_loader_utils.hpp"
 

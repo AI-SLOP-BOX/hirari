@@ -1,5 +1,17 @@
 #![no_std]
 
+#[cfg(feature = "worker-runtime")]
+extern crate std;
+
+#[cfg(feature = "worker-runtime")]
+mod worker_runtime;
+
+#[cfg(feature = "worker-runtime")]
+mod clap_events;
+
+#[cfg(feature = "worker-runtime")]
+mod clap_loader;
+
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -225,7 +237,7 @@ pub unsafe extern "C" fn hirari_midi_extended_ring_size(state: *const c_void) ->
         .wrapping_sub(ring.tail.value.load(Ordering::Acquire)) as usize
 }
 
-#[cfg(feature = "standalone-static")]
+#[cfg(all(feature = "standalone-static", not(feature = "worker-runtime")))]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
     unsafe extern "C" {

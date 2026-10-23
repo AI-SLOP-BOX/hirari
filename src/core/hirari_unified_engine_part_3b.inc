@@ -540,104 +540,28 @@ uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t 
     right.fadeOutSamples = std::min(before.fadeOutSamples, right.len);
     const uint64_t sourceLength = before.sourceLength == 0 ? before.len : before.sourceLength;
     if (sourceLength <= 1) return 0;
-    const auto sourcePositionAt = [&before, sourceLength](uint64_t timelineSample) {
-        const auto& markers = before.warpMarkers;
-        if (markers.size() < 2) {
-            return std::clamp(static_cast<double>(timelineSample) * before.sourceFramesPerTimelineFrame(),
-                              0.0, static_cast<double>(sourceLength));
-        }
-        auto upper = std::upper_bound(
-            markers.begin(), markers.end(), timelineSample,
-            [](uint64_t sample, const Region::WarpMarker& marker) {
-                return sample < marker.timelineSample;
-            });
-        const Region::WarpMarker* left = nullptr;
-        const Region::WarpMarker* right = nullptr;
-        if (upper == markers.begin()) {
-            left = &markers[0];
-            right = &markers[1];
-        } else if (upper == markers.end()) {
-            left = &markers[markers.size() - 2];
-            right = &markers.back();
-        } else {
-            left = &*std::prev(upper);
-            right = &*upper;
-        }
-        const uint64_t timelineDelta = right->timelineSample - left->timelineSample;
-        if (timelineDelta == 0) return static_cast<double>(left->sourceSample);
-        const double sourcePerTimeline = static_cast<double>(
-            right->sourceSample - left->sourceSample) / static_cast<double>(timelineDelta);
-        return std::clamp(
-            static_cast<double>(left->sourceSample) +
-                (static_cast<double>(timelineSample) - static_cast<double>(left->timelineSample)) *
-                    sourcePerTimeline,
-            0.0, static_cast<double>(sourceLength));
-    };
-    const double mappedSplit = sourcePositionAt(splitOffset);
-    if (!std::isfinite(mappedSplit)) return 0;
-    const uint64_t sourceSplit = static_cast<uint64_t>(std::clamp(
-        std::round(mappedSplit), 1.0, static_cast<double>(sourceLength - 1)));
+    static_assert(sizeof(Region::WarpMarker) == sizeof(HirariWarpMarker));
+    std::vector<Region::WarpMarker> leftMarkers(before.warpMarkers.size() + 2);
+    std::vector<Region::WarpMarker> rightMarkers(before.warpMarkers.size() + 2);
+    size_t leftMarkerCount = 0;
+    size_t rightMarkerCount = 0;
+    uint64_t sourceSplit = 0;
+    if (!hirari_region_split_warp_markers(
+            reinterpret_cast<const HirariWarpMarker*>(before.warpMarkers.data()),
+            before.warpMarkers.size(), sourceLength, before.len, splitOffset,
+            before.sourceFramesPerTimelineFrame(),
+            reinterpret_cast<HirariWarpMarker*>(leftMarkers.data()), leftMarkers.size(),
+            &leftMarkerCount, reinterpret_cast<HirariWarpMarker*>(rightMarkers.data()),
+            rightMarkers.size(), &rightMarkerCount, &sourceSplit)) return 0;
+    leftMarkers.resize(leftMarkerCount);
+    rightMarkers.resize(rightMarkerCount);
     left.sourceLength = sourceSplit;
     right.sourceLength = sourceLength - sourceSplit;
     // Preserve the piecewise source/timeline mapping on both halves. The
     // split boundary is evaluated through the same map as playback, then
     // becomes the right edge of the left map and the origin of the right map.
-    if (before.warpMarkers.size() >= 2) {
-        const Region::WarpMarker leftStart{
-            static_cast<uint64_t>(std::clamp(std::round(sourcePositionAt(0)), 0.0,
-                                             static_cast<double>(sourceSplit))),
-            0, false};
-        const Region::WarpMarker leftBoundary{sourceSplit, splitOffset, false};
-        const Region::WarpMarker rightBoundary{0, 0, false};
-        left.warpMarkers.clear();
-        right.warpMarkers.clear();
-        left.warpMarkers.reserve(before.warpMarkers.size() + 1);
-        right.warpMarkers.reserve(before.warpMarkers.size() + 1);
-        const double mappedEnd = sourcePositionAt(before.len);
-        if (!std::isfinite(mappedEnd)) return 0;
-        const uint64_t rightEndSource = static_cast<uint64_t>(std::clamp(
-            std::round(mappedEnd) - static_cast<double>(sourceSplit), 0.0,
-            static_cast<double>(right.sourceLength)));
-        for (const auto& marker : before.warpMarkers) {
-            if (marker.timelineSample < splitOffset &&
-                marker.sourceSample > leftStart.sourceSample &&
-                marker.sourceSample < sourceSplit) {
-                left.warpMarkers.push_back(marker);
-            }
-            else if (marker.timelineSample == splitOffset) left.warpMarkers.push_back(leftBoundary);
-            if (marker.timelineSample > splitOffset && marker.sourceSample > sourceSplit &&
-                marker.sourceSample - sourceSplit < rightEndSource) {
-                right.warpMarkers.push_back({marker.sourceSample - sourceSplit,
-                                             marker.timelineSample - splitOffset,
-                                             marker.transient});
-            }
-        }
-        if (left.warpMarkers.empty() ||
-            left.warpMarkers.back().timelineSample != splitOffset) {
-            left.warpMarkers.push_back(leftBoundary);
-        } else {
-            left.warpMarkers.back() = leftBoundary;
-        }
-        if (right.warpMarkers.empty() || right.warpMarkers.front().timelineSample != 0) {
-            right.warpMarkers.insert(right.warpMarkers.begin(), rightBoundary);
-        } else {
-            right.warpMarkers.front() = rightBoundary;
-        }
-        if (left.warpMarkers.front().timelineSample != 0) {
-            left.warpMarkers.insert(left.warpMarkers.begin(), leftStart);
-        } else {
-            left.warpMarkers.front() = leftStart;
-        }
-        const Region::WarpMarker rightEnd{rightEndSource, right.len, false};
-        if (right.warpMarkers.back().timelineSample != right.len) {
-            right.warpMarkers.push_back(rightEnd);
-        } else {
-            right.warpMarkers.back() = rightEnd;
-        }
-    } else {
-        left.warpMarkers.clear();
-        right.warpMarkers.clear();
-    }
+    left.warpMarkers = std::move(leftMarkers);
+    right.warpMarkers = std::move(rightMarkers);
     // Pitch/formant note edits use region-relative seconds. Split each segment
     // at the same timeline boundary and move the right half back to time zero;
     // copying the original segment vector to both clips applies stale edits to

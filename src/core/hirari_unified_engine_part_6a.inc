@@ -433,25 +433,20 @@ uint64_t HirariUnifiedEngine::get_project_generation() const {
 
     protected:
         std::streamsize xsputn(const char* bytes, std::streamsize count) override {
-            for (std::streamsize index = 0; index < count; ++index) {
-                absorb(static_cast<uint8_t>(bytes[index]));
-            }
+            hirari_project_layout_fingerprint_update(
+                &hash_, reinterpret_cast<const uint8_t*>(bytes), static_cast<size_t>(count));
             return count;
         }
 
         int_type overflow(int_type character) override {
             if (!traits_type::eq_int_type(character, traits_type::eof())) {
-                absorb(static_cast<uint8_t>(traits_type::to_char_type(character)));
+                const uint8_t byte = static_cast<uint8_t>(traits_type::to_char_type(character));
+                hirari_project_layout_fingerprint_update(&hash_, &byte, 1);
             }
             return traits_type::not_eof(character);
         }
 
     private:
-        void absorb(uint8_t byte) noexcept {
-            hash_ ^= byte;
-            hash_ *= 0x100000001b3ull;
-        }
-
         uint64_t hash_ = 0xcbf29ce484222325ull;
     } buffer;
 
@@ -465,18 +460,10 @@ uint64_t HirariUnifiedEngine::get_project_layout_revision() const noexcept {
 }
 
 uint64_t HirariUnifiedEngine::get_project_state_revision() const noexcept {
-    // Keep this polling token cheap while covering MIDI note edits, which are
-    // project state but are intentionally outside the serialized track layout.
     const uint64_t layout = get_project_layout_revision();
-    const uint64_t midi = m_midiNoteSnapshotRevision.load(std::memory_order_acquire);
+    const uint64_t midi = hirari_midi_snapshot_store_revision(m_midiSnapshotStore);
     const uint64_t control = m_projectControlRevision.load(std::memory_order_acquire);
-    uint64_t value = layout ^ (midi + 0x9e3779b97f4a7c15ull + (layout << 6) + (layout >> 2));
-    value ^= control + 0x517cc1b727220a95ull + (value << 6) + (value >> 2);
-    value ^= value >> 30;
-    value *= 0xbf58476d1ce4e5b9ull;
-    value ^= value >> 27;
-    value *= 0x94d049bb133111ebull;
-    return value ^ (value >> 31);
+    return hirari_project_state_revision_mix(layout, midi, control);
 }
 
 bool HirariUnifiedEngine::push_command(CommandType type, uint32_t tid, float val, uint64_t ts,

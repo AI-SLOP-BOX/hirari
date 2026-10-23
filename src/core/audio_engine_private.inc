@@ -1,4 +1,64 @@
 private:
+    struct ProjectLayoutSnapshotContext {
+        explicit ProjectLayoutSnapshotContext(
+            std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> value)
+            : engine(std::move(value)) {}
+        std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> engine;
+        std::atomic<bool> cancelled{false};
+    };
+    struct ProjectLayoutSnapshotResult {
+        uint64_t before = 0;
+        uint64_t after = 0;
+        std::string layout;
+    };
+
+    static bool computeProjectLayoutSnapshot(void* opaque, void** output) noexcept {
+        auto* context = static_cast<ProjectLayoutSnapshotContext*>(opaque);
+        if (!context || !context->engine || !output) return false;
+        try {
+            auto result = std::make_unique<ProjectLayoutSnapshotResult>();
+            result->before = context->engine->get_project_state_revision();
+            auto layout = context->engine->get_project_layout_json_cancellable(
+                &context->cancelled);
+            result->layout = layout.c_str();
+            result->after = context->engine->get_project_state_revision();
+            *output = result.release();
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    static bool readProjectLayoutSnapshot(
+        void* opaque, uint64_t* before, uint64_t* after,
+        const uint8_t** data, size_t* size) noexcept {
+        const auto* result = static_cast<ProjectLayoutSnapshotResult*>(opaque);
+        if (!result || !before || !after || !data || !size) return false;
+        *before = result->before;
+        *after = result->after;
+        *data = reinterpret_cast<const uint8_t*>(result->layout.data());
+        *size = result->layout.size();
+        return true;
+    }
+
+    static void destroyProjectLayoutResult(void* opaque) noexcept {
+        delete static_cast<ProjectLayoutSnapshotResult*>(opaque);
+    }
+
+    static void destroyProjectLayoutContext(void* opaque) noexcept {
+        delete static_cast<ProjectLayoutSnapshotContext*>(opaque);
+    }
+
+    static void cancelProjectLayoutSnapshot(void* opaque) noexcept {
+        if (auto* context = static_cast<ProjectLayoutSnapshotContext*>(opaque))
+            context->cancelled.store(true, std::memory_order_release);
+    }
+
+    static bool isProjectLayoutSnapshotCancelled(const void* opaque) noexcept {
+        const auto* context = static_cast<const ProjectLayoutSnapshotContext*>(opaque);
+        return !context || context->cancelled.load(std::memory_order_acquire);
+    }
+
 #if !defined(__APPLE__)
     void sync_jack_graph_config() const {
 #if defined(HIRARI_ENABLE_JACK) && !defined(__APPLE__)
@@ -42,24 +102,10 @@ private:
     }
     // Session-owned graph. Separate FFI handles receive separate project state.
     std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> m_engine;
-    inline static std::atomic<uint64_t> s_waveformSequence{0};
-    inline static std::mutex s_waveformMutex;
-    inline static std::unordered_set<uint64_t> s_waveformPending;
-    inline static std::unordered_map<uint64_t, std::vector<float>> s_waveformResults;
+    uint64_t m_layoutSnapshotOwnerId = hirari_layout_snapshot_owner_create();
     std::unique_ptr<AudioDriverHost> m_driver;
     mutable std::mutex m_configMutex;
     mutable std::mutex m_inputPollMutex;
     mutable std::vector<float> m_inputPollScratch;
     mutable ::Hirari::Core::Plugins::NativeEditorHost m_nativeEditorHost;
-    struct ProjectLayoutSnapshotState {
-        std::mutex mutex;
-        uint64_t nextId = 1;
-        uint64_t activeId = 0;
-        uint64_t resultId = 0;
-        bool hasResult = false;
-        std::string result;
-        std::shared_ptr<std::atomic<bool>> activeCancellation;
-    };
-    std::shared_ptr<ProjectLayoutSnapshotState> m_projectLayoutSnapshotState =
-        std::make_shared<ProjectLayoutSnapshotState>();
 };

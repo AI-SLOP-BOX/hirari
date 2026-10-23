@@ -11,6 +11,25 @@
 #include "../diagnostics/forensic_kernel.hpp"
 #include "../composition/harmonic_context_tracker.hpp"
 
+extern "C" void* hirari_timeline_markers_create();
+extern "C" void hirari_timeline_markers_destroy(void* store);
+extern "C" bool hirari_timeline_markers_add(
+    void* store, uint64_t samplePosition, const uint8_t* name, size_t nameSize);
+extern "C" bool hirari_timeline_markers_remove_at(void* store, uint64_t samplePosition);
+extern "C" void hirari_timeline_markers_normalize(void* store);
+extern "C" size_t hirari_timeline_markers_visit(
+    const void* store, void* context,
+    bool (*visitor)(void*, uint64_t, const uint8_t*, size_t));
+extern "C" uint64_t hirari_timeline_state_get_playhead(const void* state);
+extern "C" void hirari_timeline_state_set_playhead(void* state, uint64_t sample);
+extern "C" void hirari_timeline_state_process(void* state, uint32_t frames);
+extern "C" bool hirari_timeline_state_prepare(void* state, double sampleRate, uint32_t blockSize);
+extern "C" double hirari_timeline_state_sample_rate(const void* state);
+extern "C" bool hirari_timeline_state_is_playing(const void* state);
+extern "C" void hirari_timeline_state_set_playing(void* state, bool playing);
+extern "C" double hirari_timeline_state_bpm(const void* state);
+extern "C" void hirari_timeline_state_set_bpm(void* state, double bpm);
+
 namespace Hirari::Core::Engine {
 
 /**
@@ -21,6 +40,17 @@ struct TimelineMarker {
     uint64_t samplePos;
     std::string name;
 };
+
+inline bool collectTimelineMarker(
+    void* context, uint64_t samplePosition, const uint8_t* name, size_t nameSize) noexcept {
+    auto* markers = static_cast<std::vector<TimelineMarker>*>(context);
+    try {
+        markers->push_back({samplePosition, std::string(reinterpret_cast<const char*>(name), nameSize)});
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
 
 /**
  * @class TimelineSystem
@@ -43,12 +73,7 @@ public:
         m_tracks.erase(std::remove_if(m_tracks.begin(), m_tracks.end(), [&](const auto& track) {
             return !track || track->getId() == 0 || !ids.insert(track->getId()).second;
         }), m_tracks.end());
-        std::stable_sort(m_markers.begin(), m_markers.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.samplePos < rhs.samplePos;
-        });
-        m_markers.erase(std::unique(m_markers.begin(), m_markers.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.samplePos == rhs.samplePos && lhs.name == rhs.name;
-        }), m_markers.end());
+        hirari_timeline_markers_normalize(m_timelineState);
     }
 
     /**
@@ -56,40 +81,19 @@ public:
      * INDUSTRIAL: Delegating marker indexing and retrieval to the Rust 'TimelineOrchestrator'.
      */
     void addMarker(const std::string& name) {
-        const auto first = name.find_first_not_of(" \t\r\n");
-        const auto last = name.find_last_not_of(" \t\r\n");
-        if (first == std::string::npos || last - first + 1 > 256 || name.find('\0') != std::string::npos) return;
-        const std::string normalized = name.substr(first, last - first + 1);
-        std::lock_guard<std::mutex> lock(m_trackMutex);
-        const uint64_t position = getCurrentPos();
-        if (std::any_of(m_markers.begin(), m_markers.end(), [&](const TimelineMarker& marker) {
-                return marker.samplePos == position && marker.name == normalized;
-            })) return;
-        m_markers.push_back(TimelineMarker{position, normalized});
-        std::stable_sort(m_markers.begin(), m_markers.end(), [](const TimelineMarker& lhs, const TimelineMarker& rhs) {
-            return lhs.samplePos < rhs.samplePos;
-        });
-        // --- INDUSTRIAL TRANSITION: RUST CORE BRIDGE ---
-        // The implementation here is now a shim to Hirari::Core::Bridge::TimelineOrchestrator.
-        // Rust's memory-safe collections ensure that project markers are perfectly
-        // managed, forensics-ready, and perfectly secure.
-        // Rust's ArrangementEngine ensures bit-accurate marker distribution.
-        // Rust's MarkerEngine ensures zero-technical drift in timeline navigation.
+        (void)hirari_timeline_markers_add(
+            m_timelineState, getCurrentPos(),
+            reinterpret_cast<const uint8_t*>(name.data()), name.size());
     }
 
     bool removeMarkerAt(uint64_t samplePos) {
-        std::lock_guard<std::mutex> lock(m_trackMutex);
-        const auto it = std::find_if(m_markers.begin(), m_markers.end(), [samplePos](const TimelineMarker& marker) {
-            return marker.samplePos == samplePos;
-        });
-        if (it == m_markers.end()) return false;
-        m_markers.erase(it);
-        return true;
+        return hirari_timeline_markers_remove_at(m_timelineState, samplePos);
     }
 
     std::vector<TimelineMarker> getMarkersSnapshot() const {
-        std::lock_guard<std::mutex> lock(m_trackMutex);
-        return m_markers;
+        std::vector<TimelineMarker> result;
+        (void)hirari_timeline_markers_visit(m_timelineState, &result, &collectTimelineMarker);
+        return result;
     }
 
     /**
@@ -216,19 +220,15 @@ public:
         return track->processInto(output, numSamples, playhead, tap);
     }
 
-    uint64_t getCurrentPos() const { return m_currentPos.load(std::memory_order_acquire); }
-    void setPlayhead(uint64_t pos) { m_currentPos.store(pos, std::memory_order_release); }
+    uint64_t getCurrentPos() const {
+        return hirari_timeline_state_get_playhead(m_timelineState);
+    }
+    void setPlayhead(uint64_t pos) {
+        hirari_timeline_state_set_playhead(m_timelineState, pos);
+    }
 
     void process(uint32_t numSamples) {
-        if (!m_playing.load(std::memory_order_acquire) || numSamples == 0) return;
-        uint64_t current = m_currentPos.load(std::memory_order_relaxed);
-        for (;;) {
-            const uint64_t next = current > UINT64_MAX - numSamples
-                ? UINT64_MAX : current + numSamples;
-            if (m_currentPos.compare_exchange_weak(current, next,
-                                                    std::memory_order_relaxed,
-                                                    std::memory_order_relaxed)) break;
-        }
+        hirari_timeline_state_process(m_timelineState, numSamples);
     }
 
     void prepare(double sampleRate, uint32_t blockSize) {
@@ -244,15 +244,11 @@ public:
         for (const auto& track : tracks) {
             if (track) track->prepareToPlay(sampleRate, blockSize);
         }
-        m_sampleRate.store(sampleRate, std::memory_order_release);
-        setPlayhead(0);
+        (void)hirari_timeline_state_prepare(m_timelineState, sampleRate, blockSize);
     }
 
-    // Control-thread/offline-render boundary.  A normalized export performs
-    // an analysis pass followed by a write pass; stateful channel strips,
-    // plugin processors, and PDC delay lines must begin both passes from the
-    // same state or the measured peak and the written audio describe
-    // different renders.
+    // Control-thread/offline-render boundary. A normalized export performs
+    // two renders from the same state, so stateful processors are reset too.
     void resetForOfflineRender() noexcept {
         std::vector<std::shared_ptr<Track>> tracks;
         {
@@ -267,15 +263,21 @@ public:
     }
 
     double getSampleRate() const noexcept {
-        return m_sampleRate.load(std::memory_order_acquire);
+        return hirari_timeline_state_sample_rate(m_timelineState);
     }
-    bool isPlaying() const { return m_playing.load(std::memory_order_acquire); }
-    void setPlaying(bool playing) { m_playing.store(playing, std::memory_order_release); }
-    double getBPM() const noexcept { return m_bpm.load(std::memory_order_acquire); }
+    bool isPlaying() const {
+        return hirari_timeline_state_is_playing(m_timelineState);
+    }
+    void setPlaying(bool playing) {
+        hirari_timeline_state_set_playing(m_timelineState, playing);
+    }
+    double getBPM() const noexcept {
+        return hirari_timeline_state_bpm(m_timelineState);
+    }
     void setBPM(double bpm) noexcept {
-        if (std::isfinite(bpm) && bpm >= 20.0 && bpm <= 300.0)
-            m_bpm.store(bpm, std::memory_order_release);
+        hirari_timeline_state_set_bpm(m_timelineState, bpm);
     }
+
     double getSelectionLength() const noexcept {
         const double bpm = getBPM();
         const double sr = getSampleRate();
@@ -287,15 +289,12 @@ public:
     }
 
 public:
-    TimelineSystem() = default;
+    TimelineSystem() : m_timelineState(hirari_timeline_markers_create()) {}
+    ~TimelineSystem() { hirari_timeline_markers_destroy(m_timelineState); }
 
 private:
 
-    std::atomic<uint64_t> m_currentPos{0};
-    std::atomic<bool> m_playing{false};
-    std::atomic<double> m_sampleRate{44100.0};
-    std::atomic<double> m_bpm{120.0};
-    std::vector<TimelineMarker> m_markers;
+    void* m_timelineState = nullptr;
     
     std::vector<std::shared_ptr<Track>> m_tracks;
     mutable std::mutex m_trackMutex;

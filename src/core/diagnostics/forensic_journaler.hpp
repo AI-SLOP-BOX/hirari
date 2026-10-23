@@ -1,115 +1,90 @@
 #pragma once
-#include <fstream>
-#include <string>
-#include <thread>
+
+#include <cstdint>
 #include <atomic>
+#include <string>
 #include <vector>
-#include "../utils/ring_buffer.hpp"
+#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Diagnostics {
 
-/**
- * @class ForensicJournaler
- * @brief Industrial-grade session transaction logger for Hirari DAW.
- * INDUSTRIAL: Records every engine command to a binary journal in real-time to ensure zero data loss.
- * This singleton runs a dedicated background thread for high-priority disk I/O.
- */
+/** Native adapter for Rust's lock-free command journal and background writer. */
 class ForensicJournaler {
 public:
-    ForensicJournaler() = default;
-    /**
-     * @struct Entry
-     * @brief A single journaled transaction.
-     */
-    struct Entry { 
-        uint32_t type; 
-        uint32_t tid; 
-        float val; 
-        uint64_t ts; 
+    struct Entry {
+        uint32_t type;
+        uint32_t tid;
+        float val;
+        uint64_t ts;
     };
+    static_assert(sizeof(Entry) == 24, "journal entry ABI must match the Rust writer");
+
+    ForensicJournaler() : m_state(hirari_forensic_journaler_create()) {}
+    ~ForensicJournaler() {
+        stop();
+        hirari_forensic_journaler_destroy(m_state);
+    }
+    ForensicJournaler(const ForensicJournaler&) = delete;
+    ForensicJournaler& operator=(const ForensicJournaler&) = delete;
+    ForensicJournaler(ForensicJournaler&&) = delete;
+    ForensicJournaler& operator=(ForensicJournaler&&) = delete;
 
     static ForensicJournaler& getInstance() {
         static ForensicJournaler instance;
         return instance;
     }
 
-    /**
-     * @brief Opens the journal file and starts the background writer.
-     */
     void start(const std::string& path) {
-        if (m_running.load()) stop();
-        m_journalPath = path;
-        m_running.store(true);
-        m_writerThread = std::thread(&ForensicJournaler::writerLoop, this);
+        wakeWriter();
+        hirari_forensic_journaler_start(m_state,
+            reinterpret_cast<const uint8_t*>(path.data()), path.size(), &m_wakeSequence,
+            &loadWakeSequence, &waitWakeSequence);
     }
 
-    /**
-     * @brief Submits a command to be journaled.
-     * RT-Safe: This method never blocks and uses the lock-free RingBuffer.
-     */
-    void log(uint32_t type, uint32_t tid, float val, uint64_t ts) {
-        m_queue.push({type, tid, val, ts});
-        m_wakeSequence.fetch_add(1, std::memory_order_release);
-        m_wakeSequence.notify_one();
+    void log(uint32_t type, uint32_t tid, float value, uint64_t timestamp) {
+        hirari_forensic_journaler_log(m_state, type, tid, value, timestamp);
+        wakeWriter();
     }
 
-    /**
-     * @brief Gracefully stops the journaler and flushes all pending data.
-     */
+    void logDescription(uint32_t type, const std::string& description, float value) {
+        hirari_forensic_journaler_log_description(m_state, type,
+            reinterpret_cast<const uint8_t*>(description.data()), description.size(), value);
+        wakeWriter();
+    }
+
     void stop() {
-        m_running.store(false);
+        wakeWriter();
+        hirari_forensic_journaler_stop(m_state);
+    }
+
+    static std::vector<Entry> recover(const std::string& path) {
+        struct RecoveryContext { std::vector<Entry> entries; bool failed = false; } context;
+        const bool recovered = hirari_forensic_journaler_recover(
+            reinterpret_cast<const uint8_t*>(path.data()), path.size(), &context,
+            [](void* opaque, uint32_t type, uint32_t tid, float value,
+               uint64_t timestamp) noexcept {
+                auto& result = *static_cast<RecoveryContext*>(opaque);
+                if (result.failed) return;
+                try { result.entries.push_back({type, tid, value, timestamp}); }
+                catch (...) { result.failed = true; }
+            });
+        if (!recovered || context.failed) return {};
+        return context.entries;
+    }
+
+private:
+    static uint64_t loadWakeSequence(void* context) noexcept {
+        return static_cast<std::atomic<uint64_t>*>(context)->load(std::memory_order_acquire);
+    }
+    static void waitWakeSequence(void* context, uint64_t observed) noexcept {
+        static_cast<std::atomic<uint64_t>*>(context)->wait(observed, std::memory_order_acquire);
+    }
+    void wakeWriter() noexcept {
         m_wakeSequence.fetch_add(1, std::memory_order_release);
         m_wakeSequence.notify_one();
-        if (m_writerThread.joinable()) m_writerThread.join();
     }
 
-    /**
-     * @brief Recovers entries from a journal file.
-     */
-    static std::vector<Entry> recover(const std::string& path) {
-        std::vector<Entry> entries;
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open()) return entries;
-
-        Entry entry;
-        while (file.read(reinterpret_cast<char*>(&entry), sizeof(Entry))) {
-            entries.push_back(entry);
-        }
-        return entries;
-    }
-
-private:
-public:
-    ~ForensicJournaler() { stop(); }
-
-private:
-
-    /**
-     * @brief The background writer loop.
-     */
-    void writerLoop() {
-        std::ofstream file(m_journalPath, std::ios::binary | std::ios::app);
-        while (m_running.load() || !m_queue.isEmpty()) {
-            Entry entry;
-            if (m_queue.pop(entry)) {
-                file.write(reinterpret_cast<char*>(&entry), sizeof(Entry));
-                // INDUSTRIAL: Force disk flush for immediate durability.
-                file.flush();
-            } else {
-                const uint64_t observed = m_wakeSequence.load(std::memory_order_acquire);
-                if (m_running.load(std::memory_order_acquire) || !m_queue.isEmpty()) {
-                    m_wakeSequence.wait(observed, std::memory_order_acquire);
-                }
-            }
-        }
-    }
-
-    std::string m_journalPath;
-    std::atomic<bool> m_running{false};
-    std::thread m_writerThread;
-    
-    // INDUSTRIAL: Using the optimized Power-of-Two RingBuffer.
-    RingBuffer<Entry, 4096> m_queue;
+    void* m_state = nullptr;
     std::atomic<uint64_t> m_wakeSequence{0};
 };
 

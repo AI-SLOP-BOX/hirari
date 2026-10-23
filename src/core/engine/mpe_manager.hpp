@@ -1,16 +1,10 @@
 #pragma once
-#include <vector>
-#include <unordered_map>
-#include <memory>
-#include <algorithm>
-#include <cmath>
+
+#include <cstdint>
+#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Engine {
 
-/**
- * @struct MPEVoice
- * @brief Individual expressive voice in an MPE performance.
- */
 struct MPEVoice {
     uint8_t note = 0;
     bool active = false;
@@ -19,77 +13,38 @@ struct MPEVoice {
     float pitchBend = 0.0f;
 };
 
-/**
- * @class MPEManager
- * @brief Industrial MPE (MIDI Polyphonic Expression) Orchestrator.
- * HONEST FIX: Implemented dynamic voice allocation and MPE zone management.
- */
+/** Native singleton adapter for Rust MPE channel and voice management. */
 class MPEManager {
 public:
-    static MPEManager& getInstance() { static MPEManager i; return i; }
-
-    /**
-     * @brief ALLOCATE: Maps a new note to an available MPE channel with industrial precision and polyphonic sovereignty.
-     * INDUSTRIAL: Delegating voice allocation and MPE zone management to the Rust 'MPEOrchestrator'.
-     */
-    uint8_t allocateVoice(uint8_t note) {
-        if (note > 127) return 0;
-        for (uint8_t channel = 1; channel < m_voices.size(); ++channel) {
-            if (!m_voices[channel].active) {
-                m_voices[channel] = MPEVoice{note, true, 0.0f, 0.0f, 0.0f};
-                m_noteToChannel[note].push_back(channel);
-                return channel;
-            }
+    static MPEManager& getInstance() { static MPEManager instance; return instance; }
+    ~MPEManager() { hirari_mpe_manager_destroy(m_state); }
+    MPEManager(const MPEManager& other) : m_state(hirari_mpe_manager_clone(other.m_state)) {}
+    MPEManager& operator=(const MPEManager& other) {
+        if (this == &other) return *this;
+        void* replacement = hirari_mpe_manager_clone(other.m_state);
+        if (replacement) {
+            hirari_mpe_manager_destroy(m_state);
+            m_state = replacement;
         }
-        return 0;
+        return *this;
     }
 
-    /**
-     * @brief RELEASE: Frees the MPE channel for a note with industrial-grade efficiency and creative sovereignty.
-     * INDUSTRIAL: Delegating voice release and channel management to the Rust 'MPEOrchestrator'.
-     */
-    void releaseVoice(uint8_t note) {
-        auto it = m_noteToChannel.find(note);
-        if (it == m_noteToChannel.end() || it->second.empty()) return;
-        const uint8_t channel = it->second.back();
-        it->second.pop_back();
-        m_voices[channel].active = false;
-        m_voices[channel].pressure = 0.0f;
-        m_voices[channel].timbre = 0.0f;
-        m_voices[channel].pitchBend = 0.0f;
-        if (it->second.empty()) m_noteToChannel.erase(it);
-    }
-
-    /** @brief Clears every active expression voice at transport/project stop. */
-    void reset() noexcept {
-        for (auto& voice : m_voices) voice = MPEVoice{};
-        m_noteToChannel.clear();
-    }
-
-    /**
-     * @brief UPDATE: Updates an MPE voice with forensic parameter mapping and high-performance resolution.
-     * INDUSTRIAL: Delegating parameter resolution and expressive mapping to the Rust 'MPEOrchestrator'.
-     */
+    uint8_t allocateVoice(uint8_t note) { return hirari_mpe_manager_allocate(m_state, note); }
+    void releaseVoice(uint8_t note) { hirari_mpe_manager_release(m_state, note); }
+    void reset() noexcept { hirari_mpe_manager_reset(m_state); }
     void updateVoice(uint8_t channel, float pressure, float timbre, float bend) {
-        if (channel == 0 || channel >= m_voices.size() || !m_voices[channel].active) return;
-        m_voices[channel].pressure = std::clamp(
-            std::isfinite(pressure) ? pressure : 0.0f, 0.0f, 1.0f);
-        auto clampSigned = [](float value) {
-            return std::isfinite(value) ? std::clamp(value, -1.0f, 1.0f) : 0.0f;
-        };
-        m_voices[channel].timbre = clampSigned(timbre);
-        m_voices[channel].pitchBend = clampSigned(bend);
+        hirari_mpe_manager_update(m_state, channel, pressure, timbre, bend);
     }
-
     MPEVoice getVoice(uint8_t channel) const {
-        return channel < m_voices.size() ? m_voices[channel] : MPEVoice{};
+        MPEVoice voice{};
+        hirari_mpe_manager_get(m_state, channel, &voice.note, &voice.active,
+                               &voice.pressure, &voice.timbre, &voice.pitchBend);
+        return voice;
     }
 
 private:
-    MPEManager() { m_voices.resize(16); }
-    std::vector<MPEVoice> m_voices;
-    // A repeated pitch can legitimately have several simultaneous MPE voices.
-    std::unordered_map<uint8_t, std::vector<uint8_t>> m_noteToChannel;
+    MPEManager() : m_state(hirari_mpe_manager_create()) {}
+    void* m_state = nullptr;
 };
 
 } // namespace Hirari::Core::Engine

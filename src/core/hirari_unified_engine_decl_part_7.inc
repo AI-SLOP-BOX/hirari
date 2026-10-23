@@ -64,13 +64,7 @@
     };
     std::vector<SidechainRoute> m_sidechainRoutes;
 
-    // UI/control thread publishes immutable snapshots through a three-slot
-    // reader-pinned ring. Audio readers never wait for a mutex, and a writer
-    // never reuses a slot while a callback is traversing it.
-    ScheduledMidiSnapshot m_midiNoteSnapshots[3];
-    std::atomic<uint32_t> m_activeMidiSnapshot{0};
-    std::atomic<uint32_t> m_midiSnapshotReaders[3]{};
-    std::atomic<uint64_t> m_midiNoteSnapshotRevision{0};
+    void* m_midiSnapshotStore = nullptr;
     mutable std::mutex m_midiNotesMutex;
 
     std::atomic<float> m_dspLoad{0.0f};

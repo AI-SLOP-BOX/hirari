@@ -579,41 +579,39 @@
     }
     uint64_t queue_region_waveform(uint32_t tid, uint32_t rid) const {
         if (!m_engine || tid == 0 || rid == 0) return 0;
-        const uint64_t request = s_waveformSequence.fetch_add(1, std::memory_order_relaxed) + 1;
-        {
-            std::lock_guard<std::mutex> lock(s_waveformMutex);
-            s_waveformPending.insert(request);
-        }
-        auto engine = m_engine;
-        std::thread([engine = std::move(engine), request, tid, rid] {
-            std::vector<float> waveform;
-            if (engine) {
-                const auto peaks = engine->get_region_waveform(tid, rid, 128);
-                waveform.assign(peaks.begin(), peaks.end());
-            }
-            std::lock_guard<std::mutex> lock(s_waveformMutex);
-            s_waveformPending.erase(request);
-            s_waveformResults.emplace(request, std::move(waveform));
-        }).detach();
-        return request;
+        auto* context = new (std::nothrow) std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>(m_engine);
+        if (!context) return 0;
+        return hirari_waveform_snapshot_request(
+            context, tid, rid,
+            +[](void* opaque, uint32_t trackId, uint32_t regionId,
+                float* output, size_t capacity) noexcept -> size_t {
+                auto* engine = static_cast<std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>*>(opaque);
+                if (!engine || !*engine || !output) return 0;
+                try {
+                    const auto waveform = (*engine)->get_region_waveform(trackId, regionId, 128);
+                    const size_t count = std::min(capacity, waveform.size());
+                    std::copy_n(waveform.begin(), count, output);
+                    return count;
+                } catch (...) { return 0; }
+            },
+            +[](void* opaque) noexcept {
+                delete static_cast<std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>*>(opaque);
+            });
     }
     rust::Vec<float> poll_region_waveform(uint64_t request) const {
         rust::Vec<float> result;
         if (request == 0) return result;
-        std::vector<float> waveform;
-        {
-            std::lock_guard<std::mutex> lock(s_waveformMutex);
-            const auto it = s_waveformResults.find(request);
-            if (it == s_waveformResults.end()) return result;
-            waveform = std::move(it->second);
-            s_waveformResults.erase(it);
-        }
-        for (const float sample : waveform) result.push_back(sample);
+        (void)hirari_waveform_snapshot_poll(
+            request, &result,
+            +[](void* opaque, const float* samples, size_t count) noexcept {
+                auto* output = static_cast<rust::Vec<float>*>(opaque);
+                if (!output || (!samples && count != 0)) return;
+                for (size_t i = 0; i < count; ++i) output->push_back(samples[i]);
+            });
         return result;
     }
     bool region_waveform_pending(uint64_t request) const noexcept {
-        std::lock_guard<std::mutex> lock(s_waveformMutex);
-        return s_waveformPending.find(request) != s_waveformPending.end();
+        return request != 0 && hirari_waveform_snapshot_pending(request);
     }
     rust::Vec<float> get_region_audio_samples(uint32_t tid, uint32_t rid) const {
         return m_engine ? m_engine->get_region_audio_samples(tid, rid, 16u * 1024u * 1024u)
@@ -642,84 +640,30 @@
     float get_cpu_total_v() const;
     rust::String get_project_layout_json() const;
     uint64_t request_project_layout_snapshot() const {
-        const auto state = m_projectLayoutSnapshotState;
-        const auto engine = m_engine;
-        if (!state || !engine) return 0;
-        const auto cancellation = std::make_shared<std::atomic<bool>>(false);
-        uint64_t requestId = 0;
-        {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            if (state->activeId != 0 || state->hasResult) return 0;
-            requestId = state->nextId++;
-            if (requestId == 0) requestId = state->nextId++;
-            state->activeId = requestId;
-            state->activeCancellation = cancellation;
-        }
-        try {
-            std::thread([state, engine, requestId, cancellation]() {
-                const uint64_t before = engine->get_project_state_revision();
-                const std::string layout = engine->get_project_layout_json_cancellable(cancellation.get()).c_str();
-                const uint64_t after = engine->get_project_state_revision();
-                std::string result;
-                if (cancellation->load(std::memory_order_acquire)) {
-                    result = "CANCELLED";
-                } else if (before == after && !layout.empty()) {
-                    result.reserve(layout.size() + 32);
-                    result = "READY ";
-                    result += std::to_string(after);
-                    result.push_back('\n');
-                    result += layout;
-                } else {
-                    result = "STALE";
-                }
-                std::lock_guard<std::mutex> lock(state->mutex);
-                if (state->activeId == requestId) {
-                    state->resultId = requestId;
-                    state->result = std::move(result);
-                    state->hasResult = true;
-                    state->activeId = 0;
-                    state->activeCancellation.reset();
-                }
-            }).detach();
-        } catch (...) {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            if (state->activeId == requestId) {
-                state->activeId = 0;
-                state->activeCancellation.reset();
-            }
-            return 0;
-        }
-        return requestId;
+        if (!m_engine) return 0;
+        auto* context = new (std::nothrow) ProjectLayoutSnapshotContext{m_engine};
+        if (!context) return 0;
+        return hirari_layout_snapshot_request(
+            m_layoutSnapshotOwnerId, context, &computeProjectLayoutSnapshot, &readProjectLayoutSnapshot,
+            &destroyProjectLayoutResult, &destroyProjectLayoutContext,
+            &cancelProjectLayoutSnapshot, &isProjectLayoutSnapshotCancelled);
     }
     rust::String poll_project_layout_snapshot(uint64_t requestId) const {
-        const auto state = m_projectLayoutSnapshotState;
-        if (!state || requestId == 0) return rust::String("ERROR");
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (state->activeId == requestId) return rust::String();
-        if (state->hasResult && state->resultId == requestId) {
-            std::string result = std::move(state->result);
-            state->result.clear();
-            state->resultId = 0;
-            state->hasResult = false;
-            return rust::String(result);
-        }
-        return rust::String("ERROR");
+        if (requestId == 0) return rust::String("ERROR");
+        std::string result;
+        const uint8_t status = hirari_layout_snapshot_poll(
+            requestId, m_layoutSnapshotOwnerId, &result,
+            +[](void* opaque, const uint8_t* bytes, size_t size) noexcept {
+                auto* output = static_cast<std::string*>(opaque);
+                if (!output || (!bytes && size != 0)) return;
+                try { output->assign(reinterpret_cast<const char*>(bytes), size); }
+                catch (...) { output->clear(); }
+            });
+        if (status == 0) return rust::String();
+        return rust::String(status == 1 ? result : "ERROR");
     }
     bool cancel_project_layout_snapshot(uint64_t requestId) const {
-        const auto state = m_projectLayoutSnapshotState;
-        if (!state || requestId == 0) return false;
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (state->activeId == requestId && state->activeCancellation) {
-            state->activeCancellation->store(true, std::memory_order_release);
-            return true;
-        }
-        if (state->hasResult && state->resultId == requestId) {
-            state->result.clear();
-            state->resultId = 0;
-            state->hasResult = false;
-            return true;
-        }
-        return false;
+        return requestId != 0 && hirari_layout_snapshot_cancel(requestId, m_layoutSnapshotOwnerId);
     }
     rust::String get_routing_snapshot_json() const;
     uint64_t get_project_generation() const {

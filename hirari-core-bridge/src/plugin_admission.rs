@@ -24,6 +24,40 @@ pub(crate) fn safe_candidate(path: &Path, expected_format: &str) -> bool {
         || classify_format(path).is_some_and(|actual| actual.eq_ignore_ascii_case(expected_format))
 }
 
+/// Mirrors the user-facing admission result used by Track before it creates a
+/// sandbox process: 0=accepted, 1=empty path, 2=missing path, 3=unsupported
+/// extension. The host performs its stricter symlink and file-type check when
+/// the worker is launched.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_admission_error(path: *const c_char) -> u8 {
+    let Some(path) = (unsafe { c_string(path) }) else {
+        return 1;
+    };
+    if path.is_empty() {
+        return 1;
+    }
+    if path.starts_with("builtin://") {
+        return 0;
+    }
+    if std::fs::metadata(&path).is_err() {
+        return 2;
+    }
+    let extension = Path::new(&path)
+        .extension()
+        .and_then(|value| value.to_str());
+    let supported = match extension {
+        Some("clap" | "vst3") => true,
+        #[cfg(target_os = "macos")]
+        Some("component") => true,
+        _ => false,
+    };
+    if supported {
+        0
+    } else {
+        3
+    }
+}
+
 /// Stable plugin format IDs used by the C++ compatibility layer.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_format_for_path(path: *const c_char) -> u8 {

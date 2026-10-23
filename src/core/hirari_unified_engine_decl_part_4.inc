@@ -21,16 +21,6 @@ public:
         uint8_t probability = 100; // Chance in percent for each transport pass.
         uint32_t regionId = 0; // Zero denotes a legacy track-scoped note.
     };
-    struct ScheduledMidiSnapshot {
-        std::vector<ScheduledMidiNote> notesByStart;
-        std::vector<size_t> noteIndicesByEnd;
-
-        static uint64_t noteEnd(const ScheduledMidiNote& note) noexcept {
-            return note.lengthSamples > std::numeric_limits<uint64_t>::max() - note.startSample
-                ? std::numeric_limits<uint64_t>::max()
-                : note.startSample + note.lengthSamples;
-        }
-    };
     bool replace_midi_notes(const std::vector<ScheduledMidiNote>& notes, bool recordUndo = true);
     std::vector<ScheduledMidiNote> midi_notes_snapshot() const;
     bool remove_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample);
@@ -83,7 +73,7 @@ public:
     bool set_region_warp_markers(uint32_t tid, uint32_t rid,
         const std::vector<::Hirari::Core::Engine::Region::WarpMarker>& markers);
     bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
-                                    const std::vector<std::pair<uint32_t, uint32_t>>& targets);
+                                    const std::vector<::HirariRegionAlignmentTargetId>& targets);
     uint8_t region_alignment_status(uint32_t referenceTid, uint32_t referenceRid) const;
     bool finalize_region_alignment(uint32_t referenceTid, uint32_t referenceRid);
     bool quantize_region_sync_group(uint32_t tid, uint32_t rid,

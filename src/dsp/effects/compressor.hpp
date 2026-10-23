@@ -13,8 +13,6 @@ namespace Hirari::DSP::Effects {
 /** C++ host facade for the Rust-owned dynamic compressor. */
 class DynamicCompressor final : public IProcessor {
 public:
-    static constexpr uint32_t kStateMagic = 0x41524350u; // "ARCP"
-    static constexpr uint32_t kStateVersion = 1u;
     static constexpr uint32_t kMaxLookahead = 4096u;
 
     DynamicCompressor() : m_state(hirari_dynamic_compressor_create(44'100.0)) {}
@@ -81,51 +79,19 @@ public:
     }
 
     std::vector<uint8_t> getState() const override {
-        struct State {
-            uint32_t magic, version;
-            float threshold, ratio, makeup, knee;
-            uint32_t lookahead;
-        } state{
-            kStateMagic, kStateVersion,
-            getControl(1), getControl(2), getControl(5), getControl(7),
-            getLatencySamples()
-        };
-        std::vector<uint8_t> bytes(sizeof(state));
-        std::memcpy(bytes.data(), &state, sizeof(state));
+        std::vector<uint8_t> bytes(28);
+        bytes.resize(hirari_dynamic_compressor_save_state(m_state, bytes.data(), bytes.size()));
         return bytes;
     }
 
     bool restoreStateChecked(const std::vector<uint8_t>& bytes) override {
-        struct LegacyState { float threshold, ratio, makeup, knee; uint32_t lookahead; };
-        struct State {
-            uint32_t magic, version;
-            float threshold, ratio, makeup, knee;
-            uint32_t lookahead;
-        };
-        State state{};
-        if (bytes.size() == sizeof(LegacyState)) {
-            LegacyState legacy{};
-            std::memcpy(&legacy, bytes.data(), sizeof(legacy));
-            state = {kStateMagic, 0u, legacy.threshold, legacy.ratio, legacy.makeup,
-                     legacy.knee, legacy.lookahead};
-        } else if (bytes.size() == sizeof(State)) {
-            std::memcpy(&state, bytes.data(), sizeof(state));
-        } else {
-            return false;
-        }
-        if (state.magic != kStateMagic || state.version > kStateVersion) return false;
-        return hirari_dynamic_compressor_restore(
-            m_state, state.threshold, state.ratio, state.makeup, state.knee, state.lookahead);
+        return hirari_dynamic_compressor_restore_state(m_state, bytes.data(), bytes.size());
     }
 
 private:
     void setControl(uint32_t control, float value) {
         hirari_dynamic_compressor_set_control(m_state, control, value);
     }
-    float getControl(uint32_t control) const {
-        return hirari_dynamic_compressor_get_control(m_state, control);
-    }
-
     void* m_state = nullptr;
 };
 

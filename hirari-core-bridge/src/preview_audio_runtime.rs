@@ -744,12 +744,12 @@ fn decode_wav(path: &Path) -> Result<(Vec<f32>, f64, u32, u32), String> {
 /// `hirari_free_decoded_audio` after it has been copied into AudioBuffer.
 #[repr(C)]
 pub struct NativeDecodedAudio {
-    samples: *mut f32,
-    sample_count: usize,
-    channels: u32,
-    sample_rate: f64,
-    bits_per_sample: u32,
-    status: u32,
+    pub(crate) samples: *mut f32,
+    pub(crate) sample_count: usize,
+    pub(crate) channels: u32,
+    pub(crate) sample_rate: f64,
+    pub(crate) bits_per_sample: u32,
+    pub(crate) status: u32,
 }
 
 #[no_mangle]
@@ -802,6 +802,66 @@ pub unsafe extern "C" fn hirari_decode_audio_file(
             bits_per_sample: 0,
             status: 3,
         },
+    }
+}
+
+/// Import-only decoder boundary: validates the supported container suffix and
+/// metadata before exposing the interleaved allocation to the native buffer
+/// adapter. Status 4 means unsupported suffix; status 3 preserves the native
+/// decoder's invalid-file result; status 5 means decoded metadata was invalid.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_import_audio_file(
+    path: *const u8,
+    path_size: usize,
+) -> NativeDecodedAudio {
+    let empty = |status| NativeDecodedAudio {
+        samples: std::ptr::null_mut(),
+        sample_count: 0,
+        channels: 0,
+        sample_rate: 0.0,
+        bits_per_sample: 0,
+        status,
+    };
+    if path.is_null() || path_size == 0 || path_size > 1024 * 1024 {
+        return empty(2);
+    }
+    let path_bytes = unsafe { std::slice::from_raw_parts(path, path_size) };
+    let Some(dot) = path_bytes.iter().rposition(|byte| *byte == b'.') else {
+        return empty(4);
+    };
+    if path_bytes.iter().rposition(|byte| *byte == b'/' || *byte == b'\\')
+        .is_some_and(|separator| dot < separator) {
+        return empty(4);
+    }
+    let extension = &path_bytes[dot + 1..];
+    if extension.is_empty() || ![
+        b"wav".as_slice(), b"wave", b"rf64", b"mp3", b"flac",
+        b"aif", b"aiff", b"m4a", b"ogg", b"aac",
+    ].iter().any(|supported| extension.eq_ignore_ascii_case(supported)) {
+        return empty(4);
+    }
+    let Ok(path) = std::str::from_utf8(path_bytes) else { return empty(2) };
+    let (samples, sample_rate, channels, bits_per_sample) =
+        match decode_audio_channels(Path::new(path)) {
+            Ok(decoded) => decoded,
+            Err(_) => return empty(3),
+        };
+    if channels == 0 || channels > 32 || samples.is_empty()
+        || samples.len() % channels as usize != 0
+        || samples.len() > (512_u64 * 1024 * 1024 / 4) as usize
+        || !sample_rate.is_finite() || !(8_000.0..=384_000.0).contains(&sample_rate)
+        || samples.len() / channels as usize > u32::MAX as usize
+    {
+        return empty(5);
+    }
+    let sample_count = samples.len();
+    NativeDecodedAudio {
+        samples: Box::into_raw(samples.into_boxed_slice()) as *mut f32,
+        sample_count,
+        channels,
+        sample_rate,
+        bits_per_sample,
+        status: 0,
     }
 }
 

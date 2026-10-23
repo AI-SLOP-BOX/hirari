@@ -4,8 +4,8 @@
 #include <memory>
 #include <algorithm>
 #include <string>
-#include <set>
 #include <mutex>
+#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Composition {
 
@@ -44,51 +44,14 @@ public:
     void updateFromNotes(const std::vector<int>& activeNotes) {
         auto newState = std::make_shared<HarmonicState>();
         if (!activeNotes.empty()) {
-            // --- INDUSTRIAL CHORD DETECTION ---
-            std::set<int> pitchClasses;
-            for (int n : activeNotes) pitchClasses.insert(n % 12);
-
-            // Try every present pitch class as a candidate root. This avoids
-            // treating the lowest/first MIDI event as the chord root when the
-            // voicing is inverted or notes arrive out of order.
-            int root = *pitchClasses.begin();
-            ChordType detected = ChordType::Unknown;
-            int bestScore = -1;
-            for (int candidate : pitchClasses) {
-                uint32_t candidateMask = 0;
-                for (int p : pitchClasses) {
-                    int interval = (p - candidate + 12) % 12;
-                    candidateMask |= (1u << interval);
-                }
-                ChordType type = ChordType::Unknown;
-                int score = 0;
-                if ((candidateMask & 0b10010001u) == 0b10010001u && (candidateMask & (1u << 10))) {
-                    type = ChordType::Dominant7; score = 7;
-                } else if ((candidateMask & 0b10010001u) == 0b10010001u && (candidateMask & (1u << 11))) {
-                    type = ChordType::Major7; score = 6;
-                } else if ((candidateMask & 0b10001001u) == 0b10001001u && (candidateMask & (1u << 10))) {
-                    type = ChordType::Minor7; score = 5;
-                } else if ((candidateMask & 0b10010001u) == 0b10010001u) {
-                    type = ChordType::Major; score = 4;
-                } else if ((candidateMask & 0b10001001u) == 0b10001001u) {
-                    type = ChordType::Minor; score = 4;
-                } else if ((candidateMask & 0b1001001u) == 0b1001001u) {
-                    type = ChordType::Diminished; score = 3;
-                } else if ((candidateMask & 0b100010001u) == 0b100010001u) {
-                    type = ChordType::Augmented; score = 3;
-                }
-                if (score > bestScore) {
-                    bestScore = score;
-                    root = candidate;
-                    detected = type;
-                }
-            }
-
+            int root = 0;
+            uint8_t detected = 0;
+            if (!hirari_harmony_detect(activeNotes.data(), activeNotes.size(), &root, &detected))
+                return;
             newState->rootNote = root;
             newState->activeNotes = activeNotes;
             newState->noteDensity = static_cast<float>(activeNotes.size()) / 12.0f;
-
-            newState->chordType = detected;
+            newState->chordType = static_cast<ChordType>(detected);
         }
 
         std::lock_guard<std::mutex> lock(m_mutex);

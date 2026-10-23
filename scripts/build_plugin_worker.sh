@@ -15,7 +15,7 @@ case "$TARGET_DIR" in /*) ;; *) TARGET_DIR="$ROOT_DIR/$TARGET_DIR" ;; esac
 # The worker and in-process host share the same allocation-free Rust protocol
 # implementation. Build it as a standalone static archive for this process.
 cargo rustc --manifest-path "$ROOT_DIR/Cargo.toml" -p hirari-plugin-protocol \
-    --release --features standalone-static -- --crate-type staticlib
+    --release --features standalone-static,worker-runtime -- --crate-type staticlib
 PROTOCOL_LIB=$(find "$TARGET_DIR/release/deps" -maxdepth 1 -name 'libhirari_plugin_protocol-*.a' -print | head -n 1)
 if [ ! -f "$PROTOCOL_LIB" ]; then
     echo "Rust plugin protocol archive was not produced: $PROTOCOL_LIB" >&2

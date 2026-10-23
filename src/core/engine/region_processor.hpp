@@ -2,11 +2,8 @@
 #include <stdint.h>
 #include <vector>
 #include <cmath>
-#include <atomic>
-#include <algorithm>
-#include <memory>
-#include <limits>
 #include "../audio_buffer.hpp"
+#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Engine {
 
@@ -17,6 +14,14 @@ bool hirari_region_stretch_prepare(void* handle, double sampleRate, uint32_t max
 bool hirari_region_processor_apply_gain_fade(
     float* samples, uint32_t frames, uint64_t regionRelativePos,
     float gain, uint32_t fadeInSamples, uint8_t fadeType);
+void* hirari_region_processor_create();
+void hirari_region_processor_destroy(void* state);
+void hirari_region_processor_set_gain(void* state, float gain);
+void hirari_region_processor_set_fade_in(void* state, uint32_t samples, uint8_t fadeType);
+void hirari_region_processor_set_fade_out(void* state, uint32_t samples, uint8_t fadeType);
+void hirari_region_processor_process(void* state, float** channels, uint32_t channelCount,
+                                     uint32_t samples, uint32_t offset, uint32_t size,
+                                     uint64_t regionRelativePos);
 }
 
 // Rust owns the streaming state, scratch buffers, source preparation and seek
@@ -52,19 +57,23 @@ public:
         FadeType type = FadeType::Linear;
     };
 
-    RegionProcessor() : m_gain(1.0f) {}
+    RegionProcessor() : m_state(hirari_region_processor_create()) {}
+    ~RegionProcessor() { hirari_region_processor_destroy(m_state); }
+    RegionProcessor(const RegionProcessor&) = delete;
+    RegionProcessor& operator=(const RegionProcessor&) = delete;
 
     void setGain(float gain) noexcept {
-        m_gain.store(std::isfinite(gain) ? std::clamp(gain, 0.0f, 4.0f) : 1.0f,
-                     std::memory_order_release);
+        hirari_region_processor_set_gain(m_state, gain);
     }
 
     void setFadeIn(uint32_t durationSamples, FadeType type = FadeType::Linear) noexcept {
-        m_fadeIn = {durationSamples, type};
+        hirari_region_processor_set_fade_in(m_state, durationSamples,
+                                             static_cast<uint8_t>(type));
     }
 
     void setFadeOut(uint32_t durationSamples, FadeType type = FadeType::Linear) noexcept {
-        m_fadeOut = {durationSamples, type};
+        hirari_region_processor_set_fade_out(m_state, durationSamples,
+                                              static_cast<uint8_t>(type));
     }
 
     /**
@@ -72,23 +81,12 @@ public:
      * INDUSTRIAL: Delegating signal manipulation to the Rust 'RegionProcessorOrchestrator'.
      */
     void process(AudioBuffer& buffer, uint32_t offset, uint32_t size, uint64_t regionRelativePos) noexcept {
-        if (offset >= buffer.getNumSamples() || buffer.getNumChannels() == 0 || size == 0) return;
-        const uint32_t count = std::min(size, buffer.getNumSamples() - offset);
-        const float gain = m_gain.load(std::memory_order_acquire);
-        if (!std::isfinite(gain)) return;
-
-        const auto fadeType = static_cast<uint8_t>(m_fadeIn.type);
-        for (uint32_t channel = 0; channel < buffer.getNumChannels(); ++channel) {
-            hirari_region_processor_apply_gain_fade(
-                buffer.getWritePointer(channel, offset), count, regionRelativePos,
-                gain, m_fadeIn.durationSamples, fadeType);
-        }
+        hirari_region_processor_process(m_state, buffer.getArrayOfWritePointers(),
+            buffer.getNumChannels(), buffer.getNumSamples(), offset, size, regionRelativePos);
     }
 
 private:
-    std::atomic<float> m_gain;
-    FadeInfo m_fadeIn;
-    FadeInfo m_fadeOut;
+    void* m_state = nullptr;
 };
 
 } // namespace Hirari::Core::Engine

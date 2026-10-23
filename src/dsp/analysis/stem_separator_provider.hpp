@@ -52,38 +52,26 @@ struct StemSeparatorStatus {
 
 inline bool validateStemSeparatorModel(const StemSeparatorModelSpec& spec,
                                        std::string* error = nullptr) {
-    const auto fail = [error](const char* message) {
-        if (error) *error = message;
-        return false;
-    };
-    if (spec.config.backend == StemSeparatorBackend::Heuristic) {
-        // The built-in provider is valid without a model. This validator is
-        // also used by the registry status path, so heuristic must not be
-        // rejected as though it were an external neural backend.
-        return true;
+    const auto code = hirari_stem_separator_validate_model(
+        static_cast<uint8_t>(spec.config.backend),
+        reinterpret_cast<const uint8_t*>(spec.config.modelPath.data()),
+        spec.config.modelPath.size(), spec.config.modelSampleRate,
+        spec.config.maxChannels);
+    const char* message = nullptr;
+    switch (code) {
+        case 0: return true;
+        case 1: message = "model path is empty"; break;
+        case 2: message = "model sample rate is outside the supported range"; break;
+        case 3: message = "model channel count is outside the supported range"; break;
+        case 4: message = "model path is not a regular file"; break;
+        case 5: message = "model file is empty or unreadable"; break;
+        case 6: message = "model file exceeds the 4 GiB safety limit"; break;
+        case 7: message = "ONNX Runtime backend requires an .onnx model"; break;
+        case 9: message = "LibTorch backend requires a .pt or .pth model"; break;
+        default: message = "model validation failed"; break;
     }
-    if (spec.config.modelPath.empty()) return fail("model path is empty");
-    if (spec.config.modelSampleRate < 8000 || spec.config.modelSampleRate > 384000)
-        return fail("model sample rate is outside the supported range");
-    if (spec.config.maxChannels == 0 || spec.config.maxChannels > 32)
-        return fail("model channel count is outside the supported range");
-
-    std::error_code ec;
-    const std::filesystem::path path(spec.config.modelPath);
-    if (!std::filesystem::is_regular_file(path, ec) || ec)
-        return fail("model path is not a regular file");
-    const auto size = std::filesystem::file_size(path, ec);
-    if (ec || size == 0) return fail("model file is empty or unreadable");
-    if (size > (4ull * 1024ull * 1024ull * 1024ull))
-        return fail("model file exceeds the 4 GiB safety limit");
-
-    const auto extension = path.extension().string();
-    if (spec.config.backend == StemSeparatorBackend::OnnxRuntime && extension != ".onnx")
-        return fail("ONNX Runtime backend requires an .onnx model");
-    if (spec.config.backend == StemSeparatorBackend::LibTorch &&
-        extension != ".pt" && extension != ".pth")
-        return fail("LibTorch backend requires a .pt or .pth model");
-    return true;
+    if (error) *error = message;
+    return false;
 }
 
 /**

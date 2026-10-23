@@ -2,7 +2,111 @@
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+
+thread_local! {
+    static AUDIO_BUFFER_REALTIME_GUARD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+static AUDIO_BUFFER_RESIZE_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static AUDIO_BUFFER_LAST_REQUESTED_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+static AUDIO_BUFFER_LAST_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+
+const INPUT_MONITOR_MAX_BLOCK: u32 = 16_384;
+
+/// Owns the input monitor's validation, bounded copy and publication ordering.
+/// The C++ engine retains the storage; these pointers are valid for its lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_publish_monitor_block(
+    inputs: *const *const f32,
+    channel_count: u32,
+    frames: u32,
+    track_id: *const c_void,
+    channel_pair: *const c_void,
+    published: *mut c_void,
+    published_frames: *mut c_void,
+    no_track: u32,
+    output_left: *mut f32,
+    output_right: *mut f32,
+) {
+    if track_id.is_null() || channel_pair.is_null() || published.is_null()
+        || published_frames.is_null()
+    {
+        return;
+    }
+    let track_id = unsafe { &*track_id.cast::<AtomicU32>() }.load(Ordering::Acquire);
+    let pair = unsafe { &*channel_pair.cast::<AtomicU64>() }.load(Ordering::Acquire);
+    let left_channel = pair as u32;
+    let right_channel = (pair >> 32) as u32;
+    let channels = if inputs.is_null() {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(inputs, channel_count as usize) }
+    };
+    let valid = track_id != no_track
+        && frames != 0
+        && frames <= INPUT_MONITOR_MAX_BLOCK
+        && (left_channel as usize) < channels.len()
+        && (right_channel as usize) < channels.len()
+        && !channels[left_channel as usize].is_null()
+        && !channels[right_channel as usize].is_null();
+    let published = unsafe { &*published.cast::<AtomicBool>() };
+    let published_frames = unsafe { &*published_frames.cast::<AtomicU32>() };
+    if !valid
+        || !unsafe {
+            hirari_audio_copy_monitor_input(
+                inputs, channel_count, left_channel, right_channel, frames,
+                output_left, output_right,
+            )
+        }
+    {
+        published.store(false, Ordering::Release);
+        published_frames.store(0, Ordering::Release);
+        return;
+    }
+    published_frames.store(frames, Ordering::Release);
+    published.store(true, Ordering::Release);
+}
+
+/// Selects and copies the configured Control Room talkback input, then
+/// publishes it with the same release ordering used by the render callback.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_publish_talkback_block(
+    inputs: *const *const f32,
+    channel_count: u32,
+    frames: u32,
+    control_room: *const c_void,
+    published: *mut c_void,
+    published_frames: *mut c_void,
+    output: *mut f32,
+) {
+    if published.is_null() || published_frames.is_null() {
+        return;
+    }
+    let enabled = !control_room.is_null()
+        && unsafe { crate::control_room_runtime::hirari_control_room_talkback_enabled(control_room) };
+    let input_channel = if enabled {
+        unsafe { crate::control_room_runtime::hirari_control_room_talkback_channel(control_room) }
+    } else {
+        u32::MAX
+    };
+    let valid = enabled && !inputs.is_null() && input_channel < channel_count
+        && frames != 0 && frames <= INPUT_MONITOR_MAX_BLOCK;
+    let published = unsafe { &*published.cast::<AtomicBool>() };
+    let published_frames = unsafe { &*published_frames.cast::<AtomicU32>() };
+    if !valid
+        || !unsafe {
+            hirari_audio_copy_talkback_input(
+                inputs, channel_count, input_channel, frames, output,
+            )
+        }
+    {
+        published.store(false, Ordering::Release);
+        published_frames.store(0, Ordering::Release);
+        return;
+    }
+    published_frames.store(frames, Ordering::Release);
+    published.store(true, Ordering::Release);
+}
 
 struct BuiltinGainState {
     gain: AtomicU32,
@@ -88,10 +192,24 @@ pub unsafe extern "C" fn hirari_builtin_gain_process_state(
     }
 }
 
+const AUDIO_BUFFER_INLINE_CHANNELS: usize = 16;
+
 struct AlignedAudioStorage {
     samples: *mut f32,
     capacity: usize,
+    inline_channel_pointers: [*mut f32; AUDIO_BUFFER_INLINE_CHANNELS],
     channel_pointers: Vec<*mut f32>,
+    pointer_count: usize,
+}
+
+fn new_aligned_audio_storage() -> AlignedAudioStorage {
+    AlignedAudioStorage {
+        samples: std::ptr::null_mut(),
+        capacity: 0,
+        inline_channel_pointers: [std::ptr::null_mut(); AUDIO_BUFFER_INLINE_CHANNELS],
+        channel_pointers: Vec::new(),
+        pointer_count: 0,
+    }
 }
 
 impl Drop for AlignedAudioStorage {
@@ -101,6 +219,22 @@ impl Drop for AlignedAudioStorage {
 }
 
 impl AlignedAudioStorage {
+    fn channel_pointers(&self) -> *mut *mut f32 {
+        if self.pointer_count <= AUDIO_BUFFER_INLINE_CHANNELS {
+            self.inline_channel_pointers.as_ptr() as *mut *mut f32
+        } else {
+            self.channel_pointers.as_ptr() as *mut *mut f32
+        }
+    }
+
+    fn channel_pointers_mut(&mut self) -> &mut [*mut f32] {
+        if self.pointer_count <= AUDIO_BUFFER_INLINE_CHANNELS {
+            &mut self.inline_channel_pointers[..self.pointer_count]
+        } else {
+            &mut self.channel_pointers[..self.pointer_count]
+        }
+    }
+
     fn release(&mut self) {
         if !self.samples.is_null() {
             if let Some(layout) = audio_storage_layout(self.capacity) {
@@ -180,12 +314,7 @@ pub unsafe extern "C" fn hirari_audio_buffer_deinterleave_interleaved(
 
 #[no_mangle]
 pub extern "C" fn hirari_audio_buffer_storage_create() -> *mut std::ffi::c_void {
-    Box::into_raw(Box::new(AlignedAudioStorage {
-        samples: std::ptr::null_mut(),
-        capacity: 0,
-        channel_pointers: Vec::new(),
-    }))
-    .cast()
+    Box::into_raw(Box::new(new_aligned_audio_storage())).cast()
 }
 
 #[no_mangle]
@@ -260,27 +389,58 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_prepare_channels(
     let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_mut() }) else {
         return false;
     };
-    if storage.channel_pointers.len() == channel_count {
+    if storage.pointer_count == channel_count {
         return true;
     }
-    if storage.channel_pointers.try_reserve(channel_count).is_err() {
+    if channel_count <= AUDIO_BUFFER_INLINE_CHANNELS {
+        if storage.pointer_count <= AUDIO_BUFFER_INLINE_CHANNELS {
+            storage.inline_channel_pointers.fill(std::ptr::null_mut());
+            storage.pointer_count = AUDIO_BUFFER_INLINE_CHANNELS;
+        }
+        return true;
+    }
+    if storage.pointer_count >= channel_count {
+        return true;
+    }
+    let mut pointers = Vec::new();
+    if pointers.try_reserve_exact(channel_count).is_err() {
         return false;
     }
-    storage.channel_pointers.resize(channel_count, std::ptr::null_mut());
+    pointers.resize(channel_count, std::ptr::null_mut());
+    storage.channel_pointers = pointers;
+    storage.pointer_count = channel_count;
     true
 }
 
+/// Refreshes the planar channel view from Rust-owned sample storage.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_storage_set_channel_pointer(
+pub unsafe extern "C" fn hirari_audio_buffer_storage_update_channel_pointers(
     storage: *mut c_void,
-    channel: usize,
-    pointer: *mut f32,
-) {
-    if let Some(slot) = (unsafe { storage.cast::<AlignedAudioStorage>().as_mut() })
-        .and_then(|storage| storage.channel_pointers.get_mut(channel))
-    {
-        *slot = pointer;
+    data: *mut f32,
+    channels: u32,
+    samples: u32,
+) -> bool {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_mut() }) else {
+        return false;
+    };
+    if storage.pointer_count < channels as usize {
+        return false;
     }
+    let required = match (channels as usize).checked_mul(samples as usize) {
+        Some(required) => required,
+        None => return false,
+    };
+    if required > storage.capacity {
+        return false;
+    }
+    let pointers = storage.channel_pointers_mut();
+    for (channel, pointer) in pointers.iter_mut().take(channels as usize).enumerate() {
+        let Some(offset) = channel.checked_mul(samples as usize) else {
+            return false;
+        };
+        *pointer = unsafe { data.add(offset) };
+    }
+    true
 }
 
 #[no_mangle]
@@ -288,9 +448,7 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_channel_pointers(
     storage: *const c_void,
 ) -> *mut *mut f32 {
     unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }
-        .map_or(std::ptr::null_mut(), |storage| {
-            storage.channel_pointers.as_ptr() as *mut *mut f32
-        })
+        .map_or(std::ptr::null_mut(), |storage| storage.channel_pointers())
 }
 
 #[no_mangle]
@@ -298,7 +456,150 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_channel_count(
     storage: *const c_void,
 ) -> usize {
     unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }
-        .map_or(0, |storage| storage.channel_pointers.len())
+        .map_or(0, |storage| storage.pointer_count)
+}
+
+/// Applies AudioBuffer's capacity and channel-table growth plan on the Rust
+/// side. Status is 0 for success, 1 for a rejected realtime resize, 2 for an
+/// invalid size, 3 for sample allocation failure, and 4 for pointer allocation failure.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve_buffer(
+    storage_handle: *mut *mut c_void,
+    channels: u32,
+    current_channels: u32,
+    samples: u32,
+    current_capacity: usize,
+    is_external: bool,
+    needs_data_allocation: *mut bool,
+) -> u8 {
+    if storage_handle.is_null() || needs_data_allocation.is_null() {
+        return 3;
+    }
+    if samples > u32::MAX - 15 {
+        return 2;
+    }
+    let padded_samples = (samples + 15) & !15;
+    let Some(required) = (channels as usize).checked_mul(padded_samples as usize) else {
+        return 2;
+    };
+    if required > usize::MAX / std::mem::size_of::<f32>() {
+        return 2;
+    }
+    let storage = unsafe { &mut *storage_handle };
+    let pointer_count = if storage.is_null() {
+        0
+    } else {
+        unsafe { hirari_audio_buffer_storage_channel_count(*storage) }
+    };
+    let needs_data = required > current_capacity || (is_external && required != 0);
+    let required_pointers = channels.max(current_channels) as usize;
+    let target_pointer_count = required_pointers.max(AUDIO_BUFFER_INLINE_CHANNELS);
+    let needs_pointer_table = (needs_data || !storage.is_null() || required_pointers > AUDIO_BUFFER_INLINE_CHANNELS)
+        && pointer_count < target_pointer_count;
+    let needs_pointer_allocation = needs_pointer_table
+        && required_pointers > AUDIO_BUFFER_INLINE_CHANNELS;
+    unsafe { needs_data_allocation.write(needs_data) };
+    if !needs_data && !needs_pointer_table {
+        return 0;
+    }
+    let realtime = AUDIO_BUFFER_REALTIME_GUARD.with(std::cell::Cell::get);
+    if realtime && (needs_data || needs_pointer_allocation) {
+        AUDIO_BUFFER_RESIZE_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+        AUDIO_BUFFER_LAST_REQUESTED_CAPACITY.store(required, Ordering::Relaxed);
+        AUDIO_BUFFER_LAST_CAPACITY.store(current_capacity, Ordering::Relaxed);
+        return 1;
+    }
+    if storage.is_null() {
+        *storage = Box::into_raw(Box::new(new_aligned_audio_storage())).cast();
+    }
+    if needs_data
+        && !unsafe { hirari_audio_buffer_storage_reserve(*storage, required) }
+    {
+        return 3;
+    }
+    if needs_pointer_table
+        && !unsafe { hirari_audio_buffer_storage_prepare_channels(*storage, target_pointer_count) }
+    {
+        return 4;
+    }
+    0
+}
+
+/// Switches a native AudioBuffer between owned and externally wrapped planes.
+/// Invalid wraps release the current owned block and reset the view, matching
+/// the compatibility API's failure behavior.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_wrap_channels(
+    storage_handle: *mut *mut c_void,
+    current_channels: *mut u32,
+    current_samples: *mut u32,
+    current_capacity: *mut usize,
+    current_data: *mut *mut f32,
+    is_external: *mut bool,
+    external_data: *mut *mut *mut f32,
+    channels: *mut *mut f32,
+    channel_count: u32,
+    sample_count: u32,
+) -> bool {
+    if storage_handle.is_null() || current_channels.is_null() || current_samples.is_null()
+        || current_capacity.is_null() || current_data.is_null() || is_external.is_null()
+        || external_data.is_null()
+    {
+        return false;
+    }
+    let valid = if channels.is_null() || channel_count == 0 || sample_count == 0 {
+        false
+    } else {
+        (0..channel_count as usize)
+            .all(|index| unsafe { !(*channels.add(index)).is_null() })
+    };
+    let storage = unsafe { *storage_handle };
+    if !storage.is_null() {
+        unsafe { hirari_audio_buffer_storage_release(storage) };
+    }
+    unsafe {
+        current_capacity.write(0);
+        current_data.write(std::ptr::null_mut());
+        if !valid {
+            current_channels.write(0);
+            current_samples.write(0);
+            is_external.write(false);
+            external_data.write(std::ptr::null_mut());
+            return false;
+        }
+        current_channels.write(channel_count);
+        current_samples.write(sample_count);
+        is_external.write(true);
+        external_data.write(channels);
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_audio_buffer_set_realtime_guard(is_realtime: bool) {
+    AUDIO_BUFFER_REALTIME_GUARD.with(|guard| guard.set(is_realtime));
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_audio_buffer_realtime_resize_attempts() -> u64 {
+    AUDIO_BUFFER_RESIZE_ATTEMPTS.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_audio_buffer_last_realtime_requested_capacity() -> usize {
+    AUDIO_BUFFER_LAST_REQUESTED_CAPACITY.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_audio_buffer_last_realtime_capacity() -> usize {
+    AUDIO_BUFFER_LAST_CAPACITY.load(Ordering::Relaxed)
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_audio_buffer_reset_realtime_resize_stats() {
+    AUDIO_BUFFER_RESIZE_ATTEMPTS.store(0, Ordering::Relaxed);
+    AUDIO_BUFFER_LAST_REQUESTED_CAPACITY.store(0, Ordering::Relaxed);
+    AUDIO_BUFFER_LAST_CAPACITY.store(0, Ordering::Relaxed);
 }
 
 #[no_mangle]

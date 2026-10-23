@@ -165,6 +165,105 @@ pub unsafe extern "C" fn hirari_tube_saturation_get_parameter(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn hirari_tube_saturation_save_state(
+    state: *const c_void,
+    bypassed: u8,
+    mix: f32,
+    sidechain_bus_id: u32,
+    output: *mut u8,
+    capacity: usize,
+) -> usize {
+    const STATE_SIZE: usize = 32;
+    let Some(state) = state.cast::<TubeSaturationEngine>().as_ref() else {
+        return 0;
+    };
+    if output.is_null() || capacity < STATE_SIZE || !mix.is_finite() || !(0.0..=1.0).contains(&mix)
+    {
+        return 0;
+    }
+    let mut offset = 0;
+    let mut write = |field: &[u8]| {
+        std::ptr::copy_nonoverlapping(field.as_ptr(), output.add(offset), field.len());
+        offset += field.len();
+    };
+    write(&0x4155_5241u32.to_ne_bytes());
+    write(&1u16.to_ne_bytes());
+    write(&(u16::from(bypassed != 0)).to_ne_bytes());
+    write(&mix.to_ne_bytes());
+    write(&sidechain_bus_id.to_ne_bytes());
+    write(&state.get_parameter(0).to_ne_bytes());
+    write(&state.get_parameter(1).to_ne_bytes());
+    write(&state.get_parameter(2).to_ne_bytes());
+    write(&0u32.to_ne_bytes());
+    STATE_SIZE
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_tube_saturation_restore_state(
+    state: *mut c_void,
+    bytes: *const u8,
+    size: usize,
+    bypassed: *mut u8,
+    mix: *mut f32,
+    sidechain_bus_id: *mut u32,
+) -> bool {
+    if state.is_null()
+        || bytes.is_null()
+        || size != 32
+        || bypassed.is_null()
+        || mix.is_null()
+        || sidechain_bus_id.is_null()
+    {
+        return false;
+    }
+    let read_u16 = |offset| {
+        u16::from_ne_bytes(
+            std::slice::from_raw_parts(bytes.add(offset), 2)
+                .try_into()
+                .unwrap(),
+        )
+    };
+    let read_u32 = |offset| {
+        u32::from_ne_bytes(
+            std::slice::from_raw_parts(bytes.add(offset), 4)
+                .try_into()
+                .unwrap(),
+        )
+    };
+    let read_f32 = |offset| {
+        f32::from_ne_bytes(
+            std::slice::from_raw_parts(bytes.add(offset), 4)
+                .try_into()
+                .unwrap(),
+        )
+    };
+    let flags = read_u16(6);
+    let decoded_mix = read_f32(8);
+    let values = [read_f32(16), read_f32(20), read_f32(24)];
+    if read_u32(0) != 0x4155_5241
+        || read_u16(4) != 1
+        || flags & !1 != 0
+        || !decoded_mix.is_finite()
+        || !(0.0..=1.0).contains(&decoded_mix)
+        || values
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+    {
+        return false;
+    }
+    let Some(engine) = state.cast::<TubeSaturationEngine>().as_ref() else {
+        return false;
+    };
+    for (id, value) in values.into_iter().enumerate() {
+        engine.set_parameter(id as u32, value);
+    }
+    *bypassed = (flags & 1) as u8;
+    *mix = decoded_mix;
+    *sidechain_bus_id = read_u32(12);
+    true
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn hirari_tube_saturation_set_control(
     state: *const c_void,
     control: u32,

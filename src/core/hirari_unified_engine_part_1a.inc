@@ -1,3 +1,9 @@
+extern "C" void hirari_audio_publish_monitor_block(
+    const float* const*, uint32_t, uint32_t, const void*, const void*, void*, void*,
+    uint32_t, float*, float*);
+extern "C" void hirari_audio_publish_talkback_block(
+    const float* const*, uint32_t, uint32_t, const void*, void*, void*, float*);
+
 inline int64_t hirari_sys(int /*op*/, int64_t /*a1*/, int64_t /*a2*/, int64_t /*a3*/) {
     static std::atomic<uint64_t> state{0x9E3779B97F4A7C15ull};
     uint64_t x = state.fetch_add(0x9E3779B97F4A7C15ull, std::memory_order_relaxed);
@@ -34,6 +40,7 @@ HirariUnifiedEngine& HirariUnifiedEngine::getInstance() {
 
 HirariUnifiedEngine::~HirariUnifiedEngine() {
     shutdown();
+    hirari_midi_snapshot_store_destroy(m_midiSnapshotStore);
     hirari_control_room_state_destroy(m_controlRoomState);
     hirari_native_pdc_destroy(m_pdcState);
     hirari_tempo_map_destroy(m_tempoState);
@@ -47,48 +54,20 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
                                                     uint32_t numChannels,
                                                     uint32_t numSamples) noexcept {
-    const uint32_t monitorTrack = m_inputMonitorTrackId.load(std::memory_order_acquire);
-    const uint64_t channelPair = m_inputMonitorChannelPair.load(std::memory_order_acquire);
-    const uint32_t leftChannel = static_cast<uint32_t>(channelPair);
-    const uint32_t rightChannel = static_cast<uint32_t>(channelPair >> 32);
-    if (!inputs || leftChannel >= numChannels || rightChannel >= numChannels ||
-        !inputs[leftChannel] || !inputs[rightChannel] ||
-        monitorTrack == kNoInputMonitorTrack || numSamples == 0 ||
-        numSamples > kMaxAudioBlockSize) {
-        m_inputMonitorBlockPublished.store(false, std::memory_order_release);
-        m_inputMonitorBlockFrames.store(0, std::memory_order_release);
-        return;
-    }
-    if (!hirari_audio_copy_monitor_input(
-            inputs, numChannels, leftChannel, rightChannel, numSamples,
-            m_inputMonitorLeft.data(), m_inputMonitorRight.data())) {
-        m_inputMonitorBlockPublished.store(false, std::memory_order_release);
-        m_inputMonitorBlockFrames.store(0, std::memory_order_release);
-        return;
-    }
-    m_inputMonitorBlockFrames.store(numSamples, std::memory_order_release);
-    m_inputMonitorBlockPublished.store(true, std::memory_order_release);
+    hirari_audio_publish_monitor_block(
+        inputs, numChannels, numSamples, &m_inputMonitorTrackId,
+        &m_inputMonitorChannelPair, &m_inputMonitorBlockPublished,
+        &m_inputMonitorBlockFrames, kNoInputMonitorTrack,
+        m_inputMonitorLeft.data(), m_inputMonitorRight.data());
 }
 
 void HirariUnifiedEngine::publish_talkback_input_block(const float* const* inputs,
                                                        uint32_t numChannels,
                                                        uint32_t numSamples) noexcept {
-    const uint32_t inputChannel = hirari_control_room_talkback_channel(m_controlRoomState);
-    if (!hirari_control_room_talkback_enabled(m_controlRoomState) || !inputs || inputChannel >= numChannels ||
-        !inputs[inputChannel] ||
-        numSamples == 0 || numSamples > kMaxAudioBlockSize) {
-        m_talkbackInputPublished.store(false, std::memory_order_release);
-        m_talkbackInputFrames.store(0, std::memory_order_release);
-        return;
-    }
-    if (!hirari_audio_copy_talkback_input(
-            inputs, numChannels, inputChannel, numSamples, m_talkbackInput.data())) {
-        m_talkbackInputPublished.store(false, std::memory_order_release);
-        m_talkbackInputFrames.store(0, std::memory_order_release);
-        return;
-    }
-    m_talkbackInputFrames.store(numSamples, std::memory_order_release);
-    m_talkbackInputPublished.store(true, std::memory_order_release);
+    hirari_audio_publish_talkback_block(
+        inputs, numChannels, numSamples, m_controlRoomState,
+        &m_talkbackInputPublished, &m_talkbackInputFrames,
+        m_talkbackInput.data());
 }
 
 void HirariUnifiedEngine::apply_config(const EngineConfig& cfg) {
@@ -131,6 +110,7 @@ void HirariUnifiedEngine::shutdown() {
 HirariUnifiedEngine::HirariUnifiedEngine()
     : m_playhead(0)
     , m_loopEnabled(false) {
+    m_midiSnapshotStore = hirari_midi_snapshot_store_create();
     m_masterBuffer.setSize(2, 4096);
     m_context = std::make_unique<::Hirari::DSP::ProcessContext>();
     *m_context = ::Hirari::DSP::ProcessContext{};
@@ -315,29 +295,10 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                 m_audioRangeOverflow.store(true, std::memory_order_release);
                 return;
             }
-            uint64_t midiSnapshotRevision = 0;
-            uint32_t midiSnapshotIndex = 0;
-            bool midiSnapshotPinned = false;
-            for (uint32_t attempt = 0; attempt < 8; ++attempt) {
-                const uint64_t beforeRevision =
-                    m_midiNoteSnapshotRevision.load(std::memory_order_acquire);
-                if ((beforeRevision & 1u) != 0u) continue;
-                const uint32_t candidate =
-                    m_activeMidiSnapshot.load(std::memory_order_acquire);
-                m_midiSnapshotReaders[candidate].fetch_add(1, std::memory_order_acq_rel);
-                const uint32_t afterIndex =
-                    m_activeMidiSnapshot.load(std::memory_order_acquire);
-                const uint64_t afterRevision =
-                    m_midiNoteSnapshotRevision.load(std::memory_order_acquire);
-                if (candidate == afterIndex && beforeRevision == afterRevision &&
-                    (afterRevision & 1u) == 0u) {
-                    midiSnapshotIndex = candidate;
-                    midiSnapshotRevision = afterRevision;
-                    midiSnapshotPinned = true;
-                    break;
-                }
-                m_midiSnapshotReaders[candidate].fetch_sub(1, std::memory_order_release);
-            }
+            HirariMidiSnapshotView midiSnapshot{};
+            const bool midiSnapshotPinned = hirari_midi_snapshot_store_pin(
+                m_midiSnapshotStore, &midiSnapshot);
+            const uint64_t midiSnapshotRevision = midiSnapshot.revision;
             const bool discontinuity = midiPlaybackActive &&
                 (!m_hasPreviousMidiBlock || !m_previousMidiPlaybackActive ||
                  currentPlayhead != m_previousMidiBlockEnd);
@@ -363,7 +324,6 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
             }
             const uint64_t blockEnd = currentPlayhead + sz;
             if (midiSnapshotPinned) {
-                const auto& snapshot = m_midiNoteSnapshots[midiSnapshotIndex];
                 using AudioState = std::remove_reference_t<decltype(state)>;
                 struct MidiDispatchContext {
                     HirariUnifiedEngine* engine;
@@ -371,9 +331,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                     uint64_t playhead;
                 } dispatch{this, &state, currentPlayhead};
                 hirari_midi_schedule_block(
-                    reinterpret_cast<const HirariScheduledMidiNote*>(snapshot.notesByStart.data()),
-                    snapshot.notesByStart.size(), snapshot.noteIndicesByEnd.data(),
-                    snapshot.noteIndicesByEnd.size(), currentPlayhead, sz,
+                    midiSnapshot.notes, midiSnapshot.note_count, midiSnapshot.indices_by_end,
+                    midiSnapshot.end_count, currentPlayhead, sz,
                     midiPlaybackActive ? 1 : 0, reconcileMidiState ? 1 : 0,
                     m_midiPlaybackPass, &dispatch,
                     +[](void* opaque, const HirariScheduledMidiNote* rawNote,
@@ -432,8 +391,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                             ++engine.m_previewFallbackActiveNotes[note.midiChannel][note.pitch];
                         }
                     });
-                m_midiSnapshotReaders[midiSnapshotIndex].fetch_sub(
-                    1, std::memory_order_release);
+                hirari_midi_snapshot_store_release(m_midiSnapshotStore, midiSnapshot.slot);
             } else {
                 // Under sustained concurrent edits, never risk traversing a
                 // mutable snapshot. Panic this block and reconcile on the

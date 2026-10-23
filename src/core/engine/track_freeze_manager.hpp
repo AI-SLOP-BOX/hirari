@@ -7,7 +7,6 @@
 #include <cstring>
 #include "track.hpp"
 #include "bounce_engine.hpp"
-#include "../../io/persistence/wav_writer.hpp"
 
 namespace Hirari::Core::Engine {
 
@@ -42,20 +41,11 @@ public:
         if (path.empty()) return false;
         auto rendered = renderOffline(track, totalSamples);
         if (!rendered) return false;
-        Hirari::IO::Persistence::WavWriter::Float32StreamWriter writer(
-            path.string(), sampleRate, 2);
-        if (!writer.isOpen()) return false;
-        for (uint64_t offset = 0; offset < totalSamples;) {
-            const uint32_t frames = static_cast<uint32_t>(std::min<uint64_t>(
-                4096u, totalSamples - offset));
-            const float* channels[2] = {
-                rendered->getReadPointer(0) + static_cast<size_t>(offset),
-                rendered->getReadPointer(1) + static_cast<size_t>(offset)
-            };
-            if (!writer.writeFrames(channels, frames)) return false;
-            offset += frames;
-        }
-        if (!writer.finish()) return false;
+        const std::string outputPath = path.string();
+        if (!hirari_track_freeze_write_float32(
+                reinterpret_cast<const uint8_t*>(outputPath.data()), outputPath.size(),
+                sampleRate, rendered->getReadPointer(0), rendered->getReadPointer(1),
+                totalSamples)) return false;
         if (!track->publishFrozenAudio(rendered, totalSamples, sampleRate,
                                        0, 0, path.string())) {
             std::error_code ec;

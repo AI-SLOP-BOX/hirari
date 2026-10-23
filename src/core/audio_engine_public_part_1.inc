@@ -312,7 +312,7 @@ public:
                               uint64_t frames, float bpm, double sample_rate,
                               float strength, float swing) const noexcept {
         if (!m_engine || channels == 0 || channels > 32 || frames == 0 ||
-            frames > ::Hirari::Core::Engine::AudioQuantizer::kMaxWarpSamples ||
+            frames > hirari::limits::kMaxAudioQuantizerWarpSamples ||
             planar.size() != static_cast<size_t>(channels) * frames) return false;
         std::array<float*, 32> buffers{};
         for (uint32_t c = 0; c < channels; ++c) buffers[c] = planar.data() + static_cast<size_t>(c) * frames;
@@ -338,10 +338,10 @@ public:
                                     rust::Slice<const uint32_t> targetRids) const {
         if (!m_engine || targetTids.size() != targetRids.size() ||
             targetTids.empty() || targetTids.size() > 32) return false;
-        std::vector<std::pair<uint32_t, uint32_t>> targets;
+        std::vector<::HirariRegionAlignmentTargetId> targets;
         targets.reserve(targetTids.size());
         for (size_t i = 0; i < targetTids.size(); ++i)
-            targets.emplace_back(targetTids[i], targetRids[i]);
+            targets.push_back({targetTids[i], targetRids[i]});
         return m_engine->align_regions_to_reference(referenceTid, referenceRid, targets);
     }
     uint8_t region_alignment_status(uint32_t referenceTid, uint32_t referenceRid) const {
@@ -403,11 +403,9 @@ public:
             !std::isfinite(sample_rate) || sample_rate < 8'000.0 ||
             sample_rate > 384'000.0) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Hirari::Core::AudioBuffer view;
-        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Hirari::DSP::Analysis::SpectralProcessor processor;
-        processor.applySpectralGain(view, sample_rate,
-                                    {t0, f0, t1, f1}, gain);
+        (void)hirari_spectral_processor_apply_gain(
+            channels, 2, static_cast<uint32_t>(left.size()), sample_rate,
+            t0, f0, t1, f1, gain);
         for (size_t i = 0; i < left.size(); ++i)
             if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
         return true;
@@ -421,10 +419,9 @@ public:
             !std::isfinite(profile_seconds) || !std::isfinite(sample_rate) ||
             sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Hirari::Core::AudioBuffer view;
-        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Hirari::DSP::Analysis::SpectralProcessor processor;
-        processor.reduceNoise(view, sample_rate, amount, profile_seconds);
+        (void)hirari_spectral_processor_reduce_noise(
+            channels, 2, static_cast<uint32_t>(left.size()), sample_rate,
+            0.0f, 0.0f, 1.0e9f, 0.0f, amount, profile_seconds);
         for (size_t i = 0; i < left.size(); ++i)
             if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
         return true;
@@ -435,10 +432,9 @@ public:
         if (left.empty() || left.size() != right.size() ||
             left.size() > 16u * 1024u * 1024u || !std::isfinite(ceiling)) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Hirari::Core::AudioBuffer view;
-        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Hirari::DSP::Analysis::SpectralProcessor processor;
-        (void)processor.repairClipped(view, ceiling);
+        (void)hirari_spectral_processor_repair_clipped(
+            channels, 2, static_cast<uint32_t>(left.size()), 0.0, 0.0f,
+            0.0f, ceiling, false);
         for (size_t i = 0; i < left.size(); ++i)
             if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
         return true;
@@ -456,11 +452,9 @@ public:
             !std::isfinite(f1) || !std::isfinite(sample_rate) ||
             sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
         float* channels[2] = {left.data(), right.data()};
-        ::Hirari::Core::AudioBuffer view;
-        view.wrapChannels(channels, 2, static_cast<uint32_t>(left.size()));
-        ::Hirari::DSP::Analysis::SpectralProcessor processor;
-        processor.removeHum(view, sample_rate, fundamental_hz,
-                             {t0, f0, t1, f1}, harmonics, bandwidth_hz);
+        (void)hirari_spectral_processor_remove_hum(
+            channels, 2, static_cast<uint32_t>(left.size()), sample_rate,
+            fundamental_hz, harmonics, bandwidth_hz, t0, f0, t1, f1);
         for (size_t i = 0; i < left.size(); ++i)
             if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
         return true;

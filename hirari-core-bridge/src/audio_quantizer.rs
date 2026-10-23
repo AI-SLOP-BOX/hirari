@@ -1,7 +1,43 @@
-use std::ffi::c_void;
 use crate::region_warp::HirariWarpMarker;
+use std::ffi::c_void;
 
 const MAX_WARP_SAMPLES: u64 = 16_777_216;
+const SUPPORTED_QUANTIZE_GRIDS: [f64; 13] = [
+    1.0,
+    0.5,
+    0.25,
+    0.125,
+    0.0625,
+    2.0 / 3.0,
+    1.0 / 3.0,
+    1.0 / 6.0,
+    1.0 / 12.0,
+    1.5,
+    0.75,
+    0.375,
+    0.1875,
+];
+
+/// Keeps the quantizer's public setting bounds beside its Rust implementation.
+#[no_mangle]
+pub extern "C" fn hirari_audio_quantizer_settings_validate(
+    track_id: u32,
+    region_id: u32,
+    strength: f32,
+    grid_beats: f64,
+    swing: f32,
+) -> bool {
+    track_id != 0
+        && region_id != 0
+        && strength.is_finite()
+        && (0.0..=1.0).contains(&strength)
+        && grid_beats.is_finite()
+        && SUPPORTED_QUANTIZE_GRIDS
+            .iter()
+            .any(|grid| (grid - grid_beats).abs() < 1.0e-9)
+        && swing.is_finite()
+        && (-1.0..=1.0).contains(&swing)
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -16,6 +52,220 @@ pub struct HirariAudioQuantizeChannelView {
 pub struct HirariAudioQuantizerMapPoint {
     pub source_sample: u64,
     pub timeline_sample: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HirariAudioQuantizerTargetView {
+    pub source_span: u64,
+    pub source_frames_per_timeline_frame: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HirariAudioQuantizerTempoEvent {
+    pub sample_pos: u64,
+    pub bpm: f64,
+    pub ramp: bool,
+    pub world_beats: f64,
+}
+
+struct HirariAudioQuantizerGroupMaps {
+    targets: Vec<Vec<HirariWarpMarker>>,
+}
+
+/// Builds one synchronized transient map and projects it to every region's
+/// native source rate. The audio engine passes immutable channel views; Rust
+/// owns the complete analysis, tempo snapshot, and projection pipeline.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_quantizer_build_group_warp_maps(
+    channels: *const HirariAudioQuantizeChannelView,
+    channel_count: usize,
+    targets: *const HirariAudioQuantizerTargetView,
+    target_count: usize,
+    timeline_length: u64,
+    timeline_start: u64,
+    grid_beats: f64,
+    strength: f32,
+    swing: f32,
+    sample_rate: f64,
+    base_tempo: f64,
+    tempo_events: *const HirariAudioQuantizerTempoEvent,
+    tempo_event_count: usize,
+) -> *mut c_void {
+    if channels.is_null()
+        || targets.is_null()
+        || channel_count == 0
+        || channel_count > 32
+        || target_count == 0
+        || target_count > 32
+        || timeline_length < 2
+        || timeline_length > MAX_WARP_SAMPLES
+        || timeline_start.checked_add(timeline_length).is_none()
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !base_tempo.is_finite()
+        || base_tempo <= 0.0
+        || (tempo_event_count != 0 && tempo_events.is_null())
+        || tempo_event_count > 100_000
+    {
+        return std::ptr::null_mut();
+    }
+
+    let channels = unsafe { std::slice::from_raw_parts(channels, channel_count) };
+    let targets = unsafe { std::slice::from_raw_parts(targets, target_count) };
+    let tempo_events = if tempo_event_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(tempo_events, tempo_event_count) }
+    };
+    if targets.iter().any(|target| {
+        target.source_span < 2
+            || !target.source_frames_per_timeline_frame.is_finite()
+            || target.source_frames_per_timeline_frame <= 0.0
+    }) {
+        return std::ptr::null_mut();
+    }
+
+    let mut envelope = vec![0.0f32; timeline_length as usize];
+    if !unsafe {
+        hirari_audio_quantizer_build_group_envelope(
+            channels.as_ptr(),
+            channels.len(),
+            timeline_length,
+            envelope.as_mut_ptr(),
+            envelope.len(),
+        )
+    } {
+        return std::ptr::null_mut();
+    }
+
+    let tempo_map = crate::tempo::hirari_tempo_map_create();
+    if tempo_map.is_null() {
+        return std::ptr::null_mut();
+    }
+    unsafe {
+        crate::tempo::hirari_tempo_map_clear(tempo_map, sample_rate, base_tempo);
+        for event in tempo_events {
+            crate::tempo::hirari_tempo_map_add_tempo(
+                tempo_map,
+                event.sample_pos,
+                event.bpm,
+                sample_rate,
+                event.ramp,
+            );
+        }
+    }
+    let inputs = [envelope.as_ptr()];
+    let map = unsafe {
+        hirari_audio_quantizer_build_group_map(
+            inputs.as_ptr(),
+            1,
+            timeline_length,
+            timeline_start,
+            grid_beats,
+            strength,
+            swing,
+            tempo_map,
+            sample_rate,
+        )
+    };
+    unsafe { crate::tempo::hirari_tempo_map_destroy(tempo_map) };
+    if map.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let map_count = unsafe { hirari_audio_quantizer_map_count(map) };
+    if map_count == 0 || map_count > MAX_WARP_SAMPLES as usize {
+        unsafe { hirari_audio_quantizer_map_destroy(map) };
+        return std::ptr::null_mut();
+    }
+    let mut native_map = vec![HirariAudioQuantizerMapPoint::default(); map_count];
+    for (index, point) in native_map.iter_mut().enumerate() {
+        if !unsafe {
+            hirari_audio_quantizer_map_get(
+                map,
+                index,
+                &mut point.source_sample,
+                &mut point.timeline_sample,
+            )
+        } {
+            unsafe { hirari_audio_quantizer_map_destroy(map) };
+            return std::ptr::null_mut();
+        }
+    }
+    unsafe { hirari_audio_quantizer_map_destroy(map) };
+
+    let mut projected_targets = Vec::with_capacity(target_count);
+    for target in targets {
+        let capacity = match map_count.checked_add(2) {
+            Some(capacity) => capacity,
+            None => return std::ptr::null_mut(),
+        };
+        let mut projected = vec![HirariWarpMarker::default(); capacity];
+        let mut projected_count = 0;
+        if !unsafe {
+            hirari_audio_quantizer_project_group_map(
+                native_map.as_ptr(),
+                native_map.len(),
+                target.source_span,
+                timeline_length,
+                target.source_frames_per_timeline_frame,
+                projected.as_mut_ptr(),
+                projected.len(),
+                &mut projected_count,
+            )
+        } {
+            return std::ptr::null_mut();
+        }
+        projected.truncate(projected_count);
+        projected_targets.push(projected);
+    }
+
+    Box::into_raw(Box::new(HirariAudioQuantizerGroupMaps {
+        targets: projected_targets,
+    }))
+    .cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_quantizer_group_warp_map_count(
+    maps: *const c_void,
+    target_index: usize,
+) -> usize {
+    let Some(maps) = (unsafe { maps.cast::<HirariAudioQuantizerGroupMaps>().as_ref() }) else {
+        return 0;
+    };
+    maps.targets.get(target_index).map_or(0, Vec::len)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_quantizer_group_warp_map_copy(
+    maps: *const c_void,
+    target_index: usize,
+    output: *mut HirariWarpMarker,
+    output_capacity: usize,
+) -> bool {
+    let Some(maps) = (unsafe { maps.cast::<HirariAudioQuantizerGroupMaps>().as_ref() }) else {
+        return false;
+    };
+    let Some(target) = maps.targets.get(target_index) else {
+        return false;
+    };
+    if target.len() > output_capacity || (!target.is_empty() && output.is_null()) {
+        return false;
+    }
+    if !target.is_empty() {
+        unsafe { std::slice::from_raw_parts_mut(output, target.len()).copy_from_slice(target) };
+    }
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_quantizer_group_warp_maps_destroy(maps: *mut c_void) {
+    if !maps.is_null() {
+        drop(unsafe { Box::from_raw(maps.cast::<HirariAudioQuantizerGroupMaps>()) });
+    }
 }
 
 /// Projects the shared timeline map into one region's source coordinates,
@@ -33,8 +283,11 @@ pub unsafe extern "C" fn hirari_audio_quantizer_project_group_map(
 ) -> bool {
     if map.is_null()
         || map_count == 0
+        || map_count > MAX_WARP_SAMPLES as usize
+        || map_count.checked_add(2).is_none()
         || source_span == 0
         || timeline_span == 0
+        || timeline_span > MAX_WARP_SAMPLES
         || !source_frames_per_timeline_frame.is_finite()
         || source_frames_per_timeline_frame <= 0.0
         || output.is_null()
@@ -482,9 +735,6 @@ pub unsafe extern "C" fn hirari_audio_quantize_group(
     true
 }
 
-type SamplesToBeats = unsafe extern "C" fn(*mut c_void, u64) -> f64;
-type BeatsToSamples = unsafe extern "C" fn(*mut c_void, f64) -> u64;
-
 #[no_mangle]
 pub unsafe extern "C" fn hirari_audio_quantizer_build_group_map(
     inputs: *const *const f32,
@@ -494,9 +744,8 @@ pub unsafe extern "C" fn hirari_audio_quantizer_build_group_map(
     grid_beats: f64,
     strength: f32,
     swing: f32,
-    context: *mut c_void,
-    samples_to_beats: Option<SamplesToBeats>,
-    beats_to_samples: Option<BeatsToSamples>,
+    tempo_map: *mut c_void,
+    sample_rate: f64,
 ) -> *mut c_void {
     if inputs.is_null()
         || channels == 0
@@ -507,20 +756,23 @@ pub unsafe extern "C" fn hirari_audio_quantizer_build_group_map(
         || grid_beats <= 0.0
         || !strength.is_finite()
         || !swing.is_finite()
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || tempo_map.is_null()
     {
         return std::ptr::null_mut();
     }
-    let (Some(samples_to_beats), Some(beats_to_samples)) = (samples_to_beats, beats_to_samples)
-    else {
-        return std::ptr::null_mut();
-    };
     let inputs = std::slice::from_raw_parts(inputs, channels as usize);
     if inputs.iter().any(|pointer| pointer.is_null()) {
         return std::ptr::null_mut();
     }
     let timeline_end = timeline_start + len;
-    let start_beat = samples_to_beats(context, timeline_start);
-    let end_beat = samples_to_beats(context, timeline_end);
+    let start_beat = unsafe {
+        crate::tempo::hirari_tempo_map_samples_to_beats(tempo_map, timeline_start, sample_rate)
+    };
+    let end_beat = unsafe {
+        crate::tempo::hirari_tempo_map_samples_to_beats(tempo_map, timeline_end, sample_rate)
+    };
     if !start_beat.is_finite() || !end_beat.is_finite() || end_beat <= start_beat {
         return std::ptr::null_mut();
     }
@@ -582,8 +834,12 @@ pub unsafe extern "C" fn hirari_audio_quantizer_build_group_map(
         let grid_beat = grid_index * grid_beats;
         let first_beat = start_beat.max(grid_beat - grid_beats * 0.5);
         let last_beat = end_beat.min(grid_beat + grid_beats * 0.5);
-        let first_absolute = beats_to_samples(context, first_beat);
-        let last_absolute = beats_to_samples(context, last_beat);
+        let first_absolute = unsafe {
+            crate::tempo::hirari_tempo_map_beats_to_samples(tempo_map, first_beat, sample_rate)
+        };
+        let last_absolute = unsafe {
+            crate::tempo::hirari_tempo_map_beats_to_samples(tempo_map, last_beat, sample_rate)
+        };
         if last_absolute <= first_absolute || first_absolute >= timeline_end {
             grid_index += 1.0;
             continue;
@@ -634,7 +890,10 @@ pub unsafe extern "C" fn hirari_audio_quantizer_build_group_map(
             candidate = next;
         }
         if strongest_onset >= 0.025 {
-            let peak_beat = samples_to_beats(context, timeline_start + peak_sample.min(len - 1));
+            let peak_beat = unsafe {
+                crate::tempo::hirari_tempo_map_samples_to_beats(
+                    tempo_map, timeline_start + peak_sample.min(len - 1), sample_rate)
+            };
             if !peak_beat.is_finite() {
                 return std::ptr::null_mut();
             }
@@ -647,7 +906,9 @@ pub unsafe extern "C" fn hirari_audio_quantizer_build_group_map(
             if !target_beat.is_finite() {
                 return std::ptr::null_mut();
             }
-            let target_absolute = beats_to_samples(context, target_beat);
+            let target_absolute = unsafe {
+                crate::tempo::hirari_tempo_map_beats_to_samples(tempo_map, target_beat, sample_rate)
+            };
             let timeline_sample = if target_absolute > timeline_start {
                 len.saturating_sub(1).min(target_absolute - timeline_start)
             } else {

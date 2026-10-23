@@ -1,0 +1,483 @@
+//! CLAP module discovery, entry lifetime, instance construction and teardown.
+//!
+//! The sandbox worker calls these functions before publishing readiness. The
+//! library handle and host table stay alive for the complete plugin lifetime.
+
+use core::ffi::{c_char, c_void, CStr};
+use core::ptr;
+use std::boxed::Box;
+use std::ffi::CString;
+#[cfg(unix)]
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::vec::Vec;
+
+/// Resolve a macOS plugin package to its executable image. Non-directory paths
+/// pass through unchanged; package directories select the first executable
+/// regular file in Contents/MacOS, matching the worker's former POSIX logic.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_resolve_image_path(path: *const c_char) -> *mut c_char {
+    if path.is_null() {
+        return ptr::null_mut();
+    }
+    let path_bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
+    let resolved = if path_bytes.is_empty() {
+        Vec::new()
+    } else {
+        #[cfg(unix)]
+        {
+            use std::{ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::PathBuf};
+            let path_buf = PathBuf::from(OsStr::from_bytes(path_bytes));
+            match fs::metadata(&path_buf) {
+                Err(_) => path_bytes.to_vec(),
+                Ok(metadata) if !metadata.is_dir() => path_bytes.to_vec(),
+                Ok(_) => {
+                    let image_dir = path_buf.join("Contents").join("MacOS");
+                    let mut selected = Vec::new();
+                    if let Ok(entries) = fs::read_dir(image_dir) {
+                        for entry in entries.flatten() {
+                            let candidate = entry.path();
+                            let Ok(metadata) = fs::metadata(&candidate) else {
+                                continue;
+                            };
+                            if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+                                selected = candidate.into_os_string().into_vec();
+                                break;
+                            }
+                        }
+                    }
+                    selected
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            path_bytes.to_vec()
+        }
+    };
+    CString::new(resolved).map_or(ptr::null_mut(), CString::into_raw)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_resolved_image_free(path: *mut c_char) {
+    if !path.is_null() {
+        drop(unsafe { CString::from_raw(path) });
+    }
+}
+
+const PLUGIN_FACTORY_ID: &[u8] = b"clap.plugin-factory\0";
+const STATE_EXTENSION_ID: &[u8] = b"clap.state\0";
+const HOST_NAME: &[u8] = b"hirari-sandbox\0";
+const HOST_VENDOR: &[u8] = b"Hirari\0";
+const HOST_URL: &[u8] = b"\0";
+const HOST_VERSION: &[u8] = b"1\0";
+const RTLD_NOW: i32 = 2;
+#[cfg(target_os = "macos")]
+const RTLD_LOCAL: i32 = 4;
+#[cfg(not(target_os = "macos"))]
+const RTLD_LOCAL: i32 = 0;
+
+#[cfg_attr(any(target_os = "linux", target_os = "android"), link(name = "dl"))]
+unsafe extern "C" {
+    fn dlopen(path: *const c_char, mode: i32) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    fn dlclose(handle: *mut c_void) -> i32;
+}
+
+struct DynamicLibrary(*mut c_void);
+
+impl DynamicLibrary {
+    unsafe fn open(path: &CStr) -> Option<Self> {
+        let handle = unsafe { dlopen(path.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
+        (!handle.is_null()).then_some(Self(handle))
+    }
+
+    unsafe fn symbol(&self, name: &'static [u8]) -> *mut c_void {
+        unsafe { dlsym(self.0, name.as_ptr().cast()) }
+    }
+}
+
+impl Drop for DynamicLibrary {
+    fn drop(&mut self) {
+        unsafe {
+            dlclose(self.0);
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Version {
+    major: u32,
+    minor: u32,
+    revision: u32,
+}
+
+#[repr(C)]
+struct Host {
+    version: Version,
+    host_data: *const c_char,
+    name: *const c_char,
+    vendor: *const c_char,
+    url: *const c_char,
+    version_string: *const c_char,
+    request_restart: Option<unsafe extern "C" fn(*const Host)>,
+    request_process: Option<unsafe extern "C" fn(*const Host)>,
+    request_callback: Option<unsafe extern "C" fn(*const Host)>,
+    get_extension: Option<unsafe extern "C" fn(*const Host, *const c_char) -> *const c_void>,
+}
+
+#[repr(C)]
+struct Descriptor {
+    version: Version,
+    id: *const c_char,
+    name: *const c_char,
+    vendor: *const c_char,
+    url: *const c_char,
+    manual_url: *const c_char,
+    support_url: *const c_char,
+    version_string: *const c_char,
+    features: *const *const c_char,
+}
+
+#[repr(C)]
+struct Plugin {
+    descriptor: *const Descriptor,
+    plugin_data: *mut c_void,
+    init: Option<unsafe extern "C" fn(*const Plugin) -> bool>,
+    destroy: Option<unsafe extern "C" fn(*const Plugin)>,
+    activate: Option<unsafe extern "C" fn(*const Plugin, f64, u32, u32) -> bool>,
+    deactivate: Option<unsafe extern "C" fn(*const Plugin)>,
+    start_processing: Option<unsafe extern "C" fn(*const Plugin) -> bool>,
+    stop_processing: Option<unsafe extern "C" fn(*const Plugin)>,
+    reset: Option<unsafe extern "C" fn(*const Plugin)>,
+    process: Option<unsafe extern "C" fn(*const Plugin, *const c_void) -> i32>,
+    get_extension: Option<unsafe extern "C" fn(*const Plugin, *const c_char) -> *const c_void>,
+    on_main_thread: Option<unsafe extern "C" fn(*const Plugin)>,
+}
+
+#[repr(C)]
+struct Factory {
+    get_plugin_count: Option<unsafe extern "C" fn(*const Factory) -> u32>,
+    get_plugin_descriptor: Option<unsafe extern "C" fn(*const Factory, u32) -> *const Descriptor>,
+    create_plugin:
+        Option<unsafe extern "C" fn(*const Factory, *const Host, *const c_char) -> *const Plugin>,
+}
+
+#[repr(C)]
+struct Entry {
+    version: Version,
+    init: Option<unsafe extern "C" fn(*const c_char) -> bool>,
+    deinit: Option<unsafe extern "C" fn()>,
+    get_factory: Option<unsafe extern "C" fn(*const c_char) -> *const c_void>,
+}
+
+#[repr(C)]
+struct StateExtension {
+    save: Option<unsafe extern "C" fn(*const Plugin, *const c_void) -> bool>,
+    load: Option<unsafe extern "C" fn(*const Plugin, *const c_void) -> bool>,
+}
+
+const _: () = assert!(core::mem::size_of::<Host>() == 88);
+const _: () = assert!(core::mem::size_of::<Descriptor>() == 80);
+const _: () = assert!(core::mem::size_of::<Plugin>() == 96);
+const _: () = assert!(core::mem::offset_of!(Plugin, process) == 72);
+const _: () = assert!(core::mem::size_of::<Factory>() == 24);
+const _: () = assert!(core::mem::size_of::<Entry>() == 40);
+const _: () = assert!(core::mem::size_of::<StateExtension>() == 16);
+
+unsafe extern "C" fn noop_host_callback(_: *const Host) {}
+
+unsafe extern "C" fn no_host_extension(_: *const Host, _: *const c_char) -> *const c_void {
+    ptr::null()
+}
+
+struct ClapInstance {
+    // Field order keeps plugin teardown and entry deinit ahead of the library
+    // unload when Drop runs.
+    plugin: *const Plugin,
+    state: *const StateExtension,
+    entry: *const Entry,
+    activated: bool,
+    processing: bool,
+    created: bool,
+    host: Box<Host>,
+    _library: DynamicLibrary,
+}
+
+impl Drop for ClapInstance {
+    fn drop(&mut self) {
+        unsafe {
+            if self.processing {
+                if let Some(stop) = (*self.plugin).stop_processing {
+                    stop(self.plugin);
+                }
+            }
+            if self.activated {
+                if let Some(deactivate) = (*self.plugin).deactivate {
+                    deactivate(self.plugin);
+                }
+            }
+            if self.created {
+                if let Some(destroy) = (*self.plugin).destroy {
+                    destroy(self.plugin);
+                }
+            }
+            if !self.entry.is_null() {
+                if let Some(deinit) = (*self.entry).deinit {
+                    deinit();
+                }
+            }
+        }
+        let _ = &self.host;
+    }
+}
+
+unsafe fn descriptor_has_feature(descriptor: *const Descriptor, requested: &CStr) -> bool {
+    if descriptor.is_null() || (*descriptor).features.is_null() {
+        return false;
+    }
+    let mut feature = (*descriptor).features;
+    while !(*feature).is_null() {
+        if CStr::from_ptr(*feature).to_bytes() == requested.to_bytes() {
+            return true;
+        }
+        feature = feature.add(1);
+    }
+    false
+}
+
+/// Load and start one CLAP plugin. Returns 1 for image-load failure, 2 for an
+/// invalid CLAP entry/factory, 3 for missing feature or instance startup.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_load(
+    image_path: *const c_char,
+    package_path: *const c_char,
+    sample_rate: f64,
+    min_frames: u32,
+    max_frames: u32,
+    output_instance: *mut *mut c_void,
+    output_midi_instrument: *mut bool,
+) -> i32 {
+    if image_path.is_null()
+        || package_path.is_null()
+        || output_instance.is_null()
+        || output_midi_instrument.is_null()
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || min_frames == 0
+        || max_frames < min_frames
+    {
+        return 2;
+    }
+    output_instance.write(ptr::null_mut());
+    output_midi_instrument.write(false);
+    let library = match DynamicLibrary::open(CStr::from_ptr(image_path)) {
+        Some(library) => library,
+        None => return 1,
+    };
+    let entry_symbol = library.symbol(b"clap_entry\0");
+    if entry_symbol.is_null() {
+        return 2;
+    }
+    let entry = entry_symbol.cast::<Entry>();
+    if (*entry).version.major != 1 {
+        return 2;
+    }
+    let (Some(init), Some(deinit), Some(get_factory)) =
+        ((*entry).init, (*entry).deinit, (*entry).get_factory)
+    else {
+        return 2;
+    };
+    if !init(package_path) {
+        return 2;
+    }
+
+    let factory_ptr = get_factory(PLUGIN_FACTORY_ID.as_ptr().cast());
+    if factory_ptr.is_null() {
+        deinit();
+        return 3;
+    }
+    let factory = &*factory_ptr.cast::<Factory>();
+    let (Some(get_count), Some(get_descriptor), Some(create_plugin)) = (
+        factory.get_plugin_count,
+        factory.get_plugin_descriptor,
+        factory.create_plugin,
+    ) else {
+        deinit();
+        return 3;
+    };
+    let count = get_count(factory);
+    if count == 0 {
+        deinit();
+        return 3;
+    }
+
+    let requested_feature = std::env::var_os("HIRARI_PLUGIN_KIND")
+        .filter(|feature| !feature.is_empty())
+        .and_then(|feature| CString::new(feature.as_os_str().as_bytes()).ok());
+    let mut selected = 0;
+    if let Some(feature) = requested_feature.as_ref() {
+        let mut found = false;
+        for candidate in 0..count {
+            if descriptor_has_feature(get_descriptor(factory, candidate), feature) {
+                selected = candidate;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            deinit();
+            return 3;
+        }
+    }
+    let descriptor = get_descriptor(factory, selected);
+    if descriptor.is_null() || (*descriptor).id.is_null() {
+        deinit();
+        return 3;
+    }
+    let midi_instrument = [
+        b"instrument\0".as_slice(),
+        b"synthesizer\0",
+        b"sampler\0",
+        b"drum\0",
+    ]
+    .iter()
+    .any(|name| descriptor_has_feature(descriptor, CStr::from_bytes_with_nul_unchecked(name)));
+
+    let host = Box::new(Host {
+        version: Version {
+            major: 1,
+            minor: 0,
+            revision: 0,
+        },
+        host_data: ptr::null(),
+        name: HOST_NAME.as_ptr().cast(),
+        vendor: HOST_VENDOR.as_ptr().cast(),
+        url: HOST_URL.as_ptr().cast(),
+        version_string: HOST_VERSION.as_ptr().cast(),
+        request_restart: Some(noop_host_callback),
+        request_process: Some(noop_host_callback),
+        request_callback: Some(noop_host_callback),
+        get_extension: Some(no_host_extension),
+    });
+    let plugin = create_plugin(factory, &*host, (*descriptor).id);
+    if plugin.is_null() {
+        deinit();
+        return 3;
+    }
+    let instance = ClapInstance {
+        plugin,
+        state: ptr::null(),
+        entry,
+        activated: false,
+        processing: false,
+        created: true,
+        host,
+        _library: library,
+    };
+    let mut instance = Box::new(instance);
+    let plugin_ref = &*plugin;
+    if plugin_ref.init.is_none()
+        || plugin_ref.destroy.is_none()
+        || plugin_ref.activate.is_none()
+        || plugin_ref.deactivate.is_none()
+        || plugin_ref.start_processing.is_none()
+        || plugin_ref.stop_processing.is_none()
+        || plugin_ref.process.is_none()
+    {
+        drop(instance);
+        return 3;
+    }
+    if !plugin_ref.init.unwrap()(plugin) {
+        drop(instance);
+        return 3;
+    }
+    if !plugin_ref.activate.unwrap()(plugin, sample_rate, min_frames, max_frames) {
+        drop(instance);
+        return 3;
+    }
+    instance.activated = true;
+    if !plugin_ref.start_processing.unwrap()(plugin) {
+        drop(instance);
+        return 3;
+    }
+    instance.processing = true;
+    if let Some(get_extension) = plugin_ref.get_extension {
+        instance.state =
+            get_extension(plugin, STATE_EXTENSION_ID.as_ptr().cast()).cast::<StateExtension>();
+    }
+    output_midi_instrument.write(midi_instrument);
+    output_instance.write(Box::into_raw(instance).cast());
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_plugin(instance: *const c_void) -> *const c_void {
+    if instance.is_null() {
+        ptr::null()
+    } else {
+        (*instance.cast::<ClapInstance>()).plugin.cast()
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_state(instance: *const c_void) -> *const c_void {
+    if instance.is_null() {
+        ptr::null()
+    } else {
+        (*instance.cast::<ClapInstance>()).state.cast()
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_destroy(instance: *mut c_void) {
+    if !instance.is_null() {
+        drop(Box::from_raw(instance.cast::<ClapInstance>()));
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_reset(
+    instance: *mut c_void,
+    sample_rate: f64,
+    min_frames: u32,
+    max_frames: u32,
+) -> bool {
+    if instance.is_null()
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || min_frames == 0
+        || max_frames < min_frames
+    {
+        return false;
+    }
+    let instance = &mut *instance.cast::<ClapInstance>();
+    let plugin = &*instance.plugin;
+    if instance.processing {
+        if let Some(stop) = plugin.stop_processing {
+            stop(instance.plugin);
+        }
+        instance.processing = false;
+    }
+    if instance.activated {
+        if let Some(deactivate) = plugin.deactivate {
+            deactivate(instance.plugin);
+        }
+        instance.activated = false;
+    }
+    let Some(activate) = plugin.activate else {
+        return false;
+    };
+    if !activate(instance.plugin, sample_rate, min_frames, max_frames) {
+        return false;
+    }
+    instance.activated = true;
+    let Some(start) = plugin.start_processing else {
+        return false;
+    };
+    if !start(instance.plugin) {
+        return false;
+    }
+    instance.processing = true;
+    true
+}
