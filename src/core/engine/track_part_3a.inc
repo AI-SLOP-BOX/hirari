@@ -252,6 +252,10 @@
         markProjectLayoutChanged();
         return m_regions;
     }
+    // Rust mirror of the region table as of the last snapshot publish. Callers
+    // that mutate the vector through the legacy reference above bypass the
+    // publish and therefore the mirror; stage 3 removes that path.
+    const HirariRegionTable* regionTableMirror() const noexcept { return m_regionTable; }
     void clearRegions() {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         m_regions.clear();

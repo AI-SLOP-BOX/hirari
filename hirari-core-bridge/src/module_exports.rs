@@ -255,6 +255,7 @@ pub mod region_alignment;
 pub mod region_comp_ranges;
 pub mod region_edit_host;
 pub mod region_processing_history;
+pub mod region_table;
 pub mod region_mutations;
 pub mod region_pitch_correction;
 pub mod region_processing;

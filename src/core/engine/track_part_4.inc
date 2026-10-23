@@ -4,7 +4,44 @@
         std::vector<HirariTrackRegionRenderInput> renderInputs;
     };
 
+    // Replaces the Rust mirror with the current region list. Every region
+    // mutation ends in publishRegionSnapshot(), so syncing here keeps the
+    // mirror equal to m_regions without touching each mutation path.
+    void syncRegionTableMirror() {
+        std::vector<uint32_t> ids;
+        std::vector<HirariRegionState> states;
+        ids.reserve(m_regions.size());
+        states.reserve(m_regions.size());
+        for (const auto& region : m_regions) {
+            HirariRegionState state;
+            state.start = region.start;
+            state.len = region.len;
+            state.baseStart = region.baseStart;
+            state.baseLength = region.baseLength;
+            state.sourceOffset = region.sourceOffset;
+            state.baseSourceOffset = region.baseSourceOffset;
+            state.sourceLength = region.sourceLength;
+            state.fadeInSamples = region.fadeInSamples;
+            state.fadeOutSamples = region.fadeOutSamples;
+            state.warpRatio = region.warpRatio;
+            state.sourceSampleRate = region.sourceSampleRate;
+            state.timelineSampleRate = region.timelineSampleRate;
+            state.clipGain = region.clipGain;
+            state.pitchSemitones = region.pitchSemitones;
+            state.loopCount = region.loopCount;
+            state.syncGroup = region.syncGroup;
+            state.muted = region.muted;
+            state.reverse = region.reverse;
+            state.locked = region.locked;
+            state.pitchPreserveWarp = region.pitchPreserveWarp;
+            ids.push_back(region.id);
+            states.push_back(state);
+        }
+        (void)hirari_region_table_replace(m_regionTable, ids.data(), states.data(), ids.size());
+    }
+
     void publishRegionSnapshot() {
+        syncRegionTableMirror();
         // Streaming processors are mutable. Give each published snapshot its
         // own instances so an older callback/render can never advance state
         // that a newer snapshot is using. Allocation and configuration stay
@@ -161,6 +198,7 @@
     std::atomic<bool> m_recordArmed{false};
     std::atomic<bool> m_isEcoMode{false};
     std::vector<Region> m_regions;
+    HirariRegionTable* m_regionTable = hirari_region_table_new();
     mutable std::mutex m_regionEditMutex;
     // Published only by the control thread. Old generations intentionally
     // remain alive until Track destruction, avoiding RT-side shared_ptr release.

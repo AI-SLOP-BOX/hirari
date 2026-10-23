@@ -717,6 +717,16 @@ extern "C" bool hirari_region_edit_move(void* host, uint32_t trackId, uint32_t r
                                         double start);
 extern "C" bool hirari_region_edit_move_sync_group(void* host, uint32_t trackId,
                                                    uint32_t regionId, double start);
+// Rust-side mirror of a track's region table (stage 1 of the Region storage
+// migration). C++ stays authoritative and replaces the mirror on every publish.
+struct HirariRegionTable;
+extern "C" HirariRegionTable* hirari_region_table_new();
+extern "C" void hirari_region_table_free(HirariRegionTable* table);
+extern "C" bool hirari_region_table_replace(HirariRegionTable* table, const uint32_t* ids,
+                                            const HirariRegionState* states, size_t count);
+extern "C" size_t hirari_region_table_len(const HirariRegionTable* table);
+extern "C" bool hirari_region_table_get(const HirariRegionTable* table, size_t index,
+                                        uint32_t* id, HirariRegionState* state);
 extern "C" bool hirari_region_edit_note_anchor(void* host, uint32_t trackId, uint32_t regionId,
                                                 double segmentStart, double position,
                                                 double pitchCents, double formantCents);
