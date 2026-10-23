@@ -1,9 +1,11 @@
 use hirari_core_bridge::command_api::{
     audit_log_json, capabilities, diff, validate, validate_request_envelope, CommandDocument,
-    ProtocolRequest,
+    ProtocolRequest, PROTOCOL_VERSION,
 };
+use hirari_core_bridge::command_executor;
 use hirari_core_bridge::project::ProjectDocument;
 use hirari_core_bridge::stable_api::{CoreApiV1, MixRenderRequest, WaveContainer};
+use hirari_core_bridge::HirariCore;
 use std::io::{self, Read};
 
 mod cli_piano;
@@ -74,7 +76,7 @@ fn read_pcm_wav(path: &str) -> Result<Vec<f32>, String> {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: hirari capabilities | hirari audit-log <ledger-path> | hirari project init <project> [name] [sample-rate] | hirari project inspect <project> | hirari project manifest <project> | hirari project production init <project> [fps] | hirari project production inspect <project> | hirari project production revision <project> <message> [author] [--audio-hash HASH] [--vfx-hash HASH] | hirari track add <project> <name> [type] | hirari track rename <project> <track-id> <name> | hirari track delete <project> <track-id> | hirari plugin insert <project> <track-id> <plugin-type: name|0..=10> | hirari mix analyze <left.wav> <right.wav> | hirari render mix <project> <output.wav> [wav|wav-pcm24|wave64|wav-f32] | hirari render stems <project> <output-dir> [wav|wav-pcm24|wave64|wav-f32] | hirari render piano <notes.json> <audio.wav> <output.mp4> [sample-rate] [channels] | hirari ci verify <audio.wav> [max-peak] [min-rms] | hirari diff | hirari validate"
+        "usage: hirari capabilities | hirari audit-log <ledger-path> | hirari project init <project> [name] [sample-rate] | hirari project inspect <project> | hirari project manifest <project> | hirari project production init <project> [fps] | hirari project production inspect <project> | hirari project production revision <project> <message> [author] [--audio-hash HASH] [--vfx-hash HASH] | hirari track add <project> <name> [type] | hirari track rename <project> <track-id> <name> | hirari track delete <project> <track-id> | hirari plugin insert <project> <track-id> <plugin-type: name|0..=10> | hirari mix analyze <left.wav> <right.wav> | hirari render mix <project> <output.wav> [wav|wav-pcm24|wave64|wav-f32] | hirari render stems <project> <output-dir> [wav|wav-pcm24|wave64|wav-f32] | hirari render piano <notes.json> <audio.wav> <output.mp4> [sample-rate] [channels] | hirari ci verify <audio.wav> [max-peak] [min-rms] | hirari diff | hirari validate | hirari exec < requests.jsonl"
     );
     std::process::exit(2);
 }
@@ -105,6 +107,45 @@ fn parse_plugin_type(raw: &str) -> Option<u32> {
         "midside" => 9,
         "width" => 10,
         _ => return None,
+    })
+}
+
+/// Execute one protocol request and return the wire response. `exec` is the
+/// apply counterpart of `diff`: it accepts exactly the documents that
+/// `validate`/`diff` accept, so every action the protocol advertises is
+/// reachable from a headless client instead of only from the GUI.
+fn exec_request(core: &HirariCore, line: &str) -> serde_json::Value {
+    let request = match serde_json::from_str::<ProtocolRequest>(line) {
+        Ok(request) => request,
+        Err(error) => return exec_error("", "invalid_json", error.to_string()),
+    };
+    let request_id = request.request_id.clone();
+    if let Err(error) = validate_request_envelope(&request) {
+        return exec_error(&request_id, &error.code, error.message);
+    }
+    let command = match validate(request.command) {
+        Ok(command) => command,
+        Err(message) => return exec_error(&request_id, "invalid_command", message),
+    };
+    match command_executor::execute(core, &command) {
+        Ok(report) => serde_json::json!({
+            "protocol": PROTOCOL_VERSION,
+            "request_id": request_id,
+            "ok": true,
+            "result": report,
+            "error": serde_json::Value::Null,
+        }),
+        Err(error) => exec_error(&request_id, &error.code, error.message),
+    }
+}
+
+fn exec_error(request_id: &str, code: &str, message: String) -> serde_json::Value {
+    serde_json::json!({
+        "protocol": PROTOCOL_VERSION,
+        "request_id": request_id,
+        "ok": false,
+        "result": serde_json::Value::Null,
+        "error": {"code": code, "message": message},
     })
 }
 
@@ -457,6 +498,30 @@ fn main() {
                     );
                     std::process::exit(1);
                 }
+            }
+        }
+        Some("exec") if args.next().is_none() => {
+            let core = match HirariCore::new_offline() {
+                Ok(core) => core,
+                Err(error) => {
+                    eprintln!("failed to initialize the headless core: {error}");
+                    std::process::exit(1);
+                }
+            };
+            let mut input = String::new();
+            if io::stdin().read_to_string(&mut input).is_err() {
+                std::process::exit(1);
+            }
+            let mut failed = false;
+            for line in input.lines().filter(|line| !line.trim().is_empty()) {
+                let response = exec_request(&core, line);
+                if response["ok"] != serde_json::Value::Bool(true) {
+                    failed = true;
+                }
+                println!("{response}");
+            }
+            if failed {
+                std::process::exit(1);
             }
         }
         Some("validate") if args.next().is_none() => {
