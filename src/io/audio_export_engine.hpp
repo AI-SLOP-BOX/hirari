@@ -18,7 +18,6 @@
 #include <filesystem>
 #include <atomic>
 #include <memory>
-#include <set>
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <unistd.h>
@@ -68,103 +67,34 @@ public:
      * 32-bit IEEE-float output.
      */
     static bool bounce(Core::Engine::TimelineSystem& timeline, const ExportOptions& opts, std::function<void(float)> onProgress) {
-        if (opts.renderStems && opts.stemTrackId == 0) {
-            const auto tracks = timeline.getTracksSnapshot();
-            if (tracks.empty() || opts.filename.empty()) return false;
-            std::filesystem::path masterPath(opts.filename);
-            const std::string extension = masterPath.extension().string();
-            const std::string stemBase = masterPath.replace_extension().string();
-            std::set<std::string> destinations;
-            for (const auto& track : tracks) {
-                if (!track || track->getId() == 0) continue;
-                std::string label = track->getName();
-                if (label.empty()) label = "track";
-                for (char& character : label) {
-                    const bool safe = (character >= 'a' && character <= 'z') ||
-                        (character >= 'A' && character <= 'Z') ||
-                        (character >= '0' && character <= '9') ||
-                        character == '-' || character == '_';
-                    if (!safe) character = '_';
-                }
-                const auto destination = stemBase + ".stem-" +
-                    std::to_string(track->getId()) + "-" + label + extension;
-                std::error_code destinationError;
-                if (!destinations.insert(destination).second ||
-                    std::filesystem::exists(destination, destinationError) ||
-                    destinationError) return false;
-            }
-            size_t stemIndex = 0;
-            std::vector<std::filesystem::path> publishedStems;
-            publishedStems.reserve(destinations.size());
-            const auto rollbackStems = [&]() noexcept {
-                for (const auto& generated : publishedStems) {
-                    std::error_code cleanup;
-                    std::filesystem::remove(generated, cleanup);
-                }
-            };
-            for (const auto& track : tracks) {
-                if (!track || track->getId() == 0) continue;
-                std::string label = track->getName();
-                if (label.empty()) label = "track";
-                for (char& character : label) {
-                    const bool safe = (character >= 'a' && character <= 'z') ||
-                        (character >= 'A' && character <= 'Z') ||
-                        (character >= '0' && character <= '9') ||
-                        character == '-' || character == '_';
-                    if (!safe) character = '_';
-                }
-                ExportOptions stem = opts;
-                stem.renderStems = false;
-                stem.stemTrackId = track->getId();
-                stem.filename = stemBase + ".stem-" +
-                    std::to_string(track->getId()) + "-" + label + extension;
-                const bool rendered = bounce(timeline, stem,
-                    [&, stemIndex, total = tracks.size()](float progress) {
-                        if (onProgress) {
-                            onProgress(static_cast<float>(stemIndex) / total + progress / total);
-                        }
-                    });
-                if (!rendered) {
-                    rollbackStems();
-                    return false;
-                }
-                publishedStems.emplace_back(stem.filename);
-                ++stemIndex;
-            }
-            if (onProgress) onProgress(1.0f);
-            return stemIndex != 0;
-        }
         if (opts.filename.empty() || !std::isfinite(opts.sampleRate) ||
             opts.sampleRate < 8000.0 || opts.sampleRate > 384000.0 ||
             opts.renderTap > 2u) return false;
-
         struct RenderContext {
             Core::Engine::TimelineSystem& timeline;
             const std::vector<std::shared_ptr<Core::Engine::Track>>& tracks;
             Core::AudioBuffer buffer;
             uint32_t tap;
             uint32_t stemTrackId;
-            // The Rust writer allocates one plane per exported channel, so a
-            // mono export supplies a single plane pointer.
             uint16_t channels;
             const std::atomic<bool>* cancellation;
             std::function<void(float)>* onProgress;
         } context{timeline, timeline.getTracksSnapshot(), Core::AudioBuffer(2, 1024),
                   opts.renderTap, opts.stemTrackId, opts.channels, opts.cancellation,
                   &onProgress};
+        const auto selectTrack = +[](void* opaque, uint32_t id) -> uint8_t {
+            static_cast<RenderContext*>(opaque)->stemTrackId = id;
+            return 1;
+        };
         const auto reset = +[](void* opaque) -> uint8_t {
-            auto& state = *static_cast<RenderContext*>(opaque);
-            state.timeline.resetForOfflineRender();
+            static_cast<RenderContext*>(opaque)->timeline.resetForOfflineRender();
             return 1;
         };
         const auto render = +[](void* opaque, uint64_t position, uint32_t frames,
                                 float** output) -> uint8_t {
             auto& state = *static_cast<RenderContext*>(opaque);
-            // Honor the plane count the writer actually supplied. Requiring a
-            // second plane made every mono export fail, because the Rust writer
-            // allocates exactly one plane when channels == 1.
-            if (!output || !output[0] || frames == 0 || frames > 1024) return 0;
-            if (state.channels == 2 && !output[1]) return 0;
+            if (!output || !output[0] || (state.channels == 2 && !output[1]) ||
+                frames == 0 || frames > 1024) return 0;
             state.buffer.clear();
             for (const auto& track : state.tracks) {
                 if (state.stemTrackId != 0 &&
@@ -176,24 +106,41 @@ public:
             const float* right = state.buffer.getReadPointer(1);
             if (!left || !right) return 0;
             std::copy_n(left, frames, output[0]);
-            // A mono export folds the right channel into the left rather than
-            // dropping it, matching how the writer lays out a single plane.
-            if (state.channels == 2) {
-                std::copy_n(right, frames, output[1]);
-            } else {
-                for (uint32_t i = 0; i < frames; ++i) output[0][i] = 0.5f * (left[i] + right[i]);
-            }
+            if (state.channels == 2) std::copy_n(right, frames, output[1]);
+            else for (uint32_t i = 0; i < frames; ++i)
+                output[0][i] = 0.5f * (left[i] + right[i]);
             return 1;
         };
         const auto cancelled = +[](void* opaque) -> uint8_t {
-            const auto& state = *static_cast<RenderContext*>(opaque);
-            return state.cancellation &&
-                state.cancellation->load(std::memory_order_acquire) ? 1 : 0;
+            const auto* flag = static_cast<RenderContext*>(opaque)->cancellation;
+            return flag && flag->load(std::memory_order_acquire) ? 1 : 0;
         };
         const auto reportProgress = +[](void* opaque, float value) {
             auto& state = *static_cast<RenderContext*>(opaque);
-            if (*state.onProgress) (*state.onProgress)(value);
+            if (state.onProgress && *state.onProgress) (*state.onProgress)(value);
         };
+        if (opts.renderStems && opts.stemTrackId == 0) {
+            const auto& tracks = context.tracks;
+            if (tracks.empty() || opts.filename.empty()) return false;
+            std::vector<std::string> names;
+            std::vector<HirariAudioExportStemTrack> stemTracks;
+            names.reserve(tracks.size());
+            stemTracks.reserve(tracks.size());
+            for (const auto& track : tracks) {
+                if (!track || track->getId() == 0) continue;
+                names.push_back(track->getName());
+                const auto& name = names.back();
+                stemTracks.push_back({track->getId(),
+                    reinterpret_cast<const uint8_t*>(name.data()), name.size()});
+            }
+            return hirari_audio_export_stems(
+                reinterpret_cast<const uint8_t*>(opts.filename.data()), opts.filename.size(),
+                stemTracks.data(), stemTracks.size(), tracks.size(),
+                static_cast<uint32_t>(opts.sampleRate),
+                opts.bitDepth, opts.channels, opts.startSample, opts.endSample,
+                opts.normalize ? 1 : 0, &context, selectTrack, reset, render,
+                cancelled, reportProgress) != 0;
+        }
         return hirari_audio_export_bounce(
             opts.filename.data(), opts.filename.size(),
             static_cast<uint32_t>(opts.sampleRate), opts.bitDepth, opts.channels,

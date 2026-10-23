@@ -25,7 +25,6 @@
 #include "src/core/database/project_db.hpp"
 #include "src/io/persistence/wav_writer.hpp"
 #include "src/core/utils/wav_writer.hpp"
-#include "src/io/audio_interface.hpp"
 #include "src/core/external/jack_bridge_deep.hpp"
 #include "src/core/HirariPluginSDK.hpp"
 #include <atomic>

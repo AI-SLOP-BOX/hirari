@@ -1,14 +1,14 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 #include <string>
 #include <stdexcept>
 #include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <cmath>
-#include <filesystem>
-#include "persistence/wav_writer.hpp"
+#include "../core/rust_ffi.hpp"
 #include "../core/io/audio_decoder.hpp"
 
 namespace Hirari::IO {
@@ -64,57 +64,23 @@ public:
     static std::string loadDiagnosticJson(const std::string& path,
                                           bool wave64 = false) noexcept {
         const auto result = loadDiagnostic(path, wave64);
-        const auto escape = [](const std::string& value) {
-            std::string escaped;
-            escaped.reserve(value.size() + 8);
-            for (const char character : value) {
-                switch (character) {
-                case '\\': escaped += "\\\\"; break;
-                case '"': escaped += "\\\""; break;
-                case '\n': escaped += "\\n"; break;
-                case '\r': escaped += "\\r"; break;
-                case '\t': escaped += "\\t"; break;
-                default: escaped += character; break;
-                }
-            }
-            return escaped;
-        };
-        std::string json = "{\"ok\":" + std::string(result.ok ? "true" : "false") +
-            ",\"format\":\"" + escape(result.format) + "\"";
+        std::vector<const float*> planes;
         if (result.ok) {
-            json += ",\"sample_rate\":" + std::to_string(result.info.sampleRate) +
-                ",\"channels\":" + std::to_string(result.info.numChannels) +
-                ",\"bit_depth\":" + std::to_string(result.info.bitDepth) +
-                ",\"samples\":" + std::to_string(result.info.numSamples);
-            double peak = 0.0;
-            long double sumSquares = 0.0L;
-            uint64_t finiteSamples = 0;
-            uint64_t nonFiniteSamples = 0;
-            for (const auto& channel : result.channels) {
-                for (const float sample : channel) {
-                    if (!std::isfinite(sample)) {
-                        ++nonFiniteSamples;
-                        continue;
-                    }
-                    const double magnitude = std::abs(static_cast<double>(sample));
-                    peak = std::max(peak, magnitude);
-                    sumSquares += static_cast<long double>(sample) * sample;
-                    ++finiteSamples;
-                }
-            }
-            const double meanSquare = finiteSamples == 0
-                ? 0.0 : static_cast<double>(sumSquares / finiteSamples);
-            const double rmsLufsEstimate = meanSquare > 0.0
-                ? std::max(-120.0, 10.0 * std::log10(meanSquare) - 0.691)
-                : -120.0;
-            json += ",\"peak_linear\":" + std::to_string(peak) +
-                ",\"rms_lufs_estimate\":" + std::to_string(rmsLufsEstimate) +
-                ",\"finite_samples\":" + std::to_string(finiteSamples) +
-                ",\"non_finite_samples\":" + std::to_string(nonFiniteSamples);
-        } else {
-            json += ",\"error\":\"" + escape(result.error) + "\"";
+            planes.reserve(result.channels.size());
+            for (const auto& channel : result.channels) planes.push_back(channel.data());
         }
-        return json + "}";
+        void* raw = hirari_wav_diagnostic_json(
+            result.ok, wave64,
+            reinterpret_cast<const uint8_t*>(result.error.data()), result.error.size(),
+            result.info.sampleRate, result.info.numChannels, result.info.bitDepth,
+            result.info.numSamples, planes.data(),
+            result.ok && !result.channels.empty() ? result.channels.front().size() : 0);
+        if (!raw) return {};
+        std::unique_ptr<char, decltype(&hirari_wav_diagnostic_json_free)>
+            json(static_cast<char*>(raw), &hirari_wav_diagnostic_json_free);
+        const auto* data = hirari_wav_diagnostic_json_data(json.get());
+        const size_t size = hirari_wav_diagnostic_json_size(json.get());
+        return data ? std::string(reinterpret_cast<const char*>(data), size) : std::string();
     }
 
     /**
@@ -205,48 +171,29 @@ public:
     static bool saveWave64(const std::string& path,
                            const std::vector<std::vector<float>>& buffer,
                            uint32_t sampleRate) {
-        if (path.empty() || buffer.empty() || sampleRate == 0 || sampleRate > 384000 ||
-            buffer.size() > std::numeric_limits<uint16_t>::max() || buffer.front().empty()) {
-            return false;
-        }
-        const auto sampleCount = buffer.front().size();
-        for (const auto& channel : buffer) {
-            if (channel.size() != sampleCount) return false;
-        }
-        if (std::filesystem::path(path).has_parent_path()) {
-            std::error_code directoryError;
-            std::filesystem::create_directories(std::filesystem::path(path).parent_path(), directoryError);
-            if (directoryError) return false;
-        }
-        return Persistence::WavWriter::writeWave64Interleaved(path, buffer, sampleRate);
+        return writePlanar(path, buffer, sampleRate, 3);
     }
 
     static bool save(const std::string& path, const std::vector<std::vector<float>>& buffer, uint32_t sampleRate) {
-        if (path.empty() || buffer.empty() || sampleRate == 0 || sampleRate > 384000 ||
-            buffer.size() > std::numeric_limits<uint16_t>::max() || buffer.front().empty()) return false;
+        return writePlanar(path, buffer, sampleRate, 2);
+    }
 
-        const uint16_t numChannels = static_cast<uint16_t>(buffer.size());
-        const size_t sampleCount = buffer[0].size();
+private:
+    static bool writePlanar(const std::string& path,
+                            const std::vector<std::vector<float>>& buffer,
+                            uint32_t sampleRate, uint8_t format) {
+        if (path.empty() || buffer.empty() || buffer.size() > std::numeric_limits<uint16_t>::max() ||
+            buffer.front().empty()) return false;
+        const size_t frames = buffer.front().size();
+        std::vector<const float*> planes;
+        planes.reserve(buffer.size());
         for (const auto& channel : buffer) {
-            if (channel.size() != sampleCount) return false;
+            if (channel.size() != frames) return false;
+            planes.push_back(channel.data());
         }
-        const std::filesystem::path output(path);
-        // Stereo PCM24 is the dominant bounce path. Use the canonical writer
-        // so atomic publication, RF64 metadata, and durability cannot drift
-        // from the native compatibility APIs. Keep the multichannel path
-        // below for layouts the canonical stereo API does not represent.
-        if (numChannels == 2) {
-            if (output.has_parent_path()) {
-                std::error_code directoryError;
-                std::filesystem::create_directories(output.parent_path(), directoryError);
-                if (directoryError) return false;
-            }
-            return Persistence::WavWriter::writePcm24(
-                path, buffer[0].data(), buffer[1].data(),
-                static_cast<uint64_t>(sampleCount), sampleRate);
-        }
-        // All other channel layouts use the same canonical interleaved writer.
-        return Persistence::WavWriter::writePcm24Interleaved(path, buffer, sampleRate);
+        return hirari_wav_write_planar(
+            reinterpret_cast<const uint8_t*>(path.data()), path.size(), planes.data(),
+            planes.size(), frames, sampleRate, format) == 0;
     }
 };
 

@@ -92,7 +92,10 @@ build_link_run() {
     linked=1
     attempt=1
     while [ "$attempt" -le 2 ]; do
+        # `-Itarget/cxxbridge` exposes the cxx-generated sandbox bridge header
+        # through the engine headers that include the plugin sandbox facade.
         if "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external \
+            -Itarget/cxxbridge \
             "$source" "$@" $LINK_FLAGS -o "$binary"; then
             linked=0
             break
@@ -125,7 +128,7 @@ while [ "$main_attempt" -le 2 ]; do
     # `-Itarget/cxxbridge` exposes the cxx-generated bridge header (created by
     # build_bridge_staticlib.sh above) under its canonical source-relative path.
     if "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Isrc/external -Itarget/cxxbridge \
-        tests/native_plugin_compile_contract.cpp src/io/coreaudio_driver.cpp \
+        tests/native_plugin_compile_contract.cpp \
         "$BRIDGE_LIB" $LINK_FLAGS -o "$OUT_DIR/native-plugin-compile"; then
         main_linked=0
         break

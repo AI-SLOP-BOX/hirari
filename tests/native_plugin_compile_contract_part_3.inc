@@ -1,6 +1,3 @@
-    auto legacyDriver = Hirari::IO::HardwareFactory::createDefault();
-    if (!legacyDriver || !legacyDriver->initialize(48'000.0, 256) ||
-        legacyDriver->getDeviceName().empty()) return 39;
     {
         using Transport = Hirari::Core::Plugins::MidiFragmentReassembler;
         Transport transport;

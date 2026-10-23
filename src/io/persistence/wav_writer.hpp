@@ -2,8 +2,6 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include <filesystem>
-#include <algorithm>
 #include "../../core/rust_ffi.hpp"
 
 namespace Hirari::IO::Persistence {
