@@ -25,7 +25,7 @@ struct Slot {
 }
 
 impl Slot {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             samples: UnsafeCell::new(vec![0.0; MAX_SAMPLES_PER_SLOT].into_boxed_slice()),
             info: UnsafeCell::new(BlockInfo::default()),
@@ -49,7 +49,7 @@ unsafe impl Send for AudioInputBlockQueue {}
 unsafe impl Sync for AudioInputBlockQueue {}
 
 impl AudioInputBlockQueue {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let slots = (0..CAPACITY)
             .map(|_| Slot::new())
             .collect::<Vec<_>>()
@@ -62,7 +62,7 @@ impl AudioInputBlockQueue {
         }
     }
 
-    unsafe fn push_planar(
+    pub(crate) unsafe fn push_planar(
         &self,
         channels: *const *const f32,
         channel_count: u32,
@@ -105,7 +105,7 @@ impl AudioInputBlockQueue {
         true
     }
 
-    unsafe fn poll(
+    pub(crate) unsafe fn poll(
         &self,
         destination: *const *mut f32,
         destination_channels: u32,
@@ -167,17 +167,17 @@ impl AudioInputBlockQueue {
         *dropped_out = *dropped;
     }
 
-    fn dropped_blocks(&self) -> u64 {
+    pub(crate) fn dropped_blocks(&self) -> u64 {
         self.dropped_blocks.load(Ordering::Acquire)
     }
 
-    fn discard_pending(&self) {
+    pub(crate) fn discard_pending(&self) {
         let write = self.write_index.0.load(Ordering::Acquire);
         self.read_index.0.store(write, Ordering::Release);
         self.dropped_blocks.swap(0, Ordering::AcqRel);
     }
 
-    fn reset(&self) {
+    pub(crate) fn reset(&self) {
         let write = self.write_index.0.load(Ordering::Relaxed);
         self.read_index.0.store(write, Ordering::Relaxed);
         self.dropped_blocks.store(0, Ordering::Relaxed);

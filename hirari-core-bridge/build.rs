@@ -146,8 +146,6 @@ fn main() {
     if target_os == "macos" {
         build.file("src/metal_audio_kernel.mm");
         build.file("../src/dsp/spatial/metal_audio_kernel.mm");
-        build.file("../src/core/driver/mac_audio_driver_host.mm");
-        build.file("../src/core/driver/mac_midi_device_host.mm");
         build.file("../src/platform/macos/coreaudio_device.mm");
         build.file("../src/core/engine/video_system_bridge.mm");
     }
@@ -163,8 +161,10 @@ fn main() {
     // with no rebuild to pick up the fix.
     println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.mm");
     println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.hpp");
-    println!("cargo:rerun-if-changed=../src/core/driver/mac_audio_driver_host.mm");
     println!("cargo:rerun-if-changed=../src/core/driver/mac_audio_driver_host.hpp");
+    println!("cargo:rerun-if-changed=../src/core/driver/mac_midi_device_host.hpp");
+    println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_audio_driver.rs");
+    println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_midi_host.rs");
     println!("cargo:rerun-if-changed=../src/platform/audio_device.hpp");
     println!("cargo:rerun-if-changed=../src/platform/macos/coreaudio_device.mm");
     // The C++ translation units include these headers, so changes to the

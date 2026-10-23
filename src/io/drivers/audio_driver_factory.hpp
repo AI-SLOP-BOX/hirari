@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio_driver_base.hpp"
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -97,7 +98,7 @@ public:
 } // namespace Hirari::IO::Drivers
 
 #if defined(__APPLE__)
-#include "../../core/driver/mac_audio_driver.hpp"
+#include "../../core/driver/mac_audio_driver_host.hpp"
 
 namespace Hirari::IO::Drivers {
 
@@ -114,39 +115,25 @@ public:
             return false;
         }
         m_config = config;
-        
-        // MacAudioDriver's callback carries the channel arrays and their counts,
-        // whereas AudioDriverBase::ProcessCallback takes plain (in, out, len).
-        // The configuration above caps numOutputs at 2, so the fixed two-element
-        // staging arrays are sufficient. They are rebuilt per call because
-        // `const float* const*` does not convert to `const float**`.
-        m_driver = std::make_unique<::Hirari::Core::Driver::MacAudioDriver>(
-            [this](const float* const* inputs, uint32_t inputChannelCount,
-                   float* const* outputs, uint32_t outputChannelCount, uint32_t len) {
-                const float* inChans[2] = {nullptr, nullptr};
-                float* outChans[2] = {nullptr, nullptr};
-                if (inputs != nullptr) {
-                    for (uint32_t channel = 0; channel < inputChannelCount && channel < 2; ++channel) {
-                        inChans[channel] = inputs[channel];
-                    }
-                }
-                if (outputs != nullptr) {
-                    for (uint32_t channel = 0; channel < outputChannelCount && channel < 2; ++channel) {
-                        outChans[channel] = outputs[channel];
-                    }
-                }
-                if (m_callback) {
-                    m_callback(inChans, outChans, len);
-                }
-            });
+
+        // The Rust host owns device enumeration, format negotiation and the
+        // realtime callback fan-out. This bridge only narrows the channel
+        // arrays to the legacy two-channel IDriver callback shape.
+        m_driver = std::make_unique<::Hirari::Core::Driver::MacAudioDriverHost>();
+        m_driver->set_process_callback(&MacDriverBridge::process, this);
         return m_driver != nullptr;
     }
 
     bool start(ProcessCallback callback) override {
         m_callback = std::move(callback);
         if (m_driver) {
-            m_running = m_driver->start(m_config.sampleRate, m_config.bufferSize);
-            if (!m_running) m_error = "CoreAudio failed to start the requested device";
+            m_running = m_driver->reconfigure(m_config.sampleRate, m_config.bufferSize) &&
+                        m_driver->is_running();
+            if (!m_running) {
+                m_error = "CoreAudio failed to start the requested device";
+            } else {
+                m_error.clear();
+            }
             return m_running;
         }
         m_error = "CoreAudio driver was not initialized";
@@ -167,13 +154,42 @@ public:
     double getSampleRate() const override { return m_config.sampleRate; }
     uint32_t getBufferSize() const override { return m_config.bufferSize; }
     bool isSilentFallback() const override { return false; }
-    bool isRunning() const override { return m_running; }
+    bool isRunning() const override {
+        return m_running && m_driver && m_driver->is_running();
+    }
     const std::string& lastError() const override { return m_error; }
 
 private:
+    // The Rust host callback carries channel arrays and their counts, whereas
+    // AudioDriverBase::ProcessCallback takes plain (in, out, len). initialize()
+    // caps numOutputs at 2, so fixed two-element staging arrays are enough.
+    static void process(const float* const* inputs, uint32_t inputChannelCount,
+                        float* const* outputs, uint32_t outputChannelCount,
+                        uint32_t len, void* context) noexcept {
+        auto* self = static_cast<MacDriverBridge*>(context);
+        if (!self) return;
+        const float* inChans[2] = {nullptr, nullptr};
+        float* outChans[2] = {nullptr, nullptr};
+        if (inputs != nullptr) {
+            for (uint32_t channel = 0; channel < inputChannelCount && channel < 2; ++channel)
+                inChans[channel] = inputs[channel];
+        }
+        if (outputs != nullptr) {
+            for (uint32_t channel = 0; channel < outputChannelCount && channel < 2; ++channel)
+                outChans[channel] = outputs[channel];
+        }
+        if (self->m_callback) {
+            self->m_callback(inChans, outChans, len);
+        } else if (outputs != nullptr) {
+            for (uint32_t channel = 0; channel < outputChannelCount; ++channel)
+                if (outputs[channel])
+                    std::fill_n(outputs[channel], len, 0.0f);
+        }
+    }
+
     Config m_config;
     ProcessCallback m_callback;
-    std::unique_ptr<::Hirari::Core::Driver::MacAudioDriver> m_driver;
+    std::unique_ptr<::Hirari::Core::Driver::MacAudioDriverHost> m_driver;
     bool m_running;
     std::string m_error;
 };

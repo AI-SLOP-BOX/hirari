@@ -27,6 +27,16 @@ rustfft = "6.4.1"
 memmap2 = "0.9.11"
 hirari-plugin-protocol = { path = "../hirari-plugin-protocol" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# The macOS device host is owned by Rust. `coreaudio-rs` supplies the typed
+# AudioUnit scope/element enums; `coreaudio-sys` is the raw HAL/MIDI surface.
+coreaudio-rs = { version = "0.11.3", default-features = false, features = ["audio_unit"] }
+coreaudio-sys = { version = "0.2.18", default-features = false, features = [
+    "audio_unit",
+    "core_audio",
+    "core_midi",
+] }
+
 [build-dependencies]
 cxx-build = "1.0.199"
 glob = "0.3"

@@ -22,6 +22,10 @@ pub mod atmos_reverb;
 pub mod atomic_parameter;
 pub mod audio_buffer_ops;
 pub mod audio_graph;
+#[cfg(target_os = "macos")]
+pub mod mac_audio_driver;
+#[cfg(target_os = "macos")]
+pub mod mac_midi_host;
 pub mod audio_input_queue;
 pub mod audio_note_curve;
 pub mod audio_pitch_analysis;
