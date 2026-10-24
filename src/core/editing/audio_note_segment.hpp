@@ -66,18 +66,6 @@ struct AudioNoteSegment {
         }
     }
 
-    // Move and scale the segment without touching source audio. Anchor
-    // positions follow the same affine transform, preserving the edited curve.
-    bool warpTiming(double newStart, double newEnd) {
-        if (!std::isfinite(newStart) || !std::isfinite(newEnd) || newEnd <= newStart || !valid()) return false;
-        if (!hirari_audio_note_curve_warp_anchors(
-                anchors.data(), anchors.size(), startSeconds, endSeconds, newStart, newEnd)) return false;
-        startSeconds = newStart;
-        endSeconds = newEnd;
-        rebuildPitchRatioIntegral();
-        return true;
-    }
-
     void setPitchOffset(double cents) {
         if (std::isfinite(cents)) {
             pitchOffsetCents = std::clamp(cents, -hirari::limits::kMaxPitchCents, hirari::limits::kMaxPitchCents);
@@ -123,41 +111,6 @@ struct AudioNoteSegment {
 
 private:
 };
-
-inline std::vector<::HirariAudioNoteSegmentRange> audioNoteSegmentRanges(
-    const std::vector<AudioNoteSegment>& segments) {
-    std::vector<::HirariAudioNoteSegmentRange> ranges;
-    ranges.reserve(segments.size());
-    for (const auto& segment : segments) {
-        ranges.push_back({segment.startSeconds, segment.endSeconds,
-                          segment.detectedPitchCents});
-    }
-    return ranges;
-}
-
-// Compute the accumulated pitch-ratio phase offset before each non-overlapping
-// note segment. This lets the random-access audio callback restart in a gap or
-// at a later segment without replaying every earlier sample.
-inline void rebuildAudioNotePhasePrefixes(std::vector<AudioNoteSegment>& segments) {
-    std::vector<::HirariAudioNotePhaseView> views;
-    views.reserve(segments.size());
-    for (const auto& segment : segments) {
-        views.push_back({segment.startSeconds, segment.endSeconds,
-            segment.pitchOffsetCents, segment.anchors.data(), segment.anchors.size(),
-            segment.pitchRatioIntegralPrefix.data()});
-    }
-    std::vector<uint32_t> orderedIndices(segments.size());
-    std::vector<double> corrections(segments.size());
-    if (!hirari_audio_note_rebuild_phase_prefixes(
-            views.data(), views.size(), orderedIndices.data(), corrections.data())) return;
-    std::vector<AudioNoteSegment> ordered;
-    ordered.reserve(segments.size());
-    for (uint32_t index : orderedIndices) ordered.push_back(std::move(segments[index]));
-    for (size_t index = 0; index < ordered.size(); ++index) {
-        ordered[index].pitchRatioCorrectionBeforeSeconds = corrections[index];
-    }
-    segments = std::move(ordered);
-}
 
 // ============================================================
 // Rust-owned note-edit table.
