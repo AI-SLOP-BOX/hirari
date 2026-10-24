@@ -81,31 +81,25 @@ bool HirariUnifiedEngine::write_project_layout_json(
     }
 
     const auto jsonString = [](const std::string& value) {
-        std::string escaped;
-        escaped.reserve(value.size() + 2);
-        for (unsigned char c : value) {
-            switch (c) {
-                case '"': escaped += "\\\""; break;
-                case '\\': escaped += "\\\\"; break;
-                case '\n': escaped += "\\n"; break;
-                case '\r': escaped += "\\r"; break;
-                case '\t': escaped += "\\t"; break;
-                default: if (c < 0x20) escaped += "?"; else escaped += static_cast<char>(c);
-            }
+        std::string escaped(value.size() * 2 + 8, '\0');
+        size_t written = 0;
+        if (hirari_project_layout_escape_json_string(
+                reinterpret_cast<const uint8_t*>(value.data()), value.size(),
+                reinterpret_cast<uint8_t*>(escaped.data()), escaped.size(), &written)) {
+            escaped.resize(written);
+            return escaped;
         }
-        return escaped;
+        return value;
     };
     const auto jsonNumber = [](double value) {
         return std::isfinite(value) ? std::to_string(value) : std::string("0");
     };
     const auto jsonHex = [](const std::vector<uint8_t>& bytes) {
-        static constexpr char digits[] = "0123456789abcdef";
-        std::string encoded;
-        encoded.reserve(bytes.size() * 2);
-        for (uint8_t byte : bytes) {
-            encoded.push_back(digits[byte >> 4]);
-            encoded.push_back(digits[byte & 0x0f]);
-        }
+        std::string encoded(bytes.size() * 2, '\0');
+        size_t written = 0;
+        hirari_project_layout_encode_hex(
+            bytes.data(), bytes.size(),
+            reinterpret_cast<uint8_t*>(encoded.data()), encoded.size(), &written);
         return encoded;
     };
     ss << "[";

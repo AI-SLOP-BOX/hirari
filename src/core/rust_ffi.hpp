@@ -1751,3 +1751,8 @@ extern "C" uint64_t hirari_video_runtime_revision(const void* runtime);
 extern "C" bool hirari_video_runtime_copy_frame(
     const void* runtime, void* context, HirariVideoPixelsVisitor visit,
     uint32_t* width, uint32_t* height, double* seconds);
+
+extern "C" bool hirari_project_layout_escape_json_string(
+    const uint8_t* input, size_t input_len, uint8_t* output, size_t output_cap, size_t* written);
+extern "C" bool hirari_project_layout_encode_hex(
+    const uint8_t* input, size_t input_len, uint8_t* output, size_t output_cap, size_t* written);
