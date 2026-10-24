@@ -8,7 +8,6 @@
 #include "utils/wav_writer.hpp"
 #include "dsp/HirariDSP.hpp"
 #include "dsp/analysis/master_meter.hpp"
-#include "dsp/effects/console_dsp.hpp"
 #include "dsp/effects/master_limiter.hpp"
 #include "engine/track.hpp"
 #include "concurrency/audio_task_manager.hpp"

@@ -172,20 +172,6 @@ extern "C" void hirari_control_room_mix_cue(
     const float* click_left, const float* click_right,
     float* output_left, float* output_right, uint32_t frames,
     float cue_gain, bool click_enabled);
-struct HirariControlRoomSpeakerSnapshot {
-    uint8_t name[128];
-    uint32_t name_length;
-    float gain;
-    uint8_t enabled;
-};
-struct HirariControlRoomCueSnapshot {
-    uint32_t id;
-    float gain;
-    uint8_t enabled;
-    uint32_t bus_track_id;
-    uint32_t output_channel;
-    uint8_t click_enabled;
-};
 extern "C" void* hirari_control_room_state_create();
 extern "C" void hirari_control_room_state_destroy(void* state);
 extern "C" void hirari_control_room_reset(void* state);
@@ -1036,25 +1022,6 @@ extern "C" uint32_t hirari_dynamic_compressor_tail(const void* state);
 extern "C" uint8_t hirari_plugin_fingerprint(const char* path, size_t path_size,
                                                uint64_t* output);
 
-struct HirariPluginCacheRecordView {
-    const char* name;
-    size_t name_size;
-    const char* path;
-    size_t path_size;
-    uint32_t plugin_type;
-    uint32_t subtype;
-    uint64_t fingerprint;
-};
-
-struct HirariPluginCacheRecordOwned {
-    uint8_t* name;
-    size_t name_size;
-    uint8_t* path;
-    size_t path_size;
-    uint32_t plugin_type;
-    uint32_t subtype;
-    uint64_t fingerprint;
-};
 
 struct HirariPluginBlacklistRecord {
     uint8_t* path;
@@ -1339,10 +1306,6 @@ extern "C" uint32_t hirari_native_pdc_get_track_offset(const void* state, uint32
 extern "C" uint32_t hirari_native_pdc_get_send_offset(
     const void* state, uint32_t source, uint32_t destination);
 extern "C" bool hirari_native_pdc_low_latency_mode(const void* state);
-struct HirariMasteringByteSlice {
-    const uint8_t* data;
-    size_t size;
-};
 extern "C" void* hirari_analysis_engine_create(double sample_rate);
 extern "C" void hirari_analysis_engine_destroy(void* state);
 extern "C" void hirari_analysis_engine_update(
@@ -1352,13 +1315,6 @@ extern "C" float hirari_analysis_engine_get_band(const void* state, uint32_t cha
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
-struct HirariLoudnessMetrics {
-    float momentary_lufs;
-    float short_term_lufs;
-    float true_peak_db_l;
-    float true_peak_db_r;
-    float true_peak_db;
-};
 extern "C" void* hirari_audio_pitch_analyze(
     const float* samples, size_t count, double sample_rate,
     double min_hz, double max_hz, size_t window, size_t hop,
@@ -1383,10 +1339,6 @@ extern "C" size_t hirari_audio_pitch_anchor_count(const void* state, size_t segm
 extern "C" bool hirari_audio_pitch_get_anchor(
     const void* state, size_t segment_index, size_t anchor_index,
     double* position_seconds, double* pitch_cents, double* formant_cents);
-struct HirariTempoAnalysisResult {
-    float bpm;
-    float confidence;
-};
 using HirariSamplerBufferReader = bool (*)(void*, const float**, const float**, uint32_t*);
 extern "C" void* hirari_builtin_midi_instrument_create();
 extern "C" void hirari_builtin_midi_instrument_destroy(void* state);
@@ -1461,12 +1413,6 @@ extern "C" size_t hirari_track_midi_all_notes_off(
 extern "C" size_t hirari_track_midi_flush_scheduled_note_offs(
     const void* state, uint64_t playhead, uint32_t block_size,
     HirariGeneratedMidiEvent* output, size_t capacity);
-struct HirariAutomationEvent {
-    uint32_t track_id;
-    uint32_t param_id;
-    uint64_t pos;
-    float val;
-};
 struct HirariTrackAutomationCapturePoint {
     double time;
     float volume;
@@ -1599,23 +1545,6 @@ extern "C" bool hirari_track_freeze_render(
 extern "C" bool hirari_track_freeze_write_float32(
     const uint8_t* path, size_t path_size, uint32_t sample_rate,
     const float* left, const float* right, uint64_t total_samples);
-struct HirariPolySamplerZoneView {
-    uint32_t min_note;
-    uint32_t max_note;
-    float min_velocity;
-    float max_velocity;
-    uint32_t root_note;
-    uint32_t loop_start;
-    uint32_t loop_end;
-    bool loop_enabled;
-    double source_sample_rate;
-    const float* left;
-    size_t left_length;
-    const float* right;
-    size_t right_length;
-};
-static_assert(sizeof(HirariPolySamplerZoneView) == 72,
-    "HirariPolySamplerZoneView must match Rust's repr(C) layout");
 extern "C" bool hirari_audio_quantize(
     const float* input, float* output, uint64_t length, float bpm,
     double sample_rate, float strength, float swing);
@@ -1819,8 +1748,6 @@ extern "C" void hirari_mpe_manager_update(
 extern "C" bool hirari_mpe_manager_get(
     const void* state, uint8_t channel, uint8_t* note, bool* active,
     float* pressure, float* timbre, float* pitch_bend);
-extern "C" bool hirari_harmony_detect(
-    const int32_t* notes, size_t count, int32_t* root_note, uint8_t* chord_type);
 extern "C" void* hirari_collaboration_hub_create();
 extern "C" void hirari_collaboration_hub_destroy(void* state);
 extern "C" bool hirari_collaboration_hub_log_edit(
