@@ -205,37 +205,6 @@ rust::Vec<float> HirariUnifiedEngine::get_region_waveform(uint32_t tid, uint32_t
     return peaks; // Initially empty, will populate on next UI poll
 }
 
-rust::Vec<float> HirariUnifiedEngine::get_region_audio_samples(
-    uint32_t tid, uint32_t rid, uint32_t maxSamples) {
-    rust::Vec<float> samples;
-    if (maxSamples == 0 || maxSamples > 16u * 1024u * 1024u) return samples;
-    std::string regionPath;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& track : m_tracks) {
-            if (!track || track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == rid) { regionPath = region.path; break; }
-            }
-            break;
-        }
-    }
-    if (regionPath.empty()) return samples;
-    auto audio = m_audioDecoderManager.importFile(regionPath);
-    if (!audio || audio->getNumChannels() == 0 || audio->getNumSamples() == 0) return samples;
-    // Never return a partial region: callers write the returned buffer back as
-    // a replacement, so truncating here would silently destroy the tail.
-    if (audio->getNumSamples() > maxSamples) return samples;
-    const uint32_t count = audio->getNumSamples();
-    const float* left = audio->getReadPointer(0);
-    if (!left || count == 0) return samples;
-    samples.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
-        samples.push_back(std::isfinite(left[i]) ? left[i] : 0.0f);
-    }
-    return samples;
-}
-
 rust::Vec<float> HirariUnifiedEngine::get_region_audio_interleaved(
     uint32_t tid, uint32_t rid, uint32_t maxFrames) {
     rust::Vec<float> samples;

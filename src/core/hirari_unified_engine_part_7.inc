@@ -1,38 +1,3 @@
-void HirariUnifiedEngine::execute_restoration(uint32_t tid, float intensity) {
-    const auto& s = m_audioStates[m_activeStateIdx.load()];
-    for (uint32_t i = 0; i < s.trackCount && i < 256; ++i) {
-        Track* t = s.activeTracks[i];
-        if (t->getId() == tid) {
-            auto& buffer = t->getWorkBuffer(1024);
-            const float amount = std::clamp(intensity, 0.0f, 1.0f);
-
-            // Real restoration DSP: Dynamic Gate/Expander to suppress noise floor
-            const float threshold = 0.015f;
-            const float rangeDb = -24.0f * amount;
-            const float rangeVal = std::pow(10.0f, rangeDb / 20.0f);
-
-            for (uint32_t c = 0; c < buffer.getNumChannels(); ++c) {
-                float* p = buffer.getWritePointer(c);
-                uint32_t samples = buffer.getNumSamples();
-
-                float env = 0.0f;
-                for (uint32_t s_idx = 0; s_idx < samples; ++s_idx) {
-                    env = std::max(env, std::abs(p[s_idx]));
-                }
-
-                float gain = 1.0f;
-                if (env < threshold) {
-                    float ratio = env / (threshold + 1e-6f);
-                    gain = rangeVal + (1.0f - rangeVal) * ratio;
-                }
-
-                for (uint32_t s_idx = 0; s_idx < samples; ++s_idx) {
-                    p[s_idx] *= gain;
-                }
-            }
-        }
-    }
-}
 bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
     // Keep the wire value aligned with AutomationMode: 0=Read, 1=Write,
     // 2=Touch, 3=Latch. Unknown values must fail closed to Read rather than
@@ -51,19 +16,6 @@ bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
     return true;
 }
 
-void HirariUnifiedEngine::set_automation_punch_range(uint64_t start, uint64_t end) noexcept {
-    hirari_automation_recorder_set_punch_range(hirari_automation_recorder_instance(), start, end);
-}
-
-void HirariUnifiedEngine::record_plugin_scan_failure(std::string_view id, std::string_view error) {
-    m_pluginCompatibility.markScanFailure(std::string(id), std::string(error));
-}
-void HirariUnifiedEngine::record_plugin_crash(std::string_view id) {
-    m_pluginCompatibility.markCrash(std::string(id));
-}
-void HirariUnifiedEngine::set_plugin_blacklisted(std::string_view id, bool value) {
-    m_pluginCompatibility.setBlacklisted(std::string(id), value);
-}
 std::string HirariUnifiedEngine::plugin_compatibility_snapshot_json() const {
     return m_pluginCompatibility.snapshotJson();
 }

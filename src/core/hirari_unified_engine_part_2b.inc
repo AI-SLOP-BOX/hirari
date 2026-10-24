@@ -354,20 +354,6 @@ void HirariUnifiedEngine::set_offline_render_options(bool preFader, bool include
     m_offlineRenderIncludeInserts.store(includeInserts, std::memory_order_release);
 }
 
-bool HirariUnifiedEngine::set_offline_render_range(uint64_t startSample, uint64_t endSample) noexcept {
-    if (startSample >= endSample) return false;
-    m_offlineRenderStartSample.store(startSample, std::memory_order_release);
-    m_offlineRenderEndSample.store(endSample, std::memory_order_release);
-    m_offlineRenderRangeActive.store(true, std::memory_order_release);
-    return true;
-}
-
-void HirariUnifiedEngine::clear_offline_render_range() noexcept {
-    m_offlineRenderRangeActive.store(false, std::memory_order_release);
-    m_offlineRenderStartSample.store(0, std::memory_order_release);
-    m_offlineRenderEndSample.store(0, std::memory_order_release);
-}
-
 void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
     // A failed device negotiation must not advance the audio configuration
     // generation or partially replace the currently valid preparation state.

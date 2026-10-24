@@ -65,22 +65,6 @@ bool HirariUnifiedEngine::set_region_range_edit(uint32_t tid, uint32_t rid, uint
     return false;
 }
 
-bool HirariUnifiedEngine::clear_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start,
-                                                uint64_t end) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() != tid) continue;
-        const auto before = track->regionRangeEdits(rid);
-        if (!track->clearRegionRangeEdit(rid, start, end)) return false;
-        auto after = track->regionRangeEdits(rid);
-        m_undoManager.performAction("Clear Region Range Edit",
-            [track, rid, before] { track->replaceRegionRangeEdits(rid, before); },
-            [track, rid, after] { track->replaceRegionRangeEdits(rid, after); });
-        return true;
-    }
-    return false;
-}
-
 bool HirariUnifiedEngine::clear_region_range_edits(uint32_t tid, uint32_t rid) {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (auto& track : m_tracks) {
@@ -382,10 +366,6 @@ bool HirariUnifiedEngine::set_region_loop_count(uint32_t tid, uint32_t rid, uint
                                      std::bit_cast<float>(count), 0.0f);
 }
 
-bool HirariUnifiedEngine::set_region_locked(uint32_t tid, uint32_t rid, bool locked) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarLocked,
-                                     locked ? 1.0f : 0.0f, 0.0f);
-}
 bool HirariUnifiedEngine::set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group) {
     return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarSyncGroup,
                                      std::bit_cast<float>(group), 0.0f);

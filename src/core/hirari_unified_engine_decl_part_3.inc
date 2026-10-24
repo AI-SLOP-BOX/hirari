@@ -53,7 +53,6 @@
     uint32_t maintain_sandboxed_plugins(bool autoRestart);
     bool retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
-    bool reset_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     struct SandboxStatus {
         uint32_t trackId = 0;
         uint32_t pluginIndex = 0;

@@ -287,15 +287,6 @@ bool HirariUnifiedEngine::restart_sandboxed_plugin(uint32_t trackId, uint32_t sa
     return false;
 }
 
-bool HirariUnifiedEngine::reset_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() == trackId)
-            return track->resetSandboxedPlugin(sandboxIndex);
-    }
-    return false;
-}
-
 std::vector<HirariUnifiedEngine::SandboxStatus> HirariUnifiedEngine::get_sandbox_statuses() {
     const auto tracks = get_tracks_snapshot();
     std::vector<SandboxStatus> result;

@@ -31,7 +31,6 @@ public:
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut);
     bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
                                float gain, uint64_t fadeIn, uint64_t fadeOut);
-    bool clear_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end);
     bool clear_region_range_edits(uint32_t tid, uint32_t rid);
     bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse);
     bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio);
@@ -68,7 +67,6 @@ public:
     uint8_t region_audio_note_analysis_status(uint32_t tid, uint32_t rid) const;
     bool finalize_region_audio_note_analysis(uint32_t tid, uint32_t rid);
     bool set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count);
-    bool set_region_locked(uint32_t tid, uint32_t rid, bool locked);
     bool set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group);
     bool set_region_warp_markers(uint32_t tid, uint32_t rid,
         const std::vector<::Hirari::Core::Engine::Region::WarpMarker>& markers);
@@ -96,17 +94,14 @@ public:
     bool cancel_bounce() noexcept;
     bool pause_bounce() noexcept;
     bool resume_bounce() noexcept;
-    void execute_restoration(uint32_t trackId, float intensity);
     bool execute_vocal_remover(uint32_t tid);
     bool set_automation_record_mode(uint32_t mode);
-    void set_automation_punch_range(uint64_t start, uint64_t end) noexcept;
     float get_track_correlation(uint32_t trackId) const;
     rust::Vec<uint8_t> get_video_frame();
     uint64_t get_video_frame_revision() const noexcept;
     bool request_video_frame(double seconds);
     bool load_video(std::string_view path);
     rust::Vec<float> get_region_waveform(uint32_t tid, uint32_t rid, uint32_t numPeaks);
-    rust::Vec<float> get_region_audio_samples(uint32_t tid, uint32_t rid, uint32_t maxSamples);
     rust::Vec<float> get_region_audio_interleaved(uint32_t tid, uint32_t rid, uint32_t maxFrames);
     rust::Vec<float> get_region_audio_interleaved_range(uint32_t tid, uint32_t rid,
                                                         uint64_t startFrame,

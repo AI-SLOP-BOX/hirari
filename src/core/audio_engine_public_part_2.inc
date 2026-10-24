@@ -104,9 +104,6 @@
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
         return m_engine && m_engine->restart_sandboxed_plugin(trackId, sandboxIndex);
     }
-    bool reset_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
-        return m_engine && m_engine->reset_sandboxed_plugin(trackId, sandboxIndex);
-    }
     rust::Vec<uint32_t> get_sandbox_statuses() const {
         rust::Vec<uint32_t> result;
         if (!m_engine) return result;
@@ -215,9 +212,6 @@
     float get_track_latency_ms(uint32_t tid) const {
         return m_engine ? m_engine->get_track_latency_ms(tid) : 0.0f;
     }
-    float get_track_tail_ms(uint32_t tid) const {
-        return m_engine ? m_engine->get_track_tail_ms(tid) : 0.0f;
-    }
     float get_track_pdc_compensation_ms(uint32_t tid) const {
         return m_engine ? m_engine->get_track_pdc_compensation_ms(tid) : 0.0f;
     }
@@ -290,11 +284,6 @@
     bool has_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const noexcept {
         return m_engine && m_engine->has_plugin_native_editor(trackId, pluginIndex);
     }
-    void bind_native_editor_host(::Hirari::Core::Plugins::NativeEditorHost::OpenCallback open,
-                                 ::Hirari::Core::Plugins::NativeEditorHost::CloseCallback close) {
-        m_nativeEditorHost.bind(std::move(open), std::move(close));
-    }
-    void clear_native_editor_host() { m_nativeEditorHost.clear(); }
     uint64_t open_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex,
                                        uint64_t parent) const {
         if (!m_engine || !m_engine->has_plugin_native_editor(trackId, pluginIndex)) return 0;
@@ -326,7 +315,6 @@
     bool resume_bounce() const noexcept { return m_engine && m_engine->resume_bounce(); }
     uint32_t get_undo_count() const { return m_engine ? m_engine->get_undo_count() : 0; }
     uint32_t get_redo_count() const { return m_engine ? m_engine->get_redo_count() : 0; }
-    void execute_restoration(uint32_t tid, float intensity) const { if (m_engine) m_engine->execute_restoration(tid, intensity); }
     bool execute_vocal_remover(uint32_t tid) const { return m_engine && m_engine->execute_vocal_remover(tid); }
     bool set_articulation_map(uint32_t tid, uint32_t mapHash) const { return m_engine && m_engine->set_articulation_map(tid, mapHash); }
     bool set_expression_map(uint32_t tid, rust::Vec<uint32_t> packed, rust::String json,
@@ -376,9 +364,6 @@
     bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
                                float gain, uint64_t fadeIn, uint64_t fadeOut) const {
         return m_engine && m_engine->set_region_range_edit(tid, rid, start, end, gain, fadeIn, fadeOut);
-    }
-    bool clear_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end) const {
-        return m_engine && m_engine->clear_region_range_edit(tid, rid, start, end);
     }
     bool clear_region_range_edits(uint32_t tid, uint32_t rid) const {
         return m_engine && m_engine->clear_region_range_edits(tid, rid);
@@ -446,7 +431,6 @@
         return m_engine && m_engine->finalize_region_audio_note_analysis(tid, rid);
     }
     bool set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count) const { return m_engine && m_engine->set_region_loop_count(tid, rid, count); }
-    bool set_region_locked(uint32_t tid, uint32_t rid, bool locked) const { return m_engine && m_engine->set_region_locked(tid, rid, locked); }
     bool set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group) const { return m_engine && m_engine->set_region_sync_group(tid, rid, group); }
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, rust::Str operation, float parameter, bool enabled) const {
         return m_engine && m_engine->append_region_processing(tid, rid, stepId, std::string_view(operation.data(), operation.size()), parameter, enabled);
@@ -513,13 +497,7 @@
     bool set_automation_record_mode(uint32_t mode) const {
         return m_engine && m_engine->set_automation_record_mode(mode);
     }
-    void set_automation_punch_range(uint64_t start, uint64_t end) const {
-        if (m_engine) m_engine->set_automation_punch_range(start, end);
-    }
     rust::String plugin_compatibility_snapshot_json() const { return m_engine ? rust::String(m_engine->plugin_compatibility_snapshot_json()) : rust::String("[]"); }
-    void record_plugin_scan_failure(std::string_view id, std::string_view error) const { if (m_engine) m_engine->record_plugin_scan_failure(id, error); }
-    void record_plugin_crash(std::string_view id) const { if (m_engine) m_engine->record_plugin_crash(id); }
-    void set_plugin_blacklisted(std::string_view id, bool value) const { if (m_engine) m_engine->set_plugin_blacklisted(id, value); }
     bool set_automation_data(uint32_t tid, uint32_t paramId,
                              rust::Vec<double> packedPoints) const {
         std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::AutomationPoint> converted;
@@ -616,10 +594,6 @@
     bool region_waveform_pending(uint64_t request) const noexcept {
         return request != 0 && hirari_waveform_snapshot_pending(request);
     }
-    rust::Vec<float> get_region_audio_samples(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->get_region_audio_samples(tid, rid, 16u * 1024u * 1024u)
-                        : rust::Vec<float>{};
-    }
     rust::Vec<float> get_region_audio_interleaved(uint32_t tid, uint32_t rid) const {
         return m_engine ? m_engine->get_region_audio_interleaved(tid, rid, 16u * 1024u * 1024u)
                         : rust::Vec<float>{};
@@ -696,4 +670,3 @@
     
     // Core Access for telemetry shims
     const ::Hirari::Core::Engine::HirariUnifiedEngine& get_core() const { return *m_engine; }
-    std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine> get_core_shared() const { return m_engine; }

@@ -113,12 +113,6 @@ public:
     void set_offline_render_options(bool preFader, bool includeInserts) const noexcept {
         if (m_engine) m_engine->set_offline_render_options(preFader, includeInserts);
     }
-    bool set_offline_render_range(uint64_t startSample, uint64_t endSample) const noexcept {
-        return m_engine && m_engine->set_offline_render_range(startSample, endSample);
-    }
-    void clear_offline_render_range() const noexcept {
-        if (m_engine) m_engine->clear_offline_render_range();
-    }
     bool set_phase_invert(uint32_t tid, bool inverted) const {
         return m_engine && m_engine->set_phase_invert(tid, inverted);
     }
@@ -179,12 +173,6 @@ public:
 #endif
     }
 #if !defined(__APPLE__)
-    bool has_audio_device_error() const noexcept {
-        return m_driver && m_driver->last_error()[0] != '\0';
-    }
-    rust::String audio_device_error() const {
-        return rust::String(m_driver ? m_driver->last_error() : "audio driver unavailable");
-    }
 #endif
     float get_audio_output_peak() const {
         return m_driver ? m_driver->output_peak() : 0.0f;
@@ -270,7 +258,6 @@ public:
     }
     uint32_t get_block_size() const { return m_engine ? m_engine->get_block_size() : 0; }
     float get_latency_ms() const { return m_engine ? m_engine->get_latency_ms() : 0.0f; }
-    float get_master_tail_ms() const { return m_engine ? m_engine->get_master_tail_ms() : 0.0f; }
     void set_test_tone(bool enabled) const { if (m_engine) m_engine->set_test_tone(enabled); }
     void set_preview_sample(rust::Slice<const float> samples, double sourceRate) const {
         if (m_engine) m_engine->set_preview_sample(samples.data(), samples.size(), sourceRate);
@@ -296,28 +283,6 @@ public:
 #endif
         float* channels[2] = {left.data(), right.data()};
         if (m_engine) m_engine->processBlockDirect(channels, 2, static_cast<uint32_t>(left.size()));
-    }
-
-    bool quantize_audio_group_stereo(rust::Slice<float> left, rust::Slice<float> right,
-                                     float bpm, double sample_rate, float strength,
-                                     float swing) const noexcept {
-        if (!m_engine || left.size() == 0 || left.size() != right.size()) return false;
-        float* buffers[2] = {left.data(), right.data()};
-        return m_engine->quantizeAudioGroup(buffers, 2, left.size(), bpm, sample_rate,
-                                            strength, swing);
-    }
-    // Phase-coherent group warp for an arbitrary number of linked microphones.
-    // `planar` is laid out channel-by-channel (all frames of ch0, then ch1...).
-    bool quantize_audio_group(rust::Slice<float> planar, uint32_t channels,
-                              uint64_t frames, float bpm, double sample_rate,
-                              float strength, float swing) const noexcept {
-        if (!m_engine || channels == 0 || channels > 32 || frames == 0 ||
-            frames > hirari::limits::kMaxAudioQuantizerWarpSamples ||
-            planar.size() != static_cast<size_t>(channels) * frames) return false;
-        std::array<float*, 32> buffers{};
-        for (uint32_t c = 0; c < channels; ++c) buffers[c] = planar.data() + static_cast<size_t>(c) * frames;
-        return m_engine->quantizeAudioGroup(buffers.data(), channels, frames, bpm,
-                                            sample_rate, strength, swing);
     }
 
     bool set_region_warp_markers(uint32_t tid, uint32_t rid,
@@ -362,103 +327,6 @@ public:
         return m_engine && m_engine->finalize_region_quantize(tid, rid);
     }
 
-    void process_pitch_shift_block(rust::Slice<float> left, rust::Slice<float> right,
-                                   float ratio, float fundamental_hz,
-                                   double sample_rate, float formant_ratio,
-                                   float timing_ratio) const noexcept {
-        if (left.empty() || left.size() != right.size() || left.size() > ::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize ||
-            !std::isfinite(ratio) || ratio < 0.5f || ratio > 2.0f || !std::isfinite(fundamental_hz) || fundamental_hz <= 0.0f ||
-            !std::isfinite(sample_rate) || sample_rate < 8'000.0 || sample_rate > 384'000.0 ||
-            !std::isfinite(formant_ratio) || formant_ratio < 0.25f || formant_ratio > 4.0f ||
-            !std::isfinite(timing_ratio) || timing_ratio < 0.25f || timing_ratio > 4.0f) return;
-        static thread_local ::Hirari::Core::DSP::Vocal::DelayModPitchShifter shifterL;
-        static thread_local ::Hirari::Core::DSP::Vocal::DelayModPitchShifter shifterR;
-        static thread_local double lastSampleRate = 0.0;
-        if (lastSampleRate != sample_rate) {
-            shifterL.reset();
-            shifterR.reset();
-            lastSampleRate = sample_rate;
-        }
-        static thread_local std::vector<float> inL;
-        static thread_local std::vector<float> inR;
-        if (inL.capacity() < left.size()) inL.reserve(::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize);
-        if (inR.capacity() < right.size()) inR.reserve(::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize);
-        inL.assign(left.data(), left.data() + left.size());
-        inR.assign(right.data(), right.data() + right.size());
-        shifterL.process(inL.data(), left.data(), static_cast<uint32_t>(left.size()), ratio, fundamental_hz, sample_rate, formant_ratio, timing_ratio);
-        shifterR.process(inR.data(), right.data(), static_cast<uint32_t>(right.size()), ratio, fundamental_hz, sample_rate, formant_ratio, timing_ratio);
-    }
-
-    // Offline spectral-canvas edit exposed at the same bridge boundary as
-    // pitch processing. The AudioBuffer wraps caller-owned slices, so no
-    // second copy of the clip is made; the processor validates all bounds and
-    // keeps edits out of the realtime callback path.
-    bool apply_spectral_gain_stereo(rust::Slice<float> left, rust::Slice<float> right,
-                                    float t0, float f0, float t1, float f1,
-                                    float gain, double sample_rate) const noexcept {
-        if (left.empty() || left.size() != right.size() ||
-            left.size() > 16u * 1024u * 1024u ||
-            !std::isfinite(t0) || !std::isfinite(f0) || !std::isfinite(t1) ||
-            !std::isfinite(f1) || !std::isfinite(gain) ||
-            !std::isfinite(sample_rate) || sample_rate < 8'000.0 ||
-            sample_rate > 384'000.0) return false;
-        float* channels[2] = {left.data(), right.data()};
-        (void)hirari_spectral_processor_apply_gain(
-            channels, 2, static_cast<uint32_t>(left.size()), sample_rate,
-            t0, f0, t1, f1, gain);
-        for (size_t i = 0; i < left.size(); ++i)
-            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
-        return true;
-    }
-
-    bool reduce_noise_stereo(rust::Slice<float> left, rust::Slice<float> right,
-                             float amount, float profile_seconds,
-                             double sample_rate) const noexcept {
-        if (left.empty() || left.size() != right.size() ||
-            left.size() > 16u * 1024u * 1024u || !std::isfinite(amount) ||
-            !std::isfinite(profile_seconds) || !std::isfinite(sample_rate) ||
-            sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
-        float* channels[2] = {left.data(), right.data()};
-        (void)hirari_spectral_processor_reduce_noise(
-            channels, 2, static_cast<uint32_t>(left.size()), sample_rate,
-            0.0f, 0.0f, 1.0e9f, 0.0f, amount, profile_seconds);
-        for (size_t i = 0; i < left.size(); ++i)
-            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
-        return true;
-    }
-
-    bool repair_clipped_stereo(rust::Slice<float> left, rust::Slice<float> right,
-                               float ceiling) const noexcept {
-        if (left.empty() || left.size() != right.size() ||
-            left.size() > 16u * 1024u * 1024u || !std::isfinite(ceiling)) return false;
-        float* channels[2] = {left.data(), right.data()};
-        (void)hirari_spectral_processor_repair_clipped(
-            channels, 2, static_cast<uint32_t>(left.size()), 0.0, 0.0f,
-            0.0f, ceiling, false);
-        for (size_t i = 0; i < left.size(); ++i)
-            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
-        return true;
-    }
-
-    bool remove_hum_stereo(rust::Slice<float> left, rust::Slice<float> right,
-                           float fundamental_hz, uint32_t harmonics,
-                           float bandwidth_hz, float t0, float f0,
-                           float t1, float f1, double sample_rate) const noexcept {
-        if (left.empty() || left.size() != right.size() ||
-            left.size() > 16u * 1024u * 1024u || !std::isfinite(fundamental_hz) ||
-            fundamental_hz <= 0.0f || harmonics == 0 ||
-            !std::isfinite(bandwidth_hz) || bandwidth_hz <= 0.0f ||
-            !std::isfinite(t0) || !std::isfinite(f0) || !std::isfinite(t1) ||
-            !std::isfinite(f1) || !std::isfinite(sample_rate) ||
-            sample_rate < 8'000.0 || sample_rate > 384'000.0) return false;
-        float* channels[2] = {left.data(), right.data()};
-        (void)hirari_spectral_processor_remove_hum(
-            channels, 2, static_cast<uint32_t>(left.size()), sample_rate,
-            fundamental_hz, harmonics, bandwidth_hz, t0, f0, t1, f1);
-        for (size_t i = 0; i < left.size(); ++i)
-            if (!std::isfinite(left[i]) || !std::isfinite(right[i])) return false;
-        return true;
-    }
     void trigger_preview_sample() const { if (m_engine) m_engine->trigger_preview_sample(); }
     void clear_preview_sample() const { if (m_engine) m_engine->clear_preview_sample(); }
     void apply_config(float tempo, uint32_t sr, uint32_t bs) const {

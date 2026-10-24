@@ -6,9 +6,7 @@
     }
     uint32_t get_block_size() const noexcept;
     float get_latency_ms() const noexcept;
-    float get_master_tail_ms() const noexcept;
     float get_track_latency_ms(uint32_t tid) const noexcept;
-    float get_track_tail_ms(uint32_t tid) const noexcept;
     float get_track_pdc_compensation_ms(uint32_t tid) const noexcept;
     bool set_low_latency_mode(bool active) noexcept;
     bool low_latency_mode() const noexcept;
@@ -58,9 +56,6 @@
         }) != m_tracks.end();
     }
     std::string plugin_compatibility_snapshot_json() const;
-    void record_plugin_scan_failure(std::string_view id, std::string_view error);
-    void record_plugin_crash(std::string_view id);
-    void set_plugin_blacklisted(std::string_view id, bool value);
     bool add_automation_lane(uint32_t id) { return m_automationLanes.add(id); }
     bool set_automation_lane_linked(uint32_t id, bool linked) { return m_automationLanes.link(id, linked); }
     bool set_automation_lane_protected(uint32_t id, bool protectedLane) { return m_automationLanes.protect(id, protectedLane); }
@@ -79,8 +74,6 @@
     void clear_offline_render_target() noexcept;
     void set_offline_render_tail_seconds(float seconds) noexcept;
     void set_offline_render_options(bool pre_fader, bool include_inserts) noexcept;
-    bool set_offline_render_range(uint64_t start_sample, uint64_t end_sample) noexcept;
-    void clear_offline_render_range() noexcept;
     bool set_phase_invert(uint32_t tid, bool inverted);
     bool set_track_delay_samples(uint32_t tid, uint32_t samples);
     uint32_t get_track_delay_samples(uint32_t tid) const;

@@ -163,28 +163,12 @@ float HirariUnifiedEngine::get_latency_ms() const noexcept {
         masterLatency, m_sampleRate.load(std::memory_order_relaxed));
 }
 
-float HirariUnifiedEngine::get_master_tail_ms() const noexcept {
-    return m_masterLimiter ? hirari_samples_to_milliseconds(
-        m_masterLimiter->getTailSamples(), m_sampleRate.load(std::memory_order_relaxed)) : 0.0f;
-}
-
 float HirariUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
         if (track->getId() == tid) {
             return hirari_samples_to_milliseconds(track->getTotalLatencySamples(), sampleRate);
-        }
-    }
-    return 0.0f;
-}
-
-float HirariUnifiedEngine::get_track_tail_ms(uint32_t tid) const noexcept {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() == tid) {
-            return hirari_samples_to_milliseconds(track->getTotalTailSamples(), sampleRate);
         }
     }
     return 0.0f;
