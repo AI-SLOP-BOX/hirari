@@ -57,7 +57,6 @@ namespace Hirari::Core::Video { class VideoSync; }
 
 #include "log_buffer.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
-#include "engine/script_manager.hpp"
 #include "engine/routing_engine.hpp"
 #include "dsp/effects/atmospheric_processor_kernel.hpp"
 #include "mixing/mastering_kernel.hpp"
@@ -72,7 +71,6 @@ namespace Hirari::Core::Video { class VideoSync; }
 
 namespace Hirari::Core::Engine {
 
-class ScriptManager;
 class Track;
 
 namespace Mixing {

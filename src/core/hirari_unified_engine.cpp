@@ -18,7 +18,6 @@
 #include "dsp/haptic_metadata.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
-#include "engine/script_manager.hpp"
 #include <thread>
 #include "project_automation.hpp"
 #include <cstring>
@@ -34,7 +33,6 @@
 #include "concurrency/audio_task_manager.hpp"
 #include "log_buffer.hpp"
 #include "diagnostics_kernel.hpp"
-#include "engine/script_manager.hpp"
 #include "database/project_db.hpp"
 #include "io/audio_decoder.hpp"
 #include "dsp/spatial/ambisonic_7th_order_kernel.hpp"

@@ -125,7 +125,6 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_analyzer = std::make_unique<::Hirari::DSP::Analysis::MasterMeter>();
     m_masterLimiter = std::make_unique<::Hirari::DSP::Effects::MasterLimiter>();
-    m_scriptManager = std::make_unique<ScriptManager>();
     // Waveform peak generation is a control-plane workload. Keep a small
     // private worker pool alive for it so the first UI request does not fall
     // back to a synchronous full-file decode on the event thread. The pool

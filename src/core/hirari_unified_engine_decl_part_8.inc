@@ -70,7 +70,6 @@
     std::atomic<bool> m_graphDirty{true};
 
     // Engine Infrastructure
-    std::unique_ptr<ScriptManager> m_scriptManager;
 
     // RT-Safe Pre-allocated Kernels
     ::Hirari::Core::DSP::Effects::AtmosphericProcessorKernel m_atmosphericEngine;
