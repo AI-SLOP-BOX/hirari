@@ -77,25 +77,6 @@ struct AestheticFeatures {
     float transientClarity = 1.0f;
     float dynamicComplexity = 0.0f;
 };
-
-struct QualitativeMetricEngine {
-    static QualitativeMetricEngine& getInstance() {
-        static QualitativeMetricEngine instance;
-        return instance;
-    }
-
-    std::map<std::string, float> calculateScores(const AestheticFeatures& features) const {
-        const float clarity = std::clamp(features.transientClarity, 0.0f, 1.0f);
-        const float complexity = std::clamp(features.dynamicComplexity, 0.0f, 1.0f);
-        return {
-            {"transient_clarity", clarity},
-            {"dynamic_complexity", complexity},
-            {"balance", (clarity + (1.0f - std::fabs(complexity - 0.5f) * 2.0f)) * 0.5f},
-            {"energy", complexity}
-        };
-    }
-};
-
 } // namespace Mixing
 
 struct EngineConfig {
