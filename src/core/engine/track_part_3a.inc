@@ -867,13 +867,6 @@
         return false;
     }
 
-    void recordVolumeAutomation(float value, double time) {
-        invalidateFrozenForEdit();
-        m_volume.store(std::isfinite(value) ? std::clamp(value, 0.0f, 2.0f) : 1.0f,
-                       std::memory_order_release);
-        m_lastAutomationTime = time;
-    }
-
     // Audio-thread producer for write automation. The queue is deliberately
     // bounded and SPSC: recording a control surface gesture must never grow a
     // vector, take an edit lock, or allocate inside processBlock().

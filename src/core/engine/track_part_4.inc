@@ -234,7 +234,6 @@
     std::atomic<uint64_t> m_frozenAudioGeneration{0};
     std::string m_frozenPath;
     AnalysisEngine m_analysis;
-    double m_lastAutomationTime = 0.0;
     float m_lowGain = 1.0f;
     float m_highGain = 1.0f;
     float m_lowStateL = 0.0f;
