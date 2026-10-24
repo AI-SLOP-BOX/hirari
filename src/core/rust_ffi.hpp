@@ -132,18 +132,11 @@ extern "C" void hirari_audio_buffer_add_channels(
 extern "C" void hirari_audio_add_sanitized_stereo(
     float* destination_left, float* destination_right,
     const float* source_left, const float* source_right, uint32_t frames);
-extern "C" bool hirari_audio_copy_monitor_input(
-    const float* const* inputs, uint32_t channel_count,
-    uint32_t left_channel, uint32_t right_channel, uint32_t frames,
-    float* output_left, float* output_right);
 extern "C" void hirari_project_layout_fingerprint_update(
     uint64_t* state, const uint8_t* data, size_t length);
 extern "C" uint64_t hirari_project_state_revision_mix(
     uint64_t layout, uint64_t midi, uint64_t control);
 extern "C" float hirari_samples_to_milliseconds(uint64_t samples, double sample_rate);
-extern "C" bool hirari_audio_copy_talkback_input(
-    const float* const* inputs, uint32_t channel_count, uint32_t input_channel,
-    uint32_t frames, float* output);
 extern "C" void hirari_audio_buffer_apply_gain(
     float* const* channels, uint32_t channel_count, uint32_t sample_count, float gain);
 extern "C" void* hirari_preview_synth_create();
@@ -196,8 +189,6 @@ struct HirariControlRoomCueSnapshot {
 extern "C" void* hirari_control_room_state_create();
 extern "C" void hirari_control_room_state_destroy(void* state);
 extern "C" void hirari_control_room_reset(void* state);
-extern "C" bool hirari_control_room_talkback_enabled(const void* state);
-extern "C" uint32_t hirari_control_room_talkback_channel(const void* state);
 extern "C" void hirari_control_room_process_monitor_state(
     const void* state, float* left, float* right, const float* talkback, uint32_t frames);
 extern "C" uint32_t hirari_control_room_active_cue_bus(const void* state);
@@ -205,7 +196,6 @@ extern "C" float hirari_control_room_active_cue_gain(const void* state);
 extern "C" uint32_t hirari_control_room_active_cue_output(const void* state);
 extern "C" bool hirari_control_room_active_cue_click(const void* state);
 extern "C" bool hirari_control_room_is_cue_bus(const void* state, uint32_t id);
-extern "C" bool hirari_control_room_validate(void* state);
 extern "C" void* hirari_bus_audio_create();
 extern "C" void hirari_bus_audio_destroy(void* state);
 extern "C" bool hirari_bus_audio_accumulate(
@@ -226,7 +216,6 @@ extern "C" void hirari_bus_track_set_read_post_fx(void* state, bool post_fx);
 extern "C" bool hirari_bus_track_fetch_audio(
     const void* track_state, void* bus_audio_state,
     float* left, float* right, uint32_t frames);
-extern "C" uint64_t hirari_plugin_state_checksum(const uint8_t* data, size_t size);
 extern "C" bool hirari_plugin_preset_file_save(
     const uint8_t* path, size_t path_length, uint32_t plugin_type,
     const uint8_t* state, size_t state_length);
@@ -235,8 +224,6 @@ extern "C" uint32_t hirari_plugin_preset_file_type(const void* preset);
 extern "C" const uint8_t* hirari_plugin_preset_file_data(const void* preset);
 extern "C" size_t hirari_plugin_preset_file_size(const void* preset);
 extern "C" void hirari_plugin_preset_file_free(void* preset);
-extern "C" uint8_t hirari_plugin_state_validate(
-    const uint8_t* data, size_t size, uint32_t version, uint64_t expected_checksum);
 extern "C" void* hirari_plugin_parameter_snapshot_create();
 extern "C" void hirari_plugin_parameter_snapshot_destroy(void* handle);
 extern "C" bool hirari_plugin_parameter_snapshot_set(const void* handle, uint32_t parameter_id, double value);
@@ -269,17 +256,13 @@ extern "C" bool hirari_stem_split_process(
     uint32_t channels,
     uint32_t samples,
     double sample_rate);
-extern "C" void* hirari_audio_buffer_storage_create();
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
 extern "C" bool hirari_audio_buffer_storage_reserve(void* storage, size_t capacity);
-extern "C" void hirari_audio_buffer_storage_release(void* storage);
 extern "C" float* hirari_audio_buffer_storage_data(const void* storage);
 extern "C" size_t hirari_audio_buffer_storage_capacity(const void* storage);
-extern "C" bool hirari_audio_buffer_storage_prepare_channels(void* storage, size_t channel_count);
 extern "C" bool hirari_audio_buffer_storage_update_channel_pointers(
     void* storage, float* data, uint32_t channels, uint32_t samples);
 extern "C" float** hirari_audio_buffer_storage_channel_pointers(const void* storage);
-extern "C" size_t hirari_audio_buffer_storage_channel_count(const void* storage);
 extern "C" uint8_t hirari_audio_buffer_storage_reserve_buffer(
     void** storage, uint32_t channels, uint32_t current_channels, uint32_t samples,
     size_t current_capacity,
@@ -603,10 +586,6 @@ extern "C" size_t hirari_region_alignment_group_map_copy(
     const void* maps, size_t target_index,
     HirariWarpMarker* output, size_t output_capacity);
 extern "C" void hirari_region_alignment_group_maps_destroy(void* maps);
-extern "C" bool hirari_region_sync_move_positions(
-    const uint64_t* starts, const uint64_t* base_starts, size_t count,
-    uint64_t anchor_start, uint64_t new_anchor_start,
-    uint64_t* output_starts, uint64_t* output_base_starts);
 extern "C" bool hirari_region_split_warp_markers(
     const HirariWarpMarker* markers, size_t count, uint64_t source_span,
     uint64_t timeline_length, uint64_t split_offset,
@@ -906,16 +885,6 @@ extern "C" size_t hirari_audio_note_curve_upsert_anchor(
     HirariAudioNoteAnchor* anchors, size_t anchor_count, size_t capacity,
     double segment_start, double segment_end,
     double position_seconds, double pitch_cents, double formant_cents);
-extern "C" size_t hirari_audio_note_curve_move_anchor(
-    HirariAudioNoteAnchor* anchors, size_t anchor_count,
-    double segment_start, double segment_end,
-    double old_position, double new_position, double value_cents,
-    uint8_t edit_formant, double pitch_offset, double formant_offset);
-extern "C" bool hirari_audio_note_curve_component_anchor(
-    const HirariAudioNoteAnchor* anchors, size_t anchor_count,
-    double segment_start, double segment_end, double position_seconds,
-    double value_cents, uint8_t edit_formant,
-    double pitch_offset, double formant_offset, HirariAudioNoteAnchor* output);
 extern "C" void hirari_audio_note_curve_at(
     const HirariAudioNoteAnchor* anchors, size_t anchor_count,
     double seconds, double pitch_offset_cents, double formant_offset_cents,
@@ -1058,8 +1027,6 @@ extern "C" float hirari_dynamic_compressor_get_parameter(
     const void* state, uint32_t id);
 extern "C" void hirari_dynamic_compressor_set_control(
     void* state, uint32_t control, float value);
-extern "C" float hirari_dynamic_compressor_get_control(
-    const void* state, uint32_t control);
 extern "C" size_t hirari_dynamic_compressor_save_state(
     const void* state, uint8_t* output, size_t capacity);
 extern "C" bool hirari_dynamic_compressor_restore_state(
@@ -1130,29 +1097,11 @@ extern "C" uint8_t hirari_wav_float32_stream_write(
 extern "C" uint8_t hirari_wav_float32_stream_finish(void* stream);
 extern "C" uint64_t hirari_wav_float32_stream_frames(const void* stream);
 extern "C" void hirari_wav_float32_stream_free(void* stream);
-extern "C" uint8_t hirari_audio_export_bounce(
-    const char* path, size_t path_size, uint32_t sample_rate, uint32_t bit_depth,
-    uint16_t channels, uint64_t start_sample, uint64_t end_sample, uint8_t normalize,
-    void* context,
-    uint8_t (*reset)(void*),
-    uint8_t (*render)(void*, uint64_t, uint32_t, float**),
-    uint8_t (*cancelled)(void*),
-    void (*progress)(void*, float));
 struct HirariAudioExportStemTrack {
     uint32_t id;
     const uint8_t* name;
     size_t name_size;
 };
-extern "C" uint8_t hirari_audio_export_stems(
-    const uint8_t* path, size_t path_size,
-    const HirariAudioExportStemTrack* tracks, size_t track_count,
-    size_t progress_denominator,
-    uint32_t sample_rate, uint32_t bit_depth, uint16_t channels,
-    uint64_t start_sample, uint64_t end_sample, uint8_t normalize,
-    void* context, uint8_t (*select_track)(void*, uint32_t),
-    uint8_t (*reset)(void*),
-    uint8_t (*render)(void*, uint64_t, uint32_t, float**),
-    uint8_t (*cancelled)(void*), void (*progress)(void*, float));
 extern "C" void* hirari_wav_pcm_stream_create(
     const char* path, size_t path_size, uint64_t frames, uint32_t sample_rate,
     uint16_t channels, uint16_t bit_depth, uint8_t broadcast_wave);
@@ -1401,16 +1350,6 @@ extern "C" void hirari_analysis_engine_update(
 extern "C" void hirari_analysis_engine_get_stats(const void* state, float* output);
 extern "C" float hirari_analysis_engine_get_band(const void* state, uint32_t channel, uint32_t band);
 
-extern "C" size_t hirari_masking_analysis(
-    const float* target_mono,
-    const float* other_mono,
-    const uint32_t* other_track_ids,
-    size_t other_count,
-    size_t frame_count,
-    uint32_t* output_bins,
-    float* output_intensities,
-    uint32_t* output_track_ids,
-    size_t output_capacity);
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
 struct HirariLoudnessMetrics {
@@ -1435,17 +1374,6 @@ extern "C" void* hirari_audio_pitch_analyze_region(
     double note_change_threshold_cents, size_t note_change_confirmation_frames);
 extern "C" bool hirari_audio_pitch_commit_region_result(
     const void* result, void* region_note_store);
-extern "C" size_t hirari_audio_pitch_select_and_decimate(
-    const float* const* channels, size_t channel_count,
-    size_t source_offset, size_t source_span, size_t stride,
-    uint8_t reverse, float* output, size_t output_capacity);
-extern "C" bool hirari_audio_pitch_map_segment_to_timeline(
-    double* start_seconds, double* end_seconds,
-    HirariAudioNoteAnchor* anchors, size_t* anchor_count,
-    double source_sample_rate, double timeline_sample_rate,
-    uint64_t source_span, uint64_t timeline_length,
-    double source_frames_per_timeline_frame,
-    const HirariWarpMarker* warp_markers, size_t warp_marker_count);
 extern "C" void hirari_audio_pitch_result_destroy(void* state);
 extern "C" size_t hirari_audio_pitch_segment_count(const void* state);
 extern "C" bool hirari_audio_pitch_get_segment(
@@ -1459,56 +1387,6 @@ struct HirariTempoAnalysisResult {
     float bpm;
     float confidence;
 };
-extern "C" bool hirari_spectral_processor_apply_gain(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    float t0, float f0, float t1, float f1, float gain);
-extern "C" bool hirari_spectral_processor_apply_gain_regions(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    const float* regions, uint32_t region_count, float gain);
-extern "C" bool hirari_spectral_processor_apply_mask(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    const float* regions, const float* gains, uint32_t region_count);
-extern "C" bool hirari_spectral_processor_remove_hum(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    float fundamental, uint32_t harmonics, float bandwidth,
-    float t0, float f0, float t1, float f1);
-extern "C" bool hirari_spectral_processor_interpolate(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    float t0, float f0, float t1, float f1, float blend);
-extern "C" bool hirari_spectral_processor_reduce_noise(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    float t0, float f0, float t1, float f1, float amount, float profile_seconds);
-extern "C" uint32_t hirari_spectral_processor_remove_clicks(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    float t0, float t1, float threshold, uint32_t radius, bool selected);
-extern "C" uint32_t hirari_spectral_processor_repair_clipped(
-    float* const* channels, uint32_t channel_count, uint32_t frames, double sample_rate,
-    float t0, float t1, float ceiling, bool selected);
-extern "C" void* hirari_spectral_history_create();
-extern "C" void hirari_spectral_history_destroy(void* state);
-extern "C" bool hirari_spectral_history_capture(
-    void* state, uintptr_t owner, uint32_t channels, uint32_t frames,
-    const float* const* data, const uint8_t* label, size_t label_len);
-extern "C" void* hirari_spectral_history_snapshot_create(
-    uintptr_t owner, uint32_t channels, uint32_t frames,
-    const float* const* data, const uint8_t* label, size_t label_len);
-extern "C" void hirari_spectral_history_snapshot_destroy(void* snapshot);
-extern "C" void hirari_spectral_history_token_destroy(void* token);
-extern "C" void* hirari_spectral_history_peek(const void* state, uintptr_t owner, bool redo);
-extern "C" size_t hirari_spectral_history_label(
-    const void* state, uintptr_t owner, bool redo, uint8_t* output, size_t capacity);
-extern "C" uint32_t hirari_spectral_history_snapshot_channels(const void* state, const void* token);
-extern "C" uint32_t hirari_spectral_history_snapshot_frames(const void* state, const void* token);
-extern "C" size_t hirari_spectral_history_snapshot_label(
-    const void* state, const void* token, uint8_t* output, size_t capacity);
-extern "C" bool hirari_spectral_history_snapshot_restore(
-    const void* state, const void* token, float* const* channels, uint32_t channel_count, uint32_t frames);
-extern "C" bool hirari_spectral_history_finish_restore(
-    void* state, uintptr_t owner, bool redo, void* target, void* current);
-extern "C" bool hirari_spectral_history_contains(const void* state, uintptr_t owner, bool redo);
-extern "C" size_t hirari_spectral_history_depth(const void* state, uintptr_t owner, bool redo);
-extern "C" size_t hirari_spectral_history_bytes(const void* state);
-extern "C" void hirari_spectral_history_clear(void* state, uintptr_t owner);
 using HirariSamplerBufferReader = bool (*)(void*, const float**, const float**, uint32_t*);
 extern "C" void* hirari_builtin_midi_instrument_create();
 extern "C" void hirari_builtin_midi_instrument_destroy(void* state);
@@ -1596,8 +1474,6 @@ struct HirariTrackAutomationCapturePoint {
 };
 extern "C" void* hirari_automation_recorder_instance();
 extern "C" void hirari_automation_recorder_set_mode(const void* state, uint32_t mode);
-extern "C" void hirari_automation_recorder_set_punch_range(
-    const void* state, uint64_t start, uint64_t end);
 extern "C" void* hirari_track_automation_capture_create();
 extern "C" void hirari_track_automation_capture_destroy(void* state);
 extern "C" bool hirari_track_automation_capture_record(
@@ -1867,9 +1743,6 @@ bool hirari_audio_quantizer_group_warp_map_copy(
     HirariWarpMarker* output, size_t output_capacity);
 void hirari_audio_quantizer_group_warp_maps_destroy(void* maps);
 }
-extern "C" uint8_t hirari_plugin_format_for_path(const char* path);
-extern "C" bool hirari_plugin_is_safe_candidate(
-    const char* path, const char* expected_format);
 extern "C" uint8_t hirari_plugin_admission_error(const char* path);
 extern "C" bool hirari_plugin_cache_key(
     const uint8_t* path, size_t path_size, uint8_t* output,
@@ -1910,10 +1783,6 @@ extern "C" bool hirari_project_db_flush(
 extern "C" uint8_t hirari_stem_separator_validate_model(
     uint8_t backend, const uint8_t* path, size_t path_size,
     uint32_t model_sample_rate, uint32_t max_channels);
-extern "C" bool hirari_mix_clash_detect(
-    const float* spectrum_a, const float* spectrum_b, size_t size,
-    double sample_rate, float* masking_index, float* center_frequency,
-    uint8_t* advice);
 extern "C" void* hirari_divine_console_create();
 extern "C" void* hirari_divine_console_clone(const void* state);
 extern "C" void hirari_divine_console_destroy(void* state);
@@ -1988,7 +1857,6 @@ extern "C" void hirari_atmospheric_processor_destroy(void* state);
 extern "C" bool hirari_atmospheric_processor_process(
     void* state, float* buffer, uint32_t samples, float decay,
     float tension, float transient_clarity);
-extern "C" bool hirari_fft_utils_process(float* interleaved_complex, size_t size, bool inverse);
 extern "C" void* hirari_mobile_bridge_create();
 extern "C" void hirari_mobile_bridge_destroy(void* state);
 extern "C" void hirari_mobile_bridge_broadcast(
@@ -2030,23 +1898,6 @@ using HirariBounceRenderTrackBlock = bool (*)(
 using HirariBounceTrackInfo = bool (*)(void*, size_t, uint32_t*, const uint8_t**, size_t*);
 using HirariBounceCancelled = bool (*)(void*);
 using HirariBounceSetProgress = void (*)(void*, float);
-extern "C" bool hirari_bounce_options_valid(
-    size_t path_size, uint32_t sample_rate, uint32_t bit_depth, uint32_t render_tap);
-extern "C" uint64_t hirari_bounce_total_samples(
-    double selection_beats, double bpm, uint32_t sample_rate);
-extern "C" bool hirari_bounce_render_stream(
-    const uint8_t* path, size_t path_size, uint32_t sample_rate, uint32_t bit_depth,
-    bool normalize, bool dither, uint64_t total_samples, const uint32_t* track_ids,
-    size_t track_count, void* context, HirariBounceRenderTrackBlock render,
-    HirariBounceCancelled cancelled,
-    HirariBounceSetProgress progress, float* peak_out);
-extern "C" bool hirari_bounce_render_stems(
-    const uint8_t* master_path, size_t path_size, uint32_t sample_rate,
-    uint32_t bit_depth, bool normalize, bool dither, uint32_t render_tap,
-    double selection_beats, double bpm, size_t track_count, void* context,
-    HirariBounceTrackInfo track_info, HirariBounceRenderTrackBlock render,
-    HirariBounceCancelled cancelled, HirariBounceSetProgress progress,
-    float* peak_out);
 using HirariVideoDecodeCallback = bool (*)(void*, double, uint64_t, void**);
 using HirariVideoReadFrameCallback = bool (*)(
     void*, uint32_t*, uint32_t*, double*, const uint8_t**, size_t*);
