@@ -365,30 +365,7 @@ impl HirariCore {
             return false;
         }
         let split_samples = self.beats_to_samples(beat);
-        if !self.split_region(tid, rid, beat) {
-            return false;
-        }
-        let Ok(layout) = serde_json::from_str::<serde_json::Value>(&self.get_project_layout_json())
-        else {
-            return false;
-        };
-        let Some(track) = layout.as_array().and_then(|tracks| {
-            tracks.iter().find(|track| {
-                track.get("id").and_then(serde_json::Value::as_u64) == Some(tid as u64)
-            })
-        }) else {
-            return false;
-        };
-        let Some(regions) = track.get("regions").and_then(serde_json::Value::as_array) else {
-            return false;
-        };
-        let right_id = regions
-            .iter()
-            .find(|region| {
-                region.get("start").and_then(serde_json::Value::as_u64) == Some(split_samples)
-            })
-            .and_then(|region| region.get("id").and_then(serde_json::Value::as_u64))
-            .unwrap_or(0) as u32;
+        let right_id = self.split_region_at_sample_with_right_id(tid, rid, split_samples);
         right_id != 0
             && self.set_region_fades(tid, right_id, ratio, 0.0)
             && self.set_region_fades(tid, rid, 0.0, ratio)
