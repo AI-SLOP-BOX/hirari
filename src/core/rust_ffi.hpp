@@ -1223,6 +1223,108 @@ extern "C" void hirari_routing_feedback_inject(
     const void* state, uint32_t destination, float* left, float* right, uint32_t frames);
 extern "C" void hirari_routing_feedback_capture(
     const void* state, uint32_t source, const float* left, const float* right, uint32_t frames);
+
+// Routing edit host bridge.
+//
+// Rust owns validation, cycle/feedback rejection, send-vs-insert resolution
+// and the undo capture; the engine owns the live routing objects and applies
+// the resolved mutations under its control locks. Keep this layout in sync
+// with hirari-core-bridge/src/routing_edit_host.rs.
+enum HirariRoutingEditOp : int32_t {
+    kHirariRoutingEditRoute = 1,
+    kHirariRoutingEditRouteGain = 2,
+    kHirariRoutingEditSend = 3,
+    kHirariRoutingEditFeedback = 4,
+    kHirariRoutingEditSidechain = 5,
+    kHirariRoutingEditArm = 6,
+    kHirariRoutingEditPhase = 7,
+    kHirariRoutingEditDelay = 8,
+};
+
+struct HirariRoutingEditPayload {
+    int32_t op = 0;
+    uint32_t sourceId = 0;
+    uint32_t destId = 0;
+    uint32_t pluginIndex = 0;
+    uint32_t tapPoint = 0;
+    float gain = 0.0f;
+    uint32_t samples = 0;
+    bool enabled = false;
+    bool preFader = false;
+};
+
+struct HirariRoutingEdgeState {
+    bool routeEnabled = false;
+    float routeGain = 0.0f;
+    float sendGain = 0.0f;
+    bool sendPreFader = false;
+    float feedbackGain = -1.0f;
+};
+
+struct HirariRoutingTrackState {
+    bool armed = false;
+    bool phaseInverted = false;
+    bool isBus = false;
+    uint32_t delaySamples = 0;
+};
+
+struct HirariRoutingSidechainEntry {
+    uint32_t sourceId = 0;
+    uint32_t destId = 0;
+    uint32_t pluginIndex = 0;
+    uint32_t tapPoint = 0;
+};
+
+struct HirariRoutingSidechainContext {
+    uint32_t blockSize = 0;
+    uint32_t sampleRate = 0;
+    uint64_t generation = 0;
+    bool sourceFound = false;
+    bool destinationFound = false;
+    bool sourcePrepared = false;
+};
+
+struct HirariRoutingHostOps {
+    bool (*queryEdge)(void*, uint32_t, uint32_t, HirariRoutingEdgeState*) = nullptr;
+    bool (*queryTrack)(void*, uint32_t, HirariRoutingTrackState*) = nullptr;
+    size_t (*listSidechain)(void*, HirariRoutingSidechainEntry*, size_t) = nullptr;
+    bool (*sidechainContext)(void*, uint32_t, uint32_t,
+                             HirariRoutingSidechainContext*) = nullptr;
+    bool (*applyRoute)(void*, const HirariRoutingEditPayload*) = nullptr;
+    bool (*applyFeedback)(void*, uint32_t, uint32_t, float) = nullptr;
+    bool (*applyTrackScalar)(void*, uint32_t, int32_t, bool, uint32_t) = nullptr;
+    bool (*removeSidechain)(void*, uint32_t, uint32_t) = nullptr;
+    bool (*registerSidechain)(void*, uint32_t, uint32_t, uint32_t,
+                              const HirariRoutingSidechainContext*, uint32_t, bool) = nullptr;
+    bool (*writeSidechainRoute)(void*, uint32_t, uint32_t, uint32_t, uint32_t) = nullptr;
+    bool (*addDependency)(void*, uint32_t, uint32_t) = nullptr;
+    bool (*removeDependency)(void*, uint32_t, uint32_t) = nullptr;
+    void (*buildGraph)(void*) = nullptr;
+    void (*markLayoutChanged)(void*) = nullptr;
+    void (*publishRoutes)(void*) = nullptr;
+    void (*recordUndo)(void*, const char*, const HirariRoutingEditPayload*, size_t,
+                       const HirariRoutingEditPayload*, size_t, bool, bool) = nullptr;
+};
+
+extern "C" void hirari_routing_edit_host_install(const HirariRoutingHostOps* ops);
+extern "C" bool hirari_routing_edit_set_route(
+    void* host, uint32_t sourceId, uint32_t destId, bool enabled);
+extern "C" bool hirari_routing_edit_set_route_gain(
+    void* host, uint32_t sourceId, uint32_t destId, float gain, bool enabled);
+extern "C" bool hirari_routing_edit_set_send_route(
+    void* host, uint32_t sourceId, uint32_t destId, float gain, bool preFader, bool enabled);
+extern "C" bool hirari_routing_edit_set_feedback_route(
+    void* host, uint32_t sourceId, uint32_t destId, float gain, bool enabled);
+extern "C" bool hirari_routing_edit_set_sidechain_link(
+    void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex, uint32_t tapPoint,
+    bool enabled);
+extern "C" bool hirari_routing_edit_set_track_armed(void* host, uint32_t trackId, bool armed);
+extern "C" bool hirari_routing_edit_set_phase_invert(
+    void* host, uint32_t trackId, bool inverted);
+extern "C" bool hirari_routing_edit_set_track_delay_samples(
+    void* host, uint32_t trackId, uint32_t samples);
+extern "C" void hirari_routing_edit_apply_payloads(
+    void* host, const HirariRoutingEditPayload* entries, size_t count);
 extern "C" void* hirari_send_pdc_manager_create();
 extern "C" void hirari_send_pdc_manager_destroy(void* handle);
 extern "C" void hirari_send_pdc_manager_enter_read(void* handle);

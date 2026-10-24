@@ -47,55 +47,10 @@ bool HirariUnifiedEngine::move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t
     return true;
 }
 bool HirariUnifiedEngine::set_phase_invert(uint32_t tid, bool inverted) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track && track->getId() == tid) {
-                target = track;
-                before = track->isPhaseInverted();
-                break;
-            }
-        }
-    }
-    // A valid no-op is still a successful state application. Hydration and
-    // idempotent command replay use the setter as an acknowledgement that the
-    // target existed; rejecting the already-correct value made project restore
-    // fail for every track whose phase state was false.
-    if (!target) return false;
-    if (before == inverted) return true;
-    target->setPhaseInverted(inverted);
-    const auto apply = [target](bool next) { target->setPhaseInverted(next); };
-    m_undoManager.recordAppliedAction(
-        "Phase Invert", [apply, before] { apply(before); },
-        [apply, inverted] { apply(inverted); });
-    return true;
+    return hirari_routing_edit_set_phase_invert(this, tid, inverted);
 }
 bool HirariUnifiedEngine::set_track_delay_samples(uint32_t tid, uint32_t samples) {
-    constexpr uint32_t kMaxTrackDelaySamples = 8192;
-    if (samples > kMaxTrackDelaySamples) return false;
-    std::shared_ptr<Track> target;
-    uint32_t before = 0;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track && track->getId() == tid) {
-            target = track;
-            before = track->getTrackDelaySamples();
-            break;
-        }
-    }
-    if (!target) return false;
-    target->setTrackDelaySamples(samples);
-    const auto apply = [target](uint32_t next) { target->setTrackDelaySamples(next); };
-    m_undoManager.performAction(
-        "Track Delay " + std::to_string(tid),
-        [apply, before] { apply(before); },
-        [apply, samples] { apply(samples); });
-    // performAction executes redo, but keep the live value explicit because
-    // coalescing and nested transactions are allowed to invoke callbacks.
-    target->setTrackDelaySamples(samples);
-    return true;
+    return hirari_routing_edit_set_track_delay_samples(this, tid, samples);
 }
 uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -105,28 +60,7 @@ uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
     return 0;
 }
 bool HirariUnifiedEngine::set_track_armed(uint32_t tid, bool armed) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track && track->getId() == tid) {
-                target = track;
-                before = track->isRecordArmed();
-                break;
-            }
-        }
-    }
-    // Match the other scalar setters: an already-correct value is a valid
-    // idempotent application, not a missing-target failure.
-    if (!target) return false;
-    if (before == armed) return true;
-    target->setRecordArmed(armed);
-    const auto apply = [target](bool next) { target->setRecordArmed(next); };
-    m_undoManager.recordAppliedAction(
-        "Record Arm", [apply, before] { apply(before); },
-        [apply, armed] { apply(armed); });
-    return true;
+    return hirari_routing_edit_set_track_armed(this, tid, armed);
 }
 
 bool HirariUnifiedEngine::set_track_input_monitor(uint32_t tid, bool enabled) {
@@ -201,296 +135,247 @@ void HirariUnifiedEngine::set_preview_synth_engine(uint32_t engine) {
     m_previewSynth.setEngine(engine);
 }
 bool HirariUnifiedEngine::set_route(uint32_t sourceId, uint32_t destId, bool enabled) {
-    if (sourceId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes ||
-        destId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes || sourceId == destId) return false;
-    auto& routing = m_routingEngine;
-    const bool before = routing.hasConnection(sourceId, destId);
-    if (before == enabled) return false;
-    if (enabled) routing.addConnection(sourceId, destId);
-    else routing.removeConnection(sourceId, destId);
-    if (routing.hasConnection(sourceId, destId) != enabled) return false;
-    const auto apply = [&routing, sourceId, destId](bool next) {
-        if (next) routing.addConnection(sourceId, destId);
-        else routing.removeConnection(sourceId, destId);
-        routing.buildGraph();
-    };
-    m_undoManager.recordAppliedAction(
-        "Audio Route", [apply, before] { apply(before); },
-        [apply, enabled] { apply(enabled); });
-    routing.buildGraph();
-    syncStructuralChanges();
-    return true;
+    return hirari_routing_edit_set_route(this, sourceId, destId, enabled);
 }
-bool HirariUnifiedEngine::set_route_gain(uint32_t sourceId, uint32_t destId, float gain, bool enabled) {
-    if (sourceId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes ||
-        destId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes || sourceId == destId ||
-        !std::isfinite(gain) || gain < 0.0f || gain > 2.0f || (enabled && gain <= 0.0f)) return false;
-    auto& routing = m_routingEngine;
-    const bool beforeEnabled = routing.hasConnection(sourceId, destId);
-    const float beforeGain = routing.connectionGain(sourceId, destId);
-    if (beforeEnabled == enabled && (!enabled || std::abs(beforeGain - gain) < 1.0e-6f)) {
-        return false;
-    }
-    if (enabled) routing.addConnection(sourceId, destId, gain);
-    else routing.removeConnection(sourceId, destId);
-    if (routing.hasConnection(sourceId, destId) != enabled) return false;
-    const auto apply = [&routing, sourceId, destId](float nextGain, bool nextEnabled) {
-        if (nextEnabled) routing.addConnection(sourceId, destId, nextGain);
-        else routing.removeConnection(sourceId, destId);
-        routing.buildGraph();
-    };
-    m_undoManager.recordAppliedAction(
-        "Audio Route Gain",
-        [apply, beforeGain, beforeEnabled] { apply(beforeGain, beforeEnabled); },
-        [apply, gain, enabled] { apply(gain, enabled); });
-    routing.buildGraph();
-    syncStructuralChanges();
-    return true;
+bool HirariUnifiedEngine::set_route_gain(uint32_t sourceId, uint32_t destId, float gain,
+                                         bool enabled) {
+    return hirari_routing_edit_set_route_gain(this, sourceId, destId, gain, enabled);
 }
 bool HirariUnifiedEngine::set_send_route(uint32_t sourceId, uint32_t destId, float gain,
                                          bool preFader, bool enabled) {
-    if (sourceId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes ||
-        destId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes || sourceId == destId ||
-        !std::isfinite(gain) || gain < 0.0f || gain > 2.0f || (enabled && gain <= 0.0f)) {
-        return false;
-    }
-    if (enabled) {
-        std::lock_guard<std::mutex> trackLock(m_tracksMutex);
-        const auto source = std::find_if(m_tracks.begin(), m_tracks.end(),
-            [sourceId](const auto& track) { return track && track->getId() == sourceId; });
-        const auto destination = std::find_if(m_tracks.begin(), m_tracks.end(),
-            [destId](const auto& track) { return track && track->getId() == destId; });
-        if (source == m_tracks.end() || destination == m_tracks.end() ||
-            dynamic_cast<BusTrack*>(destination->get()) == nullptr) return false;
-    }
-    auto& routing = m_routingEngine;
-    const float beforeGain = routing.sendConnectionGain(sourceId, destId);
-    const bool beforeEnabled = beforeGain > 0.0f;
-    const bool beforePreFader = routing.sendPreFader(sourceId, destId);
-    if (beforeEnabled == enabled && (!enabled ||
-        (std::abs(beforeGain - gain) < 1.0e-6f && beforePreFader == preFader))) {
-        return false;
-    }
-    if (enabled) routing.addConnection(sourceId, destId, gain, true, preFader);
-    else routing.removeSendConnection(sourceId, destId);
-    if ((routing.sendConnectionGain(sourceId, destId) > 0.0f) != enabled) return false;
-    const auto apply = [&routing, sourceId, destId](float nextGain, bool nextPreFader,
-                                                   bool nextEnabled) {
-        if (nextEnabled) routing.addConnection(sourceId, destId, nextGain, true, nextPreFader);
-        else routing.removeSendConnection(sourceId, destId);
-        routing.buildGraph();
-    };
-    m_undoManager.recordAppliedAction(
-        "Audio Send",
-        [apply, beforeGain, beforePreFader, beforeEnabled] {
-            apply(beforeGain, beforePreFader, beforeEnabled);
-        },
-        [apply, gain, preFader, enabled] { apply(gain, preFader, enabled); });
-    routing.buildGraph();
-    syncStructuralChanges();
-    return true;
+    return hirari_routing_edit_set_send_route(this, sourceId, destId, gain, preFader, enabled);
 }
-bool HirariUnifiedEngine::set_feedback_route(uint32_t sourceId, uint32_t destId,
-                                           float gain, bool enabled) {
-    if (sourceId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes ||
-        destId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes || sourceId == destId ||
-        !std::isfinite(gain)) return false;
-    auto& routing = m_routingEngine;
-    const float beforeGain = routing.feedbackConnectionGain(sourceId, destId);
-    const bool changed = enabled
-        ? routing.addFeedbackConnection(sourceId, destId, gain)
-        : (beforeGain >= 0.0f ? (routing.removeFeedbackConnection(sourceId, destId), true) : false);
-    if (!changed) return false;
-    mark_project_layout_changed();
-    const auto apply = [this, &routing, sourceId, destId](float nextGain) {
-        if (nextGain < 0.0f) routing.removeFeedbackConnection(sourceId, destId);
-        else routing.addFeedbackConnection(sourceId, destId, nextGain);
-        mark_project_layout_changed();
-    };
-    m_undoManager.recordAppliedAction(
-        "Feedback Route", [apply, beforeGain] { apply(beforeGain); },
-        [apply, gain, enabled] { apply(enabled ? std::clamp(gain, 0.0f, 2.0f) : -1.0f); });
-    return true;
+bool HirariUnifiedEngine::set_feedback_route(uint32_t sourceId, uint32_t destId, float gain,
+                                             bool enabled) {
+    return hirari_routing_edit_set_feedback_route(this, sourceId, destId, gain, enabled);
 }
 bool HirariUnifiedEngine::set_sidechain_link(uint32_t sourceId, uint32_t destId,
-                                           uint32_t pluginIndex, uint32_t tapPoint,
-                                           bool enabled) {
-    return set_sidechain_link_internal(sourceId, destId, pluginIndex, tapPoint,
-                                       enabled, true);
+                                             uint32_t pluginIndex, uint32_t tapPoint,
+                                             bool enabled) {
+    return hirari_routing_edit_set_sidechain_link(this, sourceId, destId, pluginIndex, tapPoint,
+                                                  enabled);
 }
 
-bool HirariUnifiedEngine::set_sidechain_link_internal(uint32_t sourceId, uint32_t destId,
-                                                    uint32_t pluginIndex, uint32_t tapPoint,
-                                                    bool enabled, bool recordUndo) {
-    if (sourceId == destId || tapPoint > 2) return false;
-    auto& manager = m_sidechainManager;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const auto previous = std::find_if(
-        m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
-        [destId, pluginIndex](const SidechainRoute& route) {
-            return route.destinationId == destId && route.pluginIndex == pluginIndex;
-        });
-    const bool hadPrevious = previous != m_sidechainRoutes.end();
-    const uint32_t previousSource = hadPrevious ? previous->sourceId : 0;
-    const uint32_t previousTapPoint = hadPrevious ? previous->tapPoint : 2;
-    const auto edgeUsedByAnotherPlugin = [this, destId, pluginIndex](uint32_t sourceId) {
-        return std::any_of(m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
-            [sourceId, destId, pluginIndex](const SidechainRoute& route) {
-                return route.sourceId == sourceId && route.destinationId == destId &&
-                       route.pluginIndex != pluginIndex;
-            });
-    };
-    if (!enabled) {
-        const bool removed = manager.removeLink(destId, pluginIndex);
-        if (hadPrevious && !edgeUsedByAnotherPlugin(previousSource))
-            m_routingEngine.removeProcessingDependency(previousSource, destId);
-        const size_t previousRouteCount = m_sidechainRoutes.size();
-        m_sidechainRoutes.erase(
-            std::remove_if(m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
-                           [destId, pluginIndex](const SidechainRoute& route) {
-                               return route.destinationId == destId &&
-                                      route.pluginIndex == pluginIndex;
-                           }),
-            m_sidechainRoutes.end());
-        const bool routeRemoved = m_sidechainRoutes.size() != previousRouteCount;
-        if (removed || routeRemoved) {
-            (void)m_routingEngine.buildGraph();
-            mark_project_layout_changed();
-        }
-        if (!removed && !routeRemoved) return false;
-        if (recordUndo) {
-            m_undoManager.recordAppliedAction(
-                "Sidechain Disconnect",
-                [this, previousSource, destId, pluginIndex, previousTapPoint]() {
-                    set_sidechain_link_internal(previousSource, destId, pluginIndex,
-                                                previousTapPoint, true, false);
-                },
-                [this, previousSource, destId, pluginIndex, previousTapPoint]() {
-                    set_sidechain_link_internal(previousSource, destId, pluginIndex,
-                                                previousTapPoint, false, false);
-                });
-        }
-        return true;
-    }
-
-    // Sidechain dependencies are directed source -> destination. Adding a
-    // link is rejected when the destination can already reach the source;
-    // this prevents A->B->A cycles before the native graph is published.
-    auto reaches = [this](uint32_t from, uint32_t target) {
-        std::vector<uint32_t> pending{from};
-        std::vector<uint32_t> visited;
-        while (!pending.empty()) {
-            const uint32_t node = pending.back();
-            pending.pop_back();
-            if (node == target) return true;
-            if (std::find(visited.begin(), visited.end(), node) != visited.end()) continue;
-            visited.push_back(node);
-            for (const auto& route : m_sidechainRoutes) {
-                if (route.sourceId == node) pending.push_back(route.destinationId);
+// Routing edit host callbacks. Rust decides every edit and the undo capture;
+// these handlers only apply the resolved mutation to the live objects, under
+// the same locks the previous per-method code took.
+void HirariUnifiedEngine::installRoutingEditHost() {
+    static const HirariRoutingHostOps ops = {
+        [](void* host, uint32_t sourceId, uint32_t destId, HirariRoutingEdgeState* out) {
+            if (!out) return false;
+            auto& routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
+            out->routeEnabled = routing.hasConnection(sourceId, destId);
+            out->routeGain = routing.connectionGain(sourceId, destId);
+            out->sendGain = routing.sendConnectionGain(sourceId, destId);
+            out->sendPreFader = routing.sendPreFader(sourceId, destId);
+            out->feedbackGain = routing.feedbackConnectionGain(sourceId, destId);
+            return true;
+        },
+        [](void* host, uint32_t trackId, HirariRoutingTrackState* out) {
+            if (!out) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (const auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                out->armed = track->isRecordArmed();
+                out->phaseInverted = track->isPhaseInverted();
+                out->delaySamples = track->getTrackDelaySamples();
+                out->isBus = dynamic_cast<BusTrack*>(track.get()) != nullptr;
+                return true;
             }
-        }
-        return false;
-    };
-    if (reaches(destId, sourceId)) return false;
-
-    Track* source = nullptr;
-    Track* destination = nullptr;
-    for (const auto& track : m_tracks) {
-        if (track->getId() == sourceId) source = track.get();
-        if (track->getId() == destId) destination = track.get();
-    }
-    const uint32_t blockSize = m_context && m_context->blockSize > 0
-        ? std::min(m_context->blockSize, Hirari::Core::Engine::SidechainManager::kMaxBlockSize)
-        : 512u;
-    if (!source || !destination) return false;
-    const bool sourcePrepared = source->canProcess(blockSize);
-    const uint32_t sampleRate = static_cast<uint32_t>(std::max(
-        1.0, m_sampleRate.load(std::memory_order_acquire)));
-    const uint64_t sourceGeneration = std::max<uint64_t>(
-        1, m_audioConfigGeneration.load(std::memory_order_acquire));
-    const bool newEdgeAlreadyUsed = edgeUsedByAnotherPlugin(sourceId) ||
-        (hadPrevious && previousSource == sourceId);
-    const bool removedPreviousDependency = hadPrevious && previousSource != sourceId &&
-        !edgeUsedByAnotherPlugin(previousSource);
-    if (removedPreviousDependency)
-        m_routingEngine.removeProcessingDependency(previousSource, destId);
-    const auto restorePreviousDependency = [&]() {
-        if (removedPreviousDependency) {
-            (void)m_routingEngine.addProcessingDependency(previousSource, destId);
-            (void)m_routingEngine.buildGraph();
-        }
-    };
-    if (!m_routingEngine.addProcessingDependency(sourceId, destId) ||
-        !m_routingEngine.buildGraph()) {
-        if (!newEdgeAlreadyUsed)
-            m_routingEngine.removeProcessingDependency(sourceId, destId);
-        restorePreviousDependency();
-        return false;
-    }
-    if (!sourcePrepared) {
-        const bool published = manager.registerSilentLink(
-            destId, pluginIndex, sourceId, blockSize, sampleRate,
-            sourceGeneration, 1.0f,
-            static_cast<Hirari::Core::Engine::SidechainTapPoint>(tapPoint));
-        if (!published) {
-            if (!newEdgeAlreadyUsed)
-                m_routingEngine.removeProcessingDependency(sourceId, destId);
-            restorePreviousDependency();
             return false;
-        }
-    } else {
-        auto& sourceBuffer = source->getWorkBuffer(blockSize);
-    Hirari::Core::Engine::SidechainLink link;
-    link.sourceBufferL = sourceBuffer.getReadPointer(0);
-    link.sourceBufferR = sourceBuffer.getNumChannels() > 1
-        ? sourceBuffer.getReadPointer(1) : link.sourceBufferL;
-    link.sourceTrackId = sourceId;
-    link.sourceSampleRate = sampleRate;
-    link.sourceGeneration = sourceGeneration;
-    link.level = 1.0f;
-    link.tapPoint = static_cast<Hirari::Core::Engine::SidechainTapPoint>(tapPoint);
-    // Registration copies one prepared block into SidechainManager-owned
-    // storage.  Supplying the frame count is part of that ownership contract;
-    // without it the manager correctly rejects the link as an unbounded/raw
-    // pointer publication.
-        link.sourceFrames = blockSize;
-        if (!manager.registerLink(destId, pluginIndex, link)) {
-            if (!newEdgeAlreadyUsed)
-                m_routingEngine.removeProcessingDependency(sourceId, destId);
-            restorePreviousDependency();
-            return false;
-        }
-    }
-    auto existing = std::find_if(
-        m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
-        [destId, pluginIndex](const SidechainRoute& route) {
-            return route.destinationId == destId && route.pluginIndex == pluginIndex;
-        });
-    if (existing == m_sidechainRoutes.end()) {
-        m_sidechainRoutes.push_back({sourceId, destId, pluginIndex, tapPoint});
-    } else {
-        existing->sourceId = sourceId;
-        existing->tapPoint = tapPoint;
-    }
-    mark_project_layout_changed();
-    if (recordUndo) {
-        m_undoManager.recordAppliedAction(
-            "Sidechain Connect",
-            [this, hadPrevious, previousSource, destId, pluginIndex, previousTapPoint]() {
-                if (hadPrevious) {
-                    set_sidechain_link_internal(previousSource, destId, pluginIndex,
-                                                previousTapPoint, true, false);
-                } else {
-                    set_sidechain_link_internal(0, destId, pluginIndex, 0, false, false);
+        },
+        [](void* host, HirariRoutingSidechainEntry* out, size_t capacity) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            size_t count = 0;
+            for (const auto& route : engine->m_sidechainRoutes) {
+                if (out && count < capacity) {
+                    out[count] = {route.sourceId, route.destinationId, route.pluginIndex,
+                                  route.tapPoint};
                 }
-            },
-            [this, sourceId, destId, pluginIndex, tapPoint]() {
-                set_sidechain_link_internal(sourceId, destId, pluginIndex, tapPoint,
-                                            true, false);
-            });
-    }
-    return true;
+                ++count;
+            }
+            return count;
+        },
+        [](void* host, uint32_t sourceId, uint32_t destId,
+           HirariRoutingSidechainContext* out) {
+            if (!out) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            out->blockSize = engine->m_context && engine->m_context->blockSize > 0
+                ? std::min(engine->m_context->blockSize,
+                           Hirari::Core::Engine::SidechainManager::kMaxBlockSize)
+                : 512u;
+            out->sampleRate = static_cast<uint32_t>(std::max(
+                1.0, engine->m_sampleRate.load(std::memory_order_acquire)));
+            out->generation = std::max<uint64_t>(
+                1, engine->m_audioConfigGeneration.load(std::memory_order_acquire));
+            Track* source = nullptr;
+            Track* destination = nullptr;
+            for (const auto& track : engine->m_tracks) {
+                if (!track) continue;
+                if (track->getId() == sourceId) source = track.get();
+                if (track->getId() == destId) destination = track.get();
+            }
+            out->sourceFound = source != nullptr;
+            out->destinationFound = destination != nullptr;
+            out->sourcePrepared = source && destination && source->canProcess(out->blockSize);
+            return true;
+        },
+        [](void* host, const HirariRoutingEditPayload* payload) {
+            if (!payload) return false;
+            auto& routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
+            if (payload->op == kHirariRoutingEditSend) {
+                if (payload->enabled) {
+                    routing.addConnection(payload->sourceId, payload->destId, payload->gain,
+                                          true, payload->preFader);
+                } else {
+                    routing.removeSendConnection(payload->sourceId, payload->destId);
+                }
+            } else if (payload->enabled) {
+                routing.addConnection(payload->sourceId, payload->destId,
+                                      payload->gain > 0.0f ? payload->gain : 1.0f);
+            } else {
+                routing.removeConnection(payload->sourceId, payload->destId);
+            }
+            return true;
+        },
+        [](void* host, uint32_t sourceId, uint32_t destId, float gain) {
+            auto& routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
+            if (gain < 0.0f) {
+                routing.removeFeedbackConnection(sourceId, destId);
+                return true;
+            }
+            return routing.addFeedbackConnection(sourceId, destId, gain);
+        },
+        [](void* host, uint32_t trackId, int32_t op, bool enabled, uint32_t samples) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                if (op == kHirariRoutingEditArm) track->setRecordArmed(enabled);
+                else if (op == kHirariRoutingEditPhase) track->setPhaseInverted(enabled);
+                else track->setTrackDelaySamples(samples);
+                return true;
+            }
+            return false;
+        },
+        [](void* host, uint32_t destId, uint32_t pluginIndex) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            const bool removed = engine->m_sidechainManager.removeLink(destId, pluginIndex);
+            auto& routes = engine->m_sidechainRoutes;
+            const size_t before = routes.size();
+            routes.erase(
+                std::remove_if(routes.begin(), routes.end(),
+                               [destId, pluginIndex](const SidechainRoute& route) {
+                                   return route.destinationId == destId &&
+                                          route.pluginIndex == pluginIndex;
+                               }),
+                routes.end());
+            return removed || routes.size() != before;
+        },
+        [](void* host, uint32_t destId, uint32_t pluginIndex, uint32_t sourceId,
+           const HirariRoutingSidechainContext* context, uint32_t tapPoint, bool silent) {
+            if (!context) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            const auto tap = static_cast<Hirari::Core::Engine::SidechainTapPoint>(tapPoint);
+            if (silent) {
+                return engine->m_sidechainManager.registerSilentLink(
+                    destId, pluginIndex, sourceId, context->blockSize, context->sampleRate,
+                    context->generation, 1.0f, tap);
+            }
+            Track* source = nullptr;
+            for (const auto& track : engine->m_tracks) {
+                if (track && track->getId() == sourceId) source = track.get();
+            }
+            if (!source) return false;
+            auto& sourceBuffer = source->getWorkBuffer(context->blockSize);
+            Hirari::Core::Engine::SidechainLink link;
+            link.sourceBufferL = sourceBuffer.getReadPointer(0);
+            link.sourceBufferR = sourceBuffer.getNumChannels() > 1
+                ? sourceBuffer.getReadPointer(1) : link.sourceBufferL;
+            link.sourceTrackId = sourceId;
+            link.sourceSampleRate = context->sampleRate;
+            link.sourceGeneration = context->generation;
+            link.level = 1.0f;
+            link.tapPoint = tap;
+            // Registration copies one prepared block into manager-owned
+            // storage; supplying the frame count is part of that contract.
+            link.sourceFrames = context->blockSize;
+            return engine->m_sidechainManager.registerLink(destId, pluginIndex, link);
+        },
+        [](void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex,
+           uint32_t tapPoint) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& route : engine->m_sidechainRoutes) {
+                if (route.destinationId == destId && route.pluginIndex == pluginIndex) {
+                    route.sourceId = sourceId;
+                    route.tapPoint = tapPoint;
+                    return true;
+                }
+            }
+            engine->m_sidechainRoutes.push_back({sourceId, destId, pluginIndex, tapPoint});
+            return true;
+        },
+        [](void* host, uint32_t sourceId, uint32_t destId) {
+            return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine
+                .addProcessingDependency(sourceId, destId);
+        },
+        [](void* host, uint32_t sourceId, uint32_t destId) {
+            static_cast<HirariUnifiedEngine*>(host)->m_routingEngine
+                .removeProcessingDependency(sourceId, destId);
+            return true;
+        },
+        [](void* host) {
+            static_cast<HirariUnifiedEngine*>(host)->m_routingEngine.buildGraph();
+        },
+        [](void* host) {
+            static_cast<HirariUnifiedEngine*>(host)->mark_project_layout_changed();
+        },
+        [](void* host) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            engine->m_routingEngine.buildGraph();
+            // syncStructuralChanges takes m_tracksMutex itself; Rust calls this
+            // only after every mutation callback has released its lock.
+            engine->syncStructuralChanges();
+        },
+        [](void* host, const char* name, const HirariRoutingEditPayload* undo, size_t undoCount,
+           const HirariRoutingEditPayload* redo, size_t redoCount, bool perform, bool coalesce) {
+            if (!host || !name) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::vector<HirariRoutingEditPayload> undoCopy;
+            if (undo && undoCount) undoCopy.assign(undo, undo + undoCount);
+            std::vector<HirariRoutingEditPayload> redoCopy;
+            if (redo && redoCount) redoCopy.assign(redo, redo + redoCount);
+            const auto applyAll = [host](const std::vector<HirariRoutingEditPayload>& entries) {
+                hirari_routing_edit_apply_payloads(host, entries.data(), entries.size());
+            };
+            if (perform) {
+                // performAction replays the redo through the Rust policy.
+                engine->m_undoManager.performAction(
+                    name, [applyAll, undoCopy] { applyAll(undoCopy); },
+                    [applyAll, redoCopy] { applyAll(redoCopy); });
+                return;
+            }
+            engine->m_undoManager.recordAppliedAction(
+                name, [applyAll, undoCopy] { applyAll(undoCopy); },
+                [applyAll, redoCopy] { applyAll(redoCopy); }, coalesce);
+        },
+    };
+    hirari_routing_edit_host_install(&ops);
 }
+
+namespace {
+[[maybe_unused]] const bool kRoutingEditHostInstalled = [] {
+    HirariUnifiedEngine::installRoutingEditHost();
+    return true;
+}();
+}  // namespace
+
 
 bool HirariUnifiedEngine::has_sidechain_link(uint32_t sourceId, uint32_t destId,
                                            uint32_t pluginIndex) const {

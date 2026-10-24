@@ -274,6 +274,7 @@ pub mod review_notes;
 pub mod ripple;
 pub mod ripple_editing_engine;
 pub mod routing;
+pub mod routing_edit_host;
 pub mod routing_fanout;
 pub mod routing_feedback;
 pub mod routing_gains;

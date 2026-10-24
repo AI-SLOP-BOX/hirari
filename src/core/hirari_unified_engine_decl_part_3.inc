@@ -106,8 +106,7 @@
     bool set_sidechain_link(uint32_t sourceId, uint32_t destId,
                             uint32_t pluginIndex, uint32_t tapPoint, bool enabled);
     bool has_sidechain_link(uint32_t sourceId, uint32_t destId, uint32_t pluginIndex) const;
+    // Installs the routing edit host callbacks Rust drives; see part_3b.
+    static void installRoutingEditHost();
 
 private:
-    bool set_sidechain_link_internal(uint32_t sourceId, uint32_t destId,
-                                     uint32_t pluginIndex, uint32_t tapPoint,
-                                     bool enabled, bool recordUndo);
