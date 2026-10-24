@@ -216,7 +216,6 @@
     std::vector<uint32_t> m_sandboxedPluginIndices;
     std::atomic<uint8_t> m_lastSandboxFailure{0};
     std::string m_lastSandboxFailureText = "none";
-    RegionProcessor m_regionProcessor;
     AudioBuffer m_activeBuffer;
     AudioBuffer m_preFaderBuffer;
     AudioBuffer m_sendPreFaderBuffer;
