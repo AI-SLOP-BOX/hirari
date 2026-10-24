@@ -4,14 +4,6 @@ extern "C" void hirari_audio_publish_monitor_block(
 extern "C" void hirari_audio_publish_talkback_block(
     const float* const*, uint32_t, uint32_t, const void*, void*, void*, float*);
 
-inline int64_t hirari_sys(int /*op*/, int64_t /*a1*/, int64_t /*a2*/, int64_t /*a3*/) {
-    static std::atomic<uint64_t> state{0x9E3779B97F4A7C15ull};
-    uint64_t x = state.fetch_add(0x9E3779B97F4A7C15ull, std::memory_order_relaxed);
-    x = (x ^ (x >> 30u)) * 0xBF58476D1CE4E5B9ull;
-    x = (x ^ (x >> 27u)) * 0x94D049BB133111EBull;
-    x ^= x >> 31u;
-    return static_cast<int64_t>(x);
-}
 
 // A callback-safe thread identity.  std::hash<std::thread::id> may trigger
 // runtime machinery on some standard libraries; this monotonically assigned
