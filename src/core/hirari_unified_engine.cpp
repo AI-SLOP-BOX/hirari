@@ -18,7 +18,6 @@
 #include "dsp/haptic_metadata.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
-#include "composition/harmony_engine.hpp"
 #include "engine/script_manager.hpp"
 #include <thread>
 #include "project_automation.hpp"
