@@ -186,24 +186,6 @@ public:
         return index < m_pendingProcessors.size() && m_pendingProcessors[index].bypassed;
     }
 
-    // Audio-thread automation path. It reads the published immutable list and
-    // calls the processor's noexcept parameter setter without taking the
-    // control-plane mutex or changing shared_ptr ownership.
-    bool setParameterRealtime(uint32_t processorIndex, uint32_t parameterId,
-                              float value, uint32_t sampleOffset = 0) noexcept {
-        if (!std::isfinite(value)) return false;
-        ReaderGuard reader(m_rustState);
-        if (!reader.active()) return false;
-        auto* processor = static_cast<DSP::IProcessor*>(
-            hirari_effect_chain_runtime_processor_at(m_rustState, processorIndex));
-        if (!processor) return false;
-        processor->setParameterAtSample(parameterId, value, sampleOffset);
-        return true;
-    }
-
-    // Apply a sorted automation batch under one audio-reader guard. A single
-    // guard per control point would add two atomics for every scheduled value
-    // and inflate callback cost on dense curves.
     void setParameterAutomationRealtime(
         const DSP::TimedParameterEvent* events, size_t eventCount) noexcept {
         if (!events || eventCount == 0) return;
@@ -222,43 +204,13 @@ public:
     }
 
     bool setParameter(uint32_t processorIndex, uint32_t parameterId, float value) {
-        return setParameterNormalized(processorIndex, parameterId, value);
-    }
-
-    // Compatibility API: project/UI callers historically provide normalized
-    // automation values. Keep that contract explicit instead of hiding the
-    // conversion in a generic parameter setter.
-    bool setParameterNormalized(uint32_t processorIndex, uint32_t parameterId, float value) {
         if (!std::isfinite(value)) return false;
         std::lock_guard<std::mutex> lock(m_mutex);
         if (processorIndex >= m_pendingProcessors.size()) return false;
         auto& processor = m_pendingProcessors[processorIndex].processor;
         if (!processor) return false;
-        // The pending list shares processor instances with every published
-        // generation.  Wait for readers before mutating the instance itself;
-        // exchanging the vector alone does not protect plugin state.
         beginAudioMutation();
         processor->setParameter(parameterId, std::clamp(value, 0.0f, 1.0f));
-        endAudioMutation();
-        return true;
-    }
-
-    // Plugin adapters that expose native units (dB, Hz, milliseconds, enum
-    // values) can opt into this path. The processor remains responsible for
-    // validating its own descriptor/range; the host only rejects NaN/Inf.
-    bool setParameterValue(uint32_t processorIndex, uint32_t parameterId, float value) {
-        if (!std::isfinite(value)) return false;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (processorIndex >= m_pendingProcessors.size()) return false;
-        auto& processor = m_pendingProcessors[processorIndex].processor;
-        if (!processor) return false;
-        DSP::IProcessor::ParameterDescriptor descriptor{};
-        if (processor->getParameterDescriptor(parameterId, descriptor) &&
-            (!descriptor.valid() || value < descriptor.minimum || value > descriptor.maximum)) {
-            return false;
-        }
-        beginAudioMutation();
-        processor->setParameter(parameterId, value);
         endAudioMutation();
         return true;
     }
