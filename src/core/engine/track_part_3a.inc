@@ -735,21 +735,6 @@
         return it == m_regions.end() ? std::vector<Region::WarpMarker>{} : it->warpMarkers;
     }
 
-    std::optional<uint32_t> getRegionSyncGroup(uint32_t rid) const {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (const auto& region : m_regions) {
-            if (region.id == rid) return region.syncGroup;
-        }
-        return std::nullopt;
-    }
-
-    std::optional<uint32_t> getRegionLoopCount(uint32_t rid) const {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (const auto& region : m_regions) {
-            if (region.id == rid) return region.loopCount;
-        }
-        return std::nullopt;
-    }
 
     bool setRegionTrim(uint32_t rid, float startNorm, float endNorm) {
         invalidateFrozenForEdit();
