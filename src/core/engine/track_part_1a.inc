@@ -320,16 +320,6 @@ public:
         }
     }
 
-    bool prepareInput(const AudioBuffer& input, uint32_t sz) {
-        if (sz == 0 || input.getNumChannels() == 0 || input.getNumSamples() < sz ||
-            m_activeBuffer.getNumChannels() == 0 || m_activeBuffer.getNumSamples() < sz) {
-            return false;
-        }
-        if (&input == &m_activeBuffer) return true;
-        clearWorkBuffer(sz);
-        m_activeBuffer.addFrom(input, sz);
-        return true;
-    }
 
     bool addInput(const AudioBuffer& input, uint32_t sz) {
         if (sz == 0 || input.getNumChannels() == 0 || input.getNumSamples() < sz ||
