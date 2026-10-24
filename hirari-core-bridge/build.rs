@@ -104,8 +104,8 @@ fn main() {
     for pattern in [
         "../src/core/**/*.hpp",
         "../src/core/**/*.inc",
-        "../src/external/**/*.h",
-        "../src/external/**/*.hpp",
+        "../external/**/*.h",
+        "../external/**/*.hpp",
     ] {
         for path in glob(pattern)
             .expect("failed to scan C++ dependency pattern")
@@ -118,7 +118,7 @@ fn main() {
     build
         .include("../src")
         .include("../src/core")
-        .include("../src/external")
+        .include("../external")
         .flag_if_supported("-std=c++20")
         .flag_if_supported("-fobjc-arc")
         .flag("-O3")
@@ -157,7 +157,7 @@ fn main() {
     sandbox_build
         .include("../src")
         .include("../src/core")
-        .include("../src/external")
+        .include("../external")
         .flag_if_supported("-std=c++20")
         .flag_if_supported("-fobjc-arc")
         .flag("-O3")

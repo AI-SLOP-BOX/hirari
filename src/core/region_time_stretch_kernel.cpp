@@ -1,4 +1,4 @@
-#include "../external/signalsmith-stretch/signalsmith-stretch.h"
+#include "../../external/signalsmith-stretch/signalsmith-stretch.h"
 #include <exception>
 #include <new>
 
