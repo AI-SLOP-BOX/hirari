@@ -660,14 +660,6 @@
         return false;
     }
 
-    std::optional<bool> getRegionPitchPreserveWarp(uint32_t rid) const {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (const auto& region : m_regions) {
-            if (region.id == rid) return region.pitchPreserveWarp;
-        }
-        return std::nullopt;
-    }
-
     std::optional<double> getRegionWarpRatio(uint32_t rid) const {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (const auto& region : m_regions) {
@@ -676,21 +668,6 @@
         return std::nullopt;
     }
 
-
-    std::optional<float> getRegionPitchSemitones(uint32_t rid) const {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (const auto& region : m_regions) {
-            if (region.id == rid) return region.pitchSemitones;
-        }
-        return std::nullopt;
-    }
-
-
-    bool setRegionLocked(uint32_t rid, bool locked) {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::find_if(m_regions.begin(), m_regions.end(), [rid](const Region& r){ return r.id == rid; });
-        if (it == m_regions.end()) return false; it->locked = locked; publishRegionSnapshot(); return true;
-    }
 
     // Validates and orders warp markers through the Rust pure transform.
     //
