@@ -72,7 +72,6 @@
     // Engine Infrastructure
 
     // RT-Safe Pre-allocated Kernels
-    ::Hirari::Core::DSP::Effects::AtmosphericProcessorKernel m_atmosphericEngine;
     ::Hirari::Core::Mixing::MasteringKernel m_masteringKernel;
     // The Control Room model is implemented in Rust
     // (control_room_runtime.rs). This is only the handle its audio
