@@ -38,18 +38,7 @@ extern "C" void hirari_log_buffer_post(
     const uint8_t* message, size_t message_len);
 extern "C" bool hirari_log_buffer_pop(const void* state, void* output);
 
-// Narrow C ABI for native compatibility callers. Algorithms and policy stay
-// in Rust; this header only describes the byte-oriented boundary.
-struct HirariAestheticFeatures {
-    float spectral_balance;
-    float dynamic_complexity;
-    float transient_clarity;
-    float stereo_width;
-    float phase_coherence;
-};
-extern "C" void hirari_aesthetic_analyze(
-    const float* left, const float* right, uint32_t samples,
-    HirariAestheticFeatures* output);
+
 struct HirariScheduledMidiNote {
     uint32_t track_id;
     uint8_t pitch;
@@ -1691,17 +1680,7 @@ extern "C" void hirari_mpe_manager_update(
 extern "C" bool hirari_mpe_manager_get(
     const void* state, uint8_t channel, uint8_t* note, bool* active,
     float* pressure, float* timbre, float* pitch_bend);
-extern "C" void* hirari_collaboration_hub_create();
-extern "C" void hirari_collaboration_hub_destroy(void* state);
-extern "C" bool hirari_collaboration_hub_log_edit(
-    void* state, const uint8_t* user, size_t user_size, uint64_t sequence,
-    const uint8_t* data, size_t data_size);
-extern "C" bool hirari_collaboration_hub_is_locked(
-    const void* state, uint32_t track_id, const uint8_t* requester, size_t requester_size);
-extern "C" bool hirari_collaboration_hub_acquire(
-    void* state, uint32_t track_id, const uint8_t* user, size_t user_size);
-extern "C" bool hirari_collaboration_hub_refresh(
-    void* state, uint32_t track_id, const uint8_t* user, size_t user_size);
+
 using HirariForensicJournalRecoveryCallback = void (*)(
     void*, uint32_t, uint32_t, float, uint64_t);
 using HirariAtomicSequenceLoadCallback = uint64_t (*)(void*);
@@ -1721,22 +1700,7 @@ extern "C" void hirari_forensic_journaler_stop(void* state);
 extern "C" bool hirari_forensic_journaler_recover(
     const uint8_t* path, size_t path_size, void* context,
     HirariForensicJournalRecoveryCallback callback);
-extern "C" void* hirari_atmospheric_processor_create(size_t delay_count);
-extern "C" void* hirari_atmospheric_processor_clone(const void* state);
-extern "C" void hirari_atmospheric_processor_destroy(void* state);
-extern "C" bool hirari_atmospheric_processor_process(
-    void* state, float* buffer, uint32_t samples, float decay,
-    float tension, float transient_clarity);
-extern "C" void* hirari_mobile_bridge_create();
-extern "C" void hirari_mobile_bridge_destroy(void* state);
-extern "C" void hirari_mobile_bridge_broadcast(
-    const void* state, uint32_t track_id, uint32_t param_id, float value);
-extern "C" bool hirari_mobile_bridge_push_event(
-    const void* state, uint32_t track_id, uint32_t param_id, float value, uint64_t timestamp);
-extern "C" bool hirari_mobile_bridge_pop_event(
-    const void* state, uint32_t* track_id, uint32_t* param_id,
-    float* value, uint64_t* timestamp);
-extern "C" uint64_t hirari_mobile_bridge_bytes_sent(const void* state);
+
 using HirariSnapshotComputeCallback = bool (*)(void*, void**);
 using HirariSnapshotReadCallback = bool (*)(void*, uint64_t*, uint64_t*, const uint8_t**, size_t*);
 using HirariSnapshotDestroyCallback = void (*)(void*);
