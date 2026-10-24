@@ -253,19 +253,6 @@
         publishRegionSnapshot();
     }
 
-    bool upsertAudioNoteSegment(uint32_t regionId, ::hirari::editing::AudioNoteSegment segment) {
-        if (!segment.valid() || audioPitchAnalysisRunning()) return false;
-        segment.rebuildPitchRatioIntegral();
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::find_if(m_regions.begin(), m_regions.end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (it == m_regions.end()) return false;
-        // Rust owns the table and therefore the slot/overlap rule.
-        if (!it->noteEdits.upsert(segment)) return false;
-        publishRegionSnapshot();
-        return true;
-    }
 
     bool copyAudioNoteSegments(uint32_t regionId,
                                std::vector<::hirari::editing::AudioNoteSegment>& output) const {
@@ -319,65 +306,6 @@
         return true;
     }
 
-    bool upsertAudioNoteAnchor(uint32_t regionId, double segmentStartSeconds,
-                               ::hirari::editing::AudioNoteAnchor anchor) {
-        if (audioPitchAnalysisRunning() || !std::isfinite(segmentStartSeconds) ||
-            !std::isfinite(anchor.positionSeconds) ||
-            !std::isfinite(anchor.pitchCents) ||
-            !std::isfinite(anchor.formantCents)) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (regionIt == m_regions.end()) return false;
-        if (!regionIt->noteEdits.upsertAnchor(segmentStartSeconds, anchor.positionSeconds,
-                                              anchor.pitchCents, anchor.formantCents)) {
-            return false;
-        }
-        publishRegionSnapshot();
-        return true;
-    }
-
-    bool clearAudioNoteSegments(uint32_t regionId) {
-        if (audioPitchAnalysisRunning()) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::find_if(m_regions.begin(), m_regions.end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (it == m_regions.end() || it->noteEdits.empty()) return false;
-        it->noteEdits.clear();
-        publishRegionSnapshot();
-        return true;
-    }
-
-    bool warpAudioNoteSegment(uint32_t regionId, double segmentStartSeconds,
-                              double newStartSeconds, double newEndSeconds) {
-        if (audioPitchAnalysisRunning() || !std::isfinite(segmentStartSeconds) || !std::isfinite(newStartSeconds) ||
-            !std::isfinite(newEndSeconds) || newEndSeconds <= newStartSeconds) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (regionIt == m_regions.end()) return false;
-        // Rust re-checks validity, the overlap guard and the anchor warp.
-        if (!regionIt->noteEdits.warp(segmentStartSeconds, newStartSeconds, newEndSeconds)) {
-            return false;
-        }
-        publishRegionSnapshot();
-        return true;
-    }
-
-    bool removeAudioNoteSegment(uint32_t regionId, double segmentStartSeconds) {
-        if (audioPitchAnalysisRunning() || !std::isfinite(segmentStartSeconds)) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto regionIt = std::find_if(m_regions.begin(), m_regions.end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (regionIt == m_regions.end()) return false;
-        if (!regionIt->noteEdits.remove(segmentStartSeconds)) return false;
-        publishRegionSnapshot();
-        return true;
-    }
 
     // Offline VariAudio-style F0 detection. This is deliberately a control/
     // analysis-thread operation; the audio callback only consumes the
