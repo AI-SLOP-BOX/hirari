@@ -679,6 +679,38 @@ pub unsafe extern "C" fn hirari_routing_graph_snapshot_destroy(snapshot: *mut c_
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn hirari_routing_graph_snapshot_json(handle: *const c_void) -> *mut std::ffi::c_char {
+    let connections = unsafe { routing_graph_state(handle) }
+        .and_then(|state| state.data.lock().ok().map(|data| data.connections.clone()))
+        .unwrap_or_default();
+    let mut out = String::from("[");
+    for (i, conn) in connections.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        use std::fmt::Write;
+        let _ = write!(
+            out,
+            r#"{{"source_id":{},"destination_id":{},"gain":{},"send":{},"pre_fader":{}}}"#,
+            conn.source_id,
+            conn.destination_id,
+            if conn.gain.is_finite() { conn.gain } else { 0.0 },
+            conn.send,
+            conn.pre_fader
+        );
+    }
+    out.push(']');
+    std::ffi::CString::new(out).map_or(std::ptr::null_mut(), std::ffi::CString::into_raw)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_routing_graph_json_free(ptr: *mut std::ffi::c_char) {
+    if !ptr.is_null() {
+        drop(unsafe { std::ffi::CString::from_raw(ptr) });
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn hirari_routing_graph_build_order(
     handle: *const c_void,
     output: *mut u32,

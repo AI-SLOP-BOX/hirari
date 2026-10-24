@@ -125,6 +125,14 @@ public:
         hirari_routing_graph_snapshot_destroy(snapshot);
     }
 
+    std::string getConnectionsJson() const {
+        char* raw = hirari_routing_graph_snapshot_json(m_graphState);
+        if (!raw) return "[]";
+        std::string res(raw);
+        hirari_routing_graph_json_free(raw);
+        return res;
+    }
+
     float connectionGain(uint32_t s, uint32_t d) const noexcept {
         if (s >= kMaxNodes || d >= kMaxNodes) return 0.0f;
         return hirari_routing_gains_route(m_gainState, s, d);

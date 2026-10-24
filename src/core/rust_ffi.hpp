@@ -1132,6 +1132,8 @@ extern "C" size_t hirari_routing_graph_snapshot_count(const void* snapshot);
 extern "C" size_t hirari_routing_graph_snapshot_copy(
     const void* snapshot, void* output, size_t capacity);
 extern "C" void hirari_routing_graph_snapshot_destroy(void* snapshot);
+extern "C" char* hirari_routing_graph_snapshot_json(const void* handle);
+extern "C" void hirari_routing_graph_json_free(char* ptr);
 extern "C" void* hirari_routing_topology_create();
 extern "C" void hirari_routing_topology_destroy(void* state);
 extern "C" bool hirari_routing_topology_build(void* topology, const void* graph);

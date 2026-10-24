@@ -225,7 +225,6 @@ bool HirariUnifiedEngine::remove_region_audio_note_segment(uint32_t tid, uint32_
     return hirari_region_edit_note_remove(this, tid, rid, segmentStartSeconds);
 }
 
-
 bool HirariUnifiedEngine::start_region_audio_note_analysis(
     uint32_t tid, uint32_t rid, double sampleRate) {
     if (!std::isfinite(sampleRate) || sampleRate < 8000.0 || sampleRate > 384000.0) {

@@ -408,22 +408,7 @@ bool HirariUnifiedEngine::write_project_layout_json(
 }
 
 rust::String HirariUnifiedEngine::get_routing_snapshot_json() const {
-    std::vector<Hirari::Core::Engine::RoutingEngine::Connection> connections;
-    m_routingEngine.copyConnections(connections);
-    std::ostringstream stream;
-    stream << "[";
-    for (size_t index = 0; index < connections.size(); ++index) {
-        if (index > 0) stream << ",";
-        const auto& connection = connections[index];
-        stream << "{\"source_id\":" << connection.sourceId
-               << ",\"destination_id\":" << connection.destId
-               << ",\"gain\":" << (std::isfinite(connection.gain) ? connection.gain : 0.0f)
-               << ",\"send\":" << (connection.send ? "true" : "false")
-               << ",\"pre_fader\":" << (connection.preFader ? "true" : "false")
-               << "}";
-    }
-    stream << "]";
-    return rust::String(stream.str());
+    return rust::String(m_routingEngine.getConnectionsJson());
 }
 
 uint64_t HirariUnifiedEngine::get_project_generation() const {
