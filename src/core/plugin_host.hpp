@@ -13,7 +13,6 @@
 #include "../dsp/effects/sub_bass_generator.hpp"
 #include "../dsp/effects/compressor.hpp"
 #include "../dsp/effects/tube_saturation.hpp"
-#include "../scae/HirariAISuite.hpp"
 #include "plugins/process_sandbox_processor.hpp"
 #include "plugins/vst3_host_processor.hpp"
 
