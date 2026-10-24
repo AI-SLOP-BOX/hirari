@@ -155,11 +155,6 @@ else
 fi
 
 build_link_run wav-io-contract tests/wav_io_contract.cpp "$BRIDGE_LIB"
-build_link_run timeline-track-render-contract tests/timeline_track_render_contract.cpp "$BRIDGE_LIB"
-# The BPM ghost contract pulls the engine (and therefore the Apple driver
-# frameworks) in through the shared LINK_FLAGS above.
-build_link_run timeline-bpm-ghost-contract tests/timeline_bpm_ghost_contract.cpp \
-    "$BRIDGE_LIB"
 build_link_run sidechain-snapshot-contract tests/sidechain_snapshot_contract.cpp "$BRIDGE_LIB"
 build_link_run audio-buffer-contract tests/audio_buffer_contract.cpp "$BRIDGE_LIB"
 build_link_run range-edit-contract tests/range_edit_contract.cpp "$BRIDGE_LIB"

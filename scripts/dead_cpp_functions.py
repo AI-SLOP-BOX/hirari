@@ -47,6 +47,14 @@ def main():
                 if m and m.group(1) not in KEYWORDS:
                     defs.setdefault(m.group(1), set()).add((p, n))
     texts = {p: open(p, errors="ignore").read().split("\n") for p in all_files()}
+    # A cxx-bridge declaration only says "callable from Rust"; it is a site,
+    # not a use. A Rust call such as `engine.name(` still counts.
+    bridge = "./hirari-core-bridge/src/lib.rs"
+    if bridge in texts:
+        for n, line in enumerate(texts[bridge], 1):
+            m = re.match(r"\s*fn (\w+)\(", line)
+            if m:
+                defs.setdefault(m.group(1), set()).add((bridge, n))
     word = {}
     dead = []
     for name, sites in sorted(defs.items()):

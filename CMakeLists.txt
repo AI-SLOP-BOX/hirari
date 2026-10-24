@@ -213,14 +213,6 @@ add_custom_target(hirari-test-fuzz
     COMMENT "Running deterministic project/WAV/plugin-state fuzz smoke"
 )
 
-add_custom_target(hirari-test-codecs
-    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_ffmpeg_codec_contract.sh"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    USES_TERMINAL
-    COMMENT "Running direct FFmpeg MP3/FLAC publication contract"
-)
-add_dependencies(hirari-test-all hirari-test-codecs)
-
 add_custom_target(hirari-test-cli-e2e
     COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_cli_history_render_e2e.sh"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

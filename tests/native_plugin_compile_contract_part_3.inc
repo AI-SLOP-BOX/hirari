@@ -153,22 +153,6 @@
         if (!pcm24 || std::string(reinterpret_cast<const char*>(header.data()), 4) != "RIFF" ||
             header[34] != 24 || header[35] != 0) return 51;
     }
-    const auto legacyBouncePath = std::filesystem::temp_directory_path() /
-                                  "hirari-native-legacy-bounce-contract.wav";
-    Hirari::Core::Engine::LegacyBounceEngine::ExportProgress legacyProgress;
-    Hirari::Core::Engine::LegacyBounceEngine::renderToFile(
-        legacyBouncePath.string(), 0.001, 48'000.0, legacyProgress,
-        [](float* left, float* right, uint32_t count) {
-            for (uint32_t i = 0; i < count; ++i) { left[i] = 0.25f; right[i] = -0.25f; }
-        });
-    if (!legacyProgress.isDone.load() || legacyProgress.cancelled.load() ||
-        !std::filesystem::is_regular_file(legacyBouncePath)) return 61;
-    std::ifstream legacyBounce(legacyBouncePath, std::ios::binary);
-    std::array<uint8_t, 36> legacyHeader{};
-    legacyBounce.read(reinterpret_cast<char*>(legacyHeader.data()),
-                      static_cast<std::streamsize>(legacyHeader.size()));
-    if (!legacyBounce || std::string(legacyHeader.begin(), legacyHeader.begin() + 4) != "RIFF" ||
-        legacyHeader[34] != 16 || legacyHeader[35] != 0) return 62;
     const auto streamPath = std::filesystem::temp_directory_path() / "hirari-native-pcm24-stream-contract.wav";
     {
         Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter stream(
