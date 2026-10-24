@@ -320,7 +320,6 @@ public:
         }
     }
 
-
     bool addInput(const AudioBuffer& input, uint32_t sz) {
         if (sz == 0 || input.getNumChannels() == 0 || input.getNumSamples() < sz ||
             m_activeBuffer.getNumChannels() == 0 || m_activeBuffer.getNumSamples() < sz) {

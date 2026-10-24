@@ -4,7 +4,6 @@ extern "C" void hirari_audio_publish_monitor_block(
 extern "C" void hirari_audio_publish_talkback_block(
     const float* const*, uint32_t, uint32_t, const void*, void*, void*, float*);
 
-
 // A callback-safe thread identity.  std::hash<std::thread::id> may trigger
 // runtime machinery on some standard libraries; this monotonically assigned
 // token is allocation-free and is shared by realtime and offline callbacks.
@@ -152,8 +151,6 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         }
     });
 }
-
-
 
     void HirariUnifiedEngine::processBlock(AudioBuffer& output, uint32_t off, uint32_t sz) {
         if (sz == 0 || output.getNumChannels() < 2 || off >= output.getNumSamples()) {

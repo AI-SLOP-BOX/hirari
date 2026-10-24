@@ -154,7 +154,6 @@
             }
         }
 
-
         // 3. System Telemetry & Adaptive Sovereignty (CPU Governor)
         float currentLoad = m_dspLoad.load(std::memory_order_relaxed);
         // Diagnostics are useful, but formatting/publishing on every block

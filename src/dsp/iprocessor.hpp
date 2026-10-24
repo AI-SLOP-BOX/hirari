@@ -47,7 +47,6 @@ struct ProcessContext {
     uint32_t numOutputChannels = 2;
     bool isSpatial = false;
 
-    
     // Performance context for CPU monitoring
     mutable double cpuLoad = 0.0; 
 };

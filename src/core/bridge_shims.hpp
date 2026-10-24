@@ -47,7 +47,6 @@ namespace Hirari::Core::Bridge {
     bool initialize_gpu_with_status();
 }
 
-
 namespace Hirari::Core::BridgeFFI {
     void HIRARI_LOG(uint32_t level, const std::string& msg);
 }

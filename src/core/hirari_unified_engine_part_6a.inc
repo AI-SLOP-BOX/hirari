@@ -690,7 +690,6 @@ HirariUnifiedEngine::MeterData HirariUnifiedEngine::getMasterMeterData() const {
     return {};
 }
 
-
 double HirariUnifiedEngine::samples_to_beats(uint64_t samples) const {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
     return hirari_tempo_map_samples_to_beats(m_tempoState, samples, sampleRate);

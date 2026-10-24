@@ -30,14 +30,12 @@ constexpr size_t kMaxEditEntries = 4096;
 constexpr uint64_t kMaxAudioQuantizerWarpSamples = 16'777'216u;
 } // namespace hirari::limits
 
-
 extern "C" void* hirari_log_buffer_init(void* storage, size_t bytes);
 extern "C" uint64_t hirari_log_buffer_timestamp();
 extern "C" void hirari_log_buffer_post(
     const void* state, uint32_t level, uint32_t component_id,
     const uint8_t* message, size_t message_len);
 extern "C" bool hirari_log_buffer_pop(const void* state, void* output);
-
 
 struct HirariScheduledMidiNote {
     uint32_t track_id;
@@ -399,7 +397,6 @@ bool hirari_region_vari_audio_store_set(HirariRegionVariAudioStore* store,
                                         const size_t* anchor_offsets,
                                         const size_t* anchor_counts);
 struct HirariAudioNoteSegmentRange;
-
 
 // Control-thread snapshot of the whole table. The views it hands out point
 // into the snapshot's own arrays, so the audio thread can read them without
@@ -976,7 +973,6 @@ extern "C" uint32_t hirari_dynamic_compressor_latency(const void* state);
 extern "C" uint32_t hirari_dynamic_compressor_tail(const void* state);
 extern "C" uint8_t hirari_plugin_fingerprint(const char* path, size_t path_size,
                                                uint64_t* output);
-
 
 struct HirariPluginBlacklistRecord {
     uint8_t* path;

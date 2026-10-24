@@ -11,7 +11,6 @@
 #include "engine/track.hpp"
 #include "concurrency/audio_task_manager.hpp"
 
-
 #include "dsp/haptic_metadata.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
@@ -35,7 +34,6 @@
 #include "rust_ffi.hpp"
 
 namespace {
-
 
 } // namespace
 

@@ -153,5 +153,4 @@ private:
     TrackFreezeManager() = default;
 };
 
-
 } // namespace Hirari::Core::Engine

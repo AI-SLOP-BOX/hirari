@@ -5,7 +5,6 @@
         std::atomic<uint32_t> focusedTrackId{0};
     } m_workspace;
 
-
     // Phase 9: Forensic Peak Cache (Zero-Wait UI)
     struct WaveformCache {
         void* rustMapping = nullptr;

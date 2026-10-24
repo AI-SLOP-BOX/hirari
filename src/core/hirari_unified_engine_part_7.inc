@@ -55,13 +55,6 @@ float HirariUnifiedEngine::get_track_correlation(uint32_t tid) const {
 void HirariUnifiedEngine::push_event(const ::Hirari::Core::EngineEvent& e) { m_eventQueue.push(e); }
 bool HirariUnifiedEngine::pop_event(::Hirari::Core::EngineEvent& e) const { return m_eventQueue.pop(e); }
 
-
-
-
-
-
-
-
 HirariUnifiedEngine::WaveformCache::~WaveformCache() {
     cleanup();
 }

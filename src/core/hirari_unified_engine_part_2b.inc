@@ -231,9 +231,6 @@ bool HirariUnifiedEngine::set_track_volume(uint32_t tid, float value) {
     return true;
 }
 
-
-
-
 float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {

@@ -333,8 +333,6 @@ uint32_t HirariUnifiedEngine::get_region_channel_count(uint32_t tid, uint32_t ri
     return audio ? audio->getNumChannels() : 0;
 }
 
-
-
 bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
     // Formats 0/3 are PCM16/PCM24 RIFF/RF64, 1 is Float32 WAVE64, and 2 is
     // Float32 RIFF/RF64. Reject unsupported values instead of silently

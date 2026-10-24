@@ -109,7 +109,6 @@ public:
             m_sendPdcManager, m_topologyState);
     }
 
-
     bool hasConnection(uint32_t s, uint32_t d) const {
         if (s >= kMaxNodes || d >= kMaxNodes) return false;
         return hirari_routing_gains_route(m_gainState, s, d) > 0.0f;

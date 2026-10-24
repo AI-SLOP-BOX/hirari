@@ -253,7 +253,6 @@
         publishRegionSnapshot();
     }
 
-
     bool copyAudioNoteSegments(uint32_t regionId,
                                std::vector<::hirari::editing::AudioNoteSegment>& output) const {
         const auto* snapshot = getRegionSnapshot();
@@ -305,7 +304,6 @@
         publishRegionSnapshot();
         return true;
     }
-
 
     // Offline VariAudio-style F0 detection. This is deliberately a control/
     // analysis-thread operation; the audio callback only consumes the
@@ -505,7 +503,6 @@
         return true;
     }
 
-
     bool setRegionCompRanges(
         uint32_t rid,
         const std::vector<Region::CompRange>& ranges,
@@ -531,7 +528,6 @@
         }
         return false;
     }
-
 
     // Adopts the result of a Rust range-edit transform.
     //
@@ -617,7 +613,6 @@
         return replaceRegionRangeEdits(rid, {});
     }
 
-
     bool setRegionWarpRatio(uint32_t rid, double ratio) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
@@ -667,7 +662,6 @@
         }
         return std::nullopt;
     }
-
 
     // Validates and orders warp markers through the Rust pure transform.
     //
@@ -734,7 +728,6 @@
         });
         return it == m_regions.end() ? std::vector<Region::WarpMarker>{} : it->warpMarkers;
     }
-
 
     bool setRegionTrim(uint32_t rid, float startNorm, float endNorm) {
         invalidateFrozenForEdit();
