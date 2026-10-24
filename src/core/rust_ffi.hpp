@@ -31,13 +31,6 @@ constexpr uint64_t kMaxAudioQuantizerWarpSamples = 16'777'216u;
 } // namespace hirari::limits
 
 
-struct HirariMidiScoreGlyph {
-    float beat;
-    float staff_offset;
-    int32_t duration;
-    uint32_t source_region_id;
-    uint32_t source_note_index;
-};
 extern "C" void* hirari_log_buffer_init(void* storage, size_t bytes);
 extern "C" uint64_t hirari_log_buffer_timestamp();
 extern "C" void hirari_log_buffer_post(
@@ -292,18 +285,6 @@ extern "C" void hirari_midi_buffer_destroy(void* state);
 extern "C" void hirari_midi_buffer_add(
     void* state, uint64_t sample_offset, const uint8_t* data, uint32_t size,
     uint8_t articulation_id);
-struct HirariMixerTelemetrySnapshot {
-    float peak_l;
-    float peak_r;
-    float rms_l;
-    float rms_r;
-    uint32_t clipping_count;
-    float dc_offset_l;
-    float dc_offset_r;
-    float phase_correlation;
-    float loudness_lufs;
-    float spectrum_rms[8];
-};
 extern "C" void* hirari_mixer_telemetry_create();
 extern "C" void hirari_mixer_telemetry_destroy(void* state);
 extern "C" bool hirari_midi_buffer_copy(void* state, const void* event);
@@ -413,9 +394,6 @@ bool hirari_region_vari_audio_store_upsert(HirariRegionVariAudioStore* store,
 bool hirari_region_vari_audio_store_remove(HirariRegionVariAudioStore* store,
                                            double start_seconds);
 uint32_t hirari_region_vari_audio_store_count(HirariRegionVariAudioStore* store);
-bool hirari_region_vari_audio_store_get(HirariRegionVariAudioStore* store,
-                                        uint32_t index,
-                                        HirariAudioNoteSegment* out_segment);
 bool hirari_region_vari_audio_store_upsert_anchor(
     HirariRegionVariAudioStore* store, double segment_start, double position_seconds,
     double pitch_cents, double formant_cents);
@@ -433,9 +411,6 @@ bool hirari_region_vari_audio_store_set(HirariRegionVariAudioStore* store,
                                         const size_t* anchor_counts);
 struct HirariAudioNoteSegmentRange;
 
-uint32_t hirari_region_vari_audio_store_ranges(HirariRegionVariAudioStore* store,
-                                               HirariAudioNoteSegmentRange* out_ranges,
-                                               size_t count);
 
 // Control-thread snapshot of the whole table. The views it hands out point
 // into the snapshot's own arrays, so the audio thread can read them without
@@ -786,15 +761,6 @@ struct HirariAudioNoteCurveView {
     double correctionBeforeSeconds = 0.0;
     double formantOffsetCents = 0.0;
 };
-struct HirariAudioNoteSegmentValidation {
-    double startSeconds = 0.0;
-    double endSeconds = 0.0;
-    double detectedPitchCents = 0.0;
-    double pitchOffsetCents = 0.0;
-    double formantOffsetCents = 0.0;
-    const HirariAudioNoteAnchor* anchors = nullptr;
-    size_t anchorCount = 0;
-};
 struct HirariAudioNotePhaseView {
     double startSeconds = 0.0;
     double endSeconds = 0.0;
@@ -1064,11 +1030,6 @@ extern "C" uint8_t hirari_wav_float32_stream_write(
 extern "C" uint8_t hirari_wav_float32_stream_finish(void* stream);
 extern "C" uint64_t hirari_wav_float32_stream_frames(const void* stream);
 extern "C" void hirari_wav_float32_stream_free(void* stream);
-struct HirariAudioExportStemTrack {
-    uint32_t id;
-    const uint8_t* name;
-    size_t name_size;
-};
 extern "C" void* hirari_wav_pcm_stream_create(
     const char* path, size_t path_size, uint64_t frames, uint32_t sample_rate,
     uint16_t channels, uint16_t bit_depth, uint8_t broadcast_wave);
@@ -1331,14 +1292,6 @@ extern "C" void* hirari_audio_pitch_analyze_region(
 extern "C" bool hirari_audio_pitch_commit_region_result(
     const void* result, void* region_note_store);
 extern "C" void hirari_audio_pitch_result_destroy(void* state);
-extern "C" size_t hirari_audio_pitch_segment_count(const void* state);
-extern "C" bool hirari_audio_pitch_get_segment(
-    const void* state, size_t index, double* start_seconds,
-    double* end_seconds, double* detected_pitch_cents);
-extern "C" size_t hirari_audio_pitch_anchor_count(const void* state, size_t segment_index);
-extern "C" bool hirari_audio_pitch_get_anchor(
-    const void* state, size_t segment_index, size_t anchor_index,
-    double* position_seconds, double* pitch_cents, double* formant_cents);
 using HirariSamplerBufferReader = bool (*)(void*, const float**, const float**, uint32_t*);
 extern "C" void* hirari_builtin_midi_instrument_create();
 extern "C" void hirari_builtin_midi_instrument_destroy(void* state);
@@ -1712,16 +1665,6 @@ extern "C" bool hirari_project_db_flush(
 extern "C" uint8_t hirari_stem_separator_validate_model(
     uint8_t backend, const uint8_t* path, size_t path_size,
     uint32_t model_sample_rate, uint32_t max_channels);
-extern "C" void* hirari_divine_console_create();
-extern "C" void* hirari_divine_console_clone(const void* state);
-extern "C" void hirari_divine_console_destroy(void* state);
-extern "C" void hirari_divine_console_prepare(void* state, double sample_rate);
-extern "C" void hirari_divine_console_reset(void* state);
-extern "C" void hirari_divine_console_set_drive(void* state, float drive);
-extern "C" void hirari_divine_console_set_params(void* state, float threshold_db, float ratio);
-extern "C" bool hirari_divine_console_process(
-    void* state, float* const* channels, uint32_t channel_count,
-    uint32_t sample_count, const float* sidechain);
 extern "C" void* hirari_delay_pitch_create(double sample_rate);
 extern "C" void* hirari_delay_pitch_clone(const void* state);
 extern "C" void hirari_delay_pitch_destroy(void* state);
