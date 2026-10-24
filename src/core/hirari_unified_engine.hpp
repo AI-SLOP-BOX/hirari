@@ -66,7 +66,6 @@ namespace Hirari::Core::Video { class VideoSync; }
 #include "engine/automation_lane_group.hpp"
 #include "midi/external_sync.hpp"
 #include "composition/arrangement_edit_model.hpp"
-#include "composition/arrangement_section.hpp"
 #include "composition/harmonic_context_tracker.hpp"
 #include <thread>
 #include <future>

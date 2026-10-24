@@ -56,37 +56,7 @@ void HirariUnifiedEngine::push_event(const ::Hirari::Core::EngineEvent& e) { m_e
 bool HirariUnifiedEngine::pop_event(::Hirari::Core::EngineEvent& e) const { return m_eventQueue.pop(e); }
 
 
-std::vector<::Hirari::Core::Composition::ArrangementSection> HirariUnifiedEngine::run_structural_analysis() {
-    const auto& s = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
 
-    std::vector<uint64_t> regionStarts;
-    uint64_t maxLen = 0;
-
-    for (uint32_t i = 0; i < s.trackCount && i < 1024; ++i) {
-        Track* t = s.activeTracks[i];
-        for (const auto& r : t->getRegions()) {
-            regionStarts.push_back(r.start);
-            maxLen = std::max(maxLen, r.start + r.len);
-        }
-    }
-    if (regionStarts.empty()) {
-        regionStarts.push_back(0);
-        maxLen = static_cast<uint64_t>(m_sampleRate.load()) * 30; // default 30s
-    }
-
-    const auto harmony = Composition::HarmonicContextTracker::getInstance().getState();
-    auto rustSections = ::Hirari::Core::Bridge::analysis_structure_sections(
-        rust::Slice<const uint64_t>(regionStarts.data(), regionStarts.size()),
-        maxLen, hirari_tempo_map_get_current_bpm(m_tempoState), m_sampleRate.load(), harmony.tension, harmony.valence);
-    std::vector<::Hirari::Core::Composition::ArrangementSection> results;
-    results.reserve(rustSections.size());
-    for (const auto& section : rustSections) {
-        results.push_back({section.start_sample, section.end_sample,
-                           section.section_type, section.energy_level,
-                           section.motivic_id, section.narrative_flow_score});
-    }
-    return results;
-}
 
 
 

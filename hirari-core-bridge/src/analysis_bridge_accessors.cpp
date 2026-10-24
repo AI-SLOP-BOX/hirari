@@ -52,8 +52,26 @@ rust::String get_intelligence_dashboard_json(const Engine::HirariUnifiedEngine& 
 
 // Song structure JSON (sections -> analysis_song_structure_json payload).
 rust::String get_song_structure_json(const Engine::HirariUnifiedEngine& engine) {
-    auto* mutable_engine = const_cast<Engine::HirariUnifiedEngine*>(&engine);
-    const auto sections = mutable_engine->run_structural_analysis();
+    const auto tracks = engine.get_tracks_snapshot();
+    std::vector<uint64_t> regionStarts;
+    uint64_t maxLen = 0;
+    for (const auto& t : tracks) {
+        if (!t) continue;
+        for (const auto& r : t->getRegions()) {
+            regionStarts.push_back(r.start);
+            maxLen = std::max(maxLen, r.start + r.len);
+        }
+    }
+    const double sr = engine.get_sample_rate();
+    if (regionStarts.empty()) {
+        regionStarts.push_back(0);
+        maxLen = static_cast<uint64_t>(sr) * 30;
+    }
+    const auto harmony = Composition::HarmonicContextTracker::getInstance().getState();
+    const auto sections = ::Hirari::Core::Bridge::analysis_structure_sections(
+        rust::Slice<const uint64_t>(regionStarts.data(), regionStarts.size()),
+        maxLen, hirari_tempo_map_get_current_bpm(engine.tempo_state()),
+        sr, harmony.tension, harmony.valence);
     std::vector<uint8_t> kinds;
     std::vector<uint64_t> starts;
     std::vector<uint64_t> ends;

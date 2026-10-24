@@ -67,7 +67,6 @@
     // Phase 11: Neural Telemetry
     
     // Phase 14: Compositional Telemetry
-    std::vector<Hirari::Core::Composition::ArrangementSection> run_structural_analysis();
     
     // Phase 16: Plugin Sovereignty
     
