@@ -36,7 +36,6 @@
 #include "diagnostics_kernel.hpp"
 #include "engine/script_manager.hpp"
 #include "database/project_db.hpp"
-#include "io/multi_device_sink.hpp"
 #include "io/audio_decoder.hpp"
 #include "dsp/spatial/ambisonic_7th_order_kernel.hpp"
 #include <map>

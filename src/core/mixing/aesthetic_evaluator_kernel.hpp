@@ -1,6 +1,5 @@
 #pragma once
 #include <cstdint>
-#include "../diagnostics/forensic_kernel.hpp"
 #include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Mixing {
