@@ -6,7 +6,6 @@
 #include "engine/bus_track.hpp"
 #include "engine/sidechain_manager.hpp"
 #include "utils/wav_writer.hpp"
-#include "dsp/HirariDSP.hpp"
 #include "dsp/analysis/master_meter.hpp"
 #include "dsp/effects/master_limiter.hpp"
 #include "engine/track.hpp"
@@ -33,16 +32,6 @@
 #include "log_buffer.hpp"
 #include "diagnostics_kernel.hpp"
 #include "database/project_db.hpp"
-#include "io/audio_decoder.hpp"
-#include "dsp/spatial/ambisonic_7th_order_kernel.hpp"
-#include <map>
-#if defined(__x86_64__) || defined(_M_X64)
-#include <xmmintrin.h>
-#elif defined(__arm64__) || defined(__aarch64__)
-#include <arm_neon.h>
-#endif
-
-#include "dsp/utils/forensic_timer.hpp"
 #include "concurrency/forensic_scratchpad.hpp"
 #include "rust_ffi.hpp"
 
