@@ -299,6 +299,5 @@
     std::filesystem::remove(wave64StreamPath, wave64Cleanup);
     std::filesystem::remove(monoPcm16StreamPath, wave64Cleanup);
     std::filesystem::remove(monoPcm24StreamPath, wave64Cleanup);
-    std::filesystem::remove(legacyBouncePath, wave64Cleanup);
     return 0;
 }

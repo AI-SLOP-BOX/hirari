@@ -16,7 +16,6 @@
 #include "src/core/concurrency/audio_task_manager.hpp"
 #include "src/core/concurrency/thread_pool.hpp"
 #include "src/core/engine/bounce_engine.hpp"
-#include "src/dsp/analysis/spectral_processor.hpp"
 #include "src/dsp/effects/compressor.hpp"
 #include "src/core/database/project_db.hpp"
 #include "src/io/persistence/wav_writer.hpp"
