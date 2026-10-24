@@ -1,6 +1,9 @@
 // Frozen Hann-window STFT/OLA reference extracted from the pre-Rust
 // SpectralProcessor::applySpectralGain implementation.
-#include "dsp/utils/fft_utils.hpp"
+extern "C" void hirari_fft_utils_process(float* data, size_t size, bool inverse);
+inline void fft_process(std::vector<std::complex<float>>& data, bool inverse) {
+    hirari_fft_utils_process(reinterpret_cast<float*>(data.data()), data.size(), inverse);
+}
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -53,7 +56,7 @@ extern "C" bool spectral_reference_apply_gain(float* const* channels,
                 original[i] = sample * window[i];
                 spectrum[i] = {original[i], 0.0f};
             }
-            Hirari::DSP::Utils::FFTUtils::fft(spectrum);
+            fft_process(spectrum, false);
             for (uint32_t k = 0; k < fft_size; ++k) {
                 const float raw_frequency = static_cast<float>(k) * static_cast<float>(sample_rate) / static_cast<float>(fft_size);
                 const float frequency = std::min(raw_frequency, static_cast<float>(sample_rate) - raw_frequency);
@@ -62,7 +65,7 @@ extern "C" bool spectral_reference_apply_gain(float* const* channels,
                 const float high = smoothstep(((f1 + freq_feather) - frequency) / freq_feather);
                 spectrum[k] *= 1.0f + (gain - 1.0f) * time_weight * low * high;
             }
-            Hirari::DSP::Utils::FFTUtils::ifft(spectrum);
+            fft_process(spectrum, true);
             for (uint32_t i = 0; i < fft_size; ++i) {
                 const uint32_t position = offset + i;
                 if (position >= frames) break;
@@ -83,8 +86,8 @@ extern "C" bool spectral_reference_fft(float* real, float* imag, size_t size, bo
     if (!real || !imag || size < 2 || !std::has_single_bit(size)) return false;
     std::vector<std::complex<float>> spectrum(size);
     for (size_t i = 0; i < size; ++i) spectrum[i] = {real[i], imag[i]};
-    if (inverse) Hirari::DSP::Utils::FFTUtils::ifft(spectrum);
-    else Hirari::DSP::Utils::FFTUtils::fft(spectrum);
+    if (inverse) fft_process(spectrum, true);
+    else fft_process(spectrum, false);
     for (size_t i = 0; i < size; ++i) { real[i] = spectrum[i].real(); imag[i] = spectrum[i].imag(); }
     return true;
 }
