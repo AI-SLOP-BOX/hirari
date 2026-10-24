@@ -418,9 +418,7 @@
     bool remove_region_audio_note_segment(uint32_t tid, uint32_t rid, double segmentStart) const {
         return m_engine && m_engine->remove_region_audio_note_segment(tid, rid, segmentStart);
     }
-    bool analyze_region_audio_note_segments(uint32_t tid, uint32_t rid, double sampleRate) const {
-        return m_engine && m_engine->analyze_region_audio_note_segments(tid, rid, sampleRate);
-    }
+
     bool start_region_audio_note_analysis(uint32_t tid, uint32_t rid, double sampleRate) const {
         return m_engine && m_engine->start_region_audio_note_analysis(tid, rid, sampleRate);
     }

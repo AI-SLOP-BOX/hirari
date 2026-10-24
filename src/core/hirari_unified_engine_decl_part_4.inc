@@ -62,7 +62,7 @@ public:
                                         double newStartSeconds, double newEndSeconds);
     bool remove_region_audio_note_segment(uint32_t tid, uint32_t rid,
                                           double segmentStartSeconds);
-    bool analyze_region_audio_note_segments(uint32_t tid, uint32_t rid, double sampleRate);
+
     bool start_region_audio_note_analysis(uint32_t tid, uint32_t rid, double sampleRate);
     uint8_t region_audio_note_analysis_status(uint32_t tid, uint32_t rid) const;
     bool finalize_region_audio_note_analysis(uint32_t tid, uint32_t rid);

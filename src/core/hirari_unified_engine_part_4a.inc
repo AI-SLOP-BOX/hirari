@@ -225,38 +225,6 @@ bool HirariUnifiedEngine::remove_region_audio_note_segment(uint32_t tid, uint32_
     return hirari_region_edit_note_remove(this, tid, rid, segmentStartSeconds);
 }
 
-bool HirariUnifiedEngine::analyze_region_audio_note_segments(uint32_t tid, uint32_t rid,
-                                                            double sampleRate) {
-    if (!std::isfinite(sampleRate) || sampleRate < 8000.0 || sampleRate > 384000.0) {
-        return false;
-    }
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() == tid) { target = track; break; }
-        }
-    }
-    if (!target) return false;
-    if (!target->beginAudioPitchAnalysis()) return false;
-    std::vector<::hirari::editing::AudioNoteSegment> before;
-    if (!target->copyAudioNoteSegments(rid, before)) {
-        target->finishAudioPitchAnalysis();
-        return false;
-    }
-    const bool analyzed = target->analyzeAudioNoteSegments(rid, sampleRate);
-    std::vector<::hirari::editing::AudioNoteSegment> after;
-    const bool copied = analyzed && target->copyAudioNoteSegments(rid, after);
-    target->finishAudioPitchAnalysis();
-    if (!copied) return false;
-    const auto apply = [target, rid](const auto& segments) {
-        (void)target->setAudioNoteSegments(rid, segments);
-    };
-    m_undoManager.recordAppliedAction(
-        "Analyze Audio Pitch", [apply, before] { apply(before); },
-        [apply, after] { apply(after); });
-    return true;
-}
 
 bool HirariUnifiedEngine::start_region_audio_note_analysis(
     uint32_t tid, uint32_t rid, double sampleRate) {

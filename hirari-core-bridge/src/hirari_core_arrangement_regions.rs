@@ -904,12 +904,18 @@ impl HirariCore {
     }
 
     pub fn analyze_region_audio_note_segments(&self, tid: u32, rid: u32, sample_rate: f64) -> bool {
-        if !sample_rate.is_finite() || !crate::dsp_limits::is_supported_sample_rate(sample_rate) {
+        if !self.start_region_audio_note_analysis(tid, rid, sample_rate) {
             return false;
         }
-        self.engine
-            .as_ref()
-            .is_some_and(|engine| engine.analyze_region_audio_note_segments(tid, rid, sample_rate))
+        for _ in 0..5000 {
+            match self.region_audio_note_analysis_status(tid, rid) {
+                2 => return self.finalize_region_audio_note_analysis(tid, rid),
+                3 => return true,
+                4 => return false,
+                _ => std::thread::sleep(std::time::Duration::from_millis(1)),
+            }
+        }
+        false
     }
 
     /// Starts pitch detection on a bounded background worker. The caller must

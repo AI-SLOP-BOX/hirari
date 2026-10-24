@@ -489,12 +489,7 @@ pub mod ffi {
             rid: u32,
             segment_start: f64,
         ) -> bool;
-        fn analyze_region_audio_note_segments(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            sample_rate: f64,
-        ) -> bool;
+
         fn start_region_audio_note_analysis(
             self: &AudioEngine,
             tid: u32,
