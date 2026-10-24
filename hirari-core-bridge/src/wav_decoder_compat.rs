@@ -22,8 +22,12 @@ impl WavDecoderState {
     fn clear(&mut self) {
         if !self.samples.is_null() {
             unsafe { hirari_free_decoded_audio(self.samples, self.sample_count) };
+            self.samples = std::ptr::null_mut();
         }
-        *self = Self::new();
+        self.sample_count = 0;
+        self.channels = 0;
+        self.sample_rate = 0.0;
+        self.bits_per_sample = 0;
     }
 }
 
