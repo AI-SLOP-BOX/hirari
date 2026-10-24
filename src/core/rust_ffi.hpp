@@ -669,6 +669,10 @@ enum HirariRegionEditOp : int32_t {
     kHirariRegionEditInPlace = 2,
     // Restore a whole note table from a Rust-owned snapshot handle.
     kHirariRegionEditNoteStore = 11,
+    // Remove the region and drop its cached peaks.
+    kHirariRegionEditRemove = 12,
+    // Put a removed region back from a host-held snapshot handle (blob).
+    kHirariRegionEditRestore = 13,
 };
 
 struct HirariRegionEditPayload {
@@ -708,11 +712,16 @@ struct HirariRegionHostOps {
     // Runs a Rust note-table mutation under the region lock and publishes.
     bool (*noteEdit)(void* host, uint32_t trackId, uint32_t regionId, void* context,
                      HirariRegionNoteMutateFn mutate) = nullptr;
+    // Copies a whole region into an owned handle for undo; null if missing.
+    void* (*snapshotRegion)(void* host, uint32_t trackId, uint32_t regionId) = nullptr;
+    // Frees a snapshot handle that was never recorded for undo.
+    void (*releaseSnapshot)(void* host, void* handle) = nullptr;
 };
 
 extern "C" void hirari_region_host_install(const HirariRegionHostOps* ops);
 extern "C" bool hirari_region_edit_scalar(void* host, uint32_t trackId, uint32_t regionId,
                                           int32_t field, float valueA, float valueB);
+extern "C" bool hirari_region_edit_remove(void* host, uint32_t trackId, uint32_t regionId);
 extern "C" bool hirari_region_edit_move(void* host, uint32_t trackId, uint32_t regionId,
                                         double start);
 extern "C" bool hirari_region_edit_move_sync_group(void* host, uint32_t trackId,

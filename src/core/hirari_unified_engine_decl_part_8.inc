@@ -166,6 +166,8 @@ public:
     static bool regionHostFind(void* host, uint32_t trackId, uint32_t regionId,
                                HirariRegionState* out);
     static bool regionHostApply(void* host, const HirariRegionEditPayload* payload);
+    static void* regionHostSnapshot(void* host, uint32_t trackId, uint32_t regionId);
+    static void regionHostReleaseSnapshot(void* host, void* handle);
     static size_t regionHostListSyncGroup(void* host, uint32_t group,
                                           HirariRegionGroupMember* out, size_t capacity);
     static bool regionHostNoteEdit(void* host, uint32_t trackId, uint32_t regionId,

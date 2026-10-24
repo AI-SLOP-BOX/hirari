@@ -36,6 +36,8 @@ void fillRegionHostState(const Region& region, HirariRegionState& out) {
 struct OwnedRegionEdit {
     HirariRegionEditPayload payload;
     std::shared_ptr<HirariRegionVariAudioStore> noteStore;
+    // Whole-region copy owned by a Restore undo entry.
+    std::shared_ptr<Region> regionSnapshot;
 };
 
 }  // namespace
@@ -69,6 +71,21 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
         case kHirariRegionEditState:
             applied = track->applyRegionState(payload->regionId, payload->state);
             break;
+        case kHirariRegionEditRemove:
+            for (const auto& region : track->getRegions()) {
+                if (region.id == payload->regionId) { applied = true; break; }
+            }
+            if (applied) track->removeRegion(payload->regionId);
+            break;
+        case kHirariRegionEditRestore: {
+            const auto* snapshot = reinterpret_cast<const Region*>(payload->blob);
+            applied = snapshot != nullptr;
+            if (applied) {
+                track->removeRegion(payload->regionId);
+                track->addRegion(*snapshot);
+            }
+            break;
+        }
         case kHirariRegionEditNoteStore:
             applied = track->editRegionNoteStore(
                 payload->regionId, const_cast<uint8_t*>(payload->blob),
@@ -85,6 +102,25 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
         return applied;
     }
     return false;
+}
+
+void* HirariUnifiedEngine::regionHostSnapshot(void* host, uint32_t trackId,
+                                              uint32_t regionId) {
+    if (!host) return nullptr;
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+    for (const auto& track : engine->m_tracks) {
+        if (!track || track->getId() != trackId) continue;
+        for (const auto& region : track->getRegions()) {
+            if (region.id == regionId) return new Region(region);
+        }
+        return nullptr;
+    }
+    return nullptr;
+}
+
+void HirariUnifiedEngine::regionHostReleaseSnapshot(void*, void* handle) {
+    delete static_cast<Region*>(handle);
 }
 
 size_t HirariUnifiedEngine::regionHostListSyncGroup(void* host, uint32_t group,
@@ -144,6 +180,10 @@ void HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
                         hirari_region_vari_audio_store_clear(store);
                     });
             }
+            if (source[index].op == kHirariRegionEditRestore && source[index].blob) {
+                entry.regionSnapshot = std::shared_ptr<Region>(
+                    reinterpret_cast<Region*>(const_cast<uint8_t*>(source[index].blob)));
+            }
             entries.push_back(std::move(entry));
         }
         return entries;
@@ -153,6 +193,10 @@ void HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
     auto applyAll = [host](const std::vector<OwnedRegionEdit>& entries) {
         for (const auto& entry : entries) {
             HirariRegionEditPayload payload = entry.payload;
+            if (entry.regionSnapshot) {
+                payload.blob = reinterpret_cast<const uint8_t*>(entry.regionSnapshot.get());
+                payload.blobLen = 0;
+            }
             if (entry.noteStore) {
                 payload.blob = reinterpret_cast<const uint8_t*>(entry.noteStore.get());
                 payload.blobLen = 0;
@@ -177,6 +221,8 @@ const HirariRegionHostOps kRegionEditHostOps = {
     &HirariUnifiedEngine::regionHostListSyncGroup,
     &HirariUnifiedEngine::regionHostRecordUndo,
     &HirariUnifiedEngine::regionHostNoteEdit,
+    &HirariUnifiedEngine::regionHostSnapshot,
+    &HirariUnifiedEngine::regionHostReleaseSnapshot,
 };
 
 [[maybe_unused]] const bool kRegionEditHostInstalled = [] {

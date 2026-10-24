@@ -7,39 +7,7 @@ bool HirariUnifiedEngine::move_region_sync_group(uint32_t tid, uint32_t rid, dou
 }
 
 bool HirariUnifiedEngine::remove_region(uint32_t tid, uint32_t rid) {
-    if (tid == 0 || rid == 0) return false;
-    std::shared_ptr<Track> target;
-    Region before;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id != rid) continue;
-                target = track;
-                before = region;
-                break;
-            }
-            break;
-        }
-    }
-    if (!target) return false;
-
-    const auto remove = [this, target, rid]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target->removeRegion(rid);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
-    };
-    const auto restore = [this, target, before, rid]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target->removeRegion(rid);
-        target->addRegion(before);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
-    };
-    m_undoManager.performAction("Remove Region", restore, remove);
-    return true;
+    return hirari_region_edit_remove(this, tid, rid);
 }
 
 bool HirariUnifiedEngine::set_region_gain(uint32_t tid, uint32_t rid, float gain) {

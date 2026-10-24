@@ -35,6 +35,11 @@ use crate::region_processing::{
 pub const HIRARI_REGION_EDIT_INPLACE: i32 = 2;
 /// Payload op: replace the region's editable state and republish it.
 pub const HIRARI_REGION_EDIT_STATE: i32 = 1;
+/// Payload op: remove the region and drop its cached peaks.
+pub const HIRARI_REGION_EDIT_REMOVE: i32 = 12;
+/// Payload op: put a removed region back from a host-held snapshot handle. The
+/// host takes ownership of the handle when the payload is recorded for undo.
+pub const HIRARI_REGION_EDIT_RESTORE: i32 = 13;
 
 /// The editable part of a region. Mirrors the C++ `HirariRegionState` byte for
 /// byte; audio buffers, note edits and processing history stay in C++.
@@ -142,6 +147,11 @@ pub type HirariRegionRecordUndoFn = unsafe extern "C" fn(
     usize,
     bool,
 );
+/// Copies the whole region (audio, history, note edits) into an owned host
+/// handle, or returns null when the region does not exist.
+pub type HirariRegionSnapshotFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> *mut c_void;
+/// Frees a handle from `HirariRegionSnapshotFn` that was never recorded.
+pub type HirariRegionReleaseSnapshotFn = unsafe extern "C" fn(*mut c_void, *mut c_void);
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -151,6 +161,8 @@ pub struct HirariRegionHostOps {
     pub list_sync_group: Option<HirariRegionListGroupFn>,
     pub record_undo: Option<HirariRegionRecordUndoFn>,
     pub note_edit: Option<HirariRegionNoteEditHostFn>,
+    pub snapshot_region: Option<HirariRegionSnapshotFn>,
+    pub release_snapshot: Option<HirariRegionReleaseSnapshotFn>,
 }
 
 // The table only holds function pointers supplied by the native engine; it
@@ -459,6 +471,62 @@ fn edit_move_sync_group_with(
     }
     record(ops, host, b"Move Region Sync Group\0", &undo, &redo, true);
     true
+}
+
+/// Removes one region through an explicit host table. Undo restores the
+/// whole region from a snapshot the host holds, because audio buffers and
+/// processing history cannot travel in a numeric payload.
+fn edit_remove_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> bool {
+    if track_id == 0 || region_id == 0 {
+        return false;
+    }
+    let (Some(find), Some(apply), Some(snapshot), Some(release)) = (
+        ops.find_region,
+        ops.apply_edit,
+        ops.snapshot_region,
+        ops.release_snapshot,
+    ) else {
+        return false;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return false;
+    }
+    let handle = unsafe { snapshot(host, track_id, region_id) };
+    if handle.is_null() {
+        return false;
+    }
+    let remove = state_payload(track_id, region_id, HIRARI_REGION_EDIT_REMOVE, state);
+    if !unsafe { apply(host, &remove) } {
+        unsafe { release(host, handle) };
+        return false;
+    }
+    let mut restore = state_payload(track_id, region_id, HIRARI_REGION_EDIT_RESTORE, state);
+    restore.blob = handle as *const u8;
+    if ops.record_undo.is_some() {
+        // The host takes ownership of the handle with the undo entry.
+        record(ops, host, b"Remove Region\0", &[restore], &[remove], false);
+    } else {
+        unsafe { release(host, handle) };
+    }
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_remove(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    edit_remove_with(&ops, host, track_id, region_id)
 }
 
 /// Installs the native host callbacks. Passing null clears them.
@@ -1294,9 +1362,28 @@ use crate::audio_note_curve::{
         _host: *mut c_void,
         payload: *const HirariRegionEditPayload,
     ) -> bool {
+        if FAIL_APPLY.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
         let payload = unsafe { ptr::read(payload) };
         fake().lock().unwrap().applied.push(payload);
         true
+    }
+
+    static FAIL_APPLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static RELEASED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static SNAPSHOT_TARGET: u8 = 0;
+
+    unsafe extern "C" fn fake_snapshot(
+        _host: *mut c_void,
+        _track_id: u32,
+        _region_id: u32,
+    ) -> *mut c_void {
+        &SNAPSHOT_TARGET as *const u8 as *mut c_void
+    }
+
+    unsafe extern "C" fn fake_release(_host: *mut c_void, _handle: *mut c_void) {
+        RELEASED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     unsafe extern "C" fn fake_list(
@@ -1373,6 +1460,8 @@ use crate::audio_note_curve::{
             list_sync_group: Some(fake_list),
             record_undo: Some(fake_record_undo),
             note_edit: Some(fake_note_edit),
+            snapshot_region: Some(fake_snapshot),
+            release_snapshot: Some(fake_release),
         }
     }
 
@@ -1424,6 +1513,61 @@ use crate::audio_note_curve::{
         assert!(!edit_scalar_with(&ops, host, 1, 2, 1, f32::NAN, 0.0));
         assert!(fake().lock().unwrap().applied.is_empty());
 
+    }
+
+    #[test]
+    fn remove_applies_then_records_a_restore_that_owns_the_snapshot() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState { start: 10, len: 100, ..Default::default() });
+        RELEASED.store(0, std::sync::atomic::Ordering::SeqCst);
+
+        assert!(edit_remove_with(&ops, host, 1, 2));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_REMOVE);
+        assert_eq!(guard.undo_name, "Remove Region");
+        assert!(!guard.coalesce);
+        assert_eq!(guard.undo.len(), 1);
+        assert_eq!(guard.undo[0].op, HIRARI_REGION_EDIT_RESTORE);
+        assert_eq!(guard.undo[0].blob, &SNAPSHOT_TARGET as *const u8);
+        assert_eq!(guard.redo.len(), 1);
+        assert_eq!(guard.redo[0].op, HIRARI_REGION_EDIT_REMOVE);
+        assert!(guard.redo[0].blob.is_null());
+        // Ownership moved to the undo entry, so nothing was released here.
+        assert_eq!(RELEASED.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn failed_remove_releases_the_snapshot_and_records_nothing() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState { len: 100, ..Default::default() });
+        RELEASED.store(0, std::sync::atomic::Ordering::SeqCst);
+        FAIL_APPLY.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let removed = edit_remove_with(&ops, host, 1, 2);
+        FAIL_APPLY.store(false, std::sync::atomic::Ordering::SeqCst);
+
+        assert!(!removed);
+        assert_eq!(RELEASED.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(fake().lock().unwrap().undo.is_empty());
+    }
+
+    #[test]
+    fn remove_rejects_zero_ids_and_missing_regions() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState { len: 100, ..Default::default() });
+        assert!(!edit_remove_with(&ops, host, 0, 2));
+        assert!(!edit_remove_with(&ops, host, 1, 0));
+        fake().lock().unwrap().present = false;
+        assert!(!edit_remove_with(&ops, host, 1, 2));
+        assert!(fake().lock().unwrap().applied.is_empty());
     }
 
     #[test]
