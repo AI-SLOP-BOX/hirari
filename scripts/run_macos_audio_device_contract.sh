@@ -14,10 +14,16 @@ fi
 OUT_DIR=${TMPDIR:-/tmp}/hirari-macos-audio-device-contract
 mkdir -p "$OUT_DIR"
 
+# The CoreAudio device lifecycle moved to Rust; this contract links the same
+# staticlib every other native contract uses and drives the engine-facing
+# `MacAudioDriverHost` adapter against the real default output device.
+BRIDGE_LIB=$("$ROOT_DIR/scripts/build_bridge_staticlib.sh")
+
 ${CXX:-clang++} -std=c++20 -Wall -Wextra -I"$ROOT_DIR" -I"$ROOT_DIR/src" \
-    "$ROOT_DIR/tests/macos_audio_device_contract.mm" \
-    "$ROOT_DIR/src/platform/macos/coreaudio_device.mm" \
-    -framework AudioToolbox -framework AudioUnit -framework CoreAudio \
+    "$ROOT_DIR/tests/macos_audio_device_contract.cpp" \
+    "$BRIDGE_LIB" \
+    -framework Foundation -framework CoreAudio -framework CoreMIDI \
+    -framework AudioToolbox -framework AudioUnit -framework CoreMedia \
     -o "$OUT_DIR/macos-audio-device-contract"
 
 if "$OUT_DIR/macos-audio-device-contract"; then

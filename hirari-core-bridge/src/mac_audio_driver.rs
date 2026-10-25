@@ -2436,4 +2436,22 @@ mod tests {
         assert_eq!(realtime.stats.callback_count(), 1);
         assert!(realtime.stats.output_peak() >= 0.25);
     }
+
+    #[test]
+    fn channel_map_rejects_the_mono_device_the_deleted_cpp_contract_forced() {
+        // The deleted `Hirari::Platform` device contract opened a mono output
+        // to prove the backend did not assume two buffers. The live driver
+        // negotiates channels from the device instead of letting the caller
+        // pick them, and refuses anything that cannot cover the stereo engine
+        // boundary, so the assertion now sits on the mapping policy.
+        assert_eq!(channel_map(1, 1), Err(DriverError::NoOutputChannels(1)));
+        assert_eq!(channel_map(0, 2), Err(DriverError::NoInputChannels(0)));
+        assert_eq!(
+            channel_map(40, 40),
+            Ok(ChannelMap {
+                inputs: 32,
+                outputs: 32
+            })
+        );
+    }
 }

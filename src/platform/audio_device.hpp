@@ -78,12 +78,4 @@ private:
     std::string m_error = "audio backend unavailable; silent fallback selected";
 };
 
-#if defined(__APPLE__)
-std::unique_ptr<AudioDevice> createAudioDevice();
-#else
-inline std::unique_ptr<AudioDevice> createAudioDevice() {
-    return std::make_unique<SilentAudioDevice>();
-}
-#endif
-
 } // namespace Hirari::Platform
