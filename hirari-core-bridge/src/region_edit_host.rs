@@ -26,6 +26,7 @@ use std::ptr;
 use std::slice;
 use std::sync::{Mutex, OnceLock};
 
+use crate::region_comp_ranges::{hirari_region_comp_ranges_validate, NativeCompRange};
 use crate::region_mutations::hirari_region_sync_move_positions;
 use crate::region_processing::{
     hirari_free_range_edits, hirari_region_fade_samples, hirari_region_range_edits_apply,
@@ -54,6 +55,9 @@ pub const HIRARI_REGION_EDIT_RESTORE: i32 = 13;
 pub const HIRARI_REGION_EDIT_MARKERS: i32 = 15;
 /// Payload op: store the range-edit list packed in `blob` exactly as given.
 pub const HIRARI_REGION_EDIT_RANGE_EDITS: i32 = 16;
+/// Payload op: store the comp-range batch packed in `blob` plus `managed`
+/// exactly as given.
+pub const HIRARI_REGION_EDIT_COMP_RANGES: i32 = 17;
 
 /// The editable part of a region. Mirrors the C++ `HirariRegionState` byte for
 /// byte; audio buffers, note edits and processing history stay in C++.
@@ -120,6 +124,8 @@ pub struct HirariRegionEditPayload {
     pub blob: *const u8,
     pub blob_len: usize,
     pub state: HirariRegionState,
+    /// Comp-range batch flag; unused by the other ops.
+    pub managed: bool,
 }
 
 // The payload only borrows a buffer (or hands over an opaque snapshot handle)
@@ -667,6 +673,7 @@ fn geometry_payload(
         },
         blob_len: std::mem::size_of_val(markers),
         state,
+        ..Default::default()
     }
 }
 
@@ -859,6 +866,7 @@ fn range_edit_payload(
         },
         blob_len: std::mem::size_of_val(edits),
         state,
+        ..Default::default()
     }
 }
 
@@ -994,6 +1002,88 @@ pub unsafe extern "C" fn hirari_region_edit_range_edits_clear(
         return false;
     };
     clear_range_edits_with(&ops, host, track_id, region_id)
+}
+
+/// Replaces a region's comp-range batch.
+///
+/// The policy (count, ordering, fades, bounds, lock/managed interaction) is
+/// `hirari_region_comp_ranges_validate`; the host only stores the accepted
+/// batch. The native setter never touched the undo history, so neither does
+/// this path.
+fn set_comp_ranges_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    packed_words: *const u64,
+    word_count: usize,
+    managed: bool,
+) -> bool {
+    let (Some(find), Some(apply)) = (ops.find_region, ops.apply_edit) else {
+        return false;
+    };
+    if word_count % 4 != 0 || word_count / 4 > 4096 {
+        return false;
+    }
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return false;
+    }
+    let range_count = word_count / 4;
+    if !unsafe {
+        hirari_region_comp_ranges_validate(
+            packed_words.cast::<NativeCompRange>(),
+            range_count,
+            state.len,
+            state.locked,
+            managed,
+        )
+    } {
+        return false;
+    }
+    let payload = HirariRegionEditPayload {
+        track_id,
+        region_id,
+        op: HIRARI_REGION_EDIT_COMP_RANGES,
+        blob: if word_count == 0 {
+            ptr::null()
+        } else {
+            packed_words.cast()
+        },
+        blob_len: word_count * std::mem::size_of::<u64>(),
+        state,
+        managed,
+    };
+    unsafe { apply(host, &payload) }
+}
+
+/// Adopts a comp-range batch packed as four `u64` words per range.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect, the
+/// installed table must outlive the call, and `packed_words` must be readable
+/// for `word_count` words.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_comp_ranges_set(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    packed_words: *const u64,
+    word_count: usize,
+    managed: bool,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    set_comp_ranges_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        packed_words,
+        word_count,
+        managed,
+    )
 }
 
 /// Moves one region to `start` through an explicit host table.
@@ -2842,5 +2932,99 @@ use crate::audio_note_curve::{
         }
         fake().lock().unwrap().range_edits.clear();
         assert!(!clear_range_edits_with(&ops, host, 1, 2));
+    }
+
+    #[test]
+    fn comp_range_batch_is_admitted_and_stored_verbatim() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 400,
+            ..Default::default()
+        });
+        let packed = [0u64, 100, 10, 10, 100, 250, 0, 25, 250, 400, 5, 5];
+
+        assert!(set_comp_ranges_with(
+            &ops,
+            host,
+            1,
+            2,
+            packed.as_ptr(),
+            packed.len(),
+            true
+        ));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_COMP_RANGES);
+        assert!(guard.applied[0].managed);
+        assert_eq!(guard.applied[0].blob_len, std::mem::size_of_val(&packed));
+        let stored = unsafe {
+            slice::from_raw_parts(guard.applied[0].blob.cast::<u64>(), packed.len())
+        };
+        assert_eq!(stored, packed);
+    }
+
+    #[test]
+    fn comp_range_batch_rejects_malformed_or_locked_batches() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            ..Default::default()
+        });
+
+        // A trailing word that is not a full range.
+        let ragged = [0u64, 50, 0, 0, 1];
+        assert!(!set_comp_ranges_with(
+            &ops,
+            host,
+            1,
+            2,
+            ragged.as_ptr(),
+            ragged.len(),
+            true
+        ));
+        // Ordered but past the region length.
+        let beyond = [0u64, 101, 0, 0];
+        assert!(!set_comp_ranges_with(
+            &ops,
+            host,
+            1,
+            2,
+            beyond.as_ptr(),
+            beyond.len(),
+            true
+        ));
+        // A null pointer with a non-zero count must not be read.
+        assert!(!set_comp_ranges_with(&ops, host, 1, 2, ptr::null(), 4, true));
+        assert!(fake().lock().unwrap().applied.is_empty());
+
+        // Locking only refuses turning the managed flag on.
+        fake().lock().unwrap().state.locked = true;
+        let valid = [0u64, 50, 0, 0];
+        assert!(!set_comp_ranges_with(
+            &ops,
+            host,
+            1,
+            2,
+            valid.as_ptr(),
+            valid.len(),
+            true
+        ));
+        assert!(set_comp_ranges_with(
+            &ops,
+            host,
+            1,
+            2,
+            valid.as_ptr(),
+            valid.len(),
+            false
+        ));
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert!(!guard.applied[0].managed);
     }
 }

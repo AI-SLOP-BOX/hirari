@@ -460,12 +460,6 @@ struct HirariRegionCompRange {
     uint64_t fade_in;
     uint64_t fade_out;
 };
-// Authoritative comp-range edit policy: count bound, ordering and overlap,
-// fade fits inside its own range, every range inside the region, and the
-// lock/managed interaction. Returns false when the batch may not be stored.
-extern "C" bool hirari_region_comp_ranges_validate(
-    const HirariRegionCompRange* ranges, size_t range_count, uint64_t region_len,
-    bool locked, bool managed);
 
 // Rust-owned per-region processing-step history. `operation` is borrowed for
 // the duration of a call and copied into the store; nothing on the render path
@@ -718,6 +712,9 @@ enum HirariRegionEditOp : int32_t {
     kHirariRegionEditMarkers = 15,
     // Store the range-edit list packed in the blob exactly as given.
     kHirariRegionEditRangeEdits = 16,
+    // Store the comp-range batch packed in the blob plus `managed` exactly as
+    // given.
+    kHirariRegionEditCompRanges = 17,
 };
 
 struct HirariRegionEditPayload {
@@ -729,6 +726,8 @@ struct HirariRegionEditPayload {
     const uint8_t* blob = nullptr;
     size_t blobLen = 0;
     HirariRegionState state;
+    // Comp-range batch flag; unused by the other ops.
+    bool managed = false;
 };
 
 struct HirariRegionGroupMember {
@@ -875,6 +874,12 @@ extern "C" bool hirari_region_edit_range_edit_set(void* host, uint32_t trackId,
                                                   uint64_t fadeOut);
 extern "C" bool hirari_region_edit_range_edits_clear(void* host, uint32_t trackId,
                                                      uint32_t regionId);
+// Adopts a comp-range batch packed as four words per range after the Rust
+// policy accepts it.
+extern "C" bool hirari_region_edit_comp_ranges_set(void* host, uint32_t trackId,
+                                                   uint32_t regionId,
+                                                   const uint64_t* packedWords,
+                                                   size_t wordCount, bool managed);
 
 // Automation edit host. Rust owns the validation and the undo capture; the
 // engine keeps the curves and publishes the immutable snapshots.

@@ -511,26 +511,20 @@
         return true;
     }
 
-    bool setRegionCompRanges(
-        uint32_t rid,
-        const std::vector<Region::CompRange>& ranges,
-        bool managed) {
-        if (ranges.size() > 4096) return false;
+    // Adopts the comp-range batch Rust admitted. The rules (count, ordering,
+    // overlap, fade width, region bounds, lock/managed interaction) live in
+    // `hirari_region_comp_ranges_validate`; storing the accepted batch is all
+    // that is left here.
+    bool replaceRegionCompRanges(uint32_t rid, std::vector<Region::CompRange> ranges,
+                                 bool managed) {
+        static_assert(sizeof(Region::CompRange) == sizeof(HirariRegionCompRange));
+        static_assert(offsetof(Region::CompRange, start) == offsetof(HirariRegionCompRange, start));
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid) continue;
-            static_assert(sizeof(Region::CompRange) == sizeof(HirariRegionCompRange));
-            static_assert(offsetof(Region::CompRange, start) == offsetof(HirariRegionCompRange, start));
-            // Admissibility (count, ordering/overlap, fade width, region
-            // bounds, lock/managed interaction) is owned by the Rust core.
-            if (!hirari_region_comp_ranges_validate(
-                    reinterpret_cast<const HirariRegionCompRange*>(ranges.data()),
-                    ranges.size(), region.len, region.locked, managed)) {
-                return false;
-            }
             region.compManaged = managed;
-            region.compRanges = ranges;
+            region.compRanges = std::move(ranges);
             publishRegionSnapshot();
             return true;
         }

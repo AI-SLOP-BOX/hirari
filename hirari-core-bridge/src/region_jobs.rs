@@ -276,6 +276,7 @@ fn edit_payload(
         blob,
         blob_len: 0,
         state: HirariRegionState::default(),
+        ..Default::default()
     }
 }
 

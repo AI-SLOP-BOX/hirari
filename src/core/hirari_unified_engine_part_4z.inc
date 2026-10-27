@@ -145,11 +145,30 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
                                                      std::move(replacement), false);
             break;
         }
+        case kHirariRegionEditCompRanges: {
+            if (payload->blobLen % sizeof(HirariRegionCompRange) != 0) break;
+            const auto count = payload->blobLen / sizeof(HirariRegionCompRange);
+            if (count != 0 && payload->blob == nullptr) break;
+            const auto* source =
+                reinterpret_cast<const HirariRegionCompRange*>(payload->blob);
+            std::vector<Region::CompRange> replacement;
+            replacement.reserve(count);
+            for (size_t index = 0; index < count; ++index) {
+                replacement.push_back({source[index].start, source[index].end,
+                                       source[index].fade_in, source[index].fade_out});
+            }
+            applied = track->replaceRegionCompRanges(payload->regionId,
+                                                     std::move(replacement),
+                                                     payload->managed);
+            break;
+        }
         default:
             applied = track->applyRegionScalarFields(payload->regionId, payload->state);
             break;
         }
-        if (applied) {
+        if (applied && payload->op != kHirariRegionEditCompRanges) {
+            // The comp-range setter published the snapshot without dropping
+            // the cached peaks; keep that path unchanged.
             hirari_region_waveform_forget(engine, payload->regionId);
         }
         return applied;

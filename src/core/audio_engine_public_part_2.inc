@@ -368,7 +368,9 @@
     bool set_region_muted(uint32_t tid, uint32_t rid, bool muted) const { return m_engine && m_engine->set_region_muted(tid, rid, muted); }
     bool set_region_comp_ranges(uint32_t tid, uint32_t rid,
                                rust::Slice<const uint64_t> packedRanges, bool managed) const {
-        return m_engine && m_engine->set_region_comp_ranges(tid, rid, packedRanges, managed);
+        return m_engine && hirari_region_edit_comp_ranges_set(
+                               m_engine.get(), tid, rid, packedRanges.data(),
+                               packedRanges.size(), managed);
     }
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) const { return m_engine && m_engine->set_region_fades(tid, rid, fadeIn, fadeOut); }
     bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,

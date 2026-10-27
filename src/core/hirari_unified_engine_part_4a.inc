@@ -19,31 +19,6 @@ bool HirariUnifiedEngine::set_region_muted(uint32_t tid, uint32_t rid, bool mute
                                      muted ? 1.0f : 0.0f, 0.0f);
 }
 
-bool HirariUnifiedEngine::set_region_comp_ranges(
-    uint32_t tid,
-    uint32_t rid,
-    rust::Slice<const uint64_t> packedRanges,
-    bool managed) {
-    if (packedRanges.size() % 4 != 0 || packedRanges.size() / 4 > 4096) return false;
-    std::vector<Region::CompRange> ranges;
-    ranges.reserve(packedRanges.size() / 4);
-    for (size_t index = 0; index < packedRanges.size(); index += 4) {
-        ranges.push_back({packedRanges[index], packedRanges[index + 1],
-                          packedRanges[index + 2], packedRanges[index + 3]});
-    }
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() == tid) {
-                target = track;
-                break;
-            }
-        }
-    }
-    return target && target->setRegionCompRanges(rid, ranges, managed);
-}
-
 bool HirariUnifiedEngine::set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) {
     return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarFades, fadeIn, fadeOut);
 }

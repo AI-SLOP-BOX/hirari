@@ -74,6 +74,11 @@ production support.
   cancellation all have one implementation in
   `hirari-core-bridge/src/project_layout.rs`. `get_project_generation` now
   fingerprints the Rust buffer instead of streaming through a C++ streambuf.
+- Comp-range batches now run through the Rust region-edit host. The packed
+  words are checked and admitted by `hirari_region_comp_ranges_validate`, the
+  accepted list and managed flag reach C++ as one payload, and the engine
+  wrapper plus the duplicated Track admission code are gone. The setter never
+  recorded undo, so the history is unchanged.
 - Region range edits (gain-automation segments) now run through the Rust
   region-edit host. Rust validates upserts against the region length, applies
   the shared range-edit policy, stores the resulting list through a new

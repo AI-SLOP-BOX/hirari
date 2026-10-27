@@ -313,6 +313,7 @@ fn markers_payload(
         },
         blob_len: std::mem::size_of_val(markers),
         state: HirariRegionState::default(),
+        ..Default::default()
     }
 }
 

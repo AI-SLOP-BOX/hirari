@@ -7,8 +7,6 @@ public:
     bool move_region_sync_group(uint32_t tid, uint32_t rid, double startBeat);
     bool set_region_gain(uint32_t tid, uint32_t rid, float gain);
     bool set_region_muted(uint32_t tid, uint32_t rid, bool muted);
-    bool set_region_comp_ranges(uint32_t tid, uint32_t rid,
-                                rust::Slice<const uint64_t> packedRanges, bool managed);
     void clear_midi_notes();
     struct ScheduledMidiNote {
         uint32_t trackId = 0;
