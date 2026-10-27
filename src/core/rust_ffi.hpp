@@ -2003,6 +2003,19 @@ extern "C" size_t hirari_undo_manager_redo_count(const void* state);
 extern "C" size_t hirari_undo_manager_top_name(
     const void* state, bool redo, uint8_t* output, size_t capacity);
 extern "C" void hirari_undo_manager_clear(void* state);
+
+// History control for the engine facade. The stacks live in Rust; `host` is
+// the engine the replayed structural edit resyncs against.
+extern "C" void hirari_undo_edit_undo(void* undo, const void* log, void* host);
+extern "C" void hirari_undo_edit_redo(void* undo, const void* log, void* host);
+extern "C" bool hirari_undo_edit_transaction_active(const void* undo);
+extern "C" void hirari_undo_edit_begin_transaction(
+    void* undo, const uint8_t* name, size_t name_len);
+extern "C" bool hirari_undo_edit_end_transaction(void* undo);
+extern "C" bool hirari_undo_edit_abort_transaction(void* undo, void* host);
+extern "C" void hirari_undo_edit_clear(void* undo);
+extern "C" uint32_t hirari_undo_edit_undo_count(const void* undo);
+extern "C" uint32_t hirari_undo_edit_redo_count(const void* undo);
 struct HirariAudioQuantizeChannelView {
     const float* samples = nullptr;
     uint64_t span = 0;

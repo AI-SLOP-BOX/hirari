@@ -27,15 +27,6 @@
     MeterData getMasterMeterData() const;
     bool execute_auto_mixing();
     bool execute_auto_arrangement();
-    void undo();
-    void redo();
-    bool is_undo_transaction_active() const;
-    void begin_undo_transaction(std::string_view name);
-    bool end_undo_transaction();
-    bool abort_undo_transaction();
-    void clear_undo_history();
-    uint32_t get_undo_count() const;
-    uint32_t get_redo_count() const;
     rust::String get_project_layout_json() const;
     rust::String get_project_layout_json_cancellable(
         const std::atomic<bool>* cancellation) const;

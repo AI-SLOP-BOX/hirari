@@ -78,7 +78,7 @@ public:
         return m_engine && m_engine->bus_track_exists(busTrackId);
     }
     void clear_undo_history() const {
-        if (m_engine) m_engine->clear_undo_history();
+        if (m_engine) hirari_undo_edit_clear(m_engine->undo_state());
     }
     float get_master_gain() const noexcept {
         return m_engine ? m_engine->get_master_gain() : 1.0f;

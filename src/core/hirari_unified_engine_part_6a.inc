@@ -10,48 +10,11 @@ bool HirariUnifiedEngine::set_track_eq(uint32_t trackId, float lowBoostDb, float
     return false;
 }
 
-void HirariUnifiedEngine::undo() {
-    const bool hasUndo = m_undoManager.getUndoCount() != 0;
-    m_undoManager.undo();
-    if (hasUndo) syncStructuralChanges();
-}
-
-void HirariUnifiedEngine::redo() {
-    const bool hasRedo = m_undoManager.getRedoCount() != 0;
-    m_undoManager.redo();
-    if (hasRedo) syncStructuralChanges();
-}
-
-bool HirariUnifiedEngine::is_undo_transaction_active() const {
-    return m_undoManager.transactionActive();
-}
-
-void HirariUnifiedEngine::begin_undo_transaction(std::string_view name) {
-    m_undoManager.beginTransaction(std::string(name));
-}
-
-bool HirariUnifiedEngine::end_undo_transaction() {
-    return m_undoManager.endTransaction();
-}
-
-bool HirariUnifiedEngine::abort_undo_transaction() {
-    const bool aborted = m_undoManager.abortTransaction();
-    if (aborted) syncStructuralChanges();
-    return aborted;
-}
-
-void HirariUnifiedEngine::clear_undo_history() {
-    m_undoManager.clear();
-}
-
-uint32_t HirariUnifiedEngine::get_undo_count() const {
-    return static_cast<uint32_t>(std::min<std::size_t>(
-        m_undoManager.getUndoCount(), UINT32_MAX));
-}
-
-uint32_t HirariUnifiedEngine::get_redo_count() const {
-    return static_cast<uint32_t>(std::min<std::size_t>(
-        m_undoManager.getRedoCount(), UINT32_MAX));
+// History control (undo, redo, transactions, counts) is Rust-owned; the C++
+// facade calls the Rust entry points directly. The one thing that must stay
+// here is the graph resync that follows a replayed structural edit.
+extern "C" void hirari_engine_sync_structural_changes(void* host) {
+    if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
 }
 
 rust::String HirariUnifiedEngine::get_project_layout_json() const {

@@ -114,6 +114,12 @@ production support.
   prefixes/suffixes (case-insensitive, byte-level so non-UTF-8 paths keep
   working). The engine wrappers only forward and resolve, and the
   duplicated validator code was removed.
+- Undo, redo, history transactions and undo/redo depth now run through Rust
+  entry points. The stacks were already Rust-owned; the engine wrappers that
+  read the depth, applied the history and logged the top action were removed,
+  and Rust now posts the same `UNDO | UNDONE` / `REDONE` / stack-empty lines,
+  rolls back an unfinished transaction when a new one starts, and calls back
+  into the engine only for the structural resync a replayed edit needs.
 - Master-gain edits now run in Rust. The bridge owns the finite/`0..=2.0`
   admission, reads the current value, applies the change through the facade
   setter and records one `Master Gain` history entry only when the value

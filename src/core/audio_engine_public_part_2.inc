@@ -300,8 +300,12 @@
     bool cancel_bounce() const noexcept { return m_engine && m_engine->cancel_bounce(); }
     bool pause_bounce() const noexcept { return m_engine && m_engine->pause_bounce(); }
     bool resume_bounce() const noexcept { return m_engine && m_engine->resume_bounce(); }
-    uint32_t get_undo_count() const { return m_engine ? m_engine->get_undo_count() : 0; }
-    uint32_t get_redo_count() const { return m_engine ? m_engine->get_redo_count() : 0; }
+    uint32_t get_undo_count() const {
+        return m_engine ? hirari_undo_edit_undo_count(m_engine->undo_state()) : 0;
+    }
+    uint32_t get_redo_count() const {
+        return m_engine ? hirari_undo_edit_redo_count(m_engine->undo_state()) : 0;
+    }
     bool execute_vocal_remover(uint32_t tid) const { return m_engine && m_engine->execute_vocal_remover(tid); }
     bool set_articulation_map(uint32_t tid, uint32_t mapHash) const { return m_engine && m_engine->set_articulation_map(tid, mapHash); }
     bool set_expression_map(uint32_t tid, rust::Vec<uint32_t> packed, rust::String json,
@@ -324,16 +328,35 @@
     bool set_project_scale(int32_t root, int32_t type) const {
         return m_engine && m_engine->set_project_scale(root, type);
     }
-    void undo() const { if (m_engine) m_engine->undo(); }
-    void redo() const { if (m_engine) m_engine->redo(); }
+    void undo() const {
+        if (m_engine) {
+            hirari_undo_edit_undo(m_engine->undo_state(), m_engine->log_state(),
+                                  m_engine.get());
+        }
+    }
+    void redo() const {
+        if (m_engine) {
+            hirari_undo_edit_redo(m_engine->undo_state(), m_engine->log_state(),
+                                  m_engine.get());
+        }
+    }
     bool is_undo_transaction_active() const {
-        return m_engine && m_engine->is_undo_transaction_active();
+        return m_engine && hirari_undo_edit_transaction_active(m_engine->undo_state());
     }
     void begin_undo_transaction(rust::Str name) const {
-        if (m_engine) m_engine->begin_undo_transaction(std::string_view(name.data(), name.size()));
+        if (m_engine) {
+            hirari_undo_edit_begin_transaction(
+                m_engine->undo_state(), reinterpret_cast<const uint8_t*>(name.data()),
+                name.size());
+        }
     }
-    bool end_undo_transaction() const { return m_engine && m_engine->end_undo_transaction(); }
-    bool abort_undo_transaction() const { return m_engine && m_engine->abort_undo_transaction(); }
+    bool end_undo_transaction() const {
+        return m_engine && hirari_undo_edit_end_transaction(m_engine->undo_state());
+    }
+    bool abort_undo_transaction() const {
+        return m_engine &&
+            hirari_undo_edit_abort_transaction(m_engine->undo_state(), m_engine.get());
+    }
 
     bool move_region(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region(tid, rid, startBeat); }
     bool move_region_sync_group(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region_sync_group(tid, rid, startBeat); }
