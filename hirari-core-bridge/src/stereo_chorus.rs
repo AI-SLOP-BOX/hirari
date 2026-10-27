@@ -143,10 +143,10 @@ impl StereoChorusEngine {
                 } else {
                     input_left
                 };
-                let phase = (runtime.lfo_phase * 6.283_185_307) as f32;
+                let phase = (runtime.lfo_phase * std::f64::consts::TAU) as f32;
                 let delay_left = (28.0 + 12.0 * phase.sin()).clamp(1.0, 80.0) as u32;
-                let delay_right =
-                    (40.0 + 12.0 * (phase + 1.570_796_3).sin()).clamp(1.0, 80.0) as u32;
+                let delay_right = (40.0 + 12.0 * (phase + std::f32::consts::FRAC_PI_2).sin())
+                    .clamp(1.0, 80.0) as u32;
                 let delayed_left = runtime.delay_l.process(input_left, delay_left as f32);
                 let delayed_right = runtime.delay_r.process(input_right, delay_right as f32);
                 left[frame] = (input_left * (1.0 - mix) + delayed_left * mix).clamp(-16.0, 16.0);
@@ -161,7 +161,7 @@ impl StereoChorusEngine {
                 } else {
                     0.0
                 };
-                let phase = (runtime.lfo_phase * 6.283_185_307) as f32;
+                let phase = (runtime.lfo_phase * std::f64::consts::TAU) as f32;
                 let delay = (28.0 + 12.0 * phase.sin()).clamp(1.0, 80.0) as u32;
                 let delayed = runtime.delay_l.process(input, delay as f32);
                 *sample = (input * (1.0 - mix) + delayed * mix).clamp(-16.0, 16.0);
@@ -230,9 +230,10 @@ mod native_behavior_tests {
             } else {
                 input_left
             };
-            let angle = (phase * 6.283_185_307) as f32;
+            let angle = (phase * std::f64::consts::TAU) as f32;
             let tap_left = (28.0 + 12.0 * angle.sin()).clamp(1.0, 80.0) as u32;
-            let tap_right = (40.0 + 12.0 * (angle + 1.570_796_3).sin()).clamp(1.0, 80.0) as u32;
+            let tap_right = (40.0 + 12.0 * (angle + std::f32::consts::FRAC_PI_2).sin())
+                .clamp(1.0, 80.0) as u32;
             let wet_left = delay_left.process(input_left, tap_left as f32);
             let wet_right = delay_right.process(input_right, tap_right as f32);
             expected_left[index] = (input_left * dry_mix + wet_left * 0.6).clamp(-16.0, 16.0);

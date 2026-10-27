@@ -251,6 +251,9 @@ public:
     std::uintptr_t cacheKey() const noexcept {
         return reinterpret_cast<std::uintptr_t>(snapshot_.get());
     }
+    /// Immutable published projection, borrowed for the duration of a call.
+    /// Null until the region has been published at least once.
+    const HirariVariAudioFrozen* frozenHandle() const noexcept { return snapshot_.get(); }
 
 private:
     using ReplaceFn = bool (*)(HirariRegionVariAudioStore*,

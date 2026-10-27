@@ -50,16 +50,17 @@ public:
         postActionLog("UNDO | PERFORMED | ", name);
     }
 
-    void recordAppliedAction(const std::string& name, std::function<void()> undo,
+    bool recordAppliedAction(const std::string& name, std::function<void()> undo,
                              std::function<void()> redo, bool coalesce = false) {
-        if (!undo || !redo) return;
+        if (!undo || !redo) return false;
         const auto [undoId, redoId] = storeCallbacks(std::move(undo), std::move(redo));
         if (!undoId || !redoId || !record(name, undoId, redoId, coalesce)) {
             discard(undoId);
             discard(redoId);
-            return;
+            return false;
         }
         postActionLog("UNDO | RECORDED | ", name);
+        return true;
     }
 
     void beginTransaction(const std::string& name) {

@@ -31,6 +31,10 @@ pub const HIRARI_ROUTING_EDIT_SIDECHAIN: i32 = 5;
 pub const HIRARI_ROUTING_EDIT_ARM: i32 = 6;
 pub const HIRARI_ROUTING_EDIT_PHASE: i32 = 7;
 pub const HIRARI_ROUTING_EDIT_DELAY: i32 = 8;
+pub const HIRARI_ROUTING_EDIT_VOLUME: i32 = 9;
+pub const HIRARI_ROUTING_EDIT_PAN: i32 = 10;
+pub const HIRARI_ROUTING_EDIT_MUTE: i32 = 11;
+pub const HIRARI_ROUTING_EDIT_SOLO: i32 = 12;
 
 /// One reversible mutation. The host applies the payload without re-deciding;
 /// sidechain payloads are the exception because their previous state is
@@ -79,6 +83,10 @@ pub struct HirariRoutingTrackState {
     pub phase_inverted: bool,
     pub is_bus: bool,
     pub delay_samples: u32,
+    pub volume: f32,
+    pub pan: f32,
+    pub muted: bool,
+    pub solo: bool,
 }
 
 #[repr(C)]
@@ -112,6 +120,7 @@ pub type SidechainContextFn =
 pub type ApplyRouteFn = unsafe extern "C" fn(*mut c_void, *const HirariRoutingEditPayload) -> bool;
 pub type ApplyFeedbackFn = unsafe extern "C" fn(*mut c_void, u32, u32, f32) -> bool;
 pub type ApplyTrackScalarFn = unsafe extern "C" fn(*mut c_void, u32, i32, bool, u32) -> bool;
+pub type ApplyTrackMixFn = unsafe extern "C" fn(*mut c_void, u32, i32, f32) -> bool;
 pub type RemoveSidechainFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> bool;
 /// `silent` selects the manager's silent registration path for sources that
 /// are not prepared yet.
@@ -157,6 +166,7 @@ pub struct HirariRoutingHostOps {
     pub mark_layout_changed: Option<HostFn>,
     pub publish_routes: Option<HostFn>,
     pub record_undo: Option<RecordUndoFn>,
+    pub apply_track_mix: Option<ApplyTrackMixFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -235,6 +245,15 @@ fn track_payload(op: i32, track_id: u32, enabled: bool, samples: u32) -> HirariR
         source_id: track_id,
         samples,
         enabled,
+        ..Default::default()
+    }
+}
+
+fn track_mix_payload(op: i32, track_id: u32, value: f32) -> HirariRoutingEditPayload {
+    HirariRoutingEditPayload {
+        op,
+        source_id: track_id,
+        gain: value,
         ..Default::default()
     }
 }
@@ -947,6 +966,169 @@ fn set_track_delay_with(
     true
 }
 
+const MAX_TRACK_VOLUME: f32 = 2.0;
+
+fn apply_track_mix(
+    ops: &HirariRoutingHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    op: i32,
+    value: f32,
+) -> bool {
+    match ops.apply_track_mix {
+        Some(apply) => unsafe { apply(host, track_id, op, value) },
+        None => false,
+    }
+}
+
+/// Mix edits record even when the value already matches: the previous engine
+/// pushed an undo entry per call and control surfaces rely on that cadence.
+fn set_track_volume_with(
+    ops: &HirariRoutingHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    value: f32,
+    record: bool,
+) -> bool {
+    if !value.is_finite() || !(0.0..=MAX_TRACK_VOLUME).contains(&value) {
+        return false;
+    }
+    let Some(track) = query_track(ops, host, track_id) else {
+        return false;
+    };
+    if !apply_track_mix(ops, host, track_id, HIRARI_ROUTING_EDIT_VOLUME, value) {
+        return false;
+    }
+    if record {
+        let mut name = format!("Track Volume {track_id}").into_bytes();
+        name.push(0);
+        record_undo(
+            ops,
+            host,
+            &name,
+            &[track_mix_payload(
+                HIRARI_ROUTING_EDIT_VOLUME,
+                track_id,
+                track.volume,
+            )],
+            &[track_mix_payload(
+                HIRARI_ROUTING_EDIT_VOLUME,
+                track_id,
+                value,
+            )],
+            false,
+            false,
+        );
+    }
+    true
+}
+
+fn set_track_pan_with(
+    ops: &HirariRoutingHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    value: f32,
+    record: bool,
+) -> bool {
+    if !value.is_finite() || !(-1.0..=1.0).contains(&value) {
+        return false;
+    }
+    let Some(track) = query_track(ops, host, track_id) else {
+        return false;
+    };
+    if !apply_track_mix(ops, host, track_id, HIRARI_ROUTING_EDIT_PAN, value) {
+        return false;
+    }
+    if record {
+        let mut name = format!("Track Pan {track_id}").into_bytes();
+        name.push(0);
+        record_undo(
+            ops,
+            host,
+            &name,
+            &[track_mix_payload(HIRARI_ROUTING_EDIT_PAN, track_id, track.pan)],
+            &[track_mix_payload(HIRARI_ROUTING_EDIT_PAN, track_id, value)],
+            false,
+            false,
+        );
+    }
+    true
+}
+
+fn set_track_mute_with(
+    ops: &HirariRoutingHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    muted: bool,
+    record: bool,
+) -> bool {
+    let Some(track) = query_track(ops, host, track_id) else {
+        return false;
+    };
+    let Some(apply) = ops.apply_track_scalar else {
+        return false;
+    };
+    if !unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_MUTE, muted, 0) } {
+        return false;
+    }
+    if record {
+        let mut name = format!("Track Mute {track_id}").into_bytes();
+        name.push(0);
+        record_undo(
+            ops,
+            host,
+            &name,
+            &[track_payload(
+                HIRARI_ROUTING_EDIT_MUTE,
+                track_id,
+                track.muted,
+                0,
+            )],
+            &[track_payload(HIRARI_ROUTING_EDIT_MUTE, track_id, muted, 0)],
+            false,
+            false,
+        );
+    }
+    true
+}
+
+fn set_track_solo_with(
+    ops: &HirariRoutingHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    solo: bool,
+    record: bool,
+) -> bool {
+    let Some(track) = query_track(ops, host, track_id) else {
+        return false;
+    };
+    let Some(apply) = ops.apply_track_scalar else {
+        return false;
+    };
+    if !unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_SOLO, solo, 0) } {
+        return false;
+    }
+    if record {
+        let mut name = format!("Track Solo {track_id}").into_bytes();
+        name.push(0);
+        record_undo(
+            ops,
+            host,
+            &name,
+            &[track_payload(
+                HIRARI_ROUTING_EDIT_SOLO,
+                track_id,
+                track.solo,
+                0,
+            )],
+            &[track_payload(HIRARI_ROUTING_EDIT_SOLO, track_id, solo, 0)],
+            false,
+            false,
+        );
+    }
+    true
+}
+
 /// Applies one recorded payload. Route payloads are already resolved and are
 /// applied directly; sidechain payloads re-run the policy so the undo path
 /// keeps the same cycle/rollback behavior as the original C++ recursion.
@@ -986,9 +1168,18 @@ fn apply_payload_with(
                 false,
             );
         }
-        HIRARI_ROUTING_EDIT_ARM | HIRARI_ROUTING_EDIT_PHASE | HIRARI_ROUTING_EDIT_DELAY => {
+        HIRARI_ROUTING_EDIT_ARM
+        | HIRARI_ROUTING_EDIT_PHASE
+        | HIRARI_ROUTING_EDIT_DELAY
+        | HIRARI_ROUTING_EDIT_MUTE
+        | HIRARI_ROUTING_EDIT_SOLO => {
             if let Some(apply) = ops.apply_track_scalar {
                 unsafe { apply(host, edit.source_id, edit.op, edit.enabled, edit.samples) };
+            }
+        }
+        HIRARI_ROUTING_EDIT_VOLUME | HIRARI_ROUTING_EDIT_PAN => {
+            if let Some(apply) = ops.apply_track_mix {
+                unsafe { apply(host, edit.source_id, edit.op, edit.gain) };
             }
         }
         _ => {}
@@ -1109,6 +1300,42 @@ pub unsafe extern "C" fn hirari_routing_edit_set_track_delay_samples(
     with_ops(|ops| set_track_delay_with(ops, host, track_id, samples, true))
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn hirari_routing_edit_set_track_volume(
+    host: *mut c_void,
+    track_id: u32,
+    value: f32,
+) -> bool {
+    with_ops(|ops| set_track_volume_with(ops, host, track_id, value, true))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_routing_edit_set_track_pan(
+    host: *mut c_void,
+    track_id: u32,
+    value: f32,
+) -> bool {
+    with_ops(|ops| set_track_pan_with(ops, host, track_id, value, true))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_routing_edit_set_track_mute(
+    host: *mut c_void,
+    track_id: u32,
+    muted: bool,
+) -> bool {
+    with_ops(|ops| set_track_mute_with(ops, host, track_id, muted, true))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_routing_edit_set_track_solo(
+    host: *mut c_void,
+    track_id: u32,
+    solo: bool,
+) -> bool {
+    with_ops(|ops| set_track_solo_with(ops, host, track_id, solo, true))
+}
+
 /// Replays a recorded undo or redo payload list through the same policy.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_routing_edit_apply_payloads(
@@ -1136,6 +1363,10 @@ mod tests {
         phase: bool,
         delay: u32,
         is_bus: bool,
+        volume: f32,
+        pan: f32,
+        muted: bool,
+        solo: bool,
     }
 
     #[derive(Clone, Copy)]
@@ -1220,6 +1451,10 @@ mod tests {
             phase_inverted: track.phase,
             is_bus: track.is_bus,
             delay_samples: track.delay,
+            volume: track.volume,
+            pan: track.pan,
+            muted: track.muted,
+            solo: track.solo,
         };
         true
     }
@@ -1307,7 +1542,28 @@ mod tests {
         match op {
             HIRARI_ROUTING_EDIT_ARM => track.armed = enabled,
             HIRARI_ROUTING_EDIT_PHASE => track.phase = enabled,
-            _ => track.delay = samples,
+            HIRARI_ROUTING_EDIT_DELAY => track.delay = samples,
+            HIRARI_ROUTING_EDIT_MUTE => track.muted = enabled,
+            HIRARI_ROUTING_EDIT_SOLO => track.solo = enabled,
+            _ => return false,
+        }
+        true
+    }
+
+    unsafe extern "C" fn test_apply_track_mix(
+        host: *mut c_void,
+        track_id: u32,
+        op: i32,
+        value: f32,
+    ) -> bool {
+        let host = &mut *(host as *mut TestHost);
+        let Some((_, track)) = host.tracks.iter_mut().find(|(id, _)| *id == track_id) else {
+            return false;
+        };
+        match op {
+            HIRARI_ROUTING_EDIT_VOLUME => track.volume = value,
+            HIRARI_ROUTING_EDIT_PAN => track.pan = value,
+            _ => return false,
         }
         true
     }
@@ -1452,6 +1708,7 @@ mod tests {
             mark_layout_changed: Some(test_mark_layout_changed),
             publish_routes: Some(test_publish_routes),
             record_undo: Some(test_record_undo),
+            apply_track_mix: Some(test_apply_track_mix),
         }
     }
 
@@ -1609,5 +1866,78 @@ mod tests {
         assert_eq!(host.feedback, vec![(1, 2, 1.5)]);
         assert!(set_feedback_route_with(&ops, host_ptr, 1, 2, 0.0, false));
         assert!(host.feedback.is_empty());
+    }
+
+    #[test]
+    fn mix_edits_apply_and_restore_the_previous_value() {
+        let ops = test_ops();
+        let mut host = TestHost::default();
+        host.tracks.push((
+            3,
+            TestTrack {
+                volume: 1.0,
+                pan: -0.25,
+                ..Default::default()
+            },
+        ));
+        let host_ptr = host_ptr(&mut host);
+        assert!(set_track_volume_with(&ops, host_ptr, 3, 0.5, true));
+        assert!(set_track_pan_with(&ops, host_ptr, 3, 0.75, true));
+        assert_eq!(host.tracks[0].1.volume, 0.5);
+        assert_eq!(host.tracks[0].1.pan, 0.75);
+        assert_eq!(host.undo.len(), 2);
+        assert_eq!(host.undo[0].name, "Track Volume 3");
+        assert_eq!(host.undo[1].name, "Track Pan 3");
+        assert_eq!(host.undo[0].undo[0].gain, 1.0);
+        assert_eq!(host.undo[1].undo[0].gain, -0.25);
+        let volume_undo = host.undo[0].undo.clone();
+        let pan_undo = host.undo[1].undo.clone();
+        apply_payloads_with(&ops, host_ptr, &volume_undo);
+        apply_payloads_with(&ops, host_ptr, &pan_undo);
+        assert_eq!(host.tracks[0].1.volume, 1.0);
+        assert_eq!(host.tracks[0].1.pan, -0.25);
+    }
+
+    #[test]
+    fn mix_ranges_reject_out_of_domain_values() {
+        let ops = test_ops();
+        let mut host = TestHost::default();
+        host.tracks.push((
+            4,
+            TestTrack {
+                volume: 1.0,
+                ..Default::default()
+            },
+        ));
+        let host_ptr = host_ptr(&mut host);
+        assert!(!set_track_volume_with(&ops, host_ptr, 4, 2.5, true));
+        assert!(!set_track_volume_with(&ops, host_ptr, 4, -0.1, true));
+        assert!(!set_track_volume_with(&ops, host_ptr, 4, f32::NAN, true));
+        assert!(set_track_volume_with(&ops, host_ptr, 4, 2.0, true));
+        assert!(!set_track_pan_with(&ops, host_ptr, 4, 1.5, true));
+        assert!(!set_track_pan_with(&ops, host_ptr, 4, f32::INFINITY, true));
+        assert!(set_track_pan_with(&ops, host_ptr, 4, -1.0, true));
+        assert!(!set_track_mute_with(&ops, host_ptr, 9, true, true));
+        assert_eq!(host.undo.len(), 2);
+    }
+
+    #[test]
+    fn mute_and_solo_record_unchanged_values_like_the_previous_engine() {
+        let ops = test_ops();
+        let mut host = TestHost::default();
+        host.tracks.push((5, TestTrack::default()));
+        let host_ptr = host_ptr(&mut host);
+        assert!(set_track_mute_with(&ops, host_ptr, 5, false, true));
+        assert!(set_track_solo_with(&ops, host_ptr, 5, true, true));
+        assert!(set_track_solo_with(&ops, host_ptr, 5, true, true));
+        assert_eq!(host.undo.len(), 3);
+        assert_eq!(host.undo[0].name, "Track Mute 5");
+        assert_eq!(host.undo[1].name, "Track Solo 5");
+        assert!(!host.undo[0].undo[0].enabled);
+        assert!(!host.undo[1].undo[0].enabled);
+        assert!(host.tracks[0].1.solo);
+        let undo = host.undo[1].undo.clone();
+        apply_payloads_with(&ops, host_ptr, &undo);
+        assert!(!host.tracks[0].1.solo);
     }
 }

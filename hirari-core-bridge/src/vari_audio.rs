@@ -241,6 +241,14 @@ pub struct HirariVariAudioFrozen {
     ranges: Vec<HirariAudioNoteSegmentRange>,
 }
 impl HirariVariAudioFrozen {
+    /// Segments of the immutable projection, for control-side readers such as
+    /// the project-layout serializer.
+    pub(crate) fn segment_views(
+        &self,
+    ) -> impl Iterator<Item = (&HirariAudioNoteCurveView, &HirariAudioNoteSegmentRange)> {
+        self.curves.iter().zip(self.ranges.iter())
+    }
+
     /// Build the frozen snapshot: flatten anchors/prefix per segment,
     /// resolve curve view pointers into the frozen backing arrays.
     fn build(store: &HirariRegionVariAudioStore) -> Self {
@@ -791,6 +799,270 @@ pub unsafe extern "C" fn hirari_region_vari_audio_store_load(
     }
     store.normalize();
     true
+}
+
+/// Splits one region's note table at a timeline boundary, writing the two
+/// halves into fresh stores. This is the policy the C++ split used to carry:
+/// segments are windowed, boundary anchors are sampled from the source curve,
+/// and each half is repaired/ordered by the same load path as project load.
+///
+/// # Safety
+/// `source` must be live; `left` and `right` must be distinct, writable stores.
+pub(crate) unsafe fn vari_store_split(
+    source: *const HirariRegionVariAudioStore,
+    left: *mut HirariRegionVariAudioStore,
+    right: *mut HirariRegionVariAudioStore,
+    sample_rate: f64,
+    split_offset: u64,
+    region_length: u64,
+) -> bool {
+    if source.is_null() || left.is_null() || right.is_null() || left == right {
+        return false;
+    }
+    let source = &*source;
+    let entries: Vec<SourceSegment> = source
+        .segments
+        .iter()
+        .map(|segment| SourceSegment {
+            value: segment.value,
+            anchors: &segment.anchors,
+            pitch_offset_cents: segment.value.pitch_offset_cents,
+            formant_offset_cents: segment.value.formant_offset_cents,
+        })
+        .collect();
+    let (left_entries, right_entries) =
+        split_source_segments(&entries, sample_rate, split_offset, region_length);
+    let left_ok = load_entries(left, &left_entries);
+    let right_ok = load_entries(right, &right_entries);
+    left_ok && right_ok
+}
+
+/// Splits a published note table. The engine splits from the immutable
+/// projection so a concurrent note edit cannot mutate the table mid-read; the
+/// snapshot keeps its own backing arrays alive for the duration of the call.
+///
+/// # Safety
+/// `source` must be live; `left` and `right` must be distinct, writable stores.
+pub(crate) unsafe fn vari_frozen_split(
+    source: *const HirariVariAudioFrozen,
+    left: *mut HirariRegionVariAudioStore,
+    right: *mut HirariRegionVariAudioStore,
+    sample_rate: f64,
+    split_offset: u64,
+    region_length: u64,
+) -> bool {
+    if source.is_null() || left.is_null() || right.is_null() || left == right {
+        return false;
+    }
+    let source = &*source;
+    if source.ranges.len() != source.curves.len() {
+        return false;
+    }
+    let mut entries = Vec::with_capacity(source.ranges.len());
+    for (range, curve) in source.ranges.iter().zip(source.curves.iter()) {
+        let anchors = if curve.anchor_count == 0 {
+            &[][..]
+        } else if curve.anchors.is_null() {
+            return false;
+        } else {
+            unsafe { slice::from_raw_parts(curve.anchors, curve.anchor_count) }
+        };
+        entries.push(SourceSegment {
+            value: HirariAudioNoteSegment {
+                start_seconds: range.start_seconds,
+                end_seconds: range.end_seconds,
+                detected_pitch_cents: range.detected_pitch_cents,
+                pitch_offset_cents: curve.pitch_offset_cents,
+                formant_offset_cents: curve.formant_offset_cents,
+            },
+            anchors,
+            pitch_offset_cents: curve.pitch_offset_cents,
+            formant_offset_cents: curve.formant_offset_cents,
+        });
+    }
+    let (left_entries, right_entries) =
+        split_source_segments(&entries, sample_rate, split_offset, region_length);
+    let left_ok = load_entries(left, &left_entries);
+    let right_ok = load_entries(right, &right_entries);
+    left_ok && right_ok
+}
+
+/// C ABI for [`vari_store_split`].
+///
+/// # Safety
+/// `source` must be live; `left` and `right` must be distinct, writable stores.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_vari_audio_store_split(
+    source: *const HirariRegionVariAudioStore,
+    left: *mut HirariRegionVariAudioStore,
+    right: *mut HirariRegionVariAudioStore,
+    sample_rate: f64,
+    split_offset: u64,
+    region_length: u64,
+) -> bool {
+    unsafe {
+        vari_store_split(
+            source,
+            left,
+            right,
+            sample_rate,
+            split_offset,
+            region_length,
+        )
+    }
+}
+
+/// C ABI for [`vari_frozen_split`].
+///
+/// # Safety
+/// `source` must be a live snapshot; `left` and `right` must be distinct,
+/// writable stores.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_vari_audio_frozen_split(
+    source: *const HirariVariAudioFrozen,
+    left: *mut HirariRegionVariAudioStore,
+    right: *mut HirariRegionVariAudioStore,
+    sample_rate: f64,
+    split_offset: u64,
+    region_length: u64,
+) -> bool {
+    unsafe {
+        vari_frozen_split(
+            source,
+            left,
+            right,
+            sample_rate,
+            split_offset,
+            region_length,
+        )
+    }
+}
+
+struct SourceSegment<'a> {
+    value: HirariAudioNoteSegment,
+    anchors: &'a [HirariAudioNoteAnchor],
+    pitch_offset_cents: f64,
+    formant_offset_cents: f64,
+}
+
+type SplitEntry = (HirariAudioNoteSegment, Vec<HirariAudioNoteAnchor>);
+
+fn split_source_segments(
+    source: &[SourceSegment<'_>],
+    sample_rate: f64,
+    split_offset: u64,
+    region_length: u64,
+) -> (Vec<SplitEntry>, Vec<SplitEntry>) {
+    // Matches `std::max(1.0, m_sampleRate)`: non-finite rates collapse to 1.0
+    // the way the C++ comparison did.
+    let rate = if sample_rate.is_finite() {
+        sample_rate.max(1.0)
+    } else {
+        1.0
+    };
+    let split_seconds = split_offset as f64 / rate;
+    let region_seconds = region_length as f64 / rate;
+    let mut left_entries = Vec::new();
+    let mut right_entries = Vec::new();
+    for segment in source {
+        let left_end = segment.value.end_seconds.min(split_seconds);
+        if left_end > segment.value.start_seconds {
+            left_entries.push(window_segment(
+                segment,
+                segment.value.start_seconds,
+                left_end,
+                0.0,
+            ));
+        }
+        let right_start = segment.value.start_seconds.max(split_seconds);
+        let right_end = segment.value.end_seconds.min(region_seconds);
+        if right_end > right_start {
+            right_entries.push(window_segment(
+                segment,
+                right_start,
+                right_end,
+                split_seconds,
+            ));
+        }
+    }
+    (left_entries, right_entries)
+}
+
+/// Boundary anchors store the curve component (offset removed), sampled from
+/// the exported `hirari_audio_note_curve_at`, exactly as the C++ splitter did.
+fn window_segment(segment: &SourceSegment<'_>, start: f64, end: f64, shift: f64) -> SplitEntry {
+    let value = HirariAudioNoteSegment {
+        start_seconds: start - shift,
+        end_seconds: end - shift,
+        ..segment.value
+    };
+    if segment.anchors.is_empty() {
+        return (value, Vec::new());
+    }
+    let boundary = |position: f64| {
+        let mut output = [0.0f64; 2];
+        unsafe {
+            crate::audio_note_curve::hirari_audio_note_curve_at(
+                segment.anchors.as_ptr(),
+                segment.anchors.len(),
+                position,
+                segment.pitch_offset_cents,
+                segment.formant_offset_cents,
+                output.as_mut_ptr(),
+            )
+        };
+        HirariAudioNoteAnchor {
+            position_seconds: position,
+            pitch_cents: output[0] - segment.pitch_offset_cents,
+            formant_cents: output[1] - segment.formant_offset_cents,
+        }
+    };
+    let mut anchors = Vec::with_capacity(segment.anchors.len() + 2);
+    anchors.push(boundary(start));
+    for anchor in segment.anchors {
+        if anchor.position_seconds > start && anchor.position_seconds < end {
+            anchors.push(*anchor);
+        }
+    }
+    let end_anchor = boundary(end);
+    anchors.push(end_anchor);
+    for anchor in &mut anchors {
+        anchor.position_seconds -= shift;
+    }
+    (value, anchors)
+}
+
+unsafe fn load_entries(
+    store: *mut HirariRegionVariAudioStore,
+    entries: &[(HirariAudioNoteSegment, Vec<HirariAudioNoteAnchor>)],
+) -> bool {
+    if entries.is_empty() {
+        return unsafe { hirari_region_vari_audio_store_clear_segments(store) };
+    }
+    let mut values = Vec::with_capacity(entries.len());
+    let mut offsets = Vec::with_capacity(entries.len());
+    let mut counts = Vec::with_capacity(entries.len());
+    let mut flat = Vec::new();
+    for (value, anchors) in entries {
+        offsets.push(flat.len());
+        counts.push(anchors.len());
+        flat.extend_from_slice(anchors);
+        values.push(*value);
+    }
+    unsafe {
+        hirari_region_vari_audio_store_load(
+            store,
+            values.as_ptr(),
+            values.len(),
+            if flat.is_empty() {
+                std::ptr::null()
+            } else {
+                flat.as_ptr()
+            },
+            offsets.as_ptr(),
+            counts.as_ptr(),
+        )
+    }
 }
 
 /// Applies the region-add policy in place (cap, drop malformed segments,

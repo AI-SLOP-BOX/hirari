@@ -656,11 +656,12 @@ pub unsafe extern "C" fn hirari_native_mid_side_process(
     for frame in 0..frames as usize {
         let l = unsafe { *left.add(frame) };
         let r = unsafe { *right.add(frame) };
-        let mid = (l + r) * 0.70710678;
-        let side = (l - r) * 0.70710678 * side_gain;
+        let half_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+        let mid = (l + r) * half_sqrt2;
+        let side = (l - r) * half_sqrt2 * side_gain;
         unsafe {
-            left.add(frame).write((mid + side) * 0.70710678);
-            right.add(frame).write((mid - side) * 0.70710678);
+            left.add(frame).write((mid + side) * half_sqrt2);
+            right.add(frame).write((mid - side) * half_sqrt2);
         }
     }
 }

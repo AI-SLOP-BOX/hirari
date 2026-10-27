@@ -5,45 +5,8 @@
         std::atomic<uint32_t> focusedTrackId{0};
     } m_workspace;
 
-    // Phase 9: Forensic Peak Cache (Zero-Wait UI)
-    struct WaveformCache {
-        void* rustMapping = nullptr;
-        std::atomic<bool> valid{false};
-
-        ~WaveformCache();
-
-        WaveformCache() = default;
-        WaveformCache(const WaveformCache&) = delete;
-        WaveformCache& operator=(const WaveformCache&) = delete;
-
-        WaveformCache(WaveformCache&& other) noexcept {
-            rustMapping = other.rustMapping;
-            valid.store(other.valid.load());
-            other.rustMapping = nullptr;
-            other.valid.store(false);
-        }
-
-        WaveformCache& operator=(WaveformCache&& other) noexcept {
-            if (this != &other) {
-                cleanup();
-                rustMapping = other.rustMapping;
-                valid.store(other.valid.load());
-                other.rustMapping = nullptr;
-                other.valid.store(false);
-            }
-            return *this;
-        }
-
-    public:
-        void cleanup();
-    };
-    std::unordered_map<uint32_t, WaveformCache> m_peakCache;
-    // A region can be rebuilt while an older project generation is still
-    // draining. Store the generation so an old worker cannot erase a newer
-    // build registration.
-    std::unordered_map<uint32_t, uint64_t> m_peakBuilds;
-    std::atomic<uint64_t> m_waveformGeneration{0};
-    mutable std::mutex m_cacheMutex;
+    // Phase 9: waveform peak cache lives in Rust (region_audio.rs); this
+    // translation unit no longer holds per-region peak state.
 
     // PDC is project/session state. It must not be shared through the legacy
     // process-wide compatibility singleton. Rust (native_pdc.rs) owns the
@@ -102,83 +65,69 @@
         uint32_t droppedOutputMidi = 0;
     };
     std::unordered_map<uint64_t, SandboxObservedStatus> m_sandboxObserved;
-    struct RegionImportJob {
-        std::atomic<uint8_t> status{1}; // 1 decoding, 2 ready, 3 committed, 4 failed/stale
-        std::weak_ptr<Track> target;
-        uint32_t trackId = 0;
-        uint64_t startSample = 0;
-        std::string path;
-        std::shared_ptr<::Hirari::Core::AudioBuffer> audio;
-        double sourceSampleRate = 0.0;
-    };
-    mutable std::mutex m_regionImportJobsMutex;
-    std::unordered_map<uint64_t, std::shared_ptr<RegionImportJob>> m_regionImportJobs;
-    std::atomic<uint64_t> m_nextRegionImportTicket{1};
-    struct AudioPitchAnalysisJob {
-        std::atomic<uint8_t> status{0}; // 1 running, 2 ready to commit, 3 committed, 4 failed
-        std::weak_ptr<Track> target;
-        std::vector<::hirari::editing::AudioNoteSegment> before;
-        std::vector<::hirari::editing::AudioNoteSegment> after;
-    };
-    mutable std::mutex m_audioPitchAnalysisMutex;
-    std::unordered_map<uint64_t, std::shared_ptr<AudioPitchAnalysisJob>> m_audioPitchAnalysisJobs;
-    struct RegionQuantizeTarget {
-        std::shared_ptr<Track> track;
-        const void* snapshot = nullptr;
-        Region region;
-        std::vector<Region::WarpMarker> before;
-    };
-    struct RegionQuantizeJob {
-        std::atomic<uint8_t> status{0}; // 1 analyzing, 2 ready to apply, 3 applied, 4 failed/stale
-        std::vector<RegionQuantizeTarget> targets;
-        // Each target can have a different native source-frame count while
-        // sharing one project-timeline quantization map.
-        std::vector<std::vector<Region::WarpMarker>> after;
-        std::vector<HirariTempoEvent> tempoEvents;
-        double baseTempo = 120.0;
-        double sampleRate = 0.0;
-    };
-    mutable std::mutex m_regionQuantizeMutex;
-    std::unordered_map<uint64_t, std::shared_ptr<RegionQuantizeJob>> m_regionQuantizeJobs;
-    struct RegionAlignmentJob {
-        std::atomic<uint8_t> status{1}; // 1 analyzing, 2 ready to apply, 3 applied, 4 failed/stale
-        std::shared_ptr<Track> referenceTrack;
-        uint64_t referenceRegionGeneration = 0;
-        Region referenceRegion;
-        struct Target {
-            std::shared_ptr<Track> track;
-            uint64_t regionGeneration = 0;
-            Region region;
-            std::vector<Region::WarpMarker> before;
-            std::vector<Region::WarpMarker> after;
-        };
-        std::vector<Target> targets;
-    };
-    mutable std::mutex m_regionAlignmentMutex;
-    std::unordered_map<uint64_t, std::shared_ptr<RegionAlignmentJob>> m_regionAlignmentJobs;
+    // Region import and pitch analysis jobs live in Rust (region_jobs.rs):
+    // validation, registry limits, worker threads, staleness checks and undo
+    // capture are all owned there. These declarations are the storage
+    // callbacks that module drives.
 
 public:
     // Region edit host callbacks. Rust drives every region edit through these
-    // four entry points; see hirari_unified_engine_part_4z.inc.
+    // entry points; see hirari_unified_engine_part_4z.inc.
     static bool regionHostFind(void* host, uint32_t trackId, uint32_t regionId,
                                HirariRegionState* out);
     static bool regionHostApply(void* host, const HirariRegionEditPayload* payload);
     static void* regionHostSnapshot(void* host, uint32_t trackId, uint32_t regionId);
     static void regionHostReleaseSnapshot(void* host, void* handle);
+    static size_t regionHostWarpMarkers(void* host, uint32_t trackId, uint32_t regionId,
+                                        HirariWarpMarker* out, size_t capacity);
     static size_t regionHostListSyncGroup(void* host, uint32_t group,
                                           HirariRegionGroupMember* out, size_t capacity);
     static bool regionHostNoteEdit(void* host, uint32_t trackId, uint32_t regionId,
                                    void* context, HirariRegionNoteMutateFn mutate);
-    static void regionHostRecordUndo(void* host, const char* name,
+    static bool regionHostRecordUndo(void* host, const char* name,
                                      const HirariRegionEditPayload* undo, size_t undoCount,
                                      const HirariRegionEditPayload* redo, size_t redoCount,
                                      bool coalesce);
+    static void* regionHostRetainAudio(void* host, uint32_t trackId, uint32_t regionId);
+    static uint32_t regionHostAudioView(void* handle, const float** out, size_t capacity,
+                                        uint64_t* samples);
+    static void regionHostReleaseAudio(void* handle);
+    static bool regionHostTrackToken(void* host, uint32_t trackId, uint64_t* generation,
+                                     size_t* snapshot);
+    static size_t regionHostListTracks(void* host, uint32_t* out, size_t capacity);
+    static size_t regionHostListRegions(void* host, uint32_t trackId, uint32_t* out,
+                                        size_t capacity);
+    static void* regionHostTempoState(void* host);
+    static void* regionHostUndoState(void* host);
+    static double regionHostSampleRate(void* host);
+    static size_t regionHostRegionPath(void* host, uint32_t trackId, uint32_t regionId,
+                                       uint8_t* out, size_t capacity);
+    static bool regionHostDecodeAudio(void* host, const uint8_t* path, size_t length,
+                                      void** outHandle, double* outRate);
+    static uint32_t regionHostInsertRegion(void* host, uint32_t trackId,
+                                           size_t expectedTrack, const uint8_t* path,
+                                           size_t pathLength, uint64_t startSample,
+                                           double sourceSampleRate, double timelineSampleRate,
+                                           void* audioHandle);
+    static size_t regionHostTrackIdentity(void* host, uint32_t trackId);
+    static void* regionHostRetainTrack(void* host, uint32_t trackId);
+    static void regionHostReleaseTrack(void* handle);
+    static bool regionHostPitchBegin(void* trackHandle);
+    static bool regionHostPitchAnalyze(void* trackHandle, uint32_t regionId, double sampleRate);
+    static void regionHostPitchFinish(void* trackHandle);
+    static void* regionHostNoteSnapshot(void* trackHandle, uint32_t regionId);
+
+    // Automation edit host callbacks. Rust drives the curve edits; see
+    // hirari_unified_engine_part_6b.inc.
+    static size_t automationHostRead(void* host, uint32_t trackId, int32_t kind,
+                                     uint32_t pluginIndex, uint32_t parameterId,
+                                     Hirari::Core::ProjectAutomationPoint* out, size_t capacity,
+                                     bool* targetFound);
+    static bool automationHostApply(void* host, const HirariAutomationEditPayload* payload);
+    static void automationHostRecordUndo(void* host, const char* name,
+                                         const HirariAutomationEditPayload* undo,
+                                         const HirariAutomationEditPayload* redo);
 
 private:
 
-    bool commit_region_import(uint32_t trackId, uint64_t startSample,
-                              const std::string& path,
-                              const std::shared_ptr<Track>& expectedTrack,
-                              std::shared_ptr<::Hirari::Core::AudioBuffer> audio,
-                              double sourceSampleRate);
 };

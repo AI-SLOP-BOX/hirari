@@ -530,7 +530,9 @@ pub(crate) fn decode_tracks(
             &mut total_state_entries,
             &mut total_automation_points,
         )?;
-        if !ids.insert(track.id) {
+        // `u32::MAX` is the engine's invalid/stale track sentinel and can
+        // never be addressed, hydrated, or persisted again.
+        if track.id == u32::MAX || !ids.insert(track.id) {
             return None;
         }
         tracks.push(owned_track(track));

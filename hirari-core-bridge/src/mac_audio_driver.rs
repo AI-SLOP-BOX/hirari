@@ -157,6 +157,45 @@ pub fn channel_map(raw_inputs: u32, raw_outputs: u32) -> Result<ChannelMap, Driv
     Ok(ChannelMap { inputs, outputs })
 }
 
+/// Composition plan for [`AudioBackend::resolve_for_open`]: the output device
+/// cannot capture, so it is folded together with the default input device into
+/// one private aggregate device addressed by these two sub-device UIDs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DuplexComposition {
+    pub input_uid: String,
+    pub output_uid: String,
+}
+
+/// Pure "compose vs. reuse" decision for the duplex fix. Returns `Some` only
+/// when a private aggregate is both necessary (the output device has no input
+/// channels) and possible (a distinct default input device with input
+/// channels, and a UID for both ends). Everything else reuses `output_device`
+/// exactly as the driver did before aggregates existed.
+pub(crate) fn plan_duplex_composition(
+    output_device: u32,
+    output_input_channels: u32,
+    input_device: u32,
+    input_input_channels: u32,
+    input_device_uid: Option<&str>,
+    output_device_uid: Option<&str>,
+) -> Option<DuplexComposition> {
+    if output_device == 0 || output_input_channels > 0 {
+        return None;
+    }
+    if input_device == 0 || input_device == output_device || input_input_channels == 0 {
+        return None;
+    }
+    let input_uid = input_device_uid.unwrap_or_default();
+    let output_uid = output_device_uid.unwrap_or_default();
+    if input_uid.is_empty() || output_uid.is_empty() {
+        return None;
+    }
+    Some(DuplexComposition {
+        input_uid: input_uid.to_owned(),
+        output_uid: output_uid.to_owned(),
+    })
+}
+
 /// Split a device callback into engine-sized chunks. A normal callback
 /// (`frames <= max_chunk`) produces exactly one chunk, so the common path is
 /// unchanged. Odd tails are preserved: 1023/512 -> 512 + 511.
@@ -322,6 +361,31 @@ pub trait AudioBackend: Send {
     fn device_uid(&self, device: u32) -> Option<String>;
     fn devices_json(&self) -> String;
     fn take_default_device_change(&self) -> bool;
+    /// True when the capture endpoint behind the open device changed. A
+    /// physical duplex device needs no action, but a composed aggregate folds
+    /// in the default input, so it has to be rebuilt around the new endpoint.
+    fn take_input_endpoint_change(&self) -> bool {
+        false
+    }
+    /// The device `open` should receive for this generation.
+    ///
+    /// The default is the identity so a backend that composes nothing behaves
+    /// exactly as before. [`CoreAudioBackend`] overrides it to fold the
+    /// default input device and this output device into one private aggregate,
+    /// which is what lets an output-only default device capture as well.
+    fn resolve_for_open(&self, output_device: u32, request: FormatRequest) -> u32 {
+        let _ = (output_device, request);
+        output_device
+    }
+    /// The real capture endpoint behind the device `open` was handed.
+    ///
+    /// A composed duplex device is a backend implementation detail; callers
+    /// that report the input device to the UI must not see its private,
+    /// per-process UID. The default is the identity so a backend that opens a
+    /// physical device keeps reporting that device.
+    fn input_endpoint_for(&self, opened_device: u32) -> u32 {
+        opened_device
+    }
 }
 
 /// Testable lifecycle and format policy. Device selection order is preserved:
@@ -348,31 +412,38 @@ impl HostCore {
             sample_rate: FALLBACK_SAMPLE_RATE,
             buffer_size: FALLBACK_BUFFER_SIZE,
         };
-        let device = match self.backend.default_output_device() {
-            Ok(0) => {
-                log_message(
-                    log,
-                    log_context,
-                    1,
-                    &format!(
-                        "Audio device query failed (status=0); using {} Hz/{} frames",
-                        fallback.sample_rate, fallback.buffer_size
-                    ),
-                );
-                return fallback;
-            }
-            Ok(device) => device,
-            Err(status) => {
-                log_message(
-                    log,
-                    log_context,
-                    1,
-                    &format!(
-                        "Audio device query failed (status={status}); using {} Hz/{} frames",
-                        fallback.sample_rate, fallback.buffer_size
-                    ),
-                );
-                return fallback;
+        // The format must be negotiated with the device `start` will open. An
+        // explicit selection outranks the system default, otherwise a device
+        // running at 96 kHz was asked to open at the default device's rate.
+        let device = if self.selected_device != 0 {
+            self.selected_device
+        } else {
+            match self.backend.default_output_device() {
+                Ok(0) => {
+                    log_message(
+                        log,
+                        log_context,
+                        1,
+                        &format!(
+                            "Audio device query failed (status=0); using {} Hz/{} frames",
+                            fallback.sample_rate, fallback.buffer_size
+                        ),
+                    );
+                    return fallback;
+                }
+                Ok(device) => device,
+                Err(status) => {
+                    log_message(
+                        log,
+                        log_context,
+                        1,
+                        &format!(
+                            "Audio device query failed (status={status}); using {} Hz/{} frames",
+                            fallback.sample_rate, fallback.buffer_size
+                        ),
+                    );
+                    return fallback;
+                }
             }
         };
 
@@ -466,6 +537,25 @@ impl HostCore {
             );
         }
 
+        // The backend may compose a private aggregate (default input device +
+        // this output device) so that an output-only device can capture too.
+        // The composition replaces `resolved` for the channel probe below;
+        // only an actual composition changes what `open` receives, so every
+        // path that composes nothing still opens exactly what it did before.
+        let base_device = resolved;
+        let resolved = self.backend.resolve_for_open(resolved, request);
+        let requested_device = if resolved == base_device {
+            self.selected_device
+        } else {
+            log_message(
+                log,
+                log_context,
+                0,
+                "Audio device has no capture side; composed a private aggregate with the default input device (microphone capture stays enabled while the engine runs)",
+            );
+            resolved
+        };
+
         let dimensions = match self.backend.channel_counts(resolved) {
             Ok(dimensions) => dimensions,
             Err(error) => {
@@ -481,7 +571,7 @@ impl HostCore {
 
         let device = match self.backend.open(
             request,
-            self.selected_device,
+            requested_device,
             channels,
             Arc::clone(realtime),
         ) {
@@ -613,10 +703,14 @@ impl HostCore {
         log: Option<LogCallback>,
         log_context: *mut c_void,
     ) {
-        let requested = self.backend.take_default_device_change();
+        // Both flags have to be consumed even when the first one already
+        // requests a restart, otherwise the second change is seen again later
+        // and restarts a freshly opened device a second time.
+        let output_changed = self.backend.take_default_device_change();
+        let input_changed = self.backend.take_input_endpoint_change();
         let running = state.load(Ordering::Acquire) == STATE_RUNNING
             && realtime.running.load(Ordering::Acquire);
-        if requested || !running {
+        if output_changed || input_changed || !running {
             self.stop(state, realtime);
             self.start(None, state, last_error, realtime, log, log_context);
         }
@@ -652,7 +746,9 @@ impl HostCore {
 
     fn selected_device_for_uid(&self, realtime: &RealtimeState) -> u32 {
         if self.is_running_state(realtime) {
-            self.negotiated.map(|format| format.device).unwrap_or(0)
+            self.negotiated
+                .map(|format| self.backend.input_endpoint_for(format.device))
+                .unwrap_or(0)
         } else {
             self.selected_device
         }
@@ -1214,6 +1310,201 @@ unsafe fn cfstring_to_string(value: sys::CFStringRef) -> Option<String> {
     }
 }
 
+/// Owned CoreFoundation reference. Every object built for the aggregate
+/// description is released through this on scope exit, so no failure path can
+/// leak one.
+struct CfRef(sys::CFTypeRef);
+
+impl CfRef {
+    fn new(value: sys::CFTypeRef) -> Option<Self> {
+        if value.is_null() {
+            None
+        } else {
+            Some(Self(value))
+        }
+    }
+
+    fn as_ptr(&self) -> sys::CFTypeRef {
+        self.0
+    }
+}
+
+impl Drop for CfRef {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                sys::CFRelease(self.0);
+            }
+        }
+    }
+}
+
+unsafe fn cf_string(text: &str) -> Option<CfRef> {
+    let c_text = CString::new(text).ok()?;
+    CfRef::new(
+        sys::CFStringCreateWithCString(ptr::null(), c_text.as_ptr(), sys::kCFStringEncodingUTF8)
+            .cast::<c_void>(),
+    )
+}
+
+unsafe fn cf_key(key: &[u8]) -> Option<CfRef> {
+    let c_key = CStr::from_bytes_until_nul(key).ok()?;
+    CfRef::new(
+        sys::CFStringCreateWithCString(ptr::null(), c_key.as_ptr(), sys::kCFStringEncodingUTF8)
+            .cast::<c_void>(),
+    )
+}
+
+unsafe fn cf_dictionary(
+    keys: &mut [sys::CFTypeRef],
+    values: &mut [sys::CFTypeRef],
+) -> Option<CfRef> {
+    debug_assert_eq!(keys.len(), values.len());
+    CfRef::new(
+        sys::CFDictionaryCreate(
+            ptr::null(),
+            keys.as_mut_ptr(),
+            values.as_mut_ptr(),
+            keys.len() as sys::CFIndex,
+            &sys::kCFTypeDictionaryKeyCallBacks,
+            &sys::kCFTypeDictionaryValueCallBacks,
+        )
+        .cast::<c_void>(),
+    )
+}
+
+unsafe fn cf_array(values: &mut [sys::CFTypeRef]) -> Option<CfRef> {
+    CfRef::new(
+        sys::CFArrayCreate(
+            ptr::null(),
+            values.as_mut_ptr(),
+            values.len() as sys::CFIndex,
+            &sys::kCFTypeArrayCallBacks,
+        )
+        .cast::<c_void>(),
+    )
+}
+
+unsafe fn cf_i32(value: i32) -> Option<CfRef> {
+    // The SDK documents these aggregate flags as CFNumbers; a CFBoolean here
+    // is rejected by the aggregate builder.
+    CfRef::new(
+        sys::CFNumberCreate(
+            ptr::null(),
+            sys::kCFNumberSInt32Type as sys::CFNumberType,
+            (&value as *const i32).cast::<c_void>(),
+        )
+        .cast::<c_void>(),
+    )
+}
+
+/// Private aggregate UIDs are per-process and never persist, but a restart
+/// inside one process must not collide with an aggregate whose asynchronous
+/// teardown has not landed yet, so each creation gets its own suffix.
+fn private_aggregate_uid() -> String {
+    static CREATION: AtomicU64 = AtomicU64::new(0);
+    let sequence = CREATION.fetch_add(1, Ordering::Relaxed);
+    format!("hirari-private-io-{}-{sequence}", std::process::id())
+}
+
+/// Compose a private aggregate device out of the two sub-devices named by the
+/// plan and return its `AudioObjectID`. `AudioHardwareCreateAggregateDevice`
+/// copies the description, so releasing every object here after the call is
+/// correct; the caller owns the returned device and must destroy it with
+/// `AudioHardwareDestroyAggregateDevice`.
+unsafe fn create_private_aggregate(composition: &DuplexComposition) -> Option<u32> {
+    // Sub-device entries: [{ "uid": <input uid>, "drift": 1 },
+    // { "uid": <output uid> }]. The output is the clock master, so the input
+    // must compensate for clock drift or capture slowly slips against playback.
+    let subdevice_key = cf_key(sys::kAudioSubDeviceUIDKey)?;
+    let drift_key = cf_key(sys::kAudioSubDeviceDriftCompensationKey)?;
+    let drift = cf_i32(1)?;
+    let input_uid = cf_string(&composition.input_uid)?;
+    let output_uid = cf_string(&composition.output_uid)?;
+
+    let mut input_keys = [subdevice_key.as_ptr(), drift_key.as_ptr()];
+    let mut input_values = [input_uid.as_ptr(), drift.as_ptr()];
+    let input_entry = cf_dictionary(&mut input_keys, &mut input_values)?;
+    let mut output_keys = [subdevice_key.as_ptr()];
+    let mut output_values = [output_uid.as_ptr()];
+    let output_entry = cf_dictionary(&mut output_keys, &mut output_values)?;
+    let mut entries = [input_entry.as_ptr(), output_entry.as_ptr()];
+    let subdevices = cf_array(&mut entries)?;
+
+    // Description: uid/name/private/subdevices, with the output device acting
+    // as both master and clock so playback and capture share one timebase.
+    let uid = cf_string(&private_aggregate_uid())?;
+    let name = cf_string("Hirari I/O")?;
+    let private = cf_i32(1)?;
+    let uid_key = cf_key(sys::kAudioAggregateDeviceUIDKey)?;
+    let name_key = cf_key(sys::kAudioAggregateDeviceNameKey)?;
+    let private_key = cf_key(sys::kAudioAggregateDeviceIsPrivateKey)?;
+    let subdevices_key = cf_key(sys::kAudioAggregateDeviceSubDeviceListKey)?;
+    let master_key = cf_key(sys::kAudioAggregateDeviceMainSubDeviceKey)?;
+    let clock_key = cf_key(sys::kAudioAggregateDeviceClockDeviceKey)?;
+
+    let mut keys = [
+        uid_key.as_ptr(),
+        name_key.as_ptr(),
+        private_key.as_ptr(),
+        subdevices_key.as_ptr(),
+        master_key.as_ptr(),
+        clock_key.as_ptr(),
+    ];
+    let mut values = [
+        uid.as_ptr(),
+        name.as_ptr(),
+        private.as_ptr(),
+        subdevices.as_ptr(),
+        output_uid.as_ptr(),
+        output_uid.as_ptr(),
+    ];
+    let description = cf_dictionary(&mut keys, &mut values)?;
+
+    let mut aggregate: u32 = 0;
+    let status = sys::AudioHardwareCreateAggregateDevice(
+        description.as_ptr().cast::<sys::__CFDictionary>(),
+        &mut aggregate,
+    );
+    if status != 0 || aggregate == 0 {
+        None
+    } else {
+        Some(aggregate)
+    }
+}
+
+/// Best-effort: a sub-device that refuses the requested rate is left alone and
+/// the aggregate simply inherits whatever clock the master device settles on.
+unsafe fn set_nominal_sample_rate(device: u32, sample_rate: f64) -> Result<(), i32> {
+    let address = property_address(
+        sys::kAudioDevicePropertyNominalSampleRate,
+        sys::kAudioObjectPropertyScopeGlobal,
+        sys::kAudioObjectPropertyElementMain,
+    );
+    let status = sys::AudioObjectSetPropertyData(
+        device,
+        &address,
+        0,
+        ptr::null(),
+        size_of::<f64>() as u32,
+        (&sample_rate as *const f64).cast::<c_void>(),
+    );
+    if status != 0 {
+        Err(status)
+    } else {
+        Ok(())
+    }
+}
+
+/// Destroy a composed aggregate, if one is parked in the given slot.
+fn destroy_aggregate(aggregate: u32) {
+    if aggregate != 0 {
+        unsafe {
+            let _ = sys::AudioHardwareDestroyAggregateDevice(aggregate);
+        }
+    }
+}
+
 fn append_json_string(json: &mut String, value: &str) {
     json.push('"');
     for character in value.chars() {
@@ -1307,11 +1598,24 @@ pub struct CoreAudioBackend {
     input_buffer: Option<Box<[f32]>>,
     default_device_changed: Arc<AtomicBool>,
     default_device_listener_installed: bool,
+    default_input_changed: Arc<AtomicBool>,
+    default_input_listener_installed: bool,
+    /// Private aggregate composed by [`CoreAudioBackend::resolve_for_open`].
+    /// Zero until one is composed; destroyed by `close` on every path.
+    aggregate_device: AtomicU32,
+    /// The default input device folded into [`Self::aggregate_device`]. This is
+    /// the endpoint the UI and recording must see, not the aggregate.
+    aggregate_input_device: AtomicU32,
+    /// Nominal rates that composition changed, with the value to put back when
+    /// the aggregate is torn down. Leaving a device at a project rate after
+    /// quit silently changes how every other application records.
+    composition_rates: Mutex<Vec<(u32, f64)>>,
 }
 
 impl CoreAudioBackend {
     pub fn new() -> Self {
         let default_device_changed = Arc::new(AtomicBool::new(false));
+        let default_input_changed = Arc::new(AtomicBool::new(false));
         let mut backend = Self {
             unit: 0,
             initialized: false,
@@ -1321,6 +1625,11 @@ impl CoreAudioBackend {
             input_buffer: None,
             default_device_changed,
             default_device_listener_installed: false,
+            default_input_changed,
+            default_input_listener_installed: false,
+            aggregate_device: AtomicU32::new(0),
+            aggregate_input_device: AtomicU32::new(0),
+            composition_rates: Mutex::new(Vec::new()),
         };
         unsafe {
             let address = property_address(
@@ -1335,8 +1644,70 @@ impl CoreAudioBackend {
                 Arc::as_ptr(&backend.default_device_changed) as *mut c_void,
             );
             backend.default_device_listener_installed = status == 0;
+
+            let input_address = property_address(
+                sys::kAudioHardwarePropertyDefaultInputDevice,
+                sys::kAudioObjectPropertyScopeGlobal,
+                sys::kAudioObjectPropertyElementMain,
+            );
+            let input_status = sys::AudioObjectAddPropertyListener(
+                sys::kAudioObjectSystemObject,
+                &input_address,
+                Some(default_device_listener),
+                Arc::as_ptr(&backend.default_input_changed) as *mut c_void,
+            );
+            backend.default_input_listener_installed = input_status == 0;
         }
         backend
+    }
+
+    /// Drop a composed aggregate and the input endpoint recorded with it, so
+    /// no code path can address a destroyed device. Rates changed to align the
+    /// aggregate are put back here too, because the aggregate is the only
+    /// reason they were changed.
+    fn clear_composition(&self) {
+        self.aggregate_input_device.store(0, Ordering::Release);
+        destroy_aggregate(self.aggregate_device.swap(0, Ordering::AcqRel));
+        let restore = {
+            let mut saved = self
+                .composition_rates
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            std::mem::take(&mut *saved)
+        };
+        for (device, rate) in restore {
+            unsafe {
+                let _ = set_nominal_sample_rate(device, rate);
+            }
+        }
+    }
+
+    /// Align a sub-device with the aggregate clock. Returns the previous
+    /// nominal rate when this call changed it, so a failed composition can
+    /// put the hardware back; `None` means "nothing to undo".
+    fn align_nominal_sample_rate(&self, device: u32, sample_rate: f64) -> Option<f64> {
+        if std::env::var_os("HIRARI_NO_RATE_SET").is_some() {
+            return None;
+        }
+        let current = self.nominal_sample_rate(device)?;
+        if (current - sample_rate).abs() < 0.5 {
+            return None;
+        }
+        unsafe { set_nominal_sample_rate(device, sample_rate) }
+            .ok()
+            .map(|()| current)
+    }
+
+    /// The system default capture device, or the failing HAL status.
+    fn default_input_device(&self) -> Result<u32, i32> {
+        unsafe {
+            read_property::<u32>(
+                sys::kAudioObjectSystemObject,
+                sys::kAudioHardwarePropertyDefaultInputDevice,
+                sys::kAudioObjectPropertyScopeGlobal,
+                sys::kAudioObjectPropertyElementMain,
+            )
+        }
     }
 
     unsafe fn clear_realtime(realtime: &RealtimeState) {
@@ -1530,6 +1901,24 @@ impl Drop for CoreAudioBackend {
                 self.default_device_listener_installed = false;
             }
         }
+        self.default_input_changed
+            .store(false, Ordering::Release);
+        if self.default_input_listener_installed {
+            unsafe {
+                let address = property_address(
+                    sys::kAudioHardwarePropertyDefaultInputDevice,
+                    sys::kAudioObjectPropertyScopeGlobal,
+                    sys::kAudioObjectPropertyElementMain,
+                );
+                sys::AudioObjectRemovePropertyListener(
+                    sys::kAudioObjectSystemObject,
+                    &address,
+                    Some(default_device_listener),
+                    Arc::as_ptr(&self.default_input_changed) as *mut c_void,
+                );
+                self.default_input_listener_installed = false;
+            }
+        }
     }
 }
 
@@ -1592,6 +1981,100 @@ impl AudioBackend for CoreAudioBackend {
         }
     }
 
+    /// AUHAL can only be pointed at a single device, and a MacBook's default
+    /// output device has no input side at all, so `channel_map` rejected it
+    /// (`NoInputChannels`) and the engine silently fell back to offline.
+    /// Composing a private aggregate of the default input device and this
+    /// output device gives the one AUHAL a duplex endpoint on a single locked
+    /// clock, which is exactly what the render callback (bus 1 input pulled
+    /// inside the output callback) already expects.
+    ///
+    /// Every failure returns `output_device` untouched, so no path is worse
+    /// than the behaviour before aggregates existed.
+    fn resolve_for_open(&self, output_device: u32, request: FormatRequest) -> u32 {
+        // A start that failed after composition can leave an aggregate parked
+        // here (the unit never opened, so nothing else tore it down). Drop it
+        // before every decision, including the early returns below.
+        self.clear_composition();
+
+        let Ok((output_input_channels, _)) = self.channel_counts(output_device) else {
+            return output_device;
+        };
+        if output_input_channels > 0 {
+            // Already a duplex device: nothing to compose.
+            return output_device;
+        }
+        let input_device = match self.default_input_device() {
+            Ok(device) if device != 0 => device,
+            _ => return output_device,
+        };
+        let input_input_channels = self
+            .channel_counts(input_device)
+            .map(|(inputs, _)| inputs)
+            .unwrap_or(0);
+        let Some(composition) = plan_duplex_composition(
+            output_device,
+            output_input_channels,
+            input_device,
+            input_input_channels,
+            self.device_uid(input_device).as_deref(),
+            self.device_uid(output_device).as_deref(),
+        ) else {
+            return output_device;
+        };
+
+        // Align both ends before they are glued to one clock. A device that
+        // refuses the rate keeps its own and the aggregate still composes. If
+        // composition fails, undo the change so merely attempting to start
+        // cannot leave the machine at a different hardware rate.
+        let previous_output_rate = self.align_nominal_sample_rate(output_device, request.sample_rate);
+        let previous_input_rate = self.align_nominal_sample_rate(input_device, request.sample_rate);
+
+        match unsafe { create_private_aggregate(&composition) } {
+            Some(aggregate) => {
+                let mut restore = self
+                    .composition_rates
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                restore.clear();
+                if let Some(rate) = previous_output_rate {
+                    restore.push((output_device, rate));
+                }
+                if let Some(rate) = previous_input_rate {
+                    restore.push((input_device, rate));
+                }
+                drop(restore);
+                self.aggregate_input_device
+                    .store(input_device, Ordering::Release);
+                self.aggregate_device.store(aggregate, Ordering::Release);
+                aggregate
+            }
+            None => {
+                if let Some(rate) = previous_output_rate {
+                    unsafe {
+                        let _ = set_nominal_sample_rate(output_device, rate);
+                    }
+                }
+                if let Some(rate) = previous_input_rate {
+                    unsafe {
+                        let _ = set_nominal_sample_rate(input_device, rate);
+                    }
+                }
+                output_device
+            }
+        }
+    }
+
+    fn input_endpoint_for(&self, opened_device: u32) -> u32 {
+        if self.aggregate_device.load(Ordering::Acquire) == opened_device {
+            let input = self.aggregate_input_device.load(Ordering::Acquire);
+            if input != 0 {
+                return input;
+            }
+        }
+        opened_device
+    }
+
     fn open(
         &mut self,
         request: FormatRequest,
@@ -1650,7 +2133,10 @@ impl AudioBackend for CoreAudioBackend {
     }
 
     fn close(&mut self) {
+        // A composed aggregate can exist without an open unit: a start that
+        // failed after composition still lands here through `fail`.
         let Some(realtime) = self.realtime.take() else {
+            self.clear_composition();
             return;
         };
         unsafe {
@@ -1689,6 +2175,9 @@ impl AudioBackend for CoreAudioBackend {
             self.current_device = 0;
             realtime.stopping.store(false, Ordering::Release);
         }
+        // The AUHAL that referenced the composed device is gone by now, so
+        // the aggregate can be torn down after it rather than under it.
+        self.clear_composition();
     }
 
     fn is_open(&self) -> bool {
@@ -1741,7 +2230,15 @@ impl AudioBackend for CoreAudioBackend {
 
             let mut json = String::from("[");
             let mut first = true;
+            // The composed duplex aggregate is visible inside this process
+            // like any other device, but it is a temporary implementation
+            // detail: listing it would offer the user a device that vanishes
+            // on stop and cannot be selected again.
+            let composed_aggregate = self.aggregate_device.load(Ordering::Acquire);
             for device in devices {
+                if device == composed_aggregate {
+                    continue;
+                }
                 let Some(name) = read_cfstring(
                     device,
                     sys::kAudioObjectPropertyName,
@@ -1812,6 +2309,15 @@ impl AudioBackend for CoreAudioBackend {
 
     fn take_default_device_change(&self) -> bool {
         self.default_device_changed.swap(false, Ordering::AcqRel)
+    }
+
+    fn take_input_endpoint_change(&self) -> bool {
+        let changed = self.default_input_changed.swap(false, Ordering::AcqRel);
+        // A physical duplex device keeps capturing from the same endpoint when
+        // the system default changes; only a composed aggregate has to follow
+        // the new default input. The flag is consumed either way so a change
+        // made before composition is not replayed after it.
+        changed && self.aggregate_device.load(Ordering::Acquire) != 0
     }
 }
 
@@ -1899,12 +2405,13 @@ fn into_c_string(value: String) -> *mut c_char {
     }
 }
 
+/// # Safety
+/// `value` must be null or a pointer returned by one of this module's string
+/// getters, and must not be used again after this call.
 #[no_mangle]
-pub extern "C" fn hirari_mac_audio_string_free(value: *mut c_char) {
+pub unsafe extern "C" fn hirari_mac_audio_string_free(value: *mut c_char) {
     if !value.is_null() {
-        unsafe {
-            drop(CString::from_raw(value));
-        }
+        drop(CString::from_raw(value));
     }
 }
 
@@ -2125,12 +2632,14 @@ mod tests {
         closes: AtomicU32,
         starts: AtomicU32,
         default_changed: AtomicBool,
+        input_changed: AtomicBool,
     }
 
     struct FakeBackend {
         stats: Arc<FakeStats>,
         default_device: Result<u32, i32>,
         nominal: Option<f64>,
+        selected_nominal: Option<f64>,
         buffer: Option<u32>,
         channels: (u32, u32),
         opened: bool,
@@ -2147,6 +2656,7 @@ mod tests {
                     stats: Arc::clone(&stats),
                     default_device: Ok(7),
                     nominal: Some(48_000.0),
+                    selected_nominal: Some(96_000.0),
                     buffer: Some(256),
                     channels: (2, 2),
                     opened: false,
@@ -2164,8 +2674,12 @@ mod tests {
             self.default_device
         }
 
-        fn nominal_sample_rate(&self, _device: u32) -> Option<f64> {
-            self.nominal
+        fn nominal_sample_rate(&self, device: u32) -> Option<f64> {
+            if self.default_device == Ok(device) {
+                self.nominal
+            } else {
+                self.selected_nominal.or(self.nominal)
+            }
         }
 
         fn buffer_frame_size(&self, _device: u32) -> Option<u32> {
@@ -2234,6 +2748,10 @@ mod tests {
         fn take_default_device_change(&self) -> bool {
             self.stats.default_changed.swap(false, Ordering::AcqRel)
         }
+
+        fn take_input_endpoint_change(&self) -> bool {
+            self.stats.input_changed.swap(false, Ordering::AcqRel)
+        }
     }
 
     unsafe extern "C" fn test_log(
@@ -2301,6 +2819,30 @@ mod tests {
         let (host, stats, _logs) = fake_host();
         assert!(host.start(None));
         stats.default_changed.store(true, Ordering::Release);
+        host.try_reconnect();
+        assert_eq!(stats.opens.load(Ordering::Relaxed), 2);
+        assert!(host.is_running());
+    }
+
+    #[test]
+    fn composed_input_endpoint_change_forces_a_restart() {
+        let (host, stats, _logs) = fake_host();
+        assert!(host.start(None));
+        stats.input_changed.store(true, Ordering::Release);
+        host.try_reconnect();
+        assert_eq!(stats.opens.load(Ordering::Relaxed), 2);
+        assert!(host.is_running());
+    }
+
+    #[test]
+    fn both_device_change_flags_are_consumed_by_one_reconnect() {
+        let (host, stats, _logs) = fake_host();
+        assert!(host.start(None));
+        stats.default_changed.store(true, Ordering::Release);
+        stats.input_changed.store(true, Ordering::Release);
+        host.try_reconnect();
+        assert_eq!(stats.opens.load(Ordering::Relaxed), 2);
+        // The input flag must not survive to restart the new generation.
         host.try_reconnect();
         assert_eq!(stats.opens.load(Ordering::Relaxed), 2);
         assert!(host.is_running());
@@ -2453,5 +2995,224 @@ mod tests {
                 outputs: 32
             })
         );
+    }
+
+    // --- duplex composition (private aggregate) -------------------------
+
+    #[test]
+    fn a_duplex_output_device_is_opened_without_an_aggregate() {
+        assert_eq!(
+            plan_duplex_composition(4, 2, 9, 1, Some("BuiltInMic"), Some("Interface")),
+            None
+        );
+        // Even the device being its own default input stays untouched.
+        assert_eq!(
+            plan_duplex_composition(4, 1, 4, 1, Some("Duplex"), Some("Duplex")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_missing_default_input_device_never_composes() {
+        assert_eq!(
+            plan_duplex_composition(4, 0, 0, 1, None, Some("Speakers")),
+            None
+        );
+        assert_eq!(
+            plan_duplex_composition(4, 0, 0, 0, None, Some("Speakers")),
+            None
+        );
+    }
+
+    #[test]
+    fn an_input_device_without_channels_never_composes() {
+        assert_eq!(
+            plan_duplex_composition(4, 0, 9, 0, Some("Useless"), Some("Speakers")),
+            None
+        );
+    }
+
+    #[test]
+    fn an_output_device_without_a_uid_never_composes() {
+        assert_eq!(
+            plan_duplex_composition(4, 0, 9, 1, Some("Mic"), Some("")),
+            None
+        );
+        assert_eq!(
+            plan_duplex_composition(4, 0, 9, 1, Some("Mic"), None),
+            None
+        );
+    }
+
+    #[test]
+    fn an_output_only_device_composes_with_both_sub_device_uids() {
+        let composition = plan_duplex_composition(
+            4,
+            0,
+            9,
+            1,
+            Some("AppleHDAEngineInput:1B,0,18,1"),
+            Some("AppleHDAEngineOutput:1B,0,19,3"),
+        )
+        .expect("an output-only device plus a real input device must compose");
+        assert_eq!(composition.input_uid, "AppleHDAEngineInput:1B,0,18,1");
+        assert_eq!(composition.output_uid, "AppleHDAEngineOutput:1B,0,19,3");
+    }
+
+    /// Backend whose default output device is output-only (0, 2) and only
+    /// becomes openable once `resolve_for_open` has composed a device: the
+    /// composed id reports (1, 2), and `open` records what it was handed.
+    struct ComposingBackend {
+        composed: u32,
+        opened_with: Arc<Mutex<Option<u32>>>,
+        probed: Arc<Mutex<Vec<u32>>>,
+        opened: bool,
+        realtime: Option<Arc<RealtimeState>>,
+    }
+
+    impl ComposingBackend {
+        /// Builds a host plus the probes the assertions read back without
+        /// having to downcast the trait object.
+        fn host(
+            composed: u32,
+        ) -> (MacAudioHost, Arc<Mutex<Option<u32>>>, Arc<Mutex<Vec<u32>>>) {
+            let opened_with = Arc::new(Mutex::new(None));
+            let probed = Arc::new(Mutex::new(Vec::new()));
+            let backend = Self {
+                composed,
+                opened_with: Arc::clone(&opened_with),
+                probed: Arc::clone(&probed),
+                opened: false,
+                realtime: None,
+            };
+            let host = MacAudioHost::new(Box::new(backend), None, ptr::null_mut());
+            (host, opened_with, probed)
+        }
+    }
+
+    impl AudioBackend for ComposingBackend {
+        fn default_output_device(&self) -> Result<u32, i32> {
+            Ok(4)
+        }
+
+        fn nominal_sample_rate(&self, _device: u32) -> Option<f64> {
+            Some(48_000.0)
+        }
+
+        fn buffer_frame_size(&self, _device: u32) -> Option<u32> {
+            Some(256)
+        }
+
+        fn channel_counts(&self, device: u32) -> Result<(u32, u32), DriverError> {
+            self.probed.lock().unwrap().push(device);
+            if device == self.composed {
+                Ok((1, 2))
+            } else {
+                Ok((0, 2))
+            }
+        }
+
+        fn open(
+            &mut self,
+            _request: FormatRequest,
+            requested_device: u32,
+            _channels: ChannelMap,
+            realtime: Arc<RealtimeState>,
+        ) -> Result<u32, DriverError> {
+            *self.opened_with.lock().unwrap() = Some(requested_device);
+            self.opened = true;
+            self.realtime = Some(realtime);
+            Ok(requested_device)
+        }
+
+        fn start(&mut self) -> Result<(), DriverError> {
+            if let Some(realtime) = &self.realtime {
+                realtime.running.store(true, Ordering::Release);
+            }
+            Ok(())
+        }
+
+        fn close(&mut self) {
+            self.opened = false;
+            if let Some(realtime) = self.realtime.take() {
+                realtime.running.store(false, Ordering::Release);
+            }
+        }
+
+        fn is_open(&self) -> bool {
+            self.opened
+        }
+
+        fn device_uid(&self, device: u32) -> Option<String> {
+            Some(format!("uid-{device}"))
+        }
+
+        fn devices_json(&self) -> String {
+            "[]".to_owned()
+        }
+
+        fn take_default_device_change(&self) -> bool {
+            false
+        }
+
+        fn resolve_for_open(&self, output_device: u32, _request: FormatRequest) -> u32 {
+            if self.composed != 0 {
+                self.composed
+            } else {
+                output_device
+            }
+        }
+
+        fn input_endpoint_for(&self, opened_device: u32) -> u32 {
+            if self.composed != 0 && opened_device == self.composed {
+                9
+            } else {
+                opened_device
+            }
+        }
+    }
+
+    #[test]
+    fn start_probes_and_opens_the_composed_device() {
+        let (host, opened_with, probed) = ComposingBackend::host(42);
+        assert!(host.start(None));
+        assert_eq!(host.status(), "running");
+        // The channel probe must see the composed device, otherwise the
+        // output-only default would still reject with NoInputChannels.
+        assert_eq!(*probed.lock().unwrap(), vec![42u32]);
+        assert_eq!(*opened_with.lock().unwrap(), Some(42));
+        host.stop();
+        assert_eq!(host.status(), "stopped");
+    }
+
+    #[test]
+    fn an_explicit_selection_negotiates_its_own_rate_not_the_defaults() {
+        let (host, _stats, _logs) = fake_host();
+        host.lock_core().selected_device = 11;
+        assert!(host.start(None));
+        assert_eq!(host.lock_core().sample_rate(), 96_000.0);
+    }
+
+    #[test]
+    fn the_composed_aggregate_is_never_reported_as_the_input_endpoint() {
+        let (host, _opened_with, _probed) = ComposingBackend::host(42);
+        assert!(host.start(None));
+        // The UI and recording key off the physical capture endpoint; the
+        // private per-process aggregate UID would go stale on stop and can
+        // never be re-selected or persisted.
+        assert_eq!(host.selected_device_uid(), "uid-9");
+        host.stop();
+        assert_eq!(host.selected_device_uid(), "");
+    }
+
+    #[test]
+    fn start_still_fails_exactly_as_before_when_nothing_is_composed() {
+        let (host, opened_with, _probed) = ComposingBackend::host(0);
+        assert!(!host.start(None));
+        assert_eq!(host.status(), "start-failed");
+        assert_eq!(host.last_error_code(), -1);
+        // The identity path must not open anything: this is today's
+        // output-only behaviour, rejection included.
+        assert_eq!(*opened_with.lock().unwrap(), None);
     }
 }

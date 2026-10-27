@@ -128,7 +128,7 @@ fn parse_region<'a>(
     };
     if version >= 28 {
         region.id = cursor.u32()?;
-        if region.id == 0 || !region_ids.insert(region.id) {
+        if region.id == 0 || region.id == u32::MAX || !region_ids.insert(region.id) {
             return None;
         }
     }

@@ -8,9 +8,8 @@
         auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
                                [newId](const auto& track) { return track->getId() == newId; });
         if (it == m_tracks.end()) return;
-        {
-            std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-            for (const auto& region : (*it)->getRegions()) m_peakCache.erase(region.id);
+        for (const auto& region : (*it)->getRegions()) {
+            hirari_region_waveform_forget(this, region.id);
         }
         m_deferredDestructionTracks.push_back(*it);
         m_tracks.erase(it);
@@ -72,8 +71,9 @@ bool HirariUnifiedEngine::remove_track(uint32_t tid) {
         m_routingEngine.removeConnectionsForNode(tid, routingBackup);
         m_routingEngine.removeFeedbackConnectionsForNode(tid, feedbackBackup);
         {
-            std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-            for (const auto& region : removed->getRegions()) m_peakCache.erase(region.id);
+            for (const auto& region : removed->getRegions()) {
+                hirari_region_waveform_forget(this, region.id);
+            }
         }
         m_deferredDestructionTracks.push_back(removed);
         m_tracks.erase(it);
@@ -108,9 +108,8 @@ bool HirariUnifiedEngine::remove_track(uint32_t tid) {
             auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
                                    [tid](const auto& track) { return track->getId() == tid; });
             if (it == m_tracks.end()) return;
-            {
-                std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-                for (const auto& region : (*it)->getRegions()) m_peakCache.erase(region.id);
+            for (const auto& region : (*it)->getRegions()) {
+                hirari_region_waveform_forget(this, region.id);
             }
             m_deferredDestructionTracks.push_back(*it);
             m_tracks.erase(it);
@@ -174,61 +173,8 @@ bool HirariUnifiedEngine::remove_track(uint32_t tid) {
 }
 
 bool HirariUnifiedEngine::set_track_name(uint32_t tid, std::string_view name) {
-    if (name.empty() || name.size() > 256 || name.find('\0') != std::string_view::npos) return false;
-    std::shared_ptr<Track> target;
-    std::string before;
-    const std::string nextName(name);
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track->getId() == tid) {
-                target = track;
-                before = track->getName();
-                break;
-            }
-        }
-    }
-    if (!target) return false;
-    // Naming is an idempotent project-hydration operation: restoring a name
-    // that is already present still counts as success.
-    if (before == nextName) return true;
-    const auto apply = [this, target](const std::string& value) {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target->setName(value);
-    };
-    apply(nextName);
-    m_undoManager.recordAppliedAction(
-        "Rename Track", [apply, before] { apply(before); }, [apply, nextName] { apply(nextName); });
-    return true;
-}
-
-bool HirariUnifiedEngine::set_track_volume(uint32_t tid, float value) {
-    if (!std::isfinite(value) || value < 0.0f || value > 2.0f) return false;
-    std::shared_ptr<Track> target;
-    float before = 1.0f;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() == tid) {
-            target = track;
-            before = track->getVolume();
-            break;
-        }
-    }
-    if (!target) return false;
-    // Publish the control-thread state immediately. The undo transaction is
-    // history bookkeeping; serialized project snapshots must not depend on
-    // a later callback observing the redo closure.
-    target->setVolume(value);
-    const auto apply = [target](float next) { target->setVolume(next); };
-    m_undoManager.performAction(
-        "Track Volume " + std::to_string(tid),
-        [apply, before] { apply(before); },
-        [apply, value] { apply(value); });
-    // Undo history is process-global while the engine is a singleton. A
-    // coalesced transaction must never leave the live control state at its
-    // captured pre-edit value after the API returns.
-    target->setVolume(value);
-    return true;
+    return hirari_control_edit_rename_track(
+        this, tid, reinterpret_cast<const uint8_t*>(name.data()), name.size());
 }
 
 float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
@@ -237,67 +183,6 @@ float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
         if (track && track->getId() == tid) return track->getVolume();
     }
     return -1.0f;
-}
-
-bool HirariUnifiedEngine::set_track_pan(uint32_t tid, float value) {
-    if (!std::isfinite(value) || value < -1.0f || value > 1.0f) return false;
-    std::shared_ptr<Track> target;
-    float before = 0.0f;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() == tid) {
-            target = track;
-            before = track->getPan();
-            break;
-        }
-    }
-    if (!target) return false;
-    const auto apply = [target](float next) { target->setPan(next); };
-    m_undoManager.performAction(
-        "Track Pan " + std::to_string(tid),
-        [apply, before] { apply(before); },
-        [apply, value] { apply(value); });
-    return true;
-}
-
-bool HirariUnifiedEngine::set_track_mute(uint32_t tid, bool muted) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() == tid) {
-            target = track;
-            before = track->isMuted();
-            break;
-        }
-    }
-    if (!target) return false;
-    const auto apply = [target](bool next) { target->setMuted(next); };
-    m_undoManager.performAction(
-        "Track Mute " + std::to_string(tid),
-        [apply, before] { apply(before); },
-        [apply, muted] { apply(muted); });
-    return true;
-}
-
-bool HirariUnifiedEngine::set_track_solo(uint32_t tid, bool solo) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() == tid) {
-            target = track;
-            before = track->isSolo();
-            break;
-        }
-    }
-    if (!target) return false;
-    const auto apply = [target](bool next) { target->setSolo(next); };
-    m_undoManager.performAction(
-        "Track Solo " + std::to_string(tid),
-        [apply, before] { apply(before); },
-        [apply, solo] { apply(solo); });
-    return true;
 }
 
 bool HirariUnifiedEngine::set_track_solo_for_offline_render(uint32_t tid, bool solo) {
@@ -497,171 +382,26 @@ void HirariUnifiedEngine::syncStructuralChanges() {
     ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0x1, "Structural Sync: Topology Rebuilt.");
 }
 
+// Region import policy (validation, decoder dispatch, ticket limits, worker
+// thread, undo capture) lives in Rust (region_jobs.rs). These wrappers only
+// translate the result codes into the existing UI diagnostics.
 bool HirariUnifiedEngine::add_region(uint32_t tid, std::string_view path, double start_smp) {
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& track : m_tracks) {
-            if (track && track->getId() == tid) {
-                target = track;
-                break;
-            }
-        }
-    }
-    if (!target) {
+    const int32_t result = hirari_region_import_add(
+        this, tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(), start_smp);
+    if (result == 1) {
         ::Hirari::Core::Diagnostics::LogBuffer::post(1, 0x2102, "REGION_TRACK_NOT_FOUND");
-        return false;
-    }
-    // Importing compressed media can invoke FFmpeg and take seconds. Decode it
-    // before taking the shared track-model lock so unrelated project reads and
-    // edits are not held behind codec work.
-    double sourceSampleRate = 0.0;
-    auto audioData = m_audioDecoderManager.importFile(std::string(path), &sourceSampleRate);
-    if (!audioData || audioData->getNumSamples() == 0 || audioData->getNumChannels() == 0) {
+    } else if (result == 2) {
         ::Hirari::Core::Diagnostics::LogBuffer::post(1, 0x2101, "REGION_IMPORT_FAILED");
-        return false;
     }
-    return commit_region_import(tid, static_cast<uint64_t>(std::max(0.0, start_smp)),
-                                std::string(path), target, std::move(audioData),
-                                sourceSampleRate);
+    return result == 0;
 }
 
 uint64_t HirariUnifiedEngine::queue_region_import(
     uint32_t tid, std::string_view path, uint64_t startSample) {
-    if (tid == 0 || path.empty() || path.find('\0') != std::string_view::npos) return 0;
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> trackLock(m_tracksMutex);
-        for (const auto& track : m_tracks) {
-            if (track && track->getId() == tid) {
-                target = track;
-                break;
-            }
-        }
-    }
-    if (!target) return 0;
-
-    auto job = std::make_shared<RegionImportJob>();
-    job->target = target;
-    job->trackId = tid;
-    job->startSample = startSample;
-    job->path.assign(path.data(), path.size());
-    const auto ticket = m_nextRegionImportTicket.fetch_add(1, std::memory_order_relaxed);
-    if (ticket == 0) return 0;
-    {
-        std::lock_guard<std::mutex> jobsLock(m_regionImportJobsMutex);
-        size_t active = 0;
-        for (const auto& [id, existing] : m_regionImportJobs) {
-            (void)id;
-            const auto status = existing->status.load(std::memory_order_acquire);
-            if (status == 1 || status == 2) ++active;
-        }
-        if (active >= 2 || m_regionImportJobs.size() >= 8) return 0;
-        m_regionImportJobs.emplace(ticket, job);
-    }
-
-    try {
-        const auto decodePath = job->path;
-        std::thread([job, decodePath]() {
-            try {
-                double sourceSampleRate = 0.0;
-                auto audio = ::Hirari::Core::IO::AudioDecoderManager::getInstance()
-                    .importFile(decodePath, &sourceSampleRate);
-                if (!audio || audio->getNumSamples() == 0 || audio->getNumChannels() == 0) {
-                    job->status.store(4, std::memory_order_release);
-                    return;
-                }
-                job->audio = std::move(audio);
-                job->sourceSampleRate = sourceSampleRate;
-                job->status.store(2, std::memory_order_release);
-            } catch (...) {
-                job->status.store(4, std::memory_order_release);
-            }
-        }).detach();
-    } catch (...) {
-        std::lock_guard<std::mutex> jobsLock(m_regionImportJobsMutex);
-        m_regionImportJobs.erase(ticket);
-        return 0;
-    }
-    return ticket;
+    return hirari_region_import_queue(
+        this, tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(), startSample);
 }
 
 uint8_t HirariUnifiedEngine::complete_region_import(uint64_t ticket) {
-    std::shared_ptr<RegionImportJob> job;
-    {
-        std::lock_guard<std::mutex> jobsLock(m_regionImportJobsMutex);
-        const auto found = m_regionImportJobs.find(ticket);
-        if (found == m_regionImportJobs.end()) return 3;
-        job = found->second;
-        const auto status = job->status.load(std::memory_order_acquire);
-        if (status == 1) return 0;
-        // Import completion is its own editing action. Do not let a decode
-        // finishing during a drag or another explicit edit transaction absorb
-        // the new region into that unrelated Undo step. The UI poll retries.
-        if (status == 2 && m_undoManager.transactionActive()) return 0;
-        m_regionImportJobs.erase(found);
-        if (status != 2) return 2;
-    }
-
-    const auto target = job->target.lock();
-    if (!target || !job->audio) return 2;
-    return commit_region_import(job->trackId, job->startSample, job->path,
-                                target, std::move(job->audio), job->sourceSampleRate) ? 1 : 2;
-}
-
-bool HirariUnifiedEngine::commit_region_import(
-    uint32_t tid, uint64_t startSample, const std::string& path,
-    const std::shared_ptr<Track>& expectedTrack,
-    std::shared_ptr<::Hirari::Core::AudioBuffer> audio,
-    double sourceSampleRate) {
-    if (!expectedTrack || !audio || audio->getNumSamples() == 0 || audio->getNumChannels() == 0) {
-        return false;
-    }
-    const double timelineSampleRate = m_sampleRate.load(std::memory_order_acquire);
-    if (!std::isfinite(sourceSampleRate) || sourceSampleRate < 8000.0 ||
-        sourceSampleRate > 384000.0 || !std::isfinite(timelineSampleRate) ||
-        timelineSampleRate < 8000.0 || timelineSampleRate > 384000.0) return false;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const auto current = std::find_if(m_tracks.begin(), m_tracks.end(),
-        [tid, &expectedTrack](const auto& track) {
-            return track && track->getId() == tid && track == expectedTrack;
-        });
-    if (current == m_tracks.end()) return false;
-
-    Region region{};
-    region.id = allocateRegionIdLocked();
-    if (region.id == 0) return false;
-    region.path = path;
-    region.start = startSample;
-    region.audio = std::move(audio);
-    region.sourceSampleRate = sourceSampleRate;
-    region.timelineSampleRate = timelineSampleRate;
-    const long double timelineLength = std::ceil(
-        static_cast<long double>(region.audio->getNumSamples()) * timelineSampleRate /
-        sourceSampleRate);
-    if (!std::isfinite(static_cast<double>(timelineLength)) || timelineLength < 1.0L ||
-        timelineLength > static_cast<long double>(UINT64_MAX)) return false;
-    region.len = static_cast<uint64_t>(timelineLength);
-    region.muted = false;
-    region.name = region.path;
-    const auto added = region;
-    expectedTrack->addRegion(region);
-    // Region creation is an editing action: keep the imported audio alive for
-    // redo while removing only this region on undo.
-    m_undoManager.recordAppliedAction(
-        "Add Region",
-        [this, expectedTrack, rid = added.id]() {
-            std::lock_guard<std::mutex> undoLock(m_tracksMutex);
-            expectedTrack->removeRegion(rid);
-            std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-            m_peakCache.erase(rid);
-        },
-        [this, expectedTrack, added]() {
-            std::lock_guard<std::mutex> redoLock(m_tracksMutex);
-            expectedTrack->removeRegion(added.id);
-            expectedTrack->addRegion(added);
-            std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-            m_peakCache.erase(added.id);
-        });
-    return true;
+    return hirari_region_import_complete(this, ticket);
 }

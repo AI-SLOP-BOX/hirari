@@ -55,24 +55,19 @@ uint32_t HirariUnifiedEngine::get_redo_count() const {
 }
 
 rust::String HirariUnifiedEngine::get_project_layout_json() const {
-    std::stringstream ss;
-    write_project_layout_json(ss);
-    return rust::String(ss.str());
+    return get_project_layout_json_cancellable(nullptr);
 }
 
 rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
     const std::atomic<bool>* cancellation) const {
-    std::stringstream ss;
-    if (!write_project_layout_json(ss, cancellation)) return rust::String();
-    return rust::String(ss.str());
-}
-
-bool HirariUnifiedEngine::write_project_layout_json(
-    std::ostream& ss, const std::atomic<bool>* cancellation) const {
+    // The serializer is Rust-owned. This function only gathers the current
+    // model into a borrowed snapshot and keeps it alive (and stable) for the
+    // synchronous call. Every ordering, escaping and formatting rule lives in
+    // hirari-core-bridge/src/project_layout.rs.
     const auto cancelled = [cancellation]() noexcept {
         return cancellation && cancellation->load(std::memory_order_acquire);
     };
-    if (cancelled()) return false;
+    if (cancelled()) return rust::String();
     if (m_ecoModeLogTriggered.exchange(false, std::memory_order_acq_rel)) {
         ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | GOVERNOR | ECO_MODE_ACTIVE");
     }
@@ -80,325 +75,249 @@ bool HirariUnifiedEngine::write_project_layout_json(
         ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | VIDEO | SYNC_LOCKED");
     }
 
-    const auto jsonString = [](const std::string& value) {
-        std::string escaped(value.size() * 2 + 8, '\0');
-        size_t written = 0;
-        if (hirari_project_layout_escape_json_string(
-                reinterpret_cast<const uint8_t*>(value.data()), value.size(),
-                reinterpret_cast<uint8_t*>(escaped.data()), escaped.size(), &written)) {
-            escaped.resize(written);
-            return escaped;
-        }
-        return value;
+    static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) ==
+                  sizeof(HirariLayoutAutomationPoint));
+    static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
+
+    // Serialization borrows data owned by each track. Heap-allocate every
+    // per-track block: moving it would invalidate the pointers to short-string
+    // buffers that the snapshot already holds.
+    struct TrackLayoutStorage {
+        HirariLayoutTrack view{};
+        std::string name;
+        std::string frozenPath;
+        std::string expressionMap;
+        std::string expressionMapPro;
+        std::vector<HirariLayoutAutomationPoint> volumeAutomation;
+        std::vector<HirariLayoutAutomationPoint> panAutomation;
+        std::vector<HirariLayoutAutomationPoint> trackDelayAutomation;
+        std::vector<HirariLayoutPluginLane> pluginAutomation;
+        std::vector<std::vector<Hirari::Core::ProjectAutomationPoint>> pluginAutomationPoints;
+        std::vector<uint8_t> pluginBypass;
+        std::vector<std::vector<float>> pluginParameters;
+        std::vector<HirariLayoutParameterBlock> pluginParameterBlocks;
+        std::vector<std::vector<uint8_t>> pluginStates;
+        std::vector<HirariLayoutByteBlock> pluginStateBlocks;
+        std::vector<HirariLayoutString> sandboxPaths;
+        std::vector<std::vector<uint8_t>> sandboxStates;
+        std::vector<HirariLayoutByteBlock> sandboxStateBlocks;
+        std::vector<HirariLayoutRegion> regions;
     };
-    const auto jsonNumber = [](double value) {
-        return std::isfinite(value) ? std::to_string(value) : std::string("0");
-    };
-    const auto jsonHex = [](const std::vector<uint8_t>& bytes) {
-        std::string encoded(bytes.size() * 2, '\0');
-        size_t written = 0;
-        hirari_project_layout_encode_hex(
-            bytes.data(), bytes.size(),
-            reinterpret_cast<uint8_t*>(encoded.data()), encoded.size(), &written);
-        return encoded;
-    };
-    ss << "[";
+
     std::vector<Hirari::Core::Engine::RoutingEngine::FeedbackConnection> feedbackConnections;
     m_routingEngine.copyFeedbackConnections(feedbackConnections);
+
+    const double timelineSampleRate = m_sampleRate.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
-        if (cancelled()) return false;
-        if (track) {
-            // A callback may have queued write-automation points since the
-            // previous snapshot. Drain them on this control-side boundary so
-            // UI, CLI generation checks, history diffs, and project saves all
-            // observe the same automation state.
-            track->flushRecordedAutomation();
-            track->reclaimEffectChainRetiredMemory();
-        }
+        if (cancelled()) return rust::String();
+        if (!track) continue;
+        // A callback may have queued write-automation points since the
+        // previous snapshot. Drain them on this control-side boundary so UI,
+        // CLI generation checks, history diffs, and project saves all observe
+        // the same automation state.
+        track->flushRecordedAutomation();
+        track->reclaimEffectChainRetiredMemory();
     }
-    size_t serializedTrackCount = 0;
-    for (size_t i = 0; i < m_tracks.size(); ++i) {
-        if (cancelled()) return false;
-        const auto& track = m_tracks[i];
-        const bool isEmptyBootstrap = track->getId() == 0 &&
-            track->getName() == "Audio 1" &&
-            track->getPluginCount() == 0 && track->getRegions().empty() &&
-            m_tracks.size() > 1;
-        if (isEmptyBootstrap) continue;
-        if (serializedTrackCount++ > 0) ss << ",";
-        ss << "{";
-        ss << "\"id\":" << track->getId() << ",";
-        ss << "\"name\":\"" << jsonString(track->getName()) << "\",";
-        
-        std::string typeStr = "Audio";
-        if (track->getType() == Track::Type::Midi) typeStr = "Midi";
-        else if (track->getType() == Track::Type::Instrument) typeStr = "Instrument";
-        else if (track->getType() == Track::Type::Bus) typeStr = "Bus";
-        else if (track->getType() == Track::Type::Vocal) typeStr = "Vocal";
-        
-        ss << "\"type\":\"" << typeStr << "\",";
-        ss << "\"volume\":" << jsonNumber(track->getVolume()) << ",";
-        ss << "\"pan\":" << jsonNumber(track->getPan()) << ",";
-        ss << "\"mute\":" << (track->isMuted() ? "true" : "false") << ",";
-        ss << "\"solo\":" << (track->isSolo() ? "true" : "false") << ",";
-        ss << "\"record_armed\":" << (track->isRecordArmed() ? "true" : "false") << ",";
-        ss << "\"phase_invert\":" << (track->isPhaseInverted() ? "true" : "false") << ",";
-        ss << "\"track_delay_samples\":" << track->getTrackDelaySamples() << ",";
-        ss << "\"frozen\":" << (track->isFrozen() ? "true" : "false") << ",";
-        ss << "\"frozen_total_samples\":" << track->frozenTotalSamples() << ",";
-        ss << "\"frozen_sample_rate\":" << track->frozenSampleRate() << ",";
-        ss << "\"frozen_path\":\"" << jsonString(track->frozenPath()) << "\",";
-        const auto writeAutomationJson = [&ss, &jsonNumber, &cancelled](const char* key, const auto& points) {
-            ss << "\"" << key << "\":[";
-            for (size_t index = 0; index < points.size(); ++index) {
-                if (cancelled()) return false;
-                if (index > 0) ss << ",";
-                const auto& point = points[index];
-                ss << "{\"time\":" << jsonNumber(point.time)
-                   << ",\"value\":" << jsonNumber(point.value)
-                   << ",\"curve\":" << jsonNumber(point.curve) << "}";
-            }
-            ss << "],";
-            return true;
-        };
-        if (!writeAutomationJson("volume_automation", track->getVolumeAutomationPoints()) ||
-            !writeAutomationJson("pan_automation", track->getPanAutomationPoints()) ||
-            !writeAutomationJson("track_delay_automation", track->getTrackDelayAutomationPoints())) return false;
-        ss << "\"expression_map\":" << track->getExpressionMapJson() << ",";
-        ss << "\"expression_map_pro\":" << track->getExpressionMapProJson() << ",";
-        ss << "\"plugin_automation\":[";
+
+    const auto layoutString = [](const std::string& value) {
+        HirariLayoutString out;
+        out.data = reinterpret_cast<const uint8_t*>(value.data());
+        out.len = value.size();
+        return out;
+    };
+    const auto layoutPoints = [](const std::vector<Hirari::Core::ProjectAutomationPoint>& input) {
+        std::vector<HirariLayoutAutomationPoint> out(input.size());
+        for (size_t index = 0; index < input.size(); ++index) {
+            out[index] = {input[index].time, input[index].value, input[index].curve};
+        }
+        return out;
+    };
+
+    std::vector<std::unique_ptr<TrackLayoutStorage>> storages;
+    std::vector<HirariLayoutTrack> trackViews;
+    std::vector<HirariLayoutSidechainRoute> sidechainRoutes;
+    std::vector<HirariLayoutFeedbackRoute> feedbackRoutes;
+    storages.reserve(m_tracks.size());
+    trackViews.reserve(m_tracks.size());
+    for (const auto& track : m_tracks) {
+        if (cancelled()) return rust::String();
+        if (!track) continue;
+        auto storage = std::make_unique<TrackLayoutStorage>();
+        storage->name = track->getName();
+        storage->frozenPath = track->frozenPath();
+        storage->expressionMap = track->getExpressionMapJson();
+        storage->expressionMapPro = track->getExpressionMapProJson();
+        storage->volumeAutomation = layoutPoints(track->getVolumeAutomationPoints());
+        storage->panAutomation = layoutPoints(track->getPanAutomationPoints());
+        storage->trackDelayAutomation = layoutPoints(track->getTrackDelayAutomationPoints());
+
         const auto pluginAutomation = track->getPluginAutomation();
-        for (size_t laneIndex = 0; laneIndex < pluginAutomation.size(); ++laneIndex) {
-            if (cancelled()) return false;
-            if (laneIndex > 0) ss << ",";
-            const auto& lane = pluginAutomation[laneIndex];
-            ss << "{\"plugin_index\":" << lane.pluginIndex
-               << ",\"parameter_id\":" << lane.parameterId << ",\"points\":[";
-            for (size_t pointIndex = 0; pointIndex < lane.points.size(); ++pointIndex) {
-                if (cancelled()) return false;
-                if (pointIndex > 0) ss << ",";
-                const auto& point = lane.points[pointIndex];
-                ss << "{\"sample\":" << static_cast<uint64_t>(point.time)
-                   << ",\"normalized\":" << jsonNumber(point.value)
-                   << ",\"curve\":" << jsonNumber(point.curve) << "}";
-            }
-            ss << "]}";
+        storage->pluginAutomationPoints.reserve(pluginAutomation.size());
+        for (const auto& lane : pluginAutomation)
+            storage->pluginAutomationPoints.push_back(lane.points);
+        storage->pluginAutomation.resize(pluginAutomation.size());
+        for (size_t index = 0; index < pluginAutomation.size(); ++index) {
+            auto& lane = storage->pluginAutomation[index];
+            lane.pluginIndex = pluginAutomation[index].pluginIndex;
+            lane.parameterId = pluginAutomation[index].parameterId;
+            lane.points = reinterpret_cast<const HirariLayoutAutomationPoint*>(
+                storage->pluginAutomationPoints[index].data());
+            lane.pointCount = storage->pluginAutomationPoints[index].size();
         }
-        ss << "],";
-        ss << "\"plugin_types\":[";
+
         const auto& pluginTypes = track->getPluginTypes();
+        storage->pluginBypass.resize(pluginTypes.size());
         for (size_t index = 0; index < pluginTypes.size(); ++index) {
-            if (index > 0) ss << ",";
-            ss << pluginTypes[index];
+            storage->pluginBypass[index] =
+                track->getPluginBypass(static_cast<uint32_t>(index)) ? 1 : 0;
         }
-        ss << "],\"plugin_bypass\":[";
+        storage->pluginParameters.reserve(pluginTypes.size());
         for (size_t index = 0; index < pluginTypes.size(); ++index) {
-            if (index > 0) ss << ",";
-            ss << (track->getPluginBypass(static_cast<uint32_t>(index)) ? "true" : "false");
-        }
-        ss << "],\"plugin_parameter_values\":[";
-        for (size_t pluginIndex = 0; pluginIndex < pluginTypes.size(); ++pluginIndex) {
-            if (cancelled()) return false;
-            if (pluginIndex > 0) ss << ",";
-            ss << "[";
-            const uint32_t parameterCount = track->getPluginParameterCount(static_cast<uint32_t>(pluginIndex));
-            for (uint32_t parameterIndex = 0; parameterIndex < parameterCount; ++parameterIndex) {
-                if (parameterIndex > 0) ss << ",";
-                const float value = track->getPluginParameter(static_cast<uint32_t>(pluginIndex), parameterIndex);
-                ss << (std::isfinite(value) ? std::to_string(value) : "0.0");
+            if (cancelled()) return rust::String();
+            const uint32_t parameterCount =
+                track->getPluginParameterCount(static_cast<uint32_t>(index));
+            std::vector<float> values(parameterCount);
+            for (uint32_t parameter = 0; parameter < parameterCount; ++parameter) {
+                values[parameter] =
+                    track->getPluginParameter(static_cast<uint32_t>(index), parameter);
             }
-            ss << "]";
+            storage->pluginParameters.push_back(std::move(values));
         }
-        ss << "],\"plugin_state_sizes\":[";
-        auto pluginStates = track->getPluginStates();
-        // Keep the serialized arrays structurally aligned even when a legacy
-        // processor does not expose a state serializer. The parameter vector
-        // is already part of the control-plane snapshot, so this marker is
-        // deterministic and is not read or allocated from the audio thread.
-        while (pluginStates.size() < pluginTypes.size()) {
-            const auto pluginIndex = static_cast<uint32_t>(pluginStates.size());
-            std::vector<uint8_t> marker(sizeof(float));
-            const float value = track->getPluginParameter(pluginIndex, 0);
-            std::memcpy(marker.data(), &value, sizeof(float));
-            pluginStates.push_back(std::move(marker));
+        storage->pluginParameterBlocks.resize(storage->pluginParameters.size());
+        for (size_t index = 0; index < storage->pluginParameters.size(); ++index) {
+            storage->pluginParameterBlocks[index] = {
+                storage->pluginParameters[index].data(),
+                storage->pluginParameters[index].size()};
         }
-        for (size_t index = 0; index < pluginStates.size(); ++index) {
-            if (cancelled()) return false;
-            if (index > 0) ss << ",";
-            ss << pluginStates[index].size();
+
+        storage->pluginStates = track->getPluginStates();
+        storage->pluginStateBlocks.resize(storage->pluginStates.size());
+        for (size_t index = 0; index < storage->pluginStates.size(); ++index) {
+            storage->pluginStateBlocks[index] = {
+                storage->pluginStates[index].data(), storage->pluginStates[index].size()};
         }
-        ss << "],\"plugin_state_hashes\":[";
-        for (size_t index = 0; index < pluginStates.size(); ++index) {
-            if (index > 0) ss << ",";
-            uint64_t hash = 1469598103934665603ull;
-            for (const uint8_t byte : pluginStates[index]) {
-                if (cancelled()) return false;
-                hash ^= byte;
-                hash *= 1099511628211ull;
-            }
-            ss << hash;
-        }
-        ss << "],\"plugin_state_hex\":[";
-        for (size_t index = 0; index < pluginStates.size(); ++index) {
-            if (cancelled()) return false;
-            if (index > 0) ss << ",";
-            ss << "\"" << jsonHex(pluginStates[index]) << "\"";
-        }
-        ss << "],\"sandbox_plugin_paths\":[";
+
         const auto& sandboxPaths = track->getSandboxedPluginPaths();
+        storage->sandboxPaths.resize(sandboxPaths.size());
         for (size_t index = 0; index < sandboxPaths.size(); ++index) {
-            if (cancelled()) return false;
-            if (index > 0) ss << ",";
-            ss << "\"" << jsonString(sandboxPaths[index]) << "\"";
+            storage->sandboxPaths[index] = layoutString(sandboxPaths[index]);
         }
-        ss << "],\"sandbox_plugin_state_hex\":[";
-        const auto sandboxStates = track->getSandboxedPluginStates();
-        for (size_t index = 0; index < sandboxStates.size(); ++index) {
-            if (cancelled()) return false;
-            if (index > 0) ss << ",";
-            ss << "\"" << jsonHex(sandboxStates[index]) << "\"";
+        storage->sandboxStates = track->getSandboxedPluginStates();
+        storage->sandboxStateBlocks.resize(storage->sandboxStates.size());
+        for (size_t index = 0; index < storage->sandboxStates.size(); ++index) {
+            storage->sandboxStateBlocks[index] = {
+                storage->sandboxStates[index].data(), storage->sandboxStates[index].size()};
         }
-        ss << "],";
 
-        ss << "\"sidechain_routes\":[";
-        bool firstSidechain = true;
-        for (const auto& route : m_sidechainRoutes) {
-            if (cancelled()) return false;
-            if (route.destinationId != track->getId()) continue;
-            if (!firstSidechain) ss << ",";
-            firstSidechain = false;
-            ss << "{\"source_id\":" << route.sourceId
-               << ",\"destination_id\":" << route.destinationId
-               << ",\"plugin_index\":" << route.pluginIndex
-               << ",\"tap_point\":" << route.tapPoint << "}";
-        }
-        ss << "],";
-
-        ss << "\"feedback_routes\":[";
-        bool firstFeedback = true;
-        for (const auto& route : feedbackConnections) {
-            if (cancelled()) return false;
-            if (route.sourceId != track->getId()) continue;
-            if (!firstFeedback) ss << ",";
-            firstFeedback = false;
-            ss << "{\"source_id\":" << route.sourceId
-               << ",\"destination_id\":" << route.destId
-               << ",\"gain\":" << jsonNumber(route.gain) << "}";
-        }
-        ss << "],";
-        
-        ss << "\"regions\":[";
         const auto& regions = track->getRegions();
-        for (size_t r = 0; r < regions.size(); ++r) {
-            if (cancelled()) return false;
-            const auto& region = regions[r];
-            if (r > 0) ss << ",";
-            ss << "{";
-            ss << "\"id\":" << region.id << ",";
-            ss << "\"name\":\"" << jsonString(region.name) << "\",";
-            ss << "\"start\":" << region.start << ",";
-            ss << "\"len\":" << region.len << ",";
-            ss << "\"source_length\":" << region.sourceLength << ",";
-            ss << "\"source_sample_rate\":" << static_cast<uint32_t>(std::clamp(
+        storage->regions.resize(regions.size());
+        for (size_t index = 0; index < regions.size(); ++index) {
+            if (cancelled()) return rust::String();
+            const auto& region = regions[index];
+            auto& out = storage->regions[index];
+            out.id = region.id;
+            out.name = layoutString(region.name);
+            out.state = region.editableState();
+            out.sourceSampleRate = static_cast<uint32_t>(std::clamp(
                 std::llround(region.sourceSampleRate > 0.0
-                    ? region.sourceSampleRate : m_sampleRate.load()), 8000LL, 384000LL)) << ",";
-            ss << "\"source_offset\":" << region.sourceOffset << ",";
-            ss << "\"base_start\":" << region.baseStart << ",";
-            ss << "\"base_source_offset\":" << region.baseSourceOffset << ",";
-            ss << "\"base_length\":" << region.baseLength << ",";
-            ss << "\"muted\":" << (region.muted ? "true" : "false") << ",";
+                    ? region.sourceSampleRate : timelineSampleRate), 8000LL, 384000LL));
+            out.path = layoutString(region.path);
             std::error_code pathError;
-            const bool missing = region.path.empty() ||
+            out.missing = region.path.empty() ||
                 !std::filesystem::exists(std::filesystem::path(region.path), pathError);
-            ss << "\"path\":\"" << jsonString(region.path) << "\",";
-            ss << "\"missing\":" << (missing ? "true" : "false") << ",";
             // Distinguish a missing file from a file that exists but was not
             // decoded during project hydration; clients can surface a relink
             // or decoder error instead of silently showing an empty region.
-            ss << "\"audio_loaded\":" << (region.audio ? "true" : "false") << ",";
-            ss << "\"clip_gain\":" << jsonNumber(region.clipGain) << ",";
-            ss << "\"fade_in_samples\":" << region.fadeInSamples << ",";
-            ss << "\"fade_out_samples\":" << region.fadeOutSamples << ",";
-            ss << "\"reverse\":" << (region.reverse ? "true" : "false");
-            ss << ",\"warp_ratio\":" << jsonNumber(region.warpRatio);
-            ss << ",\"pitch_preserve_warp\":" << (region.pitchPreserveWarp ? "true" : "false");
-            ss << ",\"pitch_semitones\":" << jsonNumber(region.pitchSemitones);
-            ss << ",\"loop_count\":" << region.loopCount;
-            ss << ",\"sync_group\":" << region.syncGroup;
-            ss << ",\"warp_markers\":[";
-            for (size_t wi = 0; wi < region.warpMarkers.size(); ++wi) {
-                if (cancelled()) return false;
-                if (wi > 0) ss << ",";
-                const auto& marker = region.warpMarkers[wi];
-                ss << "{\"source_sample\":" << marker.sourceSample
-                   << ",\"timeline_sample\":" << marker.timelineSample
-                   << ",\"transient\":" << (marker.transient ? "true" : "false") << "}";
-            }
-            ss << "]";
-            ss << ",\"range_edits\":[";
-            for (size_t ei = 0; ei < region.rangeEdits.size(); ++ei) {
-                if (cancelled()) return false;
-                if (ei > 0) ss << ",";
-                const auto& edit = region.rangeEdits[ei];
-                ss << "{\"start\":" << edit.start << ",\"end\":" << edit.end
-                   << ",\"gain\":" << jsonNumber(edit.gain)
-                   << ",\"fade_in\":" << edit.fadeIn
-                   << ",\"fade_out\":" << edit.fadeOut << "}";
-            }
-            ss << "]";
-            ss << ",\"audio_note_segments\":[";
-            {
-                // The authoritative table is Rust-owned; materialize it here.
-                std::vector<::hirari::editing::AudioNoteSegment> noteSegments;
-                if (!region.noteEdits.copy(noteSegments)) return false;
-                for (size_t si = 0; si < noteSegments.size(); ++si) {
-                    if (cancelled()) return false;
-                    if (si > 0) ss << ",";
-                    const auto& segment = noteSegments[si];
-                    ss << "{\"start\":" << jsonNumber(segment.startSeconds)
-                       << ",\"end\":" << jsonNumber(segment.endSeconds)
-                       << ",\"detected_pitch_cents\":" << jsonNumber(segment.detectedPitchCents)
-                       << ",\"pitch_offset_cents\":" << jsonNumber(segment.pitchOffsetCents)
-                       << ",\"formant_offset_cents\":" << jsonNumber(segment.formantOffsetCents)
-                       << ",\"anchors\":[";
-                    for (size_t ai = 0; ai < segment.anchors.size(); ++ai) {
-                        if (cancelled()) return false;
-                        if (ai > 0) ss << ",";
-                        const auto& anchor = segment.anchors[ai];
-                        ss << "{\"position\":" << jsonNumber(anchor.positionSeconds)
-                           << ",\"pitch_cents\":" << jsonNumber(anchor.pitchCents)
-                           << ",\"formant_cents\":" << jsonNumber(anchor.formantCents) << "}";
-                    }
-                    ss << "]}";
-                }
-            }
-            ss << "]";
-            ss << ",\"processing_history\":[";
-            {
-                // The authoritative table is Rust-owned; materialize it here.
-                // Without this the layout JSON drops the history, so the
-                // document `from_layout_json` builds has nothing to save.
-                std::vector<::hirari::editing::EventProcessingStep> history;
-                if (!region.processingHistory.copy(history)) return false;
-                for (size_t si = 0; si < history.size(); ++si) {
-                    if (cancelled()) return false;
-                    if (si > 0) ss << ",";
-                    const auto& step = history[si];
-                    ss << "{\"id\":" << step.id
-                       << ",\"operation\":\"" << jsonString(step.operation) << "\""
-                       << ",\"parameter\":" << jsonNumber(step.parameter)
-                       << ",\"enabled\":" << (step.enabled ? "true" : "false") << "}";
-                }
-            }
-            ss << "]";
-            ss << "}";
+            out.audioLoaded = region.audio != nullptr;
+            out.warpMarkers = region.warpMarkers.data();
+            out.warpMarkerCount = region.warpMarkers.size();
+            out.rangeEdits =
+                reinterpret_cast<const HirariRegionRangeEdit*>(region.rangeEdits.data());
+            out.rangeEditCount = region.rangeEdits.size();
+            out.noteStore = region.noteEdits.storeHandle();
+            out.noteFrozen = region.noteEdits.frozenHandle();
+            out.processingStore = region.processingHistory.storeHandle();
         }
-        ss << "]";
-        ss << "}";
+
+        auto& view = storage->view;
+        view.id = track->getId();
+        view.name = layoutString(storage->name);
+        view.type = static_cast<uint32_t>(track->getType());
+        view.volume = track->getVolume();
+        view.pan = track->getPan();
+        view.muted = track->isMuted();
+        view.solo = track->isSolo();
+        view.recordArmed = track->isRecordArmed();
+        view.phaseInverted = track->isPhaseInverted();
+        view.trackDelaySamples = track->getTrackDelaySamples();
+        view.frozen = track->isFrozen();
+        view.frozenTotalSamples = track->frozenTotalSamples();
+        view.frozenSampleRate = track->frozenSampleRate();
+        view.frozenPath = layoutString(storage->frozenPath);
+        view.volumeAutomation = storage->volumeAutomation.data();
+        view.volumeAutomationCount = storage->volumeAutomation.size();
+        view.panAutomation = storage->panAutomation.data();
+        view.panAutomationCount = storage->panAutomation.size();
+        view.trackDelayAutomation = storage->trackDelayAutomation.data();
+        view.trackDelayAutomationCount = storage->trackDelayAutomation.size();
+        view.expressionMapJson = layoutString(storage->expressionMap);
+        view.expressionMapProJson = layoutString(storage->expressionMapPro);
+        view.pluginAutomation = storage->pluginAutomation.data();
+        view.pluginAutomationCount = storage->pluginAutomation.size();
+        view.pluginTypes = pluginTypes.data();
+        view.pluginTypeCount = pluginTypes.size();
+        view.pluginBypass = storage->pluginBypass.data();
+        view.pluginParameters = storage->pluginParameterBlocks.data();
+        view.pluginStates = storage->pluginStateBlocks.data();
+        view.pluginStateCount = storage->pluginStateBlocks.size();
+        view.sandboxPluginPaths = storage->sandboxPaths.data();
+        view.sandboxPluginPathCount = storage->sandboxPaths.size();
+        view.sandboxPluginStates = storage->sandboxStateBlocks.data();
+        view.sandboxPluginStateCount = storage->sandboxStateBlocks.size();
+        view.regions = storage->regions.data();
+        view.regionCount = storage->regions.size();
+
+        trackViews.push_back(view);
+        storages.push_back(std::move(storage));
     }
-    ss << "]";
-    return true;
+
+    sidechainRoutes.reserve(m_sidechainRoutes.size());
+    for (const auto& route : m_sidechainRoutes) {
+        HirariLayoutSidechainRoute out;
+        out.sourceId = route.sourceId;
+        out.destinationId = route.destinationId;
+        out.pluginIndex = route.pluginIndex;
+        out.tapPoint = route.tapPoint;
+        sidechainRoutes.push_back(out);
+    }
+    feedbackRoutes.reserve(feedbackConnections.size());
+    for (const auto& route : feedbackConnections) {
+        feedbackRoutes.push_back({route.sourceId, route.destId, route.gain});
+    }
+
+    HirariProjectLayoutSnapshot snapshot{};
+    snapshot.tracks = trackViews.data();
+    snapshot.trackCount = trackViews.size();
+    snapshot.sidechainRoutes = sidechainRoutes.data();
+    snapshot.sidechainRouteCount = sidechainRoutes.size();
+    snapshot.feedbackRoutes = feedbackRoutes.data();
+    snapshot.feedbackRouteCount = feedbackRoutes.size();
+    snapshot.timelineSampleRate = timelineSampleRate;
+
+    const auto isCancelled = [](const void* context) -> bool {
+        const auto* flag = static_cast<const std::atomic<bool>*>(context);
+        return flag && flag->load(std::memory_order_acquire);
+    };
+    const uint8_t* jsonData = nullptr;
+    size_t jsonSize = 0;
+    if (!hirari_project_layout_write_json(&snapshot, cancellation ? isCancelled : nullptr,
+                                          cancellation, &jsonData, &jsonSize)) {
+        return rust::String();
+    }
+    rust::String result(jsonData ? reinterpret_cast<const char*>(jsonData) : "", jsonSize);
+    hirari_project_layout_json_free(jsonData, jsonSize);
+    return result;
 }
 
 rust::String HirariUnifiedEngine::get_routing_snapshot_json() const {
@@ -406,32 +325,11 @@ rust::String HirariUnifiedEngine::get_routing_snapshot_json() const {
 }
 
 uint64_t HirariUnifiedEngine::get_project_generation() const {
-    class FingerprintBuffer final : public std::streambuf {
-    public:
-        uint64_t value() const noexcept { return hash_; }
-
-    protected:
-        std::streamsize xsputn(const char* bytes, std::streamsize count) override {
-            hirari_project_layout_fingerprint_update(
-                &hash_, reinterpret_cast<const uint8_t*>(bytes), static_cast<size_t>(count));
-            return count;
-        }
-
-        int_type overflow(int_type character) override {
-            if (!traits_type::eq_int_type(character, traits_type::eof())) {
-                const uint8_t byte = static_cast<uint8_t>(traits_type::to_char_type(character));
-                hirari_project_layout_fingerprint_update(&hash_, &byte, 1);
-            }
-            return traits_type::not_eof(character);
-        }
-
-    private:
-        uint64_t hash_ = 0xcbf29ce484222325ull;
-    } buffer;
-
-    std::ostream output(&buffer);
-    write_project_layout_json(output);
-    return buffer.value();
+    const auto layout = get_project_layout_json();
+    uint64_t hash = 0xcbf29ce484222325ull;
+    hirari_project_layout_fingerprint_update(
+        &hash, reinterpret_cast<const uint8_t*>(layout.data()), layout.size());
+    return hash;
 }
 
 uint64_t HirariUnifiedEngine::get_project_layout_revision() const noexcept {

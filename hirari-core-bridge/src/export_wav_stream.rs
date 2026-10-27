@@ -1000,34 +1000,29 @@ struct BounceStream {
 pub unsafe extern "C" fn hirari_bounce_stream_create(
     path: *const u8, path_size: usize, frames: u64, sample_rate: u32, format: u8,
 ) -> *mut std::ffi::c_void {
+    // Format codes: 0 float32 RIFF/RF64, 1 PCM16, 2 PCM24, 3 WAVE64 float.
     if path.is_null() || path_size == 0 || path_size > 1024 * 1024 || frames == 0
-        || !(8_000..=384_000).contains(&sample_rate) || format > 2
+        || !(8_000..=384_000).contains(&sample_rate) || format > 3
     { return std::ptr::null_mut(); }
-    let bytes = unsafe { std::slice::from_raw_parts(path, path_size) };
-    #[cfg(unix)]
-    let output = {
-        use std::os::unix::ffi::OsStrExt;
-        Path::new(std::ffi::OsStr::from_bytes(bytes))
-    };
-    #[cfg(not(unix))]
-    let output = {
-        let Ok(path) = std::str::from_utf8(bytes) else { return std::ptr::null_mut() };
-        Path::new(path)
-    };
-    let parent = output.parent().filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    if std::fs::create_dir_all(parent).is_err() { return std::ptr::null_mut(); }
+    // Do not create missing parent directories here. The writer's contract is
+    // to fail when the destination cannot be opened, and a render must report
+    // that failure instead of silently materialising a path the caller never
+    // created.
     let cpath = path.cast::<std::ffi::c_char>();
     let stream = match format {
         0 => unsafe { hirari_wav_float32_stream_create(cpath, path_size, sample_rate, 2) },
         1 | 2 => unsafe { hirari_wav_pcm_stream_create(
             cpath, path_size, frames, sample_rate, 2, if format == 1 { 16 } else { 24 }, 0,
         ) },
-        _ => std::ptr::null_mut(),
+        _ => unsafe { hirari_wav_wave64_stream_create(cpath, path_size, frames, sample_rate, 2) },
     };
     if stream.is_null() { return std::ptr::null_mut(); }
     Box::into_raw(Box::new(BounceStream {
-        stream: if format == 0 { StreamHandle::Float32(stream) } else { StreamHandle::Pcm(stream) },
+        stream: match format {
+            0 => StreamHandle::Float32(stream),
+            1 | 2 => StreamHandle::Pcm(stream),
+            _ => StreamHandle::Wave64(stream),
+        },
         frames,
     })).cast()
 }
@@ -1082,5 +1077,84 @@ impl Drop for StreamHandle {
                 Self::Wave64(stream) => hirari_wav_wave64_stream_free(*stream),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod bounce_stream_tests {
+    use super::*;
+
+    fn temp_path(extension: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "hirari-bounce-stream-{}-{}.{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            extension
+        ))
+    }
+
+    #[test]
+    fn every_bounce_stream_format_requires_all_frames_before_publishing() {
+        let left = [0.25_f32; 16];
+        let right = [-0.5_f32; 16];
+        let channels = [left.as_ptr(), right.as_ptr()];
+        // format, extension, WAVE64 container.
+        let cases = [
+            (0_u8, "wav", false),
+            (1, "wav", false),
+            (2, "wav", false),
+            (3, "w64", true),
+        ];
+        for (format, extension, wave64) in cases {
+            let path = temp_path(extension);
+            let bytes = path.to_str().unwrap().as_bytes();
+            let stream = unsafe {
+                hirari_bounce_stream_create(bytes.as_ptr(), bytes.len(), 16, 48_000, format)
+            };
+            assert!(!stream.is_null(), "format {format} could not be opened");
+            assert_eq!(
+                unsafe { hirari_bounce_stream_write(stream, channels.as_ptr(), 17) },
+                0,
+                "format {format} accepted more frames than declared"
+            );
+            assert_eq!(
+                unsafe { hirari_bounce_stream_finish(stream) },
+                0,
+                "format {format} published an incomplete stream"
+            );
+            assert_eq!(
+                unsafe { hirari_bounce_stream_write(stream, channels.as_ptr(), 16) },
+                1,
+                "format {format} rejected a valid block"
+            );
+            assert_eq!(
+                unsafe { hirari_bounce_stream_finish(stream) },
+                1,
+                "format {format} could not publish"
+            );
+            unsafe { hirari_bounce_stream_free(stream) };
+            let data = std::fs::read(&path).unwrap();
+            assert!(data.starts_with(b"RIFF"), "format {format} container mismatch");
+            if wave64 {
+                assert_eq!(&data[4..8], &[0x2e, 0x91, 0xcf, 0x11]);
+            } else {
+                assert_eq!(&data[8..12], b"WAVE");
+            }
+            assert_eq!(data.len() % 2, 0);
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn unsupported_bounce_stream_format_is_rejected() {
+        let path = temp_path("wav");
+        let bytes = path.to_str().unwrap().as_bytes();
+        let stream = unsafe {
+            hirari_bounce_stream_create(bytes.as_ptr(), bytes.len(), 16, 48_000, 4)
+        };
+        assert!(stream.is_null());
     }
 }

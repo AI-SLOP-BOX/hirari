@@ -173,3 +173,155 @@ fn range_edit_stores_requested_values_exactly() {
     assert_eq!(edit.get("fade_in").and_then(|v| v.as_u64()), Some(4));
     assert_eq!(edit.get("fade_out").and_then(|v| v.as_u64()), Some(6));
 }
+
+#[test]
+fn track_rename_records_one_undo_entry_and_rejects_invalid_names() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    let track_name = || {
+        let layout: serde_json::Value = serde_json::from_str(&core.get_project_layout_json())
+            .expect("layout must be valid JSON");
+        layout
+            .as_array()
+            .and_then(|tracks| {
+                tracks.iter().find(|track| {
+                    track.get("id").and_then(serde_json::Value::as_u64) == Some(track_id as u64)
+                })
+            })
+            .and_then(|track| track.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .expect("track must have a name")
+    };
+    let original = track_name();
+    assert!(core.set_track_name(track_id, "Renamed"));
+    assert_eq!(track_name(), "Renamed");
+    // Renaming to the current value succeeds without recording an edit.
+    assert!(core.set_track_name(track_id, "Renamed"));
+    core.undo();
+    assert_eq!(track_name(), original);
+    core.redo();
+    assert_eq!(track_name(), "Renamed");
+
+    assert!(!core.set_track_name(track_id, ""));
+    assert!(!core.set_track_name(track_id, "bad\0name"));
+    assert!(!core.set_track_name(track_id, &"x".repeat(257)));
+    assert_eq!(track_name(), "Renamed");
+    core.undo();
+    assert_eq!(track_name(), original);
+}
+
+#[test]
+fn plugin_chain_edits_undo_through_the_native_engine() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    assert!(core.add_plugin(track_id, 0));
+    assert!(core.add_plugin(track_id, 1));
+    let plugin_types = || {
+        let layout: serde_json::Value = serde_json::from_str(&core.get_project_layout_json())
+            .expect("layout must be valid JSON");
+        layout
+            .as_array()
+            .and_then(|tracks| {
+                tracks.iter().find(|track| {
+                    track.get("id").and_then(serde_json::Value::as_u64) == Some(track_id as u64)
+                })
+            })
+            .and_then(|track| track.get("plugin_types"))
+            .and_then(serde_json::Value::as_array)
+            .map(|types| {
+                types
+                    .iter()
+                    .filter_map(serde_json::Value::as_u64)
+                    .collect::<Vec<_>>()
+            })
+            .expect("track must publish its plugin types")
+    };
+    assert_eq!(plugin_types(), vec![0, 1]);
+
+    assert!(!core.get_plugin_bypass(track_id, 0));
+    assert!(core.set_plugin_bypass(track_id, 0, true));
+    assert!(core.get_plugin_bypass(track_id, 0));
+    core.undo();
+    assert!(!core.get_plugin_bypass(track_id, 0));
+    core.redo();
+    assert!(core.get_plugin_bypass(track_id, 0));
+    // An out-of-range index is rejected and must not record an edit.
+    assert!(!core.set_plugin_bypass(track_id, 9, true));
+
+    assert!(core.move_plugin(track_id, 0, 1));
+    assert_eq!(plugin_types(), vec![1, 0]);
+    core.undo();
+    assert_eq!(plugin_types(), vec![0, 1]);
+    core.redo();
+    assert_eq!(plugin_types(), vec![1, 0]);
+    // Moving onto the same index is not an edit.
+    assert!(!core.move_plugin(track_id, 0, 0));
+    assert_eq!(plugin_types(), vec![1, 0]);
+    // The rejected moves above must not have added history entries.
+    core.undo();
+    assert_eq!(plugin_types(), vec![0, 1]);
+}
+
+#[test]
+fn track_mix_edits_undo_through_the_native_engine() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    let track_json = || {
+        let layout: serde_json::Value = serde_json::from_str(&core.get_project_layout_json())
+            .expect("layout must be valid JSON");
+        layout
+            .as_array()
+            .and_then(|tracks| {
+                tracks.iter().find(|track| {
+                    track.get("id").and_then(serde_json::Value::as_u64) == Some(track_id as u64)
+                })
+            })
+            .cloned()
+            .expect("track must exist")
+    };
+    let f32_field = |name: &str| {
+        track_json()
+            .get(name)
+            .and_then(serde_json::Value::as_f64)
+            .expect("field must be numeric")
+    };
+    let bool_field = |name: &str| {
+        track_json()
+            .get(name)
+            .and_then(serde_json::Value::as_bool)
+            .expect("field must be boolean")
+    };
+
+    assert!((f32_field("volume") - 1.0).abs() < 0.0001);
+    assert!(core.set_volume(track_id, 0.4));
+    assert!((f32_field("volume") - 0.4).abs() < 0.0001);
+    core.undo();
+    assert!((f32_field("volume") - 1.0).abs() < 0.0001);
+    core.redo();
+    assert!((f32_field("volume") - 0.4).abs() < 0.0001);
+    // Out-of-domain values must not reach the track or the undo history.
+    assert!(!core.set_volume(track_id, 2.5));
+    assert!((f32_field("volume") - 0.4).abs() < 0.0001);
+
+    assert!((f32_field("pan")).abs() < 0.0001);
+    core.set_track_pan(track_id, -0.25);
+    assert!((f32_field("pan") + 0.25).abs() < 0.0001);
+    core.undo();
+    assert!(f32_field("pan").abs() < 0.0001);
+
+    assert!(!bool_field("mute"));
+    core.set_mute(track_id, true);
+    assert!(bool_field("mute"));
+    core.undo();
+    assert!(!bool_field("mute"));
+
+    assert!(!bool_field("solo"));
+    core.set_solo(track_id, true);
+    assert!(bool_field("solo"));
+    core.undo();
+    assert!(!bool_field("solo"));
+}

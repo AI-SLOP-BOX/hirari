@@ -15,7 +15,7 @@
 #include <fstream>
 #include <vector>
 
-#include "src/io/persistence/wav_writer.hpp"
+#include "src/core/rust_ffi.hpp"
 #include "src/io/wav_loader_utils.hpp"
 
 namespace {
@@ -76,8 +76,11 @@ void checkStereoRoundTrip(size_t frames, uint32_t sampleRate) {
     std::error_code ignored;
     fs::remove(path, ignored);
 
-    assert(Hirari::IO::Persistence::WavWriter::write(
-        path.string(), left.data(), right.data(), static_cast<uint64_t>(frames), sampleRate));
+    const std::string pathString = path.string();
+    const float* const planes[2] = {left.data(), right.data()};
+    assert(hirari_wav_write_planar(
+               reinterpret_cast<const uint8_t*>(pathString.data()), pathString.size(),
+               planes, 2, frames, sampleRate, 0) == 0);
 
     Hirari::IO::WavLoader::WavInfo info{};
     const auto decoded = Hirari::IO::WavLoader::load(path.string(), info);
@@ -115,7 +118,13 @@ void checkMultichannelPcm16() {
     std::error_code ignored;
     fs::remove(path, ignored);
 
-    assert(Hirari::IO::Persistence::WavWriter::writePcm16Interleaved(path.string(), channels, 44'100));
+    std::vector<const float*> planes;
+    planes.reserve(channels.size());
+    for (const auto& channel : channels) planes.push_back(channel.data());
+    const std::string pathString = path.string();
+    assert(hirari_wav_write_planar(
+               reinterpret_cast<const uint8_t*>(pathString.data()), pathString.size(),
+               planes.data(), planes.size(), channels.front().size(), 44'100, 1) == 0);
 
     Hirari::IO::WavLoader::WavInfo info{};
     const auto decoded = Hirari::IO::WavLoader::load(path.string(), info);

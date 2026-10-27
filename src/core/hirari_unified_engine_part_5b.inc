@@ -1,39 +1,14 @@
-    if (format == 0) {
-        pcmStream = std::make_unique<::Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter>(
-            outputPath, totalSamples, outputRate);
-        if (!pcmStream->isOpen()) {
-            m_bounceProgress.store(0.0f, std::memory_order_release);
-            m_bounceState.store(static_cast<uint32_t>(BounceState::Failed), std::memory_order_release);
-            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "BOUNCE_STREAM_OPEN_FAILED");
-            return false;
-        }
-    } else if (format == 1) {
-        wave64Stream = std::make_unique<::Hirari::IO::Persistence::WavWriter::Wave64FloatStreamWriter>(
-            outputPath, totalSamples, outputRate);
-        if (!wave64Stream->isOpen()) {
-            m_bounceProgress.store(0.0f, std::memory_order_release);
-            m_bounceState.store(static_cast<uint32_t>(BounceState::Failed), std::memory_order_release);
-            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "BOUNCE_WAVE64_STREAM_OPEN_FAILED");
-            return false;
-        }
-    } else if (format == 2) {
-        floatStream = std::make_unique<::Hirari::IO::Persistence::WavWriter::Float32StreamWriter>(
-            outputPath, outputRate);
-        if (!floatStream->isOpen()) {
-            m_bounceProgress.store(0.0f, std::memory_order_release);
-            m_bounceState.store(static_cast<uint32_t>(BounceState::Failed), std::memory_order_release);
-            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "BOUNCE_FLOAT32_STREAM_OPEN_FAILED");
-            return false;
-        }
-    } else {
-        pcm24Stream = std::make_unique<::Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter>(
-            outputPath, totalSamples, outputRate);
-        if (!pcm24Stream->isOpen()) {
-            m_bounceProgress.store(0.0f, std::memory_order_release);
-            m_bounceState.store(static_cast<uint32_t>(BounceState::Failed), std::memory_order_release);
-            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "BOUNCE_PCM24_STREAM_OPEN_FAILED");
-            return false;
-        }
+    // Public bounce formats map onto the Rust stream ABI: PCM16, WAVE64 float,
+    // float32 RIFF/RF64, PCM24.
+    constexpr uint8_t kStreamFormats[4] = {1, 3, 0, 2};
+    streamOut.handle = hirari_bounce_stream_create(
+        reinterpret_cast<const uint8_t*>(path.data()), path.size(), totalSamples,
+        outputRate, kStreamFormats[format]);
+    if (!streamOut.handle) {
+        m_bounceProgress.store(0.0f, std::memory_order_release);
+        m_bounceState.store(static_cast<uint32_t>(BounceState::Failed), std::memory_order_release);
+        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "BOUNCE_STREAM_OPEN_FAILED");
+        return false;
     }
     // Tracks size their per-track buffers to the engine block size, and
     // Track::canProcess() silently skips any block larger than that. A fixed
@@ -69,7 +44,7 @@
         }
     } playbackStateGuard{&m_playhead, &m_isPlaying, originalPlayhead, wasPlaying};
 
-    m_playhead.store(rangeActive ? rangeStart : 0);
+    m_playhead.store(plan.playhead_start);
     m_isPlaying.store(true);
     // Offline renders must be reproducible. Clear the master limiter's
     // look-ahead history so a previous playback/render cannot contaminate the
@@ -106,23 +81,9 @@
                 right[sample] += ditherRight.process() * depthScale;
             }
         }
-        bool blockWritten = false;
-        if (format == 0) {
-            blockWritten = pcmStream->writeFrames(blockBuffer.getReadPointer(0),
-                                                  blockBuffer.getReadPointer(1), sz);
-        } else if (format == 1) {
-            const float* channels[2] = {
-                blockBuffer.getReadPointer(0), blockBuffer.getReadPointer(1)};
-            blockWritten = wave64Stream->writeFrames(channels, sz);
-        } else if (format == 2) {
-            const float* channels[2] = {
-                blockBuffer.getReadPointer(0), blockBuffer.getReadPointer(1)};
-            blockWritten = floatStream->writeFrames(channels, sz);
-        } else {
-            blockWritten = pcm24Stream->writeFrames(blockBuffer.getReadPointer(0),
-                                                    blockBuffer.getReadPointer(1), sz);
-        }
-        if (!blockWritten) {
+        const float* channels[2] = {
+            blockBuffer.getReadPointer(0), blockBuffer.getReadPointer(1)};
+        if (!hirari_bounce_stream_write(streamOut.handle, channels, sz)) {
             m_playhead.store(originalPlayhead);
             m_isPlaying.store(wasPlaying);
             finishOfflineRender();
@@ -146,16 +107,7 @@
         {
             std::lock_guard<std::mutex> publishLock(m_bouncePublishMutex);
             if (!m_bounceCancelRequested.load(std::memory_order_acquire)) {
-                if (format == 0) {
-                    success = pcmStream->finish();
-                } else if (format == 1) {
-                    success = wave64Stream->finish();
-                } else if (format == 2) {
-                    success = floatStream->framesWritten() == totalSamples &&
-                              floatStream->finish();
-                } else {
-                    success = pcm24Stream->finish();
-                }
+                success = hirari_bounce_stream_finish(streamOut.handle) != 0;
             }
         }
         if (!success) {

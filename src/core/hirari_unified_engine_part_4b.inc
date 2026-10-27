@@ -28,7 +28,6 @@
                     Region r;
                     if (state.version >= 28) {
                         r.id = rs.id;
-                        if (r.id == std::numeric_limits<uint32_t>::max()) return false;
                         nextRegionId = std::max(nextRegionId, r.id + 1u);
                     } else {
                         r.id = nextRegionId++;
@@ -92,17 +91,14 @@
                     r.rangeEdits.clear();
                     r.rangeEdits.reserve(std::min<size_t>(rs.rangeEdits.size(), 4096));
                     for (const auto& edit : rs.rangeEdits) {
-                        // Reject malformed persisted edits before they reach
-                        // the real-time renderer.  This mirrors serializer
-                        // validation and protects hand-edited project files.
-                        if (edit.start >= edit.end || (r.len > 0 && edit.end > r.len) ||
-                            !std::isfinite(edit.gain) || edit.gain < 0.0f || edit.gain > 16.0f ||
-                            edit.fadeIn > edit.end - edit.start || edit.fadeOut > edit.end - edit.start) {
-                            continue;
-                        }
                         if (r.rangeEdits.size() >= 4096) break;
                         r.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
                     }
+                    // Rust rejects malformed persisted edits before they reach
+                    // the real-time renderer.
+                    r.rangeEdits.resize(hirari_region_range_edits_sanitize(
+                        reinterpret_cast<HirariLegacyRangeEdit*>(r.rangeEdits.data()),
+                        r.rangeEdits.size(), r.len));
                     // Hydrate audio during project load so an opened project
                     // is immediately playable. Missing files remain visible
                     // as unloaded regions and can be repaired via Relink.
@@ -122,99 +118,66 @@
                             if (state.version < 42 && std::isfinite(decodedSourceRate) &&
                                 decodedSourceRate >= 8000.0 && decodedSourceRate <= 384000.0) {
                                 // Older projects stored native source-frame
-                                // counts as timeline-frame counts. Migrate the
-                                // duration and trim origin using the decoded
-                                // file rate while preserving the musical start.
-                                r.sourceSampleRate = decodedSourceRate;
-                                const double sourcePerTimeline = r.warpRatio *
-                                    decodedSourceRate / projectSampleRate;
-                                if (!std::isfinite(sourcePerTimeline) || sourcePerTimeline <= 0.0)
+                                // counts as timeline-frame counts. Rust migrates
+                                // the duration, trim origin, fades, warp markers
+                                // and range windows while preserving the
+                                // musical start; an unrepresentable geometry
+                                // fails hydration.
+                                static_assert(sizeof(Region::WarpMarker) ==
+                                              sizeof(HirariLegacyWarpMarker));
+                                static_assert(sizeof(Region::RangeEdit) ==
+                                              sizeof(HirariLegacyRangeEdit));
+                                HirariRegionLegacyMigration migration{};
+                                migration.source_offset = r.sourceOffset;
+                                migration.base_source_offset = r.baseSourceOffset;
+                                migration.source_length = r.sourceLength;
+                                migration.base_start = r.baseStart;
+                                migration.warp_ratio = r.warpRatio;
+                                migration.loop_count = r.loopCount;
+                                migration.fade_in = r.fadeInSamples;
+                                migration.fade_out = r.fadeOutSamples;
+                                migration.decoded_source_rate = decodedSourceRate;
+                                migration.project_sample_rate = projectSampleRate;
+                                migration.markers = reinterpret_cast<HirariLegacyWarpMarker*>(
+                                    r.warpMarkers.data());
+                                migration.marker_count = r.warpMarkers.size();
+                                migration.range_edits = reinterpret_cast<HirariLegacyRangeEdit*>(
+                                    r.rangeEdits.data());
+                                migration.range_edit_count = r.rangeEdits.size();
+                                if (!hirari_region_legacy_source_rate_migrate(&migration))
                                     return false;
-                                const uint64_t sourceTrim = r.sourceOffset >= r.baseSourceOffset
-                                    ? r.sourceOffset - r.baseSourceOffset : 0;
-                                const long double migratedTrim = std::ceil(
-                                    static_cast<long double>(sourceTrim) / sourcePerTimeline);
-                                const long double migratedLength = std::ceil(
-                                    static_cast<long double>(r.sourceLength) / sourcePerTimeline);
-                                if (!std::isfinite(static_cast<double>(migratedTrim)) ||
-                                    !std::isfinite(static_cast<double>(migratedLength)) ||
-                                    migratedTrim > static_cast<long double>(UINT64_MAX) ||
-                                    migratedLength < 1.0L ||
-                                    migratedLength > static_cast<long double>(UINT64_MAX) ||
-                                    r.baseStart > UINT64_MAX - static_cast<uint64_t>(migratedTrim))
-                                    return false;
-                                r.start = r.baseStart + static_cast<uint64_t>(migratedTrim);
-                                r.len = static_cast<uint64_t>(migratedLength);
-                                if (r.start > UINT64_MAX - r.len || r.len > UINT64_MAX / r.loopCount ||
-                                    r.start > UINT64_MAX - r.len * r.loopCount) return false;
-                                const double timelineScale = projectSampleRate / decodedSourceRate;
-                                const auto migrateTimelineSamples = [timelineScale](uint64_t value) {
-                                    const long double scaled = std::round(
-                                        static_cast<long double>(value) * timelineScale);
-                                    return static_cast<uint64_t>(std::clamp(
-                                        scaled, 0.0L, static_cast<long double>(UINT64_MAX)));
-                                };
-                                r.fadeInSamples = std::min(r.len,
-                                    migrateTimelineSamples(r.fadeInSamples));
-                                r.fadeOutSamples = std::min(r.len,
-                                    migrateTimelineSamples(r.fadeOutSamples));
-                                for (auto& marker : r.warpMarkers)
-                                    marker.timelineSample = migrateTimelineSamples(marker.timelineSample);
-                                for (auto& edit : r.rangeEdits) {
-                                    edit.start = migrateTimelineSamples(edit.start);
-                                    edit.end = std::min(r.len, migrateTimelineSamples(edit.end));
-                                    edit.fadeIn = migrateTimelineSamples(edit.fadeIn);
-                                    edit.fadeOut = migrateTimelineSamples(edit.fadeOut);
-                                }
+                                r.sourceSampleRate = migration.source_sample_rate;
+                                r.start = migration.start;
+                                r.len = migration.len;
+                                r.fadeInSamples = migration.out_fade_in;
+                                r.fadeOutSamples = migration.out_fade_out;
                             }
                         }
                     }
                     // The persisted region length may have been larger than
                     // the decoded media (for example after an external file
-                    // was replaced).  Revalidate range edits against the
+                    // was replaced). Rust filters the range edits against the
                     // final playable length so the renderer never evaluates
                     // stale offsets beyond the audio buffer.
                     if (!r.rangeEdits.empty()) {
-                        const auto playableLength = r.len;
-                        r.rangeEdits.erase(
-                            std::remove_if(r.rangeEdits.begin(), r.rangeEdits.end(),
-                                [playableLength](const Region::RangeEdit& edit) {
-                                    return edit.start >= edit.end || edit.end > playableLength ||
-                                           edit.fadeIn > edit.end - edit.start ||
-                                           edit.fadeOut > edit.end - edit.start;
-                                }),
-                            r.rangeEdits.end());
+                        r.rangeEdits.resize(hirari_region_range_edits_sanitize(
+                            reinterpret_cast<HirariLegacyRangeEdit*>(r.rangeEdits.data()),
+                            r.rangeEdits.size(), r.len));
                     }
                     t->addRegion(r);
                     break;
                 }
             }
         }
-        // Preflight sidechain bindings while the old project is still the
-        // published document. A malformed plugin index or cyclic topology
-        // must not fail after the new tracks have been swapped into the live
-        // engine.
+        // Sidechain plugin indices are checked against the hydrated chain:
+        // sandbox admission can drop a stored path, which the document codec
+        // cannot predict. Track references, tap points and link cycles were
+        // rejected before the state became valid.
         for (const auto& sidechain : state.sidechains) {
-            const auto source = std::find_if(loadedTracks.begin(), loadedTracks.end(),
-                [&sidechain](const auto& track) { return track->getId() == sidechain.sourceId; });
             const auto destination = std::find_if(loadedTracks.begin(), loadedTracks.end(),
                 [&sidechain](const auto& track) { return track->getId() == sidechain.destinationId; });
-            if (source == loadedTracks.end() || destination == loadedTracks.end() ||
-                sidechain.pluginIndex >= (*destination)->getPluginTypes().size() ||
-                sidechain.tapPoint > 2) return false;
-        }
-        for (const auto& candidate : state.sidechains) {
-            std::vector<uint32_t> pending{candidate.destinationId};
-            std::unordered_set<uint32_t> visited;
-            while (!pending.empty()) {
-                const uint32_t node = pending.back();
-                pending.pop_back();
-                if (node == candidate.sourceId) return false;
-                if (!visited.insert(node).second) continue;
-                for (const auto& route : state.sidechains) {
-                    if (route.sourceId == node) pending.push_back(route.destinationId);
-                }
-            }
+            if (destination == loadedTracks.end() ||
+                sidechain.pluginIndex >= (*destination)->getPluginTypes().size()) return false;
         }
 
         // Prepare the detached replacement tracks before the commit point.
@@ -235,7 +198,7 @@
             // before that change can still carry a track at 0, so rejecting
             // zero here would fail hydration on reload for files that
             // serialize fine.
-            if (!track || track->getId() == std::numeric_limits<uint32_t>::max()) return false;
+            if (!track) return false;
             nextTrackId = std::max(nextTrackId, track->getId() + 1u);
         }
         // Commit point: all validation and hydration above completed while

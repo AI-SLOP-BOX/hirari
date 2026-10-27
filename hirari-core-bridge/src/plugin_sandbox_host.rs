@@ -435,6 +435,7 @@ impl SandboxHost {
     }
 
     #[inline]
+    #[allow(clippy::mut_from_ref)] // audio-thread-only interior state by design
     fn audio_state_mut(&self) -> &mut AudioState {
         // SAFETY: Audio-thread-only state; see the `SandboxHost` comment.
         unsafe { &mut *self.audio.get() }

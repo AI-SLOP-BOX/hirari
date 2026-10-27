@@ -61,11 +61,7 @@
     bool set_automation_lane_protected(uint32_t id, bool protectedLane) { return m_automationLanes.protect(id, protectedLane); }
     bool preview_automation_lane(uint32_t id, float value) { return m_automationLanes.preview(id, value); }
     float get_master_gain() const noexcept;
-    bool set_track_volume(uint32_t tid, float value);
     float get_track_volume(uint32_t tid) const;
-    bool set_track_pan(uint32_t tid, float value);
-    bool set_track_mute(uint32_t tid, bool muted);
-    bool set_track_solo(uint32_t tid, bool solo);
     bool set_track_solo_for_offline_render(uint32_t tid, bool solo);
     // Offline render target selection is control-side state. When active,
     // the audio graph keeps only the target and its upstream route closure,

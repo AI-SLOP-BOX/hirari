@@ -78,8 +78,6 @@
     uint8_t get_sandbox_plugin_state_error(uint32_t trackId, uint32_t sandboxIndex) const;
     std::string get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const;
     bool set_plugin_parameter(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId, float value);
-    bool set_plugin_automation(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId,
-                               const std::vector<ProjectAutomationPoint>& points);
     // Internal automation/hydration path. It applies the value without
     // creating a user-facing Undo step for every generated control event.
     bool set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
@@ -108,5 +106,7 @@
     bool has_sidechain_link(uint32_t sourceId, uint32_t destId, uint32_t pluginIndex) const;
     // Installs the routing edit host callbacks Rust drives; see part_3b.
     static void installRoutingEditHost();
+    static void installControlEditHost();
+    static void installPluginEditHost();
 
 private:

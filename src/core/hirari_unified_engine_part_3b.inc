@@ -1,22 +1,3 @@
-                if (t->setPluginBypass(pluginIndex, bypassed)) target = t;
-                break;
-            }
-        }
-    }
-    // Bypass changes alter the active latency path. Rebuild the published
-    // routing/PDC state after releasing m_tracksMutex; syncStructuralChanges
-    // takes the same lock and must never be called while it is held.
-    if (!target) return false;
-    const auto undo = [target, pluginIndex, before]() {
-        (void)target->setPluginBypass(pluginIndex, before);
-    };
-    const auto redo = [target, pluginIndex, bypassed]() {
-        (void)target->setPluginBypass(pluginIndex, bypassed);
-    };
-    m_undoManager.recordAppliedAction("Set Plugin Bypass", undo, redo);
-    syncStructuralChanges();
-    return true;
-}
 bool HirariUnifiedEngine::get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
@@ -25,24 +6,7 @@ bool HirariUnifiedEngine::get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) 
     return false;
 }
 bool HirariUnifiedEngine::move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex) {
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track && track->getId() == tid) {
-                if (track->movePlugin(fromIndex, toIndex)) target = track;
-                break;
-            }
-        }
-    }
-    if (!target) return false;
-    const auto undo = [target, fromIndex, toIndex]() {
-        (void)target->movePlugin(toIndex, fromIndex);
-    };
-    const auto redo = [target, fromIndex, toIndex]() {
-        (void)target->movePlugin(fromIndex, toIndex);
-    };
-    m_undoManager.recordAppliedAction("Move Plugin", undo, redo);
+    if (!hirari_plugin_edit_move(this, tid, fromIndex, toIndex)) return false;
     syncStructuralChanges();
     return true;
 }
@@ -69,58 +33,26 @@ bool HirariUnifiedEngine::set_track_input_monitor(uint32_t tid, bool enabled) {
 
 bool HirariUnifiedEngine::set_track_input_monitor_channels(
     uint32_t tid, bool enabled, uint32_t leftChannel, uint32_t rightChannel) {
-    if (leftChannel >= 32 || rightChannel >= 32) return false;
-    if (!enabled) {
-        if (m_inputMonitorTrackId.load(std::memory_order_acquire) == tid) {
-            m_inputMonitorTrackId.store(kNoInputMonitorTrack, std::memory_order_release);
-        }
-        return true;
-    }
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const bool exists = std::any_of(m_tracks.begin(), m_tracks.end(),
-        [tid](const auto& track) { return track && track->getId() == tid; });
-    if (!exists) return false;
-    // One physical input is monitored at a time. Enabling another track
-    // atomically moves the monitor focus without touching record-arm state.
-    const uint64_t channelPair = (static_cast<uint64_t>(rightChannel) << 32) | leftChannel;
-    m_inputMonitorChannelPair.store(channelPair, std::memory_order_release);
-    m_inputMonitorTrackId.store(tid, std::memory_order_release);
-    return true;
+    return hirari_control_edit_set_input_monitor(
+        this, tid, enabled, leftChannel, rightChannel);
 }
 
 void HirariUnifiedEngine::set_macro_value(uint32_t macroIndex, float value) {
-    if (!std::isfinite(value)) return;
-    hirari_macro_control_set_value(m_macroControl, macroIndex, value);
+    hirari_control_edit_set_macro_value(this, macroIndex, value);
 }
 bool HirariUnifiedEngine::bind_midi_cc_to_macro(uint8_t channel, uint8_t cc,
                                                uint32_t macroIndex, float minimum,
                                                float maximum, float curve,
                                                bool pickup) noexcept {
-    if (macroIndex >= kMaxMacros || channel > 16 || cc > 127 ||
-        !std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum ||
-        !std::isfinite(curve) || curve < -1.0f || curve > 1.0f) {
-        return false;
-    }
-    const void* targetState = m_macroControl;
-    if (targetState == nullptr) return false;
-    m_midiLearnManager.addMappingAdvanced(
-        cc, channel, targetState, macroIndex, minimum, maximum, curve, pickup);
-    return true;
+    return hirari_control_edit_bind_midi_cc(
+        this, channel, cc, macroIndex, minimum, maximum, curve, pickup);
 }
 bool HirariUnifiedEngine::bind_midi_cc14_to_macro(uint8_t channel, uint16_t controller,
                                                  uint32_t macroIndex, float minimum,
                                                  float maximum, float curve,
                                                  bool pickup) noexcept {
-    if (macroIndex >= kMaxMacros || channel > 16 || controller > 16383 ||
-        !std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum ||
-        !std::isfinite(curve) || curve < -1.0f || curve > 1.0f) {
-        return false;
-    }
-    const void* targetState = m_macroControl;
-    if (targetState == nullptr) return false;
-    m_midiLearnManager.addMapping14Bit(
-        controller, channel, targetState, macroIndex, minimum, maximum, curve, pickup);
-    return true;
+    return hirari_control_edit_bind_midi_cc14(
+        this, channel, controller, macroIndex, minimum, maximum, curve, pickup);
 }
 void HirariUnifiedEngine::handle_midi_cc(uint8_t channel, uint8_t cc,
                                        uint8_t value) noexcept {
@@ -181,6 +113,10 @@ void HirariUnifiedEngine::installRoutingEditHost() {
                 out->phaseInverted = track->isPhaseInverted();
                 out->delaySamples = track->getTrackDelaySamples();
                 out->isBus = dynamic_cast<BusTrack*>(track.get()) != nullptr;
+                out->volume = track->getVolume();
+                out->pan = track->getPan();
+                out->muted = track->isMuted();
+                out->solo = track->isSolo();
                 return true;
             }
             return false;
@@ -256,6 +192,8 @@ void HirariUnifiedEngine::installRoutingEditHost() {
                 if (!track || track->getId() != trackId) continue;
                 if (op == kHirariRoutingEditArm) track->setRecordArmed(enabled);
                 else if (op == kHirariRoutingEditPhase) track->setPhaseInverted(enabled);
+                else if (op == kHirariRoutingEditMute) track->setMuted(enabled);
+                else if (op == kHirariRoutingEditSolo) track->setSolo(enabled);
                 else track->setTrackDelaySamples(samples);
                 return true;
             }
@@ -365,6 +303,18 @@ void HirariUnifiedEngine::installRoutingEditHost() {
                 name, [applyAll, undoCopy] { applyAll(undoCopy); },
                 [applyAll, redoCopy] { applyAll(redoCopy); }, coalesce);
         },
+        [](void* host, uint32_t trackId, int32_t op, float value) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                if (op == kHirariRoutingEditVolume) track->setVolume(value);
+                else if (op == kHirariRoutingEditPan) track->setPan(value);
+                else return false;
+                return true;
+            }
+            return false;
+        },
     };
     hirari_routing_edit_host_install(&ops);
 }
@@ -372,6 +322,217 @@ void HirariUnifiedEngine::installRoutingEditHost() {
 namespace {
 [[maybe_unused]] const bool kRoutingEditHostInstalled = [] {
     HirariUnifiedEngine::installRoutingEditHost();
+    return true;
+}();
+}  // namespace
+
+// Control edit host callbacks. Rust validates every naming/monitor/macro edit
+// and decides the undo entry; these handlers only read or apply the mutation.
+void HirariUnifiedEngine::installControlEditHost() {
+    static const HirariControlEditHostOps ops = {
+        [](void* host, uint32_t trackId, uint8_t* out, size_t capacity) -> intptr_t {
+            if (!host) return -1;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (const auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                const std::string& name = track->getName();
+                if (!out || capacity == 0) return static_cast<intptr_t>(name.size());
+                const size_t written = std::min(capacity, name.size());
+                std::memcpy(out, name.data(), written);
+                return static_cast<intptr_t>(written);
+            }
+            return -1;
+        },
+        [](void* host, uint32_t trackId, const uint8_t* name, size_t nameLen) {
+            if (!host || (!name && nameLen > 0)) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            const std::string value =
+                nameLen > 0 ? std::string(reinterpret_cast<const char*>(name), nameLen)
+                            : std::string();
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                track->setName(value);
+                return true;
+            }
+            return false;
+        },
+        [](void* host, uint32_t trackId, const uint8_t* before, size_t beforeLen,
+           const uint8_t* after, size_t afterLen) {
+            if (!host) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::shared_ptr<Track> target;
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                for (auto& track : engine->m_tracks) {
+                    if (track && track->getId() == trackId) {
+                        target = track;
+                        break;
+                    }
+                }
+            }
+            if (!target) return;
+            const std::string beforeValue(
+                before ? reinterpret_cast<const char*>(before) : "", before ? beforeLen : 0);
+            const std::string afterValue(
+                after ? reinterpret_cast<const char*>(after) : "", after ? afterLen : 0);
+            const auto apply = [engine, target](const std::string& value) {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                target->setName(value);
+            };
+            engine->m_undoManager.recordAppliedAction(
+                "Rename Track", [apply, beforeValue] { apply(beforeValue); },
+                [apply, afterValue] { apply(afterValue); });
+        },
+        [](void* host, uint32_t trackId, bool enabled, uint32_t leftChannel,
+           uint32_t rightChannel) -> bool {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            if (!enabled) {
+                if (engine->m_inputMonitorTrackId.load(std::memory_order_acquire) == trackId) {
+                    engine->m_inputMonitorTrackId.store(kNoInputMonitorTrack,
+                                                       std::memory_order_release);
+                }
+                return true;
+            }
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                const bool exists = std::any_of(
+                    engine->m_tracks.begin(), engine->m_tracks.end(),
+                    [trackId](const auto& track) {
+                        return track && track->getId() == trackId;
+                    });
+                if (!exists) return false;
+            }
+            // One physical input is monitored at a time. Enabling another track
+            // atomically moves the monitor focus without touching record-arm state.
+            const uint64_t channelPair =
+                (static_cast<uint64_t>(rightChannel) << 32) | leftChannel;
+            engine->m_inputMonitorChannelPair.store(channelPair, std::memory_order_release);
+            engine->m_inputMonitorTrackId.store(trackId, std::memory_order_release);
+            return true;
+        },
+        [](void* host, uint32_t macroIndex, float value) {
+            if (!host) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            hirari_macro_control_set_value(engine->m_macroControl, macroIndex, value);
+        },
+        [](void* host, uint32_t macroIndex, uint8_t channel, bool cc14, uint16_t controller,
+           float minimum, float maximum, float curve, bool pickup) {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            const void* targetState = engine->m_macroControl;
+            if (targetState == nullptr) return false;
+            if (cc14) {
+                engine->m_midiLearnManager.addMapping14Bit(
+                    controller, channel, targetState, macroIndex, minimum, maximum, curve,
+                    pickup);
+            } else {
+                engine->m_midiLearnManager.addMappingAdvanced(
+                    static_cast<uint8_t>(controller), channel, targetState, macroIndex,
+                    minimum, maximum, curve, pickup);
+            }
+            return true;
+        },
+    };
+    hirari_control_edit_host_install(&ops);
+}
+
+namespace {
+[[maybe_unused]] const bool kControlEditHostInstalled = [] {
+    HirariUnifiedEngine::installControlEditHost();
+    return true;
+}();
+}  // namespace
+
+// Plugin-chain edit host callbacks. Rust decides whether an edit is admitted
+// and which undo entry is recorded; these handlers only read or apply.
+void HirariUnifiedEngine::installPluginEditHost() {
+    static const HirariPluginEditHostOps ops = {
+        [](void* host, uint32_t trackId, uint32_t pluginIndex) -> int32_t {
+            if (!host) return -1;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (const auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                return track->getPluginBypass(pluginIndex) ? 1 : 0;
+            }
+            return -1;
+        },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed) {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                return track->setPluginBypass(pluginIndex, bypassed);
+            }
+            return false;
+        },
+        [](void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex) {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                return track->movePlugin(fromIndex, toIndex);
+            }
+            return false;
+        },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, bool before, bool after) {
+            if (!host) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::shared_ptr<Track> target;
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                for (auto& track : engine->m_tracks) {
+                    if (track && track->getId() == trackId) {
+                        target = track;
+                        break;
+                    }
+                }
+            }
+            if (!target) return;
+            // Undo replays the stored values without re-entering the policy,
+            // exactly as the previous engine-owned lambdas did.
+            const auto undo = [target, pluginIndex, before]() {
+                (void)target->setPluginBypass(pluginIndex, before);
+            };
+            const auto redo = [target, pluginIndex, after]() {
+                (void)target->setPluginBypass(pluginIndex, after);
+            };
+            engine->m_undoManager.recordAppliedAction("Set Plugin Bypass", undo, redo);
+        },
+        [](void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex) {
+            if (!host) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::shared_ptr<Track> target;
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                for (auto& track : engine->m_tracks) {
+                    if (track && track->getId() == trackId) {
+                        target = track;
+                        break;
+                    }
+                }
+            }
+            if (!target) return;
+            const auto undo = [target, fromIndex, toIndex]() {
+                (void)target->movePlugin(toIndex, fromIndex);
+            };
+            const auto redo = [target, fromIndex, toIndex]() {
+                (void)target->movePlugin(fromIndex, toIndex);
+            };
+            engine->m_undoManager.recordAppliedAction("Move Plugin", undo, redo);
+        },
+    };
+    hirari_plugin_edit_host_install(&ops);
+}
+
+namespace {
+[[maybe_unused]] const bool kPluginEditHostInstalled = [] {
+    HirariUnifiedEngine::installPluginEditHost();
     return true;
 }();
 }  // namespace
@@ -412,147 +573,90 @@ uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t 
     const uint64_t splitOffset = static_cast<uint64_t>(splitBeat - static_cast<double>(before.start));
     if (splitOffset == 0 || splitOffset >= before.len) return 0;
 
+    // Rust owns the split policy: geometry, fades, source offsets, the warp
+    // map split and the local range/comp windows all come from here. This
+    // function keeps the payload (audio buffer, note store, caches) and
+    // applies the returned state.
+    static_assert(sizeof(Region::WarpMarker) == sizeof(HirariWarpMarker));
+    static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
+    static_assert(sizeof(Region::CompRange) == sizeof(HirariRegionCompRange));
+    HirariRegionSplitInput input{};
+    input.state = before.editableState();
+    input.splitOffset = splitOffset;
+    input.markers = reinterpret_cast<const HirariWarpMarker*>(before.warpMarkers.data());
+    input.markerCount = before.warpMarkers.size();
+    input.ranges = reinterpret_cast<const HirariRegionRangeEdit*>(before.rangeEdits.data());
+    input.rangeCount = before.rangeEdits.size();
+    input.compRanges = reinterpret_cast<const HirariRegionCompRange*>(before.compRanges.data());
+    input.compRangeCount = before.compRanges.size();
+    HirariRegionSplitOutput plan{};
+    if (!hirari_region_split_plan(&input, &plan)) return 0;
+
     Region left = before;
     Region right = before;
-    left.len = splitOffset;
-    right.start = before.start + splitOffset;
-    right.len = before.len - splitOffset;
-    // Clip-edge fades belong to the outer edges after a split. Copying both
-    // fades to both halves creates two new dips at the edit point.
-    left.fadeInSamples = std::min(before.fadeInSamples, left.len);
-    left.fadeOutSamples = 0;
-    right.fadeInSamples = 0;
-    right.fadeOutSamples = std::min(before.fadeOutSamples, right.len);
-    const uint64_t sourceLength = before.sourceLength == 0 ? before.len : before.sourceLength;
-    if (sourceLength <= 1) return 0;
-    static_assert(sizeof(Region::WarpMarker) == sizeof(HirariWarpMarker));
-    std::vector<Region::WarpMarker> leftMarkers(before.warpMarkers.size() + 2);
-    std::vector<Region::WarpMarker> rightMarkers(before.warpMarkers.size() + 2);
-    size_t leftMarkerCount = 0;
-    size_t rightMarkerCount = 0;
-    uint64_t sourceSplit = 0;
-    if (!hirari_region_split_warp_markers(
-            reinterpret_cast<const HirariWarpMarker*>(before.warpMarkers.data()),
-            before.warpMarkers.size(), sourceLength, before.len, splitOffset,
-            before.sourceFramesPerTimelineFrame(),
-            reinterpret_cast<HirariWarpMarker*>(leftMarkers.data()), leftMarkers.size(),
-            &leftMarkerCount, reinterpret_cast<HirariWarpMarker*>(rightMarkers.data()),
-            rightMarkers.size(), &rightMarkerCount, &sourceSplit)) return 0;
-    leftMarkers.resize(leftMarkerCount);
-    rightMarkers.resize(rightMarkerCount);
-    left.sourceLength = sourceSplit;
-    right.sourceLength = sourceLength - sourceSplit;
-    // Preserve the piecewise source/timeline mapping on both halves. The
-    // split boundary is evaluated through the same map as playback, then
-    // becomes the right edge of the left map and the origin of the right map.
-    left.warpMarkers = std::move(leftMarkers);
-    right.warpMarkers = std::move(rightMarkers);
+    left.applyEditableState(plan.left);
+    right.applyEditableState(plan.right);
+    left.warpMarkers.clear();
+    right.warpMarkers.clear();
+    if (plan.leftMarkerCount != 0) {
+        left.warpMarkers.assign(plan.leftMarkers,
+                                plan.leftMarkers + plan.leftMarkerCount);
+    }
+    if (plan.rightMarkerCount != 0) {
+        right.warpMarkers.assign(plan.rightMarkers,
+                                 plan.rightMarkers + plan.rightMarkerCount);
+    }
+    if (plan.leftRangeCount != 0) {
+        left.rangeEdits.assign(
+            reinterpret_cast<const Region::RangeEdit*>(plan.leftRanges),
+            reinterpret_cast<const Region::RangeEdit*>(plan.leftRanges) + plan.leftRangeCount);
+    } else {
+        left.rangeEdits.clear();
+    }
+    if (plan.rightRangeCount != 0) {
+        right.rangeEdits.assign(
+            reinterpret_cast<const Region::RangeEdit*>(plan.rightRanges),
+            reinterpret_cast<const Region::RangeEdit*>(plan.rightRanges) + plan.rightRangeCount);
+    } else {
+        right.rangeEdits.clear();
+    }
+    if (plan.leftCompRangeCount != 0) {
+        left.compRanges.assign(
+            reinterpret_cast<const Region::CompRange*>(plan.leftCompRanges),
+            reinterpret_cast<const Region::CompRange*>(plan.leftCompRanges) + plan.leftCompRangeCount);
+    } else {
+        left.compRanges.clear();
+    }
+    if (plan.rightCompRangeCount != 0) {
+        right.compRanges.assign(
+            reinterpret_cast<const Region::CompRange*>(plan.rightCompRanges),
+            reinterpret_cast<const Region::CompRange*>(plan.rightCompRanges) + plan.rightCompRangeCount);
+    } else {
+        right.compRanges.clear();
+    }
+
     // Pitch/formant note edits use region-relative seconds. Split each segment
     // at the same timeline boundary and move the right half back to time zero;
-    // copying the original segment vector to both clips applies stale edits to
-    // unrelated audio after a split.
-    const double splitSeconds = static_cast<double>(splitOffset) /
-        std::max(1.0, m_sampleRate.load(std::memory_order_acquire));
-    const double regionSeconds = static_cast<double>(before.len) /
-        std::max(1.0, m_sampleRate.load(std::memory_order_acquire));
-    std::vector<::hirari::editing::AudioNoteSegment> beforeSegments;
-    if (!before.noteEdits.copy(beforeSegments)) return false;
-    left.noteEdits.detach();
-    right.noteEdits.detach();
-    std::vector<::hirari::editing::AudioNoteSegment> leftSegments;
-    std::vector<::hirari::editing::AudioNoteSegment> rightSegments;
-    const auto appendSegmentWindow = [](const ::hirari::editing::AudioNoteSegment& source,
-                                        double start, double end, double timeShift,
-                                        auto& destination) {
-        if (!(end > start)) return;
-        auto segment = source;
-        segment.startSeconds = start - timeShift;
-        segment.endSeconds = end - timeShift;
-        if (!source.anchors.empty()) {
-            std::vector<::hirari::editing::AudioNoteAnchor> anchors;
-            anchors.reserve(source.anchors.size() + 2);
-            const auto boundaryAnchor = [&source](double position) {
-                return ::hirari::editing::AudioNoteAnchor{
-                    position,
-                    source.pitchAt(position) - source.pitchOffsetCents,
-                    source.formantAt(position) - source.formantOffsetCents};
-            };
-            anchors.push_back(boundaryAnchor(start));
-            for (const auto& anchor : source.anchors) {
-                if (anchor.positionSeconds > start && anchor.positionSeconds < end) {
-                    auto shifted = anchor;
-                    anchors.push_back(shifted);
-                }
-            }
-            auto endAnchor = boundaryAnchor(end);
-            endAnchor.positionSeconds -= timeShift;
-            anchors.push_back(endAnchor);
-            for (auto& anchor : anchors) anchor.positionSeconds -= timeShift;
-            segment.anchors = std::move(anchors);
-        }
-        segment.pitchRatioIntegralPrefix.clear();
-        segment.pitchRatioCorrectionBeforeSeconds = 0.0;
-        destination.push_back(std::move(segment));
-    };
-    for (const auto& segment : beforeSegments) {
-        appendSegmentWindow(segment, segment.startSeconds,
-                            std::min(segment.endSeconds, splitSeconds), 0.0,
-                            leftSegments);
-        appendSegmentWindow(segment, std::max(segment.startSeconds, splitSeconds),
-                            std::min(segment.endSeconds, regionSeconds), splitSeconds,
-                            rightSegments);
-    }
-    if (!left.noteEdits.assignRepaired(leftSegments) ||
-        !right.noteEdits.assignRepaired(rightSegments)) {
-        return false;
-    }
-    const auto splitLocalRanges = [splitOffset, regionLength = before.len](
-        const auto& sourceRanges, auto& leftRanges, auto& rightRanges) {
-        leftRanges.clear();
-        rightRanges.clear();
-        leftRanges.reserve(sourceRanges.size());
-        rightRanges.reserve(sourceRanges.size());
-        for (const auto& sourceRange : sourceRanges) {
-            const uint64_t sourceStart = sourceRange.start;
-            const uint64_t sourceEnd = std::min(sourceRange.end, regionLength);
-            if (sourceStart >= sourceEnd) continue;
-            const uint64_t leftEnd = std::min(sourceEnd, splitOffset);
-            if (sourceStart < leftEnd) {
-                auto range = sourceRange;
-                range.start = sourceStart;
-                range.end = leftEnd;
-                const uint64_t length = range.end - range.start;
-                range.fadeIn = sourceStart == sourceRange.start
-                    ? std::min(sourceRange.fadeIn, length) : 0;
-                range.fadeOut = leftEnd == sourceRange.end
-                    ? std::min(sourceRange.fadeOut, length) : 0;
-                leftRanges.push_back(std::move(range));
-            }
-            const uint64_t rightStart = std::max(sourceStart, splitOffset);
-            if (rightStart < sourceEnd) {
-                auto range = sourceRange;
-                range.start = rightStart - splitOffset;
-                range.end = sourceEnd - splitOffset;
-                const uint64_t length = range.end - range.start;
-                range.fadeIn = rightStart == sourceRange.start
-                    ? std::min(sourceRange.fadeIn, length) : 0;
-                range.fadeOut = sourceEnd == sourceRange.end
-                    ? std::min(sourceRange.fadeOut, length) : 0;
-                rightRanges.push_back(std::move(range));
-            }
-        }
-    };
-    splitLocalRanges(before.rangeEdits, left.rangeEdits, right.rangeEdits);
-    splitLocalRanges(before.compRanges, left.compRanges, right.compRanges);
-    if (right.sourceLength == 0) return 0;
-    if (before.reverse) {
-        const uint64_t leftSourceOffset = sourceLength - sourceSplit;
-        if (before.sourceOffset > UINT64_MAX - leftSourceOffset) return 0;
-        left.sourceOffset = before.sourceOffset + leftSourceOffset;
-    } else {
-        if (before.sourceOffset > UINT64_MAX - sourceSplit) return 0;
-        right.sourceOffset = before.sourceOffset + sourceSplit;
-    }
+    // copying the original store to both clips applies stale edits to
+    // unrelated audio after a split. Rust windows the segments and rebuilds
+    // the boundary anchors from the source curve.
+    left.noteEdits = ::hirari::editing::RegionNoteEdits{};
+    right.noteEdits = ::hirari::editing::RegionNoteEdits{};
+    const double sampleRate = m_sampleRate.load(std::memory_order_acquire);
+    // Prefer the immutable published projection: a concurrent note edit must
+    // not mutate the source table while Rust windows it. Fall back to the live
+    // store only for a region that was never published.
+    const auto* noteSnapshot = before.noteEdits.frozenHandle();
+    const bool notesSplit = noteSnapshot
+        ? hirari_region_vari_audio_frozen_split(
+              noteSnapshot, left.noteEdits.storeHandle(),
+              right.noteEdits.storeHandle(), sampleRate, splitOffset, before.len)
+        : hirari_region_vari_audio_store_split(
+              before.noteEdits.storeHandle(), left.noteEdits.storeHandle(),
+              right.noteEdits.storeHandle(), sampleRate, splitOffset, before.len);
+    hirari_region_split_plan_free(&plan);
+    if (!notesSplit) return 0;
+
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         right.id = allocateRegionIdLocked();
@@ -564,9 +668,8 @@ uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t 
         target->removeRegion(rid);
         target->addRegion(left);
         target->addRegion(right);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
-        m_peakCache.erase(right.id);
+        hirari_region_waveform_forget(this, rid);
+        hirari_region_waveform_forget(this, right.id);
     };
     const uint32_t rightId = right.id;
     const auto restore = [this, target, rid, rightId, before]() {
@@ -574,8 +677,7 @@ uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t 
         target->removeRegion(rid);
         target->removeRegion(rightId);
         target->addRegion(before);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
+        hirari_region_waveform_forget(this, rid);
     };
     m_undoManager.performAction("Split Region", restore, publish);
     return rightId;
@@ -589,22 +691,18 @@ uint32_t HirariUnifiedEngine::duplicate_region(uint32_t tid, uint32_t rid, uint6
         for (auto& track : m_tracks) {
         if (track->getId() != tid) continue;
         for (const auto& region : track->getRegions()) {
-            if (region.id != rid || region.len == 0 || region.loopCount == 0 ||
-                region.len > UINT64_MAX / region.loopCount ||
-                startSample > UINT64_MAX - region.len * region.loopCount)
-                continue;
-            const uint64_t sourceTrim = region.sourceOffset >= region.baseSourceOffset
-                ? region.sourceOffset - region.baseSourceOffset : 0;
-            const long double timelineTrim = std::ceil(
-                static_cast<long double>(sourceTrim) / region.sourceFramesPerTimelineFrame());
-            if (!std::isfinite(static_cast<double>(timelineTrim)) || timelineTrim < 0.0L ||
-                timelineTrim > static_cast<long double>(startSample)) continue;
+            if (region.id != rid) continue;
+            // Rust owns the duplicate policy: the loop-span overflow check,
+            // the source-trim ceiling and the backing-up of baseStart.
+            const auto sourceState = region.editableState();
+            HirariRegionState duplicateState{};
+            if (!hirari_region_duplicate_state(&sourceState, startSample,
+                                               &duplicateState)) continue;
             target = track;
             duplicate = region;
+            duplicate.applyEditableState(duplicateState);
             duplicate.id = allocateRegionIdLocked();
             if (duplicate.id == 0) return 0;
-            duplicate.start = startSample;
-            duplicate.baseStart = startSample - static_cast<uint64_t>(timelineTrim);
             break;
         }
         if (target) break;
@@ -624,8 +722,7 @@ uint32_t HirariUnifiedEngine::duplicate_region(uint32_t tid, uint32_t rid, uint6
     const auto remove = [this, target, duplicateId]() {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         target->removeRegion(duplicateId);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(duplicateId);
+        hirari_region_waveform_forget(this, duplicateId);
     };
     m_undoManager.performAction(
         "Duplicate Region", remove, apply);

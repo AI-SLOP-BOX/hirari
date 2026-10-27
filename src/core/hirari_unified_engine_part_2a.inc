@@ -292,9 +292,8 @@ uint32_t HirariUnifiedEngine::add_track(uint32_t type) {
         auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
                                [id](const auto& track) { return track->getId() == id; });
         if (it == m_tracks.end()) return;
-        {
-            std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-            for (const auto& region : (*it)->getRegions()) m_peakCache.erase(region.id);
+        for (const auto& region : (*it)->getRegions()) {
+            hirari_region_waveform_forget(this, region.id);
         }
         m_deferredDestructionTracks.push_back(*it);
         m_tracks.erase(it);
@@ -377,6 +376,7 @@ void HirariUnifiedEngine::new_project() {
     m_inputMonitorTrackId.store(kNoInputMonitorTrack, std::memory_order_release);
     m_inputMonitorBlockPublished.store(false, std::memory_order_release);
     m_commandQueue.clear();
+    hirari_region_jobs_clear(this);
     set_test_tone(false);
     set_playhead(0);
     hirari_mpe_state_reset(m_mpeState);
@@ -392,7 +392,8 @@ void HirariUnifiedEngine::new_project() {
     // Project tonality (root + scale) is no longer reset here: that state
     // moved into Core, and HirariCore::new_project() resets the same
     // (root 0, Major) defaults alongside the other project-scoped mirrors.
-    m_waveformGeneration.fetch_add(1, std::memory_order_acq_rel);
+    // Region ids restart with the project, so cached peaks must not survive.
+    hirari_region_waveform_clear(this);
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     m_sidechainRoutes.clear();
     // Keep old Track objects alive while a CoreAudio callback may still hold
@@ -402,15 +403,6 @@ void HirariUnifiedEngine::new_project() {
                                        std::make_move_iterator(m_tracks.end()));
     m_tracks.clear();
     mark_project_layout_changed();
-    {
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.clear();
-        // Do not let a worker from the previous project generation suppress
-        // the first waveform request for a newly loaded project. Its stale
-        // completion is still harmless because the worker checks its captured
-        // generation before publishing.
-        m_peakBuilds.clear();
-    }
     m_regionIdCounter.store(1, std::memory_order_release);
     // Track ID 0 is the invalid/stale-ID sentinel across the whole bridge:
     // ProjectDocument::validate() rejects it outright and the argument guards

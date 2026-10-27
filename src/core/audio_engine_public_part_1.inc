@@ -46,7 +46,7 @@ public:
     double midi_clock_rate() const { return m_engine ? m_engine->midi_clock_rate() : 120.0; }
     void set_midi_clock_rate(double bpm) const { if (m_engine) m_engine->set_midi_clock_rate(bpm); }
     bool set_track_volume(uint32_t tid, float value) const {
-        return m_engine && m_engine->set_track_volume(tid, value);
+        return m_engine && hirari_routing_edit_set_track_volume(m_engine.get(), tid, value);
     }
     float get_track_volume(uint32_t tid) const {
         return m_engine ? m_engine->get_track_volume(tid) : -1.0f;
@@ -90,13 +90,13 @@ public:
         return m_engine ? m_engine->get_track_delay_samples(tid) : 0u;
     }
     bool set_track_pan(uint32_t tid, float value) const {
-        return m_engine && m_engine->set_track_pan(tid, value);
+        return m_engine && hirari_routing_edit_set_track_pan(m_engine.get(), tid, value);
     }
     bool set_track_mute(uint32_t tid, bool muted) const {
-        return m_engine && m_engine->set_track_mute(tid, muted);
+        return m_engine && hirari_routing_edit_set_track_mute(m_engine.get(), tid, muted);
     }
     bool set_track_solo(uint32_t tid, bool solo) const {
-        return m_engine && m_engine->set_track_solo(tid, solo);
+        return m_engine && hirari_routing_edit_set_track_solo(m_engine.get(), tid, solo);
     }
     bool set_track_solo_for_offline_render(uint32_t tid, bool solo) const {
         return m_engine && m_engine->set_track_solo_for_offline_render(tid, solo);
@@ -291,12 +291,14 @@ public:
                                  rust::Slice<const uint8_t> transient_flags) const {
         if (!m_engine || source_samples.size() != timeline_samples.size() ||
             source_samples.size() != transient_flags.size() || source_samples.size() > 100'000) return false;
-        std::vector<::Hirari::Core::Engine::Region::WarpMarker> markers;
+        std::vector<HirariWarpMarker> markers;
         markers.reserve(source_samples.size());
         for (size_t i = 0; i < source_samples.size(); ++i) {
-            markers.push_back({source_samples[i], timeline_samples[i], transient_flags[i] != 0});
+            markers.push_back({source_samples[i], timeline_samples[i],
+                               transient_flags[i] != 0});
         }
-        return m_engine->set_region_warp_markers(tid, rid, markers);
+        return hirari_region_edit_set_warp_markers(
+            m_engine.get(), tid, rid, markers.data(), markers.size());
     }
     bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
                                     rust::Slice<const uint32_t> targetTids,

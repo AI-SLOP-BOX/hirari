@@ -63,11 +63,23 @@ struct Waiter {
     context: usize,
     load: unsafe extern "C" fn(*mut c_void) -> u64,
     wait: unsafe extern "C" fn(*mut c_void, u64),
+    wake: unsafe extern "C" fn(*mut c_void),
 }
 pub struct Journaler { inner: Arc<Inner>, writer: Mutex<Option<JoinHandle<()>>> }
 
 fn stop(journaler: &Journaler) {
     journaler.inner.running.store(false, Ordering::Release);
+    // A writer that loaded the wake sequence just before `running` became
+    // false can still be blocked in `wait`. The host wakes before calling in,
+    // so that notification can lose the race: the writer then re-waits on the
+    // new sequence, which nothing will advance until the next log entry, and
+    // this join never returns. The wake has to happen here, after the flag is
+    // visible, to guarantee the writer observes the stop.
+    if let Ok(waiter) = journaler.inner.waiter.lock() {
+        if let Some(waiter) = *waiter {
+            unsafe { (waiter.wake)(waiter.context as *mut c_void) };
+        }
+    }
     if let Ok(mut writer) = journaler.writer.lock() {
         if let Some(handle) = writer.take() { let _ = handle.join(); }
     }
@@ -152,12 +164,14 @@ pub unsafe extern "C" fn hirari_forensic_journaler_start(
     state: *mut c_void, path: *const u8, len: usize, wait_context: *mut c_void,
     load_sequence: Option<unsafe extern "C" fn(*mut c_void) -> u64>,
     wait_sequence: Option<unsafe extern "C" fn(*mut c_void, u64)>,
+    wake_sequence: Option<unsafe extern "C" fn(*mut c_void)>,
 ) -> bool {
     let Some(journaler) = state.cast::<Journaler>().as_ref() else { return false };
     if len > 0 && path.is_null() { return false; }
-    let (Some(load), Some(wait)) = (load_sequence, wait_sequence) else { return false };
+    let (Some(load), Some(wait), Some(wake)) = (load_sequence, wait_sequence, wake_sequence)
+    else { return false };
     journaler.start(if len == 0 { Vec::new() } else { std::slice::from_raw_parts(path, len).to_vec() },
-        Waiter { context: wait_context as usize, load, wait })
+        Waiter { context: wait_context as usize, load, wait, wake })
 }
 
 #[no_mangle]
@@ -223,5 +237,74 @@ pub unsafe extern "C" fn hirari_forensic_journaler_recover(
             }
             Err(_) => return true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{mpsc, Condvar, Mutex};
+    use std::time::Duration;
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    static PARK: Mutex<()> = Mutex::new(());
+    static RESUME: Condvar = Condvar::new();
+
+    unsafe extern "C" fn load_sequence(_: *mut c_void) -> u64 {
+        SEQUENCE.load(Ordering::Acquire)
+    }
+    unsafe extern "C" fn wait_sequence(_: *mut c_void, observed: u64) {
+        let mut guard = PARK.lock().unwrap();
+        while SEQUENCE.load(Ordering::Acquire) == observed {
+            guard = RESUME.wait(guard).unwrap();
+        }
+    }
+    unsafe extern "C" fn wake_sequence(_: *mut c_void) {
+        let _guard = PARK.lock().unwrap();
+        SEQUENCE.fetch_add(1, Ordering::Release);
+        RESUME.notify_all();
+    }
+
+    #[test]
+    fn stop_wakes_an_idle_writer() {
+        let path = std::env::temp_dir().join(format!(
+            "hirari-journaler-stop-{}-{:?}.journal",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let path_bytes = path.to_string_lossy().into_owned();
+        let state = hirari_forensic_journaler_create();
+        let started = unsafe {
+            hirari_forensic_journaler_start(
+                state,
+                path_bytes.as_bytes().as_ptr(),
+                path_bytes.len(),
+                std::ptr::null_mut(),
+                Some(load_sequence),
+                Some(wait_sequence),
+                Some(wake_sequence),
+            )
+        };
+        assert!(started);
+
+        // Give the writer time to drain the empty queue and park in wait().
+        // Shutdown must wake it explicitly, since no log call follows.
+        std::thread::sleep(Duration::from_millis(100));
+        let (done, finished) = mpsc::channel();
+        let address = state as usize;
+        std::thread::spawn(move || {
+            unsafe { hirari_forensic_journaler_stop(address as *mut c_void) };
+            let _ = done.send(());
+        });
+        if finished.recv_timeout(Duration::from_secs(5)).is_err() {
+            // Leak the state on failure: destroying it while the writer is
+            // still parked would hand a dangling pointer to the still-running
+            // stop thread.
+            panic!("stop() did not wake the idle writer");
+        }
+
+        unsafe { hirari_forensic_journaler_destroy(state) };
+        let _ = std::fs::remove_file(&path);
     }
 }

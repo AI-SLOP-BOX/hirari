@@ -1,8 +1,4 @@
-use memmap2::{Mmap, MmapOptions};
-use std::ffi::{c_void, CStr};
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
-use std::path::PathBuf;
+use std::ffi::c_void;
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
@@ -175,103 +171,6 @@ pub unsafe extern "C" fn hirari_waveform_overview_copy_error(
         destination.add(count).write(0);
     }
     error.len()
-}
-
-struct MappedWaveformCache {
-    file: Option<File>,
-    mapping: Option<Mmap>,
-    path: PathBuf,
-}
-
-impl Drop for MappedWaveformCache {
-    fn drop(&mut self) {
-        self.mapping.take();
-        self.file.take();
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_waveform_cache_map_create(
-    path: *const std::ffi::c_char,
-    samples: *const f32,
-    sample_count: usize,
-) -> *mut c_void {
-    if path.is_null()
-        || samples.is_null()
-        || sample_count == 0
-        || sample_count % 2 != 0
-        || sample_count > (1 << 20)
-    {
-        return std::ptr::null_mut();
-    }
-    let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
-        return std::ptr::null_mut();
-    };
-    let path = PathBuf::from(path);
-    let result = (|| -> io::Result<MappedWaveformCache> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .read(true)
-            .write(true)
-            .open(&path)?;
-        let byte_count = sample_count
-            .checked_mul(std::mem::size_of::<f32>())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "cache size overflow"))?;
-        let bytes = unsafe {
-            std::slice::from_raw_parts(samples.cast::<u8>(), byte_count)
-        };
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        let mapping = unsafe { MmapOptions::new().map(&file)? };
-        if mapping.len() != byte_count {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "cache mapping length mismatch"));
-        }
-        Ok(MappedWaveformCache {
-            file: Some(file),
-            mapping: Some(mapping),
-            path: path.clone(),
-        })
-    })();
-    match result {
-        Ok(cache) => Box::into_raw(Box::new(cache)).cast(),
-        Err(_) => {
-            let _ = fs::remove_file(path);
-            std::ptr::null_mut()
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_waveform_cache_map_data(
-    cache: *const c_void,
-) -> *const f32 {
-    if cache.is_null() {
-        return std::ptr::null();
-    }
-    unsafe { &*cache.cast::<MappedWaveformCache>() }
-        .mapping
-        .as_ref()
-        .map_or(std::ptr::null(), |mapping| mapping.as_ptr().cast())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_waveform_cache_map_len(cache: *const c_void) -> usize {
-    if cache.is_null() {
-        return 0;
-    }
-    unsafe { &*cache.cast::<MappedWaveformCache>() }
-        .mapping
-        .as_ref()
-        .map_or(0, |mapping| mapping.len() / std::mem::size_of::<f32>())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_waveform_cache_map_destroy(cache: *mut c_void) {
-    if !cache.is_null() {
-        drop(unsafe { Box::from_raw(cache.cast::<MappedWaveformCache>()) });
-    }
 }
 
 pub struct PeakPairRust {
@@ -469,54 +368,6 @@ mod tests {
         );
         assert!(resample_waveform_peak_envelope(&[1.0], 2).is_empty());
         assert!(resample_waveform_peak_envelope(&[1.0, -1.0], 0).is_empty());
-    }
-
-    #[test]
-    fn rust_mapped_cache_owns_persistence_and_removes_its_file_on_drop() {
-        use std::ffi::CString;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "hirari-waveform-map-test-{}-{unique}.bin",
-            std::process::id()
-        ));
-        let path_string = CString::new(path.to_str().unwrap()).unwrap();
-        let samples = [0.75f32, -0.5, 0.25, -0.125];
-        let cache = unsafe {
-            super::hirari_waveform_cache_map_create(
-                path_string.as_ptr(),
-                samples.as_ptr(),
-                samples.len(),
-            )
-        };
-        assert!(!cache.is_null());
-        assert!(path.exists());
-        let mapped = unsafe { super::hirari_waveform_cache_map_data(cache) };
-        let mapped_len = unsafe { super::hirari_waveform_cache_map_len(cache) };
-        assert_eq!(mapped_len, samples.len());
-        assert_eq!(unsafe { std::slice::from_raw_parts(mapped, mapped_len) }, &samples);
-        unsafe { super::hirari_waveform_cache_map_destroy(cache) };
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn rust_mapped_cache_rejects_invalid_layouts() {
-        use std::ffi::CString;
-
-        let path = CString::new("unused-waveform-cache-path").unwrap();
-        let samples = [1.0f32, 0.0, 2.0];
-        let cache = unsafe {
-            super::hirari_waveform_cache_map_create(
-                path.as_ptr(),
-                samples.as_ptr(),
-                samples.len(),
-            )
-        };
-        assert!(cache.is_null());
     }
 
     #[cfg(feature = "dsp-differential-reference")]

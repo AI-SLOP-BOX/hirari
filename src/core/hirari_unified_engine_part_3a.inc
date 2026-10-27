@@ -30,26 +30,20 @@ bool HirariUnifiedEngine::replace_region_audio(uint32_t tid, uint32_t rid, std::
             }
         }
         if (!after.audio) return false;
-        m_waveformGeneration.fetch_add(1, std::memory_order_acq_rel);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
+        hirari_region_waveform_forget(this, rid);
     }
 
     const auto publish = [this, target, after, rid]() {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         target->removeRegion(rid);
         target->addRegion(after);
-        m_waveformGeneration.fetch_add(1, std::memory_order_acq_rel);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
+        hirari_region_waveform_forget(this, rid);
     };
     const auto restore = [this, target, before, rid]() {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         target->removeRegion(rid);
         target->addRegion(before);
-        m_waveformGeneration.fetch_add(1, std::memory_order_acq_rel);
-        std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
-        m_peakCache.erase(rid);
+        hirari_region_waveform_forget(this, rid);
     };
     m_undoManager.recordAppliedAction("Replace Region Audio", restore, publish);
     return true;
@@ -528,10 +522,9 @@ bool HirariUnifiedEngine::load_plugin_preset(uint32_t tid, uint32_t pluginIndex,
     return true;
 }
 bool HirariUnifiedEngine::set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) {
-    std::shared_ptr<Track> target;
-    bool before = false;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& t : m_tracks) {
-            if (t->getId() == tid) {
-                before = t->getPluginBypass(pluginIndex);
+    if (!hirari_plugin_edit_set_bypass(this, tid, pluginIndex, bypassed)) return false;
+    // Bypass changes alter the active latency path. Rebuild the published
+    // routing/PDC state now that the edit host has released m_tracksMutex.
+    syncStructuralChanges();
+    return true;
+}

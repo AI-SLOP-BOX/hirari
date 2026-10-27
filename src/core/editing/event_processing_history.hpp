@@ -36,6 +36,12 @@ public:
 
     bool valid() const noexcept { return static_cast<bool>(store_); }
 
+    /// Borrowed handle for the Rust layout serializer; the table stays owned
+    /// here.
+    HirariRegionProcessingHistoryStore* storeHandle() const noexcept {
+        return store_.get();
+    }
+
     /// Appends one step. The admissibility policy (id, operation size,
     /// parameter finiteness, 4096-step cap) is owned by the Rust store.
     bool append(const EventProcessingStep& step) const {

@@ -393,12 +393,13 @@ pub extern "C" fn hirari_core_midi_dropped_input_events() -> u64 {
     DROPPED_INPUT_EVENTS.load(Ordering::Relaxed)
 }
 
+/// # Safety
+/// `value` must be null or a pointer returned by one of this module's string
+/// getters, and must not be used again after this call.
 #[no_mangle]
-pub extern "C" fn hirari_core_midi_string_free(value: *mut c_char) {
+pub unsafe extern "C" fn hirari_core_midi_string_free(value: *mut c_char) {
     if !value.is_null() {
-        unsafe {
-            drop(CString::from_raw(value));
-        }
+        drop(CString::from_raw(value));
     }
 }
 

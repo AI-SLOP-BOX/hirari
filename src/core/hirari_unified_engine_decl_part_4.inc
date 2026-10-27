@@ -68,8 +68,6 @@ public:
     bool finalize_region_audio_note_analysis(uint32_t tid, uint32_t rid);
     bool set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count);
     bool set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group);
-    bool set_region_warp_markers(uint32_t tid, uint32_t rid,
-        const std::vector<::Hirari::Core::Engine::Region::WarpMarker>& markers);
     bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
                                     const std::vector<::HirariRegionAlignmentTargetId>& targets);
     uint8_t region_alignment_status(uint32_t referenceTid, uint32_t referenceRid) const;

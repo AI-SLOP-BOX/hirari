@@ -32,161 +32,130 @@ float HirariUnifiedEngine::get_master_gain() const noexcept {
     return m_masterGain.load(std::memory_order_acquire);
 }
 
-bool HirariUnifiedEngine::set_automation_data(uint32_t tid, uint32_t param_id, const std::vector<AutomationPoint>& points) {
-    if (param_id > 1) return false;
-    const float minValue = param_id == 0 ? 0.0f : -1.0f;
-    const float maxValue = param_id == 0 ? 2.0f : 1.0f;
-    double previousTime = -1.0;
-    for (const auto& point : points) {
-        if (!std::isfinite(point.time) || point.time < 0.0 || std::trunc(point.time) != point.time
-            || !std::isfinite(point.value) || point.value < minValue || point.value > maxValue
-            || !std::isfinite(point.curve) || point.curve < -1.0f || point.curve > 1.0f
-            || point.time <= previousTime) {
-            return false;
-        }
-        previousTime = point.time;
-    }
-    std::vector<Hirari::Core::ProjectAutomationPoint> serializedPoints;
-    serializedPoints.reserve(points.size());
-    for (const auto& p : points) {
-        Hirari::Core::ProjectAutomationPoint sp;
-        sp.time = p.time;
-        sp.value = p.value;
-        sp.curve = p.curve;
-        serializedPoints.push_back(sp);
-    }
-
-    // Snapshot the previous curve while holding the model lock, then release
-    // it before registering the undo transaction. Undo callbacks reacquire the
-    // lock later, so the audio/model lock is never held across a callback.
-    std::vector<Hirari::Core::ProjectAutomationPoint> previousPoints;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& t : m_tracks) {
-            if (t->getId() != tid) continue;
-            previousPoints = param_id == 0
-                ? t->getVolumeAutomationPoints()
-                : t->getPanAutomationPoints();
-            break;
-        }
-    }
-    if (previousPoints.empty() && serializedPoints.empty()) {
-        // An empty curve is still a valid clear operation only when the track
-        // exists; distinguish it from an unknown track below.
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        if (std::none_of(m_tracks.begin(), m_tracks.end(),
-                         [tid](const auto& track) { return track->getId() == tid; })) {
-            return false;
-        }
-    } else {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        if (std::none_of(m_tracks.begin(), m_tracks.end(),
-                         [tid](const auto& track) { return track->getId() == tid; })) {
-            return false;
-        }
-    }
-
-    auto apply = [this, tid, param_id](const std::vector<Hirari::Core::ProjectAutomationPoint>& curve) {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& track : m_tracks) {
-            if (track->getId() != tid) continue;
-            if (param_id == 0) track->setVolumeAutomation(curve);
-            else track->setPanAutomation(curve);
-            return;
-        }
-    };
-    const std::string actionName =
-        std::string(param_id == 0 ? "Volume Automation Track " : "Pan Automation Track ") +
-        std::to_string(tid);
-    m_undoManager.performAction(
-        actionName,
-        [apply, previousPoints] { apply(previousPoints); },
-        [apply, serializedPoints] { apply(serializedPoints); });
-    return true;
-}
-
-bool HirariUnifiedEngine::set_plugin_automation(
-    uint32_t tid, uint32_t pluginIndex, uint32_t parameterId,
-    const std::vector<ProjectAutomationPoint>& points) {
-    if (points.size() > 100'000) return false;
-    double previousTime = -1.0;
-    for (const auto& point : points) {
-        if (!std::isfinite(point.time) || point.time < 0.0 || point.time > 9007199254740992.0 ||
-            std::trunc(point.time) != point.time || point.time <= previousTime ||
-            !std::isfinite(point.value) || point.value < 0.0f || point.value > 1.0f ||
-            !std::isfinite(point.curve) || point.curve < -1.0f || point.curve > 1.0f) {
-            return false;
-        }
-        previousTime = point.time;
-    }
-
-    std::shared_ptr<Track> target;
-    std::vector<ProjectPluginAutomationLane> before;
-    std::vector<ProjectPluginAutomationLane> after;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& track : m_tracks) {
-            if (!track || track->getId() != tid) continue;
-            if (pluginIndex >= track->getPluginTypes().size()) return false;
-            target = track;
-            before = track->getPluginAutomation();
-            after = before;
-            after.erase(std::remove_if(after.begin(), after.end(),
-                [pluginIndex, parameterId](const auto& lane) {
-                    return lane.pluginIndex == pluginIndex && lane.parameterId == parameterId;
-                }), after.end());
-            if (!points.empty()) {
-                after.push_back({pluginIndex, parameterId, points});
-            }
-            break;
-        }
-    }
-    if (!target) return false;
-
-    auto apply = [target](const auto& lanes) { target->setPluginAutomation(lanes); };
-    m_undoManager.performAction(
-        "Plugin Parameter Automation Track " + std::to_string(tid),
-        [apply, before] { apply(before); }, [apply, after] { apply(after); });
-    return true;
-}
-
-bool HirariUnifiedEngine::set_track_delay_automation(uint32_t tid, const std::vector<AutomationPoint>& points) {
-    if (points.size() > 8192) return false;
-    double previousTime = -1.0;
-    for (const auto& point : points) {
-        if (!std::isfinite(point.time) || point.time < 0.0 || std::trunc(point.time) != point.time || point.time <= previousTime ||
-            !std::isfinite(point.value) || point.value < 0.0f || point.value > 1.0f ||
-            !std::isfinite(point.curve) || point.curve < -1.0f || point.curve > 1.0f) return false;
-        previousTime = point.time;
-    }
-    std::vector<AutomationPoint> before;
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& track : m_tracks) {
-            if (track && track->getId() == tid) {
-                target = track;
-                for (const auto& point : track->getTrackDelayAutomationPoints()) {
-                    before.push_back({point.time, point.value, point.curve});
+size_t HirariUnifiedEngine::automationHostRead(void* host, uint32_t trackId, int32_t kind,
+                                               uint32_t pluginIndex, uint32_t parameterId,
+                                               Hirari::Core::ProjectAutomationPoint* out,
+                                               size_t capacity, bool* targetFound) {
+    if (targetFound) *targetFound = false;
+    if (!host) return 0;
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+    for (const auto& track : engine->m_tracks) {
+        if (!track || track->getId() != trackId) continue;
+        std::vector<Hirari::Core::ProjectAutomationPoint> points;
+        if (kind == kHirariAutomationPlugin) {
+            if (pluginIndex >= track->getPluginTypes().size()) return 0;
+            for (const auto& lane : track->getPluginAutomation()) {
+                if (lane.pluginIndex == pluginIndex && lane.parameterId == parameterId) {
+                    points = lane.points;
+                    break;
                 }
-                break;
             }
+        } else if (kind == kHirariAutomationTrackDelay) {
+            points = track->getTrackDelayAutomationPoints();
+        } else if (kind == kHirariAutomationPan) {
+            points = track->getPanAutomationPoints();
+        } else {
+            points = track->getVolumeAutomationPoints();
+        }
+        if (targetFound) *targetFound = true;
+        if (out && capacity >= points.size()) {
+            std::copy(points.begin(), points.end(), out);
+        }
+        return points.size();
+    }
+    return 0;
+}
+
+bool HirariUnifiedEngine::automationHostApply(void* host,
+                                              const HirariAutomationEditPayload* payload) {
+    if (!host || !payload) return false;
+    if (payload->pointCount != 0 && payload->points == nullptr) return false;
+    const std::vector<Hirari::Core::ProjectAutomationPoint> points(
+        payload->points, payload->points + payload->pointCount);
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+    for (const auto& track : engine->m_tracks) {
+        if (!track || track->getId() != payload->trackId) continue;
+        switch (payload->kind) {
+            case kHirariAutomationVolume:
+                track->setVolumeAutomation(points);
+                return true;
+            case kHirariAutomationPan:
+                track->setPanAutomation(points);
+                return true;
+            case kHirariAutomationTrackDelay:
+                track->setTrackDelayAutomation(points);
+                return true;
+            case kHirariAutomationPlugin: {
+                auto lanes = track->getPluginAutomation();
+                lanes.erase(std::remove_if(lanes.begin(), lanes.end(),
+                                           [payload](const auto& lane) {
+                                               return lane.pluginIndex == payload->pluginIndex &&
+                                                      lane.parameterId == payload->parameterId;
+                                           }),
+                            lanes.end());
+                if (!points.empty()) {
+                    lanes.push_back({payload->pluginIndex, payload->parameterId, points});
+                }
+                track->setPluginAutomation(lanes);
+                return true;
+            }
+            default:
+                return false;
         }
     }
-    if (!target) return false;
-    auto apply = [target](const std::vector<AutomationPoint>& curve) {
-        std::vector<Hirari::Core::ProjectAutomationPoint> serialized;
-        serialized.reserve(curve.size());
-        for (const auto& point : curve) {
-            serialized.push_back({point.time, point.value, point.curve});
-        }
-        target->setTrackDelayAutomation(serialized);
-    };
-    m_undoManager.performAction(
-        "Track Delay Automation " + std::to_string(tid),
-        [apply, before] { apply(before); }, [apply, points] { apply(points); });
-    return true;
+    return false;
 }
+
+void HirariUnifiedEngine::automationHostRecordUndo(void* host, const char* name,
+                                                   const HirariAutomationEditPayload* undo,
+                                                   const HirariAutomationEditPayload* redo) {
+    if (!host || !name || !undo || !redo) return;
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    struct OwnedAutomationEdit {
+        HirariAutomationEditPayload payload;
+        std::shared_ptr<std::vector<Hirari::Core::ProjectAutomationPoint>> points;
+    };
+    auto capture = [](const HirariAutomationEditPayload& source) {
+        OwnedAutomationEdit entry;
+        entry.payload = source;
+        entry.points =
+            std::make_shared<std::vector<Hirari::Core::ProjectAutomationPoint>>();
+        if (source.pointCount != 0 && source.points != nullptr) {
+            entry.points->assign(source.points, source.points + source.pointCount);
+        }
+        entry.payload.pointCount = entry.points->size();
+        return entry;
+    };
+    const auto undoCopy = capture(*undo);
+    const auto redoCopy = capture(*redo);
+    auto applyOne = [host](const OwnedAutomationEdit& entry) {
+        HirariAutomationEditPayload payload = entry.payload;
+        payload.points = entry.points->data();
+        (void)HirariUnifiedEngine::automationHostApply(host, &payload);
+    };
+    // Rust already applied the edit, so record the entry without replaying the
+    // redo a second time.
+    engine->m_undoManager.recordAppliedAction(name, [applyOne, undoCopy] { applyOne(undoCopy); },
+                                              [applyOne, redoCopy] { applyOne(redoCopy); },
+                                              false);
+}
+
+namespace {
+
+const HirariAutomationHostOps kAutomationEditHostOps = {
+    &HirariUnifiedEngine::automationHostRead,
+    &HirariUnifiedEngine::automationHostApply,
+    &HirariUnifiedEngine::automationHostRecordUndo,
+};
+
+[[maybe_unused]] const bool kAutomationEditHostInstalled = [] {
+    hirari_automation_host_install(&kAutomationEditHostOps);
+    return true;
+}();
+
+}  // namespace
 bool HirariUnifiedEngine::set_spatial_position(uint32_t tid, float x, float y, float z) {
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
     // C-4 fix: use m_tracks under mutex instead of raw audioState pointers

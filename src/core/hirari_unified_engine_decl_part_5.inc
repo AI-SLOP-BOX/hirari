@@ -1,6 +1,3 @@
-    // Automation
-    bool set_automation_data(uint32_t tid, uint32_t param_id, const std::vector<AutomationPoint>& points);
-    bool set_track_delay_automation(uint32_t tid, const std::vector<AutomationPoint>& points);
     bool push_command(::Hirari::Core::CommandType type, uint32_t targetId, float value,
                       uint64_t timestamp, uint64_t expectedProjectGeneration,
                       uint64_t expectedAudioGeneration);

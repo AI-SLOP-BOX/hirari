@@ -15,12 +15,6 @@ public:
         Paused = 6,
     };
 
-    struct AutomationPoint {
-        double time = 0.0;
-        float value = 0.0f;
-        float curve = 0.0f;
-    };
-
     static HirariUnifiedEngine& getInstance();
     HirariUnifiedEngine();
     ~HirariUnifiedEngine();

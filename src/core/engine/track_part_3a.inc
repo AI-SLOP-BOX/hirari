@@ -461,6 +461,34 @@
         return false;
     }
 
+    // Host entry point for trim and warp-ratio edits. Rust computed the
+    // geometry and the undo pair; this stores exactly those fields and swaps
+    // the marker list in a single publish.
+    bool applyRegionGeometry(uint32_t rid, const HirariRegionState& state,
+                             const HirariWarpMarker* markers, size_t markerCount) {
+        if (markerCount != 0 && markers == nullptr) return false;
+        invalidateFrozenForEdit();
+        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
+        for (auto& region : m_regions) {
+            if (region.id != rid || region.locked) continue;
+            region.start = state.start;
+            region.len = state.len;
+            region.sourceOffset = state.sourceOffset;
+            region.sourceLength = state.sourceLength;
+            region.fadeInSamples = state.fadeInSamples;
+            region.fadeOutSamples = state.fadeOutSamples;
+            region.warpRatio = state.warpRatio;
+            if (markerCount == 0) {
+                region.warpMarkers.clear();
+            } else {
+                region.warpMarkers.assign(markers, markers + markerCount);
+            }
+            publishRegionSnapshot();
+            return true;
+        }
+        return false;
+    }
+
     // Host entry point for edits that move or re-trim a region. Re-adding the
     // replacement runs the same normalisation (`addRegion`) the previous
     // remove/add path used, including the sorted insert into `m_regions`.
@@ -478,26 +506,7 @@
             }
             if (!found) return false;
         }
-        replacement.start = state.start;
-        replacement.len = state.len;
-        replacement.baseStart = state.baseStart;
-        replacement.baseLength = state.baseLength;
-        replacement.sourceOffset = state.sourceOffset;
-        replacement.baseSourceOffset = state.baseSourceOffset;
-        replacement.sourceLength = state.sourceLength;
-        replacement.fadeInSamples = state.fadeInSamples;
-        replacement.fadeOutSamples = state.fadeOutSamples;
-        replacement.warpRatio = state.warpRatio;
-        replacement.sourceSampleRate = state.sourceSampleRate;
-        replacement.timelineSampleRate = state.timelineSampleRate;
-        replacement.clipGain = state.clipGain;
-        replacement.pitchSemitones = state.pitchSemitones;
-        replacement.loopCount = state.loopCount;
-        replacement.syncGroup = state.syncGroup;
-        replacement.muted = state.muted;
-        replacement.reverse = state.reverse;
-        replacement.locked = state.locked;
-        replacement.pitchPreserveWarp = state.pitchPreserveWarp;
+        replacement.applyEditableState(state);
         removeRegion(rid);
         addRegion(replacement);
         return true;
@@ -613,31 +622,6 @@
         return replaceRegionRangeEdits(rid, {});
     }
 
-    bool setRegionWarpRatio(uint32_t rid, double ratio) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        // The range and finiteness guard lives in
-        // hirari_region_set_warp_ratio_geometry; a second C++ copy of the same
-        // bound is how the two implementations drift apart.
-        for (auto& region : m_regions) {
-            if (region.id == rid) {
-                if (region.locked) return false;
-                const auto input = regionGeometryForRust(region);
-                HirariNativeRegionGeometry output{};
-                if (!hirari_region_set_warp_ratio_geometry(&input, ratio, &output)) return false;
-                region.warpRatio = output.warp_ratio;
-                region.warpMarkers.clear();
-                region.start = output.start;
-                region.len = output.length;
-                region.fadeInSamples = output.fade_in;
-                region.fadeOutSamples = output.fade_out;
-                publishRegionSnapshot();
-                return true;
-            }
-        }
-        return false;
-    }
-
     bool setRegionPitchPreserveWarp(uint32_t rid, bool enabled) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
@@ -727,27 +711,6 @@
             return r.id == rid;
         });
         return it == m_regions.end() ? std::vector<Region::WarpMarker>{} : it->warpMarkers;
-    }
-
-    bool setRegionTrim(uint32_t rid, float startNorm, float endNorm) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid || region.locked || region.baseLength == 0) continue;
-            const auto input = regionGeometryForRust(region);
-            HirariNativeRegionGeometry output{};
-            if (!hirari_region_set_trim_geometry(&input, startNorm, endNorm, &output)) return false;
-            region.start = output.start;
-            region.sourceOffset = output.source_offset;
-            region.sourceLength = output.source_length;
-            region.len = output.length;
-            region.warpMarkers.clear();
-            region.fadeInSamples = output.fade_in;
-            region.fadeOutSamples = output.fade_out;
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
     }
 
     // Audio-thread producer for write automation. The queue is deliberately

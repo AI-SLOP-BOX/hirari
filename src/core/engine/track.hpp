@@ -97,6 +97,55 @@ struct Region {
         const double effective = warpRatio * conversion;
         return std::isfinite(effective) && effective > 0.0 ? effective : warpRatio;
     }
+    // The single mapping between Region storage and the Rust-owned edit state.
+    // Split, duplicate, the host bridge and the mirror all go through these so
+    // a new field cannot be added on one side only.
+    ::HirariRegionState editableState() const noexcept {
+        ::HirariRegionState state;
+        state.start = start;
+        state.len = len;
+        state.baseStart = baseStart;
+        state.baseLength = baseLength;
+        state.sourceOffset = sourceOffset;
+        state.baseSourceOffset = baseSourceOffset;
+        state.sourceLength = sourceLength;
+        state.fadeInSamples = fadeInSamples;
+        state.fadeOutSamples = fadeOutSamples;
+        state.warpRatio = warpRatio;
+        state.sourceSampleRate = sourceSampleRate;
+        state.timelineSampleRate = timelineSampleRate;
+        state.clipGain = clipGain;
+        state.pitchSemitones = pitchSemitones;
+        state.loopCount = loopCount;
+        state.syncGroup = syncGroup;
+        state.muted = muted;
+        state.reverse = reverse;
+        state.locked = locked;
+        state.pitchPreserveWarp = pitchPreserveWarp;
+        return state;
+    }
+    void applyEditableState(const ::HirariRegionState& state) noexcept {
+        start = state.start;
+        len = state.len;
+        baseStart = state.baseStart;
+        baseLength = state.baseLength;
+        sourceOffset = state.sourceOffset;
+        baseSourceOffset = state.baseSourceOffset;
+        sourceLength = state.sourceLength;
+        fadeInSamples = state.fadeInSamples;
+        fadeOutSamples = state.fadeOutSamples;
+        warpRatio = state.warpRatio;
+        sourceSampleRate = state.sourceSampleRate;
+        timelineSampleRate = state.timelineSampleRate;
+        clipGain = state.clipGain;
+        pitchSemitones = state.pitchSemitones;
+        loopCount = state.loopCount;
+        syncGroup = state.syncGroup;
+        muted = state.muted;
+        reverse = state.reverse;
+        locked = state.locked;
+        pitchPreserveWarp = state.pitchPreserveWarp;
+    }
     // When enabled, the spectral stretcher changes duration while preserving
     // pitch and applying the region's non-destructive pitch/formant curves.
     // Off preserves legacy varispeed behavior.

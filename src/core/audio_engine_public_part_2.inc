@@ -164,22 +164,9 @@
     }
     bool set_plugin_automation(uint32_t tid, uint32_t pluginIndex,
                                uint32_t parameterId, rust::Vec<double> packedPoints) const {
-        if (!m_engine || packedPoints.size() % 3 != 0 || packedPoints.size() > 300'000) return false;
-        std::vector<::Hirari::Core::ProjectAutomationPoint> points;
-        points.reserve(packedPoints.size() / 3);
-        double previousTime = -1.0;
-        for (size_t i = 0; i < packedPoints.size(); i += 3) {
-            const double time = packedPoints[i];
-            const double value = packedPoints[i + 1];
-            const double curve = packedPoints[i + 2];
-            if (!std::isfinite(time) || time < 0.0 || time > 9007199254740992.0 ||
-                std::trunc(time) != time ||
-                time <= previousTime || !std::isfinite(value) || value < 0.0 || value > 1.0 ||
-                !std::isfinite(curve) || curve < -1.0 || curve > 1.0) return false;
-            points.push_back({time, static_cast<float>(value), static_cast<float>(curve)});
-            previousTime = time;
-        }
-        return m_engine->set_plugin_automation(tid, pluginIndex, parameterId, points);
+        return m_engine && hirari_automation_edit_plugin(
+                               m_engine.get(), tid, pluginIndex, parameterId,
+                               packedPoints.data(), packedPoints.size());
     }
     bool set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
                                            uint32_t parameterId, float value) const {
@@ -498,40 +485,15 @@
     rust::String plugin_compatibility_snapshot_json() const { return m_engine ? rust::String(m_engine->plugin_compatibility_snapshot_json()) : rust::String("[]"); }
     bool set_automation_data(uint32_t tid, uint32_t paramId,
                              rust::Vec<double> packedPoints) const {
-        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::AutomationPoint> converted;
-        if (packedPoints.size() % 3 != 0) return false;
-        converted.reserve(packedPoints.size() / 3);
-        double previousTime = -1.0;
-        for (size_t i = 0; i < packedPoints.size(); i += 3) {
-            const double time = packedPoints[i];
-            const double value = packedPoints[i + 1];
-            const double curve = packedPoints[i + 2];
-            if (!std::isfinite(time) || !std::isfinite(value) || !std::isfinite(curve)
-                || time < 0.0 || std::trunc(time) != time || time <= previousTime || value < 0.0 || value > 1.0
-                || curve < -1.0 || curve > 1.0) return false;
-            ::Hirari::Core::Engine::HirariUnifiedEngine::AutomationPoint p;
-            p.time = std::max(0.0, time);
-            p.value = std::clamp(static_cast<float>(value), 0.0f, 1.0f);
-            p.curve = std::clamp(static_cast<float>(curve), -1.0f, 1.0f);
-            converted.push_back(p);
-            previousTime = time;
-        }
-        return m_engine && m_engine->set_automation_data(tid, paramId, converted);
+        if (!m_engine) return false;
+        const int32_t kind = paramId == 0 ? kHirariAutomationVolume : kHirariAutomationPan;
+        return hirari_automation_edit_track(m_engine.get(), tid, kind, paramId,
+                                            packedPoints.data(), packedPoints.size());
     }
     bool set_track_delay_automation(uint32_t tid, rust::Vec<double> packedPoints) const {
-        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::AutomationPoint> converted;
-        if (packedPoints.size() % 3 != 0) return false;
-        converted.reserve(packedPoints.size() / 3);
-        double previousTime = -1.0;
-        for (size_t i = 0; i < packedPoints.size(); i += 3) {
-            const double time = packedPoints[i], value = packedPoints[i + 1], curve = packedPoints[i + 2];
-            if (!std::isfinite(time) || !std::isfinite(value) || !std::isfinite(curve) ||
-                time < 0.0 || std::trunc(time) != time || time <= previousTime ||
-                value < 0.0 || value > 1.0 || curve < -1.0 || curve > 1.0) return false;
-            converted.push_back({time, static_cast<float>(value), static_cast<float>(curve)});
-            previousTime = time;
-        }
-        return m_engine && m_engine->set_track_delay_automation(tid, converted);
+        return m_engine && hirari_automation_edit_track(
+                               m_engine.get(), tid, kHirariAutomationTrackDelay, 0,
+                               packedPoints.data(), packedPoints.size());
     }
     // Compatibility API: stop only this wrapper's device.  The underlying
     // HirariUnifiedEngine is a process-wide singleton and must not be shut down

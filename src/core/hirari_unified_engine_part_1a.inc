@@ -30,6 +30,11 @@ HirariUnifiedEngine& HirariUnifiedEngine::getInstance() {
 }
 
 HirariUnifiedEngine::~HirariUnifiedEngine() {
+    // Async region jobs hold the engine host pointer; join them before any
+    // member (decoder, tracks) is destroyed.
+    hirari_region_jobs_shutdown();
+    // Rust keys cached peaks by engine address; a later engine may reuse it.
+    hirari_region_waveform_clear(this);
     shutdown();
     hirari_midi_snapshot_store_destroy(m_midiSnapshotStore);
     hirari_control_room_state_destroy(m_controlRoomState);

@@ -27,19 +27,29 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::region_mutations::hirari_region_sync_move_positions;
 use crate::region_processing::{
-    hirari_region_fade_samples, HirariRegionScalarDecision, HirariRegionScalarEdit,
-    HirariRegionScalarField,
+    hirari_region_fade_samples, hirari_region_set_trim_geometry,
+    hirari_region_set_warp_ratio_geometry, HirariRegionScalarDecision, HirariRegionScalarEdit,
+    HirariRegionScalarField, NativeRegionGeometry,
+};
+use crate::region_warp::{
+    hirari_free_warp_markers, hirari_region_normalize_warp_markers, HirariWarpMarker,
 };
 
 /// Payload op: write the policy-controlled scalar fields in place.
 pub const HIRARI_REGION_EDIT_INPLACE: i32 = 2;
 /// Payload op: replace the region's editable state and republish it.
 pub const HIRARI_REGION_EDIT_STATE: i32 = 1;
+/// Payload op: write the geometry fields Rust computed for a trim or warp
+/// ratio edit and replace the warp markers from `blob`.
+pub const HIRARI_REGION_EDIT_GEOMETRY: i32 = 14;
 /// Payload op: remove the region and drop its cached peaks.
 pub const HIRARI_REGION_EDIT_REMOVE: i32 = 12;
 /// Payload op: put a removed region back from a host-held snapshot handle. The
 /// host takes ownership of the handle when the payload is recorded for undo.
 pub const HIRARI_REGION_EDIT_RESTORE: i32 = 13;
+/// Payload op: replace only the warp markers from `blob`, leaving the editable
+/// state alone. Timing jobs (alignment, quantize) commit through this.
+pub const HIRARI_REGION_EDIT_MARKERS: i32 = 15;
 
 /// The editable part of a region. Mirrors the C++ `HirariRegionState` byte for
 /// byte; audio buffers, note edits and processing history stay in C++.
@@ -70,7 +80,7 @@ pub struct HirariRegionState {
 
 impl HirariRegionState {
     /// Matches `Region::sourceFramesPerTimelineFrame()` in `track.hpp`.
-    fn source_frames_per_timeline_frame(&self) -> f64 {
+    pub(crate) fn source_frames_per_timeline_frame(&self) -> f64 {
         let source_rate = if self.source_sample_rate.is_finite() && self.source_sample_rate > 0.0 {
             self.source_sample_rate
         } else {
@@ -129,6 +139,11 @@ pub type HirariRegionApplyFn =
     unsafe extern "C" fn(*mut c_void, *const HirariRegionEditPayload) -> bool;
 pub type HirariRegionListGroupFn =
     unsafe extern "C" fn(*mut c_void, u32, *mut HirariRegionGroupMember, usize) -> usize;
+/// Copies a region's warp markers into `out` and returns the total count. A
+/// null or short buffer reports the count without writing, like the sync-group
+/// listing.
+pub type HirariRegionMarkersFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *mut HirariWarpMarker, usize) -> usize;
 pub type HirariRegionNoteEditFn =
     unsafe extern "C" fn(*mut c_void, *mut HirariRegionVariAudioStore) -> bool;
 pub type HirariRegionNoteEditHostFn = unsafe extern "C" fn(
@@ -146,12 +161,81 @@ pub type HirariRegionRecordUndoFn = unsafe extern "C" fn(
     *const HirariRegionEditPayload,
     usize,
     bool,
-);
+) -> bool;
 /// Copies the whole region (audio, history, note edits) into an owned host
 /// handle, or returns null when the region does not exist.
 pub type HirariRegionSnapshotFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> *mut c_void;
 /// Frees a handle from `HirariRegionSnapshotFn` that was never recorded.
 pub type HirariRegionReleaseSnapshotFn = unsafe extern "C" fn(*mut c_void, *mut c_void);
+/// Retains a region's decoded audio in an immutable host handle so a worker
+/// thread can read it after the control thread moves on. Null when the region
+/// has no decoded audio.
+pub type HirariRegionRetainAudioFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> *mut c_void;
+/// Reports a retained handle's channel count. With room in `out`, also writes
+/// the channel pointers and the total sample count.
+pub type HirariRegionAudioViewFn =
+    unsafe extern "C" fn(*mut c_void, *mut *const f32, usize, *mut u64) -> u32;
+/// Releases a handle from `HirariRegionRetainAudioFn`.
+pub type HirariRegionReleaseAudioFn = unsafe extern "C" fn(*mut c_void);
+/// Reports a track's region-table generation and published snapshot identity.
+/// Returns false when the track is no longer part of the project.
+pub type HirariRegionTrackTokenFn =
+    unsafe extern "C" fn(*mut c_void, u32, *mut u64, *mut usize) -> bool;
+/// Lists track ids in engine order. Reports the total even when `out` is short.
+pub type HirariRegionListTracksFn = unsafe extern "C" fn(*mut c_void, *mut u32, usize) -> usize;
+/// Lists one track's region ids in storage order.
+pub type HirariRegionListRegionsFn = unsafe extern "C" fn(*mut c_void, u32, *mut u32, usize) -> usize;
+/// Returns the Rust-owned tempo map handle.
+pub type HirariRegionTempoStateFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+/// Returns the Rust-owned undo history handle.
+pub type HirariRegionUndoStateFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+/// Returns the project timeline sample rate.
+pub type HirariRegionSampleRateFn = unsafe extern "C" fn(*mut c_void) -> f64;
+/// Copies a region's source path into `out` and returns its byte length. A
+/// null or short buffer reports the length without writing.
+pub type HirariRegionPathFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *mut u8, usize) -> usize;
+/// Decodes a media file through the native decoder and returns an owned audio
+/// handle plus the source sample rate captured during the import. The handle
+/// is read through `HirariRegionAudioViewFn` and freed by
+/// `HirariRegionReleaseAudioFn`.
+pub type HirariRegionDecodeAudioFn = unsafe extern "C" fn(
+    *mut c_void,
+    *const u8,
+    usize,
+    *mut *mut c_void,
+    *mut f64,
+) -> bool;
+/// Inserts a freshly decoded region into the project. The audio handle is
+/// consumed on every path. Returns the new region id, or 0 on failure.
+pub type HirariRegionInsertFn = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    usize,
+    *const u8,
+    usize,
+    u64,
+    f64,
+    f64,
+    *mut c_void,
+) -> u32;
+/// Reports the live track's identity, or 0 when the id is not in the project.
+pub type HirariRegionTrackIdentityFn =
+    unsafe extern "C" fn(*mut c_void, u32) -> usize;
+/// Retains a track in an owned handle so a worker can use it safely.
+pub type HirariRegionRetainTrackFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
+/// Releases a handle from `HirariRegionRetainTrackFn`.
+pub type HirariRegionReleaseTrackFn = unsafe extern "C" fn(*mut c_void);
+/// Starts F0 analysis ownership on a retained track.
+pub type HirariRegionPitchBeginFn = unsafe extern "C" fn(*mut c_void) -> bool;
+/// Runs the analysis kernel on a retained track.
+pub type HirariRegionPitchAnalyzeFn =
+    unsafe extern "C" fn(*mut c_void, u32, f64) -> bool;
+/// Ends F0 analysis ownership on a retained track.
+pub type HirariRegionPitchFinishFn = unsafe extern "C" fn(*mut c_void);
+/// Copies a region's note table from a retained track into an owned store.
+pub type HirariRegionNoteSnapshotFn =
+    unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -163,6 +247,26 @@ pub struct HirariRegionHostOps {
     pub note_edit: Option<HirariRegionNoteEditHostFn>,
     pub snapshot_region: Option<HirariRegionSnapshotFn>,
     pub release_snapshot: Option<HirariRegionReleaseSnapshotFn>,
+    pub warp_markers: Option<HirariRegionMarkersFn>,
+    pub retain_audio: Option<HirariRegionRetainAudioFn>,
+    pub audio_view: Option<HirariRegionAudioViewFn>,
+    pub release_audio: Option<HirariRegionReleaseAudioFn>,
+    pub track_token: Option<HirariRegionTrackTokenFn>,
+    pub list_tracks: Option<HirariRegionListTracksFn>,
+    pub list_regions: Option<HirariRegionListRegionsFn>,
+    pub tempo_state: Option<HirariRegionTempoStateFn>,
+    pub undo_state: Option<HirariRegionUndoStateFn>,
+    pub sample_rate: Option<HirariRegionSampleRateFn>,
+    pub region_path: Option<HirariRegionPathFn>,
+    pub decode_audio: Option<HirariRegionDecodeAudioFn>,
+    pub insert_region: Option<HirariRegionInsertFn>,
+    pub track_identity: Option<HirariRegionTrackIdentityFn>,
+    pub retain_track: Option<HirariRegionRetainTrackFn>,
+    pub release_track: Option<HirariRegionReleaseTrackFn>,
+    pub pitch_begin: Option<HirariRegionPitchBeginFn>,
+    pub pitch_analyze: Option<HirariRegionPitchAnalyzeFn>,
+    pub pitch_finish: Option<HirariRegionPitchFinishFn>,
+    pub note_snapshot: Option<HirariRegionNoteSnapshotFn>,
 }
 
 // The table only holds function pointers supplied by the native engine; it
@@ -172,7 +276,7 @@ unsafe impl Sync for HirariRegionHostOps {}
 
 static HOST_OPS: OnceLock<Mutex<Option<HirariRegionHostOps>>> = OnceLock::new();
 
-fn host_ops() -> Option<HirariRegionHostOps> {
+pub(crate) fn host_ops() -> Option<HirariRegionHostOps> {
     HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
 }
 
@@ -256,16 +360,16 @@ fn edited_state(
     after
 }
 
-fn record(
+pub(crate) fn record(
     ops: &HirariRegionHostOps,
     host: *mut c_void,
     name: &[u8],
     undo: &[HirariRegionEditPayload],
     redo: &[HirariRegionEditPayload],
     coalesce: bool,
-) {
-    if let Some(record_undo) = ops.record_undo {
-        unsafe {
+) -> bool {
+    match ops.record_undo {
+        Some(record_undo) => unsafe {
             record_undo(
                 host,
                 name.as_ptr() as *const c_char,
@@ -274,8 +378,9 @@ fn record(
                 redo.as_ptr(),
                 redo.len(),
                 coalesce,
-            );
-        }
+            )
+        },
+        None => false,
     }
 }
 
@@ -341,6 +446,350 @@ fn state_payload(
         state,
         ..Default::default()
     }
+}
+
+/// Upper bound for a captured marker list. The engine rejects edits above this
+/// order of magnitude; the cap only keeps a foreign host from driving an
+/// unbounded allocation here.
+const MAX_WARP_MARKERS: usize = 1_000_000;
+
+fn geometry_of(state: HirariRegionState) -> NativeRegionGeometry {
+    NativeRegionGeometry {
+        start: state.start,
+        length: state.len,
+        source_length: state.source_length,
+        source_offset: state.source_offset,
+        base_start: state.base_start,
+        base_source_offset: state.base_source_offset,
+        base_length: state.base_length,
+        loop_count: state.loop_count,
+        fade_in: state.fade_in_samples,
+        fade_out: state.fade_out_samples,
+        warp_ratio: state.warp_ratio,
+        source_sample_rate: state.source_sample_rate,
+        timeline_sample_rate: state.timeline_sample_rate,
+    }
+}
+
+fn state_with_geometry(
+    state: HirariRegionState,
+    geometry: &NativeRegionGeometry,
+) -> HirariRegionState {
+    let mut after = state;
+    after.start = geometry.start;
+    after.len = geometry.length;
+    after.source_offset = geometry.source_offset;
+    after.source_length = geometry.source_length;
+    after.fade_in_samples = geometry.fade_in;
+    after.fade_out_samples = geometry.fade_out;
+    after.warp_ratio = geometry.warp_ratio;
+    after
+}
+
+pub(crate) fn warp_markers_of(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> Option<Vec<HirariWarpMarker>> {
+    let markers: HirariRegionMarkersFn = ops.warp_markers?;
+    let count = unsafe { markers(host, track_id, region_id, ptr::null_mut(), 0) };
+    if count > MAX_WARP_MARKERS {
+        return None;
+    }
+    let mut captured = vec![HirariWarpMarker::default(); count];
+    if count == 0 {
+        return Some(captured);
+    }
+    let written = unsafe { markers(host, track_id, region_id, captured.as_mut_ptr(), count) };
+    if written != count {
+        return None;
+    }
+    Some(captured)
+}
+
+/// Runs the shared marker normalizer and adopts its output. An empty list is
+/// valid and clears the markers; a null result means normalization failed.
+fn normalize_markers(
+    markers: &[HirariWarpMarker],
+    source_span: u64,
+    timeline_length: u64,
+) -> Option<Vec<HirariWarpMarker>> {
+    if markers.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut count = 0usize;
+    let out = unsafe {
+        hirari_region_normalize_warp_markers(
+            markers.as_ptr(),
+            markers.len(),
+            source_span,
+            timeline_length,
+            &mut count,
+        )
+    };
+    if out.is_null() {
+        return None;
+    }
+    let ordered = unsafe { std::slice::from_raw_parts(out, count) }.to_vec();
+    unsafe { hirari_free_warp_markers(out, count) };
+    Some(ordered)
+}
+
+fn same_markers(left: &[HirariWarpMarker], right: &[HirariWarpMarker]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(a, b)| {
+            a.source_sample == b.source_sample
+                && a.timeline_sample == b.timeline_sample
+                && a.transient == b.transient
+        })
+}
+
+/// Replaces a region's warp markers. The previous engine setter rejected any
+/// list that normalization would shorten, so callers can rely on a marker
+/// count round-trip; a successful edit records one marker-aware undo entry.
+fn set_warp_markers_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    markers: *const HirariWarpMarker,
+    count: usize,
+) -> bool {
+    // The previous engine setter rejected edits above this order of magnitude.
+    const MAX_WARP_MARKER_EDITS: usize = 100_000;
+    if track_id == 0 || region_id == 0 || count > MAX_WARP_MARKER_EDITS {
+        return false;
+    }
+    if count != 0 && markers.is_null() {
+        return false;
+    }
+    let (Some(find), Some(apply)) = (ops.find_region, ops.apply_edit) else {
+        return false;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } || state.locked {
+        return false;
+    }
+    let input: &[HirariWarpMarker] = if count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(markers, count) }
+    };
+    let Some(ordered) = normalize_markers(input, u64::MAX, u64::MAX) else {
+        return false;
+    };
+    if ordered.len() != input.len() {
+        return false;
+    }
+    let source_span = if state.source_length > 0 {
+        state.source_length
+    } else {
+        state.len
+    };
+    let Some(ordered) = normalize_markers(&ordered, source_span, state.len) else {
+        return false;
+    };
+    if ordered.len() != input.len() {
+        return false;
+    }
+    let Some(current) = warp_markers_of(ops, host, track_id, region_id) else {
+        return false;
+    };
+    if same_markers(&current, &ordered) {
+        return true;
+    }
+    let undo = geometry_payload(track_id, region_id, state, &current);
+    let redo = geometry_payload(track_id, region_id, state, &ordered);
+    if !unsafe { apply(host, &redo) } {
+        return false;
+    }
+    record(
+        ops,
+        host,
+        b"Edit Region Warp Markers\0",
+        &[undo],
+        &[redo],
+        false,
+    );
+    true
+}
+
+fn geometry_payload(
+    track_id: u32,
+    region_id: u32,
+    state: HirariRegionState,
+    markers: &[HirariWarpMarker],
+) -> HirariRegionEditPayload {
+    HirariRegionEditPayload {
+        track_id,
+        region_id,
+        op: HIRARI_REGION_EDIT_GEOMETRY,
+        blob: if markers.is_empty() {
+            ptr::null()
+        } else {
+            markers.as_ptr().cast()
+        },
+        blob_len: std::mem::size_of_val(markers),
+        state,
+    }
+}
+
+/// Applies a validated geometry result and records one marker-aware undo entry.
+fn commit_geometry(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    before: HirariRegionState,
+    geometry: NativeRegionGeometry,
+    name: &[u8],
+) -> bool {
+    let Some(apply) = ops.apply_edit else {
+        return false;
+    };
+    let Some(markers) = warp_markers_of(ops, host, track_id, region_id) else {
+        return false;
+    };
+    let after = state_with_geometry(before, &geometry);
+    let undo = geometry_payload(track_id, region_id, before, &markers);
+    let redo = geometry_payload(track_id, region_id, after, &[]);
+    if !unsafe { apply(host, &redo) } {
+        return false;
+    }
+    record(ops, host, name, &[undo], &[redo], false);
+    true
+}
+
+fn edit_trim_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start_normalized: f32,
+    end_normalized: f32,
+) -> bool {
+    if !start_normalized.is_finite() || !end_normalized.is_finite() {
+        return false;
+    }
+    let start_normalized = start_normalized.clamp(0.0, 1.0);
+    let end_normalized = end_normalized.clamp(0.0, 1.0);
+    if end_normalized <= start_normalized {
+        return false;
+    }
+    let Some(find) = ops.find_region else {
+        return false;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return false;
+    }
+    // The previous engine wrapper only offered trim to regions with a base
+    // (untrimmed) length, and the storage layer refused locked regions.
+    if state.locked || state.base_length == 0 {
+        return false;
+    }
+    let input = geometry_of(state);
+    let mut output = NativeRegionGeometry::default();
+    if !unsafe {
+        hirari_region_set_trim_geometry(&input, start_normalized, end_normalized, &mut output)
+    } {
+        return false;
+    }
+    commit_geometry(ops, host, track_id, region_id, state, output, b"Trim Region\0")
+}
+
+fn edit_warp_ratio_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    ratio: f64,
+) -> bool {
+    if !ratio.is_finite() || !(0.5..=2.0).contains(&ratio) {
+        return false;
+    }
+    let Some(find) = ops.find_region else {
+        return false;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return false;
+    }
+    if state.locked {
+        return false;
+    }
+    let input = geometry_of(state);
+    let mut output = NativeRegionGeometry::default();
+    if !unsafe { hirari_region_set_warp_ratio_geometry(&input, ratio, &mut output) } {
+        return false;
+    }
+    commit_geometry(ops, host, track_id, region_id, state, output, b"Flex Warp Ratio\0")
+}
+
+/// Recomputes and applies a normalized trim. The engine keeps region storage;
+/// this owns the bounds policy, the geometry math and the undo capture.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect, and the
+/// installed table must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_trim(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start_normalized: f32,
+    end_normalized: f32,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    edit_trim_with(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        start_normalized,
+        end_normalized,
+    )
+}
+
+/// Recomputes and applies a warp-ratio edit, clearing the region's markers.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect, and the
+/// installed table must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_warp_ratio(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    ratio: f64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    edit_warp_ratio_with(&ops, host, track_id, region_id, ratio)
+}
+
+/// Replaces a region's warp markers after the shared normalizer accepts them.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect, and
+/// `markers` must point to `count` initialized entries for the duration of the
+/// call.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_set_warp_markers(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    markers: *const HirariWarpMarker,
+    count: usize,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    set_warp_markers_with(&ops, host, track_id, region_id, markers, count)
 }
 
 /// Moves one region to `start` through an explicit host table.
@@ -1335,6 +1784,9 @@ use crate::audio_note_curve::{
         undo_name: String,
         coalesce: bool,
         note_store: usize,
+        warp_markers: Vec<HirariWarpMarker>,
+        undo_markers: Vec<HirariWarpMarker>,
+        redo_markers: Vec<HirariWarpMarker>,
     }
 
     static FAKE: OnceLock<Mutex<FakeHost>> = OnceLock::new();
@@ -1443,14 +1895,50 @@ use crate::audio_note_curve::{
         redo: *const HirariRegionEditPayload,
         redo_count: usize,
         coalesce: bool,
-    ) {
+    ) -> bool {
         let mut guard = fake().lock().unwrap();
         guard.coalesce = coalesce;
         guard.undo_name = unsafe { std::ffi::CStr::from_ptr(name) }
             .to_string_lossy()
             .into_owned();
-        guard.undo = unsafe { slice::from_raw_parts(undo, undo_count) }.to_vec();
-        guard.redo = unsafe { slice::from_raw_parts(redo, redo_count) }.to_vec();
+        let undo = unsafe { slice::from_raw_parts(undo, undo_count) }.to_vec();
+        let redo = unsafe { slice::from_raw_parts(redo, redo_count) }.to_vec();
+        let copy_markers = |payloads: &[HirariRegionEditPayload]| {
+            payloads
+                .iter()
+                .find(|payload| {
+                    payload.op == HIRARI_REGION_EDIT_GEOMETRY && !payload.blob.is_null()
+                })
+                .map(|payload| unsafe {
+                    slice::from_raw_parts(
+                        payload.blob.cast::<HirariWarpMarker>(),
+                        payload.blob_len / std::mem::size_of::<HirariWarpMarker>(),
+                    )
+                    .to_vec()
+                })
+                .unwrap_or_default()
+        };
+        guard.undo_markers = copy_markers(&undo);
+        guard.redo_markers = copy_markers(&redo);
+        guard.undo = undo;
+        guard.redo = redo;
+        true
+    }
+
+    unsafe extern "C" fn fake_markers(
+        _host: *mut c_void,
+        _track_id: u32,
+        _region_id: u32,
+        out: *mut HirariWarpMarker,
+        capacity: usize,
+    ) -> usize {
+        let guard = fake().lock().unwrap();
+        let count = guard.warp_markers.len();
+        if out.is_null() || capacity < count {
+            return count;
+        }
+        unsafe { ptr::copy_nonoverlapping(guard.warp_markers.as_ptr(), out, count) };
+        count
     }
 
     fn fake_ops() -> HirariRegionHostOps {
@@ -1462,6 +1950,8 @@ use crate::audio_note_curve::{
             note_edit: Some(fake_note_edit),
             snapshot_region: Some(fake_snapshot),
             release_snapshot: Some(fake_release),
+            warp_markers: Some(fake_markers),
+            ..Default::default()
         }
     }
 
@@ -1513,6 +2003,128 @@ use crate::audio_note_curve::{
         assert!(!edit_scalar_with(&ops, host, 1, 2, 1, f32::NAN, 0.0));
         assert!(fake().lock().unwrap().applied.is_empty());
 
+    }
+
+    fn trim_base_state() -> HirariRegionState {
+        HirariRegionState {
+            start: 1000,
+            len: 1000,
+            base_start: 1000,
+            base_length: 2000,
+            source_offset: 0,
+            base_source_offset: 0,
+            source_length: 0,
+            loop_count: 1,
+            fade_in_samples: 64,
+            fade_out_samples: 64,
+            warp_ratio: 1.0,
+            ..Default::default()
+        }
+    }
+
+    fn one_marker() -> HirariWarpMarker {
+        HirariWarpMarker {
+            source_sample: 10,
+            timeline_sample: 12,
+            transient: 0,
+        }
+    }
+
+    #[test]
+    fn trim_edit_applies_the_geometry_and_records_the_markers_for_undo() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(trim_base_state());
+        fake().lock().unwrap().warp_markers = vec![one_marker()];
+
+        assert!(edit_trim_with(&ops, host, 1, 2, 0.25, 0.75));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_GEOMETRY);
+        assert_eq!(guard.applied[0].state.start, 1500);
+        assert_eq!(guard.applied[0].state.len, 1000);
+        assert_eq!(guard.applied[0].state.source_offset, 500);
+        assert_eq!(guard.applied[0].state.source_length, 1000);
+        assert!(guard.applied[0].blob.is_null());
+        assert_eq!(guard.undo_name, "Trim Region");
+        assert!(!guard.coalesce);
+        assert_eq!(guard.undo[0].state.start, 1000);
+        assert_eq!(guard.undo[0].state.source_offset, 0);
+        assert_eq!(guard.undo_markers.len(), 1);
+        assert_eq!(guard.undo_markers[0].source_sample, 10);
+        assert_eq!(guard.undo_markers[0].timeline_sample, 12);
+        assert!(guard.redo_markers.is_empty());
+    }
+
+    #[test]
+    fn trim_edit_clamps_the_fractions_and_rejects_inverted_or_locked_regions() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(trim_base_state());
+
+        assert!(!edit_trim_with(&ops, host, 1, 2, 0.8, 0.2));
+        assert!(!edit_trim_with(&ops, host, 1, 2, f32::NAN, 0.5));
+        assert!(fake().lock().unwrap().applied.is_empty());
+
+        let mut locked = trim_base_state();
+        locked.locked = true;
+        reset(locked);
+        assert!(!edit_trim_with(&ops, host, 1, 2, 0.25, 0.75));
+        assert!(fake().lock().unwrap().applied.is_empty());
+
+        // Out-of-range fractions clamp instead of rejecting, like the C++
+        // wrapper did before handing them to the geometry transform.
+        reset(trim_base_state());
+        assert!(edit_trim_with(&ops, host, 1, 2, -0.5, 1.5));
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.undo[0].state.start, 1000);
+    }
+
+    #[test]
+    fn warp_ratio_edit_recomputes_the_length_and_clears_markers_on_redo() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        let state = HirariRegionState {
+            len: 1000,
+            base_length: 1000,
+            source_length: 1000,
+            loop_count: 1,
+            warp_ratio: 1.0,
+            ..Default::default()
+        };
+        reset(state);
+        fake().lock().unwrap().warp_markers = vec![one_marker()];
+
+        assert!(edit_warp_ratio_with(&ops, host, 1, 2, 2.0));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_GEOMETRY);
+        assert_eq!(guard.applied[0].state.len, 500);
+        assert!((guard.applied[0].state.warp_ratio - 2.0).abs() < 1e-9);
+        assert_eq!(guard.undo_name, "Flex Warp Ratio");
+        assert_eq!(guard.undo[0].state.len, 1000);
+        assert!((guard.undo[0].state.warp_ratio - 1.0).abs() < 1e-9);
+        assert_eq!(guard.undo_markers.len(), 1);
+        assert_eq!(guard.undo_markers[0].source_sample, 10);
+        assert_eq!(guard.undo_markers[0].timeline_sample, 12);
+        assert!(guard.redo_markers.is_empty());
+    }
+
+    #[test]
+    fn warp_ratio_edit_rejects_out_of_range_values() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(trim_base_state());
+
+        assert!(!edit_warp_ratio_with(&ops, host, 1, 2, 0.49));
+        assert!(!edit_warp_ratio_with(&ops, host, 1, 2, 2.01));
+        assert!(!edit_warp_ratio_with(&ops, host, 1, 2, f64::NAN));
+        assert!(fake().lock().unwrap().applied.is_empty());
     }
 
     #[test]
@@ -1824,5 +2436,117 @@ use crate::audio_note_curve::{
             vari_store_release(store);
         }
         fake().lock().unwrap().note_store = 0;
+    }
+
+    fn marker(source: u64, timeline: u64, transient: u8) -> HirariWarpMarker {
+        HirariWarpMarker {
+            source_sample: source,
+            timeline_sample: timeline,
+            transient,
+        }
+    }
+
+    #[test]
+    fn warp_marker_edit_orders_markers_and_records_marker_undo() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 1_000,
+            source_length: 2_000,
+            ..Default::default()
+        });
+        fake().lock().unwrap().warp_markers = vec![marker(0, 0, 0)];
+
+        let input = [marker(500, 500, 0), marker(100, 100, 1)];
+        assert!(set_warp_markers_with(
+            &ops,
+            host,
+            1,
+            2,
+            input.as_ptr(),
+            input.len()
+        ));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_GEOMETRY);
+        assert_eq!(guard.undo_name, "Edit Region Warp Markers");
+        assert!(!guard.coalesce);
+        assert!(same_markers(&guard.undo_markers, &[marker(0, 0, 0)]));
+        assert!(same_markers(
+            &guard.redo_markers,
+            &[marker(100, 100, 1), marker(500, 500, 0)]
+        ));
+    }
+
+    #[test]
+    fn warp_marker_edit_rejects_dropped_markers_and_locked_regions() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 1_000,
+            source_length: 2_000,
+            ..Default::default()
+        });
+
+        // A duplicate timeline anchor is dropped by normalization, so the
+        // edit is rejected instead of silently shortening the list.
+        let duplicate = [marker(0, 0, 0), marker(0, 0, 0)];
+        assert!(!set_warp_markers_with(
+            &ops,
+            host,
+            1,
+            2,
+            duplicate.as_ptr(),
+            duplicate.len()
+        ));
+        // Beyond the region's timeline length.
+        let beyond = [marker(0, 0, 0), marker(1_100, 1_100, 0)];
+        assert!(!set_warp_markers_with(
+            &ops,
+            host,
+            1,
+            2,
+            beyond.as_ptr(),
+            beyond.len()
+        ));
+        // A null buffer with a non-zero count must not be read.
+        assert!(!set_warp_markers_with(&ops, host, 1, 2, ptr::null(), 1));
+        assert!(fake().lock().unwrap().applied.is_empty());
+
+        fake().lock().unwrap().state.locked = true;
+        let valid = [marker(0, 0, 0)];
+        assert!(!set_warp_markers_with(
+            &ops,
+            host,
+            1,
+            2,
+            valid.as_ptr(),
+            valid.len()
+        ));
+    }
+
+    #[test]
+    fn warp_marker_edit_accepts_an_empty_list_as_a_clear() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 1_000,
+            ..Default::default()
+        });
+        fake().lock().unwrap().warp_markers = vec![marker(0, 0, 0), marker(10, 10, 0)];
+
+        assert!(set_warp_markers_with(&ops, host, 1, 2, ptr::null(), 0));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_GEOMETRY);
+        assert!(guard.applied[0].blob.is_null());
+        assert_eq!(guard.applied[0].blob_len, 0);
+        assert_eq!(guard.undo_markers.len(), 2);
+        assert!(guard.redo_markers.is_empty());
     }
 }

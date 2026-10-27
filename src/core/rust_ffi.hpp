@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "project_automation.hpp"
+
 // Physical limits shared by the C++ engine and the Rust core. These mirror
 // `crate::dsp_limits` exactly; the two sides have to agree because a clamp on
 // one side and a rejection on the other is how a caller ends up storing a
@@ -95,11 +97,6 @@ extern "C" void hirari_tap_tempo_destroy(void* state);
 extern "C" void hirari_tap_tempo_tap(void* state, uint64_t timestamp_ms);
 extern "C" void hirari_tap_tempo_clear(void* state);
 extern "C" double hirari_tap_tempo_bpm(const void* state);
-extern "C" void* hirari_waveform_cache_map_create(
-    const char* path, const float* samples, size_t sample_count);
-extern "C" const float* hirari_waveform_cache_map_data(const void* cache);
-extern "C" size_t hirari_waveform_cache_map_len(const void* cache);
-extern "C" void hirari_waveform_cache_map_destroy(void* cache);
 using HirariWaveformSampleCount = bool (*)(void*, uint64_t*);
 using HirariWaveformSample = bool (*)(void*, uint64_t, float*);
 extern "C" void hirari_audio_buffer_clear(
@@ -344,12 +341,6 @@ struct HirariNativeRegionAddMetadata {
 extern "C" bool hirari_region_normalize_add_metadata(
     HirariNativeRegionAddMetadata* metadata, bool has_audio,
     uint64_t audio_samples, uint32_t audio_channels);
-extern "C" bool hirari_region_set_warp_ratio_geometry(
-    const HirariNativeRegionGeometry* region, double ratio,
-    HirariNativeRegionGeometry* output);
-extern "C" bool hirari_region_set_trim_geometry(
-    const HirariNativeRegionGeometry* region, float start_normalized,
-    float end_normalized, HirariNativeRegionGeometry* output);
 extern "C" bool hirari_region_move_geometry(
     const HirariNativeRegionGeometry* region, uint64_t new_start,
     HirariNativeRegionGeometry* output);
@@ -435,6 +426,20 @@ bool hirari_region_vari_audio_store_load(
 // Applies the region-add policy in place (cap, drop malformed, normalize
 // anchor windows, sort, rebuild phases).
 bool hirari_region_vari_audio_store_normalize(HirariRegionVariAudioStore* store);
+
+// Splits the note table at a timeline boundary into two fresh stores,
+// windowing segments and rebuilding boundary anchors from the source curve.
+bool hirari_region_vari_audio_store_split(
+    const HirariRegionVariAudioStore* source, HirariRegionVariAudioStore* left,
+    HirariRegionVariAudioStore* right, double sample_rate, uint64_t split_offset,
+    uint64_t region_length);
+
+// Same split policy, read from the immutable published snapshot so a
+// concurrent note edit cannot mutate the table mid-read.
+bool hirari_region_vari_audio_frozen_split(
+    const HirariVariAudioFrozen* source, HirariRegionVariAudioStore* left,
+    HirariRegionVariAudioStore* right, double sample_rate, uint64_t split_offset,
+    uint64_t region_length);
 }
 
 extern "C" char* hirari_xml_escape_attribute(const char* input);
@@ -510,13 +515,6 @@ extern "C" HirariWarpMarker* hirari_region_normalize_warp_markers(
     const HirariWarpMarker* markers_in, size_t count,
     uint64_t source_span, uint64_t timeline_length, size_t* out_count);
 extern "C" void hirari_free_warp_markers(HirariWarpMarker* markers, size_t count);
-struct HirariRegionAlignmentTargetView {
-    size_t channelOffset;
-    size_t channelCount;
-    size_t sourceOffset;
-    size_t sourceSpan;
-    uint64_t timelineLength;
-};
 struct HirariRegionAlignmentTargetId {
     uint32_t track_id;
     uint32_t region_id;
@@ -524,22 +522,6 @@ struct HirariRegionAlignmentTargetId {
 extern "C" bool hirari_region_alignment_target_ids_valid(
     uint32_t reference_track_id, uint32_t reference_region_id,
     const HirariRegionAlignmentTargetId* targets, size_t target_count);
-extern "C" void* hirari_region_align_audio_group(
-    const float* const* reference_channels, size_t reference_channel_count,
-    size_t reference_offset, size_t reference_span,
-    const float* const* target_channels, size_t target_channel_pointer_count,
-    const HirariRegionAlignmentTargetView* targets, size_t target_count);
-extern "C" size_t hirari_region_alignment_group_map_copy(
-    const void* maps, size_t target_index,
-    HirariWarpMarker* output, size_t output_capacity);
-extern "C" void hirari_region_alignment_group_maps_destroy(void* maps);
-extern "C" bool hirari_region_split_warp_markers(
-    const HirariWarpMarker* markers, size_t count, uint64_t source_span,
-    uint64_t timeline_length, uint64_t split_offset,
-    double source_frames_per_timeline_frame,
-    HirariWarpMarker* left_output, size_t left_capacity, size_t* left_count,
-    HirariWarpMarker* right_output, size_t right_capacity, size_t* right_count,
-    uint64_t* source_split_output);
 
 // Scalar region edit fields. The accept/reject and clamping policy for these
 // lives in the Rust core so the C++ storage layer cannot drift from it.
@@ -588,6 +570,136 @@ struct HirariRegionState {
     bool pitchPreserveWarp = false;
 };
 
+// Split/duplicate policy is Rust-owned. C++ keeps the payload (buffers, cache,
+// note-store handle) and applies the returned state; these calls never touch
+// the audio thread.
+//
+// Mirrors `hirari-core-bridge/src/region_split.rs` byte for byte.
+struct HirariRegionSplitInput {
+    HirariRegionState state;
+    uint64_t splitOffset = 0;
+    const HirariWarpMarker* markers = nullptr;
+    size_t markerCount = 0;
+    const HirariRegionRangeEdit* ranges = nullptr;
+    size_t rangeCount = 0;
+    const HirariRegionCompRange* compRanges = nullptr;
+    size_t compRangeCount = 0;
+};
+
+struct HirariRegionSplitOutput {
+    HirariRegionState left;
+    HirariRegionState right;
+    HirariWarpMarker* leftMarkers = nullptr;
+    size_t leftMarkerCount = 0;
+    HirariWarpMarker* rightMarkers = nullptr;
+    size_t rightMarkerCount = 0;
+    HirariRegionRangeEdit* leftRanges = nullptr;
+    size_t leftRangeCount = 0;
+    HirariRegionRangeEdit* rightRanges = nullptr;
+    size_t rightRangeCount = 0;
+    HirariRegionCompRange* leftCompRanges = nullptr;
+    size_t leftCompRangeCount = 0;
+    HirariRegionCompRange* rightCompRanges = nullptr;
+    size_t rightCompRangeCount = 0;
+};
+
+extern "C" bool hirari_region_split_plan(
+    const HirariRegionSplitInput* input, HirariRegionSplitOutput* out);
+extern "C" void hirari_region_split_plan_free(HirariRegionSplitOutput* out);
+extern "C" bool hirari_region_duplicate_state(
+    const HirariRegionState* state, uint64_t start_sample, HirariRegionState* out);
+
+// Pre-v42 region hydration policy is Rust-owned: the source-rate migration
+// (older documents stored native source frames as timeline frames) and the
+// range-edit filter. Both mirror `hirari-core-bridge/src/region_hydration.rs`.
+struct HirariLegacyWarpMarker {
+    uint64_t source_sample = 0;
+    uint64_t timeline_sample = 0;
+    bool transient = false;
+};
+
+struct HirariLegacyRangeEdit {
+    uint64_t start = 0;
+    uint64_t end = 0;
+    float gain = 1.0f;
+    uint64_t fade_in = 0;
+    uint64_t fade_out = 0;
+};
+
+struct HirariRegionLegacyMigration {
+    uint64_t source_offset = 0;
+    uint64_t base_source_offset = 0;
+    uint64_t source_length = 0;
+    uint64_t base_start = 0;
+    double warp_ratio = 1.0;
+    uint32_t loop_count = 1;
+    uint64_t fade_in = 0;
+    uint64_t fade_out = 0;
+    double decoded_source_rate = 0.0;
+    double project_sample_rate = 0.0;
+    HirariLegacyWarpMarker* markers = nullptr;
+    size_t marker_count = 0;
+    HirariLegacyRangeEdit* range_edits = nullptr;
+    size_t range_edit_count = 0;
+    // Outputs, applied by the loader.
+    uint64_t start = 0;
+    uint64_t len = 0;
+    uint64_t out_fade_in = 0;
+    uint64_t out_fade_out = 0;
+    double source_sample_rate = 0.0;
+};
+
+extern "C" bool hirari_region_legacy_source_rate_migrate(
+    HirariRegionLegacyMigration* input);
+extern "C" size_t hirari_region_range_edits_sanitize(
+    HirariLegacyRangeEdit* edits, size_t count, uint64_t playable_length);
+
+// Bounce planning is Rust-owned. C++ supplies the arrangement spans and the
+// streaming writers; the acceptance rules and the render extent live in
+// `hirari-core-bridge/src/bounce_plan.rs`.
+struct HirariBounceRegionSpan {
+    uint64_t start = 0;
+    uint64_t len = 0;
+    uint32_t loop_count = 1;
+};
+
+struct HirariBouncePlanInput {
+    const HirariBounceRegionSpan* regions = nullptr;
+    size_t region_count = 0;
+    const uint64_t* midi_note_ends = nullptr;
+    size_t midi_note_count = 0;
+    double sample_rate = 0.0;
+    uint8_t range_active = 0;
+    uint64_t range_start = 0;
+    uint64_t range_end = 0;
+    uint32_t tail_millis = 0;
+    uint64_t limiter_tail = 0;
+};
+
+struct HirariBouncePlan {
+    uint64_t total_samples = 0;
+    uint32_t output_rate = 0;
+    uint64_t playhead_start = 0;
+};
+
+// 0 on success; -1 for an unsupported sample rate; -2 for an inverted render
+// range. The engine maps each code to its existing failure path.
+extern "C" int32_t hirari_bounce_render_extent(
+    const HirariBouncePlanInput* input, HirariBouncePlan* out);
+extern "C" bool hirari_bounce_output_path_supported(
+    const uint8_t* path, size_t length, uint32_t format);
+
+// Formats: 0 float32 RIFF/RF64, 1 PCM16, 2 PCM24, 3 WAVE64 float. The stream
+// rejects writes past the declared frame count and only publishes a complete
+// file from finish(), so callers cannot emit a truncated container.
+extern "C" void* hirari_bounce_stream_create(
+    const uint8_t* path, size_t length, uint64_t frames, uint32_t sample_rate,
+    uint8_t format);
+extern "C" uint8_t hirari_bounce_stream_write(
+    void* stream, const float* const* channels, uint32_t frames);
+extern "C" uint8_t hirari_bounce_stream_finish(void* stream);
+extern "C" void hirari_bounce_stream_free(void* stream);
+
 enum HirariRegionEditOp : int32_t {
     // Replace the editable state and republish it (normalising add path).
     kHirariRegionEditState = 1,
@@ -599,6 +711,11 @@ enum HirariRegionEditOp : int32_t {
     kHirariRegionEditRemove = 12,
     // Put a removed region back from a host-held snapshot handle (blob).
     kHirariRegionEditRestore = 13,
+    // Write the geometry fields Rust computed for a trim or warp-ratio edit
+    // and replace the warp markers from the blob.
+    kHirariRegionEditGeometry = 14,
+    // Replace only the warp markers from the blob (timing jobs).
+    kHirariRegionEditMarkers = 15,
 };
 
 struct HirariRegionEditPayload {
@@ -631,7 +748,7 @@ struct HirariRegionHostOps {
     bool (*applyEdit)(void* host, const HirariRegionEditPayload* payload) = nullptr;
     size_t (*listSyncGroup)(void* host, uint32_t group, HirariRegionGroupMember* out,
                             size_t capacity) = nullptr;
-    void (*recordUndo)(void* host, const char* name,
+    bool (*recordUndo)(void* host, const char* name,
                        const HirariRegionEditPayload* undo, size_t undoCount,
                        const HirariRegionEditPayload* redo, size_t redoCount,
                        bool coalesce) = nullptr;
@@ -642,9 +759,96 @@ struct HirariRegionHostOps {
     void* (*snapshotRegion)(void* host, uint32_t trackId, uint32_t regionId) = nullptr;
     // Frees a snapshot handle that was never recorded for undo.
     void (*releaseSnapshot)(void* host, void* handle) = nullptr;
+    // Copies a region's warp markers into `out`; returns the total count.
+    size_t (*warpMarkers)(void* host, uint32_t trackId, uint32_t regionId,
+                          HirariWarpMarker* out, size_t capacity) = nullptr;
+    // Retains a region's decoded audio so a worker can read it later.
+    void* (*retainAudio)(void* host, uint32_t trackId, uint32_t regionId) = nullptr;
+    // Reports a retained handle's channels, sample count and pointers.
+    uint32_t (*audioView)(void* handle, const float** out, size_t capacity,
+                          uint64_t* samples) = nullptr;
+    void (*releaseAudio)(void* handle) = nullptr;
+    // Reports a track's region generation and published snapshot identity.
+    bool (*trackToken)(void* host, uint32_t trackId, uint64_t* generation,
+                       size_t* snapshot) = nullptr;
+    // Lists track ids / one track's region ids in storage order.
+    size_t (*listTracks)(void* host, uint32_t* out, size_t capacity) = nullptr;
+    size_t (*listRegions)(void* host, uint32_t trackId, uint32_t* out,
+                          size_t capacity) = nullptr;
+    void* (*tempoState)(void* host) = nullptr;
+    void* (*undoState)(void* host) = nullptr;
+    double (*sampleRate)(void* host) = nullptr;
+    // Copies a region's source path into `out`; returns its byte length.
+    size_t (*regionPath)(void* host, uint32_t trackId, uint32_t regionId,
+                         uint8_t* out, size_t capacity) = nullptr;
+    // Decodes a media file and returns an owned audio handle plus its rate.
+    bool (*decodeAudio)(void* host, const uint8_t* path, size_t length,
+                        void** outHandle, double* outRate) = nullptr;
+    // Inserts a decoded region. The audio handle is consumed on every path.
+    uint32_t (*insertRegion)(void* host, uint32_t trackId, size_t expectedTrack,
+                             const uint8_t* path, size_t pathLength, uint64_t startSample,
+                             double sourceSampleRate, double timelineSampleRate,
+                             void* audioHandle) = nullptr;
+    // Live track identity, or 0 when the id is not in the project.
+    size_t (*trackIdentity)(void* host, uint32_t trackId) = nullptr;
+    // Retains a track for a worker thread.
+    void* (*retainTrack)(void* host, uint32_t trackId) = nullptr;
+    void (*releaseTrack)(void* handle) = nullptr;
+    bool (*pitchBegin)(void* trackHandle) = nullptr;
+    bool (*pitchAnalyze)(void* trackHandle, uint32_t regionId, double sampleRate) = nullptr;
+    void (*pitchFinish)(void* trackHandle) = nullptr;
+    // Copies a region's note table into an owned Rust store handle.
+    void* (*noteSnapshot)(void* trackHandle, uint32_t regionId) = nullptr;
 };
 
 extern "C" void hirari_region_host_install(const HirariRegionHostOps* ops);
+extern "C" int32_t hirari_region_import_add(
+    void* host, uint32_t trackId, const uint8_t* path, size_t pathLength,
+    double startSample);
+extern "C" uint64_t hirari_region_import_queue(
+    void* host, uint32_t trackId, const uint8_t* path, size_t pathLength,
+    uint64_t startSample);
+extern "C" uint8_t hirari_region_import_complete(void* host, uint64_t ticket);
+extern "C" bool hirari_region_pitch_analysis_start(
+    void* host, uint32_t trackId, uint32_t regionId, double sampleRate);
+extern "C" uint8_t hirari_region_pitch_analysis_status(
+    void* host, uint32_t trackId, uint32_t regionId);
+extern "C" bool hirari_region_pitch_analysis_finalize(
+    void* host, uint32_t trackId, uint32_t regionId);
+extern "C" void hirari_region_jobs_clear(void* host);
+extern "C" void hirari_region_jobs_shutdown();
+extern "C" bool hirari_region_align_to_reference(
+    void* host, uint32_t referenceTrackId, uint32_t referenceRegionId,
+    const HirariRegionAlignmentTargetId* targets, size_t targetCount);
+extern "C" uint8_t hirari_region_alignment_status(
+    void* host, uint32_t referenceTrackId, uint32_t referenceRegionId);
+extern "C" bool hirari_region_finalize_alignment(
+    void* host, uint32_t referenceTrackId, uint32_t referenceRegionId);
+extern "C" bool hirari_region_quantize_sync_group(
+    void* host, uint32_t trackId, uint32_t regionId, float strength,
+    double gridBeats, float swing);
+extern "C" uint8_t hirari_region_quantize_status(
+    void* host, uint32_t trackId, uint32_t regionId);
+extern "C" bool hirari_region_finalize_quantize(
+    void* host, uint32_t trackId, uint32_t regionId);
+extern "C" size_t hirari_float_buffer_len(const void* buffer);
+extern "C" const float* hirari_float_buffer_data(const void* buffer);
+extern "C" void hirari_float_buffer_destroy(void* buffer);
+extern "C" void* hirari_region_waveform(
+    void* host, uint32_t trackId, uint32_t regionId, uint32_t numPeaks);
+extern "C" void hirari_region_waveform_forget(void* host, uint32_t regionId);
+extern "C" void hirari_region_waveform_clear(void* host);
+extern "C" void* hirari_region_audio_interleaved(
+    void* host, uint32_t trackId, uint32_t regionId, uint32_t maxFrames);
+extern "C" void* hirari_region_audio_interleaved_range(
+    void* host, uint32_t trackId, uint32_t regionId, uint64_t startFrame,
+    uint32_t frames, uint32_t channels);
+extern "C" uint64_t hirari_region_source_frame_count(
+    void* host, uint32_t trackId, uint32_t regionId);
+extern "C" double hirari_region_source_sample_rate(
+    void* host, uint32_t trackId, uint32_t regionId);
+extern "C" uint32_t hirari_region_audio_channel_count(
+    void* host, uint32_t trackId, uint32_t regionId);
 extern "C" bool hirari_region_edit_scalar(void* host, uint32_t trackId, uint32_t regionId,
                                           int32_t field, float valueA, float valueB);
 extern "C" bool hirari_region_edit_remove(void* host, uint32_t trackId, uint32_t regionId);
@@ -652,6 +856,52 @@ extern "C" bool hirari_region_edit_move(void* host, uint32_t trackId, uint32_t r
                                         double start);
 extern "C" bool hirari_region_edit_move_sync_group(void* host, uint32_t trackId,
                                                    uint32_t regionId, double start);
+extern "C" bool hirari_region_edit_trim(void* host, uint32_t trackId, uint32_t regionId,
+                                        float startNormalized, float endNormalized);
+extern "C" bool hirari_region_edit_warp_ratio(void* host, uint32_t trackId, uint32_t regionId,
+                                              double ratio);
+extern "C" bool hirari_region_edit_set_warp_markers(void* host, uint32_t trackId,
+                                                    uint32_t regionId,
+                                                    const HirariWarpMarker* markers,
+                                                    size_t count);
+
+// Automation edit host. Rust owns the validation and the undo capture; the
+// engine keeps the curves and publishes the immutable snapshots.
+enum HirariAutomationEditKind : int32_t {
+    kHirariAutomationVolume = 1,
+    kHirariAutomationPan = 2,
+    kHirariAutomationTrackDelay = 3,
+    kHirariAutomationPlugin = 4,
+};
+
+struct HirariAutomationEditPayload {
+    uint32_t trackId = 0;
+    int32_t kind = 0;
+    uint32_t pluginIndex = 0;
+    uint32_t parameterId = 0;
+    const Hirari::Core::ProjectAutomationPoint* points = nullptr;
+    size_t pointCount = 0;
+};
+
+struct HirariAutomationHostOps {
+    // Copies the target's current curve into `out` and sets `targetFound`.
+    // Returns the total point count.
+    size_t (*readPoints)(void* host, uint32_t trackId, int32_t kind, uint32_t pluginIndex,
+                         uint32_t parameterId, Hirari::Core::ProjectAutomationPoint* out,
+                         size_t capacity, bool* targetFound) = nullptr;
+    bool (*apply)(void* host, const HirariAutomationEditPayload* payload) = nullptr;
+    void (*recordUndo)(void* host, const char* name,
+                       const HirariAutomationEditPayload* undo,
+                       const HirariAutomationEditPayload* redo) = nullptr;
+};
+
+extern "C" void hirari_automation_host_install(const HirariAutomationHostOps* ops);
+extern "C" bool hirari_automation_edit_track(void* host, uint32_t trackId, int32_t kind,
+                                             uint32_t parameterId, const double* packed,
+                                             size_t packedLen);
+extern "C" bool hirari_automation_edit_plugin(void* host, uint32_t trackId,
+                                              uint32_t pluginIndex, uint32_t parameterId,
+                                              const double* packed, size_t packedLen);
 // Rust-side mirror of a track's region table (stage 1 of the Region storage
 // migration). C++ stays authoritative and replaces the mirror on every publish.
 struct HirariRegionTable;
@@ -1239,6 +1489,10 @@ enum HirariRoutingEditOp : int32_t {
     kHirariRoutingEditArm = 6,
     kHirariRoutingEditPhase = 7,
     kHirariRoutingEditDelay = 8,
+    kHirariRoutingEditVolume = 9,
+    kHirariRoutingEditPan = 10,
+    kHirariRoutingEditMute = 11,
+    kHirariRoutingEditSolo = 12,
 };
 
 struct HirariRoutingEditPayload {
@@ -1266,6 +1520,10 @@ struct HirariRoutingTrackState {
     bool phaseInverted = false;
     bool isBus = false;
     uint32_t delaySamples = 0;
+    float volume = 1.0f;
+    float pan = 0.0f;
+    bool muted = false;
+    bool solo = false;
 };
 
 struct HirariRoutingSidechainEntry {
@@ -1304,6 +1562,7 @@ struct HirariRoutingHostOps {
     void (*publishRoutes)(void*) = nullptr;
     void (*recordUndo)(void*, const char*, const HirariRoutingEditPayload*, size_t,
                        const HirariRoutingEditPayload*, size_t, bool, bool) = nullptr;
+    bool (*applyTrackMix)(void*, uint32_t, int32_t, float) = nullptr;
 };
 
 extern "C" void hirari_routing_edit_host_install(const HirariRoutingHostOps* ops);
@@ -1323,8 +1582,56 @@ extern "C" bool hirari_routing_edit_set_phase_invert(
     void* host, uint32_t trackId, bool inverted);
 extern "C" bool hirari_routing_edit_set_track_delay_samples(
     void* host, uint32_t trackId, uint32_t samples);
+extern "C" bool hirari_routing_edit_set_track_volume(
+    void* host, uint32_t trackId, float value);
+extern "C" bool hirari_routing_edit_set_track_pan(void* host, uint32_t trackId, float value);
+extern "C" bool hirari_routing_edit_set_track_mute(void* host, uint32_t trackId, bool muted);
+extern "C" bool hirari_routing_edit_set_track_solo(void* host, uint32_t trackId, bool solo);
 extern "C" void hirari_routing_edit_apply_payloads(
     void* host, const HirariRoutingEditPayload* entries, size_t count);
+
+// Control-thread edit policy (track naming, input monitoring, macro learn).
+// The engine only supplies storage adapters; admission and undo live in Rust.
+struct HirariControlEditHostOps {
+    intptr_t (*queryTrackName)(void*, uint32_t, uint8_t*, size_t) = nullptr;
+    bool (*applyTrackName)(void*, uint32_t, const uint8_t*, size_t) = nullptr;
+    void (*recordNameUndo)(void*, uint32_t, const uint8_t*, size_t,
+                           const uint8_t*, size_t) = nullptr;
+    bool (*updateMonitorFocus)(void*, uint32_t, bool, uint32_t, uint32_t) = nullptr;
+    void (*setMacroValue)(void*, uint32_t, float) = nullptr;
+    bool (*bindMacro)(void*, uint32_t, uint8_t, bool, uint16_t,
+                      float, float, float, bool) = nullptr;
+};
+
+extern "C" void hirari_control_edit_host_install(const HirariControlEditHostOps* ops);
+extern "C" bool hirari_control_edit_rename_track(
+    void* host, uint32_t trackId, const uint8_t* name, size_t nameLen);
+extern "C" bool hirari_control_edit_set_input_monitor(
+    void* host, uint32_t trackId, bool enabled, uint32_t leftChannel, uint32_t rightChannel);
+extern "C" void hirari_control_edit_set_macro_value(
+    void* host, uint32_t macroIndex, float value);
+extern "C" bool hirari_control_edit_bind_midi_cc(
+    void* host, uint8_t channel, uint16_t cc, uint32_t macroIndex,
+    float minimum, float maximum, float curve, bool pickup);
+extern "C" bool hirari_control_edit_bind_midi_cc14(
+    void* host, uint8_t channel, uint16_t controller, uint32_t macroIndex,
+    float minimum, float maximum, float curve, bool pickup);
+
+// Plugin-chain edit policy (bypass and reordering).
+struct HirariPluginEditHostOps {
+    int32_t (*queryBypass)(void*, uint32_t, uint32_t) = nullptr;
+    bool (*applyBypass)(void*, uint32_t, uint32_t, bool) = nullptr;
+    bool (*movePlugin)(void*, uint32_t, uint32_t, uint32_t) = nullptr;
+    void (*recordBypassUndo)(void*, uint32_t, uint32_t, bool, bool) = nullptr;
+    void (*recordMoveUndo)(void*, uint32_t, uint32_t, uint32_t) = nullptr;
+};
+
+extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* ops);
+extern "C" bool hirari_plugin_edit_set_bypass(
+    void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
+extern "C" bool hirari_plugin_edit_move(
+    void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex);
+
 extern "C" void* hirari_send_pdc_manager_create();
 extern "C" void hirari_send_pdc_manager_destroy(void* handle);
 extern "C" void hirari_send_pdc_manager_enter_read(void* handle);
@@ -1785,12 +2092,14 @@ using HirariForensicJournalRecoveryCallback = void (*)(
     void*, uint32_t, uint32_t, float, uint64_t);
 using HirariAtomicSequenceLoadCallback = uint64_t (*)(void*);
 using HirariAtomicSequenceWaitCallback = void (*)(void*, uint64_t);
+using HirariAtomicSequenceWakeCallback = void (*)(void*);
 extern "C" void* hirari_forensic_journaler_create();
 extern "C" void hirari_forensic_journaler_destroy(void* state);
 extern "C" bool hirari_forensic_journaler_start(
     void* state, const uint8_t* path, size_t path_size, void* wait_context,
     HirariAtomicSequenceLoadCallback load_sequence,
-    HirariAtomicSequenceWaitCallback wait_sequence);
+    HirariAtomicSequenceWaitCallback wait_sequence,
+    HirariAtomicSequenceWakeCallback wake_sequence);
 extern "C" bool hirari_forensic_journaler_log(
     const void* state, uint32_t type, uint32_t track_id, float value, uint64_t timestamp);
 extern "C" bool hirari_forensic_journaler_log_description(
@@ -1854,7 +2163,112 @@ extern "C" bool hirari_video_runtime_copy_frame(
     const void* runtime, void* context, HirariVideoPixelsVisitor visit,
     uint32_t* width, uint32_t* height, double* seconds);
 
-extern "C" bool hirari_project_layout_escape_json_string(
-    const uint8_t* input, size_t input_len, uint8_t* output, size_t output_cap, size_t* written);
-extern "C" bool hirari_project_layout_encode_hex(
-    const uint8_t* input, size_t input_len, uint8_t* output, size_t output_cap, size_t* written);
+// Project-layout snapshot consumed by the Rust serializer. Every pointer is
+// borrowed only for the duration of the synchronous write call; Rust never
+// stores or frees any of it. The returned JSON buffer is Rust-owned and must
+// be released with hirari_project_layout_json_free.
+struct HirariLayoutString {
+    const uint8_t* data = nullptr;
+    size_t len = 0;
+};
+struct HirariLayoutAutomationPoint {
+    double time = 0.0;
+    float value = 0.0f;
+    float curve = 0.0f;
+};
+struct HirariLayoutPluginLane {
+    uint32_t pluginIndex = 0;
+    uint32_t parameterId = 0;
+    const HirariLayoutAutomationPoint* points = nullptr;
+    size_t pointCount = 0;
+};
+struct HirariLayoutParameterBlock {
+    const float* values = nullptr;
+    size_t count = 0;
+};
+struct HirariLayoutByteBlock {
+    const uint8_t* bytes = nullptr;
+    size_t count = 0;
+};
+struct HirariLayoutSidechainRoute {
+    uint32_t sourceId = 0;
+    uint32_t destinationId = 0;
+    uint32_t pluginIndex = 0;
+    uint32_t tapPoint = 0;
+};
+struct HirariLayoutFeedbackRoute {
+    uint32_t sourceId = 0;
+    uint32_t destinationId = 0;
+    float gain = 0.0f;
+};
+struct HirariLayoutRegion {
+    uint32_t id = 0;
+    HirariLayoutString name;
+    HirariRegionState state;
+    uint32_t sourceSampleRate = 0;
+    HirariLayoutString path;
+    bool missing = false;
+    bool audioLoaded = false;
+    const HirariWarpMarker* warpMarkers = nullptr;
+    size_t warpMarkerCount = 0;
+    const HirariRegionRangeEdit* rangeEdits = nullptr;
+    size_t rangeEditCount = 0;
+    const HirariRegionVariAudioStore* noteStore = nullptr;
+    // Immutable projection preferred by the serializer when the region has
+    // been published; the live store may be mutated by a concurrent edit.
+    const HirariVariAudioFrozen* noteFrozen = nullptr;
+    const HirariRegionProcessingHistoryStore* processingStore = nullptr;
+};
+struct HirariLayoutTrack {
+    uint32_t id = 0;
+    HirariLayoutString name;
+    uint32_t type = 0;
+    float volume = 0.0f;
+    float pan = 0.0f;
+    bool muted = false;
+    bool solo = false;
+    bool recordArmed = false;
+    bool phaseInverted = false;
+    uint64_t trackDelaySamples = 0;
+    bool frozen = false;
+    uint64_t frozenTotalSamples = 0;
+    uint32_t frozenSampleRate = 0;
+    HirariLayoutString frozenPath;
+    const HirariLayoutAutomationPoint* volumeAutomation = nullptr;
+    size_t volumeAutomationCount = 0;
+    const HirariLayoutAutomationPoint* panAutomation = nullptr;
+    size_t panAutomationCount = 0;
+    const HirariLayoutAutomationPoint* trackDelayAutomation = nullptr;
+    size_t trackDelayAutomationCount = 0;
+    HirariLayoutString expressionMapJson;
+    HirariLayoutString expressionMapProJson;
+    const HirariLayoutPluginLane* pluginAutomation = nullptr;
+    size_t pluginAutomationCount = 0;
+    const uint32_t* pluginTypes = nullptr;
+    size_t pluginTypeCount = 0;
+    const uint8_t* pluginBypass = nullptr;  // one byte per plugin
+    const HirariLayoutParameterBlock* pluginParameters = nullptr;  // one per plugin
+    const HirariLayoutByteBlock* pluginStates = nullptr;
+    size_t pluginStateCount = 0;
+    const HirariLayoutString* sandboxPluginPaths = nullptr;
+    size_t sandboxPluginPathCount = 0;
+    const HirariLayoutByteBlock* sandboxPluginStates = nullptr;
+    size_t sandboxPluginStateCount = 0;
+    const HirariLayoutRegion* regions = nullptr;
+    size_t regionCount = 0;
+};
+struct HirariProjectLayoutSnapshot {
+    const HirariLayoutTrack* tracks = nullptr;
+    size_t trackCount = 0;
+    const HirariLayoutSidechainRoute* sidechainRoutes = nullptr;
+    size_t sidechainRouteCount = 0;
+    const HirariLayoutFeedbackRoute* feedbackRoutes = nullptr;
+    size_t feedbackRouteCount = 0;
+    double timelineSampleRate = 0.0;
+};
+using HirariLayoutIsCancelledCallback = bool (*)(const void*);
+extern "C" bool hirari_project_layout_write_json(
+    const HirariProjectLayoutSnapshot* snapshot,
+    HirariLayoutIsCancelledCallback is_cancelled, const void* cancel_context,
+    const uint8_t** json_data, size_t* json_size);
+extern "C" void hirari_project_layout_json_free(const uint8_t* json_data, size_t json_size);

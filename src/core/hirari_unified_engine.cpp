@@ -5,7 +5,6 @@
 #include "engine/video_system_bridge.hpp"
 #include "engine/bus_track.hpp"
 #include "engine/sidechain_manager.hpp"
-#include "utils/wav_writer.hpp"
 #include "dsp/analysis/master_meter.hpp"
 #include "dsp/effects/master_limiter.hpp"
 #include "engine/track.hpp"

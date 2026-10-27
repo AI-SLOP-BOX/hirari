@@ -6,9 +6,12 @@
 //! the native engine, while `project inspect` must not reject a real `.hirari`
 //! file with a JSON parser error.
 
-use crate::ffi::NativeProjectState;
+use crate::ffi::{
+    NativeProjectState, NativeRouteState, NativeSidechainState, NativeTrackState,
+};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
 
@@ -104,6 +107,92 @@ pub(crate) fn read_payload(path: &str) -> Option<(Vec<u8>, NativeProjectHeader)>
     ))
 }
 
+/// Checks the plugin-array shape a track will be hydrated from: one
+/// little-endian plugin id per slot, positional state/bypass arrays that may
+/// not exceed it, and a sandbox path for every sandbox marker.
+fn plugin_data_is_consistent(track: &NativeTrackState) -> bool {
+    if track.pluginData.len() % 4 != 0 {
+        return false;
+    }
+    let slots = track.pluginData.len() / 4;
+    if track.pluginStates.len() > slots || track.pluginBypass.len() > slots {
+        return false;
+    }
+    let sandbox_markers = track
+        .pluginData
+        .chunks_exact(4)
+        .filter(|word| {
+            let mut bytes = [0u8; 4];
+            bytes.copy_from_slice(word);
+            u32::from_le_bytes(bytes) == u32::MAX
+        })
+        .count();
+    sandbox_markers <= track.sandboxedPluginPaths.len()
+}
+
+/// Cross-document invariants that the per-section decoders cannot see:
+/// references between tracks, sidechains, and routes. The engine hydrates a
+/// decoded state without repeating these checks.
+fn validate_decoded(
+    tracks: &[NativeTrackState],
+    sidechains: &[NativeSidechainState],
+    routes: &[NativeRouteState],
+) -> bool {
+    const ROUTING_NODE_LIMIT: u32 = crate::routing_gains::MAX_ROUTING_NODES;
+    const BUS_TRACK_TYPE: u32 = 3;
+
+    let mut track_ids = HashSet::with_capacity(tracks.len());
+    let mut bus_ids = HashSet::new();
+    for track in tracks {
+        if !plugin_data_is_consistent(track) {
+            return false;
+        }
+        track_ids.insert(track.id);
+        if track.trackType == BUS_TRACK_TYPE {
+            bus_ids.insert(track.id);
+        }
+    }
+
+    for sidechain in sidechains {
+        if !track_ids.contains(&sidechain.sourceId)
+            || !track_ids.contains(&sidechain.destinationId)
+        {
+            return false;
+        }
+    }
+    // A detector link may not form a cycle: the destination must never reach
+    // the source through further links.
+    for candidate in sidechains {
+        let mut pending = vec![candidate.destinationId];
+        let mut visited = HashSet::new();
+        while let Some(node) = pending.pop() {
+            if node == candidate.sourceId {
+                return false;
+            }
+            if !visited.insert(node) {
+                continue;
+            }
+            for link in sidechains {
+                if link.sourceId == node {
+                    pending.push(link.destinationId);
+                }
+            }
+        }
+    }
+
+    for route in routes {
+        if route.sourceId >= ROUTING_NODE_LIMIT
+            || route.destinationId >= ROUTING_NODE_LIMIT
+            || !track_ids.contains(&route.sourceId)
+            || !track_ids.contains(&route.destinationId)
+            || (route.send && !bus_ids.contains(&route.destinationId))
+        {
+            return false;
+        }
+    }
+    true
+}
+
 /// Decodes an `ARUA` container into the engine-facing state record.
 pub(crate) fn load_state(path: &str) -> NativeProjectState {
     let mut state = NativeProjectState::default();
@@ -135,6 +224,9 @@ pub(crate) fn load_state(path: &str) -> NativeProjectState {
         return NativeProjectState::default();
     };
     if tail_offset != bytes.len() {
+        return NativeProjectState::default();
+    }
+    if !validate_decoded(&tracks, &sidechains, &routes) {
         return NativeProjectState::default();
     }
     state.bpm = header.bpm;
@@ -620,5 +712,145 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&oversized);
+    }
+
+    fn v42_document() -> NativeProjectState {
+        use crate::ffi::{
+            NativeRegionState, NativeRouteState, NativeSidechainState, NativeTrackState,
+        };
+        let audio = |id: u32| NativeTrackState {
+            id,
+            trackType: 0,
+            volume: 1.0,
+            ..Default::default()
+        };
+        let mut destination = audio(8);
+        destination.pluginData = vec![0, 0, 0, 0];
+        NativeProjectState {
+            version: 42,
+            sampleRate: 48_000,
+            bpm: 120.0,
+            tracks: vec![
+                audio(7),
+                destination,
+                NativeTrackState {
+                    id: 9,
+                    trackType: 3,
+                    volume: 1.0,
+                    ..Default::default()
+                },
+            ],
+            regions: vec![NativeRegionState {
+                id: 9001,
+                trackId: 7,
+                samplePosition: 0,
+                sampleLength: 128,
+                sourceLength: 128,
+                sourceSampleRate: 48_000,
+                baseLength: 128,
+                filePath: "contract.wav".into(),
+                warpRatio: 1.0,
+                loopCount: 1,
+                ..Default::default()
+            }],
+            sidechains: vec![NativeSidechainState {
+                sourceId: 7,
+                destinationId: 8,
+                pluginIndex: 0,
+                tapPoint: 0,
+            }],
+            routes: vec![
+                NativeRouteState {
+                    sourceId: 7,
+                    destinationId: 9,
+                    gain: 1.0,
+                    send: true,
+                    preFader: false,
+                },
+                NativeRouteState {
+                    sourceId: 8,
+                    destinationId: 7,
+                    gain: 1.0,
+                    send: false,
+                    preFader: false,
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rejects_cross_section_inconsistencies_at_load() {
+        let state = v42_document();
+        let path = native_project_path("cross-validation");
+        let path_text = path.to_string_lossy().into_owned();
+        assert!(native_project_save(&path_text, &state));
+        let restored = native_project_load(&path_text);
+        assert!(restored.valid, "the baseline document must hydrate");
+        assert_eq!(restored.routes.len(), 2);
+        assert_eq!(restored.sidechains.len(), 1);
+
+        let assert_rejected = |candidate: NativeProjectState, what: &str| {
+            assert!(native_project_save(&path_text, &candidate));
+            assert!(
+                !native_project_load(&path_text).valid,
+                "a document with {what} must be rejected on load"
+            );
+        };
+
+        let mut sentinel = v42_document();
+        sentinel.regions.clear();
+        sentinel.sidechains.clear();
+        sentinel.routes.clear();
+        let second_track = sentinel.tracks[1].clone();
+        sentinel.tracks = vec![
+            crate::ffi::NativeTrackState {
+                id: u32::MAX,
+                ..Default::default()
+            },
+            second_track,
+        ];
+        assert_rejected(sentinel, "the invalid track id sentinel");
+
+        let mut odd_plugin_data = v42_document();
+        odd_plugin_data.tracks[1].pluginData.push(0);
+        assert_rejected(odd_plugin_data, "a partial plugin id word");
+
+        let mut excess_states = v42_document();
+        excess_states.tracks[1].pluginStates = vec![crate::ffi::NativeBlob::default(); 2];
+        excess_states.tracks[1].pluginGuiStates = vec![crate::ffi::NativeBlob::default(); 2];
+        assert_rejected(excess_states, "more plugin states than slots");
+
+        let mut missing_sandbox_path = v42_document();
+        missing_sandbox_path.tracks[1].pluginData = vec![0xff, 0xff, 0xff, 0xff];
+        assert_rejected(missing_sandbox_path, "a sandbox marker without a path");
+
+        let mut unknown_route = v42_document();
+        unknown_route.routes[1].destinationId = 999;
+        assert_rejected(unknown_route, "a route to an absent track");
+
+        let mut out_of_range_node = v42_document();
+        out_of_range_node.routes[1].destinationId = 128;
+        assert_rejected(out_of_range_node, "a route node at the graph limit");
+
+        let mut send_to_audio = v42_document();
+        send_to_audio.routes[0].sourceId = 8;
+        send_to_audio.routes[0].destinationId = 7;
+        assert_rejected(send_to_audio, "a send routed to a non-bus track");
+
+        let mut unknown_sidechain = v42_document();
+        unknown_sidechain.sidechains[0].sourceId = 999;
+        assert_rejected(unknown_sidechain, "a sidechain from an absent track");
+
+        let mut cyclic_sidechain = v42_document();
+        cyclic_sidechain.sidechains.push(crate::ffi::NativeSidechainState {
+            sourceId: 8,
+            destinationId: 7,
+            pluginIndex: 0,
+            tapPoint: 0,
+        });
+        assert_rejected(cyclic_sidechain, "a cyclic sidechain topology");
+
+        let _ = std::fs::remove_file(&path);
     }
 }

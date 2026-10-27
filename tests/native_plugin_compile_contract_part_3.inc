@@ -40,7 +40,13 @@
     const auto wave64Path = std::filesystem::temp_directory_path() / "hirari-native-wave64-contract.w64";
     const float waveLeft[] = {0.0f, 0.25f};
     const float waveRight[] = {-0.25f, 0.5f};
-    if (!Hirari::IO::Persistence::WavWriter::writeWave64(wave64Path.string(), waveLeft, waveRight, 2, 48'000)) return 43;
+    {
+        const std::string wave64String = wave64Path.string();
+        const float* wave64Channels[2] = {waveLeft, waveRight};
+        if (hirari_wav_write_planar(
+                reinterpret_cast<const uint8_t*>(wave64String.data()), wave64String.size(),
+                wave64Channels, 2, 2, 48'000, 3) != 0) return 43;
+    }
     {
         std::ifstream wave64(wave64Path, std::ios::binary);
         std::array<uint8_t, 24> header{};
@@ -96,9 +102,13 @@
     std::filesystem::remove(reservedTempPath, offlineCleanup);
     const std::vector<float> reservationLeft{0.0f, 0.5f, -0.25f, 0.125f};
     const std::vector<float> reservationRight{0.0f, -0.5f, 0.25f, -0.125f};
-    if (!Hirari::IO::Persistence::WavWriter::write(
-            reservedTempPath.string(), reservationLeft.data(), reservationRight.data(),
-            static_cast<uint64_t>(reservationLeft.size()), 48'000)) return 62;
+    {
+        const std::string pathString = reservedTempPath.string();
+        const float* planes[2] = {reservationLeft.data(), reservationRight.data()};
+        if (hirari_wav_write_planar(
+                reinterpret_cast<const uint8_t*>(pathString.data()), pathString.size(),
+                planes, 2, reservationLeft.size(), 48'000, 0) != 0) return 62;
+    }
     {
         Hirari::IO::WavLoader::WavInfo reservationInfo{};
         const auto decoded =
@@ -111,9 +121,13 @@
     // Re-export different, longer content over the existing destination.
     const std::vector<float> replacedLeft{0.25f, -0.25f, 0.75f, -0.5f, 0.125f, -0.125f};
     const std::vector<float> replacedRight{-0.25f, 0.25f, 0.5f, -0.75f, 0.25f, -0.25f};
-    if (!Hirari::IO::Persistence::WavWriter::write(
-            reservedTempPath.string(), replacedLeft.data(), replacedRight.data(),
-            static_cast<uint64_t>(replacedLeft.size()), 48'000)) return 62;
+    {
+        const std::string pathString = reservedTempPath.string();
+        const float* planes[2] = {replacedLeft.data(), replacedRight.data()};
+        if (hirari_wav_write_planar(
+                reinterpret_cast<const uint8_t*>(pathString.data()), pathString.size(),
+                planes, 2, replacedLeft.size(), 48'000, 0) != 0) return 62;
+    }
     {
         Hirari::IO::WavLoader::WavInfo reservationInfo{};
         const auto decoded =
@@ -126,11 +140,23 @@
     }
     std::filesystem::remove(reservedTempPath, offlineCleanup);
     const auto pcm16Path = std::filesystem::temp_directory_path() / "hirari-native-pcm16-contract.wav";
-    if (!Hirari::Core::Utils::WavWriter::write(pcm16Path.string(), waveLeft, waveRight, 2, 48'000)) return 48;
+    {
+        const std::string pcm16String = pcm16Path.string();
+        const float* pcm16Channels[2] = {waveLeft, waveRight};
+        if (hirari_wav_write_planar(
+                reinterpret_cast<const uint8_t*>(pcm16String.data()), pcm16String.size(),
+                pcm16Channels, 2, 2, 48'000, 1) != 0) return 48;
+    }
     const auto pcm16MultiPath = std::filesystem::temp_directory_path() / "hirari-native-pcm16-multichannel-contract.wav";
     const std::vector<std::vector<float>> pcm16Multi{{0.0f, 0.25f}, {-0.25f, 0.5f}, {0.75f, -0.5f}};
-    if (!Hirari::IO::Persistence::WavWriter::writePcm16Interleaved(
-            pcm16MultiPath.string(), pcm16Multi, 48'000)) return 60;
+    {
+        const std::string pathString = pcm16MultiPath.string();
+        std::vector<const float*> planes;
+        for (const auto& channel : pcm16Multi) planes.push_back(channel.data());
+        if (hirari_wav_write_planar(
+                reinterpret_cast<const uint8_t*>(pathString.data()), pathString.size(),
+                planes.data(), planes.size(), pcm16Multi.front().size(), 48'000, 1) != 0) return 60;
+    }
     Hirari::IO::WavLoader::WavInfo pcm16Info{};
     const auto pcm16Decoded = Hirari::IO::WavLoader::load(pcm16MultiPath.string(), pcm16Info);
     if (pcm16Info.numChannels != 3 || pcm16Info.bitDepth != 16 || pcm16Decoded.size() != 3 ||
@@ -145,7 +171,13 @@
             header[34] != 16 || header[35] != 0) return 49;
     }
     const auto pcm24Path = std::filesystem::temp_directory_path() / "hirari-native-pcm24-contract.wav";
-    if (!Hirari::Core::Utils::WavWriter::writePcm24(pcm24Path.string(), waveLeft, waveRight, 2, 48'000)) return 50;
+    {
+        const std::string pcm24String = pcm24Path.string();
+        const float* pcm24Channels[2] = {waveLeft, waveRight};
+        if (hirari_wav_write_planar(
+                reinterpret_cast<const uint8_t*>(pcm24String.data()), pcm24String.size(),
+                pcm24Channels, 2, 2, 48'000, 2) != 0) return 50;
+    }
     {
         std::ifstream pcm24(pcm24Path, std::ios::binary);
         std::array<uint8_t, 36> header{};
@@ -153,12 +185,46 @@
         if (!pcm24 || std::string(reinterpret_cast<const char*>(header.data()), 4) != "RIFF" ||
             header[34] != 24 || header[35] != 0) return 51;
     }
+    // The native stream façade was folded into the Rust C ABI, so the
+    // contract exercises the owning writers directly.
+    struct ContractStream final {
+        void* handle = nullptr;
+        uint8_t kind = 0;  // 0 PCM, 1 WAVE64, 2 float32
+        ContractStream(void* value, uint8_t streamKind) : handle(value), kind(streamKind) {}
+        ContractStream(const ContractStream&) = delete;
+        ContractStream& operator=(const ContractStream&) = delete;
+        ~ContractStream() {
+            if (kind == 0) hirari_wav_pcm_stream_free(handle);
+            else if (kind == 1) hirari_wav_wave64_stream_free(handle);
+            else hirari_wav_float32_stream_free(handle);
+        }
+        bool isOpen() const { return handle != nullptr; }
+        bool write(const float* const* channels, uint32_t count) const {
+            if (!handle) return false;
+            if (kind == 0) return hirari_wav_pcm_stream_write(handle, channels, count);
+            if (kind == 1) return hirari_wav_wave64_stream_write(handle, channels, count);
+            return hirari_wav_float32_stream_write(handle, channels, count);
+        }
+        uint64_t framesWritten() const {
+            if (kind == 1) return hirari_wav_wave64_stream_frames(handle);
+            if (kind == 2) return hirari_wav_float32_stream_frames(handle);
+            return 0;
+        }
+        bool finish() const {
+            if (!handle) return false;
+            if (kind == 0) return hirari_wav_pcm_stream_finish(handle);
+            if (kind == 1) return hirari_wav_wave64_stream_finish(handle);
+            return hirari_wav_float32_stream_finish(handle);
+        }
+    };
     const auto streamPath = std::filesystem::temp_directory_path() / "hirari-native-pcm24-stream-contract.wav";
+    const std::string streamPathString = streamPath.string();
     {
-        Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter stream(
-            streamPath.string(), 4, 48'000);
-        if (!stream.isOpen() || !stream.writeFrames(waveLeft, waveRight, 2) ||
-            !stream.writeFrames(waveLeft, waveRight, 2) || !stream.finish()) return 59;
+        const float* channels[2] = {waveLeft, waveRight};
+        ContractStream stream(hirari_wav_pcm_stream_create(
+            streamPathString.data(), streamPathString.size(), 4, 48'000, 2, 24, 0), 0);
+        if (!stream.isOpen() || !stream.write(channels, 2) ||
+            !stream.write(channels, 2) || !stream.finish()) return 59;
         std::ifstream streamInput(streamPath, std::ios::binary);
         std::array<uint8_t, 44> streamHeader{};
         streamInput.read(reinterpret_cast<char*>(streamHeader.data()),
@@ -171,10 +237,13 @@
     const auto pcm16StreamPath = std::filesystem::temp_directory_path() /
                                  "hirari-native-pcm16-stream-contract.wav";
     {
-        Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter stream(
-            pcm16StreamPath.string(), 4, 48'000);
-        if (!stream.isOpen() || !stream.writeFrames(waveLeft, waveRight, 1) ||
-            !stream.writeFrames(waveLeft + 1, waveRight + 1, 3) || !stream.finish()) return 63;
+        const std::string pathString = pcm16StreamPath.string();
+        ContractStream stream(hirari_wav_pcm_stream_create(
+            pathString.data(), pathString.size(), 4, 48'000, 2, 16, 0), 0);
+        const float* second[2] = {waveLeft + 1, waveRight + 1};
+        const float* first[2] = {waveLeft, waveRight};
+        if (!stream.isOpen() || !stream.write(first, 1) ||
+            !stream.write(second, 3) || !stream.finish()) return 63;
         std::ifstream streamInput(pcm16StreamPath, std::ios::binary);
         std::array<uint8_t, 44> streamHeader{};
         streamInput.read(reinterpret_cast<char*>(streamHeader.data()),
@@ -187,13 +256,14 @@
     const auto wave64StreamPath = std::filesystem::temp_directory_path() /
                                   "hirari-native-wave64-stream-contract.w64";
     {
-        Hirari::IO::Persistence::WavWriter::Wave64FloatStreamWriter stream(
-            wave64StreamPath.string(), 4, 48'000, 2);
+        const std::string pathString = wave64StreamPath.string();
+        ContractStream stream(hirari_wav_wave64_stream_create(
+            pathString.data(), pathString.size(), 4, 48'000, 2), 1);
         const float streamLeft[4] = {0.0f, 0.25f, 0.5f, 0.75f};
         const float streamRight[4] = {-0.25f, 0.5f, -0.75f, 1.0f};
         const float* channels[2] = {streamLeft, streamRight};
-        if (!stream.isOpen() || !stream.writeFrames(channels, 2) ||
-            !stream.writeFrames(channels, 2) || stream.framesWritten() != 4 ||
+        if (!stream.isOpen() || !stream.write(channels, 2) ||
+            !stream.write(channels, 2) || stream.framesWritten() != 4 ||
             !stream.finish()) return 76;
         Hirari::IO::WavLoader::WavInfo info{};
         const auto decoded = Hirari::IO::WavLoader::loadWave64(wave64StreamPath.string(), info);
@@ -205,9 +275,11 @@
     const auto monoPcm16StreamPath = std::filesystem::temp_directory_path() /
                                      "hirari-native-pcm16-mono-stream-contract.wav";
     {
-        Hirari::IO::Persistence::WavWriter::Pcm16StreamWriter stream(
-            monoPcm16StreamPath.string(), 4, 48'000, 1);
-        if (!stream.isOpen() || !stream.writeFrames(waveLeft, nullptr, 4) || !stream.finish()) return 65;
+        const std::string pathString = monoPcm16StreamPath.string();
+        ContractStream stream(hirari_wav_pcm_stream_create(
+            pathString.data(), pathString.size(), 4, 48'000, 1, 16, 0), 0);
+        const float* monoChannels[1] = {waveLeft};
+        if (!stream.isOpen() || !stream.write(monoChannels, 4) || !stream.finish()) return 65;
         std::ifstream streamInput(monoPcm16StreamPath, std::ios::binary);
         std::array<uint8_t, 44> streamHeader{};
         streamInput.read(reinterpret_cast<char*>(streamHeader.data()),
@@ -218,9 +290,11 @@
     const auto monoPcm24StreamPath = std::filesystem::temp_directory_path() /
                                      "hirari-native-pcm24-mono-stream-contract.wav";
     {
-        Hirari::IO::Persistence::WavWriter::Pcm24StreamWriter stream(
-            monoPcm24StreamPath.string(), 4, 48'000, false, 1);
-        if (!stream.isOpen() || !stream.writeFrames(waveLeft, nullptr, 4) || !stream.finish()) return 67;
+        const std::string pathString = monoPcm24StreamPath.string();
+        ContractStream stream(hirari_wav_pcm_stream_create(
+            pathString.data(), pathString.size(), 4, 48'000, 1, 24, 0), 0);
+        const float* monoChannels[1] = {waveLeft};
+        if (!stream.isOpen() || !stream.write(monoChannels, 4) || !stream.finish()) return 67;
         std::ifstream streamInput(monoPcm24StreamPath, std::ios::binary);
         std::array<uint8_t, 44> streamHeader{};
         streamInput.read(reinterpret_cast<char*>(streamHeader.data()),
@@ -234,9 +308,10 @@
         const float floatLeft[2] = {0.25f, std::numeric_limits<float>::quiet_NaN()};
         const float floatRight[2] = {-0.5f, 0.75f};
         const float* floatChannels[2] = {floatLeft, floatRight};
-        Hirari::IO::Persistence::WavWriter::Float32StreamWriter stream(
-            floatStreamPath.string(), 48'000, 2);
-        if (!stream.isOpen() || !stream.writeFrames(floatChannels, 2) ||
+        const std::string pathString = floatStreamPath.string();
+        ContractStream stream(hirari_wav_float32_stream_create(
+            pathString.data(), pathString.size(), 48'000, 2), 2);
+        if (!stream.isOpen() || !stream.write(floatChannels, 2) ||
             stream.framesWritten() != 2 || !stream.finish()) return 69;
         std::ifstream streamInput(floatStreamPath, std::ios::binary);
         std::array<uint8_t, 80> streamHeader{};

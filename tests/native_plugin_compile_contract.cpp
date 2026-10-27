@@ -17,8 +17,6 @@
 #include "src/core/concurrency/thread_pool.hpp"
 #include "src/dsp/effects/compressor.hpp"
 #include "src/core/database/project_db.hpp"
-#include "src/io/persistence/wav_writer.hpp"
-#include "src/core/utils/wav_writer.hpp"
 #include "src/core/external/jack_bridge_deep.hpp"
 #include "src/core/HirariPluginSDK.hpp"
 #include <atomic>

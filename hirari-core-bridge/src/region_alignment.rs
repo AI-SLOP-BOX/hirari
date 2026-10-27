@@ -7,16 +7,6 @@ const MAX_OUTPUT_MARKERS: usize = 257;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct HirariRegionAlignmentTargetView {
-    pub channel_offset: usize,
-    pub channel_count: usize,
-    pub source_offset: usize,
-    pub source_span: usize,
-    pub timeline_length: u64,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
 pub struct HirariRegionAlignmentTargetId {
     pub track_id: u32,
     pub region_id: u32,
@@ -49,113 +39,6 @@ pub unsafe extern "C" fn hirari_region_alignment_target_ids_valid(
                 (previous.track_id, previous.region_id) != (target.track_id, target.region_id)
             })
     })
-}
-
-struct HirariRegionAlignmentGroupMaps {
-    targets: Vec<Vec<HirariWarpMarker>>,
-}
-
-/// Computes warp markers for a reference and a set of target regions. The
-/// caller supplies flattened channel pointers so the native engine can retain
-/// ownership of audio buffers while Rust owns the complete DTW batch.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_align_audio_group(
-    reference_channels: *const *const f32,
-    reference_channel_count: usize,
-    reference_offset: usize,
-    reference_span: usize,
-    target_channels: *const *const f32,
-    target_channel_pointer_count: usize,
-    targets: *const HirariRegionAlignmentTargetView,
-    target_count: usize,
-) -> *mut std::ffi::c_void {
-    if reference_channels.is_null()
-        || target_channels.is_null()
-        || targets.is_null()
-        || !(1..=MAX_ALIGNMENT_CHANNELS).contains(&reference_channel_count)
-        || target_count == 0
-        || target_count > MAX_ALIGNMENT_CHANNELS
-        || target_channel_pointer_count == 0
-        || target_channel_pointer_count > target_count.saturating_mul(MAX_ALIGNMENT_CHANNELS)
-        || reference_offset.checked_add(reference_span).is_none()
-    {
-        return std::ptr::null_mut();
-    }
-    let references =
-        unsafe { std::slice::from_raw_parts(reference_channels, reference_channel_count) };
-    let channel_pointers =
-        unsafe { std::slice::from_raw_parts(target_channels, target_channel_pointer_count) };
-    let targets = unsafe { std::slice::from_raw_parts(targets, target_count) };
-
-    let mut maps = Vec::with_capacity(target_count);
-    for target in targets {
-        let Some(channel_end) = target.channel_offset.checked_add(target.channel_count) else {
-            return std::ptr::null_mut();
-        };
-        if target.channel_count == 0
-            || target.channel_count > MAX_ALIGNMENT_CHANNELS
-            || channel_end > target_channel_pointer_count
-            || target
-                .source_offset
-                .checked_add(target.source_span)
-                .is_none()
-            || target.timeline_length == 0
-        {
-            return std::ptr::null_mut();
-        }
-        let mut markers = vec![HirariWarpMarker::default(); MAX_OUTPUT_MARKERS];
-        let mut marker_count = 0;
-        if !unsafe {
-            hirari_region_align_audio(
-                references.as_ptr(),
-                references.len(),
-                reference_offset,
-                reference_span,
-                channel_pointers.as_ptr().add(target.channel_offset),
-                target.channel_count,
-                target.source_offset,
-                target.source_span,
-                target.timeline_length,
-                markers.as_mut_ptr(),
-                markers.len(),
-                &mut marker_count,
-            )
-        } {
-            return std::ptr::null_mut();
-        }
-        markers.truncate(marker_count);
-        maps.push(markers);
-    }
-    Box::into_raw(Box::new(HirariRegionAlignmentGroupMaps { targets: maps })).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_alignment_group_map_copy(
-    maps: *const std::ffi::c_void,
-    target_index: usize,
-    output: *mut HirariWarpMarker,
-    output_capacity: usize,
-) -> usize {
-    let Some(maps) = (unsafe { maps.cast::<HirariRegionAlignmentGroupMaps>().as_ref() }) else {
-        return 0;
-    };
-    let Some(target) = maps.targets.get(target_index) else {
-        return 0;
-    };
-    if target.len() > output_capacity || (!target.is_empty() && output.is_null()) {
-        return 0;
-    }
-    if !target.is_empty() {
-        unsafe { std::slice::from_raw_parts_mut(output, target.len()).copy_from_slice(target) };
-    }
-    target.len()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_alignment_group_maps_destroy(maps: *mut std::ffi::c_void) {
-    if !maps.is_null() {
-        drop(unsafe { Box::from_raw(maps.cast::<HirariRegionAlignmentGroupMaps>()) });
-    }
 }
 
 unsafe fn normalized_envelope(

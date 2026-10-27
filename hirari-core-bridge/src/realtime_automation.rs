@@ -166,8 +166,8 @@ pub unsafe extern "C" fn hirari_realtime_automation_apply_stereo_block(
         if !pan_points.is_empty() {
             let pan = evaluate_points(pan_points, time, pan_hint).clamp(-1.0, 1.0);
             let angle = (pan + 1.0) * 0.25 * pi;
-            let left_gain = angle.cos() * 1.414_213_5_f32;
-            let right_gain = angle.sin() * 1.414_213_5_f32;
+            let left_gain = angle.cos() * std::f32::consts::SQRT_2;
+            let right_gain = angle.sin() * std::f32::consts::SQRT_2;
             left[sample] *= left_gain;
             right[sample] *= right_gain;
             if let (Some(dry_left), Some(dry_right)) =

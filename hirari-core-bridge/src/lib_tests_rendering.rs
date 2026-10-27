@@ -1281,3 +1281,98 @@ fn cli_render_stems_format_names_reach_the_engine_as_the_container_they_name() {
     let _ = std::fs::remove_file(&wav_path);
     let _ = std::fs::remove_file(&project_path);
 }
+
+// The async import pipeline is Rust-owned (region_jobs.rs); these tests drive
+// it through the engine so the registry limits, ticket lifecycle, region
+// insertion and its single-step undo stay pinned to the public bridge.
+#[test]
+fn queued_region_import_commits_and_undoes_as_one_step() {
+    let _guard = native_engine_test_guard();
+    let engine = crate::ffi::new_audio_engine();
+    let e = engine.as_ref().expect("engine must initialize");
+    let wav_path = std::env::temp_dir().join(format!(
+        "hirari-queued-import-{}.wav",
+        std::process::id()
+    ));
+    write_test_tone_wav(&wav_path, 48_000, 4_800);
+    let source = wav_path.to_str().unwrap();
+    let track = e.add_track(0);
+    assert_ne!(track, 0);
+
+    let ticket = e.queue_region_import(track, source, 0);
+    assert_ne!(ticket, 0, "queue must return a ticket");
+    assert_eq!(
+        e.queue_region_import(track + 99, source, 0),
+        0,
+        "unknown tracks are rejected before decoding"
+    );
+
+    let mut status = 0u8;
+    for _ in 0..5_000 {
+        status = e.complete_region_import(ticket);
+        if status != 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(status, 1, "queued import must apply");
+    assert_eq!(e.complete_region_import(ticket), 3, "tickets are consumed");
+
+    let layout: serde_json::Value =
+        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+    assert_eq!(layout[0]["regions"].as_array().map(Vec::len), Some(1));
+
+    e.undo();
+    let layout: serde_json::Value =
+        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+    assert_eq!(layout[0]["regions"].as_array().map(Vec::len), Some(0));
+
+    e.redo();
+    let layout: serde_json::Value =
+        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+    assert_eq!(layout[0]["regions"].as_array().map(Vec::len), Some(1));
+
+    let _ = std::fs::remove_file(&wav_path);
+}
+
+// Pitch analysis is a Rust job (region_jobs.rs) that retains the track for the
+// worker and records the before/after note tables as one undo pair.
+#[test]
+fn queued_pitch_analysis_finishes_and_finalizes() {
+    let _guard = native_engine_test_guard();
+    let engine = crate::ffi::new_audio_engine();
+    let e = engine.as_ref().expect("engine must initialize");
+    let wav_path = std::env::temp_dir().join(format!(
+        "hirari-queued-analysis-{}.wav",
+        std::process::id()
+    ));
+    write_test_tone_wav(&wav_path, 48_000, 48_000);
+    let source = wav_path.to_str().unwrap();
+    let track = e.add_track(0);
+    assert!(e.add_region(track, source, 0.0));
+
+    let layout: serde_json::Value =
+        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+    let region = layout[0]["regions"][0]["id"].as_u64().expect("region id") as u32;
+
+    assert!(!e.start_region_audio_note_analysis(track, region, 1_000.0));
+    assert!(e.start_region_audio_note_analysis(track, region, 48_000.0));
+    assert!(
+        !e.start_region_audio_note_analysis(track, region, 48_000.0),
+        "a second analysis for the same region is rejected while running"
+    );
+
+    let mut status = 0u8;
+    for _ in 0..5_000 {
+        status = e.region_audio_note_analysis_status(track, region);
+        if status != 1 && status != 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(status, 2, "analysis must become ready");
+    assert!(e.finalize_region_audio_note_analysis(track, region));
+    assert_eq!(e.region_audio_note_analysis_status(track, region), 3);
+
+    let _ = std::fs::remove_file(&wav_path);
+}

@@ -38,7 +38,7 @@ public:
         wakeWriter();
         hirari_forensic_journaler_start(m_state,
             reinterpret_cast<const uint8_t*>(path.data()), path.size(), &m_wakeSequence,
-            &loadWakeSequence, &waitWakeSequence);
+            &loadWakeSequence, &waitWakeSequence, &wakeWakeSequence);
     }
 
     void log(uint32_t type, uint32_t tid, float value, uint64_t timestamp) {
@@ -78,6 +78,14 @@ private:
     }
     static void waitWakeSequence(void* context, uint64_t observed) noexcept {
         static_cast<std::atomic<uint64_t>*>(context)->wait(observed, std::memory_order_acquire);
+    }
+    // The writer may enter wait() after the application has already called
+    // stop(), so the shutdown path needs a wake of its own; otherwise the join
+    // never completes and the app hangs on exit.
+    static void wakeWakeSequence(void* context) noexcept {
+        auto* sequence = static_cast<std::atomic<uint64_t>*>(context);
+        sequence->fetch_add(1, std::memory_order_release);
+        sequence->notify_one();
     }
     void wakeWriter() noexcept {
         m_wakeSequence.fetch_add(1, std::memory_order_release);

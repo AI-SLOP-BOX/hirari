@@ -113,4 +113,12 @@ fi
 sandbox_body="$(extract_function 'bool process(AudioBuffer& audio, MidiBuffer& midi)' "${sandbox_parts[@]}")"
 assert_clean_body "$sandbox_body" "PluginSandboxHost::process" "$sandbox_forbidden"
 
+# The CoreAudio device callback is owned by Rust now, so the C++ guard above
+# cannot see it. Printing, formatting, allocating, or locking there blocks the
+# audio thread exactly like the C++ violations this script exists to catch.
+rust_driver="$root_dir/hirari-core-bridge/src/mac_audio_driver.rs"
+rust_callback_body="$(extract_function 'fn audio_unit_render_callback(' "$rust_driver")"
+rust_forbidden='eprintln!|println!|print!|dbg!|format!|vec!|to_string\(\)|String::from|\.lock\(\)|std::fs|std::thread::sleep'
+assert_clean_body "$rust_callback_body" "audio_unit_render_callback (Rust)" "$rust_forbidden"
+
 echo "realtime boundary checks passed"

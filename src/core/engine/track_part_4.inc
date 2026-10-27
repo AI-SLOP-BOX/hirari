@@ -13,29 +13,8 @@
         ids.reserve(m_regions.size());
         states.reserve(m_regions.size());
         for (const auto& region : m_regions) {
-            HirariRegionState state;
-            state.start = region.start;
-            state.len = region.len;
-            state.baseStart = region.baseStart;
-            state.baseLength = region.baseLength;
-            state.sourceOffset = region.sourceOffset;
-            state.baseSourceOffset = region.baseSourceOffset;
-            state.sourceLength = region.sourceLength;
-            state.fadeInSamples = region.fadeInSamples;
-            state.fadeOutSamples = region.fadeOutSamples;
-            state.warpRatio = region.warpRatio;
-            state.sourceSampleRate = region.sourceSampleRate;
-            state.timelineSampleRate = region.timelineSampleRate;
-            state.clipGain = region.clipGain;
-            state.pitchSemitones = region.pitchSemitones;
-            state.loopCount = region.loopCount;
-            state.syncGroup = region.syncGroup;
-            state.muted = region.muted;
-            state.reverse = region.reverse;
-            state.locked = region.locked;
-            state.pitchPreserveWarp = region.pitchPreserveWarp;
             ids.push_back(region.id);
-            states.push_back(state);
+            states.push_back(region.editableState());
         }
         (void)hirari_region_table_replace(m_regionTable, ids.data(), states.data(), ids.size());
     }

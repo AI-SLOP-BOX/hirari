@@ -55,13 +55,3 @@ float HirariUnifiedEngine::get_track_correlation(uint32_t tid) const {
 void HirariUnifiedEngine::push_event(const ::Hirari::Core::EngineEvent& e) { m_eventQueue.push(e); }
 bool HirariUnifiedEngine::pop_event(::Hirari::Core::EngineEvent& e) const { return m_eventQueue.pop(e); }
 
-HirariUnifiedEngine::WaveformCache::~WaveformCache() {
-    cleanup();
-}
-void HirariUnifiedEngine::WaveformCache::cleanup() {
-    if (rustMapping != nullptr) {
-        hirari_waveform_cache_map_destroy(rustMapping);
-        rustMapping = nullptr;
-    }
-    valid.store(false, std::memory_order_release);
-}
