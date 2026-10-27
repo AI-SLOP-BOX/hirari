@@ -15,16 +15,9 @@ bool HirariUnifiedEngine::set_tempo(float bpm) {
 }
 
 bool HirariUnifiedEngine::set_master_gain(float value) {
-    if (!std::isfinite(value) || value < 0.0f || value > 2.0f) return false;
-    const float before = m_masterGain.load(std::memory_order_acquire);
+    // Storage only: the bridge owns the range check and the undo entry. The
+    // audio callback reads this atomic once per block.
     m_masterGain.store(value, std::memory_order_release);
-    if (before != value) {
-        const auto apply = [this](float next) {
-            m_masterGain.store(next, std::memory_order_release);
-        };
-        m_undoManager.recordAppliedAction(
-            "Master Gain", [apply, before] { apply(before); }, [apply, value] { apply(value); });
-    }
     return true;
 }
 

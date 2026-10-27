@@ -114,6 +114,11 @@ production support.
   prefixes/suffixes (case-insensitive, byte-level so non-UTF-8 paths keep
   working). The engine wrappers only forward and resolve, and the
   duplicated validator code was removed.
+- Master-gain edits now run in Rust. The bridge owns the finite/`0..=2.0`
+  admission, reads the current value, applies the change through the facade
+  setter and records one `Master Gain` history entry only when the value
+  changes; loading a project validates the stored gain before writing it. The
+  engine setter keeps nothing but the atomic store the audio callback reads.
 - Region warp-marker edits now run through the Rust region-edit host. Rust
   normalizes the caller's list through the shared marker transform, rejects
   any list that would lose a marker, applies one geometry payload and records

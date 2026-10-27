@@ -332,6 +332,30 @@ fn post_action_log(h: EditHandles, prefix: &str, name: &str) {
     unsafe { hirari_log_buffer_post(h.log, 0, 0xA001, message.as_ptr(), length) };
 }
 
+/// `recordAppliedAction` for an edit whose state lives outside the tempo
+/// controls: the same history and log handles, coalescing off, and the same
+/// `UNDO | RECORDED |` diagnostics line.
+pub(crate) fn record_external_action(
+    undo: *mut std::ffi::c_void,
+    log: *const std::ffi::c_void,
+    name: &str,
+    undo_callback: impl Fn() + 'static,
+    redo_callback: impl Fn() + 'static,
+) {
+    record_applied_action(
+        EditHandles {
+            tempo: std::ptr::null_mut(),
+            undo,
+            log,
+            sample_rate: 0.0,
+        },
+        name.to_owned(),
+        undo_callback,
+        redo_callback,
+        false,
+    );
+}
+
 /// The whole of the C++ `set_tempo`: clamp the control, write an event at the
 /// playhead, move the displayed BPM with it, and put both halves in one
 /// history entry. Carried over verbatim from the comment that guarded it:

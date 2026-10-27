@@ -336,3 +336,27 @@ fn track_mix_edits_undo_through_the_native_engine() {
     core.undo();
     assert!(!bool_field("solo"));
 }
+
+#[test]
+fn master_gain_edits_validate_and_undo_through_the_native_engine() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    assert!((core.master_gain() - 1.0).abs() < 0.0001);
+
+    // Setting the current value again is accepted but adds no history entry:
+    // one undo must land on the value from before the first edit.
+    assert!(core.set_master_gain(0.5));
+    assert!((core.master_gain() - 0.5).abs() < 0.0001);
+    assert!(core.set_master_gain(0.5));
+    core.undo();
+    assert!((core.master_gain() - 1.0).abs() < 0.0001);
+    core.redo();
+    assert!((core.master_gain() - 0.5).abs() < 0.0001);
+
+    for invalid in [-0.01, 2.01, f32::NAN, f32::INFINITY] {
+        assert!(!core.set_master_gain(invalid));
+        assert!((core.master_gain() - 0.5).abs() < 0.0001);
+    }
+    assert!(core.set_master_gain(2.0));
+    assert!((core.master_gain() - 2.0).abs() < 0.0001);
+}

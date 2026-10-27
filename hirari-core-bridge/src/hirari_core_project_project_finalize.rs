@@ -27,7 +27,9 @@ impl HirariCore {
             engine.set_loop(false);
         }
         engine.set_metronome_enabled(document.metronome_enabled);
-        if !engine.set_master_gain(document.master_gain) {
+        if !crate::master_edit_host::admit_master_gain(document.master_gain)
+            || !engine.set_master_gain(document.master_gain)
+        {
             return Err(rollback_error(anyhow::anyhow!(
                 "loaded project contains an invalid master gain"
             )));

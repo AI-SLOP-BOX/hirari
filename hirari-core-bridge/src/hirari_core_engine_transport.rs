@@ -302,12 +302,15 @@ impl HirariCore {
     }
 
     pub fn set_master_gain(&self, value: f32) -> bool {
-        value.is_finite()
-            && (0.0..=2.0).contains(&value)
-            && self
-                .engine
-                .as_ref()
-                .is_some_and(|engine| engine.set_master_gain(value))
+        self.engine.as_ref().is_some_and(|engine| {
+            crate::master_edit_host::set_master_gain(
+                engine,
+                self.undo_state,
+                self.log_state,
+                value,
+                true,
+            )
+        })
     }
 
     pub fn set_master_gain_diagnostic_json(&self, value: f32) -> String {

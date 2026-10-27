@@ -70,6 +70,7 @@ pub mod console_model;
 pub mod console_strip;
 pub mod control_edit_host;
 pub mod plugin_edit_host;
+pub mod master_edit_host;
 pub mod control_room;
 pub mod control_room_audio;
 pub mod control_room_runtime;
