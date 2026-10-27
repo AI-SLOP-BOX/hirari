@@ -134,20 +134,12 @@ bool HirariUnifiedEngine::remove_plugin(uint32_t tid, uint32_t pluginIndex) {
     return true;
 }
 bool HirariUnifiedEngine::add_sandboxed_plugin(uint32_t tid, std::string_view pluginPath) {
-    if (pluginPath.empty() || pluginPath.size() > 4096 ||
-        pluginPath.find('\0') != std::string_view::npos) {
+    // Accepted bundle formats are owned by the Rust sandbox host, which also
+    // performs the conversion at load time.
+    if (!hirari_plugin_sandbox_path_supported(
+            reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size())) {
         return false;
     }
-    std::string normalizedPath(pluginPath);
-    std::transform(normalizedPath.begin(), normalizedPath.end(), normalizedPath.begin(),
-        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-    const auto hasSuffix = [&normalizedPath](std::string_view suffix) {
-        return normalizedPath.size() >= suffix.size() &&
-            normalizedPath.compare(normalizedPath.size() - suffix.size(), suffix.size(), suffix) == 0;
-    };
-    const bool supportedBundle = hasSuffix(".vst3") || hasSuffix(".component") ||
-        hasSuffix(".clap") || normalizedPath.starts_with("builtin://");
-    if (!supportedBundle) return false;
     std::shared_ptr<Track> target;
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);

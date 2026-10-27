@@ -328,8 +328,7 @@ uint32_t HirariUnifiedEngine::add_track(uint32_t type) {
 }
 
 bool HirariUnifiedEngine::add_vca_group(uint32_t groupId, float gain) {
-    if (groupId == 0 || !std::isfinite(gain) || gain < 0.0f || gain > 8.0f) return false;
-    hirari_vca_add_group(groupId, gain);
+    if (!hirari_vca_add_group(groupId, gain)) return false;
     hirari_vca_resolve_hierarchy();
     return true;
 }
@@ -346,8 +345,7 @@ bool HirariUnifiedEngine::assign_track_to_vca(uint32_t trackId, uint32_t groupId
 }
 
 bool HirariUnifiedEngine::set_vca_group_gain(uint32_t groupId, float gain) {
-    if (groupId == 0 || !std::isfinite(gain) || gain < 0.0f || gain > 8.0f) return false;
-    hirari_vca_add_group(groupId, gain);
+    if (!hirari_vca_add_group(groupId, gain)) return false;
     hirari_vca_resolve_hierarchy();
     return true;
 }

@@ -198,9 +198,15 @@ pub unsafe extern "C" fn hirari_vca_apply_track_gain(
     apply_stereo_gain(left, right, gain);
 }
 
+/// Adds or updates a VCA group. The validation lives here because this module
+/// owns the group table; the engine wrapper only forwards and resolves.
 #[no_mangle]
-pub extern "C" fn hirari_vca_add_group(group_id: u32, gain: f32) {
+pub extern "C" fn hirari_vca_add_group(group_id: u32, gain: f32) -> bool {
+    if group_id == 0 || !gain.is_finite() || !(0.0..=8.0).contains(&gain) {
+        return false;
+    }
     global_manager().add_group(group_id, gain);
+    true
 }
 
 #[no_mangle]

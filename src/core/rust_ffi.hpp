@@ -1638,6 +1638,7 @@ extern "C" bool hirari_plugin_edit_set_parameter(
     void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
 extern "C" bool hirari_plugin_edit_set_parameter_without_undo(
     void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
+extern "C" bool hirari_plugin_sandbox_path_supported(const uint8_t* path, size_t pathLength);
 
 extern "C" void* hirari_send_pdc_manager_create();
 extern "C" void hirari_send_pdc_manager_destroy(void* handle);
@@ -1703,7 +1704,7 @@ extern "C" void hirari_builtin_midi_instrument_process(
     float* left, float* right, uint32_t frames, double sample_rate);
 extern "C" float hirari_realtime_automation_evaluate(
     const void* points, size_t count, double time, size_t* last_index_hint);
-extern "C" void hirari_vca_add_group(uint32_t group_id, float gain);
+extern "C" bool hirari_vca_add_group(uint32_t group_id, float gain);
 extern "C" void hirari_vca_resolve_hierarchy();
 extern "C" bool hirari_vca_assign_track(uint32_t track_id, uint32_t group_id);
 extern "C" float hirari_vca_get_cumulative_gain(uint32_t track_id);

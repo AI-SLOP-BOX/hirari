@@ -1992,6 +1992,65 @@ fn format_for_path(path: &str) -> &'static str {
     }
 }
 
+const MAX_SANDBOX_PLUGIN_PATH_BYTES: usize = 4096;
+
+/// Byte-level counterpart of `format_for_path` for engine callers: the path
+/// may be non-UTF-8, so acceptance only compares ASCII prefixes/suffixes.
+fn supported_bundle_path(bytes: &[u8]) -> bool {
+    if bytes.is_empty()
+        || bytes.len() > MAX_SANDBOX_PLUGIN_PATH_BYTES
+        || bytes.contains(&0)
+    {
+        return false;
+    }
+    let ends_with = |suffix: &[u8]| {
+        bytes.len() >= suffix.len() && bytes[bytes.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+    };
+    (bytes.len() >= b"builtin://".len()
+        && bytes[..b"builtin://".len()].eq_ignore_ascii_case(b"builtin://"))
+        || ends_with(b".vst3")
+        || ends_with(b".component")
+        || ends_with(b".clap")
+}
+
+/// Reports whether the engine should attempt to load this path as a sandboxed
+/// plugin bundle. This module owns the accepted formats, so the engine no
+/// longer normalises and re-checks the suffix itself.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_sandbox_path_supported(
+    path: *const u8,
+    path_len: usize,
+) -> bool {
+    if path.is_null() || path_len == 0 {
+        return false;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(path, path_len) };
+    supported_bundle_path(bytes)
+}
+
+#[cfg(test)]
+mod path_policy_tests {
+    use super::supported_bundle_path;
+
+    #[test]
+    fn bundles_are_recognised_case_insensitively() {
+        assert!(supported_bundle_path(b"/Library/Audio/Plug-Ins/VST3/Test.VST3"));
+        assert!(supported_bundle_path(b"/Library/Audio/Plug-Ins/Components/Test.component"));
+        assert!(supported_bundle_path(b"plugin.clap"));
+        assert!(supported_bundle_path(b"builtin://passthrough"));
+        assert!(supported_bundle_path(b"BUILTIN://Passthrough"));
+    }
+
+    #[test]
+    fn unsupported_or_malformed_paths_are_rejected() {
+        assert!(!supported_bundle_path(b""));
+        assert!(!supported_bundle_path(b"plugin.dll"));
+        assert!(!supported_bundle_path(b"plugin.vst3\0trailing"));
+        assert!(supported_bundle_path(b".vst3"));
+        assert!(!supported_bundle_path(&vec![b'a'; 4097]));
+    }
+}
+
 fn worker_format(plugin_path: &str, requested_format: &str) -> String {
     if requested_format.is_empty() || requested_format == "auto" {
         format_for_path(plugin_path).to_string()

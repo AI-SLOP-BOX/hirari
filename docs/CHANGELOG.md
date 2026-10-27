@@ -107,6 +107,13 @@ production support.
   undo pair keeps the exact requested parameter value rather than a clamped
   read-back, as before. The engine's duplicated undo lambdas were removed,
   while the post-edit structural sync stays at the engine boundary.
+- VCA group and sandboxed-plugin path admission now live with the state
+  owners in Rust. `hirari_vca_add_group` rejects a zero group, non-finite
+  gain and gain outside 0..=8 before touching the group table, and
+  `hirari_plugin_sandbox_path_supported` owns the accepted bundle
+  prefixes/suffixes (case-insensitive, byte-level so non-UTF-8 paths keep
+  working). The engine wrappers only forward and resolve, and the
+  duplicated validator code was removed.
 - Region warp-marker edits now run through the Rust region-edit host. Rust
   normalizes the caller's list through the shared marker transform, rejects
   any list that would lose a marker, applies one geometry payload and records
