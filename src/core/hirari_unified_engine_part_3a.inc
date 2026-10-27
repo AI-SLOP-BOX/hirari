@@ -126,65 +126,60 @@ std::vector<uint8_t> HirariUnifiedEngine::process_sandboxed_plugin_midi_block(
 }
 
 uint32_t HirariUnifiedEngine::maintain_sandboxed_plugins(bool autoRestart) {
-    std::lock_guard<std::mutex> maintenanceLock(m_sandboxMaintenanceMutex);
-    const auto tracks = get_tracks_snapshot();
-    const auto publishStatusEvent = [this](uint32_t type, uint32_t trackId,
-                                            uint32_t pluginIndex, float value,
-                                            const char* label) {
-        ::Hirari::Core::EngineEvent event{};
-        event.timestamp = m_playhead.load(std::memory_order_relaxed);
-        event.type = type;
-        event.trackId = trackId;
-        event.value = value;
-        std::snprintf(event.label, sizeof(event.label), "%s #%u", label, pluginIndex);
-        push_event(event);
+    return hirari_plugin_sandbox_maintain(this, autoRestart);
+}
+
+// The maintenance pass itself lives in Rust; these handlers only resolve a
+// track, report its sandbox statuses, restart what can be restarted, and post
+// the resulting event with the engine's playhead.
+static_assert(sizeof(Track::SandboxStatus) == 24,
+              "plugin_sandbox_maintenance.rs mirrors this layout");
+void HirariUnifiedEngine::installSandboxMaintenanceHost() {
+    static const HirariPluginSandboxHostOps ops = {
+        [](void* host, void* context, HirariPluginSandboxVisitorFn visit) -> bool {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            for (const auto& track : engine->get_tracks_snapshot())
+                for (const auto& status : track->getSandboxStatuses())
+                    if (!visit(context, track->getId(), &status)) return true;
+            return true;
+        },
+        [](void* host, uint32_t trackId, bool autoRestart, void* context,
+           HirariPluginSandboxVisitorFn visit) -> uint32_t {
+            if (!host) return 0;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            for (const auto& track : engine->get_tracks_snapshot()) {
+                if (!track || track->getId() != trackId) continue;
+                const uint32_t recovered = track->maintainSandboxedPlugins(autoRestart);
+                for (const auto& status : track->getSandboxStatuses())
+                    if (!visit(context, trackId, &status)) break;
+                return recovered;
+            }
+            return 0;
+        },
+        [](void* host, uint32_t type, uint32_t trackId, float value,
+           const uint8_t* label, size_t labelLength) {
+            if (!host) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            ::Hirari::Core::EngineEvent event{};
+            event.timestamp = engine->m_playhead.load(std::memory_order_relaxed);
+            event.type = type;
+            event.trackId = trackId;
+            event.value = value;
+            std::snprintf(event.label, sizeof(event.label), "%.*s",
+                          static_cast<int>(labelLength),
+                          reinterpret_cast<const char*>(label));
+            engine->push_event(event);
+        },
     };
-    uint32_t recovered = 0;
-    for (const auto& track : tracks) {
-        if (!track) continue;
-        const uint32_t trackId = track->getId();
-        const auto before = track->getSandboxStatuses();
-        for (const auto& status : before) {
-            const uint64_t key = (static_cast<uint64_t>(trackId) << 32) | status.pluginIndex;
-            auto& observed = m_sandboxObserved[key];
-            if ((!observed.alive && status.alive) ||
-                (observed.failure != 0 && status.failure == 0 && status.alive)) {
-                publishStatusEvent(0x61, trackId, status.pluginIndex, 1.0f,
-                                   "PLUGIN_SANDBOX_RECOVERED");
-            } else if (observed.alive && !status.alive) {
-                publishStatusEvent(0x60, trackId, status.pluginIndex,
-                                   static_cast<float>(status.failure),
-                                   "PLUGIN_SANDBOX_FAILED");
-            }
-            if (observed.failure != status.failure && status.failure != 0) {
-                publishStatusEvent(0x63, trackId, status.pluginIndex,
-                                   static_cast<float>(status.failure),
-                                   "PLUGIN_SANDBOX_QUARANTINED");
-            }
-            if (status.droppedOutputMidi > 0) {
-                publishStatusEvent(0x62, trackId, status.pluginIndex,
-                                   static_cast<float>(status.droppedOutputMidi),
-                                   "PLUGIN_SANDBOX_MIDI_DROPPED");
-            }
-            observed.alive = status.alive;
-            observed.failure = status.failure;
-            observed.droppedOutputMidi = status.droppedOutputMidi;
-        }
-        recovered += track->maintainSandboxedPlugins(autoRestart);
-        const auto after = track->getSandboxStatuses();
-        for (const auto& status : after) {
-            const uint64_t key = (static_cast<uint64_t>(trackId) << 32) | status.pluginIndex;
-            auto& observed = m_sandboxObserved[key];
-            if (!observed.alive && status.alive) {
-                publishStatusEvent(0x61, trackId, status.pluginIndex, 1.0f,
-                                   "PLUGIN_SANDBOX_RECOVERED");
-            }
-            observed.alive = status.alive;
-            observed.failure = status.failure;
-            observed.droppedOutputMidi = status.droppedOutputMidi;
-        }
-    }
-    return recovered;
+    hirari_plugin_sandbox_maintenance_host_install(&ops);
+}
+
+namespace {
+[[maybe_unused]] const bool kSandboxMaintenanceHostInstalled = [] {
+    HirariUnifiedEngine::installSandboxMaintenanceHost();
+    return true;
+}();
 }
 
 bool HirariUnifiedEngine::retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
@@ -203,21 +198,6 @@ bool HirariUnifiedEngine::restart_sandboxed_plugin(uint32_t trackId, uint32_t sa
             return track->restartSandboxedPlugin(sandboxIndex);
     }
     return false;
-}
-
-std::vector<HirariUnifiedEngine::SandboxStatus> HirariUnifiedEngine::get_sandbox_statuses() {
-    const auto tracks = get_tracks_snapshot();
-    std::vector<SandboxStatus> result;
-    for (const auto& track : tracks) {
-        if (!track) continue;
-        for (const auto& status : track->getSandboxStatuses()) {
-            result.push_back({track->getId(), status.pluginIndex, status.alive,
-                              status.canRetry, status.failure, status.droppedOutputMidi,
-                              status.mailboxOverruns, status.inputMidiTruncations,
-                              status.recoveryMode});
-        }
-    }
-    return result;
 }
 
 uint32_t HirariUnifiedEngine::take_watchdog_trips() {

@@ -227,6 +227,7 @@ pub mod plugin_presets;
 pub mod plugin_preset_file;
 pub mod plugin_processing;
 pub mod plugin_sandbox_host;
+pub mod plugin_sandbox_maintenance;
 pub mod plugin_registry;
 pub mod plugin_state_protocol;
 pub mod plugin_parameter_snapshot;

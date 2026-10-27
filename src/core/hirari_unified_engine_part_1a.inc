@@ -36,6 +36,9 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     // Rust keys cached peaks by engine address; a later engine may reuse it.
     hirari_region_waveform_clear(this);
     shutdown();
+    // Sandbox observed-health state is keyed by engine address for the same
+    // reason. Drop it after shutdown() has joined the recovery thread.
+    hirari_plugin_sandbox_maintenance_forget(this);
     hirari_midi_snapshot_store_destroy(m_midiSnapshotStore);
     hirari_control_room_state_destroy(m_controlRoomState);
     hirari_native_pdc_destroy(m_pdcState);

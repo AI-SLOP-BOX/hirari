@@ -50,18 +50,8 @@
     uint32_t maintain_sandboxed_plugins(bool autoRestart);
     bool retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
-    struct SandboxStatus {
-        uint32_t trackId = 0;
-        uint32_t pluginIndex = 0;
-        bool alive = false;
-        bool canRetry = false;
-        uint8_t failure = 0;
-        uint32_t droppedOutputMidi = 0;
-        uint32_t mailboxOverruns = 0;
-        uint32_t inputMidiTruncations = 0;
-        uint32_t recoveryMode = 0;
-    };
-    std::vector<SandboxStatus> get_sandbox_statuses();
+    // Status enumeration for the UI lives in Rust; see
+    // plugin_sandbox_maintenance.rs and AudioEngine::get_sandbox_statuses.
     // Control-thread diagnostic edge: number of AU processors that crossed
     // the consecutive-overrun watchdog since the previous poll.
     uint32_t take_watchdog_trips();
@@ -103,5 +93,7 @@
     static void installRoutingEditHost();
     static void installControlEditHost();
     static void installPluginEditHost();
+    // Installs the sandbox maintenance callbacks Rust drives; see part_3a.
+    static void installSandboxMaintenanceHost();
 
 private:

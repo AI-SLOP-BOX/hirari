@@ -16,6 +16,7 @@ pub use analysis_views::{
     analysis_song_structure_json, analysis_spectral_clashes, analysis_spectral_display,
     analysis_structure_sections as build_analysis_structure_sections, analysis_synesthesia_colors,
 };
+pub use plugin_sandbox_maintenance::sandbox_statuses_packed;
 pub use runtime_views::{interleave_planar_audio_input, runtime_health_vector};
 pub use waveform_cache::{analysis_waveform_peak_envelope, resample_waveform_peak_envelope};
 pub mod ara2_protocol;
@@ -997,6 +998,9 @@ pub mod ffi {
         fn analysis_mel_spectrogram(spectrum: &[f32]) -> Vec<f32>;
         fn analysis_motion_vectors(spectrum: &[f32]) -> Vec<f32>;
         fn analysis_motion_energy(spectrum: &[f32]) -> f32;
+        /// Packs every sandbox status of the engine at `host` into the UI wire
+        /// format. The engine pointer must remain valid for the call.
+        fn sandbox_statuses_packed(host: usize) -> Vec<u32>;
         fn analysis_synesthesia_colors(spectrum: &[f32]) -> Vec<f32>;
         fn analysis_arrangement_advice(track_id: u32) -> String;
         fn analysis_mixing_advice(true_peak_l: f32, true_peak_r: f32, correlation: f32)

@@ -88,6 +88,13 @@ production support.
   and new lists. The engine's publish lambda, control-side note mutex and the
   direct range/upsert FFI declarations are gone; the snapshot read is a
   count-then-copy call.
+- Plugin sandbox maintenance now runs in Rust. Rust serializes the pass, keeps
+  the observed health of every sandbox by engine address, decides the
+  failure/recovery/quarantine/dropped-MIDI edges, formats the event labels and
+  owns the packed status protocol the UI decodes. The engine only enumerates a
+  track's statuses, restarts its rejected sandboxes and posts the event with
+  the current playhead. The maintenance mutex, observed-health map, status
+  vector accessor and its packing loop are gone.
 - Plugin preset save and load now run through the Rust plugin-edit host. Rust
   checks the preset's plugin type against the target plugin, copies the current
   state for the undo entry, applies the loaded bytes and records one

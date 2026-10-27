@@ -56,15 +56,9 @@
     std::condition_variable m_recoveryWake;
     std::mutex m_recoveryWakeMutex;
     // Manual health polling and the background recovery loop share the same
-    // sandbox host objects. Serialize maintenance so stop/restart cannot race
-    // with another poll on the same worker or IPC mapping.
-    mutable std::mutex m_sandboxMaintenanceMutex;
-    struct SandboxObservedStatus {
-        bool alive = false;
-        uint8_t failure = 0;
-        uint32_t droppedOutputMidi = 0;
-    };
-    std::unordered_map<uint64_t, SandboxObservedStatus> m_sandboxObserved;
+    // sandbox host objects. Rust serializes maintenance and keeps the
+    // observed-health map (plugin_sandbox_maintenance.rs); the engine only
+    // supplies the track/status/restart callbacks.
     // Region import and pitch analysis jobs live in Rust (region_jobs.rs):
     // validation, registry limits, worker threads, staleness checks and undo
     // capture are all owned there. These declarations are the storage

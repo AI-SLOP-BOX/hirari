@@ -111,22 +111,11 @@
         return m_engine && m_engine->restart_sandboxed_plugin(trackId, sandboxIndex);
     }
     rust::Vec<uint32_t> get_sandbox_statuses() const {
-        rust::Vec<uint32_t> result;
-        if (!m_engine) return result;
-        result.push_back(Plugins::SandboxProtocol::kStatusHeaderV9);
-        if (!m_engine) return result;
-        for (const auto& status : m_engine->get_sandbox_statuses()) {
-            result.push_back(status.trackId);
-            result.push_back(status.pluginIndex);
-            result.push_back(status.alive ? 1u : 0u);
-            result.push_back(status.canRetry ? 1u : 0u);
-            result.push_back(status.failure);
-            result.push_back(status.droppedOutputMidi);
-            result.push_back(status.mailboxOverruns);
-            result.push_back(status.inputMidiTruncations);
-            result.push_back(status.recoveryMode);
-        }
-        return result;
+        if (!m_engine) return {};
+        // Rust enumerates the tracks through the maintenance host and owns the
+        // packed status protocol.
+        return ::Hirari::Core::Bridge::sandbox_statuses_packed(
+            reinterpret_cast<size_t>(m_engine.get()));
     }
     uint32_t get_last_sandbox_failure(uint32_t trackId) const {
         return m_engine ? m_engine->get_last_sandbox_failure(trackId) : 0u;

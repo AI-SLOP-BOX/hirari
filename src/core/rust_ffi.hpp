@@ -1657,6 +1657,24 @@ extern "C" bool hirari_plugin_edit_set_state(
     void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* state, size_t size);
 extern "C" bool hirari_plugin_sandbox_path_supported(const uint8_t* path, size_t pathLength);
 
+// Status pointers refer to Track::SandboxStatus, mirrored field for field in
+// plugin_sandbox_maintenance.rs.
+using HirariPluginSandboxVisitorFn = bool (*)(void* context, uint32_t trackId, const void* status);
+struct HirariPluginSandboxHostOps {
+    // Reports every track's statuses in engine order.
+    bool (*statuses)(void* host, void* context, HirariPluginSandboxVisitorFn visit) = nullptr;
+    // Restarts one track's rejected sandboxes, then reports the resulting
+    // statuses; returns how many were recovered.
+    uint32_t (*maintain)(void* host, uint32_t trackId, bool autoRestart, void* context,
+                         HirariPluginSandboxVisitorFn visit) = nullptr;
+    void (*publishEvent)(void* host, uint32_t type, uint32_t trackId, float value,
+                         const uint8_t* label, size_t labelLength) = nullptr;
+};
+extern "C" void hirari_plugin_sandbox_maintenance_host_install(
+    const HirariPluginSandboxHostOps* ops);
+extern "C" uint32_t hirari_plugin_sandbox_maintain(void* host, bool autoRestart);
+extern "C" void hirari_plugin_sandbox_maintenance_forget(void* host);
+
 extern "C" void* hirari_send_pdc_manager_create();
 extern "C" void hirari_send_pdc_manager_destroy(void* handle);
 extern "C" void hirari_send_pdc_manager_enter_read(void* handle);
