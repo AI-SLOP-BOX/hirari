@@ -74,6 +74,12 @@ production support.
   cancellation all have one implementation in
   `hirari-core-bridge/src/project_layout.rs`. `get_project_generation` now
   fingerprints the Rust buffer instead of streaming through a C++ streambuf.
+- Region range edits (gain-automation segments) now run through the Rust
+  region-edit host. Rust validates upserts against the region length, applies
+  the shared range-edit policy, stores the resulting list through a new
+  range-edit payload, and records the undo pair; `set_region_range_edit` and
+  `clear_region_range_edits` on the engine and Track were removed. C++ keeps
+  the storage and now accepts Rust's sorted, bounded list verbatim.
 - Region trim and warp-ratio edits now run through the Rust region-edit host.
   Rust validates the request, computes the geometry, reads the existing warp
   markers, applies one geometry payload and records the undo pair; C++ only

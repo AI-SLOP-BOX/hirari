@@ -716,6 +716,8 @@ enum HirariRegionEditOp : int32_t {
     kHirariRegionEditGeometry = 14,
     // Replace only the warp markers from the blob (timing jobs).
     kHirariRegionEditMarkers = 15,
+    // Store the range-edit list packed in the blob exactly as given.
+    kHirariRegionEditRangeEdits = 16,
 };
 
 struct HirariRegionEditPayload {
@@ -751,7 +753,7 @@ struct HirariRegionHostOps {
     bool (*recordUndo)(void* host, const char* name,
                        const HirariRegionEditPayload* undo, size_t undoCount,
                        const HirariRegionEditPayload* redo, size_t redoCount,
-                       bool coalesce) = nullptr;
+                       bool coalesce, bool perform) = nullptr;
     // Runs a Rust note-table mutation under the region lock and publishes.
     bool (*noteEdit)(void* host, uint32_t trackId, uint32_t regionId, void* context,
                      HirariRegionNoteMutateFn mutate) = nullptr;
@@ -762,6 +764,9 @@ struct HirariRegionHostOps {
     // Copies a region's warp markers into `out`; returns the total count.
     size_t (*warpMarkers)(void* host, uint32_t trackId, uint32_t regionId,
                           HirariWarpMarker* out, size_t capacity) = nullptr;
+    // Copies a region's range edits into `out`; returns the total count.
+    size_t (*rangeEdits)(void* host, uint32_t trackId, uint32_t regionId,
+                         HirariRegionRangeEdit* out, size_t capacity) = nullptr;
     // Retains a region's decoded audio so a worker can read it later.
     void* (*retainAudio)(void* host, uint32_t trackId, uint32_t regionId) = nullptr;
     // Reports a retained handle's channels, sample count and pointers.
@@ -864,6 +869,12 @@ extern "C" bool hirari_region_edit_set_warp_markers(void* host, uint32_t trackId
                                                     uint32_t regionId,
                                                     const HirariWarpMarker* markers,
                                                     size_t count);
+extern "C" bool hirari_region_edit_range_edit_set(void* host, uint32_t trackId,
+                                                  uint32_t regionId, uint64_t start,
+                                                  uint64_t end, float gain, uint64_t fadeIn,
+                                                  uint64_t fadeOut);
+extern "C" bool hirari_region_edit_range_edits_clear(void* host, uint32_t trackId,
+                                                     uint32_t regionId);
 
 // Automation edit host. Rust owns the validation and the undo capture; the
 // engine keeps the curves and publishes the immutable snapshots.

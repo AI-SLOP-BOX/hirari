@@ -80,6 +80,8 @@ public:
     static void regionHostReleaseSnapshot(void* host, void* handle);
     static size_t regionHostWarpMarkers(void* host, uint32_t trackId, uint32_t regionId,
                                         HirariWarpMarker* out, size_t capacity);
+    static size_t regionHostRangeEdits(void* host, uint32_t trackId, uint32_t regionId,
+                                       HirariRegionRangeEdit* out, size_t capacity);
     static size_t regionHostListSyncGroup(void* host, uint32_t group,
                                           HirariRegionGroupMember* out, size_t capacity);
     static bool regionHostNoteEdit(void* host, uint32_t trackId, uint32_t regionId,
@@ -87,7 +89,7 @@ public:
     static bool regionHostRecordUndo(void* host, const char* name,
                                      const HirariRegionEditPayload* undo, size_t undoCount,
                                      const HirariRegionEditPayload* redo, size_t redoCount,
-                                     bool coalesce);
+                                     bool coalesce, bool perform);
     static void* regionHostRetainAudio(void* host, uint32_t trackId, uint32_t regionId);
     static uint32_t regionHostAudioView(void* handle, const float** out, size_t capacity,
                                         uint64_t* samples);

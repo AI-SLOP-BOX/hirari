@@ -23,13 +23,15 @@ use crate::vari_audio::{
 };
 use std::os::raw::c_void;
 use std::ptr;
+use std::slice;
 use std::sync::{Mutex, OnceLock};
 
 use crate::region_mutations::hirari_region_sync_move_positions;
 use crate::region_processing::{
-    hirari_region_fade_samples, hirari_region_set_trim_geometry,
-    hirari_region_set_warp_ratio_geometry, HirariRegionScalarDecision, HirariRegionScalarEdit,
-    HirariRegionScalarField, NativeRegionGeometry,
+    hirari_free_range_edits, hirari_region_fade_samples, hirari_region_range_edits_apply,
+    hirari_region_set_trim_geometry, hirari_region_set_warp_ratio_geometry, NativeRangeEdit,
+    HirariRegionScalarDecision, HirariRegionScalarEdit, HirariRegionScalarField,
+    NativeRegionGeometry,
 };
 use crate::region_warp::{
     hirari_free_warp_markers, hirari_region_normalize_warp_markers, HirariWarpMarker,
@@ -50,6 +52,8 @@ pub const HIRARI_REGION_EDIT_RESTORE: i32 = 13;
 /// Payload op: replace only the warp markers from `blob`, leaving the editable
 /// state alone. Timing jobs (alignment, quantize) commit through this.
 pub const HIRARI_REGION_EDIT_MARKERS: i32 = 15;
+/// Payload op: store the range-edit list packed in `blob` exactly as given.
+pub const HIRARI_REGION_EDIT_RANGE_EDITS: i32 = 16;
 
 /// The editable part of a region. Mirrors the C++ `HirariRegionState` byte for
 /// byte; audio buffers, note edits and processing history stay in C++.
@@ -144,6 +148,10 @@ pub type HirariRegionListGroupFn =
 /// listing.
 pub type HirariRegionMarkersFn =
     unsafe extern "C" fn(*mut c_void, u32, u32, *mut HirariWarpMarker, usize) -> usize;
+/// Copies a region's range edits into `out` and returns the total count, with
+/// the same count-then-copy contract as the warp-marker listing.
+pub type HirariRegionRangeEditsFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *mut NativeRangeEdit, usize) -> usize;
 pub type HirariRegionNoteEditFn =
     unsafe extern "C" fn(*mut c_void, *mut HirariRegionVariAudioStore) -> bool;
 pub type HirariRegionNoteEditHostFn = unsafe extern "C" fn(
@@ -160,6 +168,7 @@ pub type HirariRegionRecordUndoFn = unsafe extern "C" fn(
     usize,
     *const HirariRegionEditPayload,
     usize,
+    bool,
     bool,
 ) -> bool;
 /// Copies the whole region (audio, history, note edits) into an owned host
@@ -248,6 +257,7 @@ pub struct HirariRegionHostOps {
     pub snapshot_region: Option<HirariRegionSnapshotFn>,
     pub release_snapshot: Option<HirariRegionReleaseSnapshotFn>,
     pub warp_markers: Option<HirariRegionMarkersFn>,
+    pub range_edits: Option<HirariRegionRangeEditsFn>,
     pub retain_audio: Option<HirariRegionRetainAudioFn>,
     pub audio_view: Option<HirariRegionAudioViewFn>,
     pub release_audio: Option<HirariRegionReleaseAudioFn>,
@@ -368,6 +378,30 @@ pub(crate) fn record(
     redo: &[HirariRegionEditPayload],
     coalesce: bool,
 ) -> bool {
+    record_with(ops, host, name, undo, redo, coalesce, false)
+}
+
+/// Records an edit the host must replay through the redo callback before the
+/// history entry exists, matching the native `performAction` contract.
+fn record_performed(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    name: &[u8],
+    undo: &[HirariRegionEditPayload],
+    redo: &[HirariRegionEditPayload],
+) -> bool {
+    record_with(ops, host, name, undo, redo, true, true)
+}
+
+fn record_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    name: &[u8],
+    undo: &[HirariRegionEditPayload],
+    redo: &[HirariRegionEditPayload],
+    coalesce: bool,
+    perform: bool,
+) -> bool {
     match ops.record_undo {
         Some(record_undo) => unsafe {
             record_undo(
@@ -378,6 +412,7 @@ pub(crate) fn record(
                 redo.as_ptr(),
                 redo.len(),
                 coalesce,
+                perform,
             )
         },
         None => false,
@@ -790,6 +825,175 @@ pub unsafe extern "C" fn hirari_region_edit_set_warp_markers(
         return false;
     };
     set_warp_markers_with(&ops, host, track_id, region_id, markers, count)
+}
+
+fn read_range_edits(
+    read: HirariRegionRangeEditsFn,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> Option<Vec<NativeRangeEdit>> {
+    let required = unsafe { read(host, track_id, region_id, ptr::null_mut(), 0) };
+    let mut edits = vec![NativeRangeEdit::default(); required];
+    if required == 0 {
+        return Some(edits);
+    }
+    let actual = unsafe { read(host, track_id, region_id, edits.as_mut_ptr(), required) };
+    (actual == required).then_some(edits)
+}
+
+fn range_edit_payload(
+    track_id: u32,
+    region_id: u32,
+    state: HirariRegionState,
+    edits: &[NativeRangeEdit],
+) -> HirariRegionEditPayload {
+    HirariRegionEditPayload {
+        track_id,
+        region_id,
+        op: HIRARI_REGION_EDIT_RANGE_EDITS,
+        blob: if edits.is_empty() {
+            ptr::null()
+        } else {
+            edits.as_ptr().cast()
+        },
+        blob_len: std::mem::size_of_val(edits),
+        state,
+    }
+}
+
+/// Applies one range-edit upsert. The Rust transform owns the bounds, gain and
+/// fade rules; the undo entry is the pair of stored lists, replayed through the
+/// host's perform path exactly like the native setter did.
+fn set_range_edit_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start: u64,
+    end: u64,
+    gain: f32,
+    fade_in: u64,
+    fade_out: u64,
+) -> bool {
+    let (Some(find), Some(apply), Some(read)) =
+        (ops.find_region, ops.apply_edit, ops.range_edits)
+    else {
+        return false;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } || state.locked {
+        return false;
+    }
+    let Some(before) = read_range_edits(read, host, track_id, region_id) else {
+        return false;
+    };
+    let mut produced = 0usize;
+    let result = unsafe {
+        hirari_region_range_edits_apply(
+            before.as_ptr(),
+            before.len(),
+            state.len,
+            1, // upsert
+            start,
+            end,
+            gain,
+            fade_in,
+            fade_out,
+            &mut produced,
+        )
+    };
+    if result.is_null() {
+        return false;
+    }
+    let after = unsafe { slice::from_raw_parts(result, produced) }.to_vec();
+    unsafe { hirari_free_range_edits(result, produced) };
+    if !unsafe { apply(host, &range_edit_payload(track_id, region_id, state, &after)) } {
+        return false;
+    }
+    record_performed(
+        ops,
+        host,
+        b"Region Range Edit\0",
+        &[range_edit_payload(track_id, region_id, state, &before)],
+        &[range_edit_payload(track_id, region_id, state, &after)],
+    );
+    true
+}
+
+fn clear_range_edits_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> bool {
+    let (Some(find), Some(apply), Some(read)) =
+        (ops.find_region, ops.apply_edit, ops.range_edits)
+    else {
+        return false;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } || state.locked {
+        return false;
+    }
+    let Some(before) = read_range_edits(read, host, track_id, region_id) else {
+        return false;
+    };
+    if before.is_empty() {
+        return false;
+    }
+    if !unsafe { apply(host, &range_edit_payload(track_id, region_id, state, &[])) } {
+        return false;
+    }
+    record_performed(
+        ops,
+        host,
+        b"Clear Region Range Edits\0",
+        &[range_edit_payload(track_id, region_id, state, &before)],
+        &[range_edit_payload(track_id, region_id, state, &[])],
+    );
+    true
+}
+
+/// Adds or replaces the range edit covering `[start, end)`.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect, and the
+/// installed table must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_range_edit_set(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start: u64,
+    end: u64,
+    gain: f32,
+    fade_in: u64,
+    fade_out: u64,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    set_range_edit_with(
+        &ops, host, track_id, region_id, start, end, gain, fade_in, fade_out,
+    )
+}
+
+/// Removes every range edit from one region, recording the previous list.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect, and the
+/// installed table must outlive the call.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_range_edits_clear(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    clear_range_edits_with(&ops, host, track_id, region_id)
 }
 
 /// Moves one region to `start` through an explicit host table.
@@ -1783,10 +1987,12 @@ use crate::audio_note_curve::{
         redo: Vec<HirariRegionEditPayload>,
         undo_name: String,
         coalesce: bool,
+        perform: bool,
         note_store: usize,
         warp_markers: Vec<HirariWarpMarker>,
         undo_markers: Vec<HirariWarpMarker>,
         redo_markers: Vec<HirariWarpMarker>,
+        range_edits: Vec<NativeRangeEdit>,
     }
 
     static FAKE: OnceLock<Mutex<FakeHost>> = OnceLock::new();
@@ -1895,9 +2101,11 @@ use crate::audio_note_curve::{
         redo: *const HirariRegionEditPayload,
         redo_count: usize,
         coalesce: bool,
+        perform: bool,
     ) -> bool {
         let mut guard = fake().lock().unwrap();
         guard.coalesce = coalesce;
+        guard.perform = perform;
         guard.undo_name = unsafe { std::ffi::CStr::from_ptr(name) }
             .to_string_lossy()
             .into_owned();
@@ -1923,6 +2131,22 @@ use crate::audio_note_curve::{
         guard.undo = undo;
         guard.redo = redo;
         true
+    }
+
+    unsafe extern "C" fn fake_range_edits(
+        _host: *mut c_void,
+        _track_id: u32,
+        _region_id: u32,
+        out: *mut NativeRangeEdit,
+        capacity: usize,
+    ) -> usize {
+        let guard = fake().lock().unwrap();
+        let count = guard.range_edits.len();
+        if out.is_null() || capacity < count {
+            return count;
+        }
+        unsafe { ptr::copy_nonoverlapping(guard.range_edits.as_ptr(), out, count) };
+        count
     }
 
     unsafe extern "C" fn fake_markers(
@@ -1951,6 +2175,7 @@ use crate::audio_note_curve::{
             snapshot_region: Some(fake_snapshot),
             release_snapshot: Some(fake_release),
             warp_markers: Some(fake_markers),
+            range_edits: Some(fake_range_edits),
             ..Default::default()
         }
     }
@@ -2548,5 +2773,74 @@ use crate::audio_note_curve::{
         assert_eq!(guard.applied[0].blob_len, 0);
         assert_eq!(guard.undo_markers.len(), 2);
         assert!(guard.redo_markers.is_empty());
+    }
+
+    #[test]
+    fn range_edit_upsert_stores_the_list_and_performs_the_undo_pair() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            ..Default::default()
+        });
+
+        assert!(set_range_edit_with(&ops, host, 1, 2, 10, 50, 0.5, 2, 2));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_RANGE_EDITS);
+        assert_eq!(guard.applied[0].blob_len, std::mem::size_of::<NativeRangeEdit>());
+        assert_eq!(guard.undo_name, "Region Range Edit");
+        assert!(guard.perform, "range edits keep the native perform path");
+        assert!(guard.coalesce);
+        assert_eq!(guard.undo[0].blob_len, 0);
+        assert_eq!(guard.redo[0].blob_len, std::mem::size_of::<NativeRangeEdit>());
+    }
+
+    #[test]
+    fn range_edit_rejects_out_of_bounds_and_locked_regions() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            ..Default::default()
+        });
+
+        assert!(!set_range_edit_with(&ops, host, 1, 2, 10, 101, 0.5, 2, 2));
+        assert!(!set_range_edit_with(&ops, host, 1, 2, 10, 50, f32::NAN, 2, 2));
+        fake().lock().unwrap().state.locked = true;
+        assert!(!set_range_edit_with(&ops, host, 1, 2, 10, 50, 0.5, 2, 2));
+        assert!(fake().lock().unwrap().applied.is_empty());
+    }
+
+    #[test]
+    fn clearing_range_edits_records_the_previous_list() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            ..Default::default()
+        });
+        fake().lock().unwrap().range_edits = vec![NativeRangeEdit {
+            start: 10,
+            end: 50,
+            gain: 0.5,
+            fade_in: 2,
+            fade_out: 2,
+        }];
+
+        assert!(clear_range_edits_with(&ops, host, 1, 2));
+
+        {
+            let guard = fake().lock().unwrap();
+            assert_eq!(guard.undo_name, "Clear Region Range Edits");
+            assert_eq!(guard.undo[0].blob_len, std::mem::size_of::<NativeRangeEdit>());
+            assert_eq!(guard.redo[0].blob_len, 0);
+        }
+        fake().lock().unwrap().range_edits.clear();
+        assert!(!clear_range_edits_with(&ops, host, 1, 2));
     }
 }

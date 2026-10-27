@@ -21,6 +21,8 @@ struct OwnedRegionEdit {
     std::shared_ptr<Region> regionSnapshot;
     // Warp markers owned by a Geometry or Markers undo entry.
     std::shared_ptr<std::vector<HirariWarpMarker>> warpMarkers;
+    // Range edits owned by a RangeEdits undo entry.
+    std::shared_ptr<std::vector<HirariRegionRangeEdit>> rangeEdits;
 };
 
 // Packs a region's note table into a fresh Rust-owned store, so an analysis
@@ -127,6 +129,22 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
             applied = track->setRegionWarpMarkers(payload->regionId, std::move(replacement));
             break;
         }
+        case kHirariRegionEditRangeEdits: {
+            if (payload->blobLen % sizeof(HirariRegionRangeEdit) != 0) break;
+            const auto count = payload->blobLen / sizeof(HirariRegionRangeEdit);
+            if (count != 0 && payload->blob == nullptr) break;
+            const auto* edits = reinterpret_cast<const HirariRegionRangeEdit*>(payload->blob);
+            std::vector<Region::RangeEdit> replacement;
+            replacement.reserve(count);
+            for (size_t index = 0; index < count; ++index) {
+                replacement.push_back({edits[index].start, edits[index].end,
+                                       edits[index].gain, edits[index].fade_in,
+                                       edits[index].fade_out});
+            }
+            applied = track->replaceRegionRangeEdits(payload->regionId,
+                                                     std::move(replacement), false);
+            break;
+        }
         default:
             applied = track->applyRegionScalarFields(payload->regionId, payload->state);
             break;
@@ -178,9 +196,32 @@ size_t HirariUnifiedEngine::regionHostWarpMarkers(void* host, uint32_t trackId,
     return 0;
 }
 
+size_t HirariUnifiedEngine::regionHostRangeEdits(void* host, uint32_t trackId,
+                                                 uint32_t regionId,
+                                                 HirariRegionRangeEdit* out,
+                                                 size_t capacity) {
+    if (!host) return 0;
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+    for (const auto& track : engine->m_tracks) {
+        if (!track || track->getId() != trackId) continue;
+        for (const auto& region : track->getRegions()) {
+            if (region.id != regionId) continue;
+            if (out && capacity >= region.rangeEdits.size()) {
+                for (size_t index = 0; index < region.rangeEdits.size(); ++index) {
+                    const auto& edit = region.rangeEdits[index];
+                    out[index] = {edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut};
+                }
+            }
+            return region.rangeEdits.size();
+        }
+        return 0;
+    }
+    return 0;
+}
+
 void* HirariUnifiedEngine::regionHostRetainAudio(void* host, uint32_t trackId,
-                                                 uint32_t regionId) {
-    if (!host) return nullptr;
+                                                 uint32_t regionId) {    if (!host) return nullptr;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     for (const auto& track : engine->m_tracks) {
@@ -466,7 +507,7 @@ bool HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
                                                const HirariRegionEditPayload* undo,
                                                size_t undoCount,
                                                const HirariRegionEditPayload* redo,
-                                               size_t redoCount, bool coalesce) {
+                                               size_t redoCount, bool coalesce, bool perform) {
     if (!host || !name) return false;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     auto capture = [](const HirariRegionEditPayload* source, size_t count) {
@@ -496,6 +537,14 @@ bool HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
                     markers, markers + count);
                 entry.payload.blobLen = count * sizeof(HirariWarpMarker);
             }
+            if (source[index].op == kHirariRegionEditRangeEdits && source[index].blob) {
+                const auto count = source[index].blobLen / sizeof(HirariRegionRangeEdit);
+                const auto* edits =
+                    reinterpret_cast<const HirariRegionRangeEdit*>(source[index].blob);
+                entry.rangeEdits = std::make_shared<std::vector<HirariRegionRangeEdit>>(
+                    edits, edits + count);
+                entry.payload.blobLen = count * sizeof(HirariRegionRangeEdit);
+            }
             entries.push_back(std::move(entry));
         }
         return entries;
@@ -517,9 +566,21 @@ bool HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
                 payload.blob =
                     reinterpret_cast<const uint8_t*>(entry.warpMarkers->data());
             }
+            if (entry.rangeEdits) {
+                payload.blob =
+                    reinterpret_cast<const uint8_t*>(entry.rangeEdits->data());
+            }
             (void)HirariUnifiedEngine::regionHostApply(host, &payload);
         }
     };
+    if (perform) {
+        // The legacy perform path applied the edit through the redo callback,
+        // so replaying it here is the same contract, not an extra mutation.
+        engine->m_undoManager.performAction(
+            name, [applyAll, undoCopy] { applyAll(undoCopy); },
+            [applyAll, redoCopy] { applyAll(redoCopy); });
+        return true;
+    }
     // Rust already applied the edit, so record the entry without replaying the
     // redo a second time.
     return engine->m_undoManager.recordAppliedAction(
@@ -540,6 +601,7 @@ const HirariRegionHostOps kRegionEditHostOps = {
     &HirariUnifiedEngine::regionHostSnapshot,
     &HirariUnifiedEngine::regionHostReleaseSnapshot,
     &HirariUnifiedEngine::regionHostWarpMarkers,
+    &HirariUnifiedEngine::regionHostRangeEdits,
     &HirariUnifiedEngine::regionHostRetainAudio,
     &HirariUnifiedEngine::regionHostAudioView,
     &HirariUnifiedEngine::regionHostReleaseAudio,

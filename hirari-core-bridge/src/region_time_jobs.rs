@@ -1211,6 +1211,7 @@ mod tests {
         redo: *const HirariRegionEditPayload,
         redo_count: usize,
         _coalesce: bool,
+        _perform: bool,
     ) -> bool {
         let name = unsafe { std::ffi::CStr::from_ptr(name) }
             .to_string_lossy()

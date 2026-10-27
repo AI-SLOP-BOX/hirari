@@ -568,57 +568,29 @@
         return true;
     }
 
-    bool setRegionRangeEdit(uint32_t rid, uint64_t start, uint64_t end,
-                            float gain, uint64_t fadeIn, uint64_t fadeOut) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid || region.locked) continue;
-            if (!adoptRangeEdits(region.rangeEdits, region.rangeEdits, 1u,
-                                 region.len, start, end, gain, fadeIn, fadeOut)) {
-                return false;
-            }
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-
-    bool clearRegionRangeEdit(uint32_t rid, uint64_t start, uint64_t end) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid || region.locked) continue;
-            if (!adoptRangeEdits(region.rangeEdits, region.rangeEdits, 2u,
-                                 region.len, start, end)) {
-                return false;
-            }
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-
     std::vector<Region::RangeEdit> regionRangeEdits(uint32_t rid) const {
         for (const auto& region : m_regions) if (region.id == rid) return region.rangeEdits;
         return {};
     }
 
-    bool replaceRegionRangeEdits(uint32_t rid, std::vector<Region::RangeEdit> edits) {
+    bool replaceRegionRangeEdits(uint32_t rid, std::vector<Region::RangeEdit> edits,
+                                 bool validate = true) {
         if (edits.size() > 4096) return false;
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid || region.locked) continue;
-            if (!adoptRangeEdits(region.rangeEdits, edits, 3u, region.len)) return false;
+            if (validate) {
+                if (!adoptRangeEdits(region.rangeEdits, edits, 3u, region.len)) return false;
+            } else {
+                // Rust already produced this sorted, bounded list; storing it
+                // verbatim is the old direct-setter path, not a re-admission.
+                region.rangeEdits = std::move(edits);
+            }
             publishRegionSnapshot();
             return true;
         }
         return false;
-    }
-
-    bool clearRegionRangeEdits(uint32_t rid) {
-        return replaceRegionRangeEdits(rid, {});
     }
 
     bool setRegionPitchPreserveWarp(uint32_t rid, bool enabled) {

@@ -373,10 +373,11 @@
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) const { return m_engine && m_engine->set_region_fades(tid, rid, fadeIn, fadeOut); }
     bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
                                float gain, uint64_t fadeIn, uint64_t fadeOut) const {
-        return m_engine && m_engine->set_region_range_edit(tid, rid, start, end, gain, fadeIn, fadeOut);
+        return m_engine && hirari_region_edit_range_edit_set(m_engine.get(), tid, rid, start,
+                                                            end, gain, fadeIn, fadeOut);
     }
     bool clear_region_range_edits(uint32_t tid, uint32_t rid) const {
-        return m_engine && m_engine->clear_region_range_edits(tid, rid);
+        return m_engine && hirari_region_edit_range_edits_clear(m_engine.get(), tid, rid);
     }
     bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) const { return m_engine && m_engine->set_region_reverse(tid, rid, reverse); }
     bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio) const { return m_engine && m_engine->set_region_warp_ratio(tid, rid, ratio); }

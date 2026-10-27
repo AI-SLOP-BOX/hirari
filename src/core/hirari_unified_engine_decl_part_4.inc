@@ -29,9 +29,6 @@ public:
     void set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
                        uint64_t startSample, uint64_t lengthSamples);
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut);
-    bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
-                               float gain, uint64_t fadeIn, uint64_t fadeOut);
-    bool clear_region_range_edits(uint32_t tid, uint32_t rid);
     bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse);
     bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio);
     bool set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled);

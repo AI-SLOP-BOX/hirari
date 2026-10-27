@@ -48,37 +48,6 @@ bool HirariUnifiedEngine::set_region_fades(uint32_t tid, uint32_t rid, float fad
     return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarFades, fadeIn, fadeOut);
 }
 
-bool HirariUnifiedEngine::set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start,
-                                              uint64_t end, float gain, uint64_t fadeIn,
-                                              uint64_t fadeOut) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() != tid) continue;
-        const auto before = track->regionRangeEdits(rid);
-        if (!track->setRegionRangeEdit(rid, start, end, gain, fadeIn, fadeOut)) return false;
-        auto after = track->regionRangeEdits(rid);
-        m_undoManager.performAction("Region Range Edit",
-            [track, rid, before] { track->replaceRegionRangeEdits(rid, before); },
-            [track, rid, after] { track->replaceRegionRangeEdits(rid, after); });
-        return true;
-    }
-    return false;
-}
-
-bool HirariUnifiedEngine::clear_region_range_edits(uint32_t tid, uint32_t rid) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() != tid) continue;
-        const auto before = track->regionRangeEdits(rid);
-        if (before.empty() || !track->clearRegionRangeEdits(rid)) return false;
-        m_undoManager.performAction("Clear Region Range Edits",
-            [track, rid, before] { track->replaceRegionRangeEdits(rid, before); },
-            [track, rid] { track->clearRegionRangeEdits(rid); });
-        return true;
-    }
-    return false;
-}
-
 bool HirariUnifiedEngine::set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) {
     return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarReverse,
                                      reverse ? 1.0f : 0.0f, 0.0f);
