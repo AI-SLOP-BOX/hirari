@@ -572,6 +572,61 @@ void HirariUnifiedEngine::installPluginEditHost() {
             };
             engine->m_undoManager.recordAppliedAction("Set Plugin Parameter", undo, redo);
         },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t* type,
+           uint8_t* out, size_t capacity) -> size_t {
+            if (!host) return std::numeric_limits<size_t>::max();
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (const auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                const auto& types = track->getPluginTypes();
+                const auto states = track->getPluginStates();
+                if (pluginIndex >= types.size() || pluginIndex >= states.size())
+                    return std::numeric_limits<size_t>::max();
+                const auto& state = states[pluginIndex];
+                if (type) *type = types[pluginIndex];
+                if (out && capacity >= state.size() && !state.empty()) {
+                    std::memcpy(out, state.data(), state.size());
+                }
+                return state.size();
+            }
+            return std::numeric_limits<size_t>::max();
+        },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* state,
+           size_t size, const uint8_t* before, size_t beforeSize, bool record) -> bool {
+            if (!host || (size != 0 && !state)) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::shared_ptr<Track> target;
+            bool found = false;
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                for (auto& track : engine->m_tracks) {
+                    if (!track || track->getId() != trackId) continue;
+                    found = true;
+                    std::vector<uint8_t> replacement;
+                    if (size != 0) replacement.assign(state, state + size);
+                    if (!track->setPluginState(pluginIndex, replacement)) return false;
+                    if (record) target = track;
+                    break;
+                }
+            }
+            if (!found) return false;
+            if (!record) return true;
+            // The state is already stored; the entry only replays the two
+            // snapshots, exactly as the engine-owned lambdas did.
+            std::vector<uint8_t> beforeState;
+            std::vector<uint8_t> afterState;
+            if (beforeSize != 0) beforeState.assign(before, before + beforeSize);
+            if (size != 0) afterState.assign(state, state + size);
+            const auto undo = [target, pluginIndex, beforeState]() {
+                (void)target->setPluginState(pluginIndex, beforeState);
+            };
+            const auto redo = [target, pluginIndex, afterState]() {
+                (void)target->setPluginState(pluginIndex, afterState);
+            };
+            engine->m_undoManager.recordAppliedAction("Load Plugin Preset", undo, redo);
+            return true;
+        },
     };
     hirari_plugin_edit_host_install(&ops);
 }

@@ -74,6 +74,13 @@ production support.
   cancellation all have one implementation in
   `hirari-core-bridge/src/project_layout.rs`. `get_project_generation` now
   fingerprints the Rust buffer instead of streaming through a C++ streambuf.
+- Plugin preset save and load now run through the Rust plugin-edit host. Rust
+  checks the preset's plugin type against the target plugin, copies the current
+  state for the undo entry, applies the loaded bytes and records one
+  `Load Plugin Preset` action through the host; saving validates the path,
+  plugin and non-empty state before calling the preset writer. C++ keeps the
+  track lookup and state storage behind two host callbacks, and the engine
+  methods are one-line delegations.
 - Splitting and duplicating regions now run through the Rust region-edit host.
   Rust validates the split position, builds the split plan and the windowed
   note tables, applies both sides through payload ops, and records whole-region

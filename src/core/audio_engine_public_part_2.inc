@@ -57,16 +57,22 @@
     rust::Vec<uint8_t> get_plugin_state(uint32_t tid, uint32_t pluginIndex) const {
         rust::Vec<uint8_t> out;
         if (!m_engine) return out;
-        for (const auto byte : m_engine->get_plugin_state(tid, pluginIndex)) out.push_back(byte);
+        const size_t required = hirari_plugin_edit_get_state(
+            m_engine.get(), tid, pluginIndex, nullptr, 0);
+        if (required == 0) return out;
+        std::vector<uint8_t> state(required);
+        if (hirari_plugin_edit_get_state(m_engine.get(), tid, pluginIndex,
+                                         state.data(), required) != required) {
+            return out;
+        }
+        out.reserve(required);
+        for (const auto byte : state) out.push_back(byte);
         return out;
     }
     bool set_plugin_state(uint32_t tid, uint32_t pluginIndex,
                           rust::Slice<const uint8_t> state) const {
-        if (!m_engine) return false;
-        std::vector<uint8_t> bytes;
-        bytes.reserve(state.size());
-        for (const auto byte : state) bytes.push_back(byte);
-        return m_engine->set_plugin_state(tid, pluginIndex, bytes);
+        return m_engine && hirari_plugin_edit_set_state(
+                               m_engine.get(), tid, pluginIndex, state.data(), state.size());
     }
     bool remove_plugin(uint32_t tid, uint32_t pluginIndex) const { return m_engine && m_engine->remove_plugin(tid, pluginIndex); }
     bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex) const { return m_engine && m_engine->move_plugin(tid, fromIndex, toIndex); }
@@ -185,10 +191,14 @@
         return rust::String(m_engine ? m_engine->get_plugin_parameter_name(tid, pluginIndex, parameterId) : "");
     }
     bool save_plugin_preset(uint32_t tid, uint32_t pluginIndex, rust::Str path) const {
-        return m_engine && m_engine->save_plugin_preset(tid, pluginIndex, std::string(path));
+        return m_engine && hirari_plugin_edit_save_preset(
+                               m_engine.get(), tid, pluginIndex,
+                               reinterpret_cast<const uint8_t*>(path.data()), path.size());
     }
     bool load_plugin_preset(uint32_t tid, uint32_t pluginIndex, rust::Str path) const {
-        return m_engine && m_engine->load_plugin_preset(tid, pluginIndex, std::string(path));
+        return m_engine && hirari_plugin_edit_load_preset(
+                               m_engine.get(), tid, pluginIndex,
+                               reinterpret_cast<const uint8_t*>(path.data()), path.size());
     }
     bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) const {
         return m_engine && m_engine->set_plugin_bypass(tid, pluginIndex, bypassed);

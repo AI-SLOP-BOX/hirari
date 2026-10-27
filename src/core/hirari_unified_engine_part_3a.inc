@@ -42,29 +42,6 @@ bool HirariUnifiedEngine::add_plugin(uint32_t tid, uint32_t pluginType) {
     return true;
 }
 
-std::vector<uint8_t> HirariUnifiedEngine::get_plugin_state(
-    uint32_t tid, uint32_t pluginIndex) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() == tid) {
-            const auto states = track->getPluginStates();
-            return pluginIndex < states.size() ? states[pluginIndex] : std::vector<uint8_t>{};
-        }
-    }
-    return {};
-}
-
-bool HirariUnifiedEngine::set_plugin_state(
-    uint32_t tid, uint32_t pluginIndex, const std::vector<uint8_t>& state) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() == tid) {
-            return track->setPluginState(pluginIndex, state);
-        }
-    }
-    return false;
-}
-
 bool HirariUnifiedEngine::remove_plugin(uint32_t tid, uint32_t pluginIndex) {
     std::shared_ptr<Track> target;
     Track::PluginSnapshot snapshot{};
@@ -391,55 +368,6 @@ std::string HirariUnifiedEngine::get_plugin_parameter_name(uint32_t tid, uint32_
         if (track && track->getId() == tid)
             return track->getPluginParameterName(pluginIndex, parameterId);
     return {};
-}
-bool HirariUnifiedEngine::save_plugin_preset(uint32_t tid, uint32_t pluginIndex,
-                                           std::string_view path) const {
-    if (path.empty()) return false;
-    for (const auto& track : get_tracks_snapshot()) {
-        if (!track || track->getId() != tid) continue;
-        const auto states = track->getPluginStates();
-        const auto& pluginTypes = track->getPluginTypes();
-        if (pluginIndex >= states.size() || pluginIndex >= pluginTypes.size() || states[pluginIndex].empty()) return false;
-        const uint32_t pluginType = pluginTypes[pluginIndex];
-        return hirari_plugin_preset_file_save(
-            reinterpret_cast<const uint8_t*>(path.data()), path.size(), pluginType,
-            states[pluginIndex].data(), states[pluginIndex].size());
-    }
-    return false;
-}
-bool HirariUnifiedEngine::load_plugin_preset(uint32_t tid, uint32_t pluginIndex,
-                                           std::string_view path) {
-    void* rawPreset = hirari_plugin_preset_file_load(
-        reinterpret_cast<const uint8_t*>(path.data()), path.size());
-    if (!rawPreset) return false;
-    std::unique_ptr<void, void (*)(void*)> preset(rawPreset, hirari_plugin_preset_file_free);
-    const uint32_t pluginType = hirari_plugin_preset_file_type(preset.get());
-    const uint8_t* stateData = hirari_plugin_preset_file_data(preset.get());
-    const size_t stateSize = hirari_plugin_preset_file_size(preset.get());
-    if (!stateData || stateSize == 0) return false;
-    std::vector<uint8_t> state(stateData, stateData + stateSize);
-    std::shared_ptr<Track> target;
-    std::vector<uint8_t> before;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (const auto& track : m_tracks) {
-            if (!track || track->getId() != tid || pluginIndex >= track->getPluginTypes().size() ||
-                track->getPluginTypes()[pluginIndex] != pluginType) continue;
-            target = track;
-            before = track->getPluginStates()[pluginIndex];
-            if (!track->setPluginState(pluginIndex, state)) return false;
-            break;
-        }
-    }
-    if (!target) return false;
-    const auto undo = [target, pluginIndex, before]() {
-        (void)target->setPluginState(pluginIndex, before);
-    };
-    const auto redo = [target, pluginIndex, state]() {
-        (void)target->setPluginState(pluginIndex, state);
-    };
-    m_undoManager.recordAppliedAction("Load Plugin Preset", undo, redo);
-    return true;
 }
 bool HirariUnifiedEngine::set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) {
     if (!hirari_plugin_edit_set_bypass(this, tid, pluginIndex, bypassed)) return false;

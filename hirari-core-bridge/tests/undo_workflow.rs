@@ -557,3 +557,63 @@ fn split_and_duplicate_regions_round_trip_through_undo() {
     core.redo();
     assert_eq!(regions(), duplicated);
 }
+
+/// Preset save/load policy now lives in the Rust plugin-edit host: it checks
+/// the plugin type, swaps the stored state and records the before/after pair.
+/// A mismatched or missing preset must leave the plugin and the history alone.
+#[test]
+fn plugin_preset_load_swaps_state_and_undoes_through_the_plugin_host() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    assert!(core.add_plugin(track_id, 0));
+
+    assert!(core.set_plugin_parameter(track_id, 0, 0, 0.3));
+    let saved = std::env::temp_dir().join(format!(
+        "hirari-preset-{}-{}.hrp",
+        std::process::id(),
+        track_id
+    ));
+    let saved_path = saved.to_str().unwrap().to_owned();
+    assert!(core.save_plugin_preset(track_id, 0, &saved_path));
+    assert!(saved.exists(), "save must write the preset file");
+
+    assert!(core.set_plugin_parameter(track_id, 0, 0, 0.8));
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.8).abs() < 0.001);
+
+    assert!(core.load_plugin_preset(track_id, 0, &saved_path));
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.3).abs() < 0.01);
+    core.undo();
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.8).abs() < 0.001);
+    core.redo();
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.3).abs() < 0.01);
+
+    // A preset for another plugin type is rejected before anything changes,
+    // and the rejected load must not add a history entry.
+    let mismatched = std::env::temp_dir().join(format!(
+        "hirari-preset-mismatch-{}-{}.hrp",
+        std::process::id(),
+        track_id
+    ));
+    let mismatched_path = mismatched.to_str().unwrap().to_owned();
+    assert!(unsafe {
+        hirari_core_bridge::plugin_preset_file::hirari_plugin_preset_file_save(
+            mismatched_path.as_ptr(),
+            mismatched_path.len(),
+            1,
+            [9_u8, 9, 9].as_ptr(),
+            3,
+        )
+    });
+    assert!(!core.load_plugin_preset(track_id, 0, &mismatched_path));
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.3).abs() < 0.01);
+    core.undo();
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.8).abs() < 0.001);
+
+    assert!(!core.load_plugin_preset(track_id, 0, ""));
+    assert!(!core.load_plugin_preset(track_id, 9, &saved_path));
+    assert!(!core.save_plugin_preset(track_id, 0, ""));
+
+    let _ = std::fs::remove_file(saved);
+    let _ = std::fs::remove_file(mismatched);
+}

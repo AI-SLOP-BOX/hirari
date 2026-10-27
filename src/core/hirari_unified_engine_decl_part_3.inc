@@ -37,9 +37,6 @@
     uint8_t complete_region_import(uint64_t ticket);
     bool replace_region_audio(uint32_t trackId, uint32_t regionId, std::string_view path);
     bool add_plugin(uint32_t tid, uint32_t pluginType);
-    std::vector<uint8_t> get_plugin_state(uint32_t tid, uint32_t pluginIndex) const;
-    bool set_plugin_state(uint32_t tid, uint32_t pluginIndex,
-                          const std::vector<uint8_t>& state);
     bool remove_plugin(uint32_t tid, uint32_t pluginIndex);
     bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex);
     bool add_sandboxed_plugin(uint32_t tid, std::string_view pluginPath);
@@ -90,8 +87,6 @@
     bool close_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
                                     uint64_t session) const;
     std::string get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId) const;
-    bool save_plugin_preset(uint32_t tid, uint32_t pluginIndex, std::string_view path) const;
-    bool load_plugin_preset(uint32_t tid, uint32_t pluginIndex, std::string_view path);
     bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed);
     bool get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const;
     void set_macro_value(uint32_t macroIndex, float value);

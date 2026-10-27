@@ -179,14 +179,6 @@ extern "C" void hirari_bus_track_set_read_post_fx(void* state, bool post_fx);
 extern "C" bool hirari_bus_track_fetch_audio(
     const void* track_state, void* bus_audio_state,
     float* left, float* right, uint32_t frames);
-extern "C" bool hirari_plugin_preset_file_save(
-    const uint8_t* path, size_t path_length, uint32_t plugin_type,
-    const uint8_t* state, size_t state_length);
-extern "C" void* hirari_plugin_preset_file_load(const uint8_t* path, size_t path_length);
-extern "C" uint32_t hirari_plugin_preset_file_type(const void* preset);
-extern "C" const uint8_t* hirari_plugin_preset_file_data(const void* preset);
-extern "C" size_t hirari_plugin_preset_file_size(const void* preset);
-extern "C" void hirari_plugin_preset_file_free(void* preset);
 extern "C" void* hirari_plugin_parameter_snapshot_create();
 extern "C" void hirari_plugin_parameter_snapshot_destroy(void* handle);
 extern "C" bool hirari_plugin_parameter_snapshot_set(const void* handle, uint32_t parameter_id, double value);
@@ -1625,7 +1617,7 @@ extern "C" bool hirari_control_edit_bind_midi_cc14(
     void* host, uint8_t channel, uint16_t controller, uint32_t macroIndex,
     float minimum, float maximum, float curve, bool pickup);
 
-// Plugin-chain edit policy (bypass and reordering).
+// Plugin-chain edit policy (bypass, reordering, parameters and presets).
 struct HirariPluginEditHostOps {
     int32_t (*queryBypass)(void*, uint32_t, uint32_t) = nullptr;
     bool (*applyBypass)(void*, uint32_t, uint32_t, bool) = nullptr;
@@ -1635,6 +1627,13 @@ struct HirariPluginEditHostOps {
     bool (*queryParameter)(void*, uint32_t, uint32_t, uint32_t, float*) = nullptr;
     bool (*applyParameter)(void*, uint32_t, uint32_t, uint32_t, float) = nullptr;
     void (*recordParameterUndo)(void*, uint32_t, uint32_t, uint32_t, float, float) = nullptr;
+    // Reads a plugin's type and state; returns SIZE_MAX when it is missing,
+    // otherwise the state length.
+    size_t (*readPlugin)(void*, uint32_t, uint32_t, uint32_t*, uint8_t*, size_t) = nullptr;
+    // Stores a plugin state and, when `record` is set, records the preset
+    // undo entry from `before` and `state`.
+    bool (*applyPluginState)(void*, uint32_t, uint32_t, const uint8_t*, size_t,
+                             const uint8_t*, size_t, bool) = nullptr;
 };
 
 extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* ops);
@@ -1646,6 +1645,14 @@ extern "C" bool hirari_plugin_edit_set_parameter(
     void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
 extern "C" bool hirari_plugin_edit_set_parameter_without_undo(
     void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
+extern "C" bool hirari_plugin_edit_load_preset(
+    void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* path, size_t pathLength);
+extern "C" bool hirari_plugin_edit_save_preset(
+    void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* path, size_t pathLength);
+extern "C" size_t hirari_plugin_edit_get_state(
+    void* host, uint32_t trackId, uint32_t pluginIndex, uint8_t* out, size_t capacity);
+extern "C" bool hirari_plugin_edit_set_state(
+    void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* state, size_t size);
 extern "C" bool hirari_plugin_sandbox_path_supported(const uint8_t* path, size_t pathLength);
 
 extern "C" void* hirari_send_pdc_manager_create();
