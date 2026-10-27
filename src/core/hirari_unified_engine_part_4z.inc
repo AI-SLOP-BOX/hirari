@@ -509,6 +509,53 @@ void* HirariUnifiedEngine::regionHostNoteSnapshot(void* trackHandle, uint32_t re
     }
 }
 
+uint32_t HirariUnifiedEngine::regionHostClone(void* host, uint32_t trackId,
+                                              uint32_t regionId,
+                                              const HirariRegionState* state) {
+    if (!host) return 0;
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+    for (auto& track : engine->m_tracks) {
+        if (!track || track->getId() != trackId) continue;
+        for (const auto& region : track->getRegions()) {
+            if (region.id != regionId) continue;
+            Region copy = region;
+            if (state) copy.applyEditableState(*state);
+            copy.id = engine->allocateRegionIdLocked();
+            if (copy.id == 0) return 0;
+            track->addRegion(copy);
+            return copy.id;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+size_t HirariUnifiedEngine::regionHostCompRanges(void* host, uint32_t trackId,
+                                                 uint32_t regionId,
+                                                 HirariRegionCompRange* out, size_t capacity,
+                                                 bool* managed) {
+    if (!host) return 0;
+    auto* engine = static_cast<HirariUnifiedEngine*>(host);
+    std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+    for (const auto& track : engine->m_tracks) {
+        if (!track || track->getId() != trackId) continue;
+        for (const auto& region : track->getRegions()) {
+            if (region.id != regionId) continue;
+            if (managed) *managed = region.compManaged;
+            if (out && capacity >= region.compRanges.size()) {
+                for (size_t index = 0; index < region.compRanges.size(); ++index) {
+                    const auto& range = region.compRanges[index];
+                    out[index] = {range.start, range.end, range.fadeIn, range.fadeOut};
+                }
+            }
+            return region.compRanges.size();
+        }
+        return 0;
+    }
+    return 0;
+}
+
 size_t HirariUnifiedEngine::regionHostListSyncGroup(void* host, uint32_t group,
                                                     HirariRegionGroupMember* out,
                                                     size_t capacity) {
@@ -663,6 +710,8 @@ const HirariRegionHostOps kRegionEditHostOps = {
     &HirariUnifiedEngine::regionHostPitchAnalyze,
     &HirariUnifiedEngine::regionHostPitchFinish,
     &HirariUnifiedEngine::regionHostNoteSnapshot,
+    &HirariUnifiedEngine::regionHostClone,
+    &HirariUnifiedEngine::regionHostCompRanges,
 };
 
 [[maybe_unused]] const bool kRegionEditHostInstalled = [] {

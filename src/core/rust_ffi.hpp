@@ -564,44 +564,17 @@ struct HirariRegionState {
     bool pitchPreserveWarp = false;
 };
 
-// Split/duplicate policy is Rust-owned. C++ keeps the payload (buffers, cache,
-// note-store handle) and applies the returned state; these calls never touch
-// the audio thread.
+// Split/duplicate policy is Rust-owned, including the note-table split and
+// the undo capture. C++ keeps the payload (buffers, cache, note-store handle)
+// and clones/stores it; these calls never touch the audio thread.
 //
-// Mirrors `hirari-core-bridge/src/region_split.rs` byte for byte.
-struct HirariRegionSplitInput {
-    HirariRegionState state;
-    uint64_t splitOffset = 0;
-    const HirariWarpMarker* markers = nullptr;
-    size_t markerCount = 0;
-    const HirariRegionRangeEdit* ranges = nullptr;
-    size_t rangeCount = 0;
-    const HirariRegionCompRange* compRanges = nullptr;
-    size_t compRangeCount = 0;
-};
-
-struct HirariRegionSplitOutput {
-    HirariRegionState left;
-    HirariRegionState right;
-    HirariWarpMarker* leftMarkers = nullptr;
-    size_t leftMarkerCount = 0;
-    HirariWarpMarker* rightMarkers = nullptr;
-    size_t rightMarkerCount = 0;
-    HirariRegionRangeEdit* leftRanges = nullptr;
-    size_t leftRangeCount = 0;
-    HirariRegionRangeEdit* rightRanges = nullptr;
-    size_t rightRangeCount = 0;
-    HirariRegionCompRange* leftCompRanges = nullptr;
-    size_t leftCompRangeCount = 0;
-    HirariRegionCompRange* rightCompRanges = nullptr;
-    size_t rightCompRangeCount = 0;
-};
-
-extern "C" bool hirari_region_split_plan(
-    const HirariRegionSplitInput* input, HirariRegionSplitOutput* out);
-extern "C" void hirari_region_split_plan_free(HirariRegionSplitOutput* out);
-extern "C" bool hirari_region_duplicate_state(
-    const HirariRegionState* state, uint64_t start_sample, HirariRegionState* out);
+// Splits a region at `splitBeat` (an absolute timeline sample position) and
+// returns the new right-hand id, or 0.
+extern "C" uint32_t hirari_region_split(void* host, uint32_t trackId,
+                                        uint32_t regionId, double splitBeat);
+// Duplicates a region at `startSample` and returns the new id, or 0.
+extern "C" uint32_t hirari_region_duplicate(void* host, uint32_t trackId,
+                                            uint32_t regionId, uint64_t startSample);
 
 // Pre-v42 region hydration policy is Rust-owned: the source-rate migration
 // (older documents stored native source frames as timeline frames) and the
@@ -807,6 +780,16 @@ struct HirariRegionHostOps {
     void (*pitchFinish)(void* trackHandle) = nullptr;
     // Copies a region's note table into an owned Rust store handle.
     void* (*noteSnapshot)(void* trackHandle, uint32_t regionId) = nullptr;
+    // Clones a region under a fresh id, optionally replacing its editable
+    // state first, and adds the copy. Returns 0 on failure.
+    uint32_t (*cloneRegion)(void* host, uint32_t trackId, uint32_t regionId,
+                            const HirariRegionState* state) = nullptr;
+    // Copies a region's comp ranges into `out` and reports the managed flag.
+    // Returns the total count, with the same count-then-copy contract as the
+    // range-edit listing.
+    size_t (*compRanges)(void* host, uint32_t trackId, uint32_t regionId,
+                         HirariRegionCompRange* out, size_t capacity,
+                         bool* managed) = nullptr;
 };
 
 extern "C" void hirari_region_host_install(const HirariRegionHostOps* ops);

@@ -74,6 +74,14 @@ production support.
   cancellation all have one implementation in
   `hirari-core-bridge/src/project_layout.rs`. `get_project_generation` now
   fingerprints the Rust buffer instead of streaming through a C++ streambuf.
+- Splitting and duplicating regions now run through the Rust region-edit host.
+  Rust validates the split position, builds the split plan and the windowed
+  note tables, applies both sides through payload ops, and records whole-region
+  restore snapshots for undo; the duplicate policy and its undo capture moved
+  with it. C++ keeps the payload and only clones/stores regions, and
+  `split_region_with_right_id` / `duplicate_region` are one-line delegations.
+  Splitting a region with an empty note table now succeeds instead of failing
+  on the store splitter's empty-clear result.
 - Replacing a region's audio now runs through the Rust region-edit host. Rust
   rejects an empty path, decodes the file, applies the 8 kHz..384 kHz rate
   policy, snapshots the region before and after the swap, and records one

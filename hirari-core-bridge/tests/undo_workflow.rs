@@ -455,3 +455,105 @@ fn replace_region_audio_swaps_the_source_and_round_trips_through_undo() {
 
     let _ = std::fs::remove_file(replacement);
 }
+
+/// Splitting and duplicating a region run through the Rust region-edit host:
+/// the host clones and stores the payload, and the undo entries are whole-region
+/// restore snapshots instead of C++ lambdas. This pins the full path so a
+/// regression in either layer shows up as a missing or extra region.
+#[test]
+fn split_and_duplicate_regions_round_trip_through_undo() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    core.start_recording_capture(48_000.0, 2, 128, 0)
+        .expect("capture must start");
+    let audio = (0..4096)
+        .flat_map(|index| {
+            if index % 2 == 0 {
+                [0.4, -0.4]
+            } else {
+                [0.2, -0.2]
+            }
+        })
+        .collect::<Vec<_>>();
+    core.append_recording_preview(&audio)
+        .expect("capture must accept audio");
+    core.commit_recording_capture_to_track(track_id, None)
+        .expect("capture must publish");
+
+    let regions = || -> Vec<(u32, u64, u64)> {
+        let layout: serde_json::Value = serde_json::from_str(&core.get_project_layout_json())
+            .expect("layout must be valid JSON");
+        layout
+            .as_array()
+            .and_then(|tracks| {
+                tracks.iter().find(|track| {
+                    track.get("id").and_then(serde_json::Value::as_u64) == Some(track_id as u64)
+                })
+            })
+            .and_then(|track| track.get("regions"))
+            .and_then(serde_json::Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|region| {
+                        Some((
+                            region.get("id").and_then(serde_json::Value::as_u64)? as u32,
+                            region.get("start").and_then(serde_json::Value::as_u64)?,
+                            region.get("len").and_then(serde_json::Value::as_u64)?,
+                        ))
+                    })
+                    .collect()
+            })
+            .expect("track must publish its regions")
+    };
+
+    let original = regions();
+    assert_eq!(original.len(), 1);
+    let (region_id, region_start, region_len) = original[0];
+    assert_eq!(region_start, 0);
+    assert!(region_len > 2400);
+
+    // 0.1 beat is the split point; ask the tempo map for the sample position
+    // so the test does not depend on the project sample rate.
+    let split_sample = core.beats_to_samples(0.1);
+    assert!(split_sample > 0 && split_sample < region_len);
+    assert!(core.split_region(track_id, region_id, 0.1));
+    let split = regions();
+    assert_eq!(split.len(), 2);
+    assert_eq!(split.iter().map(|region| region.2).sum::<u64>(), region_len);
+    let right = split
+        .iter()
+        .find(|region| region.0 != region_id)
+        .copied()
+        .expect("split must add a right-hand region");
+    assert_eq!(right.1, split_sample);
+    assert_eq!(right.2, region_len - split_sample);
+
+    core.undo();
+    assert_eq!(regions(), original);
+    core.redo();
+    assert_eq!(regions(), split);
+
+    let duplicate_sample = core.beats_to_samples(0.5);
+    let duplicate_id = core.duplicate_region(track_id, region_id, 0.5);
+    assert_ne!(duplicate_id, 0);
+    let duplicated = regions();
+    assert_eq!(duplicated.len(), split.len() + 1);
+    let copy = duplicated
+        .iter()
+        .find(|region| region.0 == duplicate_id)
+        .copied()
+        .expect("duplicate must be present");
+    assert_eq!(copy.1, duplicate_sample);
+    let left_len = split
+        .iter()
+        .find(|region| region.0 == region_id)
+        .map(|region| region.2)
+        .expect("the left-hand region must remain");
+    assert_eq!(copy.2, left_len);
+    core.undo();
+    assert_eq!(regions(), split);
+    core.redo();
+    assert_eq!(regions(), duplicated);
+}

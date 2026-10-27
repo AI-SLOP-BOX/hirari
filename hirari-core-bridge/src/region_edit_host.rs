@@ -16,7 +16,8 @@ use crate::audio_note_curve::{
     HirariAudioNoteAnchor,
 };
 use crate::vari_audio::{
-    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_remove,
+    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_new,
+    hirari_region_vari_audio_store_remove, hirari_region_vari_audio_store_split,
     hirari_region_vari_audio_store_upsert, hirari_region_vari_audio_store_upsert_anchor,
     hirari_region_vari_audio_store_warp, vari_store_clone, vari_store_release, vari_store_restore,
     vari_store_view, HirariAudioNoteSegment, HirariRegionVariAudioStore,
@@ -33,6 +34,10 @@ use crate::region_processing::{
     hirari_region_set_trim_geometry, hirari_region_set_warp_ratio_geometry, NativeRangeEdit,
     HirariRegionScalarDecision, HirariRegionScalarEdit, HirariRegionScalarField,
     NativeRegionGeometry,
+};
+use crate::region_split::{
+    hirari_region_duplicate_state, hirari_region_split_plan, hirari_region_split_plan_free,
+    HirariRegionSplitInput, HirariRegionSplitOutput,
 };
 use crate::region_warp::{
     hirari_free_warp_markers, hirari_region_normalize_warp_markers, HirariWarpMarker,
@@ -257,6 +262,14 @@ pub type HirariRegionPitchFinishFn = unsafe extern "C" fn(*mut c_void);
 /// Copies a region's note table from a retained track into an owned store.
 pub type HirariRegionNoteSnapshotFn =
     unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
+/// Clones a region under a fresh id, optionally replacing its editable state
+/// first, and adds the copy. Returns the new id, or 0 on failure.
+pub type HirariRegionCloneFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *const HirariRegionState) -> u32;
+/// Copies a region's comp ranges into `out` and reports the managed flag,
+/// with the same count-then-copy contract as the range-edit listing.
+pub type HirariRegionCompRangesFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *mut NativeCompRange, usize, *mut bool) -> usize;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -289,6 +302,8 @@ pub struct HirariRegionHostOps {
     pub pitch_analyze: Option<HirariRegionPitchAnalyzeFn>,
     pub pitch_finish: Option<HirariRegionPitchFinishFn>,
     pub note_snapshot: Option<HirariRegionNoteSnapshotFn>,
+    pub clone_region: Option<HirariRegionCloneFn>,
+    pub comp_ranges: Option<HirariRegionCompRangesFn>,
 }
 
 // The table only holds function pointers supplied by the native engine; it
@@ -1440,6 +1455,418 @@ pub unsafe extern "C" fn hirari_region_edit_replace_audio(
     replace_audio_with(&ops, host, track_id, region_id, path)
 }
 
+fn read_comp_ranges(
+    read: HirariRegionCompRangesFn,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+) -> Option<(Vec<NativeCompRange>, bool)> {
+    let mut managed = false;
+    let required = unsafe { read(host, track_id, region_id, ptr::null_mut(), 0, &mut managed) };
+    if required > 4096 {
+        return None;
+    }
+    let mut ranges = vec![NativeCompRange::default(); required];
+    if required == 0 {
+        return Some((ranges, managed));
+    }
+    let actual = unsafe {
+        read(
+            host,
+            track_id,
+            region_id,
+            ranges.as_mut_ptr(),
+            required,
+            &mut managed,
+        )
+    };
+    (actual == required).then_some((ranges, managed))
+}
+
+/// Owns a split plan's buffers until the request finishes.
+struct SplitPlan(HirariRegionSplitOutput);
+
+impl Drop for SplitPlan {
+    fn drop(&mut self) {
+        unsafe { hirari_region_split_plan_free(&mut self.0) };
+    }
+}
+
+/// Borrows a split plan's boxed array; empty plans use null pointers.
+///
+/// # Safety
+/// `ptr` must come from the matching plan field and stay alive for `'a`.
+unsafe fn plan_slice<'a, T>(ptr: *mut T, count: usize) -> &'a [T] {
+    if count == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(ptr, count) }
+    }
+}
+
+/// Writes one side of a split through the payload ops: editable state, warp
+/// markers, range edits, comp ranges and the windowed note table.
+fn apply_split_side(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    state: HirariRegionState,
+    markers: &[HirariWarpMarker],
+    ranges: &[NativeRangeEdit],
+    comp_ranges: &[NativeCompRange],
+    comp_managed: bool,
+    notes: *mut HirariRegionVariAudioStore,
+) -> bool {
+    let Some(apply) = ops.apply_edit else {
+        return false;
+    };
+    let payloads = [
+        state_payload(track_id, region_id, HIRARI_REGION_EDIT_STATE, state),
+        HirariRegionEditPayload {
+            track_id,
+            region_id,
+            op: HIRARI_REGION_EDIT_MARKERS,
+            blob: markers.as_ptr().cast(),
+            blob_len: std::mem::size_of_val(markers),
+            ..Default::default()
+        },
+        HirariRegionEditPayload {
+            track_id,
+            region_id,
+            op: HIRARI_REGION_EDIT_RANGE_EDITS,
+            blob: ranges.as_ptr().cast(),
+            blob_len: std::mem::size_of_val(ranges),
+            ..Default::default()
+        },
+        HirariRegionEditPayload {
+            track_id,
+            region_id,
+            op: HIRARI_REGION_EDIT_COMP_RANGES,
+            blob: comp_ranges.as_ptr().cast(),
+            blob_len: std::mem::size_of_val(comp_ranges),
+            managed: comp_managed,
+            ..Default::default()
+        },
+        note_store_payload(track_id, region_id, notes),
+    ];
+    payloads.iter().all(|payload| unsafe { apply(host, payload) })
+}
+
+/// Splits one region at an absolute timeline sample position.
+///
+/// The native splitter validated the position, built both payloads, split the
+/// note table and recorded the undo pair in C++. All of that lives here now;
+/// the host only clones and stores regions.
+fn split_region_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    split_beat: f64,
+) -> u32 {
+    // The bridge passes an absolute sample position as a double. Reject
+    // fractional positions instead of truncating them.
+    if !split_beat.is_finite() || split_beat < 0.0 || split_beat.floor() != split_beat {
+        return 0;
+    }
+    let (Some(find), Some(apply), Some(snapshot)) =
+        (ops.find_region, ops.apply_edit, ops.snapshot_region)
+    else {
+        return 0;
+    };
+    let (Some(release_snapshot), Some(clone)) = (ops.release_snapshot, ops.clone_region) else {
+        return 0;
+    };
+    let (Some(read_ranges), Some(read_comp)) = (ops.range_edits, ops.comp_ranges) else {
+        return 0;
+    };
+    let (Some(retain_track), Some(release_track), Some(note_snapshot)) =
+        (ops.retain_track, ops.release_track, ops.note_snapshot)
+    else {
+        return 0;
+    };
+    let Some(read_rate) = ops.sample_rate else {
+        return 0;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return 0;
+    }
+    if state.len == 0 || state.start.checked_add(state.len).is_none() {
+        return 0;
+    }
+    let end = state.start as f64 + state.len as f64;
+    if split_beat <= state.start as f64 || split_beat >= end {
+        return 0;
+    }
+    let split_offset = (split_beat - state.start as f64) as u64;
+    if split_offset == 0 || split_offset >= state.len {
+        return 0;
+    }
+    let Some(markers) = warp_markers_of(ops, host, track_id, region_id) else {
+        return 0;
+    };
+    let Some(ranges) = read_range_edits(read_ranges, host, track_id, region_id) else {
+        return 0;
+    };
+    let Some((comp_ranges, comp_managed)) = read_comp_ranges(read_comp, host, track_id, region_id)
+    else {
+        return 0;
+    };
+    let input = HirariRegionSplitInput {
+        state,
+        split_offset,
+        markers: markers.as_ptr(),
+        marker_count: markers.len(),
+        ranges: ranges.as_ptr(),
+        range_count: ranges.len(),
+        comp_ranges: comp_ranges.as_ptr(),
+        comp_range_count: comp_ranges.len(),
+    };
+    let mut plan = SplitPlan(HirariRegionSplitOutput::default());
+    if !unsafe { hirari_region_split_plan(&input, &mut plan.0) } {
+        return 0;
+    }
+
+    // Pitch/formant note edits use region-relative seconds: window each
+    // segment at the split and move the right half back to time zero. The
+    // retained-track snapshot reads the published projection, so a concurrent
+    // note edit cannot mutate the table while it is windowed.
+    let track_handle = unsafe { retain_track(host, track_id) };
+    if track_handle.is_null() {
+        return 0;
+    }
+    let source_notes = unsafe { note_snapshot(track_handle, region_id) };
+    unsafe { release_track(track_handle) };
+    if source_notes.is_null() {
+        return 0;
+    }
+    let left_notes = unsafe { hirari_region_vari_audio_store_new() };
+    let right_notes = unsafe { hirari_region_vari_audio_store_new() };
+    let notes_split = !left_notes.is_null()
+        && !right_notes.is_null()
+        && unsafe {
+            hirari_region_vari_audio_store_split(
+                source_notes.cast(),
+                left_notes,
+                right_notes,
+                read_rate(host),
+                split_offset,
+                state.len,
+            )
+        };
+    unsafe {
+        vari_store_release(source_notes.cast());
+        if !notes_split {
+            vari_store_release(left_notes);
+            vari_store_release(right_notes);
+        }
+    }
+    if !notes_split {
+        return 0;
+    }
+
+    let before = unsafe { snapshot(host, track_id, region_id) };
+    if before.is_null() {
+        unsafe {
+            vari_store_release(left_notes);
+            vari_store_release(right_notes);
+        }
+        return 0;
+    }
+    let right_id = unsafe { clone(host, track_id, region_id, ptr::null()) };
+    if right_id == 0 {
+        unsafe {
+            release_snapshot(host, before);
+            vari_store_release(left_notes);
+            vari_store_release(right_notes);
+        }
+        return 0;
+    }
+
+    let left_ok = apply_split_side(
+        ops,
+        host,
+        track_id,
+        region_id,
+        plan.0.left,
+        unsafe { plan_slice(plan.0.left_markers, plan.0.left_marker_count) },
+        unsafe { plan_slice(plan.0.left_ranges, plan.0.left_range_count) },
+        unsafe { plan_slice(plan.0.left_comp_ranges, plan.0.left_comp_range_count) },
+        comp_managed,
+        left_notes,
+    );
+    let right_ok = left_ok
+        && apply_split_side(
+            ops,
+            host,
+            track_id,
+            right_id,
+            plan.0.right,
+            unsafe { plan_slice(plan.0.right_markers, plan.0.right_marker_count) },
+            unsafe { plan_slice(plan.0.right_ranges, plan.0.right_range_count) },
+            unsafe { plan_slice(plan.0.right_comp_ranges, plan.0.right_comp_range_count) },
+            comp_managed,
+            right_notes,
+        );
+    unsafe {
+        vari_store_release(left_notes);
+        vari_store_release(right_notes);
+    }
+    if !right_ok {
+        // The region was already mutated, so put the original back and drop
+        // the clone instead of leaving a half-applied split behind.
+        let restore = restore_payload(track_id, region_id, before);
+        let remove = state_payload(
+            track_id,
+            right_id,
+            HIRARI_REGION_EDIT_REMOVE,
+            HirariRegionState::default(),
+        );
+        unsafe {
+            apply(host, &restore);
+            apply(host, &remove);
+            release_snapshot(host, before);
+        }
+        return 0;
+    }
+
+    let left_snapshot = unsafe { snapshot(host, track_id, region_id) };
+    let right_snapshot = unsafe { snapshot(host, track_id, right_id) };
+    if left_snapshot.is_null() || right_snapshot.is_null() {
+        if !left_snapshot.is_null() {
+            unsafe { release_snapshot(host, left_snapshot) };
+        }
+        if !right_snapshot.is_null() {
+            unsafe { release_snapshot(host, right_snapshot) };
+        }
+        let restore = restore_payload(track_id, region_id, before);
+        let remove = state_payload(
+            track_id,
+            right_id,
+            HIRARI_REGION_EDIT_REMOVE,
+            HirariRegionState::default(),
+        );
+        unsafe {
+            apply(host, &restore);
+            apply(host, &remove);
+            release_snapshot(host, before);
+        }
+        return 0;
+    }
+    if ops.record_undo.is_some() {
+        let undo = [
+            restore_payload(track_id, region_id, before),
+            state_payload(
+                track_id,
+                right_id,
+                HIRARI_REGION_EDIT_REMOVE,
+                HirariRegionState::default(),
+            ),
+        ];
+        let redo = [
+            restore_payload(track_id, region_id, left_snapshot),
+            restore_payload(track_id, right_id, right_snapshot),
+        ];
+        record_with(ops, host, b"Split Region\0", &undo, &redo, true, false);
+    } else {
+        unsafe {
+            release_snapshot(host, before);
+            release_snapshot(host, left_snapshot);
+            release_snapshot(host, right_snapshot);
+        }
+    }
+    right_id
+}
+
+/// Duplicates one region at `start_sample`.
+///
+/// The native copier kept every payload field, kept one identity across
+/// undo/redo and recorded the add/remove pair in C++. Rust owns that decision
+/// and the undo capture; the host clones the payload.
+fn duplicate_region_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start_sample: u64,
+) -> u32 {
+    let (Some(find), Some(clone), Some(snapshot)) =
+        (ops.find_region, ops.clone_region, ops.snapshot_region)
+    else {
+        return 0;
+    };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return 0;
+    }
+    let mut duplicate = HirariRegionState::default();
+    if !unsafe { hirari_region_duplicate_state(&state, start_sample, &mut duplicate) } {
+        return 0;
+    }
+    let duplicate_id = unsafe { clone(host, track_id, region_id, &duplicate) };
+    if duplicate_id == 0 || ops.record_undo.is_none() {
+        return duplicate_id;
+    }
+    // A duplicated clip is a new timeline instance that keeps one stable
+    // identity across undo/redo, so the undo entry is built from a snapshot
+    // instead of re-cloning on every redo.
+    let snapshot_handle = unsafe { snapshot(host, track_id, duplicate_id) };
+    if snapshot_handle.is_null() {
+        return duplicate_id;
+    }
+    let undo = [state_payload(
+        track_id,
+        duplicate_id,
+        HIRARI_REGION_EDIT_REMOVE,
+        HirariRegionState::default(),
+    )];
+    let redo = [restore_payload(track_id, duplicate_id, snapshot_handle)];
+    // The native copier recorded through `performAction`, which always
+    // coalesces: repeated duplicates in one gesture stay a single entry.
+    record_with(
+        ops,
+        host,
+        b"Duplicate Region\0",
+        &undo,
+        &redo,
+        true,
+        false,
+    );
+    duplicate_id
+}
+
+/// Splits a region at an absolute timeline sample position.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_split(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    split_beat: f64,
+) -> u32 {
+    let Some(ops) = host_ops() else { return 0 };
+    split_region_with(&ops, host, track_id, region_id, split_beat)
+}
+
+/// Duplicates a region at `start_sample`.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_duplicate(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    start_sample: u64,
+) -> u32 {
+    let Some(ops) = host_ops() else { return 0 };
+    duplicate_region_with(&ops, host, track_id, region_id, start_sample)
+}
+
 /// Installs the native host callbacks. Passing null clears them.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_edit_scalar(
@@ -2226,10 +2653,11 @@ mod tests {
     use std::slice;
 
 use crate::vari_audio::{
-    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_remove,
-    hirari_region_vari_audio_store_upsert, hirari_region_vari_audio_store_upsert_anchor,
-    hirari_region_vari_audio_store_warp, vari_store_clone, vari_store_release, vari_store_restore,
-    vari_store_view, HirariAudioNoteSegment, HirariRegionVariAudioStore,
+    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_new,
+    hirari_region_vari_audio_store_remove, hirari_region_vari_audio_store_upsert,
+    hirari_region_vari_audio_store_upsert_anchor, hirari_region_vari_audio_store_warp,
+    vari_store_clone, vari_store_release, vari_store_restore, vari_store_view,
+    HirariAudioNoteSegment, HirariRegionVariAudioStore,
 };
 use crate::audio_note_curve::{
     hirari_audio_note_curve_component_anchor, HirariAudioNoteAnchor,
@@ -2252,6 +2680,10 @@ use crate::audio_note_curve::{
         undo_markers: Vec<HirariWarpMarker>,
         redo_markers: Vec<HirariWarpMarker>,
         range_edits: Vec<NativeRangeEdit>,
+        comp_ranges: Vec<NativeCompRange>,
+        comp_managed: bool,
+        cloned_states: Vec<HirariRegionState>,
+        next_region_id: u32,
     }
 
     static FAKE: OnceLock<Mutex<FakeHost>> = OnceLock::new();
@@ -2431,6 +2863,59 @@ use crate::audio_note_curve::{
         count
     }
 
+    unsafe extern "C" fn fake_comp_ranges(
+        _host: *mut c_void,
+        _track_id: u32,
+        _region_id: u32,
+        out: *mut NativeCompRange,
+        capacity: usize,
+        managed: *mut bool,
+    ) -> usize {
+        let guard = fake().lock().unwrap();
+        if !managed.is_null() {
+            unsafe { *managed = guard.comp_managed };
+        }
+        let count = guard.comp_ranges.len();
+        if out.is_null() || capacity < count {
+            return count;
+        }
+        unsafe { ptr::copy_nonoverlapping(guard.comp_ranges.as_ptr(), out, count) };
+        count
+    }
+
+    unsafe extern "C" fn fake_clone(
+        _host: *mut c_void,
+        _track_id: u32,
+        _region_id: u32,
+        state: *const HirariRegionState,
+    ) -> u32 {
+        let mut guard = fake().lock().unwrap();
+        guard.cloned_states.push(if state.is_null() {
+            HirariRegionState::default()
+        } else {
+            unsafe { *state }
+        });
+        guard.next_region_id = if guard.next_region_id == 0 {
+            100
+        } else {
+            guard.next_region_id + 1
+        };
+        guard.next_region_id
+    }
+
+    unsafe extern "C" fn fake_retain_track(_host: *mut c_void, _track_id: u32) -> *mut c_void {
+        1usize as *mut c_void
+    }
+
+    unsafe extern "C" fn fake_release_track(_handle: *mut c_void) {}
+
+    unsafe extern "C" fn fake_note_snapshot(
+        _handle: *mut c_void,
+        _region_id: u32,
+    ) -> *mut c_void {
+        hirari_region_vari_audio_store_new().cast()
+    }
+
     static FAKE_AUDIO: u8 = 0;
     static FAIL_DECODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static RELEASED_AUDIO: std::sync::atomic::AtomicUsize =
@@ -2477,6 +2962,11 @@ use crate::audio_note_curve::{
             sample_rate: Some(fake_sample_rate),
             decode_audio: Some(fake_decode_audio),
             release_audio: Some(fake_release_audio),
+            clone_region: Some(fake_clone),
+            comp_ranges: Some(fake_comp_ranges),
+            retain_track: Some(fake_retain_track),
+            release_track: Some(fake_release_track),
+            note_snapshot: Some(fake_note_snapshot),
             ..Default::default()
         }
     }
@@ -3310,5 +3800,168 @@ use crate::audio_note_curve::{
         assert_eq!(RELEASED_AUDIO.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(fake().lock().unwrap().applied.is_empty());
         FAKE_RATE_BITS.store(48_000f64.to_bits(), std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn splittable_state() -> HirariRegionState {
+        HirariRegionState {
+            len: 1000,
+            source_length: 1000,
+            loop_count: 1,
+            warp_ratio: 1.0,
+            source_sample_rate: 48_000.0,
+            timeline_sample_rate: 48_000.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn split_rejects_positions_outside_the_region() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            start: 100,
+            ..splittable_state()
+        });
+        for beat in [f64::NAN, f64::INFINITY, -1.0, 50.5, 100.0, 1100.0, 1200.0] {
+            assert_eq!(
+                split_region_with(&ops, host, 1, 2, beat),
+                0,
+                "beat {beat} must be rejected"
+            );
+        }
+        let guard = fake().lock().unwrap();
+        assert!(guard.applied.is_empty());
+        assert!(guard.cloned_states.is_empty());
+        assert!(guard.undo.is_empty());
+    }
+
+    #[test]
+    fn split_applies_both_sides_and_records_the_restore_pair() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            start: 100,
+            ..splittable_state()
+        });
+        RELEASED.store(0, std::sync::atomic::Ordering::SeqCst);
+        {
+            let mut guard = fake().lock().unwrap();
+            guard.comp_managed = true;
+            guard.comp_ranges = vec![NativeCompRange {
+                start: 0,
+                end: 500,
+                fade_in: 0,
+                fade_out: 0,
+            }];
+            guard.warp_markers = vec![HirariWarpMarker {
+                source_sample: 0,
+                timeline_sample: 0,
+                transient: 0,
+            }];
+        }
+
+        let right = split_region_with(&ops, host, 1, 2, 600.0);
+        assert_eq!(right, 100);
+
+        let guard = fake().lock().unwrap();
+        // The clone starts from the original payload; the right-hand state
+        // arrives with the first payload op.
+        assert_eq!(guard.cloned_states, vec![HirariRegionState::default()]);
+        let ops_applied: Vec<i32> = guard.applied.iter().map(|payload| payload.op).collect();
+        assert_eq!(
+            ops_applied,
+            vec![
+                HIRARI_REGION_EDIT_STATE,
+                HIRARI_REGION_EDIT_MARKERS,
+                HIRARI_REGION_EDIT_RANGE_EDITS,
+                HIRARI_REGION_EDIT_COMP_RANGES,
+                HIRARI_REGION_EDIT_NOTE_STORE,
+                HIRARI_REGION_EDIT_STATE,
+                HIRARI_REGION_EDIT_MARKERS,
+                HIRARI_REGION_EDIT_RANGE_EDITS,
+                HIRARI_REGION_EDIT_COMP_RANGES,
+                HIRARI_REGION_EDIT_NOTE_STORE,
+            ]
+        );
+        assert_eq!(guard.applied[0].state.start, 100);
+        assert_eq!(guard.applied[0].state.len, 500);
+        assert_eq!(guard.applied[5].state.start, 600);
+        assert_eq!(guard.applied[5].state.len, 500);
+        // Both sides keep the region's managed flag.
+        assert!(guard.applied[3].managed);
+        assert!(guard.applied[8].managed);
+        assert_eq!(guard.undo_name, "Split Region");
+        assert!(guard.coalesce);
+        assert!(!guard.perform);
+        assert_eq!(guard.undo.len(), 2);
+        assert_eq!(guard.undo[0].op, HIRARI_REGION_EDIT_RESTORE);
+        assert_eq!(guard.undo[1].op, HIRARI_REGION_EDIT_REMOVE);
+        assert_eq!(guard.undo[1].region_id, 100);
+        assert_eq!(guard.redo.len(), 2);
+        assert_eq!(guard.redo[0].op, HIRARI_REGION_EDIT_RESTORE);
+        assert_eq!(guard.redo[1].op, HIRARI_REGION_EDIT_RESTORE);
+        assert_eq!(guard.redo[1].region_id, 100);
+        drop(guard);
+        assert_eq!(RELEASED.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn duplicate_copies_the_policy_state_and_records_remove_restore() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            base_start: 100,
+            base_length: 1000,
+            source_offset: 100,
+            ..splittable_state()
+        });
+        RELEASED.store(0, std::sync::atomic::Ordering::SeqCst);
+
+        let id = duplicate_region_with(&ops, host, 1, 2, 5000);
+        assert_eq!(id, 100);
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.cloned_states.len(), 1);
+        assert_eq!(guard.cloned_states[0].start, 5000);
+        // The untrimmed base backs up by the ceil of the trimmed span.
+        assert_eq!(guard.cloned_states[0].base_start, 4900);
+        assert!(guard.applied.is_empty());
+        assert_eq!(guard.undo_name, "Duplicate Region");
+        assert!(guard.coalesce);
+        assert!(!guard.perform);
+        assert_eq!(guard.undo.len(), 1);
+        assert_eq!(guard.undo[0].op, HIRARI_REGION_EDIT_REMOVE);
+        assert_eq!(guard.undo[0].region_id, 100);
+        assert_eq!(guard.redo.len(), 1);
+        assert_eq!(guard.redo[0].op, HIRARI_REGION_EDIT_RESTORE);
+        drop(guard);
+        assert_eq!(RELEASED.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn duplicate_rejects_an_empty_or_loopless_region() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        for state in [
+            HirariRegionState {
+                len: 0,
+                ..splittable_state()
+            },
+            HirariRegionState {
+                loop_count: 0,
+                ..splittable_state()
+            },
+        ] {
+            reset(state);
+            assert_eq!(duplicate_region_with(&ops, host, 1, 2, 5000), 0);
+            let guard = fake().lock().unwrap();
+            assert!(guard.cloned_states.is_empty());
+            assert!(guard.undo.is_empty());
+            drop(guard);
+        }
     }
 }

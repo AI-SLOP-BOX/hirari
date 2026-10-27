@@ -1037,7 +1037,10 @@ unsafe fn load_entries(
     entries: &[(HirariAudioNoteSegment, Vec<HirariAudioNoteAnchor>)],
 ) -> bool {
     if entries.is_empty() {
-        return unsafe { hirari_region_vari_audio_store_clear_segments(store) };
+        // An empty source splits into two empty tables. Clearing an already
+        // empty store reports false, which is not a failure here.
+        let _ = unsafe { hirari_region_vari_audio_store_clear_segments(store) };
+        return true;
     }
     let mut values = Vec::with_capacity(entries.len());
     let mut offsets = Vec::with_capacity(entries.len());

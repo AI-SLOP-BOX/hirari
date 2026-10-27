@@ -118,6 +118,11 @@ public:
     static bool regionHostPitchAnalyze(void* trackHandle, uint32_t regionId, double sampleRate);
     static void regionHostPitchFinish(void* trackHandle);
     static void* regionHostNoteSnapshot(void* trackHandle, uint32_t regionId);
+    static uint32_t regionHostClone(void* host, uint32_t trackId, uint32_t regionId,
+                                    const HirariRegionState* state);
+    static size_t regionHostCompRanges(void* host, uint32_t trackId, uint32_t regionId,
+                                       HirariRegionCompRange* out, size_t capacity,
+                                       bool* managed);
 
     // Automation edit host callbacks. Rust drives the curve edits; see
     // hirari_unified_engine_part_6b.inc.
