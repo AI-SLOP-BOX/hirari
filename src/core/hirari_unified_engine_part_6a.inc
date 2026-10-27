@@ -385,109 +385,68 @@ std::vector<std::shared_ptr<Track>> HirariUnifiedEngine::get_tracks_snapshot() c
     return m_tracks;
 }
 
-bool HirariUnifiedEngine::freeze_track(uint32_t tid, uint64_t totalSamples, uint32_t sampleRate) {
-    if (totalSamples == 0 || sampleRate == 0 ||
-        totalSamples > TrackFreezeManager::kMaxFreezeSamples) return false;
-    // A freeze render mutates processor state while producing its immutable
-    // snapshot, so it must never overlap the live callback or another graph
-    // hydration.  The manager itself remains allocation/control-thread only.
-    waitForAudioCallbacks();
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-            [tid](const auto& track) { return track && track->getId() == tid; });
-        if (it == m_tracks.end()) return false;
-        target = *it;
-    }
-    return TrackFreezeManager::freezeTrack(std::move(target), totalSamples, sampleRate);
+void HirariUnifiedEngine::installTrackFreezeHost() {
+    static const HirariTrackFreezeHostOps ops = {
+        [](void* host, uint32_t tid, bool wait) -> void* {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            if (!engine) return nullptr;
+            if (wait) engine->waitForAudioCallbacks();
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            const auto it = std::find_if(engine->m_tracks.begin(), engine->m_tracks.end(),
+                [tid](const auto& track) { return track && track->getId() == tid; });
+            return it == engine->m_tracks.end() ? nullptr
+                                                : new std::shared_ptr<Track>(*it);
+        },
+        [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
+        [](void* handle, uint64_t totalSamples, uint32_t sampleRate) {
+            return handle && TrackFreezeManager::freezeTrack(
+                *static_cast<std::shared_ptr<Track>*>(handle), totalSamples, sampleRate);
+        },
+        [](void* handle, const uint8_t* path, size_t length, uint64_t totalSamples,
+           uint32_t sampleRate, bool persist) {
+            if (!handle) return false;
+            auto track = *static_cast<std::shared_ptr<Track>*>(handle);
+            const std::filesystem::path file(
+                std::string(reinterpret_cast<const char*>(path), length));
+            return persist
+                ? TrackFreezeManager::freezeTrackToFile(track, file, totalSamples, sampleRate)
+                : TrackFreezeManager::restoreTrackFromFile(track, file, totalSamples, sampleRate);
+        },
+        [](void* handle, const uint8_t* path, size_t length) {
+            return handle && (*static_cast<std::shared_ptr<Track>*>(handle))->setFrozenCachePath(
+                std::string_view(reinterpret_cast<const char*>(path), length));
+        },
+        [](void* handle) {
+            if (handle) TrackFreezeManager::unfreezeTrack(
+                *static_cast<std::shared_ptr<Track>*>(handle));
+        },
+        [](void* handle) {
+            return handle && (*static_cast<std::shared_ptr<Track>*>(handle))->isFrozen();
+        },
+        [](void* handle, uint64_t* out) -> bool {
+            if (!handle || !out) return false;
+            uint64_t projectEnd = 0;
+            for (const auto& region : (*static_cast<std::shared_ptr<Track>*>(handle))->getRegions()) {
+                if (region.len == 0 || region.start > UINT64_MAX - region.len) return false;
+                projectEnd = std::max(projectEnd, region.start + region.len);
+            }
+            *out = projectEnd;
+            return true;
+        },
+        [](void* host) -> uint32_t {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            return engine ? engine->get_block_size() : 0;
+        },
+    };
+    hirari_track_freeze_host_install(&ops);
 }
 
-bool HirariUnifiedEngine::freeze_track_to_project_end(uint32_t tid, uint32_t sampleRate) {
-    if (sampleRate == 0) return false;
-    std::shared_ptr<Track> target;
-    uint64_t projectEnd = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-            [tid](const auto& track) { return track && track->getId() == tid; });
-        if (it == m_tracks.end()) return false;
-        target = *it;
-        for (const auto& region : target->getRegions()) {
-            if (region.len == 0 || region.start > UINT64_MAX - region.len) return false;
-            projectEnd = std::max(projectEnd, region.start + region.len);
-        }
-    }
-    const uint64_t fallback = std::max<uint32_t>(1u, get_block_size()) * 2ull;
-    const uint64_t totalSamples = std::max(projectEnd, fallback);
-    if (totalSamples > TrackFreezeManager::kMaxFreezeSamples) return false;
-    return freeze_track(tid, totalSamples, sampleRate);
-}
-
-bool HirariUnifiedEngine::freeze_track_to_file(uint32_t tid, std::string_view path,
-                                             uint64_t totalSamples, uint32_t sampleRate) {
-    if (path.empty() || totalSamples == 0 || sampleRate == 0 ||
-        totalSamples > TrackFreezeManager::kMaxFreezeSamples) return false;
-    waitForAudioCallbacks();
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-            [tid](const auto& track) { return track && track->getId() == tid; });
-        if (it == m_tracks.end()) return false;
-        target = *it;
-    }
-    std::error_code pathError;
-    const auto absolutePath = std::filesystem::absolute(std::filesystem::path(path), pathError);
-    if (pathError || absolutePath.empty()) return false;
-    return TrackFreezeManager::freezeTrackToFile(
-        std::move(target), absolutePath, totalSamples, sampleRate);
-}
-
-bool HirariUnifiedEngine::set_track_freeze_cache_path(uint32_t tid, std::string_view path) {
-    if (path.empty()) return false;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-        [tid](const auto& track) { return track && track->getId() == tid; });
-    return it != m_tracks.end() && (*it)->setFrozenCachePath(path);
-}
-
-bool HirariUnifiedEngine::restore_track_freeze_from_file(uint32_t tid, std::string_view path,
-                                                       uint64_t totalSamples, uint32_t sampleRate) {
-    if (path.empty() || totalSamples == 0 || sampleRate == 0) return false;
-    waitForAudioCallbacks();
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-            [tid](const auto& track) { return track && track->getId() == tid; });
-        if (it == m_tracks.end()) return false;
-        target = *it;
-    }
-    return TrackFreezeManager::restoreTrackFromFile(
-        std::move(target), std::filesystem::path(path), totalSamples, sampleRate);
-}
-
-bool HirariUnifiedEngine::unfreeze_track(uint32_t tid) {
-    waitForAudioCallbacks();
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-            [tid](const auto& track) { return track && track->getId() == tid; });
-        if (it == m_tracks.end()) return false;
-        target = *it;
-    }
-    TrackFreezeManager::unfreezeTrack(std::move(target));
+namespace {
+[[maybe_unused]] const bool kTrackFreezeHostInstalled = [] {
+    HirariUnifiedEngine::installTrackFreezeHost();
     return true;
-}
-
-bool HirariUnifiedEngine::is_track_frozen(uint32_t tid) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-        [tid](const auto& track) { return track && track->getId() == tid; });
-    return it != m_tracks.end() && (*it)->isFrozen();
-}
+}();
+}  // namespace
 
 rust::Slice<const float> HirariUnifiedEngine::get_track_peaks_l() const {
     thread_local std::array<float, 256> snapshot{};

@@ -12,18 +12,6 @@
     bool set_track_name(uint32_t id, std::string_view name);
     uint32_t get_track_count() const;
     std::vector<std::shared_ptr<Track>> get_tracks_snapshot() const;
-    // Freeze is a control/offline operation.  The engine owns the track
-    // lifetime and serializes the render against the callback boundary
-    // before publishing the immutable frozen buffer.
-    bool freeze_track(uint32_t tid, uint64_t total_samples, uint32_t sample_rate);
-    bool freeze_track_to_project_end(uint32_t tid, uint32_t sample_rate);
-    bool freeze_track_to_file(uint32_t tid, std::string_view path,
-                              uint64_t total_samples, uint32_t sample_rate);
-    bool restore_track_freeze_from_file(uint32_t tid, std::string_view path,
-                                        uint64_t total_samples, uint32_t sample_rate);
-    bool set_track_freeze_cache_path(uint32_t tid, std::string_view path);
-    bool unfreeze_track(uint32_t tid);
-    bool is_track_frozen(uint32_t tid) const;
     rust::Slice<const float> get_track_peaks_l() const;
     rust::Slice<const float> get_track_peaks_r() const;
     Track& get_track(uint32_t id);
@@ -94,6 +82,7 @@
     static void installControlEditHost();
     static void installPluginEditHost();
     static void installTrackEditHost();
+    static void installTrackFreezeHost();
     using ReplayCallback = void (*)(void*);
     static void recordNativeReplay(void* host, const uint8_t* label, size_t labelLength, void* edit,
                                    ReplayCallback undo, ReplayCallback redo,

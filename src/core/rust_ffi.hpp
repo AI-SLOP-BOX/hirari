@@ -1681,6 +1681,39 @@ extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops
 extern "C" uint32_t hirari_track_add(void* host, uint32_t trackType);
 extern "C" uint32_t hirari_track_duplicate(void* host, uint32_t trackId);
 extern "C" bool hirari_track_remove(void* host, uint32_t trackId);
+
+// Track freeze admission policy (limits, project-end sizing, paths, ordering).
+struct HirariTrackFreezeHostOps {
+    // Pins a track; `wait` drains the audio callback before lookup. The
+    // returned handle must be released.
+    void* (*acquire)(void*, uint32_t, bool) = nullptr;
+    void (*release)(void*) = nullptr;
+    bool (*freeze)(void*, uint64_t, uint32_t) = nullptr;
+    // Renders to the path, or restores from it when `persist` is false.
+    bool (*runFromFile)(void*, const uint8_t*, size_t, uint64_t, uint32_t, bool) = nullptr;
+    bool (*setCachePath)(void*, const uint8_t*, size_t) = nullptr;
+    void (*unfreeze)(void*) = nullptr;
+    bool (*isFrozen)(void*) = nullptr;
+    // Writes the last region end; false when a region length overflows.
+    bool (*projectEnd)(void*, uint64_t*) = nullptr;
+    uint32_t (*blockSize)(void*) = nullptr;
+};
+
+extern "C" void hirari_track_freeze_host_install(const HirariTrackFreezeHostOps* ops);
+extern "C" bool hirari_track_freeze(
+    void* host, uint32_t trackId, uint64_t totalSamples, uint32_t sampleRate);
+extern "C" bool hirari_track_freeze_to_project_end(
+    void* host, uint32_t trackId, uint32_t sampleRate);
+extern "C" bool hirari_track_freeze_to_file(void* host, uint32_t trackId, const uint8_t* path,
+                                            size_t pathLength, uint64_t totalSamples,
+                                            uint32_t sampleRate);
+extern "C" bool hirari_track_restore_freeze(void* host, uint32_t trackId, const uint8_t* path,
+                                            size_t pathLength, uint64_t totalSamples,
+                                            uint32_t sampleRate);
+extern "C" bool hirari_track_set_freeze_cache_path(
+    void* host, uint32_t trackId, const uint8_t* path, size_t pathLength);
+extern "C" bool hirari_track_unfreeze(void* host, uint32_t trackId);
+extern "C" bool hirari_track_is_frozen(void* host, uint32_t trackId);
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 extern "C" bool hirari_plugin_edit_move(

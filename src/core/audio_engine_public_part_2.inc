@@ -12,29 +12,31 @@
     bool low_latency_mode() const { return m_engine && m_engine->low_latency_mode(); }
     uint32_t duplicate_track(uint32_t id) const { return m_engine ? m_engine->duplicate_track(id) : 0; }
     bool freeze_track(uint32_t tid, uint64_t totalSamples, uint32_t sampleRate) const {
-        return m_engine && m_engine->freeze_track(tid, totalSamples, sampleRate);
+        return m_engine && hirari_track_freeze(m_engine.get(), tid, totalSamples, sampleRate);
     }
     bool freeze_track_to_file(uint32_t tid, rust::Str path, uint64_t totalSamples, uint32_t sampleRate) const {
-        return m_engine && m_engine->freeze_track_to_file(
-            tid, std::string_view(path.data(), path.size()), totalSamples, sampleRate);
+        return m_engine && hirari_track_freeze_to_file(
+            m_engine.get(), tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(),
+            totalSamples, sampleRate);
     }
     bool set_track_freeze_cache_path(uint32_t tid, rust::Str path) const {
-        return m_engine && m_engine->set_track_freeze_cache_path(
-            tid, std::string_view(path.data(), path.size()));
+        return m_engine && hirari_track_set_freeze_cache_path(
+            m_engine.get(), tid, reinterpret_cast<const uint8_t*>(path.data()), path.size());
     }
     bool restore_track_freeze_from_file(uint32_t tid, rust::Str path,
                                         uint64_t totalSamples, uint32_t sampleRate) const {
-        return m_engine && m_engine->restore_track_freeze_from_file(
-            tid, std::string_view(path.data(), path.size()), totalSamples, sampleRate);
+        return m_engine && hirari_track_restore_freeze(
+            m_engine.get(), tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(),
+            totalSamples, sampleRate);
     }
     bool unfreeze_track(uint32_t tid) const {
-        return m_engine && m_engine->unfreeze_track(tid);
+        return m_engine && hirari_track_unfreeze(m_engine.get(), tid);
     }
     bool is_track_frozen(uint32_t tid) const {
-        return m_engine && m_engine->is_track_frozen(tid);
+        return m_engine && hirari_track_is_frozen(m_engine.get(), tid);
     }
     bool freeze_track_to_project_end(uint32_t tid, uint32_t sampleRate) const {
-        return m_engine && m_engine->freeze_track_to_project_end(tid, sampleRate);
+        return m_engine && hirari_track_freeze_to_project_end(m_engine.get(), tid, sampleRate);
     }
     bool region_table_mirror_matches(uint32_t tid) const {
         return m_engine && m_engine->region_table_mirror_matches(tid);

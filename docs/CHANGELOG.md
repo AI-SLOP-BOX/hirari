@@ -102,6 +102,13 @@ production support.
   plugin and non-empty state before calling the preset writer. C++ keeps the
   track lookup and state storage behind two host callbacks, and the engine
   methods are one-line delegations.
+- Track freeze requests now run through the Rust freeze host. Rust owns the
+  64 Mi-sample admission limit, validation order, project-end sizing (last
+  region end versus two blocks) and absolute path resolution for disk freezes,
+  and drains the audio callback only after a request is admissible. C++ keeps
+  the track lookup, offline render, published snapshot and file writer behind
+  host callbacks; the engine freeze methods are gone and the public layer calls
+  Rust directly.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
