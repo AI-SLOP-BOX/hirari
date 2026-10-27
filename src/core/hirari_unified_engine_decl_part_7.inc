@@ -63,6 +63,8 @@
         uint32_t tapPoint = 2;
     };
     std::vector<SidechainRoute> m_sidechainRoutes;
+    // Removes a track's sidechain routes; captures them when `removed` is set.
+    void eraseSidechainRoutesLocked(uint32_t tid, std::vector<SidechainRoute>* removed);
 
     void* m_midiSnapshotStore = nullptr;
 

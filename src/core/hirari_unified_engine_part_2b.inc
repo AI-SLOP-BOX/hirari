@@ -1,175 +1,5 @@
-            if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
-        }
-        m_activeStateIdx.store(nextIdx, std::memory_order_release);
-    }
-
-    const auto removeCopy = [this, newId]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-                               [newId](const auto& track) { return track->getId() == newId; });
-        if (it == m_tracks.end()) return;
-        for (const auto& region : (*it)->getRegions()) {
-            hirari_region_waveform_forget(this, region.id);
-        }
-        m_deferredDestructionTracks.push_back(*it);
-        m_tracks.erase(it);
-        mark_project_layout_changed();
-        uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);
-        auto& state = m_audioStates[nextIdx];
-        state.trackCount = 0;
-        for (const auto& track : m_tracks) {
-            if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
-        }
-        m_activeStateIdx.store(nextIdx, std::memory_order_release);
-    };
-    const auto restoreCopy = [this, copy, newId, insertIndex]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const bool alreadyPresent = std::any_of(m_tracks.begin(), m_tracks.end(),
-            [newId](const auto& track) { return track->getId() == newId; });
-        if (alreadyPresent) return;
-        m_tracks.insert(m_tracks.begin() + std::min(insertIndex, m_tracks.size()), copy);
-        mark_project_layout_changed();
-        uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);
-        auto& state = m_audioStates[nextIdx];
-        state.trackCount = 0;
-        for (const auto& track : m_tracks) {
-            if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
-        }
-        m_activeStateIdx.store(nextIdx, std::memory_order_release);
-    };
-    m_undoManager.recordAppliedAction("Duplicate Track", removeCopy, restoreCopy);
-    syncStructuralChanges();
-    return newId;
-}
-
 bool HirariUnifiedEngine::remove_track(uint32_t tid) {
-    const auto sidechainBackup = m_sidechainManager.captureLinksForTrack(tid);
-    std::shared_ptr<Track> removed;
-    std::vector<SidechainRoute> sidechainRouteBackup;
-    std::vector<Hirari::Core::Engine::RoutingEngine::Connection> routingBackup;
-    std::vector<Hirari::Core::Engine::RoutingEngine::FeedbackConnection> feedbackBackup;
-    size_t originalIndex = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-                               [tid](const auto& track) { return track->getId() == tid; });
-        if (it == m_tracks.end()) return false;
-        originalIndex = static_cast<size_t>(it - m_tracks.begin());
-        removed = *it;
-        m_sidechainManager.removeLinksForTrack(tid);
-        for (const auto& route : m_sidechainRoutes) {
-            if (route.sourceId == tid || route.destinationId == tid)
-                sidechainRouteBackup.push_back(route);
-        }
-        m_sidechainRoutes.erase(
-            std::remove_if(m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
-                [tid](const SidechainRoute& route) {
-                    return route.sourceId == tid || route.destinationId == tid;
-                }),
-            m_sidechainRoutes.end());
-        m_routingEngine.removeProcessingDependenciesForNode(tid);
-        m_routingEngine.removeConnectionsForNode(tid, routingBackup);
-        m_routingEngine.removeFeedbackConnectionsForNode(tid, feedbackBackup);
-        {
-            for (const auto& region : removed->getRegions()) {
-                hirari_region_waveform_forget(this, region.id);
-            }
-        }
-        m_deferredDestructionTracks.push_back(removed);
-        m_tracks.erase(it);
-        mark_project_layout_changed();
-        if (tid == 1 && m_tracks.empty()) {
-            // new_project() creates the bootstrap at ID 1 and advances the
-            // allocator to 2. Removing that placeholder during project
-            // hydration must rewind the allocator so the first persisted track
-            // keeps its canonical ID instead of becoming ID 2.
-            m_trackIdCounter.store(1, std::memory_order_release);
-        }
-        uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);
-        auto& state = m_audioStates[nextIdx];
-        state.trackCount = 0;
-        for (const auto& track : m_tracks) {
-            if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
-        }
-        m_activeStateIdx.store(nextIdx, std::memory_order_release);
-    }
-
-    const auto removeAgain = [this, tid]() {
-        {
-            std::lock_guard<std::mutex> lock(m_tracksMutex);
-            m_sidechainManager.removeLinksForTrack(tid);
-            m_sidechainRoutes.erase(
-                std::remove_if(m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
-                    [tid](const SidechainRoute& route) {
-                        return route.sourceId == tid || route.destinationId == tid;
-                    }),
-                m_sidechainRoutes.end());
-            m_routingEngine.removeProcessingDependenciesForNode(tid);
-            auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-                                   [tid](const auto& track) { return track->getId() == tid; });
-            if (it == m_tracks.end()) return;
-            for (const auto& region : (*it)->getRegions()) {
-                hirari_region_waveform_forget(this, region.id);
-            }
-            m_deferredDestructionTracks.push_back(*it);
-            m_tracks.erase(it);
-            mark_project_layout_changed();
-            uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);
-            auto& state = m_audioStates[nextIdx];
-            state.trackCount = 0;
-            for (const auto& track : m_tracks) {
-                if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
-            }
-            m_activeStateIdx.store(nextIdx, std::memory_order_release);
-        }
-        std::vector<Hirari::Core::Engine::RoutingEngine::Connection> discardedRoutes;
-        m_routingEngine.removeConnectionsForNode(tid, discardedRoutes);
-        std::vector<Hirari::Core::Engine::RoutingEngine::FeedbackConnection> discardedFeedback;
-        m_routingEngine.removeFeedbackConnectionsForNode(tid, discardedFeedback);
-    };
-    const auto restore = [this, removed, tid, originalIndex, sidechainBackup,
-                          sidechainRouteBackup,
-                          routingBackup, feedbackBackup]() {
-        {
-            std::lock_guard<std::mutex> lock(m_tracksMutex);
-            const bool alreadyPresent = std::any_of(m_tracks.begin(), m_tracks.end(),
-                [tid](const auto& track) { return track->getId() == tid; });
-            if (!alreadyPresent) {
-                m_tracks.insert(m_tracks.begin() + std::min(originalIndex, m_tracks.size()), removed);
-                mark_project_layout_changed();
-                uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);
-                auto& state = m_audioStates[nextIdx];
-                state.trackCount = 0;
-                for (const auto& track : m_tracks) {
-                    if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
-                }
-                m_activeStateIdx.store(nextIdx, std::memory_order_release);
-            }
-            for (const auto& route : sidechainRouteBackup) {
-                const auto duplicate = std::find_if(
-                    m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
-                    [&route](const SidechainRoute& current) {
-                        return current.destinationId == route.destinationId &&
-                               current.pluginIndex == route.pluginIndex;
-                    });
-                if (duplicate == m_sidechainRoutes.end()) {
-                    if (m_routingEngine.addProcessingDependency(
-                            route.sourceId, route.destinationId)) {
-                        m_sidechainRoutes.push_back(route);
-                    }
-                }
-            }
-        }
-        m_sidechainManager.restoreLinks(sidechainBackup);
-        for (const auto& connection : routingBackup)
-            m_routingEngine.addConnection(connection.sourceId, connection.destId, connection.gain,
-                                          connection.send, connection.preFader);
-        for (const auto& connection : feedbackBackup)
-            m_routingEngine.addFeedbackConnection(connection.sourceId, connection.destId, connection.gain);
-    };
-    m_undoManager.recordAppliedAction("Remove Track", restore, removeAgain);
-    syncStructuralChanges();
-    return true;
+    return hirari_track_remove(this, tid);
 }
 
 bool HirariUnifiedEngine::set_track_name(uint32_t tid, std::string_view name) {
@@ -402,3 +232,307 @@ uint64_t HirariUnifiedEngine::queue_region_import(
 uint8_t HirariUnifiedEngine::complete_region_import(uint64_t ticket) {
     return hirari_region_import_complete(this, ticket);
 }
+
+void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) {
+    uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);
+    auto& state = m_audioStates[nextIdx];
+    if (stampAudioGeneration)
+        state.audioConfigGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
+    state.trackCount = 0;
+    for (const auto& track : m_tracks) {
+        if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
+    }
+    m_activeStateIdx.store(nextIdx, std::memory_order_release);
+}
+
+std::shared_ptr<Track> HirariUnifiedEngine::detachTrackLocked(uint32_t tid, bool stampGeneration) {
+    auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
+                           [tid](const auto& track) { return track->getId() == tid; });
+    if (it == m_tracks.end()) return nullptr;
+    auto detached = *it;
+    for (const auto& region : detached->getRegions()) {
+        hirari_region_waveform_forget(this, region.id);
+    }
+    m_deferredDestructionTracks.push_back(detached);
+    m_tracks.erase(it);
+    mark_project_layout_changed();
+    publishTrackSnapshotLocked(stampGeneration);
+    return detached;
+}
+
+void HirariUnifiedEngine::eraseSidechainRoutesLocked(uint32_t tid,
+                                                    std::vector<SidechainRoute>* removed) {
+    for (const auto& route : m_sidechainRoutes) {
+        if ((route.sourceId == tid || route.destinationId == tid) && removed)
+            removed->push_back(route);
+    }
+    m_sidechainRoutes.erase(
+        std::remove_if(m_sidechainRoutes.begin(), m_sidechainRoutes.end(),
+            [tid](const SidechainRoute& route) {
+                return route.sourceId == tid || route.destinationId == tid;
+            }),
+        m_sidechainRoutes.end());
+}
+
+std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::string& name,
+                                                     Track::Type type) {
+    if (type != Track::Type::Bus)
+        return std::make_shared<Track>(id, name, type, &m_sidechainManager, m_projectLayoutRevision);
+    auto bus = std::make_shared<BusTrack>(id, name, id, &m_sidechainManager, m_projectLayoutRevision);
+    bus->resolveBus(m_busSystem.registerBus(id));
+    return bus;
+}
+
+void HirariUnifiedEngine::insertTrackLocked(const std::shared_ptr<Track>& track, size_t index,
+                                            bool stampGeneration) {
+    const bool alreadyPresent = std::any_of(m_tracks.begin(), m_tracks.end(),
+        [&track](const auto& current) { return current->getId() == track->getId(); });
+    if (alreadyPresent) return;
+    m_tracks.insert(m_tracks.begin() + std::min(index, m_tracks.size()), track);
+    mark_project_layout_changed();
+    publishTrackSnapshotLocked(stampGeneration);
+}
+
+void HirariUnifiedEngine::recordNativeReplay(void* host, const uint8_t* label, size_t labelLength,
+                                             void* edit, ReplayCallback undo,
+                                             ReplayCallback redo, ReplayCallback release) {
+    if (!host || !edit) return;
+    // Both history callbacks share the edit; it is released when the entry is
+    // dropped. Replay re-enters Rust, which owns what undo and redo do.
+    std::shared_ptr<void> owned(edit, [release](void* handle) { release(handle); });
+    const std::string name(reinterpret_cast<const char*>(label), labelLength);
+    static_cast<HirariUnifiedEngine*>(host)->m_undoManager.recordAppliedAction(
+        name, [owned, undo]() { undo(owned.get()); }, [owned, redo]() { redo(owned.get()); });
+}
+
+void HirariUnifiedEngine::syncNative(void* host) {
+    if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
+}
+
+void HirariUnifiedEngine::installTrackEditHost() {
+    struct Handle {
+        std::shared_ptr<Track> track;
+        size_t index = 0;
+        uint32_t id = 0;
+        std::vector<SidechainManager::LinkState> sidechainLinks;
+        std::vector<SidechainRoute> sidechainRoutes;
+        std::vector<RoutingEngine::Connection> routing;
+        std::vector<RoutingEngine::FeedbackConnection> feedback;
+    };
+    static const HirariTrackEditHostOps ops = {
+        [](void* host) -> uint32_t {
+            if (!host) return 0;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            return engine->allocateTrackIdLocked();
+        },
+        [](void* host, uint32_t type, uint32_t id, const uint8_t* name, size_t nameLength,
+           size_t* outIndex) -> void* {
+            if (!host || !name || !outIndex) return nullptr;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            const std::string trackName(reinterpret_cast<const char*>(name), nameLength);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            auto created = engine->makeTrack(id, trackName, static_cast<Track::Type>(type));
+            if (engine->m_context)
+                created->prepareToPlay(engine->m_context->sampleRate, engine->m_context->blockSize);
+            auto* handle = new Handle{created, engine->m_tracks.size(), id, {}, {}, {}, {}};
+            engine->m_tracks.push_back(std::move(created));
+            engine->mark_project_layout_changed();
+            engine->publishTrackSnapshotLocked(true);
+            *outIndex = handle->index;
+            return handle;
+        },
+        [](void* host, uint32_t tid, uint32_t* outId, size_t* outIndex) -> void* {
+            if (!host || !outId || !outIndex) return nullptr;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::shared_ptr<Track> copy;
+            size_t insertIndex = 0;
+            uint32_t newId = 0;
+            std::vector<uint32_t> pluginTypes;
+            std::vector<std::vector<uint8_t>> pluginStates;
+            std::vector<bool> pluginBypasses;
+            std::vector<std::string> sandboxPaths;
+            std::vector<ProjectAutomationPoint> volumeAutomation;
+            std::vector<ProjectAutomationPoint> panAutomation;
+            std::vector<ProjectAutomationPoint> delayAutomation;
+            std::vector<ProjectPluginAutomationLane> pluginAutomation;
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                auto source = std::find_if(engine->m_tracks.begin(), engine->m_tracks.end(),
+                                           [tid](const auto& track) { return track->getId() == tid; });
+                if (source == engine->m_tracks.end()) return nullptr;
+                const auto& original = *source;
+                pluginTypes = original->getPluginTypes();
+                pluginStates = original->getPluginStates();
+                volumeAutomation = original->getVolumeAutomationPoints();
+                panAutomation = original->getPanAutomationPoints();
+                delayAutomation = original->getTrackDelayAutomationPoints();
+                pluginAutomation = original->getPluginAutomation();
+                pluginBypasses.reserve(pluginTypes.size());
+                for (size_t index = 0; index < pluginTypes.size(); ++index) {
+                    pluginBypasses.push_back(original->getPluginBypass(static_cast<uint32_t>(index)));
+                }
+                sandboxPaths = original->getSandboxedPluginPaths();
+                newId = engine->allocateTrackIdLocked();
+                if (newId == 0) return nullptr;
+                copy = engine->makeTrack(newId, original->getName() + " Copy",
+                                         original->getType());
+                copy->setVolume(original->getVolume());
+                copy->setPan(original->getPan());
+                copy->setMuted(original->isMuted());
+                copy->setPhaseInverted(original->isPhaseInverted());
+                copy->setVolumeAutomation(volumeAutomation);
+                copy->setPanAutomation(panAutomation);
+                copy->setTrackDelayAutomation(delayAutomation);
+                size_t sandboxPathIndex = 0;
+                for (size_t pluginIndex = 0; pluginIndex < pluginTypes.size(); ++pluginIndex) {
+                    const uint32_t pluginType = pluginTypes[pluginIndex];
+                    bool inserted = false;
+                    if (pluginType == 0xFFFFFFFFu) {
+                        if (sandboxPathIndex < sandboxPaths.size()) {
+                            inserted = copy->addSandboxedPlugin(sandboxPaths[sandboxPathIndex]);
+                        }
+                        ++sandboxPathIndex;
+                    } else {
+                        inserted = copy->addPlugin(pluginType);
+                    }
+                    if (inserted && pluginIndex < pluginStates.size() &&
+                        !pluginStates[pluginIndex].empty()) {
+                        const uint32_t destinationIndex =
+                            static_cast<uint32_t>(copy->getPluginCount() - 1);
+                        copy->setPluginState(destinationIndex, pluginStates[pluginIndex]);
+                        if (pluginIndex < pluginBypasses.size()) {
+                            copy->setPluginBypass(destinationIndex, pluginBypasses[pluginIndex]);
+                        }
+                    }
+                }
+                if (!pluginAutomation.empty()) copy->setPluginAutomation(pluginAutomation);
+                for (const auto& region : original->getRegions()) {
+                    Region cloned = region;
+                    cloned.id = engine->allocateRegionIdLocked();
+                    if (cloned.id == 0) return nullptr;
+                    copy->addRegion(cloned);
+                }
+                // MIDI regions are independent objects and cannot be shallow-copied
+                // because their note vectors are mutex-protected. Clone the notes
+                // through the safe control-plane accessor and allocate fresh IDs.
+                for (const auto& midiRegion : original->getMidiRegions()) {
+                    if (!midiRegion) continue;
+                    std::vector<MIDINote> notes;
+                    if (!midiRegion->copyProcessedNotes(notes)) return nullptr;
+                    const uint32_t midiId = engine->allocateRegionIdLocked();
+                    if (midiId == 0) return nullptr;
+                    auto midiCopy = std::make_shared<Hirari::Core::MidiRegion>(
+                        midiId, midiRegion->getName(), midiRegion->getStartBeat(),
+                        midiRegion->getLengthBeats());
+                    if (!midiCopy->replaceNotes(notes)) return nullptr;
+                    copy->addMidiRegion(std::move(midiCopy));
+                }
+                insertIndex = engine->m_tracks.size();
+                engine->m_tracks.push_back(copy);
+                engine->mark_project_layout_changed();
+                engine->publishTrackSnapshotLocked(false);
+            }
+            auto* handle = new Handle{copy, insertIndex, newId, {}, {}, {}, {}};
+            *outId = newId;
+            *outIndex = insertIndex;
+            return handle;
+        },
+        [](void* host, uint32_t tid) -> void* {
+            if (!host) return nullptr;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            auto sidechainBackup = engine->m_sidechainManager.captureLinksForTrack(tid);
+            std::shared_ptr<Track> removed;
+            std::vector<SidechainRoute> sidechainRouteBackup;
+            std::vector<RoutingEngine::Connection> routingBackup;
+            std::vector<RoutingEngine::FeedbackConnection> feedbackBackup;
+            size_t originalIndex = 0;
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                auto it = std::find_if(engine->m_tracks.begin(), engine->m_tracks.end(),
+                                       [tid](const auto& track) { return track->getId() == tid; });
+                if (it == engine->m_tracks.end()) return nullptr;
+                originalIndex = static_cast<size_t>(it - engine->m_tracks.begin());
+                engine->m_sidechainManager.removeLinksForTrack(tid);
+                engine->eraseSidechainRoutesLocked(tid, &sidechainRouteBackup);
+                engine->m_routingEngine.removeProcessingDependenciesForNode(tid);
+                engine->m_routingEngine.removeConnectionsForNode(tid, routingBackup);
+                engine->m_routingEngine.removeFeedbackConnectionsForNode(tid, feedbackBackup);
+                removed = engine->detachTrackLocked(tid, false);
+                if (tid == 1 && engine->m_tracks.empty()) {
+                    // new_project() creates the bootstrap at ID 1 and advances the
+                    // allocator to 2. Removing that placeholder during project
+                    // hydration must rewind the allocator so the first persisted track
+                    // keeps its canonical ID instead of becoming ID 2.
+                    engine->m_trackIdCounter.store(1, std::memory_order_release);
+                }
+            }
+            return new Handle{std::move(removed), originalIndex, tid,
+                              std::move(sidechainBackup), std::move(sidechainRouteBackup),
+                              std::move(routingBackup), std::move(feedbackBackup)};
+        },
+        [](void* host, void* raw, bool dropSidechainLinks, bool dropRouting) -> bool {
+            if (!host || !raw) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            auto* handle = static_cast<Handle*>(raw);
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                if (dropSidechainLinks) engine->m_sidechainManager.removeLinksForTrack(handle->id);
+                if (dropRouting) {
+                    engine->eraseSidechainRoutesLocked(handle->id, nullptr);
+                    engine->m_routingEngine.removeProcessingDependenciesForNode(handle->id);
+                }
+                engine->detachTrackLocked(handle->id, false);
+            }
+            if (!dropRouting) return true;
+            std::vector<RoutingEngine::Connection> discardedRoutes;
+            engine->m_routingEngine.removeConnectionsForNode(handle->id, discardedRoutes);
+            std::vector<RoutingEngine::FeedbackConnection> discardedFeedback;
+            engine->m_routingEngine.removeFeedbackConnectionsForNode(handle->id, discardedFeedback);
+            return true;
+        },
+        [](void* host, void* raw, bool stampGeneration) -> bool {
+            if (!host || !raw) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            auto* handle = static_cast<Handle*>(raw);
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                engine->insertTrackLocked(handle->track, handle->index, stampGeneration);
+                for (const auto& route : handle->sidechainRoutes) {
+                    const auto duplicate = std::find_if(
+                        engine->m_sidechainRoutes.begin(), engine->m_sidechainRoutes.end(),
+                        [&route](const SidechainRoute& current) {
+                            return current.destinationId == route.destinationId &&
+                                   current.pluginIndex == route.pluginIndex;
+                        });
+                    if (duplicate == engine->m_sidechainRoutes.end()) {
+                        if (engine->m_routingEngine.addProcessingDependency(
+                                route.sourceId, route.destinationId)) {
+                            engine->m_sidechainRoutes.push_back(route);
+                        }
+                    }
+                }
+            }
+            engine->m_sidechainManager.restoreLinks(handle->sidechainLinks);
+            for (const auto& connection : handle->routing)
+                engine->m_routingEngine.addConnection(connection.sourceId, connection.destId,
+                                                      connection.gain, connection.send,
+                                                      connection.preFader);
+            for (const auto& connection : handle->feedback)
+                engine->m_routingEngine.addFeedbackConnection(connection.sourceId,
+                                                              connection.destId, connection.gain);
+            return true;
+        },
+        [](void* raw) { delete static_cast<Handle*>(raw); },
+        &HirariUnifiedEngine::recordNativeReplay,
+        &HirariUnifiedEngine::syncNative,
+    };
+    hirari_track_edit_host_install(&ops);
+}
+
+namespace {
+[[maybe_unused]] const bool kTrackEditHostInstalled = [] {
+    HirariUnifiedEngine::installTrackEditHost();
+    return true;
+}();
+}  // namespace

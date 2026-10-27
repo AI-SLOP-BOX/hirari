@@ -1022,7 +1022,7 @@ mod tests {
     #[test]
     fn add_captures_state_and_replays_undo_and_redo() {
         let _guard = SERIAL.lock().unwrap();
-        reset();
+        drop(reset());
 
         assert!(append_builtin(&fake_ops(), std::ptr::null_mut(), 4, 5));
         assert_eq!(
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn add_sandboxed_records_the_bundle_path() {
         let _guard = SERIAL.lock().unwrap();
-        reset();
+        drop(reset());
 
         assert!(append_sandboxed(
             &fake_ops(),
@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn unsupported_bundle_paths_are_rejected_before_the_engine() {
         let _guard = SERIAL.lock().unwrap();
-        reset();
+        drop(reset());
 
         assert!(!append_sandboxed(
             &fake_ops(),
@@ -1093,7 +1093,7 @@ mod tests {
     #[test]
     fn remove_replays_the_captured_snapshot_and_releases_it() {
         let _guard = SERIAL.lock().unwrap();
-        reset();
+        drop(reset());
 
         assert!(remove_chain_plugin(
             &fake_ops(),

@@ -677,22 +677,8 @@ void HirariUnifiedEngine::installPluginEditHost() {
             return false;
         },
         [](void* snapshot) { delete static_cast<Track::PluginSnapshot*>(snapshot); },
-        [](void* host, const uint8_t* label, size_t labelLength, void* edit,
-           HirariPluginEditHostOps::ReplayFn undo, HirariPluginEditHostOps::ReplayFn redo,
-           HirariPluginEditHostOps::ReplayFn release) {
-            if (!host || !edit) return;
-            // Both history callbacks share the edit; it is released once the
-            // entry is dropped. Replay re-enters Rust, which owns what undo and
-            // redo do for each edit kind.
-            std::shared_ptr<void> owned(edit, [release](void* handle) { release(handle); });
-            const std::string name(reinterpret_cast<const char*>(label), labelLength);
-            static_cast<HirariUnifiedEngine*>(host)->m_undoManager.recordAppliedAction(
-                name, [owned, undo]() { undo(owned.get()); },
-                [owned, redo]() { redo(owned.get()); });
-        },
-        [](void* host) {
-            if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
-        },
+        &HirariUnifiedEngine::recordNativeReplay,
+        &HirariUnifiedEngine::syncNative,
     };
     hirari_plugin_edit_host_install(&ops);
 }

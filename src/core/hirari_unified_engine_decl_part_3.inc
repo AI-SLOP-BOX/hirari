@@ -93,6 +93,17 @@
     static void installRoutingEditHost();
     static void installControlEditHost();
     static void installPluginEditHost();
+    static void installTrackEditHost();
+    using ReplayCallback = void (*)(void*);
+    static void recordNativeReplay(void* host, const uint8_t* label, size_t labelLength, void* edit,
+                                   ReplayCallback undo, ReplayCallback redo,
+                                   ReplayCallback release);
+    static void syncNative(void* host);
+    std::shared_ptr<Track> makeTrack(uint32_t id, const std::string& name, Track::Type type);
+    void publishTrackSnapshotLocked(bool stampAudioGeneration);
+    std::shared_ptr<Track> detachTrackLocked(uint32_t tid, bool stampAudioGeneration);
+    void insertTrackLocked(const std::shared_ptr<Track>& track, size_t index,
+                           bool stampAudioGeneration);
     // Installs the sandbox maintenance callbacks Rust drives; see part_3a.
     static void installSandboxMaintenanceHost();
 

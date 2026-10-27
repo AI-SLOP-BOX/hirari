@@ -102,6 +102,16 @@ production support.
   plugin and non-empty state before calling the preset writer. C++ keeps the
   track lookup and state storage behind two host callbacks, and the engine
   methods are one-line delegations.
+- Track lifecycle edits now run through the Rust track-edit host. Rust owns the
+  `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
+  `Remove Track` labels, and the undo/redo decisions: created and copied tracks
+  are removed on undo and re-inserted at their captured index on redo, while a
+  removed track travels with its sidechain links, sidechain routes and routing
+  connections into a handle that restores them on undo. C++ keeps the track
+  objects, deep clone, routing graph and the published audio snapshot behind
+  host callbacks; the history releases each handle through Rust when the entry
+  is dropped. Track insertion/removal now share one snapshot publisher and the
+  plugin and track hosts share one replay recorder.
 - Plugin chain add and remove now run through the Rust plugin-edit host. Rust
   checks the sandboxed bundle path, appends built-in or sandboxed plugins,
   captures the appended state and bypass (or the removed processor snapshot),

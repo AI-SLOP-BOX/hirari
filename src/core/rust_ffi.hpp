@@ -1659,6 +1659,28 @@ extern "C" bool hirari_plugin_edit_add_sandboxed(
     void* host, uint32_t trackId, const uint8_t* path, size_t pathLength);
 extern "C" bool hirari_plugin_edit_remove(
     void* host, uint32_t trackId, uint32_t pluginIndex);
+
+// Track lifecycle edit policy (create, duplicate, remove and their undo).
+struct HirariTrackEditHostOps {
+    uint32_t (*allocateId)(void*) = nullptr;
+    void* (*create)(void*, uint32_t, uint32_t, const uint8_t*, size_t, size_t*) = nullptr;
+    void* (*duplicate)(void*, uint32_t, uint32_t*, size_t*) = nullptr;
+    void* (*take)(void*, uint32_t) = nullptr;
+    // The flags drop sidechain links and routing; created and removed tracks
+    // take different paths. Restore replays the captured links and routes.
+    bool (*remove)(void*, void*, bool, bool) = nullptr;
+    bool (*restore)(void*, void*, bool) = nullptr;
+    void (*releaseHandle)(void*) = nullptr;
+    using ReplayFn = void (*)(void*);
+    void (*recordReplay)(void*, const uint8_t*, size_t, void*, ReplayFn, ReplayFn,
+                         ReplayFn) = nullptr;
+    void (*syncStructuralChanges)(void*) = nullptr;
+};
+
+extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops);
+extern "C" uint32_t hirari_track_add(void* host, uint32_t trackType);
+extern "C" uint32_t hirari_track_duplicate(void* host, uint32_t trackId);
+extern "C" bool hirari_track_remove(void* host, uint32_t trackId);
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 extern "C" bool hirari_plugin_edit_move(
