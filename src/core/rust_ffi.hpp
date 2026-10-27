@@ -50,9 +50,6 @@ struct HirariScheduledMidiNote {
     uint8_t probability;
     uint32_t region_id;
 };
-extern "C" int64_t hirari_midi_edit_range(
-    HirariScheduledMidiNote* notes, size_t count, uint32_t track_id,
-    uint64_t start_sample, uint64_t end_sample, uint32_t operation, int64_t amount);
 struct HirariMidiSnapshotView {
     const HirariScheduledMidiNote* notes;
     size_t note_count;
@@ -63,17 +60,22 @@ struct HirariMidiSnapshotView {
 };
 extern "C" void* hirari_midi_snapshot_store_create();
 extern "C" void hirari_midi_snapshot_store_destroy(void* store);
-extern "C" bool hirari_midi_snapshot_store_publish(
-    void* store, const HirariScheduledMidiNote* notes, size_t count);
 extern "C" bool hirari_midi_snapshot_store_pin(
     const void* store, HirariMidiSnapshotView* output);
 extern "C" void hirari_midi_snapshot_store_release(const void* store, size_t slot);
 extern "C" uint64_t hirari_midi_snapshot_store_revision(const void* store);
 extern "C" uint64_t hirari_midi_scheduled_note_end(const HirariScheduledMidiNote* note);
-extern "C" int64_t hirari_midi_note_upsert(
-    HirariScheduledMidiNote* notes, size_t count, size_t capacity,
-    uint32_t track_id, uint8_t pitch, uint8_t velocity,
-    uint64_t start_sample, uint64_t length_samples);
+extern "C" size_t hirari_midi_notes_snapshot_copy(
+    const void* store, HirariScheduledMidiNote* output, size_t capacity);
+extern "C" bool hirari_midi_notes_replace(
+    void* store, const HirariScheduledMidiNote* notes, size_t count,
+    bool record_undo, void* undo, const void* log);
+extern "C" bool hirari_midi_notes_edit_range(
+    void* store, uint32_t track_id, uint64_t start_sample, uint64_t end_sample,
+    uint32_t operation, int64_t amount, void* undo, const void* log);
+extern "C" void hirari_midi_notes_upsert(
+    void* store, uint32_t track_id, uint8_t pitch, uint8_t velocity,
+    uint64_t start_sample, uint64_t length_samples, void* undo, const void* log);
 using HirariScheduledMidiEventCallback = void (*)(
     void* context, const HirariScheduledMidiNote* note,
     uint64_t sample_offset, uint8_t note_off);

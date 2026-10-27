@@ -53,85 +53,51 @@ bool HirariUnifiedEngine::replace_midi_notes(const std::vector<ScheduledMidiNote
                   offsetof(HirariScheduledMidiNote, start_sample));
     static_assert(offsetof(ScheduledMidiNote, regionId) ==
                   offsetof(HirariScheduledMidiNote, region_id));
-    if (!m_midiSnapshotStore || notes.size() > 100'000) return false;
-    std::vector<ScheduledMidiNote> before;
-    const auto after = notes;
-    const auto publish = [this](const std::vector<ScheduledMidiNote>& snapshot) {
-        std::lock_guard<std::mutex> lock(m_midiNotesMutex);
-        (void)hirari_midi_snapshot_store_publish(m_midiSnapshotStore,
-            reinterpret_cast<const HirariScheduledMidiNote*>(snapshot.data()), snapshot.size());
-    };
-    {
-        std::lock_guard<std::mutex> lock(m_midiNotesMutex);
-        before = midi_notes_snapshot();
-        if (!hirari_midi_snapshot_store_publish(m_midiSnapshotStore,
-                reinterpret_cast<const HirariScheduledMidiNote*>(after.data()), after.size()))
-            return false;
-    }
-    if (recordUndo) {
-        m_undoManager.recordAppliedAction(
-            "Replace MIDI Notes", [publish, before]() { publish(before); },
-            [publish, after]() { publish(after); });
-    }
-    return true;
+    return hirari_midi_notes_replace(
+        m_midiSnapshotStore, reinterpret_cast<const HirariScheduledMidiNote*>(notes.data()),
+        notes.size(), recordUndo, undo_state(), log_state());
 }
 
 std::vector<HirariUnifiedEngine::ScheduledMidiNote> HirariUnifiedEngine::midi_notes_snapshot() const {
-    if (!m_midiSnapshotStore) return {};
-    HirariMidiSnapshotView snapshot{};
-    while (!hirari_midi_snapshot_store_pin(m_midiSnapshotStore, &snapshot))
-        std::this_thread::yield();
     std::vector<ScheduledMidiNote> notes;
-    if (snapshot.note_count != 0) {
-        const auto* begin = reinterpret_cast<const ScheduledMidiNote*>(snapshot.notes);
-        notes.assign(begin, begin + snapshot.note_count);
+    const size_t count = hirari_midi_notes_snapshot_copy(m_midiSnapshotStore, nullptr, 0);
+    if (count == 0) return notes;
+    notes.resize(count);
+    for (;;) {
+        const size_t copied = hirari_midi_notes_snapshot_copy(
+            m_midiSnapshotStore, reinterpret_cast<HirariScheduledMidiNote*>(notes.data()),
+            notes.size());
+        if (copied <= notes.size()) {
+            notes.resize(copied);
+            break;
+        }
+        notes.resize(copied);
     }
-    hirari_midi_snapshot_store_release(m_midiSnapshotStore, snapshot.slot);
     return notes;
 }
 
 bool HirariUnifiedEngine::remove_midi_notes_range(uint32_t trackId, uint64_t startSample,
                                                 uint64_t endSample) {
-    auto next = midi_notes_snapshot();
-    const int64_t edited = hirari_midi_edit_range(
-        reinterpret_cast<HirariScheduledMidiNote*>(next.data()), next.size(),
-        trackId, startSample, endSample, 0, 0);
-    if (edited < 0) return false;
-    next.resize(static_cast<size_t>(edited));
-    return replace_midi_notes(next, true);
+    return hirari_midi_notes_edit_range(m_midiSnapshotStore, trackId, startSample, endSample,
+                                        0, 0, undo_state(), log_state());
 }
 
 bool HirariUnifiedEngine::transpose_midi_notes_range(uint32_t trackId, uint64_t startSample,
                                                    uint64_t endSample, int32_t semitones) {
-    auto next = midi_notes_snapshot();
-    const int64_t edited = hirari_midi_edit_range(
-        reinterpret_cast<HirariScheduledMidiNote*>(next.data()), next.size(),
-        trackId, startSample, endSample, 1, semitones);
-    if (edited < 0) return false;
-    return replace_midi_notes(next, true);
+    return hirari_midi_notes_edit_range(m_midiSnapshotStore, trackId, startSample, endSample,
+                                        1, semitones, undo_state(), log_state());
 }
 
 bool HirariUnifiedEngine::move_midi_notes_range(uint32_t trackId, uint64_t startSample,
                                               uint64_t endSample, int64_t deltaSamples) {
-    auto next = midi_notes_snapshot();
-    const int64_t edited = hirari_midi_edit_range(
-        reinterpret_cast<HirariScheduledMidiNote*>(next.data()), next.size(),
-        trackId, startSample, endSample, 2, deltaSamples);
-    if (edited < 0) return false;
-    return replace_midi_notes(next, true);
+    return hirari_midi_notes_edit_range(m_midiSnapshotStore, trackId, startSample, endSample,
+                                        2, deltaSamples, undo_state(), log_state());
 }
 
 void HirariUnifiedEngine::set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
                                       uint64_t startSample, uint64_t lengthSamples) {
-    auto next = midi_notes_snapshot();
-    const size_t count = next.size();
-    next.resize(count + 1);
-    const int64_t edited = hirari_midi_note_upsert(
-        reinterpret_cast<HirariScheduledMidiNote*>(next.data()), count, next.size(),
-        trackId, pitch, velocity, startSample, lengthSamples);
-    if (edited < 0) return;
-    next.resize(static_cast<size_t>(edited));
-    replace_midi_notes(next, true);
+    hirari_midi_notes_upsert(m_midiSnapshotStore, trackId, pitch, velocity, startSample,
+                             lengthSamples, undo_state(), log_state());
 }
 
 void HirariUnifiedEngine::set_playing(bool p) {

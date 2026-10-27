@@ -81,6 +81,13 @@ production support.
   replay the full snapshot by track id. The engine only resolves a track's
   articulation handle and stores the map JSON behind two host callbacks; the
   packed visitor/validator FFI and the track's articulation wrappers are gone.
+- Scheduled MIDI note edits now run through the Rust note-snapshot store. Rust
+  owns the 100,000-note admission, the read-modify-publish sequence under one
+  edit mutex, the range edits and the legacy upsert, and records one
+  `Replace MIDI Notes` history entry whose undo and redo replay the previous
+  and new lists. The engine's publish lambda, control-side note mutex and the
+  direct range/upsert FFI declarations are gone; the snapshot read is a
+  count-then-copy call.
 - Plugin preset save and load now run through the Rust plugin-edit host. Rust
   checks the preset's plugin type against the target plugin, copies the current
   state for the undo entry, applies the loaded bytes and records one

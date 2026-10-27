@@ -65,7 +65,6 @@
     std::vector<SidechainRoute> m_sidechainRoutes;
 
     void* m_midiSnapshotStore = nullptr;
-    mutable std::mutex m_midiNotesMutex;
 
     std::atomic<float> m_dspLoad{0.0f};
     std::atomic<uint32_t> m_diagnosticBlockCounter{0};

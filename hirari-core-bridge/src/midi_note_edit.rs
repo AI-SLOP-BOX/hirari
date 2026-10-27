@@ -1,5 +1,5 @@
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct ScheduledMidiNoteFfi {
     pub track_id: u32,
     pub pitch: u8,
@@ -30,6 +30,9 @@ struct MidiSnapshotStore {
     readers: [AtomicUsize; 3],
     revision: AtomicU64,
     writer: Mutex<()>,
+    // Serializes the read-modify-publish sequence of one note edit, as the
+    // engine's control-side mutex did. Plain snapshots do not take it.
+    edit: Mutex<()>,
 }
 
 // Writers mutate only an inactive slot whose reader count is zero. Readers
@@ -58,6 +61,7 @@ impl MidiSnapshotStore {
             readers: std::array::from_fn(|_| AtomicUsize::new(0)),
             revision: AtomicU64::new(0),
             writer: Mutex::new(()),
+            edit: Mutex::new(()),
         }
     }
 
@@ -113,6 +117,95 @@ impl MidiSnapshotStore {
             readers.fetch_sub(1, Ordering::Release);
         }
     }
+
+    /// Copies the published notes out of the stable slot. The engine's control
+    /// path waited for a pin rather than failing, so this retries the same way.
+    fn snapshot_notes(&self) -> Vec<ScheduledMidiNoteFfi> {
+        let view = loop {
+            if let Some(view) = self.pin() {
+                break view;
+            }
+            thread::yield_now();
+        };
+        let notes = if view.note_count == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(view.notes, view.note_count) }.to_vec()
+        };
+        self.release(view.slot);
+        notes
+    }
+}
+
+/// Builds and publishes one immutable note snapshot, applying the same
+/// validation and ordering the standalone publish entry point used.
+fn publish_snapshot(store: &MidiSnapshotStore, notes: &[ScheduledMidiNoteFfi]) -> bool {
+    if notes.len() > 100_000 {
+        return false;
+    }
+    let mut notes_by_start = notes.to_vec();
+    let mut indices_by_end = vec![0; notes_by_start.len()];
+    if !unsafe {
+        hirari_midi_snapshot_build(
+            notes_by_start.as_mut_ptr(),
+            notes_by_start.len(),
+            indices_by_end.as_mut_ptr(),
+            indices_by_end.len(),
+        )
+    } {
+        return false;
+    }
+    store.publish(MidiSnapshot {
+        notes_by_start,
+        indices_by_end,
+    });
+    true
+}
+
+/// Replays one history snapshot under the same edit mutex the forward path
+/// held. The native undo/redo lambdas published through that lock.
+fn replay_snapshot(store: *const MidiSnapshotStore, notes: &[ScheduledMidiNoteFfi]) {
+    let _edit = unsafe { &*store }
+        .edit
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let _ = unsafe { publish_snapshot(&*store, notes) };
+}
+
+/// Adopts `notes` as the scheduled note list and, when asked, records one
+/// non-coalescing "Replace MIDI Notes" entry. The native method held its
+/// control-side mutex across the before-read and the publish, then recorded
+/// outside the lock; the edit mutex reproduces that scope.
+fn replace_notes(
+    store: &MidiSnapshotStore,
+    notes: Vec<ScheduledMidiNoteFfi>,
+    record_undo: bool,
+    undo: *mut c_void,
+    log: *const c_void,
+) -> bool {
+    if notes.len() > 100_000 {
+        return false;
+    }
+    let before = {
+        let _edit = store.edit.lock().unwrap_or_else(|error| error.into_inner());
+        let before = store.snapshot_notes();
+        if !publish_snapshot(store, &notes) {
+            return false;
+        }
+        before
+    };
+    if record_undo {
+        let store = store as *const MidiSnapshotStore;
+        let after = notes;
+        crate::record_external_action(
+            undo,
+            log,
+            "Replace MIDI Notes",
+            move || replay_snapshot(store, &before),
+            move || replay_snapshot(store, &after),
+        );
+    }
+    true
 }
 
 #[no_mangle]
@@ -139,27 +232,12 @@ pub unsafe extern "C" fn hirari_midi_snapshot_store_publish(
     if count > 100_000 || (count > 0 && notes.is_null()) {
         return false;
     }
-    let mut notes_by_start = if count == 0 {
-        Vec::new()
+    let notes = if count == 0 {
+        &[][..]
     } else {
-        unsafe { std::slice::from_raw_parts(notes, count) }.to_vec()
+        unsafe { std::slice::from_raw_parts(notes, count) }
     };
-    let mut indices_by_end = vec![0; count];
-    if !unsafe {
-        hirari_midi_snapshot_build(
-            notes_by_start.as_mut_ptr(),
-            count,
-            indices_by_end.as_mut_ptr(),
-            indices_by_end.len(),
-        )
-    } {
-        return false;
-    }
-    store.publish(MidiSnapshot {
-        notes_by_start,
-        indices_by_end,
-    });
-    true
+    publish_snapshot(store, notes)
 }
 
 #[no_mangle]
@@ -483,4 +561,244 @@ pub unsafe extern "C" fn hirari_midi_edit_range(
         }
     }
     count as i64
+}
+
+/// # Safety
+/// `store` must be null or a handle returned by
+/// `hirari_midi_snapshot_store_create` that is still alive.
+unsafe fn store_ref<'a>(store: *mut c_void) -> Option<&'a MidiSnapshotStore> {
+    unsafe { store.cast::<MidiSnapshotStore>().as_ref() }
+}
+
+/// Copies the published note list. Returns the current count, which is larger
+/// than `capacity` when the caller has to grow and retry; a null `output` is
+/// the count query.
+///
+/// # Safety
+/// `output` must be writable for `capacity` notes.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_snapshot_copy(
+    store: *const c_void,
+    output: *mut ScheduledMidiNoteFfi,
+    capacity: usize,
+) -> usize {
+    let Some(store) = (unsafe { store.cast::<MidiSnapshotStore>().as_ref() }) else {
+        return 0;
+    };
+    let notes = store.snapshot_notes();
+    if output.is_null() || capacity < notes.len() {
+        return notes.len();
+    }
+    if !notes.is_empty() {
+        unsafe { std::ptr::copy_nonoverlapping(notes.as_ptr(), output, notes.len()) };
+    }
+    notes.len()
+}
+
+/// Replaces the scheduled note list, rejecting a null store or more than
+/// 100,000 notes, and records the "Replace MIDI Notes" history entry when
+/// asked.
+///
+/// # Safety
+/// `notes` must be readable for `count` entries.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_replace(
+    store: *mut c_void,
+    notes: *const ScheduledMidiNoteFfi,
+    count: usize,
+    record_undo: bool,
+    undo: *mut c_void,
+    log: *const c_void,
+) -> bool {
+    let Some(store) = (unsafe { store_ref(store) }) else {
+        return false;
+    };
+    if count > 100_000 || (count > 0 && notes.is_null()) {
+        return false;
+    }
+    let notes = if count == 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(notes, count) }.to_vec()
+    };
+    replace_notes(store, notes, record_undo, undo, log)
+}
+
+/// Applies a range edit (0=remove, 1=transpose, 2=move) to the published list
+/// and republishes it with one history entry. Returns false when the edit is
+/// rejected or the publication fails.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_edit_range(
+    store: *mut c_void,
+    track_id: u32,
+    start_sample: u64,
+    end_sample: u64,
+    operation: u32,
+    amount: i64,
+    undo: *mut c_void,
+    log: *const c_void,
+) -> bool {
+    let Some(store) = (unsafe { store_ref(store) }) else {
+        return false;
+    };
+    let mut next = store.snapshot_notes();
+    let edited = unsafe {
+        hirari_midi_edit_range(
+            next.as_mut_ptr(),
+            next.len(),
+            track_id,
+            start_sample,
+            end_sample,
+            operation,
+            amount,
+        )
+    };
+    if edited < 0 {
+        return false;
+    }
+    next.truncate(edited as usize);
+    replace_notes(store, next, true, undo, log)
+}
+
+/// Inserts or updates a legacy track-scoped note and republishes the list with
+/// one history entry. Invalid input and an unchanged note leave it untouched.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_upsert(
+    store: *mut c_void,
+    track_id: u32,
+    pitch: u8,
+    velocity: u8,
+    start_sample: u64,
+    length_samples: u64,
+    undo: *mut c_void,
+    log: *const c_void,
+) {
+    let Some(store) = (unsafe { store_ref(store) }) else {
+        return;
+    };
+    let mut next = store.snapshot_notes();
+    let count = next.len();
+    next.push(ScheduledMidiNoteFfi::default());
+    let edited = unsafe {
+        hirari_midi_note_upsert(
+            next.as_mut_ptr(),
+            count,
+            next.len(),
+            track_id,
+            pitch,
+            velocity,
+            start_sample,
+            length_samples,
+        )
+    };
+    if edited < 0 {
+        return;
+    }
+    next.truncate(edited as usize);
+    replace_notes(store, next, true, undo, log);
+}
+
+#[cfg(test)]
+mod edit_host_tests {
+    use super::*;
+    use crate::undo_transaction::{
+        hirari_undo_manager_apply_and_invoke, hirari_undo_manager_create,
+        hirari_undo_manager_destroy, hirari_undo_manager_undo_count,
+    };
+
+    fn note(track_id: u32, pitch: u8, start_sample: u64) -> ScheduledMidiNoteFfi {
+        ScheduledMidiNoteFfi {
+            track_id,
+            pitch,
+            velocity: 100,
+            midi_channel: 0,
+            articulation_id: 0,
+            start_sample,
+            length_samples: 480,
+            probability: 100,
+            region_id: 0,
+        }
+    }
+
+    fn published(store: *mut c_void) -> Vec<ScheduledMidiNoteFfi> {
+        let count = unsafe { hirari_midi_notes_snapshot_copy(store, std::ptr::null_mut(), 0) };
+        let mut notes = vec![ScheduledMidiNoteFfi::default(); count];
+        let copied =
+            unsafe { hirari_midi_notes_snapshot_copy(store, notes.as_mut_ptr(), notes.len()) };
+        notes.truncate(copied);
+        notes
+    }
+
+    #[test]
+    fn replace_publishes_and_undo_replays_the_previous_list() {
+        let store = hirari_midi_snapshot_store_create();
+        let undo = hirari_undo_manager_create(8, 300);
+        let first = [note(1, 60, 0), note(1, 64, 480)];
+        let second = [note(1, 60, 0), note(1, 64, 480), note(2, 67, 960)];
+        unsafe {
+            assert!(hirari_midi_notes_replace(
+                store,
+                first.as_ptr(),
+                first.len(),
+                false,
+                std::ptr::null_mut(),
+                std::ptr::null()
+            ));
+            assert_eq!(published(store), first);
+            assert!(hirari_midi_notes_replace(
+                store,
+                second.as_ptr(),
+                second.len(),
+                true,
+                undo,
+                std::ptr::null()
+            ));
+            assert_eq!(published(store), second);
+            assert!(hirari_undo_manager_apply_and_invoke(undo, false));
+            assert_eq!(published(store), first);
+            assert!(hirari_undo_manager_apply_and_invoke(undo, true));
+            assert_eq!(published(store), second);
+            hirari_undo_manager_destroy(undo);
+            hirari_midi_snapshot_store_destroy(store);
+        }
+    }
+
+    #[test]
+    fn range_removal_and_upsert_each_publish_one_history_entry() {
+        let store = hirari_midi_snapshot_store_create();
+        let undo = hirari_undo_manager_create(8, 300);
+        let base = [note(1, 60, 0), note(1, 62, 1000), note(2, 64, 2000)];
+        unsafe {
+            assert!(hirari_midi_notes_replace(
+                store,
+                base.as_ptr(),
+                base.len(),
+                true,
+                undo,
+                std::ptr::null()
+            ));
+            assert!(hirari_midi_notes_edit_range(
+                store,
+                1,
+                0,
+                500,
+                0,
+                0,
+                undo,
+                std::ptr::null()
+            ));
+            assert_eq!(published(store), [note(1, 62, 1000), note(2, 64, 2000)]);
+            hirari_midi_notes_upsert(store, 1, 72, 100, 4000, 480, undo, std::ptr::null());
+            assert_eq!(published(store).len(), 3);
+            // An identical upsert leaves both the list and the history alone.
+            hirari_midi_notes_upsert(store, 1, 72, 100, 4000, 480, undo, std::ptr::null());
+            assert_eq!(hirari_undo_manager_undo_count(undo), 3);
+            assert!(hirari_undo_manager_apply_and_invoke(undo, false));
+            assert_eq!(published(store).len(), 2);
+            assert!(hirari_undo_manager_apply_and_invoke(undo, false));
+            assert_eq!(published(store), base);
+            hirari_undo_manager_destroy(undo);
+            hirari_midi_snapshot_store_destroy(store);
+        }
+    }
 }
