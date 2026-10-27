@@ -342,6 +342,30 @@ pub(crate) fn record_external_action(
     undo_callback: impl Fn() + 'static,
     redo_callback: impl Fn() + 'static,
 ) {
+    record_external_action_with(undo, log, name, undo_callback, redo_callback, false);
+}
+
+/// The same entry as `record_external_action`, for edits whose native call
+/// passed `recordAppliedAction(..., true)` and folded a repeated edit inside
+/// the coalescing window into one history entry.
+pub(crate) fn record_external_action_coalesced(
+    undo: *mut std::ffi::c_void,
+    log: *const std::ffi::c_void,
+    name: &str,
+    undo_callback: impl Fn() + 'static,
+    redo_callback: impl Fn() + 'static,
+) {
+    record_external_action_with(undo, log, name, undo_callback, redo_callback, true);
+}
+
+fn record_external_action_with(
+    undo: *mut std::ffi::c_void,
+    log: *const std::ffi::c_void,
+    name: &str,
+    undo_callback: impl Fn() + 'static,
+    redo_callback: impl Fn() + 'static,
+    coalesce: bool,
+) {
     record_applied_action(
         EditHandles {
             tempo: std::ptr::null_mut(),
@@ -352,7 +376,7 @@ pub(crate) fn record_external_action(
         name.to_owned(),
         undo_callback,
         redo_callback,
-        false,
+        coalesce,
     );
 }
 

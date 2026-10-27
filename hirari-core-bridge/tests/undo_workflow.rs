@@ -617,3 +617,69 @@ fn plugin_preset_load_swaps_state_and_undoes_through_the_plugin_host() {
     let _ = std::fs::remove_file(saved);
     let _ = std::fs::remove_file(mismatched);
 }
+
+/// Expression-map edits now admit and apply through the Rust edit host: the
+/// packed rows and JSON are compared against the stored snapshot, an identical
+/// write records nothing, and undo/redo replay the full snapshot by track id.
+#[test]
+fn expression_map_edits_undo_through_the_rust_edit_host() {
+    use hirari_core_bridge::project_contracts::{ExpressionMapEntry, ExpressionMapOutput};
+
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    let entry = |value: u8| ExpressionMapEntry {
+        articulation_id: 1,
+        name: "Test".to_owned(),
+        keyswitch_pitch: None,
+        channel: 0,
+        group: 0,
+        outputs: vec![ExpressionMapOutput::ControlChange {
+            controller: 1,
+            value,
+        }],
+        off_outputs: Vec::new(),
+        transition_off_outputs: Vec::new(),
+    };
+    let map_json = |core: &HirariCore| -> serde_json::Value {
+        let layout: serde_json::Value =
+            serde_json::from_str(&core.get_project_layout_json()).expect("layout is json");
+        layout[0]["expression_map"].clone()
+    };
+
+    let before = map_json(&core);
+    assert!(core.set_midi_expression_map(track_id, vec![entry(64)], 0));
+    let after = map_json(&core);
+    assert_ne!(before, after);
+
+    // A repeated identical write is a no-op: the single undo below must jump
+    // straight back to the pre-edit map.
+    assert!(core.set_midi_expression_map(track_id, vec![entry(64)], 0));
+    core.undo();
+    assert_eq!(map_json(&core), before);
+    core.redo();
+    assert_eq!(map_json(&core), after);
+
+    // Editing a specific articulation gives the action a distinct name, so it
+    // records its own entry instead of coalescing into the first edit, and it
+    // round-trips by snapshot.
+    let second = ExpressionMapEntry {
+        articulation_id: 2,
+        name: "Second".to_owned(),
+        keyswitch_pitch: None,
+        channel: 0,
+        group: 0,
+        outputs: vec![ExpressionMapOutput::ControlChange {
+            controller: 2,
+            value: 32,
+        }],
+        off_outputs: Vec::new(),
+        transition_off_outputs: Vec::new(),
+    };
+    assert!(core.set_midi_expression_map(track_id, vec![second], 2));
+    let both = map_json(&core);
+    core.undo();
+    assert_eq!(map_json(&core), after);
+    core.redo();
+    assert_eq!(map_json(&core), both);
+}

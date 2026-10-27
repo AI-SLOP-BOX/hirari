@@ -229,77 +229,54 @@ bool HirariUnifiedEngine::set_expression_map(uint32_t trackId,
                                              const std::vector<uint32_t>& packed,
                                              const std::string& json,
                                              uint32_t articulationId) {
-    if (!hirari_expression_map_validate_packed(
-            packed.data(), packed.size(), json.size(), articulationId)) return false;
-    const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
-    for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
-        auto* track = state.activeTracks[i];
-        if (!track || track->getId() != trackId) continue;
-        std::vector<uint32_t> beforePacked;
-        track->getArticulationOutputMap(beforePacked);
-        const std::string beforeJson = track->getExpressionMapJson();
-        if (beforePacked == packed && beforeJson == json) return true;
-        const auto applySnapshot = [this, trackId](const std::vector<uint32_t>& values,
-                                                   const std::string& serialized) {
-            const auto& current = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
-            for (uint32_t index = 0; index < current.trackCount && index < 256; ++index) {
-                auto* target = current.activeTracks[index];
-                if (!target || target->getId() != trackId) continue;
-                struct ApplyContext { Track* track; } context{target};
-                const bool applied = hirari_expression_map_visit_packed(
-                    values.data(), values.size(), &context,
-                    +[](void* opaque, uint8_t operation, uint8_t id, uint8_t slot,
-                        uint32_t kind, uint32_t channel, uint32_t a, uint32_t b,
-                        uint32_t c, uint8_t outputCount) -> bool {
-                        auto* track = static_cast<ApplyContext*>(opaque)->track;
-                        if (operation == 0) return track->beginArticulationMapUpdate(id);
-                        if (operation == 1) return track->setArticulationOutput(
-                            id, slot, static_cast<uint8_t>(kind), static_cast<uint8_t>(channel),
-                            static_cast<uint8_t>(a), static_cast<uint8_t>(b), static_cast<uint8_t>(c));
-                        if (operation == 2) return track->finishArticulationMapUpdate(id, outputCount);
-                        return false;
-                    });
-                if (!applied) return;
-                target->setExpressionMapJson(serialized);
-                return;
-            }
-        };
-        applySnapshot(packed, json);
-        const std::string actionName = "Edit MIDI Expression Map T" + std::to_string(trackId) +
-            (articulationId == 0 ? std::string{} : " A" + std::to_string(articulationId));
-        m_undoManager.recordAppliedAction(actionName,
-            [applySnapshot, beforePacked, beforeJson] { applySnapshot(beforePacked, beforeJson); },
-            [applySnapshot, afterPacked = packed, afterJson = json] { applySnapshot(afterPacked, afterJson); },
-            true);
-        return true;
-    }
-    return false;
+    return hirari_expression_map_edit_set(
+        this, trackId, packed.data(), packed.size(),
+        reinterpret_cast<const uint8_t*>(json.data()), json.size(), articulationId,
+        undo_state(), log_state());
 }
 
 bool HirariUnifiedEngine::set_expression_map_pro(uint32_t trackId, const std::string& json) {
-    if (trackId == 0 || json.size() > 1024 * 1024) return false;
-    const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
-    for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
-        auto* track = state.activeTracks[i];
-        if (!track || track->getId() != trackId) continue;
-        const std::string before = track->getExpressionMapProJson();
-        if (before == json) return true;
-        const auto applySnapshot = [this, trackId](const std::string& snapshot) {
-            const auto& current = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
-            for (uint32_t index = 0; index < current.trackCount && index < 256; ++index) {
-                auto* target = current.activeTracks[index];
-                if (target && target->getId() == trackId) {
-                    target->setExpressionMapProJson(snapshot);
-                    return;
-                }
-            }
-        };
-        track->setExpressionMapProJson(json);
-        m_undoManager.recordAppliedAction(
-            "Edit MIDI Expression Map Pro T" + std::to_string(trackId),
-            [applySnapshot, before] { applySnapshot(before); },
-            [applySnapshot, after = json] { applySnapshot(after); }, true);
-        return true;
-    }
-    return false;
+    return hirari_expression_map_edit_set_pro(
+        this, trackId, reinterpret_cast<const uint8_t*>(json.data()), json.size(),
+        undo_state(), log_state());
 }
+
+void HirariUnifiedEngine::installExpressionMapEditHost() {
+    const HirariExpressionMapEditHostOps ops{
+        [](void* host, uint32_t trackId) -> void* {
+            if (!host) return nullptr;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            const auto& state = engine->m_audioStates[
+                engine->m_activeStateIdx.load(std::memory_order_acquire)];
+            for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
+                auto* track = state.activeTracks[i];
+                if (track && track->getId() == trackId) return track->articulationStateHandle();
+            }
+            return nullptr;
+        },
+        [](void* host, uint32_t trackId, uint8_t kind, const uint8_t* data,
+           size_t length) -> bool {
+            if (!host || (length != 0 && !data)) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            const auto& state = engine->m_audioStates[
+                engine->m_activeStateIdx.load(std::memory_order_acquire)];
+            for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
+                auto* track = state.activeTracks[i];
+                if (!track || track->getId() != trackId) continue;
+                std::string json(reinterpret_cast<const char*>(data), length);
+                if (kind == 0) track->setExpressionMapJson(std::move(json));
+                else track->setExpressionMapProJson(std::move(json));
+                return true;
+            }
+            return false;
+        },
+    };
+    hirari_expression_map_edit_host_install(&ops);
+}
+
+namespace {
+[[maybe_unused]] const bool kExpressionMapEditHostInstalled = [] {
+    HirariUnifiedEngine::installExpressionMapEditHost();
+    return true;
+}();
+}  // namespace

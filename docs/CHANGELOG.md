@@ -74,6 +74,13 @@ production support.
   cancellation all have one implementation in
   `hirari-core-bridge/src/project_layout.rs`. `get_project_generation` now
   fingerprints the Rust buffer instead of streaming through a C++ streambuf.
+- MIDI expression-map edits now run through the Rust expression-map edit host.
+  Rust admits the packed rows and JSON size, snapshots the current articulation
+  map, skips an identical write, rewrites every articulation row and records
+  one coalescing `Edit MIDI Expression Map ...` entry whose undo and redo
+  replay the full snapshot by track id. The engine only resolves a track's
+  articulation handle and stores the map JSON behind two host callbacks; the
+  packed visitor/validator FFI and the track's articulation wrappers are gone.
 - Plugin preset save and load now run through the Rust plugin-edit host. Rust
   checks the preset's plugin type against the target plugin, copies the current
   state for the undo entry, applies the loaded bytes and records one

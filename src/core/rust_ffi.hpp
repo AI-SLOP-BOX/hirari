@@ -1750,23 +1750,8 @@ extern "C" void* hirari_track_midi_articulation_create();
 extern "C" void hirari_track_midi_articulation_destroy(void* state);
 extern "C" bool hirari_track_midi_expression_map_set(
     const void* state, uint8_t map_kind, const uint8_t* data, size_t length);
-using HirariExpressionMapPackedVisitor = bool (*)(
-    void*, uint8_t, uint8_t, uint8_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint8_t);
-extern "C" bool hirari_expression_map_validate_packed(
-    const uint32_t* values, size_t count, size_t json_size, uint32_t articulation_id);
-extern "C" bool hirari_expression_map_visit_packed(
-    const uint32_t* values, size_t count, void* context,
-    HirariExpressionMapPackedVisitor visitor);
 extern "C" size_t hirari_track_midi_expression_map_copy(
     const void* state, uint8_t map_kind, uint8_t* output, size_t capacity);
-extern "C" bool hirari_track_midi_articulation_begin(const void* state, uint8_t articulation_id);
-extern "C" bool hirari_track_midi_articulation_set_output(
-    const void* state, uint8_t articulation_id, uint8_t slot, uint8_t kind,
-    uint8_t channel, uint8_t a, uint8_t b, uint8_t c);
-extern "C" bool hirari_track_midi_articulation_finish(
-    const void* state, uint8_t articulation_id, uint8_t count);
-extern "C" size_t hirari_track_midi_articulation_pack(
-    const void* state, uint32_t* output, size_t capacity);
 extern "C" size_t hirari_track_midi_timed_outputs(
     const void* state, uint8_t articulation_id, bool transitions,
     HirariTimedKeySwitchOutput* output, size_t capacity);
@@ -2031,6 +2016,26 @@ extern "C" bool hirari_undo_edit_abort_transaction(void* undo, void* host);
 extern "C" void hirari_undo_edit_clear(void* undo);
 extern "C" uint32_t hirari_undo_edit_undo_count(const void* undo);
 extern "C" uint32_t hirari_undo_edit_redo_count(const void* undo);
+
+// MIDI expression-map edit policy. Rust validates and applies the packed map
+// through the track's articulation runtime; the engine only resolves the
+// track handle and stores the map JSON.
+using HirariExpressionMapTrackArticulationFn = void* (*)(void*, uint32_t);
+using HirariExpressionMapSetJsonFn =
+    bool (*)(void*, uint32_t, uint8_t, const uint8_t*, size_t);
+struct HirariExpressionMapEditHostOps {
+    HirariExpressionMapTrackArticulationFn trackArticulation = nullptr;
+    HirariExpressionMapSetJsonFn setMapJson = nullptr;
+};
+extern "C" void hirari_expression_map_edit_host_install(
+    const HirariExpressionMapEditHostOps* ops);
+extern "C" bool hirari_expression_map_edit_set(
+    void* host, uint32_t trackId, const uint32_t* packed, size_t packedCount,
+    const uint8_t* json, size_t jsonLength, uint32_t articulationId,
+    void* undo, const void* log);
+extern "C" bool hirari_expression_map_edit_set_pro(
+    void* host, uint32_t trackId, const uint8_t* json, size_t jsonLength,
+    void* undo, const void* log);
 struct HirariAudioQuantizeChannelView {
     const float* samples = nullptr;
     uint64_t span = 0;

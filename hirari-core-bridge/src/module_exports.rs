@@ -97,6 +97,7 @@ pub mod engine_orchestrator;
 pub mod events;
 pub mod export;
 pub mod expression_map;
+pub mod expression_map_edit_host;
 pub mod extensions;
 pub mod fade_enveloper;
 pub mod fet_compressor;

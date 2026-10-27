@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-
 fn packed_map_is_valid(values: &[u32]) -> bool {
     if values.len() % 6 != 0 || values.len() > 24_480 {
         return false;
@@ -29,65 +27,15 @@ fn packed_map_is_valid(values: &[u32]) -> bool {
     true
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_expression_map_validate_packed(
-    values: *const u32,
-    count: usize,
+/// Admission for a packed articulation map and its JSON side, shared by the
+/// expression-map edit host. The size and id limits are the ones the engine's
+/// `set_expression_map` applied before touching a track.
+pub(crate) fn admit_packed_map(
+    values: &[u32],
     json_size: usize,
     articulation_id: u32,
 ) -> bool {
-    if count != 0 && values.is_null() || json_size > 1024 * 1024 || articulation_id > 255 {
-        return false;
-    }
-    let values = if count == 0 { &[][..] } else {
-        unsafe { std::slice::from_raw_parts(values, count) }
-    };
-    packed_map_is_valid(values)
-}
-
-type PackedMapVisitor = unsafe extern "C" fn(
-    *mut c_void, u8, u8, u8, u32, u32, u32, u32, u32, u8,
-) -> bool;
-
-#[derive(Clone, Copy, Default)]
-struct PackedMapOutput { kind: u32, channel: u32, a: u32, b: u32, c: u32 }
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_expression_map_visit_packed(
-    values: *const u32,
-    count: usize,
-    context: *mut c_void,
-    visitor: Option<PackedMapVisitor>,
-) -> bool {
-    if (count != 0 && values.is_null()) || context.is_null() || !packed_map_is_valid(
-        if count == 0 { &[] } else { unsafe { std::slice::from_raw_parts(values, count) } },
-    ) {
-        return false;
-    }
-    let Some(visitor) = visitor else { return false };
-    let values = if count == 0 { &[][..] } else {
-        unsafe { std::slice::from_raw_parts(values, count) }
-    };
-    let mut outputs = [[PackedMapOutput::default(); 16]; 256];
-    let mut counts = [0u8; 256];
-    for row in values.chunks_exact(6) {
-        let id = row[0] as usize;
-        let slot = counts[id] as usize;
-        outputs[id][slot] = PackedMapOutput {
-            kind: row[2], channel: row[1], a: row[3], b: row[4], c: row[5],
-        };
-        counts[id] += 1;
-    }
-    for raw_id in 1..256 {
-        let id = raw_id as u8;
-        if !unsafe { visitor(context, 0, id, 0, 0, 0, 0, 0, 0, 0) } { return false; }
-        for (slot, output) in outputs[raw_id][..counts[raw_id] as usize].iter().enumerate() {
-            if !unsafe { visitor(context, 1, id, slot as u8, output.kind,
-                output.channel, output.a, output.b, output.c, 0) } { return false; }
-        }
-        if !unsafe { visitor(context, 2, id, 0, 0, 0, 0, 0, 0, counts[raw_id]) } { return false; }
-    }
-    true
+    json_size <= 1024 * 1024 && articulation_id <= 255 && packed_map_is_valid(values)
 }
 
 impl ProArticulation {

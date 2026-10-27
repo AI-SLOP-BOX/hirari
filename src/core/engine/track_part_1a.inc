@@ -193,26 +193,9 @@ public:
     // enters the graph. Keep the buffer owned by the track so MIDI reaches
     // its instrument/effect chain without allocating on the audio thread.
     void clearMidiInput() noexcept { m_pluginMidi.clear(); }
-    bool beginArticulationMapUpdate(uint8_t articulationId) noexcept {
-        return hirari_track_midi_articulation_begin(m_articulationState, articulationId);
-    }
-    bool setArticulationOutput(uint8_t articulationId, uint8_t slot, uint8_t kind,
-                               uint8_t channel, uint8_t a, uint8_t b, uint8_t c) noexcept {
-        return hirari_track_midi_articulation_set_output(
-            m_articulationState, articulationId, slot, kind, channel, a, b, c);
-    }
-    bool finishArticulationMapUpdate(uint8_t articulationId, uint8_t count) noexcept {
-        return hirari_track_midi_articulation_finish(m_articulationState, articulationId, count);
-    }
-    void getArticulationOutputMap(std::vector<uint32_t>& packed) const {
-        const size_t required = hirari_track_midi_articulation_pack(
-            m_articulationState, nullptr, 0);
-        packed.resize(required);
-        if (required != 0) {
-            (void)hirari_track_midi_articulation_pack(
-                m_articulationState, packed.data(), packed.size());
-        }
-    }
+    // The articulation runtime is Rust-owned; the expression-map edit host
+    // resolves it by track id instead of going through the track wrapper.
+    void* articulationStateHandle() const noexcept { return m_articulationState; }
     void setExpressionMapJson(std::string json) {
         (void)hirari_track_midi_expression_map_set(
             m_articulationState, 0, reinterpret_cast<const uint8_t*>(json.data()), json.size());
