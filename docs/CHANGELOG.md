@@ -74,6 +74,12 @@ production support.
   cancellation all have one implementation in
   `hirari-core-bridge/src/project_layout.rs`. `get_project_generation` now
   fingerprints the Rust buffer instead of streaming through a C++ streambuf.
+- Replacing a region's audio now runs through the Rust region-edit host. Rust
+  rejects an empty path, decodes the file, applies the 8 kHz..384 kHz rate
+  policy, snapshots the region before and after the swap, and records one
+  "Replace Region Audio" undo entry built from the two snapshots. The engine
+  wrapper is gone and `Track::replaceRegionAudio` only stores the batch it is
+  handed, so the swap policy has one owner.
 - Comp-range batches now run through the Rust region-edit host. The packed
   words are checked and admitted by `hirari_region_comp_ranges_validate`, the
   accepted list and managed flag reach C++ as one payload, and the engine

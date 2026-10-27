@@ -145,14 +145,14 @@ public:
         return false;
     }
 
+    // Adopts a decoded replacement. Path/rate policy and the undo snapshots
+    // live in `region_edit_host.rs`; the null check keeps a bad handle from
+    // replacing the region's audio outright.
     bool replaceRegionAudio(uint32_t rid, std::string path, std::shared_ptr<AudioBuffer> audio,
                             double sourceSampleRate, double timelineSampleRate) {
+        if (!audio) return false;
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        if (path.empty() || !audio || audio->getNumSamples() == 0 || audio->getNumChannels() == 0 ||
-            !std::isfinite(sourceSampleRate) || sourceSampleRate < 8000.0 ||
-            sourceSampleRate > 384000.0 || !std::isfinite(timelineSampleRate) ||
-            timelineSampleRate < 8000.0 || timelineSampleRate > 384000.0) return false;
         for (auto& region : m_regions) {
             if (region.id == rid) {
                 region.path = std::move(path);

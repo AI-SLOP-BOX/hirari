@@ -58,6 +58,12 @@ pub const HIRARI_REGION_EDIT_RANGE_EDITS: i32 = 16;
 /// Payload op: store the comp-range batch packed in `blob` plus `managed`
 /// exactly as given.
 pub const HIRARI_REGION_EDIT_COMP_RANGES: i32 = 17;
+/// Payload op: swap in a decoded audio handle. The blob starts with a
+/// native-layout header (handle, source rate, timeline rate) followed by the
+/// path bytes.
+pub const HIRARI_REGION_EDIT_REPLACE_AUDIO: i32 = 18;
+const REPLACE_AUDIO_HEADER_BYTES: usize = 8 + 2 * 8;
+const _: () = assert!(std::mem::size_of::<usize>() == 8);
 
 /// The editable part of a region. Mirrors the C++ `HirariRegionState` byte for
 /// byte; audio buffers, note edits and processing history stay in C++.
@@ -1272,6 +1278,168 @@ pub unsafe extern "C" fn hirari_region_edit_remove(
     edit_remove_with(&ops, host, track_id, region_id)
 }
 
+/// Keeps a decoded handle alive until it is handed to the host.
+struct DecodedAudio {
+    ops: HirariRegionHostOps,
+    handle: *mut c_void,
+}
+
+impl DecodedAudio {
+    fn into_raw(self) -> *mut c_void {
+        let handle = self.handle;
+        std::mem::forget(self);
+        handle
+    }
+}
+
+impl Drop for DecodedAudio {
+    fn drop(&mut self) {
+        if let Some(release) = self.ops.release_audio {
+            unsafe { release(self.handle) };
+        }
+    }
+}
+
+fn audio_rate_supported(rate: f64) -> bool {
+    rate.is_finite() && (8_000.0..=384_000.0).contains(&rate)
+}
+
+fn restore_payload(
+    track_id: u32,
+    region_id: u32,
+    snapshot: *mut c_void,
+) -> HirariRegionEditPayload {
+    let mut payload = state_payload(
+        track_id,
+        region_id,
+        HIRARI_REGION_EDIT_RESTORE,
+        HirariRegionState::default(),
+    );
+    payload.blob = snapshot as *const u8;
+    payload
+}
+
+/// Decodes `path` and swaps it into the region, recording one undo entry.
+///
+/// The native setter rejected an empty path, an unreadable file and rates
+/// outside 8 kHz..384 kHz, and snapshotted the region before and after the
+/// swap; all of that lives here now. The host still performs the swap and
+/// publishes the snapshot.
+fn replace_audio_with(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    path: &[u8],
+) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    let (Some(find), Some(apply), Some(decode), Some(snapshot)) = (
+        ops.find_region,
+        ops.apply_edit,
+        ops.decode_audio,
+        ops.snapshot_region,
+    ) else {
+        return false;
+    };
+    let Some(read_rate) = ops.sample_rate else {
+        return false;
+    };
+    // Decode before the lookup, as the native setter did, so an unreadable
+    // file fails the same way whether or not the region exists.
+    let mut handle = ptr::null_mut();
+    let mut source_sample_rate = 0.0;
+    if !unsafe { decode(host, path.as_ptr(), path.len(), &mut handle, &mut source_sample_rate) }
+        || handle.is_null()
+    {
+        return false;
+    }
+    let audio = DecodedAudio { ops: *ops, handle };
+    let mut state = HirariRegionState::default();
+    if !unsafe { find(host, track_id, region_id, &mut state) } {
+        return false;
+    }
+    let timeline_sample_rate = unsafe { read_rate(host) };
+    if !audio_rate_supported(source_sample_rate) || !audio_rate_supported(timeline_sample_rate) {
+        return false;
+    }
+    let before = unsafe { snapshot(host, track_id, region_id) };
+    if before.is_null() {
+        return false;
+    }
+    let release_snapshot = |handle: *mut c_void| {
+        if let Some(release) = ops.release_snapshot {
+            unsafe { release(host, handle) };
+        }
+    };
+    let mut blob = Vec::with_capacity(REPLACE_AUDIO_HEADER_BYTES + path.len());
+    blob.extend_from_slice(&(audio.into_raw() as usize).to_ne_bytes());
+    blob.extend_from_slice(&source_sample_rate.to_ne_bytes());
+    blob.extend_from_slice(&timeline_sample_rate.to_ne_bytes());
+    blob.extend_from_slice(path);
+    let payload = HirariRegionEditPayload {
+        track_id,
+        region_id,
+        op: HIRARI_REGION_EDIT_REPLACE_AUDIO,
+        blob: blob.as_ptr(),
+        blob_len: blob.len(),
+        ..Default::default()
+    };
+    if !unsafe { apply(host, &payload) } {
+        release_snapshot(before);
+        return false;
+    }
+    let after = unsafe { snapshot(host, track_id, region_id) };
+    if after.is_null() {
+        release_snapshot(before);
+        return false;
+    }
+    if ops.record_undo.is_some() {
+        // Both handles move to the undo entry.
+        record(
+            ops,
+            host,
+            b"Replace Region Audio\0",
+            &[restore_payload(track_id, region_id, before)],
+            &[restore_payload(track_id, region_id, after)],
+            false,
+        );
+    } else {
+        release_snapshot(before);
+        release_snapshot(after);
+    }
+    true
+}
+
+/// Replaces a region's audio from a file path.
+///
+/// # Safety
+/// `host` must be the opaque handle the installed host ops expect, the
+/// installed table must outlive the call, and `path` must be readable for
+/// `path_length` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_edit_replace_audio(
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    path: *const u8,
+    path_length: usize,
+) -> bool {
+    let Some(ops) = host_ops() else {
+        return false;
+    };
+    if path.is_null() && path_length != 0 {
+        return false;
+    }
+    let path = if path_length == 0 {
+        &[][..]
+    } else {
+        unsafe { slice::from_raw_parts(path, path_length) }
+    };
+    replace_audio_with(&ops, host, track_id, region_id, path)
+}
+
 /// Installs the native host callbacks. Passing null clears them.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_edit_scalar(
@@ -2073,6 +2241,7 @@ use crate::audio_note_curve::{
         present: bool,
         state: HirariRegionState,
         applied: Vec<HirariRegionEditPayload>,
+        applied_blobs: Vec<Vec<u8>>,
         undo: Vec<HirariRegionEditPayload>,
         redo: Vec<HirariRegionEditPayload>,
         undo_name: String,
@@ -2114,7 +2283,14 @@ use crate::audio_note_curve::{
             return false;
         }
         let payload = unsafe { ptr::read(payload) };
-        fake().lock().unwrap().applied.push(payload);
+        let blob = if payload.blob_len != 0 && !payload.blob.is_null() {
+            unsafe { slice::from_raw_parts(payload.blob, payload.blob_len) }.to_vec()
+        } else {
+            Vec::new()
+        };
+        let mut guard = fake().lock().unwrap();
+        guard.applied_blobs.push(blob);
+        guard.applied.push(payload);
         true
     }
 
@@ -2255,6 +2431,38 @@ use crate::audio_note_curve::{
         count
     }
 
+    static FAKE_AUDIO: u8 = 0;
+    static FAIL_DECODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    static RELEASED_AUDIO: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    static FAKE_RATE_BITS: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(48_000f64.to_bits());
+
+    unsafe extern "C" fn fake_decode_audio(
+        _host: *mut c_void,
+        _path: *const u8,
+        _length: usize,
+        out: *mut *mut c_void,
+        sample_rate: *mut f64,
+    ) -> bool {
+        if FAIL_DECODE.load(std::sync::atomic::Ordering::SeqCst) {
+            return false;
+        }
+        unsafe {
+            out.write(&FAKE_AUDIO as *const u8 as *mut c_void);
+            sample_rate.write(44_100.0);
+        }
+        true
+    }
+
+    unsafe extern "C" fn fake_release_audio(_handle: *mut c_void) {
+        RELEASED_AUDIO.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn fake_sample_rate(_host: *mut c_void) -> f64 {
+        f64::from_bits(FAKE_RATE_BITS.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
     fn fake_ops() -> HirariRegionHostOps {
         HirariRegionHostOps {
             find_region: Some(fake_find),
@@ -2266,6 +2474,9 @@ use crate::audio_note_curve::{
             release_snapshot: Some(fake_release),
             warp_markers: Some(fake_markers),
             range_edits: Some(fake_range_edits),
+            sample_rate: Some(fake_sample_rate),
+            decode_audio: Some(fake_decode_audio),
+            release_audio: Some(fake_release_audio),
             ..Default::default()
         }
     }
@@ -3026,5 +3237,78 @@ use crate::audio_note_curve::{
         let guard = fake().lock().unwrap();
         assert_eq!(guard.applied.len(), 1);
         assert!(!guard.applied[0].managed);
+    }
+
+    #[test]
+    fn replace_audio_decodes_and_records_the_snapshot_pair() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            ..Default::default()
+        });
+        RELEASED_AUDIO.store(0, std::sync::atomic::Ordering::SeqCst);
+        FAIL_DECODE.store(false, std::sync::atomic::Ordering::SeqCst);
+        FAKE_RATE_BITS.store(48_000f64.to_bits(), std::sync::atomic::Ordering::SeqCst);
+
+        let path = b"/tmp/replacement.wav";
+        assert!(replace_audio_with(&ops, host, 1, 2, path));
+
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_REPLACE_AUDIO);
+        let blob = &guard.applied_blobs[0];
+        assert_eq!(blob.len(), REPLACE_AUDIO_HEADER_BYTES + path.len());
+        let raw = usize::from_ne_bytes(blob[0..8].try_into().unwrap());
+        assert_eq!(raw, &FAKE_AUDIO as *const u8 as usize);
+        assert_eq!(
+            f64::from_ne_bytes(blob[8..16].try_into().unwrap()),
+            44_100.0
+        );
+        assert_eq!(
+            f64::from_ne_bytes(blob[16..24].try_into().unwrap()),
+            48_000.0
+        );
+        assert_eq!(&blob[REPLACE_AUDIO_HEADER_BYTES..], path);
+        assert_eq!(guard.undo_name, "Replace Region Audio");
+        assert!(!guard.coalesce);
+        assert!(!guard.perform);
+        assert_eq!(guard.undo[0].op, HIRARI_REGION_EDIT_RESTORE);
+        assert_eq!(guard.redo[0].op, HIRARI_REGION_EDIT_RESTORE);
+        drop(guard);
+        // The handle moved into the payload, so it is not released here.
+        assert_eq!(RELEASED_AUDIO.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn replace_audio_rejects_bad_paths_files_regions_and_rates() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 100,
+            ..Default::default()
+        });
+        RELEASED_AUDIO.store(0, std::sync::atomic::Ordering::SeqCst);
+        FAKE_RATE_BITS.store(48_000f64.to_bits(), std::sync::atomic::Ordering::SeqCst);
+
+        assert!(!replace_audio_with(&ops, host, 1, 2, b""));
+        FAIL_DECODE.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(!replace_audio_with(&ops, host, 1, 2, b"/tmp/missing.wav"));
+        FAIL_DECODE.store(false, std::sync::atomic::Ordering::SeqCst);
+
+        // The file decodes but the region is gone: the handle is released.
+        fake().lock().unwrap().present = false;
+        assert!(!replace_audio_with(&ops, host, 1, 2, b"/tmp/x.wav"));
+        assert_eq!(RELEASED_AUDIO.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // A timeline rate the native setter refused before the swap.
+        fake().lock().unwrap().present = true;
+        FAKE_RATE_BITS.store(0f64.to_bits(), std::sync::atomic::Ordering::SeqCst);
+        assert!(!replace_audio_with(&ops, host, 1, 2, b"/tmp/x.wav"));
+        assert_eq!(RELEASED_AUDIO.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(fake().lock().unwrap().applied.is_empty());
+        FAKE_RATE_BITS.store(48_000f64.to_bits(), std::sync::atomic::Ordering::SeqCst);
     }
 }

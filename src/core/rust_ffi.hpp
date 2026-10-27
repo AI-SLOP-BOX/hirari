@@ -715,6 +715,10 @@ enum HirariRegionEditOp : int32_t {
     // Store the comp-range batch packed in the blob plus `managed` exactly as
     // given.
     kHirariRegionEditCompRanges = 17,
+    // Swap a region's audio for a decoded handle. The blob is a native-layout
+    // header (audio handle, source rate, timeline rate) followed by the path
+    // bytes; the host takes the handle over on every path.
+    kHirariRegionEditReplaceAudio = 18,
 };
 
 struct HirariRegionEditPayload {
@@ -880,6 +884,11 @@ extern "C" bool hirari_region_edit_comp_ranges_set(void* host, uint32_t trackId,
                                                    uint32_t regionId,
                                                    const uint64_t* packedWords,
                                                    size_t wordCount, bool managed);
+// Decodes `path`, swaps it into the region and records the undo pair. Rust
+// owns the path/rate policy and the snapshots; C++ performs the swap.
+extern "C" bool hirari_region_edit_replace_audio(void* host, uint32_t trackId,
+                                                 uint32_t regionId, const uint8_t* path,
+                                                 size_t pathLength);
 
 // Automation edit host. Rust owns the validation and the undo capture; the
 // engine keeps the curves and publishes the immutable snapshots.

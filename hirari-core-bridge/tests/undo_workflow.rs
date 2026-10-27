@@ -360,3 +360,98 @@ fn master_gain_edits_validate_and_undo_through_the_native_engine() {
     assert!(core.set_master_gain(2.0));
     assert!((core.master_gain() - 2.0).abs() < 0.0001);
 }
+
+/// Replacing a region's audio must take effect and round-trip through undo and
+/// redo. The swap and the snapshots that restore it live in different layers,
+/// so this pins the whole path: decode, payload hand-off, and the RESTORE undo
+/// entries the host replays.
+#[test]
+fn replace_region_audio_swaps_the_source_and_round_trips_through_undo() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    core.start_recording_capture(48_000.0, 2, 128, 0)
+        .expect("capture must start");
+    let audio = (0..4096)
+        .flat_map(|index| {
+            if index % 2 == 0 {
+                [0.4, -0.4]
+            } else {
+                [0.2, -0.2]
+            }
+        })
+        .collect::<Vec<_>>();
+    core.append_recording_preview(&audio)
+        .expect("capture must accept audio");
+    core.commit_recording_capture_to_track(track_id, None)
+        .expect("capture must publish");
+
+    let region_state = || {
+        let layout: serde_json::Value = serde_json::from_str(&core.get_project_layout_json())
+            .expect("layout must be valid JSON");
+        let region = layout
+            .as_array()
+            .and_then(|tracks| {
+                tracks.iter().find(|track| {
+                    track.get("id").and_then(serde_json::Value::as_u64) == Some(track_id as u64)
+                })
+            })
+            .and_then(|track| track.get("regions"))
+            .and_then(serde_json::Value::as_array)
+            .and_then(|regions| regions.first())
+            .cloned()
+            .expect("recording must publish a region");
+        (
+            region
+                .get("id")
+                .and_then(serde_json::Value::as_u64)
+                .expect("region id") as u32,
+            region
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            region
+                .get("source_length")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default(),
+            region
+                .get("len")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default(),
+        )
+    };
+    let (region_id, before_path, before_source, before_len) = region_state();
+    assert_eq!(before_source, 4096);
+
+    let replacement = std::env::temp_dir().join(format!(
+        "hirari-replace-{}-{}.wav",
+        std::process::id(),
+        track_id
+    ));
+    let tone = (0..2048)
+        .map(|index| (index as f32 * 0.01).sin() * 0.3)
+        .collect::<Vec<_>>();
+    hirari_core_bridge::export::write_wav_pcm16(&replacement, &tone, 44_100, 1)
+        .expect("replacement fixture must be writable");
+    let replacement_path = replacement.to_str().unwrap().to_owned();
+
+    assert!(core.replace_region_audio(track_id, region_id, &replacement_path));
+    let (_, after_path, after_source, after_len) = region_state();
+    assert_eq!(after_path, replacement_path);
+    assert_eq!(after_source, 2048);
+    assert_ne!(after_len, before_len);
+
+    core.undo();
+    let (_, undone_path, undone_source, undone_len) = region_state();
+    assert_eq!(undone_path, before_path);
+    assert_eq!(undone_source, before_source);
+    assert_eq!(undone_len, before_len);
+
+    core.redo();
+    let (_, redone_path, redone_source, _) = region_state();
+    assert_eq!(redone_path, replacement_path);
+    assert_eq!(redone_source, after_source);
+
+    let _ = std::fs::remove_file(replacement);
+}

@@ -162,6 +162,29 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
                                                      payload->managed);
             break;
         }
+        case kHirariRegionEditReplaceAudio: {
+            // Header: audio handle, source rate, timeline rate, then the path.
+            static_assert(sizeof(void*) == sizeof(uint64_t));
+            constexpr size_t kHeaderBytes = sizeof(uint64_t) + 2 * sizeof(double);
+            if (payload->blobLen < kHeaderBytes || payload->blob == nullptr) break;
+            uint64_t rawHandle = 0;
+            double sourceRate = 0.0;
+            double timelineRate = 0.0;
+            std::memcpy(&rawHandle, payload->blob, sizeof(rawHandle));
+            std::memcpy(&sourceRate, payload->blob + sizeof(rawHandle), sizeof(double));
+            std::memcpy(&timelineRate, payload->blob + sizeof(rawHandle) + sizeof(double),
+                        sizeof(double));
+            auto* owned = reinterpret_cast<std::shared_ptr<AudioBuffer>*>(
+                static_cast<uintptr_t>(rawHandle));
+            auto audio = owned ? std::move(*owned) : nullptr;
+            delete owned;
+            const std::string path(
+                reinterpret_cast<const char*>(payload->blob + kHeaderBytes),
+                payload->blobLen - kHeaderBytes);
+            applied = track->replaceRegionAudio(payload->regionId, std::move(path),
+                                                std::move(audio), sourceRate, timelineRate);
+            break;
+        }
         default:
             applied = track->applyRegionScalarFields(payload->regionId, payload->state);
             break;

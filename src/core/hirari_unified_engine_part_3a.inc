@@ -1,52 +1,7 @@
 bool HirariUnifiedEngine::replace_region_audio(uint32_t tid, uint32_t rid, std::string_view path) {
-    if (path.empty()) return false;
-    double sourceSampleRate = 0.0;
-    auto audio = m_audioDecoderManager.importFile(std::string(path), &sourceSampleRate);
-    if (!audio || audio->getNumSamples() == 0 || audio->getNumChannels() == 0) return false;
-    const double timelineSampleRate = m_sampleRate.load(std::memory_order_acquire);
-    std::shared_ptr<Track> target;
-    Region before;
-    Region after;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (!track || track->getId() != tid) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == rid) {
-                    target = track;
-                    before = region;
-                    break;
-                }
-            }
-            break;
-        }
-        if (!target) return false;
-        if (!target->replaceRegionAudio(rid, std::string(path), std::move(audio),
-                                        sourceSampleRate, timelineSampleRate)) return false;
-        for (const auto& region : target->getRegions()) {
-            if (region.id == rid) {
-                after = region;
-                break;
-            }
-        }
-        if (!after.audio) return false;
-        hirari_region_waveform_forget(this, rid);
-    }
-
-    const auto publish = [this, target, after, rid]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target->removeRegion(rid);
-        target->addRegion(after);
-        hirari_region_waveform_forget(this, rid);
-    };
-    const auto restore = [this, target, before, rid]() {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target->removeRegion(rid);
-        target->addRegion(before);
-        hirari_region_waveform_forget(this, rid);
-    };
-    m_undoManager.recordAppliedAction("Replace Region Audio", restore, publish);
-    return true;
+    return hirari_region_edit_replace_audio(this, tid, rid,
+                                            reinterpret_cast<const uint8_t*>(path.data()),
+                                            path.size());
 }
 bool HirariUnifiedEngine::add_plugin(uint32_t tid, uint32_t pluginType) {
     std::shared_ptr<Track> target;
