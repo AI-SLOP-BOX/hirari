@@ -251,6 +251,17 @@ fn plugin_chain_edits_undo_through_the_native_engine() {
     // An out-of-range index is rejected and must not record an edit.
     assert!(!core.set_plugin_bypass(track_id, 9, true));
 
+    let default_value = core.get_plugin_parameter(track_id, 0, 0);
+    assert!(core.set_plugin_parameter(track_id, 0, 0, 0.7));
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.7).abs() < 0.001);
+    core.undo();
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - default_value).abs() < 0.001);
+    core.redo();
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.7).abs() < 0.001);
+    // Non-finite values are rejected without touching the plugin or history.
+    assert!(!core.set_plugin_parameter(track_id, 0, 0, f32::NAN));
+    assert!((core.get_plugin_parameter(track_id, 0, 0) - 0.7).abs() < 0.001);
+
     assert!(core.move_plugin(track_id, 0, 1));
     assert_eq!(plugin_types(), vec![1, 0]);
     core.undo();

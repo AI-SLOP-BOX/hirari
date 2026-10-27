@@ -1624,6 +1624,9 @@ struct HirariPluginEditHostOps {
     bool (*movePlugin)(void*, uint32_t, uint32_t, uint32_t) = nullptr;
     void (*recordBypassUndo)(void*, uint32_t, uint32_t, bool, bool) = nullptr;
     void (*recordMoveUndo)(void*, uint32_t, uint32_t, uint32_t) = nullptr;
+    bool (*queryParameter)(void*, uint32_t, uint32_t, uint32_t, float*) = nullptr;
+    bool (*applyParameter)(void*, uint32_t, uint32_t, uint32_t, float) = nullptr;
+    void (*recordParameterUndo)(void*, uint32_t, uint32_t, uint32_t, float, float) = nullptr;
 };
 
 extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* ops);
@@ -1631,6 +1634,10 @@ extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 extern "C" bool hirari_plugin_edit_move(
     void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex);
+extern "C" bool hirari_plugin_edit_set_parameter(
+    void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
+extern "C" bool hirari_plugin_edit_set_parameter_without_undo(
+    void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
 
 extern "C" void* hirari_send_pdc_manager_create();
 extern "C" void hirari_send_pdc_manager_destroy(void* handle);

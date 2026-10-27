@@ -374,40 +374,13 @@ std::string HirariUnifiedEngine::get_sandbox_plugin_state_error_text(uint32_t tr
 }
 bool HirariUnifiedEngine::set_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
                                              uint32_t parameterId, float value) {
-    if (!std::isfinite(value)) return false;
-    std::shared_ptr<Track> target;
-    float before = 0.0f;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& t : m_tracks) {
-        if (t->getId() == tid) {
-            before = t->getPluginParameter(pluginIndex, parameterId);
-            if (!t->setPluginParameter(pluginIndex, parameterId, value)) return false;
-            target = t;
-            break;
-        }
-    }
-    }
-    if (!target) return false;
-    const auto undo = [target, pluginIndex, parameterId, before]() {
-        (void)target->setPluginParameter(pluginIndex, parameterId, before);
-    };
-    const auto redo = [target, pluginIndex, parameterId, value]() {
-        (void)target->setPluginParameter(pluginIndex, parameterId, value);
-    };
-    m_undoManager.recordAppliedAction("Set Plugin Parameter", undo, redo);
-    return true;
+    return hirari_plugin_edit_set_parameter(this, tid, pluginIndex, parameterId, value);
 }
 
 bool HirariUnifiedEngine::set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
                                                           uint32_t parameterId, float value) {
-    if (!std::isfinite(value)) return false;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track && track->getId() == tid)
-            return track->setPluginParameter(pluginIndex, parameterId, value);
-    }
-    return false;
+    return hirari_plugin_edit_set_parameter_without_undo(
+        this, tid, pluginIndex, parameterId, value);
 }
 float HirariUnifiedEngine::get_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
                                               uint32_t parameterId) const {

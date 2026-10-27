@@ -18,6 +18,12 @@ pub type ApplyBypassFn = unsafe extern "C" fn(*mut c_void, u32, u32, bool) -> bo
 pub type MovePluginFn = unsafe extern "C" fn(*mut c_void, u32, u32, u32) -> bool;
 pub type RecordBypassUndoFn = unsafe extern "C" fn(*mut c_void, u32, u32, bool, bool);
 pub type RecordMoveUndoFn = unsafe extern "C" fn(*mut c_void, u32, u32, u32);
+/// Writes the parameter's current value and reports whether the track exists.
+pub type QueryParameterFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, u32, *mut f32) -> bool;
+pub type ApplyParameterFn = unsafe extern "C" fn(*mut c_void, u32, u32, u32, f32) -> bool;
+pub type RecordParameterUndoFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, u32, f32, f32);
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -27,6 +33,9 @@ pub struct HirariPluginEditHostOps {
     pub move_plugin: Option<MovePluginFn>,
     pub record_bypass_undo: Option<RecordBypassUndoFn>,
     pub record_move_undo: Option<RecordMoveUndoFn>,
+    pub query_parameter: Option<QueryParameterFn>,
+    pub apply_parameter: Option<ApplyParameterFn>,
+    pub record_parameter_undo: Option<RecordParameterUndoFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -112,6 +121,74 @@ pub unsafe extern "C" fn hirari_plugin_edit_move(
     }
     unsafe { record(host, track_id, from_index, to_index) };
     true
+}
+
+/// Sets one plugin parameter. Non-finite values are rejected before the
+/// engine is touched; a rejected index/parameter records nothing. The undo
+/// pair keeps the exact requested value rather than a clamped read-back,
+/// matching the previous engine behavior.
+///
+/// # Safety
+/// `host` must be the engine pointer the installed callbacks expect.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_edit_set_parameter(
+    host: *mut c_void,
+    track_id: u32,
+    plugin_index: u32,
+    parameter_id: u32,
+    value: f32,
+) -> bool {
+    if !value.is_finite() {
+        return false;
+    }
+    let Some(ops) = host_ops() else { return false };
+    let (Some(query), Some(apply), Some(record)) = (
+        ops.query_parameter,
+        ops.apply_parameter,
+        ops.record_parameter_undo,
+    ) else {
+        return false;
+    };
+    let mut before = 0.0_f32;
+    if !unsafe { query(host, track_id, plugin_index, parameter_id, &mut before) } {
+        return false;
+    }
+    if !unsafe { apply(host, track_id, plugin_index, parameter_id, value) } {
+        return false;
+    }
+    unsafe {
+        record(
+            host,
+            track_id,
+            plugin_index,
+            parameter_id,
+            before,
+            value,
+        )
+    };
+    true
+}
+
+/// Applies a plugin parameter without touching the undo history. Used by
+/// hydration and automation replay, where the caller owns the edit log.
+///
+/// # Safety
+/// `host` must be the engine pointer the installed callbacks expect.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_edit_set_parameter_without_undo(
+    host: *mut c_void,
+    track_id: u32,
+    plugin_index: u32,
+    parameter_id: u32,
+    value: f32,
+) -> bool {
+    if !value.is_finite() {
+        return false;
+    }
+    match host_ops().and_then(|ops| ops.apply_parameter) {
+        Some(apply) => unsafe { apply(host, track_id, plugin_index, parameter_id, value) },
+        None => false,
+    }
 }
 
 #[cfg(test)]

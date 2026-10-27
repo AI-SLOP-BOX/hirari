@@ -526,6 +526,52 @@ void HirariUnifiedEngine::installPluginEditHost() {
             };
             engine->m_undoManager.recordAppliedAction("Move Plugin", undo, redo);
         },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
+           float* out) -> bool {
+            if (!host || !out) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (const auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                *out = track->getPluginParameter(pluginIndex, parameterId);
+                return true;
+            }
+            return false;
+        },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
+           float value) -> bool {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                return track->setPluginParameter(pluginIndex, parameterId, value);
+            }
+            return false;
+        },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
+           float before, float after) {
+            if (!host) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::shared_ptr<Track> target;
+            {
+                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+                for (auto& track : engine->m_tracks) {
+                    if (track && track->getId() == trackId) {
+                        target = track;
+                        break;
+                    }
+                }
+            }
+            if (!target) return;
+            const auto undo = [target, pluginIndex, parameterId, before]() {
+                (void)target->setPluginParameter(pluginIndex, parameterId, before);
+            };
+            const auto redo = [target, pluginIndex, parameterId, after]() {
+                (void)target->setPluginParameter(pluginIndex, parameterId, after);
+            };
+            engine->m_undoManager.recordAppliedAction("Set Plugin Parameter", undo, redo);
+        },
     };
     hirari_plugin_edit_host_install(&ops);
 }

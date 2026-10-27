@@ -98,13 +98,15 @@ production support.
   undo entry; C++ only reads the current name, applies the resolved mutation
   and updates the monitor atomics. The engine's duplicated validation and
   undo capture were removed.
-- Plugin bypass and chain-reordering edits now run through the Rust
-  plugin-edit host. Rust rejects a same-index move before touching the chain,
-  distinguishes a missing track from an invalid plugin index, applies the
-  edit and records exactly one `Set Plugin Bypass` / `Move Plugin` entry;
-  C++ only reads or applies the mutation. The engine's duplicated undo
-  lambdas were removed, while the post-edit structural sync stays at the
-  engine boundary.
+- Plugin bypass, chain-reordering and parameter edits now run through the
+  Rust plugin-edit host. Rust rejects a same-index move and non-finite
+  parameter values before touching the chain, distinguishes a missing track
+  from an invalid plugin index, reads the pre-edit value, applies the edit
+  and records exactly one `Set Plugin Bypass` / `Move Plugin` /
+  `Set Plugin Parameter` entry; C++ only reads or applies the mutation. The
+  undo pair keeps the exact requested parameter value rather than a clamped
+  read-back, as before. The engine's duplicated undo lambdas were removed,
+  while the post-edit structural sync stays at the engine boundary.
 - Region warp-marker edits now run through the Rust region-edit host. Rust
   normalizes the caller's list through the shared marker transform, rejects
   any list that would lose a marker, applies one geometry payload and records
