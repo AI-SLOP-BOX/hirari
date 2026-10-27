@@ -1636,9 +1636,29 @@ struct HirariPluginEditHostOps {
     // undo entry from `before` and `state`.
     bool (*applyPluginState)(void*, uint32_t, uint32_t, const uint8_t*, size_t,
                              const uint8_t*, size_t, bool) = nullptr;
+    // Appends a built-in plugin (`path` null) or a sandboxed bundle and writes
+    // the new index. `prepare` re-prepares the track, as the initial insert did.
+    bool (*appendPlugin)(void*, uint32_t, uint32_t, const uint8_t*, size_t, bool,
+                         uint32_t*) = nullptr;
+    // Removes a plugin; a non-null `outSnapshot` captures it into a handle the
+    // caller must release.
+    bool (*removePlugin)(void*, uint32_t, uint32_t, void**) = nullptr;
+    bool (*restorePlugin)(void*, uint32_t, uint32_t, void*) = nullptr;
+    void (*releasePluginSnapshot)(void*) = nullptr;
+    // Records an add/remove undo entry whose undo and redo replay `edit`.
+    using ReplayFn = void (*)(void*);
+    void (*recordPluginReplay)(void*, const uint8_t*, size_t, void*, ReplayFn, ReplayFn,
+                               ReplayFn) = nullptr;
+    void (*syncStructuralChanges)(void*) = nullptr;
 };
 
 extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* ops);
+extern "C" bool hirari_plugin_edit_add(
+    void* host, uint32_t trackId, uint32_t pluginType);
+extern "C" bool hirari_plugin_edit_add_sandboxed(
+    void* host, uint32_t trackId, const uint8_t* path, size_t pathLength);
+extern "C" bool hirari_plugin_edit_remove(
+    void* host, uint32_t trackId, uint32_t pluginIndex);
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 extern "C" bool hirari_plugin_edit_move(
@@ -1655,7 +1675,6 @@ extern "C" size_t hirari_plugin_edit_get_state(
     void* host, uint32_t trackId, uint32_t pluginIndex, uint8_t* out, size_t capacity);
 extern "C" bool hirari_plugin_edit_set_state(
     void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* state, size_t size);
-extern "C" bool hirari_plugin_sandbox_path_supported(const uint8_t* path, size_t pathLength);
 
 // Status pointers refer to Track::SandboxStatus, mirrored field for field in
 // plugin_sandbox_maintenance.rs.

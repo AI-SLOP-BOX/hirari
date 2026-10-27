@@ -40,6 +40,33 @@ pub type ApplyPluginStateFn = unsafe extern "C" fn(
     usize,
     bool,
 ) -> bool;
+/// Appends a plugin and writes its new index. A non-null `path` appends the
+/// sandboxed bundle at that path instead of the built-in `plugin_type`.
+/// `prepare` re-prepares the track for playback, as the engine did on the
+/// initial insert only.
+pub type AppendPluginFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *const u8, usize, bool, *mut u32) -> bool;
+/// Removes a plugin. When `out_snapshot` is non-null the removed processor is
+/// captured into an opaque handle the caller must release.
+pub type RemovePluginFn = unsafe extern "C" fn(*mut c_void, u32, u32, *mut *mut c_void) -> bool;
+/// Re-inserts a captured snapshot at its original index.
+pub type RestorePluginFn = unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void) -> bool;
+pub type ReleasePluginSnapshotFn = unsafe extern "C" fn(*mut c_void);
+/// Replays one side of a plugin add/remove undo entry.
+pub type ReplayPluginEditFn = unsafe extern "C" fn(*mut c_void);
+/// Records an applied action; the host invokes `undo`/`redo` with `edit` and
+/// releases it once the history drops the entry.
+pub type RecordPluginReplayFn = unsafe extern "C" fn(
+    *mut c_void,
+    *const u8,
+    usize,
+    *mut c_void,
+    ReplayPluginEditFn,
+    ReplayPluginEditFn,
+    ReplayPluginEditFn,
+);
+/// Re-publishes the track snapshot after the chain changed.
+pub type SyncStructuralChangesFn = unsafe extern "C" fn(*mut c_void);
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -54,6 +81,12 @@ pub struct HirariPluginEditHostOps {
     pub record_parameter_undo: Option<RecordParameterUndoFn>,
     pub read_plugin: Option<ReadPluginFn>,
     pub apply_plugin_state: Option<ApplyPluginStateFn>,
+    pub append_plugin: Option<AppendPluginFn>,
+    pub remove_plugin: Option<RemovePluginFn>,
+    pub restore_plugin: Option<RestorePluginFn>,
+    pub release_plugin_snapshot: Option<ReleasePluginSnapshotFn>,
+    pub record_plugin_replay: Option<RecordPluginReplayFn>,
+    pub sync_structural_changes: Option<SyncStructuralChangesFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -414,9 +447,364 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_state(
     }
 }
 
+/// What an `Add`/`Remove Plugin` undo entry replays.
+enum PluginEditKind {
+    /// A built-in plugin was appended; replay re-appends it by type.
+    Added { plugin_type: u32 },
+    /// A sandboxed bundle was appended; replay re-appends it by path.
+    SandboxedAdded { path: Vec<u8> },
+    /// A plugin was removed; replay re-inserts its captured snapshot.
+    Removed { snapshot: *mut c_void },
+}
+
+/// One recorded plugin add/remove entry. It owns the state captured after the
+/// insert (or the removed processor snapshot) until the history drops it. The
+/// host table is copied in so a replay never depends on the current global.
+struct PluginEdit {
+    ops: HirariPluginEditHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    plugin_index: u32,
+    state: Vec<u8>,
+    bypassed: bool,
+    kind: PluginEditKind,
+}
+
+fn capture_appended(
+    ops: &HirariPluginEditHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    plugin_index: u32,
+) -> (Vec<u8>, bool) {
+    let state = ops
+        .read_plugin
+        .and_then(|read| read_plugin(read, host, track_id, plugin_index))
+        .map(|(_, state)| state)
+        .unwrap_or_default();
+    let bypassed = ops
+        .query_bypass
+        .map(|query| unsafe { query(host, track_id, plugin_index) } > 0)
+        .unwrap_or(false);
+    (state, bypassed)
+}
+
+fn reappend(edit: &PluginEdit, native_type: u32, path: &[u8]) -> Option<u32> {
+    let append = edit.ops.append_plugin?;
+    // An empty path selects the built-in plugin; the host treats a non-null
+    // pointer as a sandboxed bundle request.
+    let path_ptr = if path.is_empty() {
+        std::ptr::null()
+    } else {
+        path.as_ptr()
+    };
+    let mut index = 0_u32;
+    let inserted = unsafe {
+        append(
+            edit.host,
+            edit.track_id,
+            native_type,
+            path_ptr,
+            path.len(),
+            false,
+            &mut index,
+        )
+    };
+    if !inserted {
+        return None;
+    }
+    if !edit.state.is_empty() {
+        if let Some(apply) = edit.ops.apply_plugin_state {
+            unsafe {
+                apply(
+                    edit.host,
+                    edit.track_id,
+                    index,
+                    edit.state.as_ptr(),
+                    edit.state.len(),
+                    std::ptr::null(),
+                    0,
+                    false,
+                )
+            };
+        }
+    }
+    if let Some(apply) = edit.ops.apply_bypass {
+        unsafe { apply(edit.host, edit.track_id, index, edit.bypassed) };
+    }
+    Some(index)
+}
+
+unsafe extern "C" fn replay_plugin_undo(edit: *mut c_void) {
+    if edit.is_null() {
+        return;
+    }
+    let edit = unsafe { &*(edit as *const PluginEdit) };
+    match &edit.kind {
+        PluginEditKind::Added { .. } | PluginEditKind::SandboxedAdded { .. } => {
+            if let Some(remove) = edit.ops.remove_plugin {
+                unsafe { remove(edit.host, edit.track_id, edit.plugin_index, std::ptr::null_mut()) };
+            }
+        }
+        PluginEditKind::Removed { snapshot } => {
+            if let Some(restore) = edit.ops.restore_plugin {
+                unsafe { restore(edit.host, edit.track_id, edit.plugin_index, *snapshot) };
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn replay_plugin_redo(edit: *mut c_void) {
+    if edit.is_null() {
+        return;
+    }
+    let edit = unsafe { &*(edit as *const PluginEdit) };
+    match &edit.kind {
+        PluginEditKind::Added { plugin_type } => {
+            // The re-appended plugin takes a fresh index; it is appended by
+            // the Track contract, as the engine's redo always did.
+            let _ = reappend(edit, *plugin_type, &[]);
+        }
+        PluginEditKind::SandboxedAdded { path } => {
+            let _ = reappend(edit, 0, path);
+        }
+        PluginEditKind::Removed { .. } => {
+            if let Some(remove) = edit.ops.remove_plugin {
+                unsafe { remove(edit.host, edit.track_id, edit.plugin_index, std::ptr::null_mut()) };
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn release_plugin_edit(edit: *mut c_void) {
+    if edit.is_null() {
+        return;
+    }
+    let edit = unsafe { Box::from_raw(edit as *mut PluginEdit) };
+    if let PluginEditKind::Removed { snapshot } = edit.kind {
+        if let Some(release) = edit.ops.release_plugin_snapshot {
+            unsafe { release(snapshot) };
+        }
+    }
+}
+
+/// Hands one plugin edit to the history. A missing recorder drops the entry
+/// (releasing its snapshot) instead of leaking it.
+fn record_plugin_edit(ops: &HirariPluginEditHostOps, host: *mut c_void, label: &str, edit: PluginEdit) {
+    let edit = Box::into_raw(Box::new(edit));
+    match ops.record_plugin_replay {
+        Some(record) => {
+            unsafe {
+                record(
+                    host,
+                    label.as_ptr(),
+                    label.len(),
+                    edit.cast(),
+                    replay_plugin_undo,
+                    replay_plugin_redo,
+                    release_plugin_edit,
+                )
+            };
+        }
+        None => unsafe { release_plugin_edit(edit.cast()) },
+    }
+}
+
+fn sync_structural_changes(ops: &HirariPluginEditHostOps, host: *mut c_void) {
+    if let Some(sync) = ops.sync_structural_changes {
+        unsafe { sync(host) };
+    }
+}
+
+fn append_builtin(
+    ops: &HirariPluginEditHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    plugin_type: u32,
+) -> bool {
+    let Some(append) = ops.append_plugin else {
+        return false;
+    };
+    let mut plugin_index = 0_u32;
+    let inserted = unsafe {
+        append(
+            host,
+            track_id,
+            plugin_type,
+            std::ptr::null(),
+            0,
+            true,
+            &mut plugin_index,
+        )
+    };
+    if !inserted {
+        return false;
+    }
+    let (state, bypassed) = capture_appended(ops, host, track_id, plugin_index);
+    record_plugin_edit(
+        ops,
+        host,
+        "Add Plugin",
+        PluginEdit {
+            ops: *ops,
+            host,
+            track_id,
+            plugin_index,
+            state,
+            bypassed,
+            kind: PluginEditKind::Added { plugin_type },
+        },
+    );
+    sync_structural_changes(ops, host);
+    true
+}
+
+fn append_sandboxed(
+    ops: &HirariPluginEditHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    path: &[u8],
+) -> bool {
+    if !unsafe {
+        crate::plugin_sandbox_host::hirari_plugin_sandbox_path_supported(path.as_ptr(), path.len())
+    } {
+        return false;
+    }
+    let Some(append) = ops.append_plugin else {
+        return false;
+    };
+    let mut plugin_index = 0_u32;
+    let inserted = unsafe {
+        append(
+            host,
+            track_id,
+            0,
+            path.as_ptr(),
+            path.len(),
+            false,
+            &mut plugin_index,
+        )
+    };
+    if !inserted {
+        return false;
+    }
+    let (state, bypassed) = capture_appended(ops, host, track_id, plugin_index);
+    record_plugin_edit(
+        ops,
+        host,
+        "Add Sandboxed Plugin",
+        PluginEdit {
+            ops: *ops,
+            host,
+            track_id,
+            plugin_index,
+            state,
+            bypassed,
+            kind: PluginEditKind::SandboxedAdded {
+                path: path.to_vec(),
+            },
+        },
+    );
+    sync_structural_changes(ops, host);
+    true
+}
+
+fn remove_chain_plugin(
+    ops: &HirariPluginEditHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    plugin_index: u32,
+) -> bool {
+    let Some(remove) = ops.remove_plugin else {
+        return false;
+    };
+    let mut snapshot = std::ptr::null_mut();
+    if !unsafe { remove(host, track_id, plugin_index, &mut snapshot) } || snapshot.is_null() {
+        return false;
+    }
+    record_plugin_edit(
+        ops,
+        host,
+        "Remove Plugin",
+        PluginEdit {
+            ops: *ops,
+            host,
+            track_id,
+            plugin_index,
+            state: Vec::new(),
+            bypassed: false,
+            kind: PluginEditKind::Removed { snapshot },
+        },
+    );
+    sync_structural_changes(ops, host);
+    true
+}
+
+/// Appends a built-in plugin and records one `Add Plugin` undo entry.
+///
+/// The engine rejected a missing track and a failed insert without recording
+/// anything; the entry captures the appended state and bypass so undo removes
+/// it and redo re-appends it with the same settings.
+///
+/// # Safety
+/// `host` must be the engine pointer the installed callbacks expect.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_edit_add(
+    host: *mut c_void,
+    track_id: u32,
+    plugin_type: u32,
+) -> bool {
+    match host_ops() {
+        Some(ops) => append_builtin(&ops, host, track_id, plugin_type),
+        None => false,
+    }
+}
+
+/// Appends a sandboxed bundle and records one `Add Sandboxed Plugin` entry.
+///
+/// The accepted bundle formats are checked before the engine is touched,
+/// exactly as the engine did with the shared path policy.
+///
+/// # Safety
+/// `host` must be the engine pointer the installed callbacks expect and `path`
+/// must be readable for `path_length` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_edit_add_sandboxed(
+    host: *mut c_void,
+    track_id: u32,
+    path: *const u8,
+    path_length: usize,
+) -> bool {
+    if path.is_null() || path_length == 0 {
+        return false;
+    }
+    let path = unsafe { std::slice::from_raw_parts(path, path_length) };
+    match host_ops() {
+        Some(ops) => append_sandboxed(&ops, host, track_id, path),
+        None => false,
+    }
+}
+
+/// Removes a plugin and records one `Remove Plugin` undo entry whose undo
+/// re-inserts the captured processor at the same index.
+///
+/// # Safety
+/// `host` must be the engine pointer the installed callbacks expect.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_plugin_edit_remove(
+    host: *mut c_void,
+    track_id: u32,
+    plugin_index: u32,
+) -> bool {
+    match host_ops() {
+        Some(ops) => remove_chain_plugin(&ops, host, track_id, plugin_index),
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn host_table_is_empty_until_installed() {
@@ -428,5 +816,304 @@ mod tests {
         assert!(ops.move_plugin.is_none());
         assert!(ops.record_bypass_undo.is_none());
         assert!(ops.record_move_undo.is_none());
+    }
+
+    #[derive(Default)]
+    struct TestState {
+        calls: Vec<String>,
+        undo: Option<(ReplayPluginEditFn, usize)>,
+        redo: Option<(ReplayPluginEditFn, usize)>,
+        release: Option<(ReplayPluginEditFn, usize)>,
+        plugin_count: u32,
+    }
+
+    // The host table is process-global, so these tests serialize on one lock.
+    static SERIAL: Mutex<()> = Mutex::new(());
+    static STATE: Mutex<TestState> = Mutex::new(TestState {
+        calls: Vec::new(),
+        undo: None,
+        redo: None,
+        release: None,
+        plugin_count: 0,
+    });
+
+    fn reset() -> std::sync::MutexGuard<'static, TestState> {
+        let mut state = STATE.lock().unwrap();
+        state.calls.clear();
+        state.undo = None;
+        state.redo = None;
+        state.release = None;
+        state.plugin_count = 0;
+        state
+    }
+
+    fn drain() -> Vec<String> {
+        std::mem::take(&mut STATE.lock().unwrap().calls)
+    }
+
+    unsafe extern "C" fn fake_append(
+        _host: *mut c_void,
+        _track: u32,
+        plugin_type: u32,
+        path: *const u8,
+        path_len: usize,
+        prepare: bool,
+        out_index: *mut u32,
+    ) -> bool {
+        let mut state = STATE.lock().unwrap();
+        let kind = if path.is_null() {
+            format!("append type={plugin_type}")
+        } else {
+            format!("append sandboxed len={path_len}")
+        };
+        state.calls.push(format!("{kind} prepare={prepare}"));
+        state.plugin_count += 1;
+        unsafe { *out_index = state.plugin_count - 1 };
+        true
+    }
+
+    unsafe extern "C" fn fake_read(
+        _host: *mut c_void,
+        _track: u32,
+        _index: u32,
+        plugin_type: *mut u32,
+        out: *mut u8,
+        capacity: usize,
+    ) -> usize {
+        if !plugin_type.is_null() {
+            unsafe { *plugin_type = 5 };
+        }
+        if !out.is_null() && capacity >= 2 {
+            unsafe { std::ptr::copy_nonoverlapping(b"SS".as_ptr(), out, 2) };
+        }
+        2
+    }
+
+    unsafe extern "C" fn fake_query_bypass(
+        _host: *mut c_void,
+        _track: u32,
+        _index: u32,
+    ) -> i32 {
+        1
+    }
+
+    unsafe extern "C" fn fake_apply_bypass(
+        _host: *mut c_void,
+        _track: u32,
+        _index: u32,
+        bypassed: bool,
+    ) -> bool {
+        STATE
+            .lock()
+            .unwrap()
+            .calls
+            .push(format!("bypass={bypassed}"));
+        true
+    }
+
+    unsafe extern "C" fn fake_apply_state(
+        _host: *mut c_void,
+        _track: u32,
+        _index: u32,
+        state: *const u8,
+        size: usize,
+        _before: *const u8,
+        _before_size: usize,
+        _record: bool,
+    ) -> bool {
+        STATE
+            .lock()
+            .unwrap()
+            .calls
+            .push(format!("state len={size}"));
+        true
+    }
+
+    unsafe extern "C" fn fake_remove(
+        _host: *mut c_void,
+        _track: u32,
+        index: u32,
+        out_snapshot: *mut *mut c_void,
+    ) -> bool {
+        let mut state = STATE.lock().unwrap();
+        if out_snapshot.is_null() {
+            state.calls.push(format!("remove {index}"));
+        } else {
+            state.calls.push(format!("remove {index} snapshot"));
+            unsafe { *out_snapshot = 0xBEEF as *mut c_void };
+        }
+        true
+    }
+
+    unsafe extern "C" fn fake_restore(
+        _host: *mut c_void,
+        _track: u32,
+        index: u32,
+        snapshot: *mut c_void,
+    ) -> bool {
+        STATE
+            .lock()
+            .unwrap()
+            .calls
+            .push(format!("restore {index} {:?}", snapshot));
+        true
+    }
+
+    unsafe extern "C" fn fake_release(snapshot: *mut c_void) {
+        STATE
+            .lock()
+            .unwrap()
+            .calls
+            .push(format!("release {:?}", snapshot));
+    }
+
+    unsafe extern "C" fn fake_record(
+        _host: *mut c_void,
+        label: *const u8,
+        label_len: usize,
+        edit: *mut c_void,
+        undo: ReplayPluginEditFn,
+        redo: ReplayPluginEditFn,
+        release: ReplayPluginEditFn,
+    ) {
+        let label = unsafe { std::slice::from_raw_parts(label, label_len) };
+        let mut state = STATE.lock().unwrap();
+        state
+            .calls
+            .push(format!("record {}", String::from_utf8_lossy(label)));
+        state.undo = Some((undo, edit as usize));
+        state.redo = Some((redo, edit as usize));
+        state.release = Some((release, edit as usize));
+    }
+
+    unsafe extern "C" fn fake_sync(_host: *mut c_void) {
+        STATE.lock().unwrap().calls.push("sync".to_string());
+    }
+
+    fn fake_ops() -> HirariPluginEditHostOps {
+        HirariPluginEditHostOps {
+            query_bypass: Some(fake_query_bypass),
+            apply_bypass: Some(fake_apply_bypass),
+            read_plugin: Some(fake_read),
+            apply_plugin_state: Some(fake_apply_state),
+            append_plugin: Some(fake_append),
+            remove_plugin: Some(fake_remove),
+            restore_plugin: Some(fake_restore),
+            release_plugin_snapshot: Some(fake_release),
+            record_plugin_replay: Some(fake_record),
+            sync_structural_changes: Some(fake_sync),
+            ..Default::default()
+        }
+    }
+
+    fn pending() -> (
+        (ReplayPluginEditFn, usize),
+        (ReplayPluginEditFn, usize),
+        (ReplayPluginEditFn, usize),
+    ) {
+        let state = STATE.lock().unwrap();
+        (
+            state.undo.unwrap(),
+            state.redo.unwrap(),
+            state.release.unwrap(),
+        )
+    }
+
+    #[test]
+    fn add_captures_state_and_replays_undo_and_redo() {
+        let _guard = SERIAL.lock().unwrap();
+        reset();
+
+        assert!(append_builtin(&fake_ops(), std::ptr::null_mut(), 4, 5));
+        assert_eq!(
+            drain(),
+            vec!["append type=5 prepare=true", "record Add Plugin", "sync"],
+            "the initial insert prepares the track and records one entry"
+        );
+
+        let ((undo, edit), (redo, _), (release, _)) = pending();
+        unsafe { undo(edit as *mut c_void) };
+        assert_eq!(drain(), vec!["remove 0"], "undo removes the appended plugin");
+
+        unsafe { redo(edit as *mut c_void) };
+        assert_eq!(
+            drain(),
+            vec!["append type=5 prepare=false", "state len=2", "bypass=true"],
+            "redo re-appends without re-preparing and restores state plus bypass"
+        );
+
+        unsafe { release(edit as *mut c_void) };
+        assert!(drain().is_empty(), "an add entry owns no snapshot to release");
+    }
+
+    #[test]
+    fn add_sandboxed_records_the_bundle_path() {
+        let _guard = SERIAL.lock().unwrap();
+        reset();
+
+        assert!(append_sandboxed(
+            &fake_ops(),
+            std::ptr::null_mut(),
+            4,
+            b"/tmp/Example.clap"
+        ));
+        assert_eq!(
+            drain(),
+            vec![
+                "append sandboxed len=17 prepare=false",
+                "record Add Sandboxed Plugin",
+                "sync"
+            ]
+        );
+
+        let ((_, edit), (redo, _), (release, _)) = pending();
+        unsafe { redo(edit as *mut c_void) };
+        assert_eq!(
+            drain(),
+            vec!["append sandboxed len=17 prepare=false", "state len=2", "bypass=true"]
+        );
+        unsafe { release(edit as *mut c_void) };
+        assert!(drain().is_empty(), "a sandbox entry owns no snapshot");
+    }
+
+    #[test]
+    fn unsupported_bundle_paths_are_rejected_before_the_engine() {
+        let _guard = SERIAL.lock().unwrap();
+        reset();
+
+        assert!(!append_sandboxed(
+            &fake_ops(),
+            std::ptr::null_mut(),
+            4,
+            b"/tmp/notes.txt"
+        ));
+        assert!(drain().is_empty());
+    }
+
+    #[test]
+    fn remove_replays_the_captured_snapshot_and_releases_it() {
+        let _guard = SERIAL.lock().unwrap();
+        reset();
+
+        assert!(remove_chain_plugin(
+            &fake_ops(),
+            std::ptr::null_mut(),
+            4,
+            2
+        ));
+        assert_eq!(
+            drain(),
+            vec!["remove 2 snapshot", "record Remove Plugin", "sync"]
+        );
+
+        let ((undo, edit), (redo, _), (release, _)) = pending();
+        unsafe { undo(edit as *mut c_void) };
+        assert_eq!(drain(), vec!["restore 2 0xbeef"]);
+
+        unsafe { redo(edit as *mut c_void) };
+        assert_eq!(drain(), vec!["remove 2"]);
+
+        unsafe { release(edit as *mut c_void) };
+        assert_eq!(drain(), vec!["release 0xbeef"]);
     }
 }

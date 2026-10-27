@@ -4,104 +4,16 @@ bool HirariUnifiedEngine::replace_region_audio(uint32_t tid, uint32_t rid, std::
                                             path.size());
 }
 bool HirariUnifiedEngine::add_plugin(uint32_t tid, uint32_t pluginType) {
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& t : m_tracks) {
-            if (t->getId() == tid) {
-                if (!t->addPlugin(pluginType)) break;
-                target = t;
-                if (m_context) {
-                    // Plugin insertion changes both intrinsic latency and the
-                    // published PDC graph. Re-prepare at the control boundary
-                    // before recalculating compensation.
-                    t->prepareToPlay(m_context->sampleRate, m_context->blockSize);
-                }
-                break;
-            }
-        }
-    }
-    if (!target) return false;
-
-    const size_t pluginIndex = target->getPluginCount() - 1;
-    const auto state = target->getPluginStates()[pluginIndex];
-    const bool bypassed = target->getPluginBypass(static_cast<uint32_t>(pluginIndex));
-    const auto undo = [target, pluginIndex]() {
-        if (target->getPluginCount() > pluginIndex)
-            (void)target->removePlugin(static_cast<uint32_t>(pluginIndex));
-    };
-    const auto redo = [target, pluginType, pluginIndex, state, bypassed]() {
-        if (!target->addPlugin(pluginType)) return;
-        const auto newIndex = static_cast<uint32_t>(target->getPluginCount() - 1);
-        if (!state.empty()) (void)target->setPluginState(newIndex, state);
-        (void)target->setPluginBypass(newIndex, bypassed);
-        (void)pluginIndex; // The current Track API appends plugins by contract.
-    };
-    m_undoManager.recordAppliedAction("Add Plugin", undo, redo);
-    syncStructuralChanges();
-    return true;
+    return hirari_plugin_edit_add(this, tid, pluginType);
 }
 
 bool HirariUnifiedEngine::remove_plugin(uint32_t tid, uint32_t pluginIndex) {
-    std::shared_ptr<Track> target;
-    Track::PluginSnapshot snapshot{};
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            if (track && track->getId() == tid) {
-                if (track->removePlugin(pluginIndex, &snapshot)) target = track;
-                break;
-            }
-        }
-    }
-    if (!target) return false;
-    const auto undo = [target, pluginIndex, snapshot]() {
-        (void)target->restorePlugin(pluginIndex, snapshot);
-    };
-    const auto redo = [target, pluginIndex]() {
-        (void)target->removePlugin(pluginIndex);
-    };
-    m_undoManager.recordAppliedAction("Remove Plugin", undo, redo);
-    syncStructuralChanges();
-    return true;
+    return hirari_plugin_edit_remove(this, tid, pluginIndex);
 }
-bool HirariUnifiedEngine::add_sandboxed_plugin(uint32_t tid, std::string_view pluginPath) {
-    // Accepted bundle formats are owned by the Rust sandbox host, which also
-    // performs the conversion at load time.
-    if (!hirari_plugin_sandbox_path_supported(
-            reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size())) {
-        return false;
-    }
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& t : m_tracks) {
-            if (t->getId() != tid) continue;
-            if (!t->addSandboxedPlugin(std::string(pluginPath))) return false;
-            target = t;
-            break;
-        }
-    }
-    if (!target) return false;
 
-    const uint32_t pluginIndex = static_cast<uint32_t>(target->getPluginCount() - 1);
-    const std::string path(pluginPath);
-    const auto state = target->getPluginStates()[pluginIndex];
-    const bool bypassed = target->getPluginBypass(pluginIndex);
-    const auto undo = [target, pluginIndex]() {
-        if (target->getPluginCount() > pluginIndex)
-            (void)target->removePlugin(pluginIndex);
-    };
-    const auto redo = [target, path, pluginIndex, state, bypassed]() {
-        if (!target->addSandboxedPlugin(path)) return;
-        const auto newIndex = static_cast<uint32_t>(target->getPluginCount() - 1);
-        if (!state.empty()) (void)target->setPluginState(newIndex, state);
-        (void)target->setPluginBypass(newIndex, bypassed);
-        (void)pluginIndex; // Sandbox insertion appends by the Track contract.
-    };
-    m_undoManager.recordAppliedAction("Add Sandboxed Plugin", undo, redo);
-    syncStructuralChanges();
-    return true;
+bool HirariUnifiedEngine::add_sandboxed_plugin(uint32_t tid, std::string_view pluginPath) {
+    return hirari_plugin_edit_add_sandboxed(
+        this, tid, reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size());
 }
 
 bool HirariUnifiedEngine::process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,

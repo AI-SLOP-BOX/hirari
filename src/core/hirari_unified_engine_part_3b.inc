@@ -627,6 +627,72 @@ void HirariUnifiedEngine::installPluginEditHost() {
             engine->m_undoManager.recordAppliedAction("Load Plugin Preset", undo, redo);
             return true;
         },
+        [](void* host, uint32_t trackId, uint32_t pluginType, const uint8_t* path, size_t pathLength,
+           bool prepare, uint32_t* outIndex) -> bool {
+            if (!host || !outIndex || (pathLength != 0 && !path)) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                const bool sandboxed = path != nullptr;
+                const bool inserted =
+                    sandboxed ? track->addSandboxedPlugin(std::string(
+                                    reinterpret_cast<const char*>(path), pathLength))
+                              : track->addPlugin(pluginType);
+                if (!inserted) return false;
+                if (prepare && engine->m_context) {
+                    track->prepareToPlay(engine->m_context->sampleRate, engine->m_context->blockSize);
+                }
+                *outIndex = static_cast<uint32_t>(track->getPluginCount() - 1);
+                return true;
+            }
+            return false;
+        },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, void** outSnapshot) -> bool {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (!track || track->getId() != trackId) continue;
+                if (!outSnapshot) return track->removePlugin(pluginIndex);
+                auto* snapshot = new Track::PluginSnapshot();
+                if (track->removePlugin(pluginIndex, snapshot)) {
+                    *outSnapshot = snapshot;
+                    return true;
+                }
+                delete snapshot;
+                return false;
+            }
+            return false;
+        },
+        [](void* host, uint32_t trackId, uint32_t pluginIndex, void* snapshot) -> bool {
+            if (!host || !snapshot) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (auto& track : engine->m_tracks) {
+                if (track && track->getId() == trackId)
+                    return track->restorePlugin(
+                        pluginIndex, *static_cast<const Track::PluginSnapshot*>(snapshot));
+            }
+            return false;
+        },
+        [](void* snapshot) { delete static_cast<Track::PluginSnapshot*>(snapshot); },
+        [](void* host, const uint8_t* label, size_t labelLength, void* edit,
+           HirariPluginEditHostOps::ReplayFn undo, HirariPluginEditHostOps::ReplayFn redo,
+           HirariPluginEditHostOps::ReplayFn release) {
+            if (!host || !edit) return;
+            // Both history callbacks share the edit; it is released once the
+            // entry is dropped. Replay re-enters Rust, which owns what undo and
+            // redo do for each edit kind.
+            std::shared_ptr<void> owned(edit, [release](void* handle) { release(handle); });
+            const std::string name(reinterpret_cast<const char*>(label), labelLength);
+            static_cast<HirariUnifiedEngine*>(host)->m_undoManager.recordAppliedAction(
+                name, [owned, undo]() { undo(owned.get()); },
+                [owned, redo]() { redo(owned.get()); });
+        },
+        [](void* host) {
+            if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
+        },
     };
     hirari_plugin_edit_host_install(&ops);
 }

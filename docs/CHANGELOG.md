@@ -102,6 +102,13 @@ production support.
   plugin and non-empty state before calling the preset writer. C++ keeps the
   track lookup and state storage behind two host callbacks, and the engine
   methods are one-line delegations.
+- Plugin chain add and remove now run through the Rust plugin-edit host. Rust
+  checks the sandboxed bundle path, appends built-in or sandboxed plugins,
+  captures the appended state and bypass (or the removed processor snapshot),
+  and records `Add Plugin`, `Add Sandboxed Plugin` and `Remove Plugin` entries
+  whose undo and redo replay through the host. C++ keeps only the track lookup,
+  chain storage and snapshot lifetime; the history releases each edit through
+  Rust when the entry is dropped, so removed processors are not leaked.
 - Splitting and duplicating regions now run through the Rust region-edit host.
   Rust validates the split position, builds the split plan and the windowed
   note tables, applies both sides through payload ops, and records whole-region
