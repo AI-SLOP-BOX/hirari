@@ -218,7 +218,6 @@ bool HirariUnifiedEngine::finalize_region_quantize(uint32_t tid, uint32_t rid) {
     return hirari_region_finalize_quantize(this, tid, rid);
 }
 bool HirariUnifiedEngine::append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled) {
-    if (stepId == 0 || operation.empty() || operation.size() > 256 || !std::isfinite(parameter)) return false;
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (auto& track : m_tracks) if (track->getId() == tid)
         return track->appendProcessingStep(rid, {stepId, std::string(operation), parameter, enabled});

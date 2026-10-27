@@ -114,6 +114,11 @@ production support.
   prefixes/suffixes (case-insensitive, byte-level so non-UTF-8 paths keep
   working). The engine wrappers only forward and resolve, and the
   duplicated validator code was removed.
+- Last duplicated validators in front of Rust-owned state were removed. The
+  render tail is clamped once in the bridge (`0..=60` s, non-finite to zero)
+  and the engine only converts it to milliseconds; project scale and region
+  processing-step admission are decided by the bridge and the Rust step store,
+  so the engine and Track copies of those checks are gone.
 - Undo, redo, history transactions and undo/redo depth now run through Rust
   entry points. The stacks were already Rust-owned; the engine wrappers that
   read the depth, applied the history and logged the top action were removed,

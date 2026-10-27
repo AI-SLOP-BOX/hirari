@@ -222,13 +222,10 @@ void HirariUnifiedEngine::clear_offline_render_target() noexcept {
 }
 
 void HirariUnifiedEngine::set_offline_render_tail_seconds(float seconds) noexcept {
-    if (!std::isfinite(seconds) || seconds < 0.0f) {
-        m_offlineRenderTailMillis.store(0, std::memory_order_release);
-        return;
-    }
-    const float bounded = std::min(seconds, 60.0f);
+    // Bounds and non-finite rejection are enforced by the bridge; this only
+    // stores the value the render loop consumes.
     m_offlineRenderTailMillis.store(
-        static_cast<uint32_t>(bounded * 1000.0f), std::memory_order_release);
+        static_cast<uint32_t>(seconds * 1000.0f), std::memory_order_release);
 }
 
 void HirariUnifiedEngine::set_offline_render_options(bool preFader, bool includeInserts) noexcept {

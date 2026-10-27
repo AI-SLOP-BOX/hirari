@@ -1,4 +1,13 @@
 impl HirariCore {
+    /// Render tail bounds live here; the engine only stores milliseconds.
+    fn bounded_render_tail_seconds(seconds: f32) -> f32 {
+        if seconds.is_finite() {
+            seconds.clamp(0.0, 60.0)
+        } else {
+            0.0
+        }
+    }
+
     pub fn set_offline_render_target(&self, track_id: u32) -> bool {
         self.engine
             .as_ref()
@@ -13,7 +22,7 @@ impl HirariCore {
 
     pub fn set_offline_render_tail_seconds(&self, seconds: f32) {
         if let Some(engine) = self.engine.as_ref() {
-            engine.set_offline_render_tail_seconds(seconds);
+            engine.set_offline_render_tail_seconds(Self::bounded_render_tail_seconds(seconds));
         }
     }
 
@@ -515,7 +524,7 @@ impl HirariCore {
             .to_string();
         }
 
-        engine.set_offline_render_tail_seconds(tail_seconds);
+        engine.set_offline_render_tail_seconds(Self::bounded_render_tail_seconds(tail_seconds));
         engine.set_offline_render_options(pre_fader, include_inserts);
 
         match self.stem_batch.lock() {

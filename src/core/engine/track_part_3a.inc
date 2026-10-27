@@ -387,11 +387,10 @@
     }
 
     bool appendProcessingStep(uint32_t regionId, ::hirari::editing::EventProcessingStep step) {
-        if (step.operation.empty() || step.operation.size() > 256 || step.id == 0) return false;
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) if (region.id == regionId) {
-            // The store owns the rest of the policy, including the parameter
-            // finiteness check the engine wrapper used to make alone.
+            // The store owns the policy: zero id, empty/oversized operation,
+            // parameter finiteness and the step cap.
             if (!region.processingHistory.append(step)) return false;
             publishRegionSnapshot();
             return true;
