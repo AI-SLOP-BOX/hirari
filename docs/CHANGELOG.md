@@ -217,6 +217,11 @@ production support.
 - Stem-separator backend names are also Rust-owned, so the C++ adapter no
   longer restates the Heuristic / ONNX Runtime / LibTorch / External Process
   display mapping.
+- The sandbox transport retry policy now lives in Rust.
+  `hirari_plugin_sandbox_transport_retry_delay` decides which failures are
+  transient (spawn, handshake, early exit) and returns the 25 ms doubling
+  backoff or 0 for terminal failures, so `addSandboxedPlugin` only starts,
+  closes and sleeps instead of restating the failure set and shift.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

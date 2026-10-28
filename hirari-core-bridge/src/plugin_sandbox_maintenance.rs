@@ -324,6 +324,20 @@ pub unsafe extern "C" fn hirari_plugin_sandbox_maintain(
     recovered
 }
 
+/// Backoff before retrying a failed worker spawn, or 0 when the failure is
+/// terminal. Worker creation runs on the control thread; on macOS a worker
+/// that just exited can briefly hold code-signature and IPC resources, so only
+/// transport-level failures (spawn, handshake, early exit) are retried, with a
+/// 25 ms doubling backoff. Plug-in ABI/load/instance failures stay terminal and
+/// must never be hidden by a retry.
+#[no_mangle]
+pub extern "C" fn hirari_plugin_sandbox_transport_retry_delay(attempt: u32, failure: u8) -> u32 {
+    if !matches!(failure, 3 | 4 | 11) || attempt >= 32 {
+        return 0;
+    }
+    25u32 << attempt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,5 +495,16 @@ mod tests {
         assert_eq!(&packed[1..5], &[7, 3, 1, 1]);
         assert_eq!(packed[6], 3);
         assert_eq!(packed.len(), 10);
+    }
+
+    #[test]
+    fn transport_retries_only_cover_transient_failures() {
+        for code in 0..=255u8 {
+            let delay = hirari_plugin_sandbox_transport_retry_delay(0, code);
+            assert_eq!(delay != 0, matches!(code, 3 | 4 | 11));
+        }
+        assert_eq!(hirari_plugin_sandbox_transport_retry_delay(0, 3), 25);
+        assert_eq!(hirari_plugin_sandbox_transport_retry_delay(4, 11), 400);
+        assert_eq!(hirari_plugin_sandbox_transport_retry_delay(32, 3), 0);
     }
 }

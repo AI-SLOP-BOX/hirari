@@ -144,25 +144,17 @@
         auto processor = std::make_shared<Hirari::Core::Plugins::ProcessSandboxProcessor>(
             pluginPath, m_sampleRate, std::max<uint32_t>(m_blockSize, 1u));
         bool started = false;
-        // Worker creation is a control-thread operation. On macOS, a worker
-        // that just exited may leave code-signature validation and IPC
-        // resources briefly unavailable to the next launch. Retry only those
-        // transport-level failures, and explicitly close the failed host
-        // before trying again. Plugin ABI/load/instance failures remain
-        // terminal and are never hidden by retrying.
-        constexpr int kMaxTransportRetries = 5;
-        for (int attempt = 0; attempt < kMaxTransportRetries && !started; ++attempt) {
+        // The transport-retry policy (which failures are transient and the
+        // backoff) lives in Rust; close the failed host before a retry.
+        constexpr uint32_t kMaxTransportRetries = 5;
+        for (uint32_t attempt = 0; attempt < kMaxTransportRetries && !started; ++attempt) {
             started = processor->start();
             if (started || attempt + 1 == kMaxTransportRetries) break;
-            const auto failure = processor->failure();
-            const bool transient =
-                failure == Hirari::Core::Plugins::PluginSandboxHost::Failure::SpawnFailed ||
-                failure == Hirari::Core::Plugins::PluginSandboxHost::Failure::ProcessExited ||
-                failure == Hirari::Core::Plugins::PluginSandboxHost::Failure::HandshakeTimeout;
-            if (!transient) break;
+            const uint32_t delay =
+                hirari_plugin_sandbox_transport_retry_delay(attempt, processor->failureCode());
+            if (delay == 0) break;
             processor->stop();
-            const auto backoff = std::chrono::milliseconds(25u << static_cast<unsigned>(attempt));
-            std::this_thread::sleep_for(backoff);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
         }
         if (!started) {
             m_lastSandboxFailure.store(processor->failureCode(), std::memory_order_release);
