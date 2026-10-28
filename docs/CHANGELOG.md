@@ -129,6 +129,12 @@ production support.
   slot), unknown types stay unresolved instead of loading an inert processor,
   and the name-to-type bridge lookup shares the same table. Track and bus
   chains ask Rust for the path; the C++ host still constructs the processor.
+- Auto-arrangement now runs in Rust. The arrangement module gathers the region
+  spans, sizes the project from its latest region end (saturating instead of
+  overflowing), asks the structure analyzer for sections and emits one marker
+  per section with its length. C++ keeps the region storage and the event queue
+  behind the listing callbacks and the marker sink; an empty project still
+  reports failure and a project without regions still emits nothing.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

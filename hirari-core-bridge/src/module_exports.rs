@@ -20,6 +20,7 @@ pub mod atmos_compressor;
 pub mod atmos_eq;
 pub mod atmos_reverb;
 pub mod atomic_parameter;
+pub mod auto_arrangement;
 pub mod audio_buffer_ops;
 pub mod async_snapshots;
 pub mod audio_graph;

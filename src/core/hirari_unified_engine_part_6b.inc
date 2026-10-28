@@ -195,37 +195,20 @@ bool HirariUnifiedEngine::execute_auto_mixing() {
     return true;
 }
 bool HirariUnifiedEngine::execute_auto_arrangement() {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    if (m_tracks.empty()) return false;
-    
-    // 1. GATHER TIMELINE DATA
-    std::vector<uint64_t> regionStarts;
-    uint64_t projectLen = 0;
-    
-    for (const auto& t : m_tracks) {
-        for (const auto& r : t->getRegions()) {
-            regionStarts.push_back(r.start);
-            projectLen = std::max(projectLen, r.start + r.len);
-        }
-    }
-
-    // 2. INDUSTRIAL: AI ANALYSIS (Neural Arrangement Kernel)
-    // For this phase, we use the density analyzer to identify sections.
+    // Project extent, section boundaries and marker lengths are Rust-owned.
+    // The engine keeps the region storage and the event queue behind the
+    // host callbacks and the marker sink below.
     const auto harmony = Composition::HarmonicContextTracker::getInstance().getState();
-    auto sections = ::Hirari::Core::Bridge::analysis_structure_sections(
-        rust::Slice<const uint64_t>(regionStarts.data(), regionStarts.size()),
-        projectLen, hirari_tempo_map_get_current_bpm(m_tempoState), m_sampleRate.load(), harmony.tension, harmony.valence
-    );
-
-    // 3. GENERATE MARKERS & NOTIFY UI
-    for (const auto& sec : sections) {
-        ::Hirari::Core::EngineEvent ev{};
-        ev.type = 0x50; // EVENT_TYPE_STRUCTURE_MARKER
-        ev.timestamp = sec.start_sample;
-        ev.value = static_cast<float>(sec.end_sample - sec.start_sample);
-        push_event(ev);
-        
-        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "AI | ARRANGEMENT | SECTION_DETECTED");
-    }
-    return true;
+    return hirari_engine_auto_arrange(
+        this, hirari_tempo_map_get_current_bpm(m_tempoState), m_sampleRate.load(),
+        harmony.tension, harmony.valence,
+        [](void* context, uint64_t start, uint64_t length) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(context);
+            ::Hirari::Core::EngineEvent event{};
+            event.type = 0x50;  // EVENT_TYPE_STRUCTURE_MARKER
+            event.timestamp = start;
+            event.value = static_cast<float>(length);
+            engine->push_event(event);
+            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "AI | ARRANGEMENT | SECTION_DETECTED");
+        });
 }

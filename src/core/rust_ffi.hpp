@@ -786,6 +786,10 @@ struct HirariRegionHostOps {
                          bool* managed) = nullptr;
 };
 
+extern "C" bool hirari_engine_auto_arrange(
+    void* host, float bpm, double sample_rate, float tension, float valence,
+    void (*emitSection)(void*, uint64_t, uint64_t));
+
 extern "C" void hirari_region_host_install(const HirariRegionHostOps* ops);
 extern "C" int32_t hirari_region_import_add(
     void* host, uint32_t trackId, const uint8_t* path, size_t pathLength,
