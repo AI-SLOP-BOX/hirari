@@ -56,10 +56,10 @@
         }) != m_tracks.end();
     }
     std::string plugin_compatibility_snapshot_json() const;
-    bool add_automation_lane(uint32_t id) { return m_automationLanes.add(id); }
-    bool set_automation_lane_linked(uint32_t id, bool linked) { return m_automationLanes.link(id, linked); }
-    bool set_automation_lane_protected(uint32_t id, bool protectedLane) { return m_automationLanes.protect(id, protectedLane); }
-    bool preview_automation_lane(uint32_t id, float value) { return m_automationLanes.preview(id, value); }
+    bool add_automation_lane(uint32_t id) { return hirari_automation_lane_group_add(m_automationLanes, id); }
+    bool set_automation_lane_linked(uint32_t id, bool linked) { return hirari_automation_lane_group_link(m_automationLanes, id, linked); }
+    bool set_automation_lane_protected(uint32_t id, bool protectedLane) { return hirari_automation_lane_group_protect(m_automationLanes, id, protectedLane); }
+    bool preview_automation_lane(uint32_t id, float value) { return hirari_automation_lane_group_preview(m_automationLanes, id, value); }
     float get_master_gain() const noexcept;
     float get_track_volume(uint32_t tid) const;
     bool set_track_solo_for_offline_render(uint32_t tid, bool solo);

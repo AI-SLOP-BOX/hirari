@@ -48,6 +48,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_metronome_destroy(m_metronome);
     hirari_mixer_telemetry_destroy(m_mixerTelemetry);
     hirari_macro_mapping_destroy(m_macroControl);
+    hirari_automation_lane_group_destroy(m_automationLanes);
     hirari_mpe_state_free(m_mpeState);
 }
 

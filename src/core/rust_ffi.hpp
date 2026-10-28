@@ -250,6 +250,10 @@ extern "C" bool hirari_audio_buffer_deinterleave_interleaved(
     float* const* channel_pointers, uint32_t channel_count, uint32_t frames);
 extern "C" void* hirari_macro_mapping_create();
 extern "C" void hirari_macro_mapping_destroy(void* state);
+extern "C" void* hirari_automation_lane_group_create();
+extern "C" void hirari_automation_lane_group_destroy(void* state), hirari_automation_lane_group_remove(void* state, uint32_t id);
+extern "C" bool hirari_automation_lane_group_add(void* state, uint32_t id), hirari_automation_lane_group_link(void* state, uint32_t id, bool linked), hirari_automation_lane_group_protect(void* state, uint32_t id, bool protected_lane);
+extern "C" bool hirari_automation_lane_group_preview(void* state, uint32_t id, float value);
 extern "C" void hirari_macro_control_set_value(
     void* state, uint32_t macro_index, float value);
 extern "C" float hirari_macro_control_get_value(

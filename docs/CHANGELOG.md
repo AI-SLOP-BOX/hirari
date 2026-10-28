@@ -198,6 +198,10 @@ production support.
   non-32-bit sample format, a payload that is not a whole number of frames and
   any non-finite sample, so `WavLoader::loadWave64` no longer re-checks the
   returned channel/frame/size fields before copying them into planar vectors.
+- Automation lane state now lives in Rust. `automation_lane_group.rs` owns the
+  per-lane linked/protected/preview flags and the rule that a protected lane
+  rejects previews, so the engine's four `*_automation_lane` entries forward to
+  a Rust handle and the C++ `AutomationLaneGroup` header is gone.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

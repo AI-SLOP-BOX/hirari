@@ -45,6 +45,7 @@ pub mod automation_capture_runtime;
 pub mod automation_curve;
 pub mod automation_curve_shared;
 pub mod automation_edit_host;
+pub mod automation_lane_group;
 pub mod automation_manager;
 pub mod automation_mode;
 pub mod automation_recorder;
