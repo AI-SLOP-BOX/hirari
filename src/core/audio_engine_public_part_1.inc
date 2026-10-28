@@ -289,16 +289,13 @@ public:
                                  rust::Slice<const uint64_t> source_samples,
                                  rust::Slice<const uint64_t> timeline_samples,
                                  rust::Slice<const uint8_t> transient_flags) const {
-        if (!m_engine || source_samples.size() != timeline_samples.size() ||
-            source_samples.size() != transient_flags.size() || source_samples.size() > 100'000) return false;
-        std::vector<HirariWarpMarker> markers;
-        markers.reserve(source_samples.size());
-        for (size_t i = 0; i < source_samples.size(); ++i) {
-            markers.push_back({source_samples[i], timeline_samples[i],
-                               transient_flags[i] != 0});
-        }
-        return hirari_region_edit_set_warp_markers(
-            m_engine.get(), tid, rid, markers.data(), markers.size());
+        // Slice agreement, the marker cap and the conversion to the marker
+        // layout are Rust-owned (hirari_region_edit_set_warp_markers).
+        return m_engine && hirari_region_edit_set_warp_markers(
+            m_engine.get(), tid, rid,
+            source_samples.data(), source_samples.size(),
+            timeline_samples.data(), timeline_samples.size(),
+            transient_flags.data(), transient_flags.size());
     }
     bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
                                     rust::Slice<const uint32_t> targetTids,

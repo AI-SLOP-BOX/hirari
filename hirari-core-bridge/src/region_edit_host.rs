@@ -607,6 +607,9 @@ fn same_markers(left: &[HirariWarpMarker], right: &[HirariWarpMarker]) -> bool {
         })
 }
 
+/// The previous engine setter rejected edits above this order of magnitude.
+const MAX_WARP_MARKER_EDITS: usize = 100_000;
+
 /// Replaces a region's warp markers. The previous engine setter rejected any
 /// list that normalization would shorten, so callers can rely on a marker
 /// count round-trip; a successful edit records one marker-aware undo entry.
@@ -618,8 +621,6 @@ fn set_warp_markers_with(
     markers: *const HirariWarpMarker,
     count: usize,
 ) -> bool {
-    // The previous engine setter rejected edits above this order of magnitude.
-    const MAX_WARP_MARKER_EDITS: usize = 100_000;
     if track_id == 0 || region_id == 0 || count > MAX_WARP_MARKER_EDITS {
         return false;
     }
@@ -835,24 +836,81 @@ pub unsafe extern "C" fn hirari_region_edit_warp_ratio(
     edit_warp_ratio_with(&ops, host, track_id, region_id, ratio)
 }
 
-/// Replaces a region's warp markers after the shared normalizer accepts them.
+/// Converts the bridge's three parallel frames (source samples, timeline
+/// samples, transient flags) into the marker layout and forwards them to
+/// [`set_warp_markers_with`]. Disagreeing lengths and an oversized list are
+/// rejected before any conversion, so a rejected request allocates nothing.
+fn set_warp_markers_from_slices(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    region_id: u32,
+    source_samples: *const u64,
+    source_count: usize,
+    timeline_samples: *const u64,
+    timeline_count: usize,
+    transient_flags: *const u8,
+    flag_count: usize,
+) -> bool {
+    if source_count != timeline_count || source_count != flag_count {
+        return false;
+    }
+    if source_count == 0 {
+        return set_warp_markers_with(ops, host, track_id, region_id, ptr::null(), 0);
+    }
+    if source_count > MAX_WARP_MARKER_EDITS
+        || source_samples.is_null()
+        || timeline_samples.is_null()
+        || transient_flags.is_null()
+    {
+        return false;
+    }
+    let source = unsafe { std::slice::from_raw_parts(source_samples, source_count) };
+    let timeline = unsafe { std::slice::from_raw_parts(timeline_samples, source_count) };
+    let flags = unsafe { std::slice::from_raw_parts(transient_flags, source_count) };
+    let markers: Vec<HirariWarpMarker> = (0..source_count)
+        .map(|index| HirariWarpMarker {
+            source_sample: source[index],
+            timeline_sample: timeline[index],
+            transient: u8::from(flags[index] != 0),
+        })
+        .collect();
+    set_warp_markers_with(ops, host, track_id, region_id, markers.as_ptr(), markers.len())
+}
+
+/// Replaces a region's warp markers from the bridge's three parallel slices.
 ///
 /// # Safety
-/// `host` must be the opaque handle the installed host ops expect, and
-/// `markers` must point to `count` initialized entries for the duration of the
-/// call.
+/// `host` must be the opaque handle the installed host ops expect, and every
+/// non-null slice must point to its declared element count for the duration of
+/// the call.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_edit_set_warp_markers(
     host: *mut c_void,
     track_id: u32,
     region_id: u32,
-    markers: *const HirariWarpMarker,
-    count: usize,
+    source_samples: *const u64,
+    source_count: usize,
+    timeline_samples: *const u64,
+    timeline_count: usize,
+    transient_flags: *const u8,
+    flag_count: usize,
 ) -> bool {
     let Some(ops) = host_ops() else {
         return false;
     };
-    set_warp_markers_with(&ops, host, track_id, region_id, markers, count)
+    set_warp_markers_from_slices(
+        &ops,
+        host,
+        track_id,
+        region_id,
+        source_samples,
+        source_count,
+        timeline_samples,
+        timeline_count,
+        transient_flags,
+        flag_count,
+    )
 }
 
 fn read_range_edits(
@@ -3564,6 +3622,78 @@ use crate::audio_note_curve::{
         assert_eq!(guard.applied[0].blob_len, 0);
         assert_eq!(guard.undo_markers.len(), 2);
         assert!(guard.redo_markers.is_empty());
+    }
+
+    #[test]
+    fn packed_warp_markers_convert_the_parallel_slices() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState {
+            len: 1_000,
+            source_length: 2_000,
+            ..Default::default()
+        });
+        fake().lock().unwrap().warp_markers = vec![marker(0, 0, 0)];
+
+        let source = [500u64, 100];
+        let timeline = [500u64, 100];
+        let flags = [0u8, 1];
+        assert!(set_warp_markers_from_slices(
+            &ops,
+            host,
+            1,
+            2,
+            source.as_ptr(),
+            source.len(),
+            timeline.as_ptr(),
+            timeline.len(),
+            flags.as_ptr(),
+            flags.len(),
+        ));
+
+        let guard = fake().lock().unwrap();
+        assert!(same_markers(
+            &guard.redo_markers,
+            &[marker(100, 100, 1), marker(500, 500, 0)]
+        ));
+    }
+
+    #[test]
+    fn packed_warp_markers_reject_disagreeing_lengths_and_oversized_lists() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let ops = fake_ops();
+        let host = 1usize as *mut c_void;
+        reset(HirariRegionState::default());
+        let source = [1u64, 2];
+        let timeline = [1u64];
+        let flags = [1u8, 1];
+        assert!(!set_warp_markers_from_slices(
+            &ops,
+            host,
+            1,
+            2,
+            source.as_ptr(),
+            source.len(),
+            timeline.as_ptr(),
+            timeline.len(),
+            flags.as_ptr(),
+            flags.len(),
+        ));
+        // The cap is enforced before any allocation, so null slices with an
+        // oversized count are rejected without touching memory.
+        assert!(!set_warp_markers_from_slices(
+            &ops,
+            host,
+            1,
+            2,
+            ptr::null(),
+            100_001,
+            ptr::null(),
+            100_001,
+            ptr::null(),
+            100_001,
+        ));
     }
 
     #[test]

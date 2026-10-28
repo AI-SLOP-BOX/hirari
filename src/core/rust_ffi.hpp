@@ -861,10 +861,11 @@ extern "C" bool hirari_region_edit_trim(void* host, uint32_t trackId, uint32_t r
                                         float startNormalized, float endNormalized);
 extern "C" bool hirari_region_edit_warp_ratio(void* host, uint32_t trackId, uint32_t regionId,
                                               double ratio);
-extern "C" bool hirari_region_edit_set_warp_markers(void* host, uint32_t trackId,
-                                                    uint32_t regionId,
-                                                    const HirariWarpMarker* markers,
-                                                    size_t count);
+extern "C" bool hirari_region_edit_set_warp_markers(
+    void* host, uint32_t trackId, uint32_t regionId,
+    const uint64_t* sourceSamples, size_t sourceCount,
+    const uint64_t* timelineSamples, size_t timelineCount,
+    const uint8_t* transientFlags, size_t flagCount);
 extern "C" bool hirari_region_edit_range_edit_set(void* host, uint32_t trackId,
                                                   uint32_t regionId, uint64_t start,
                                                   uint64_t end, float gain, uint64_t fadeIn,

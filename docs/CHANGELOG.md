@@ -158,6 +158,11 @@ production support.
   the last tick timestamp moved to `external_sync_runtime.rs`, which also keeps
   the wrapping tick increment and tolerates a null state. The C++ header that
   held the class, its unused MTC helpers and an unreferenced MMC enum is gone.
+- Warp-marker replacement now converts the bridge's three parallel slices
+  (source samples, timeline samples, transient flags) in Rust. Slice-length
+  agreement and the 100k marker cap are checked before any conversion, so a
+  rejected request allocates nothing; the converted list still runs through the
+  shared normalizer before one marker-aware undo entry is recorded.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
