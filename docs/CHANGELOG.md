@@ -163,6 +163,11 @@ production support.
   agreement and the 100k marker cap are checked before any conversion, so a
   rejected request allocates nothing; the converted list still runs through the
   shared normalizer before one marker-aware undo entry is recorded.
+- Audio-device admission from the environment now lives in Rust. The
+  `HIRARI_AUDIO_MODE=offline|none` gate and the `HIRARI_NATIVE_TEST_ISOLATION=1`
+  flag are read in `audio_device_mode.rs` with tests, replacing five copies of
+  the `getenv`/`strcmp` checks across engine construction, device restart,
+  reconnect and configuration apply.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

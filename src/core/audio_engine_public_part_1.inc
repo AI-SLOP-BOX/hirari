@@ -186,8 +186,7 @@ public:
                                       uint64_t& droppedInputBlocks) const;
     void try_reconnect_audio_device() const {
 #if defined(__APPLE__)
-        const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
-        if (isolated && std::strcmp(isolated, "1") == 0) return;
+        if (hirari_native_test_isolation()) return;
 #endif
         std::lock_guard<std::mutex> lock(m_configMutex);
         if (m_driver) {
@@ -356,9 +355,7 @@ public:
 #if defined(__APPLE__)
         // The graph and CoreAudio must be rebuilt as one transaction. Updating
         // only the graph leaves the device callback on the previous format.
-        const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
-        const bool offlineIsolation = isolated && std::strcmp(isolated, "1") == 0;
-        if (!offlineIsolation && m_driver && m_driver->is_running()) {
+        if (!hirari_native_test_isolation() && m_driver && m_driver->is_running()) {
             if (!m_driver->reconfigure(static_cast<double>(sr), bs)) {
                 return false;
             }

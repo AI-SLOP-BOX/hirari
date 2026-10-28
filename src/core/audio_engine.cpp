@@ -2,9 +2,7 @@
 #include "hirari-core-bridge/src/lib.rs.h"
 #include <array>
 #include <cstdio>
-#include <cstdlib>
 #include <iostream>
-#include <string_view>
 #include <vector>
 #include "status_queue.hpp"
 
@@ -22,22 +20,16 @@ AudioEngine::AudioEngine(bool startDevice)
         if (!startDevice) return;
         // Control-plane clients (CLI, offline render, project inspection and
         // isolated tests) must be able to construct an engine without taking
-        // ownership of the user's hardware device. Normal interactive startup
-        // remains unchanged when this variable is absent.
-        const char* requestedMode = std::getenv("HIRARI_AUDIO_MODE");
-        if (requestedMode &&
-            (std::strcmp(requestedMode, "offline") == 0 ||
-             std::strcmp(requestedMode, "none") == 0)) {
-            return;
-        }
+        // ownership of the user's hardware device. The mode gate is Rust-owned
+        // (audio_device_mode.rs) and normal interactive startup is unchanged.
+        if (hirari_audio_device_mode_offline()) return;
 #if defined(__APPLE__)
         // Native integration tests may create multiple independent session
         // engines in one process.  The legacy CoreAudio host callback still
         // targets the process-wide compatibility engine, so do not attach a
         // real device in that explicitly isolated mode.  The session graph
         // remains fully usable for offline/plugin sandbox validation.
-        const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
-        if (!(isolated && std::string_view(isolated) == "1")) {
+        if (!hirari_native_test_isolation()) {
             const bool started = m_driver->start();
             if (!started) {
                 char message[192];
@@ -62,15 +54,9 @@ AudioEngine::AudioEngine(bool startDevice)
     }
 
 bool AudioEngine::start_audio_device() const {
-    const char* requestedMode = std::getenv("HIRARI_AUDIO_MODE");
-    if (requestedMode &&
-        (std::strcmp(requestedMode, "offline") == 0 ||
-         std::strcmp(requestedMode, "none") == 0)) {
-        return false;
-    }
+    if (hirari_audio_device_mode_offline()) return false;
 #if defined(__APPLE__)
-    const char* isolated = std::getenv("HIRARI_NATIVE_TEST_ISOLATION");
-    if (isolated && std::strcmp(isolated, "1") == 0) return false;
+    if (hirari_native_test_isolation()) return false;
 #endif
     std::lock_guard<std::mutex> lock(m_configMutex);
     const bool started = m_driver && m_driver->start();
