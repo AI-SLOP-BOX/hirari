@@ -56,29 +56,30 @@
             snapshot->parallel = removed.parallel;
             snapshot->midiInstrument = removedMidiInstrument;
             if (snapshot->type == 0xFFFFFFFFu) {
-                for (size_t i = 0; i < m_sandboxedPluginIndices.size(); ++i) {
-                    if (m_sandboxedPluginIndices[i] == pluginIndex && i < m_sandboxedPluginPaths.size()) {
-                        snapshot->sandboxPath = m_sandboxedPluginPaths[i];
-                        break;
-                    }
-                }
+                const size_t slot = hirari_plugin_sandbox_find(
+                    m_sandboxedPluginIndices.data(), m_sandboxedPluginIndices.size(), pluginIndex);
+                if (slot < m_sandboxedPluginPaths.size())
+                    snapshot->sandboxPath = m_sandboxedPluginPaths[slot];
             }
         }
         m_pluginTypes.erase(m_pluginTypes.begin() + pluginIndex);
         if (removedMidiInstrument)
             m_midiInstrumentPluginCount.fetch_sub(1, std::memory_order_release);
         invalidateFrozenForEdit();
-        for (size_t i = 0; i < m_sandboxedPluginIndices.size();) {
-            auto& sandboxIndex = m_sandboxedPluginIndices[i];
-            if (sandboxIndex == pluginIndex) {
-                m_sandboxedPluginIndices.erase(m_sandboxedPluginIndices.begin() + i);
-                if (i < m_sandboxedPluginPaths.size())
-                    m_sandboxedPluginPaths.erase(m_sandboxedPluginPaths.begin() + i);
-                continue;
-            }
-            if (sandboxIndex > pluginIndex) --sandboxIndex;
-            ++i;
+        // The slot shift and its path permutation are Rust-owned so removal and
+        // reordering cannot disagree about the chain order.
+        std::vector<uint32_t> survivors(m_sandboxedPluginIndices.size());
+        const size_t kept = hirari_plugin_sandbox_remove(
+            m_sandboxedPluginIndices.data(), survivors.data(),
+            m_sandboxedPluginIndices.size(), pluginIndex);
+        std::vector<std::string> paths;
+        paths.reserve(kept);
+        for (size_t i = 0; i < kept; ++i) {
+            if (survivors[i] < m_sandboxedPluginPaths.size())
+                paths.push_back(std::move(m_sandboxedPluginPaths[survivors[i]]));
         }
+        m_sandboxedPluginIndices.resize(kept);
+        m_sandboxedPluginPaths = std::move(paths);
         markProjectLayoutChanged();
         return true;
     }
@@ -112,24 +113,17 @@
         m_pluginTypes.erase(m_pluginTypes.begin() + from);
         m_pluginTypes.insert(m_pluginTypes.begin() + to, type);
 
-        std::vector<std::pair<uint32_t, std::string>> sandbox;
-        sandbox.reserve(m_sandboxedPluginIndices.size());
-        for (size_t i = 0; i < m_sandboxedPluginIndices.size(); ++i) {
-            if (i >= m_sandboxedPluginPaths.size()) continue;
-            uint32_t index = m_sandboxedPluginIndices[i];
-            if (index == from) index = to;
-            else if (from < to && index > from && index <= to) --index;
-            else if (to < from && index >= to && index < from) ++index;
-            sandbox.emplace_back(index, m_sandboxedPluginPaths[i]);
-        }
-        std::sort(sandbox.begin(), sandbox.end(),
-                  [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-        m_sandboxedPluginIndices.clear();
-        m_sandboxedPluginPaths.clear();
-        for (auto& entry : sandbox) {
-            m_sandboxedPluginIndices.push_back(entry.first);
-            m_sandboxedPluginPaths.push_back(std::move(entry.second));
-        }
+        // Same Rust-owned permutation as removal, now with the from/to remap.
+        std::vector<uint32_t> order(m_sandboxedPluginIndices.size());
+        const size_t kept = hirari_plugin_sandbox_move(
+            m_sandboxedPluginIndices.data(), order.data(),
+            m_sandboxedPluginIndices.size(), m_sandboxedPluginPaths.size(), from, to);
+        std::vector<std::string> paths;
+        paths.reserve(kept);
+        for (size_t i = 0; i < kept; ++i)
+            paths.push_back(std::move(m_sandboxedPluginPaths[order[i]]));
+        m_sandboxedPluginIndices.resize(kept);
+        m_sandboxedPluginPaths = std::move(paths);
         invalidateFrozenForEdit();
         markProjectLayoutChanged();
         return true;

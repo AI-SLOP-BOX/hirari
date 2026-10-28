@@ -141,6 +141,12 @@ production support.
   on the diagnostic path), and the WAVE loader's supported-format gate lives in
   the same place. The C++ bridge methods no longer carry a second copy of the
   path/format checks.
+- Sandboxed-plugin slot bookkeeping now runs in Rust. Finding a plugin's sandbox
+  slot, shifting the remaining slots down when a plugin is removed, and
+  re-pointing plus re-sorting them when a plugin is moved share one module with
+  tests, so the slot list can no longer drift from the effect-chain order; the
+  engine keeps the slot and path storage and rebuilds the parallel path list
+  from the returned positions.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
