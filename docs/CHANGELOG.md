@@ -147,6 +147,12 @@ production support.
   tests, so the slot list can no longer drift from the effect-chain order; the
   engine keeps the slot and path storage and rebuilds the parallel path list
   from the returned positions.
+- The packed MIDI note vector between the UI bridge and the note table is now
+  decoded and validated in Rust. Track/region ids, pitch, velocity, channel,
+  articulation, non-zero length, probability, the 100k note cap and the
+  start/length overflow check all live in `midi_note_edit.rs` with tests, and a
+  rejected vector leaves the caller's buffer untouched; packing the snapshot
+  back into the nine-field vector is Rust-owned too.
 - MIDI clock receive state now lives in Rust. The external-sync clock rate
   (validated as finite, above 1 BPM and below 1000 BPM), the tick counter and
   the last tick timestamp moved to `external_sync_runtime.rs`, which also keeps

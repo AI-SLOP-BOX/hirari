@@ -698,6 +698,261 @@ pub unsafe extern "C" fn hirari_midi_notes_upsert(
     replace_notes(store, next, true, undo, log);
 }
 
+const PACKED_NOTE_FIELDS: usize = 9;
+const MAX_PACKED_NOTES: usize = 100_000;
+
+fn decode_packed_note(fields: &[u64]) -> Option<ScheduledMidiNoteFfi> {
+    let [track, pitch, velocity, midi_channel, start, length, probability, region, articulation] =
+        [fields[0], fields[1], fields[2], fields[3], fields[4], fields[5], fields[6], fields[7], fields[8]];
+    if track > u64::from(u32::MAX)
+        || pitch > 127
+        || velocity == 0
+        || velocity > 127
+        || midi_channel > 15
+        || length == 0
+        || probability > 100
+        || region > u64::from(u32::MAX)
+        || articulation > 127
+        || start.checked_add(length).is_none()
+    {
+        return None;
+    }
+    Some(ScheduledMidiNoteFfi {
+        track_id: track as u32,
+        pitch: pitch as u8,
+        velocity: velocity as u8,
+        midi_channel: midi_channel as u8,
+        articulation_id: articulation as u8,
+        start_sample: start,
+        length_samples: length,
+        probability: probability as u8,
+        region_id: region as u32,
+    })
+}
+
+fn packed_notes(packed: &[u64]) -> Option<impl Iterator<Item = &[u64]>> {
+    if packed.len() % PACKED_NOTE_FIELDS != 0 || packed.len() / PACKED_NOTE_FIELDS > MAX_PACKED_NOTES
+    {
+        return None;
+    }
+    Some(packed.chunks_exact(PACKED_NOTE_FIELDS))
+}
+
+/// Decodes the UI bridge's nine-field note vector into the note-table layout.
+/// Every note is range-checked (ids, MIDI bytes, non-zero length, probability,
+/// no start/length overflow) before any byte is written, so a malformed vector
+/// leaves the caller's buffer untouched. Returns the note count, or
+/// `usize::MAX` when the vector is malformed or a note is out of range; a
+/// smaller `capacity` reports the count without writing.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_unpack(
+    packed: *const u64,
+    len: usize,
+    out: *mut ScheduledMidiNoteFfi,
+    capacity: usize,
+) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if packed.is_null() {
+        return usize::MAX;
+    }
+    let packed = unsafe { std::slice::from_raw_parts(packed, len) };
+    let Some(chunks) = packed_notes(packed) else {
+        return usize::MAX;
+    };
+    let count = len / PACKED_NOTE_FIELDS;
+    if count == 0 || out.is_null() || capacity < count {
+        // Validate without writing so the count-then-copy protocol never
+        // reports a size for a vector that would be rejected.
+        return if chunks.map(decode_packed_note).all(|note| note.is_some()) {
+            count
+        } else {
+            usize::MAX
+        };
+    }
+    let notes = unsafe { std::slice::from_raw_parts_mut(out, count) };
+    for (slot, fields) in notes.iter_mut().zip(chunks) {
+        let Some(note) = decode_packed_note(fields) else {
+            return usize::MAX;
+        };
+        *slot = note;
+    }
+    count
+}
+
+/// Packs the note-table layout into the nine-field vector the UI bridge reads.
+/// Returns the required element count (`note_count * 9`) and copies only when
+/// the capacity covers it, so the caller can size its vector in one call.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_pack(
+    notes: *const ScheduledMidiNoteFfi,
+    note_count: usize,
+    out: *mut u64,
+    capacity: usize,
+) -> usize {
+    if note_count == 0 {
+        return 0;
+    }
+    if notes.is_null() {
+        return usize::MAX;
+    }
+    let Some(required) = note_count.checked_mul(PACKED_NOTE_FIELDS) else {
+        return usize::MAX;
+    };
+    if out.is_null() || capacity < required {
+        return required;
+    }
+    let notes = unsafe { std::slice::from_raw_parts(notes, note_count) };
+    let out = unsafe { std::slice::from_raw_parts_mut(out, required) };
+    for (note, fields) in notes.iter().zip(out.chunks_exact_mut(PACKED_NOTE_FIELDS)) {
+        fields[0] = u64::from(note.track_id);
+        fields[1] = u64::from(note.pitch);
+        fields[2] = u64::from(note.velocity);
+        fields[3] = u64::from(note.midi_channel);
+        fields[4] = note.start_sample;
+        fields[5] = note.length_samples;
+        fields[6] = u64::from(note.probability);
+        fields[7] = u64::from(note.region_id);
+        fields[8] = u64::from(note.articulation_id);
+    }
+    required
+}
+
+#[cfg(test)]
+mod packed_note_tests {
+    use super::*;
+
+    fn valid() -> Vec<u64> {
+        vec![3, 60, 100, 2, 960, 480, 100, 7, 4]
+    }
+
+    fn unpack(packed: &[u64]) -> Result<Vec<ScheduledMidiNoteFfi>, usize> {
+        let mut notes = vec![ScheduledMidiNoteFfi::default(); packed.len() / 9 + 1];
+        let count = unsafe {
+            hirari_midi_notes_unpack(
+                packed.as_ptr(),
+                packed.len(),
+                notes.as_mut_ptr(),
+                notes.len(),
+            )
+        };
+        if count == usize::MAX {
+            return Err(count);
+        }
+        notes.truncate(count);
+        Ok(notes)
+    }
+
+    #[test]
+    fn decodes_every_field() {
+        let notes = unpack(&valid()).expect("valid vector");
+        assert_eq!(
+            notes,
+            vec![ScheduledMidiNoteFfi {
+                track_id: 3,
+                pitch: 60,
+                velocity: 100,
+                midi_channel: 2,
+                articulation_id: 4,
+                start_sample: 960,
+                length_samples: 480,
+                probability: 100,
+                region_id: 7,
+            }]
+        );
+    }
+
+    #[test]
+    fn rejects_a_vector_that_is_not_a_whole_number_of_notes() {
+        assert!(unpack(&[1, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn rejects_out_of_range_fields() {
+        for (index, value) in [
+            (0, u64::from(u32::MAX) + 1),
+            (1, 128),
+            (2, 0),
+            (2, 128),
+            (3, 16),
+            (5, 0),
+            (6, 101),
+            (7, u64::from(u32::MAX) + 1),
+            (8, 128),
+            (4, u64::MAX),
+        ] {
+            let mut packed = valid();
+            packed[index] = value;
+            assert!(unpack(&packed).is_err(), "field {index}={value} must fail");
+        }
+    }
+
+    #[test]
+    fn accepts_the_edge_of_every_range() {
+        let mut packed = valid();
+        packed[0] = u64::from(u32::MAX);
+        packed[1] = 127;
+        packed[2] = 1;
+        packed[3] = 15;
+        packed[4] = u64::MAX - 1;
+        packed[5] = 1;
+        packed[6] = 0;
+        packed[7] = u64::from(u32::MAX);
+        packed[8] = 127;
+        assert_eq!(unpack(&packed).expect("edge values are valid").len(), 1);
+    }
+
+    #[test]
+    fn count_request_does_not_write_when_capacity_is_short() {
+        let packed = valid();
+        let mut sentinel = [ScheduledMidiNoteFfi::default()];
+        sentinel[0].pitch = 9;
+        let count = unsafe {
+            hirari_midi_notes_unpack(packed.as_ptr(), packed.len(), sentinel.as_mut_ptr(), 0)
+        };
+        assert_eq!(count, 1);
+        assert_eq!(sentinel[0].pitch, 9);
+    }
+
+    #[test]
+    fn packing_round_trips_the_decoded_note() {
+        let notes = unpack(&valid()).expect("valid vector");
+        let required = unsafe {
+            hirari_midi_notes_pack(notes.as_ptr(), notes.len(), std::ptr::null_mut(), 0)
+        };
+        assert_eq!(required, valid().len());
+        let mut packed = vec![0u64; required];
+        assert_eq!(
+            unsafe {
+                hirari_midi_notes_pack(notes.as_ptr(), notes.len(), packed.as_mut_ptr(), packed.len())
+            },
+            required
+        );
+        assert_eq!(packed, valid());
+    }
+
+    #[test]
+    fn packing_needs_room_for_every_field() {
+        let notes = unpack(&valid()).expect("valid vector");
+        let mut short = [7u64; 8];
+        assert_eq!(
+            unsafe {
+                hirari_midi_notes_pack(notes.as_ptr(), notes.len(), short.as_mut_ptr(), short.len())
+            },
+            valid().len()
+        );
+        assert_eq!(short, [7u64; 8]);
+    }
+
+    #[test]
+    fn empty_vector_reports_zero() {
+        let count =
+            unsafe { hirari_midi_notes_unpack(std::ptr::null(), 0, std::ptr::null_mut(), 0) };
+        assert_eq!(count, 0);
+    }
+}
+
 #[cfg(test)]
 mod edit_host_tests {
     use super::*;

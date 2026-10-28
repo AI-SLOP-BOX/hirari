@@ -443,23 +443,17 @@
         if (m_engine) m_engine->set_midi_note(trackId, pitch, velocity, startSample, lengthSamples);
     }
     bool replace_midi_notes(rust::Vec<uint64_t> packed, bool recordUndo) const {
-        if (!m_engine || packed.size() % 9 != 0 || packed.size() / 9 > 100000) return false;
-        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::ScheduledMidiNote> notes;
-        notes.reserve(packed.size() / 9);
-        for (size_t i = 0; i < packed.size(); i += 9) {
-            const uint64_t track = packed[i];
-            const uint64_t pitch = packed[i + 1];
-            const uint64_t velocity = packed[i + 2];
-            const uint64_t midiChannel = packed[i + 3];
-            if (track > UINT32_MAX || pitch > 127 || velocity == 0 || velocity > 127 ||
-                midiChannel > 15 || packed[i + 5] == 0 || packed[i + 6] > 100 ||
-                packed[i + 7] > UINT32_MAX || packed[i + 8] > 127 ||
-                packed[i + 4] > UINT64_MAX - packed[i + 5]) return false;
-            notes.push_back({static_cast<uint32_t>(track), static_cast<uint8_t>(pitch),
-                static_cast<uint8_t>(velocity), static_cast<uint8_t>(midiChannel),
-                static_cast<uint8_t>(packed[i + 8]),
-                packed[i + 4], packed[i + 5], static_cast<uint8_t>(packed[i + 6]),
-                static_cast<uint32_t>(packed[i + 7])});
+        // Field ranges, the note cap and the start/length overflow check are
+        // Rust-owned (hirari_midi_notes_unpack); a rejected vector writes nothing.
+        if (!m_engine) return false;
+        const size_t count = hirari_midi_notes_unpack(
+            packed.data(), packed.size(), nullptr, 0);
+        if (count == SIZE_MAX) return false;
+        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::ScheduledMidiNote> notes(count);
+        if (hirari_midi_notes_unpack(
+                packed.data(), packed.size(),
+                reinterpret_cast<HirariScheduledMidiNote*>(notes.data()), count) != count) {
+            return false;
         }
         return m_engine->replace_midi_notes(notes, recordUndo);
     }
@@ -467,18 +461,12 @@
         rust::Vec<uint64_t> packed;
         if (!m_engine) return packed;
         const auto notes = m_engine->midi_notes_snapshot();
-        packed.reserve(notes.size() * 9);
-        for (const auto& note : notes) {
-            packed.push_back(note.trackId);
-            packed.push_back(note.pitch);
-            packed.push_back(note.velocity);
-            packed.push_back(note.midiChannel);
-            packed.push_back(note.startSample);
-            packed.push_back(note.lengthSamples);
-            packed.push_back(note.probability);
-            packed.push_back(note.regionId);
-            packed.push_back(note.articulationId);
-        }
+        const auto* raw = reinterpret_cast<const HirariScheduledMidiNote*>(notes.data());
+        const size_t required = hirari_midi_notes_pack(raw, notes.size(), nullptr, 0);
+        if (required == SIZE_MAX) return packed;
+        packed.reserve(required);
+        for (size_t i = 0; i < required; ++i) packed.push_back(0);
+        (void)hirari_midi_notes_pack(raw, notes.size(), packed.data(), packed.size());
         return packed;
     }
     bool set_spatial_position(uint32_t tid, float x, float y, float z) const {

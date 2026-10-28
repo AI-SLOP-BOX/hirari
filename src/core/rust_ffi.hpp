@@ -67,6 +67,10 @@ extern "C" uint64_t hirari_midi_snapshot_store_revision(const void* store);
 extern "C" uint64_t hirari_midi_scheduled_note_end(const HirariScheduledMidiNote* note);
 extern "C" size_t hirari_midi_notes_snapshot_copy(
     const void* store, HirariScheduledMidiNote* output, size_t capacity);
+extern "C" size_t hirari_midi_notes_unpack(
+    const uint64_t* packed, size_t len, HirariScheduledMidiNote* output, size_t capacity);
+extern "C" size_t hirari_midi_notes_pack(
+    const HirariScheduledMidiNote* notes, size_t note_count, uint64_t* output, size_t capacity);
 extern "C" bool hirari_midi_notes_replace(
     void* store, const HirariScheduledMidiNote* notes, size_t count,
     bool record_undo, void* undo, const void* log);
