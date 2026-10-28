@@ -648,7 +648,6 @@ pub mod ffi {
         fn save_project(self: &AudioEngine, path: &str) -> bool;
         fn load_project(self: &AudioEngine, path: &str) -> bool;
         fn bounce_project(self: &AudioEngine, path: &str, format: u32) -> bool;
-        fn bounce_project_diagnostic_json(self: &AudioEngine, path: &str, format: u32) -> String;
         fn read_wav_diagnostic_json(self: &AudioEngine, path: &str, format: u32) -> String;
         fn bounce_project_async(self: &AudioEngine, path: &str, format: u32) -> bool;
         fn get_bounce_progress(self: &AudioEngine) -> f32;

@@ -241,12 +241,17 @@ impl HirariCore {
 
     /// Returns the native canonical WAVE/WAVE64 parser diagnostic. This keeps
     /// UI callers from duplicating format parsing and preserves native error
-    /// reasons across the CXX boundary.
+    /// reasons across the CXX boundary. The supported-format gate is owned
+    /// here so the C++ loader only ever sees formats it can parse.
     pub fn read_wav_diagnostic_json(&self, path: &str, format: u32) -> String {
-        self.engine
-            .as_ref()
-            .map(|engine| engine.read_wav_diagnostic_json(path, format).to_string())
-            .unwrap_or_else(|| "{\"ok\":false,\"code\":\"engine_unavailable\"}".to_owned())
+        let Some(engine) = self.engine.as_ref() else {
+            return "{\"ok\":false,\"code\":\"engine_unavailable\"}".to_owned();
+        };
+        if format > 1 {
+            return "{\"ok\":false,\"code\":\"unsupported_wave_format\",\"retryable\":false}"
+                .to_owned();
+        }
+        engine.read_wav_diagnostic_json(path, format).to_string()
     }
 
     /// Validates a published WAV without touching the native graph. When
@@ -326,22 +331,21 @@ impl HirariCore {
     }
 
     /// Structured bounce result for CLI/automation callers. The legacy bool
-    /// API remains available for existing UI bindings.
+    /// API remains available for existing UI bindings. Validation and the
+    /// resulting JSON codes live here; the engine only performs the render and
+    /// reports success, so both entry points accept exactly the same paths.
     pub fn bounce_project_diagnostic_json(&self, path: &str, format: u32) -> String {
-        if !is_wav_output_path(path) {
-            return "{\"code\":\"invalid_render_path\",\"retryable\":false}".to_owned();
+        if let Some(rejection) = bounce_diagnostic_rejection(path, format) {
+            return rejection.to_owned();
         }
-        if format > 3 {
-            return "{\"code\":\"unsupported_render_format\",\"retryable\":false}".to_owned();
+        let Some(engine) = self.engine.as_ref() else {
+            return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
+        };
+        if engine.bounce_project(path, format) {
+            "{\"ok\":true}".to_owned()
+        } else {
+            "{\"code\":\"bounce_failed\",\"retryable\":true}".to_owned()
         }
-        self.engine.as_ref().map_or_else(
-            || "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned(),
-            |engine| {
-                engine
-                    .bounce_project_diagnostic_json(path, format)
-                    .to_string()
-            },
-        )
     }
 
     /// Exposes the render graph's currently addressable targets to CLI, UI,
@@ -789,6 +793,19 @@ impl HirariCore {
     }
 
     // --- RUST-POWERED PERSISTENCE (Point 3) ---
+}
+
+/// Request validation shared by the diagnostic bounce entry point. Returns
+/// the rejection document when the render cannot be attempted; the chosen
+/// container and the engine failure stay separate codes.
+pub(crate) fn bounce_diagnostic_rejection(path: &str, format: u32) -> Option<&'static str> {
+    if !is_wav_output_path(path) {
+        return Some("{\"code\":\"invalid_render_path\",\"retryable\":false}");
+    }
+    if format > 3 {
+        return Some("{\"code\":\"unsupported_render_format\",\"retryable\":false}");
+    }
+    None
 }
 
 /// `stem_batch_*` reports success as `"ok": true` and every failure as the

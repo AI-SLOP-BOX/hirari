@@ -135,6 +135,12 @@ production support.
   per section with its length. C++ keeps the region storage and the event queue
   behind the listing callbacks and the marker sink; an empty project still
   reports failure and a project without regions still emits nothing.
+- Bounce and WAVE diagnostics are Rust-owned. The diagnostic bounce entry
+  point and its JSON codes share one validator with the bool bounce API, so
+  both accept exactly the same paths (an uppercase `.WAV` no longer fails only
+  on the diagnostic path), and the WAVE loader's supported-format gate lives in
+  the same place. The C++ bridge methods no longer carry a second copy of the
+  path/format checks.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

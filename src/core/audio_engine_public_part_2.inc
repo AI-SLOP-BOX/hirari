@@ -129,7 +129,6 @@
     rust::Vec<rust::String> get_sandbox_plugin_paths() const {
         rust::Vec<rust::String> result;
         if (!m_engine) return result;
-        if (!m_engine) return result;
         for (const auto& path : m_engine->get_sandbox_plugin_paths())
             result.push_back(rust::String(path));
         return result;
@@ -248,22 +247,9 @@
     bool save_project(rust::Str path) const { return m_engine && m_engine->saveProject(std::string_view(path.data(), path.size())); }
     bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }
     bool bounce_project(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project(std::string_view(path.data(), path.size()), format); }
-    rust::String bounce_project_diagnostic_json(rust::Str path, uint32_t format) const {
-        if (!m_engine) return rust::String("{\"code\":\"engine_unavailable\",\"retryable\":true}");
-        const std::string_view output(path.data(), path.size());
-        if (output.empty() || output.size() < 4 || output.substr(output.size() - 4) != ".wav") {
-            return rust::String("{\"code\":\"invalid_render_path\",\"retryable\":false}");
-        }
-        if (format > 3) return rust::String("{\"code\":\"unsupported_render_format\",\"retryable\":false}");
-        const bool ok = m_engine->bounce_project(std::string_view(path.data(), path.size()), format);
-        return rust::String(ok ? "{\"ok\":true}" :
-                            "{\"code\":\"bounce_failed\",\"retryable\":true}");
-    }
     rust::String read_wav_diagnostic_json(rust::Str path, uint32_t format) const {
+        // The supported-format gate and its diagnostic code are Rust-owned.
         const std::string input(path.data(), path.size());
-        if (format > 1) {
-            return rust::String("{\"ok\":false,\"code\":\"unsupported_wave_format\",\"retryable\":false}");
-        }
         return rust::String(::Hirari::IO::WavLoader::loadDiagnosticJson(input, format == 1));
     }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }

@@ -436,16 +436,22 @@
         assert!(!engine_ref.load_project(invalid_path));
         assert!(!engine_ref.bounce_project("", 0));
         assert!(!engine_ref.bounce_project("/tmp/hirari-output.aiff", 0));
-        let diagnostic: serde_json::Value =
-            serde_json::from_str(&engine_ref.bounce_project_diagnostic_json("", 0))
-                .expect("bounce diagnostics must be JSON");
+        let diagnostic: serde_json::Value = serde_json::from_str(
+            crate::bounce_diagnostic_rejection("", 0)
+                .expect("an empty path must be rejected"),
+        )
+        .expect("bounce diagnostics must be JSON");
         assert_eq!(diagnostic["code"], "invalid_render_path");
         assert_eq!(diagnostic["retryable"], false);
         // Formats 0..=3 are the supported render formats; anything above that
         // must be rejected as unsupported. (This test previously passed 2, which
         // is a valid format, so it never reached the rejection branch.)
         let unsupported_format: serde_json::Value = serde_json::from_str(
-            &engine_ref.bounce_project_diagnostic_json("/tmp/hirari-output.wav", 4),
+            crate::bounce_diagnostic_rejection(
+                "/tmp/hirari-output.wav",
+                4,
+            )
+            .expect("format 4 must be rejected"),
         )
         .expect("format diagnostics must be JSON");
         assert_eq!(unsupported_format["code"], "unsupported_render_format");
