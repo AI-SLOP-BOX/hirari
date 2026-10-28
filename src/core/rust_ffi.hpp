@@ -2231,6 +2231,7 @@ extern "C" uint8_t hirari_plugin_admission_error(const char* path);
 extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bus);
 extern "C" size_t hirari_plugin_sandbox_find(const uint32_t*, size_t, uint32_t);
 extern "C" size_t hirari_plugin_sandbox_remove(uint32_t*, uint32_t*, size_t, uint32_t);
+extern "C" const char* hirari_plugin_sandbox_failure_name(uint8_t code), *hirari_plugin_sandbox_state_error_name(uint8_t code);
 extern "C" size_t hirari_plugin_sandbox_move(uint32_t*, uint32_t*, size_t, size_t, uint32_t, uint32_t);
 extern "C" bool hirari_plugin_cache_key(
     const uint8_t* path, size_t path_size, uint8_t* output,

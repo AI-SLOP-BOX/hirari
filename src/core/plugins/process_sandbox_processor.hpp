@@ -255,24 +255,7 @@ public:
     uint8_t stateErrorCode() const noexcept { return m_host.stateErrorCode(); }
     const char* stateErrorText() const noexcept { return m_host.stateErrorText(); }
     const char* failureText() const noexcept {
-        switch (m_host.failure()) {
-        case PluginSandboxHost::Failure::None: return "none";
-        case PluginSandboxHost::Failure::MissingHelper: return "missing-helper";
-        case PluginSandboxHost::Failure::InvalidPluginPath: return "invalid-plugin-path";
-        case PluginSandboxHost::Failure::SpawnFailed: return "spawn-failed";
-        case PluginSandboxHost::Failure::HandshakeTimeout: return "handshake-timeout";
-        case PluginSandboxHost::Failure::PluginLoadFailed: return "plugin-load-failed";
-        case PluginSandboxHost::Failure::PluginAbiInvalid: return "plugin-abi-invalid";
-        case PluginSandboxHost::Failure::PluginInstanceFailed: return "plugin-instance-failed";
-        case PluginSandboxHost::Failure::SecuritySetupFailed: return "security-setup-failed";
-        case PluginSandboxHost::Failure::PluginFormatUnsupported: return "plugin-format-unsupported";
-        case PluginSandboxHost::Failure::PluginQuarantined: return "plugin-quarantined";
-        case PluginSandboxHost::Failure::ProcessExited: return "process-exited";
-        case PluginSandboxHost::Failure::ProcessHung: return "process-hung";
-        case PluginSandboxHost::Failure::ProcessFailed: return "process-failed";
-        case PluginSandboxHost::Failure::UnsupportedPlatform: return "unsupported-platform";
-        }
-        return "unknown-failure";
+        return hirari_plugin_sandbox_failure_name(failureCode());
     }
 
     // State is exchanged only by the control thread.  The audio callback never

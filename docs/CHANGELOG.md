@@ -210,6 +210,10 @@ production support.
   table moved from `validateStemSeparatorModel` into
   `stem_separator_validation.rs`, so C++ only maps a non-zero code to the
   message Rust returns.
+- Sandbox status text moved to Rust. `plugin_sandbox_status_text.rs` maps the
+  failure and state-mailbox error codes to their hyphenated status strings, so
+  `failureText` and `stateErrorText` no longer carry switch tables and a new
+  code cannot drift between the native and Rust sides.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

@@ -191,17 +191,7 @@ public:
     }
     uint8_t stateErrorCode() const noexcept { return m_host->state_error_code(); }
     const char* stateErrorText() const noexcept {
-        switch (stateErrorCode()) {
-        case SandboxProtocol::kStateErrorNone: return "none";
-        case SandboxProtocol::kStateErrorOversize: return "state-oversize";
-        case SandboxProtocol::kStateErrorVersion: return "state-version-unsupported";
-        case SandboxProtocol::kStateErrorChecksum: return "state-checksum-mismatch";
-        case SandboxProtocol::kStateErrorPlugin: return "state-plugin-rejected";
-        case SandboxProtocol::kStateErrorUnavailable: return "state-unavailable";
-        case SandboxProtocol::kStateErrorBusy: return "state-busy";
-        case SandboxProtocol::kStateErrorTimeout: return "state-timeout";
-        default: return "state-unknown-error";
-        }
+        return hirari_plugin_sandbox_state_error_name(stateErrorCode());
     }
 
 private:
