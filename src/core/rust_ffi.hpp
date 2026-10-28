@@ -842,6 +842,9 @@ extern "C" void hirari_float_buffer_destroy(void* buffer);
 // Environment-driven device admission (audio_device_mode.rs).
 extern "C" bool hirari_audio_device_mode_offline();
 extern "C" bool hirari_native_test_isolation();
+// Audio configuration bounds (audio_config_rules.rs).
+extern "C" bool hirari_audio_config_valid(float tempo, double sampleRate, uint32_t blockSize);
+extern "C" bool hirari_audio_format_valid(double sampleRate, uint32_t blockSize);
 extern "C" void* hirari_region_waveform(
     void* host, uint32_t trackId, uint32_t regionId, uint32_t numPeaks);
 extern "C" void hirari_region_waveform_forget(void* host, uint32_t regionId);

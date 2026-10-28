@@ -172,6 +172,11 @@ production support.
   All Notes Off validate the 1-based channel range and compose the status
   bytes in `midi_buffer_ops.rs`, so the C++ buffer only forwards arguments and
   an out-of-range channel can never produce an event.
+- Audio configuration bounds now live in Rust. The tempo
+  (finite, above 0 and at most 999 BPM), sample-rate (8 kHz to 384 kHz) and
+  block-size (1 to 16384) checks in `audio_config_rules.rs` gate both the
+  bridge's `apply_config`/`try_apply_config` and the engine's
+  `prepareToPlay`, replacing three copies of the same predicate.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

@@ -339,11 +339,9 @@ public:
     bool apply_config_locked(float tempo, uint32_t sr, uint32_t bs) const {
         // Keep the legacy void ABI, but make every entrypoint obey the same
         // configuration contract as try_apply_config. Invalid direct callers
-        // must not quiesce the callback or advance the audio generation.
-        if (!m_engine || !std::isfinite(tempo) || tempo <= 0.0f || tempo > 999.0f ||
-            sr < 8'000u || sr > 384'000u || bs == 0u || bs > 16'384u) {
-            return false;
-        }
+        // must not quiesce the callback or advance the audio generation; the
+        // bounds live in Rust (audio_config_rules.rs).
+        if (!m_engine || !hirari_audio_config_valid(tempo, static_cast<double>(sr), bs)) return false;
         // A configuration transition is a stop-the-world control operation.
         // Do not silently stop a live transport here: callers must perform
         // the explicit transport transition first, and the check is made
@@ -386,8 +384,7 @@ public:
         return true;
     }
     bool try_apply_config(float tempo, uint32_t sr, uint32_t bs) const {
-        if (!m_engine || !std::isfinite(tempo) || tempo <= 0.0f || tempo > 999.0f ||
-            sr < 8'000u || sr > 384'000u || bs == 0u || bs > 16'384u) return false;
+        if (!m_engine || !hirari_audio_config_valid(tempo, static_cast<double>(sr), bs)) return false;
         std::lock_guard<std::mutex> lock(m_configMutex);
         const uint64_t before = m_engine->get_audio_config_generation();
         if (!apply_config_locked(tempo, sr, bs)) return false;

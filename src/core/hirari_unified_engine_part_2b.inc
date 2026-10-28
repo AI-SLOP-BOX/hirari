@@ -66,10 +66,8 @@ void HirariUnifiedEngine::set_offline_render_options(bool preFader, bool include
 void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
     // A failed device negotiation must not advance the audio configuration
     // generation or partially replace the currently valid preparation state.
-    if (!std::isfinite(sr) || sr < 8'000.0 || sr > 384'000.0 || bs == 0 ||
-        bs > 16'384u) {
-        return;
-    }
+    // The rate/block bounds live in Rust (audio_config_rules.rs).
+    if (!hirari_audio_format_valid(sr, bs)) return;
     // Close callback admission before waiting for in-flight callbacks. The
     // generation check alone cannot make master/track buffer reallocation
     // safe while a callback still traverses the previous buffers.
