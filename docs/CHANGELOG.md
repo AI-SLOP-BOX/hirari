@@ -226,6 +226,10 @@ production support.
   `hirari_plugin_worker_parse_error_text` turns the parser's `error_kind` into
   the logged message next to the parser itself, so the worker no longer keeps
   its own copy of the kind-to-text mapping.
+- Bounce lifecycle admission now lives in Rust. `bounce_plan.rs` owns which
+  published states are terminal, cancellable, pausable or resumable, so the
+  engine's retry, cancel, pause and resume checks no longer restate the state
+  sets that the render loop publishes.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

@@ -168,6 +168,44 @@ pub unsafe extern "C" fn hirari_bounce_output_path_supported(
     output_path_supported(slice::from_raw_parts(path, len), format)
 }
 
+/// Bounce lifecycle states, matching the engine's published values.
+pub const BOUNCE_STATE_QUEUED: u32 = 1;
+pub const BOUNCE_STATE_RENDERING: u32 = 2;
+pub const BOUNCE_STATE_COMPLETED: u32 = 3;
+pub const BOUNCE_STATE_FAILED: u32 = 4;
+pub const BOUNCE_STATE_CANCELLED: u32 = 5;
+pub const BOUNCE_STATE_PAUSED: u32 = 6;
+
+/// True once a render has finished, failed or been cancelled. A terminal
+/// render may be retired or replaced by a new one.
+#[no_mangle]
+pub extern "C" fn hirari_bounce_state_terminal(state: u32) -> bool {
+    matches!(
+        state,
+        BOUNCE_STATE_COMPLETED | BOUNCE_STATE_FAILED | BOUNCE_STATE_CANCELLED
+    )
+}
+
+/// True while a cancellation request can still take effect.
+#[no_mangle]
+pub extern "C" fn hirari_bounce_state_cancellable(state: u32) -> bool {
+    matches!(
+        state,
+        BOUNCE_STATE_QUEUED | BOUNCE_STATE_RENDERING | BOUNCE_STATE_PAUSED
+    )
+}
+
+/// Only a rendering bounce can pause; resuming is the inverse transition.
+#[no_mangle]
+pub extern "C" fn hirari_bounce_state_pausable(state: u32) -> bool {
+    state == BOUNCE_STATE_RENDERING
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_bounce_state_resumable(state: u32) -> bool {
+    state == BOUNCE_STATE_PAUSED
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +318,26 @@ mod tests {
             BOUNCE_PLAN_OK
         );
         assert_eq!(plan.total_samples, 48_000);
+    }
+
+    #[test]
+    fn bounce_states_follow_the_lifecycle_sets() {
+        let states = [
+            (0, false, false, false, false),
+            (1, false, true, false, false),
+            (2, false, true, true, false),
+            (3, true, false, false, false),
+            (4, true, false, false, false),
+            (5, true, false, false, false),
+            (6, false, true, false, true),
+        ];
+        for (state, terminal, cancellable, pausable, resumable) in states {
+            assert_eq!(hirari_bounce_state_terminal(state), terminal, "{state}");
+            assert_eq!(hirari_bounce_state_cancellable(state), cancellable, "{state}");
+            assert_eq!(hirari_bounce_state_pausable(state), pausable, "{state}");
+            assert_eq!(hirari_bounce_state_resumable(state), resumable, "{state}");
+        }
+        assert!(!hirari_bounce_state_terminal(99));
+        assert!(!hirari_bounce_state_cancellable(99));
     }
 }

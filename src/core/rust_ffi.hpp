@@ -669,6 +669,8 @@ extern "C" int32_t hirari_bounce_render_extent(
     const HirariBouncePlanInput* input, HirariBouncePlan* out);
 extern "C" bool hirari_bounce_output_path_supported(
     const uint8_t* path, size_t length, uint32_t format);
+// Lifecycle admission sets (bounce_plan.rs): terminal, cancellable, pausable, resumable.
+extern "C" bool hirari_bounce_state_terminal(uint32_t state), hirari_bounce_state_cancellable(uint32_t state), hirari_bounce_state_pausable(uint32_t state), hirari_bounce_state_resumable(uint32_t state);
 
 // Formats: 0 float32 RIFF/RF64, 1 PCM16, 2 PCM24, 3 WAVE64 float. The stream
 // rejects writes past the declared frame count and only publishes a complete

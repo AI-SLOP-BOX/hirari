@@ -138,10 +138,7 @@ bool HirariUnifiedEngine::bounce_project_async(std::string_view path, uint32_t f
     std::lock_guard<std::mutex> bounceLifecycleLock(m_bounceLifecycleMutex);
     if (m_bounceRunning.load(std::memory_order_acquire)) {
         const uint32_t state = m_bounceState.load(std::memory_order_acquire);
-        const bool terminal = state == static_cast<uint32_t>(BounceState::Completed) ||
-                              state == static_cast<uint32_t>(BounceState::Failed) ||
-                              state == static_cast<uint32_t>(BounceState::Cancelled);
-        if (!terminal) return false;
+        if (!hirari_bounce_state_terminal(state)) return false;
         // A terminal state is published just before the worker wrapper clears
         // m_bounceRunning. Join here so a retry cannot be rejected during
         // that narrow retirement window.
@@ -177,11 +174,7 @@ uint32_t HirariUnifiedEngine::get_bounce_state() const noexcept {
 
 bool HirariUnifiedEngine::cancel_bounce() noexcept {
     const uint32_t state = m_bounceState.load(std::memory_order_acquire);
-    if (state != static_cast<uint32_t>(BounceState::Queued) &&
-        state != static_cast<uint32_t>(BounceState::Rendering) &&
-        state != static_cast<uint32_t>(BounceState::Paused)) {
-        return false;
-    }
+    if (!hirari_bounce_state_cancellable(state)) return false;
     {
         std::lock_guard<std::mutex> publishLock(m_bouncePublishMutex);
         m_bounceCancelRequested.store(true, std::memory_order_release);
@@ -192,14 +185,14 @@ bool HirariUnifiedEngine::cancel_bounce() noexcept {
 
 bool HirariUnifiedEngine::pause_bounce() noexcept {
     const uint32_t state = m_bounceState.load(std::memory_order_acquire);
-    if (state != static_cast<uint32_t>(BounceState::Rendering)) return false;
+    if (!hirari_bounce_state_pausable(state)) return false;
     m_bouncePauseRequested.store(true, std::memory_order_release);
     return true;
 }
 
 bool HirariUnifiedEngine::resume_bounce() noexcept {
     const uint32_t state = m_bounceState.load(std::memory_order_acquire);
-    if (state != static_cast<uint32_t>(BounceState::Paused)) return false;
+    if (!hirari_bounce_state_resumable(state)) return false;
     m_bouncePauseRequested.store(false, std::memory_order_release);
     return true;
 }
