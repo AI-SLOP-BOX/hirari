@@ -44,6 +44,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_native_pdc_destroy(m_pdcState);
     hirari_tempo_map_destroy(m_tempoState);
     hirari_tap_tempo_destroy(m_tapTempo);
+    hirari_external_sync_destroy(m_externalSync);
     hirari_metronome_destroy(m_metronome);
     hirari_mixer_telemetry_destroy(m_mixerTelemetry);
     hirari_macro_mapping_destroy(m_macroControl);

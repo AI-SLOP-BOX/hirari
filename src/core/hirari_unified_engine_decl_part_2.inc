@@ -31,11 +31,11 @@
     }
     void clear_tap_tempo() noexcept { hirari_tap_tempo_clear(m_tapTempo); }
     double tapped_tempo() const noexcept { return hirari_tap_tempo_bpm(m_tapTempo); }
-    void midi_clock_tick(uint64_t timestamp) noexcept { m_externalSync.onClockTick(timestamp); }
-    uint64_t midi_clock_ticks() const noexcept { return m_externalSync.tickCount(); }
-    uint64_t midi_clock_last_tick() const noexcept { return m_externalSync.lastTick(); }
-    double midi_clock_rate() const noexcept { return m_externalSync.clockRate(); }
-    void set_midi_clock_rate(double bpm) noexcept { m_externalSync.setClockRate(bpm); }
+    void midi_clock_tick(uint64_t timestamp) noexcept { hirari_external_sync_tick(m_externalSync, timestamp); }
+    uint64_t midi_clock_ticks() const noexcept { return hirari_external_sync_ticks(m_externalSync); }
+    uint64_t midi_clock_last_tick() const noexcept { return hirari_external_sync_last_tick(m_externalSync); }
+    double midi_clock_rate() const noexcept { return hirari_external_sync_rate(m_externalSync); }
+    void set_midi_clock_rate(double bpm) noexcept { hirari_external_sync_set_rate(m_externalSync, bpm); }
     bool set_master_gain(float value);
     void* control_room_state() const noexcept { return m_controlRoomState; }
     // Rust owns the tempo map, the undo history and the diagnostic ring; these

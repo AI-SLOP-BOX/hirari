@@ -94,6 +94,14 @@ extern "C" void hirari_mixer_track_peaks(
     uint32_t track_count, uint32_t frames, float* peaks_left, float* peaks_right);
 extern "C" bool hirari_audio_test_tone_render(
     float* left, float* right, uint32_t frames, uint64_t playhead, double sample_rate);
+extern "C" void* hirari_external_sync_create();
+extern "C" void hirari_external_sync_destroy(void* state);
+extern "C" void hirari_external_sync_set_rate(void* state, double bpm);
+extern "C" double hirari_external_sync_rate(const void* state);
+extern "C" void hirari_external_sync_tick(void* state, uint64_t timestamp);
+extern "C" uint64_t hirari_external_sync_ticks(const void* state);
+extern "C" uint64_t hirari_external_sync_last_tick(const void* state);
+extern "C" void hirari_external_sync_reset(void* state);
 extern "C" void* hirari_tap_tempo_create(size_t max_taps);
 extern "C" void hirari_tap_tempo_destroy(void* state);
 extern "C" void hirari_tap_tempo_tap(void* state, uint64_t timestamp_ms);

@@ -147,6 +147,11 @@ production support.
   tests, so the slot list can no longer drift from the effect-chain order; the
   engine keeps the slot and path storage and rebuilds the parallel path list
   from the returned positions.
+- MIDI clock receive state now lives in Rust. The external-sync clock rate
+  (validated as finite, above 1 BPM and below 1000 BPM), the tick counter and
+  the last tick timestamp moved to `external_sync_runtime.rs`, which also keeps
+  the wrapping tick increment and tolerates a null state. The C++ header that
+  held the class, its unused MTC helpers and an unreferenced MMC enum is gone.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

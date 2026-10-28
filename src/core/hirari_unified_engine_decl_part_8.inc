@@ -44,7 +44,8 @@
     ::Hirari::Core::Plugins::PluginCompatibilityRegistry m_pluginCompatibility;
     ::Hirari::Core::Engine::AutomationLaneGroup m_automationLanes;
     void* m_tapTempo = hirari_tap_tempo_create(8);
-    ::Hirari::Core::MIDI::ExternalSync m_externalSync;
+    // MIDI clock receive state lives in Rust (external_sync_runtime.rs).
+    void* m_externalSync = hirari_external_sync_create();
     ::Hirari::Core::Composition::ArrangementEditModel m_arrangement;
     mutable std::atomic<bool> m_ecoModeLogTriggered{false};
     mutable std::atomic<bool> m_videoSyncLogTriggered{false};

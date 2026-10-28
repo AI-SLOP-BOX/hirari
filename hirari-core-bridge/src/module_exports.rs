@@ -104,6 +104,7 @@ pub mod export;
 pub mod expression_map;
 pub mod expression_map_edit_host;
 pub mod extensions;
+pub mod external_sync_runtime;
 pub mod fade_enveloper;
 pub mod fet_compressor;
 pub mod fft;
