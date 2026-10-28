@@ -1,18 +1,9 @@
 bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
-    // Keep the wire value aligned with AutomationMode: 0=Read, 1=Write,
-    // 2=Touch, 3=Latch. Unknown values must fail closed to Read rather than
-    // accidentally enabling write automation for a future/invalid enum.
-    const uint32_t normalized = mode <= 4u ? mode : 0u;
-    m_autoRecordMode.store(normalized, std::memory_order_release);
-    // Keep the standalone recorder and the engine transport state in lockstep
-    // so control-surface/API writes are captured by the same mode semantics.
-    enum class RecorderMode : uint32_t { Off = 0, Touch = 1, Latch = 2, Write = 3, AutoPunch = 4 };
-    hirari_automation_recorder_set_mode(hirari_automation_recorder_instance(),
-        static_cast<uint32_t>(normalized == 0u ? RecorderMode::Off
-        : normalized == 1u ? RecorderMode::Write
-        : normalized == 2u ? RecorderMode::Touch
-        : normalized == 3u ? RecorderMode::Latch
-        : RecorderMode::AutoPunch));
+    // Rust owns wire-mode normalization, the fail-closed unknown-value rule
+    // and the recorder-mode translation; the atomic keeps the audio
+    // callback's copy of the normalized wire value.
+    m_autoRecordMode.store(hirari_automation_record_mode_apply(mode),
+                           std::memory_order_release);
     return true;
 }
 

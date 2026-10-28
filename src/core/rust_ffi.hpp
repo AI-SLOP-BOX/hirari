@@ -1904,6 +1904,7 @@ struct HirariTrackAutomationCapturePoint {
 };
 extern "C" void* hirari_automation_recorder_instance();
 extern "C" void hirari_automation_recorder_set_mode(const void* state, uint32_t mode);
+extern "C" uint32_t hirari_automation_record_mode_apply(uint32_t mode);
 extern "C" void* hirari_track_automation_capture_create();
 extern "C" void hirari_track_automation_capture_destroy(void* state);
 extern "C" bool hirari_track_automation_capture_record(

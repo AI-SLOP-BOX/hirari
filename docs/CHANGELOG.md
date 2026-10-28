@@ -118,6 +118,12 @@ production support.
   be non-empty, stereo-matched and within 128 taps. The engine exposes
   track-queue/panner callbacks and the deleted engine methods are replaced by
   direct Rust calls from the public layer.
+- Automation record-mode admission now runs in Rust. Wire-mode normalization
+  (unknown values fail closed to Read), the translation onto the recorder's own
+  mode vocabulary and the engine/recorder lockstep live in the recorder module;
+  the engine keeps the atomic the audio callback reads. The bridge no longer
+  clamps requests with `min(4)` before validation, so an invalid mode can no
+  longer arm AutoPunch recording.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

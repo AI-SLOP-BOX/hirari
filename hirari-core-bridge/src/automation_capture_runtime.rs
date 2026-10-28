@@ -7,6 +7,46 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 const RECORDER_CAPACITY: usize = 65_536;
 const TRACK_CAPTURE_CAPACITY: usize = 16_384;
 
+/// Wire values shared with the engine and UI: Read, Write, Touch, Latch,
+/// AutoPunch. The engine's control-mode atomic stores this vocabulary.
+pub const WIRE_MODE_READ: u32 = 0;
+pub const WIRE_MODE_WRITE: u32 = 1;
+pub const WIRE_MODE_TOUCH: u32 = 2;
+pub const WIRE_MODE_LATCH: u32 = 3;
+pub const WIRE_MODE_AUTO_PUNCH: u32 = 4;
+
+/// Recorder-side vocabulary. It predates the wire enum and orders the modes
+/// differently, so every mode change has to be translated.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecorderMode {
+    Off = 0,
+    Touch = 1,
+    Latch = 2,
+    Write = 3,
+    AutoPunch = 4,
+}
+
+/// Unknown wire values fail closed to Read: a future/invalid enum must never
+/// silently arm write automation.
+pub fn normalize_record_mode(mode: u32) -> u32 {
+    if mode <= WIRE_MODE_AUTO_PUNCH {
+        mode
+    } else {
+        WIRE_MODE_READ
+    }
+}
+
+pub fn recorder_mode_for_wire(mode: u32) -> RecorderMode {
+    match normalize_record_mode(mode) {
+        WIRE_MODE_WRITE => RecorderMode::Write,
+        WIRE_MODE_TOUCH => RecorderMode::Touch,
+        WIRE_MODE_LATCH => RecorderMode::Latch,
+        WIRE_MODE_AUTO_PUNCH => RecorderMode::AutoPunch,
+        _ => RecorderMode::Off,
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct NativeAutomationEvent {
@@ -233,6 +273,22 @@ pub unsafe extern "C" fn hirari_automation_recorder_set_mode(state: *const c_voi
     }
 }
 
+/// Applies one wire-mode request: normalizes it, keeps the recorder in
+/// lockstep and returns the value the engine should publish. Callers on the
+/// control thread must store the result so the audio callback and the
+/// recorder agree on the mode.
+#[no_mangle]
+pub extern "C" fn hirari_automation_record_mode_apply(mode: u32) -> u32 {
+    let normalized = normalize_record_mode(mode);
+    unsafe {
+        hirari_automation_recorder_set_mode(
+            hirari_automation_recorder_instance(),
+            recorder_mode_for_wire(normalized) as u32,
+        );
+    }
+    normalized
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_automation_recorder_get_mode(state: *const c_void) -> u32 {
     unsafe { state.cast::<AutomationRecorderState>().as_ref() }
@@ -365,6 +421,46 @@ mod tests {
                 pos: 20,
                 val: 0.3
             }]
+        );
+    }
+
+    #[test]
+    fn record_mode_normalization_fails_closed_to_read() {
+        assert_eq!(normalize_record_mode(0), WIRE_MODE_READ);
+        assert_eq!(normalize_record_mode(4), WIRE_MODE_AUTO_PUNCH);
+        assert_eq!(normalize_record_mode(5), WIRE_MODE_READ);
+        assert_eq!(normalize_record_mode(u32::MAX), WIRE_MODE_READ);
+    }
+
+    #[test]
+    fn wire_modes_map_onto_the_recorder_vocabulary() {
+        assert_eq!(recorder_mode_for_wire(0), RecorderMode::Off);
+        assert_eq!(recorder_mode_for_wire(1), RecorderMode::Write);
+        assert_eq!(recorder_mode_for_wire(2), RecorderMode::Touch);
+        assert_eq!(recorder_mode_for_wire(3), RecorderMode::Latch);
+        assert_eq!(recorder_mode_for_wire(4), RecorderMode::AutoPunch);
+        // Unknown values never reach AutoPunch through the `min` that the
+        // bridge used to apply before this policy moved here.
+        assert_eq!(recorder_mode_for_wire(9), RecorderMode::Off);
+    }
+
+    #[test]
+    fn applying_a_mode_keeps_the_recorder_in_lockstep_and_returns_the_wire_value() {
+        let recorder = hirari_automation_recorder_instance();
+        assert_eq!(hirari_automation_record_mode_apply(1), WIRE_MODE_WRITE);
+        assert_eq!(
+            unsafe { hirari_automation_recorder_get_mode(recorder) },
+            RecorderMode::Write as u32
+        );
+        assert_eq!(hirari_automation_record_mode_apply(2), WIRE_MODE_TOUCH);
+        assert_eq!(
+            unsafe { hirari_automation_recorder_get_mode(recorder) },
+            RecorderMode::Touch as u32
+        );
+        assert_eq!(hirari_automation_record_mode_apply(77), WIRE_MODE_READ);
+        assert_eq!(
+            unsafe { hirari_automation_recorder_get_mode(recorder) },
+            RecorderMode::Off as u32
         );
     }
 

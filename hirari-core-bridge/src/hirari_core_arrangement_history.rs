@@ -220,7 +220,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return false;
         };
-        engine.set_automation_record_mode(mode.min(4))
+        engine.set_automation_record_mode(mode)
     }
 
     pub fn undo_diagnostic_json(&self) -> String {
