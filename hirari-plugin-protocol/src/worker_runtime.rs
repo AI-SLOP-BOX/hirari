@@ -454,6 +454,21 @@ pub unsafe extern "C" fn hirari_plugin_worker_parse_args(
     true
 }
 
+/// Diagnostic for the `error_kind` reported by
+/// [`hirari_plugin_worker_parse_args`]. The worker logs this text verbatim
+/// before exiting with status 2.
+#[no_mangle]
+pub extern "C" fn hirari_plugin_worker_parse_error_text(error_kind: u32) -> *const c_char {
+    let message: &'static core::ffi::CStr = match error_kind {
+        1 => c"missing command-line option value",
+        3 => c"required worker argument is invalid",
+        4 => c"requested plugin format is invalid",
+        5 => c"requested audio configuration is invalid",
+        _ => c"unknown or invalid command-line option",
+    };
+    message.as_ptr()
+}
+
 #[repr(C)]
 struct SharedAudioPrefix {
     protocol_version: AtomicU32,
@@ -653,4 +668,25 @@ fn process_state_request(
     shared
         .state_completed_sequence
         .store(request, Ordering::Release);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_error_kinds_report_their_diagnostic() {
+        let text = |kind| unsafe {
+            core::ffi::CStr::from_ptr(hirari_plugin_worker_parse_error_text(kind))
+                .to_str()
+                .unwrap()
+        };
+        assert_eq!(text(1), "missing command-line option value");
+        assert_eq!(text(3), "required worker argument is invalid");
+        assert_eq!(text(4), "requested plugin format is invalid");
+        assert_eq!(text(5), "requested audio configuration is invalid");
+        assert_eq!(text(2), "unknown or invalid command-line option");
+        assert_eq!(text(0), "unknown or invalid command-line option");
+        assert_eq!(text(200), "unknown or invalid command-line option");
+    }
 }

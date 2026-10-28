@@ -15,13 +15,7 @@ int main(int argc, char** argv) {
     uint32_t parseError = 0;
     if (!hirari_plugin_worker_parse_args(argc,
             const_cast<const char* const*>(argv), &options, &parseError)) {
-        switch (parseError) {
-            case 1: debugLog("missing command-line option value"); break;
-            case 3: debugLog("required worker argument is invalid"); break;
-            case 4: debugLog("requested plugin format is invalid"); break;
-            case 5: debugLog("requested audio configuration is invalid"); break;
-            default: debugLog("unknown or invalid command-line option"); break;
-        }
+        debugLog(hirari_plugin_worker_parse_error_text(parseError));
         return 2;
     }
     const int controlFd = options.controlFd;

@@ -47,6 +47,7 @@ struct HirariPluginWorkerLaunchOptions {
 extern "C" bool hirari_plugin_worker_parse_args(
     int32_t argc, const char* const* argv,
     HirariPluginWorkerLaunchOptions* output, uint32_t* errorKind);
+extern "C" const char* hirari_plugin_worker_parse_error_text(uint32_t errorKind);
 extern "C" int32_t hirari_plugin_worker_run(
     int32_t controlFd, void* shared, void* backendContext,
     const HirariPluginWorkerBackend* backend,

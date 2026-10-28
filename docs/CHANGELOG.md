@@ -222,6 +222,10 @@ production support.
   transient (spawn, handshake, early exit) and returns the 25 ms doubling
   backoff or 0 for terminal failures, so `addSandboxedPlugin` only starts,
   closes and sleeps instead of restating the failure set and shift.
+- Worker command-line diagnostics moved to Rust.
+  `hirari_plugin_worker_parse_error_text` turns the parser's `error_kind` into
+  the logged message next to the parser itself, so the worker no longer keeps
+  its own copy of the kind-to-text mapping.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
