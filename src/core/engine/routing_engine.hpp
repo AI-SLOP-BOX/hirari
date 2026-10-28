@@ -110,7 +110,6 @@ public:
     }
 
     bool hasConnection(uint32_t s, uint32_t d) const {
-        if (s >= kMaxNodes || d >= kMaxNodes) return false;
         return hirari_routing_gains_route(m_gainState, s, d) > 0.0f;
     }
 
@@ -134,7 +133,6 @@ public:
     }
 
     float connectionGain(uint32_t s, uint32_t d) const noexcept {
-        if (s >= kMaxNodes || d >= kMaxNodes) return 0.0f;
         return hirari_routing_gains_route(m_gainState, s, d);
     }
 
@@ -147,17 +145,14 @@ public:
     }
 
     float sendConnectionGain(uint32_t s, uint32_t d) const noexcept {
-        if (s >= kMaxNodes || d >= kMaxNodes) return 0.0f;
         return hirari_routing_gains_send(m_gainState, s, d);
     }
 
     bool hasSendConnection(uint32_t s, uint32_t d) const noexcept {
-        if (s >= kMaxNodes || d >= kMaxNodes) return false;
         return hirari_routing_gains_has_send(m_gainState, s, d);
     }
 
     bool sendPreFader(uint32_t s, uint32_t d) const noexcept {
-        if (s >= kMaxNodes || d >= kMaxNodes) return false;
         return hirari_routing_gains_send_pre_fader(m_gainState, s, d);
     }
 
@@ -166,12 +161,10 @@ public:
     // to a retire list and are reclaimed only after audio-block readers exit.
     bool setSendPdcCompensationSamples(uint32_t sourceId, uint32_t destId,
                                        uint32_t samples) {
-        if (sourceId >= kMaxNodes || destId >= kMaxNodes) return false;
         return hirari_send_pdc_manager_set_delay(m_sendPdcManager, sourceId, destId, samples);
     }
 
     void retireSendPdcState(uint32_t sourceId, uint32_t destId) {
-        if (sourceId >= kMaxNodes || destId >= kMaxNodes) return;
         hirari_send_pdc_manager_retire(m_sendPdcManager, sourceId, destId);
     }
 
@@ -184,9 +177,6 @@ public:
                         float* outputLeft, float* outputRight,
                         uint32_t frames, uint32_t additionalDelay = 0,
                         float inputGain = 1.0f) noexcept {
-        if (sourceId >= kMaxNodes || destId >= kMaxNodes || !inputLeft || !inputRight ||
-            !outputLeft || !outputRight || frames == 0)
-            return false;
         return hirari_send_pdc_manager_process(
             m_sendPdcManager, sourceId, destId, inputLeft, inputRight,
             outputLeft, outputRight, frames, additionalDelay, inputGain);
@@ -199,9 +189,6 @@ public:
                       float* const* destinationLeft, float* const* destinationRight,
                       const uint32_t* destinationIds, uint32_t destinationCount,
                       uint32_t frames) const noexcept {
-        if (sourceId >= kMaxNodes || !left || !right || !destinationLeft ||
-            !destinationRight || !destinationIds || destinationCount == 0 || frames == 0)
-            return;
         hirari_routing_fanout_stereo(m_gainState, sourceId, left, right,
                                      destinationLeft, destinationRight,
                                      destinationIds, destinationCount, frames);
@@ -214,9 +201,6 @@ public:
                       float* const* const* destinationChannels,
                       const uint32_t* destinationIds, uint32_t destinationCount,
                       uint32_t channelCount, uint32_t frames) const noexcept {
-        if (sourceId >= kMaxNodes || !sourceChannels || !destinationChannels ||
-            !destinationIds || destinationCount == 0 || channelCount == 0 || frames == 0)
-            return;
         hirari_routing_fanout_planar(m_gainState, sourceId, sourceChannels,
                                      destinationChannels, destinationIds,
                                      destinationCount, channelCount, frames);
@@ -252,7 +236,6 @@ public:
     // Control/diagnostic snapshot. A negative value means the edge does not
     // exist; zero remains a valid explicitly muted feedback edge.
     float feedbackConnectionGain(uint32_t source, uint32_t dest) const noexcept {
-        if (source >= kMaxNodes || dest >= kMaxNodes) return -1.0f;
         return hirari_routing_feedback_gain(m_feedbackState, source, dest);
     }
 

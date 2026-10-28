@@ -293,4 +293,19 @@ mod tests {
         assert_eq!(state.send_gain(0, 1), 0.0);
         assert!(!state.has_send(0, 1));
     }
+
+    #[test]
+    fn out_of_range_nodes_read_as_absent_through_the_ffi() {
+        let handle = super::hirari_routing_gains_create();
+        assert!(!handle.is_null());
+        unsafe {
+            assert_eq!(super::hirari_routing_gains_route(handle, 0, 1), 0.0);
+            assert_eq!(super::hirari_routing_gains_route(handle, 128, 0), 0.0);
+            assert_eq!(super::hirari_routing_gains_route(handle, 0, u32::MAX), 0.0);
+            assert_eq!(super::hirari_routing_gains_send(handle, 128, 128), 0.0);
+            assert!(!super::hirari_routing_gains_has_send(handle, 128, 0));
+            assert!(!super::hirari_routing_gains_send_pre_fader(handle, 0, 128));
+            super::hirari_routing_gains_destroy(handle);
+        }
+    }
 }

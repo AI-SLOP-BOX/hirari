@@ -183,6 +183,12 @@ production support.
   frames and a non-finite gain; `clear` clamps the frame count in Rust too, so
   the duplicated guards in the C++ bus header are gone. A new Rust test covers
   each rejection path.
+- Routing lookups and fanout now trust Rust validation. The node-range checks
+  in `RoutingEngine` for route/send gains, feedback gains, send-PDC delay
+  registration and retire, and the pointer/frame checks around
+  `processSendPdc` and both fanout calls are removed; the Rust tables reject
+  out-of-range nodes and the fanout/PDC entries already refuse null buffers and
+  zero frames. An FFI-level test pins the absent-edge reads.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
