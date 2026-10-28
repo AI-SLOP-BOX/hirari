@@ -1,16 +1,3 @@
-    bool push_command(::Hirari::Core::CommandType type, uint32_t targetId, float value,
-                      uint64_t timestamp, uint64_t expectedProjectGeneration,
-                      uint64_t expectedAudioGeneration);
-    uint8_t get_last_command_error() const noexcept {
-        return m_lastCommandError.load(std::memory_order_acquire);
-    }
-
-    // Spatial
-    bool set_spatial_position(uint32_t tid, float x, float y, float z);
-    bool set_hrtf_kernel(uint32_t tid, const std::vector<float>& left,
-                         const std::vector<float>& right);
-    bool clear_hrtf_kernel(uint32_t tid);
-
     // Analysis
     struct MeterData {
         float peakL = 0.0f;

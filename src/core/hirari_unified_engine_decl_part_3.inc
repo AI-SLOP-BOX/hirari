@@ -83,6 +83,8 @@
     static void installPluginEditHost();
     static void installTrackEditHost();
     static void installTrackFreezeHost();
+    static void installCommandHost();
+    static void installTrackControlHost();
     using ReplayCallback = void (*)(void*);
     static void recordNativeReplay(void* host, const uint8_t* label, size_t labelLength, void* edit,
                                    ReplayCallback undo, ReplayCallback redo,

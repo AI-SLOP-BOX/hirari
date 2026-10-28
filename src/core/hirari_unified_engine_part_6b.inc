@@ -149,41 +149,38 @@ const HirariAutomationHostOps kAutomationEditHostOps = {
 }();
 
 }  // namespace
-bool HirariUnifiedEngine::set_spatial_position(uint32_t tid, float x, float y, float z) {
-    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
-    // C-4 fix: use m_tracks under mutex instead of raw audioState pointers
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& t : m_tracks) {
-        if (t->getId() == tid) {
-            t->setSpatialPosition(x, y, z);
-            return true;
-        }
-    }
-    return false;
+void HirariUnifiedEngine::installTrackControlHost() {
+    static const HirariTrackControlHostOps ops = {
+        [](void* host, uint32_t tid) -> void* {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            if (!engine) return nullptr;
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (const auto& track : engine->m_tracks)
+                if (track && track->getId() == tid) return new std::shared_ptr<Track>(track);
+            return nullptr;
+        },
+        [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
+        [](void* handle, float x, float y, float z) {
+            (*static_cast<std::shared_ptr<Track>*>(handle))->setSpatialPosition(x, y, z);
+        },
+        [](void* handle, const float* left, const float* right, uint32_t taps) -> bool {
+            return (*static_cast<std::shared_ptr<Track>*>(handle))->setHrtfKernel(left, right, taps);
+        },
+        [](void* handle) {
+            (*static_cast<std::shared_ptr<Track>*>(handle))->clearHrtfKernel();
+        },
+    };
+    hirari_track_control_host_install(&ops);
 }
 
-bool HirariUnifiedEngine::set_hrtf_kernel(uint32_t tid, const std::vector<float>& left,
-                                        const std::vector<float>& right) {
-    if (left.empty() || left.size() != right.size() ||
-        left.size() > ::Hirari::DSP::Spatial::HolographicPanner::kMaxHrtfTaps) return false;
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() == tid)
-            return track->setHrtfKernel(left.data(), right.data(), static_cast<uint32_t>(left.size()));
-    }
-    return false;
-}
+namespace {
+[[maybe_unused]] const bool kTrackControlHostsInstalled = [] {
+    HirariUnifiedEngine::installCommandHost();
+    HirariUnifiedEngine::installTrackControlHost();
+    return true;
+}();
+}  // namespace
 
-bool HirariUnifiedEngine::clear_hrtf_kernel(uint32_t tid) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() == tid) {
-            track->clearHrtfKernel();
-            return true;
-        }
-    }
-    return false;
-}
 bool HirariUnifiedEngine::execute_auto_mixing() {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     if (m_tracks.empty()) return false;

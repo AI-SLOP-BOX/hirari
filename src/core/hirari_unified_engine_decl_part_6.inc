@@ -66,17 +66,6 @@ private:
         uint64_t expectedAudioGeneration{0};
     };
 
-    enum class CommandPushError : uint8_t {
-        None = 0,
-        InvalidTarget = 1,
-        StaleProjectGeneration = 2,
-        StaleAudioGeneration = 3,
-        QueueFull = 4,
-    };
-
-    std::atomic<uint8_t> m_lastCommandError{
-        static_cast<uint8_t>(CommandPushError::None)};
-
     ::Hirari::Core::RingBuffer<Command, 1024> m_commandQueue;
     mutable ::Hirari::Core::RingBuffer<::Hirari::Core::EngineEvent, 512> m_eventQueue;
 

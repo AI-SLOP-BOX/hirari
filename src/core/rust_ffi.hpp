@@ -1714,6 +1714,39 @@ extern "C" bool hirari_track_set_freeze_cache_path(
     void* host, uint32_t trackId, const uint8_t* path, size_t pathLength);
 extern "C" bool hirari_track_unfreeze(void* host, uint32_t trackId);
 extern "C" bool hirari_track_is_frozen(void* host, uint32_t trackId);
+
+// Control-command admission (target, generations, queue-full ordering).
+struct HirariCommandHostOps {
+    bool (*trackExists)(void*, uint32_t) = nullptr;
+    // Writes the current project and audio-configuration generations.
+    bool (*generations)(void*, uint64_t*, uint64_t*) = nullptr;
+    bool (*enqueue)(void*, uint32_t, uint32_t, float, uint64_t, uint64_t) = nullptr;
+    void (*journal)(void*, uint32_t, uint32_t, float, uint64_t) = nullptr;
+    void (*logQueueFull)(void*, uint32_t) = nullptr;
+};
+extern "C" void hirari_command_host_install(const HirariCommandHostOps* ops);
+extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t trackId,
+                                           float value, uint64_t timestamp,
+                                           uint64_t expectedProjectGeneration,
+                                           uint64_t expectedAudioGeneration);
+extern "C" uint8_t hirari_engine_last_command_error(void* host);
+
+// Track control policy (spatial validation, HRTF admission, auto-mix curve).
+struct HirariTrackControlHostOps {
+    // Pins a track; the handle must be released.
+    void* (*acquire)(void*, uint32_t) = nullptr;
+    void (*release)(void*) = nullptr;
+    void (*setSpatial)(void*, float, float, float) = nullptr;
+    bool (*setHrtf)(void*, const float*, const float*, uint32_t) = nullptr;
+    void (*clearHrtf)(void*) = nullptr;
+};
+extern "C" void hirari_track_control_host_install(const HirariTrackControlHostOps* ops);
+extern "C" bool hirari_track_set_spatial_position(
+    void* host, uint32_t trackId, float x, float y, float z);
+extern "C" bool hirari_track_set_hrtf_kernel(void* host, uint32_t trackId, const float* left,
+                                             size_t leftLength, const float* right,
+                                             size_t rightLength);
+extern "C" bool hirari_track_clear_hrtf_kernel(void* host, uint32_t trackId);
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 extern "C" bool hirari_plugin_edit_move(

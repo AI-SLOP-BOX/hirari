@@ -495,16 +495,16 @@
         }
         return packed;
     }
-    bool set_spatial_position(uint32_t tid, float x, float y, float z) const { return m_engine && m_engine->set_spatial_position(tid, x, y, z); }
+    bool set_spatial_position(uint32_t tid, float x, float y, float z) const {
+        return m_engine && hirari_track_set_spatial_position(m_engine.get(), tid, x, y, z);
+    }
     bool set_hrtf_kernel(uint32_t tid, rust::Vec<float> left,
                          rust::Vec<float> right) const {
-        if (!m_engine || left.empty() || left.size() != right.size()) return false;
-        std::vector<float> left_copy(left.begin(), left.end());
-        std::vector<float> right_copy(right.begin(), right.end());
-        return m_engine->set_hrtf_kernel(tid, left_copy, right_copy);
+        return m_engine && hirari_track_set_hrtf_kernel(
+            m_engine.get(), tid, left.data(), left.size(), right.data(), right.size());
     }
     bool clear_hrtf_kernel(uint32_t tid) const {
-        return m_engine && m_engine->clear_hrtf_kernel(tid);
+        return m_engine && hirari_track_clear_hrtf_kernel(m_engine.get(), tid);
     }
     bool set_automation_record_mode(uint32_t mode) const {
         return m_engine && m_engine->set_automation_record_mode(mode);
@@ -643,16 +643,16 @@
         if (m_engine) m_engine->mark_project_layout_changed();
     }
 
-    // Command Dispatch
+    // Command Dispatch (admission lives in Rust; the engine keeps the queue)
     bool push_command(CommandType type, uint32_t tid, float val, uint64_t ts,
                       uint64_t expectedProjectGeneration,
                       uint64_t expectedAudioGeneration) const {
-        return m_engine && m_engine->push_command(type, tid, val, ts,
-                                                   expectedProjectGeneration,
-                                                   expectedAudioGeneration);
+        return m_engine && hirari_engine_push_command(
+            m_engine.get(), static_cast<uint32_t>(type), tid, val, ts,
+            expectedProjectGeneration, expectedAudioGeneration);
     }
     uint8_t get_last_command_error() const noexcept {
-        return m_engine ? m_engine->get_last_command_error() : 1u;
+        return m_engine ? hirari_engine_last_command_error(m_engine.get()) : 1u;
     }
     
     // Core Access for telemetry shims

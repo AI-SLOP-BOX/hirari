@@ -306,60 +306,37 @@ uint64_t HirariUnifiedEngine::get_project_state_revision() const noexcept {
     return hirari_project_state_revision_mix(layout, midi, control);
 }
 
-bool HirariUnifiedEngine::push_command(CommandType type, uint32_t tid, float val, uint64_t ts,
-                                     uint64_t expectedProjectGeneration,
-                                     uint64_t expectedAudioGeneration) {
-    const auto setError = [this](CommandPushError error) {
-        m_lastCommandError.store(static_cast<uint8_t>(error), std::memory_order_release);
+void HirariUnifiedEngine::installCommandHost() {
+    static const HirariCommandHostOps ops = {
+        [](void* host, uint32_t tid) -> bool {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            if (!engine) return false;
+            const auto tracks = engine->get_tracks_snapshot();
+            return std::any_of(tracks.begin(), tracks.end(),
+                               [tid](const auto& t) { return t && t->getId() == tid; });
+        },
+        [](void* host, uint64_t* project, uint64_t* audio) -> bool {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            if (!engine) return false;
+            *project = engine->get_project_generation();
+            *audio = engine->get_audio_config_generation();
+            return true;
+        },
+        [](void* host, uint32_t type, uint32_t tid, float val, uint64_t ts,
+           uint64_t audioGeneration) -> bool {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            return engine && engine->m_commandQueue.push(Command{
+                static_cast<::Hirari::Core::CommandType>(type), tid, val, ts, audioGeneration});
+        },
+        [](void* host, uint32_t type, uint32_t tid, float val, uint64_t ts) {
+            if (auto* engine = static_cast<HirariUnifiedEngine*>(host))
+                engine->m_forensicJournaler.log(type, tid, val, ts);
+        },
+        [](void*, uint32_t tid) {
+            ::Hirari::Core::Diagnostics::LogBuffer::post(1, tid, "COMMAND_QUEUE_FULL");
+        },
     };
-    // A bounded integer is not a valid target by itself.  Reject commands for
-    // tracks that are no longer present instead of letting the legacy
-    // get_track() fallback silently redirect an old UI command to the first
-    // current track after project reload.
-    const auto tracks = get_tracks_snapshot();
-    const bool targetExists = std::any_of(
-        tracks.begin(), tracks.end(), [tid](const auto& track) {
-            return track != nullptr && track->getId() == tid;
-        });
-    if (!targetExists) {
-        setError(CommandPushError::InvalidTarget);
-        m_forensicJournaler.log(
-            static_cast<uint32_t>(type), tid, val, ts);
-        return false;
-    }
-    const uint64_t projectGeneration = get_project_generation();
-    if (projectGeneration != expectedProjectGeneration) {
-        setError(CommandPushError::StaleProjectGeneration);
-        m_forensicJournaler.log(
-            static_cast<uint32_t>(type), tid, val, ts);
-        return false;
-    }
-    if (get_audio_config_generation() != expectedAudioGeneration) {
-        setError(CommandPushError::StaleAudioGeneration);
-        m_forensicJournaler.log(
-            static_cast<uint32_t>(type), tid, val, ts);
-        return false;
-    }
-    // LOCK-FREE Command Injection. State mutation is deferred to the audio
-    // block consumer so the UI thread never races Track parameters.
-    Command cmd{type, tid, val, ts, expectedAudioGeneration};
-    // A full queue is a real command failure, not a best-effort enqueue. Do
-    // not report success to the UI/CLI when the audio thread cannot observe
-    // the command; otherwise the caller's undo/generation state diverges
-    // from the engine.
-    if (!m_commandQueue.push(cmd)) {
-        setError(CommandPushError::QueueFull);
-        m_forensicJournaler.log(
-            static_cast<uint32_t>(type), tid, val, ts);
-        ::Hirari::Core::Diagnostics::LogBuffer::post(
-            1, tid, "COMMAND_QUEUE_FULL");
-        return false;
-    }
-    setError(CommandPushError::None);
-
-    // INDUSTRIAL: Real-time Journaling
-    m_forensicJournaler.log(static_cast<uint32_t>(type), tid, val, ts);
-    return true;
+    hirari_command_host_install(&ops);
 }
 
 Track& HirariUnifiedEngine::get_track(uint32_t id) {

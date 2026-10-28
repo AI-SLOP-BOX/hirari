@@ -109,6 +109,15 @@ production support.
   the track lookup, offline render, published snapshot and file writer behind
   host callbacks; the engine freeze methods are gone and the public layer calls
   Rust directly.
+- Control-command admission and track spatial policy now run in Rust.
+  `push_command` target lookup, project/audio generation rechecks, queue-full
+  reporting, forensic-journal ordering and the last-command error are Rust-owned
+  (the engine keeps the lock-free queue and its consumer); unreadable
+  generations fail closed instead of matching generation zero. Spatial
+  coordinates are rejected before lookup when non-finite, and HRTF kernels must
+  be non-empty, stereo-matched and within 128 taps. The engine exposes
+  track-queue/panner callbacks and the deleted engine methods are replaced by
+  direct Rust calls from the public layer.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
