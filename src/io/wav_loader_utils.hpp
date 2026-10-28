@@ -19,9 +19,8 @@ namespace Hirari::IO {
  */
 class WavLoader {
 public:
-    // Keep the WAVE64 path consistent with the canonical WAV decoder: the
-    // reader is an offline helper, but it must still reject oversized input
-    // before allocating a file-sized buffer.
+    // Mirrors MAX_WAVE64_BYTES in export_wave64.rs, which enforces the limit.
+    // Retained so the native compile contract can size an oversize probe file.
     static constexpr uint64_t kMaximumDecodedBytes = 512ull * 1024ull * 1024ull;
 
     struct WavInfo {
@@ -127,14 +126,6 @@ public:
                 ? std::string(reinterpret_cast<const char*>(decoded.error), decoded.error_size)
                 : std::string("unsupported or invalid file");
             throw std::runtime_error("WAVE64 decode failed: " + detail + ": " + path);
-        }
-        if (decoded.channels == 0 || decoded.channels > 32 || decoded.bit_depth != 32 ||
-            decoded.frames > std::numeric_limits<size_t>::max() ||
-            decoded.frames > std::numeric_limits<size_t>::max() / decoded.channels ||
-            decoded.sample_count != static_cast<size_t>(decoded.frames) * decoded.channels ||
-            decoded.sample_count > kMaximumDecodedBytes / sizeof(float) ||
-            (decoded.sample_count != 0 && decoded.samples == nullptr)) {
-            throw std::runtime_error("WAVE64 decoder returned invalid metadata: " + path);
         }
         outInfo.sampleRate = decoded.sample_rate;
         outInfo.numChannels = decoded.channels;

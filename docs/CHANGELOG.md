@@ -193,6 +193,11 @@ production support.
   owns the `(track, plug-in)` key packing and the session table, so
   open/close/adopt/forget/embedded on `NativeEditorHost` forward to Rust while
   C++ keeps only the platform callbacks and never holds a lock across one.
+- WAVE64 loading now trusts the Rust decoder's metadata. `read_wave64_float32`
+  already rejects files above 512 MiB, channel counts outside 1..=32, a
+  non-32-bit sample format, a payload that is not a whole number of frames and
+  any non-finite sample, so `WavLoader::loadWave64` no longer re-checks the
+  returned channel/frame/size fields before copying them into planar vectors.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
