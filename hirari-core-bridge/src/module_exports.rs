@@ -231,6 +231,7 @@ pub mod pitch_detector;
 pub mod plugin_admission;
 pub mod plugin_blacklist;
 pub mod plugin_cache_codec;
+pub mod plugin_cache_path;
 pub mod plugin_catalog;
 pub mod plugin_fingerprint;
 pub mod plugin_parameters;

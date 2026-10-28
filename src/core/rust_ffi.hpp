@@ -2235,6 +2235,7 @@ extern "C" size_t hirari_plugin_sandbox_move(uint32_t*, uint32_t*, size_t, size_
 extern "C" bool hirari_plugin_cache_key(
     const uint8_t* path, size_t path_size, uint8_t* output,
     size_t output_capacity, size_t* output_size);
+extern "C" const char* hirari_plugin_cache_path();
 
 extern "C" void* hirari_midi_learn_create();
 extern "C" void hirari_midi_learn_destroy(void* state);

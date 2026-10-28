@@ -202,6 +202,10 @@ production support.
   per-lane linked/protected/preview flags and the rule that a protected lane
   rejects previews, so the engine's four `*_automation_lane` entries forward to
   a Rust handle and the C++ `AutomationLaneGroup` header is gone.
+- The plug-in cache path is resolved in Rust. `plugin_cache_path.rs` applies
+  the `$HOME/.hirari` fallback with `/tmp/.hirari`, creates the directory and
+  owns the cached `plugin_cache_v8.bin` string, and `cacheKey` forwards empty
+  or oversized paths to `plugin_cache_key`, which already rejects them.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

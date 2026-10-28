@@ -1,9 +1,9 @@
 #pragma once
 
-#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,20 +22,16 @@ public:
     }
 
     static std::filesystem::path getCachePath() {
-        const char* home = std::getenv("HOME");
-        const auto directory = home
-            ? std::filesystem::path(home) / ".hirari"
-            : std::filesystem::path("/tmp/.hirari");
-        std::filesystem::create_directories(directory);
-        return directory / "plugin_cache_v8.bin";
+        const char* path = hirari_plugin_cache_path();
+        if (!path) throw std::runtime_error("failed to prepare the plug-in cache directory");
+        return path;
     }
 
     static std::string cacheKey(const std::string& pluginPath) {
-        if (pluginPath.empty()) return {};
         size_t size = 0;
         const auto* input = reinterpret_cast<const uint8_t*>(pluginPath.data());
-        if (!hirari_plugin_cache_key(input, pluginPath.size(), nullptr, 0, &size) ||
-            size > 1024 * 1024) return {};
+        if (!hirari_plugin_cache_key(input, pluginPath.size(), nullptr, 0, &size))
+            return {};
         std::string key(size, '\0');
         size_t written = 0;
         if (!hirari_plugin_cache_key(input, pluginPath.size(),
