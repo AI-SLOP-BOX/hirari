@@ -2274,6 +2274,7 @@ extern "C" uint8_t hirari_stem_separator_validate_model(
     uint8_t backend, const uint8_t* path, size_t path_size,
     uint32_t model_sample_rate, uint32_t max_channels);
 extern "C" const char* hirari_stem_separator_validation_message(uint8_t code);
+extern "C" const char* hirari_stem_separator_backend_name(uint8_t backend);
 extern "C" void* hirari_delay_pitch_create(double sample_rate);
 extern "C" void* hirari_delay_pitch_clone(const void* state);
 extern "C" void hirari_delay_pitch_destroy(void* state);

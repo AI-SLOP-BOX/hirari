@@ -36,6 +36,19 @@ pub unsafe extern "C" fn hirari_stem_separator_validate_model(
     0
 }
 
+/// Stable display name for a backend code.
+#[no_mangle]
+pub extern "C" fn hirari_stem_separator_backend_name(backend: u8) -> *const c_char {
+    let name: &'static CStr = match backend {
+        0 => c"Heuristic",
+        1 => c"ONNX Runtime",
+        2 => c"LibTorch",
+        3 => c"External Process",
+        _ => c"Unknown",
+    };
+    name.as_ptr()
+}
+
 /// Human-readable text for a validation code. The C++ adapter used to hold
 /// this table; keeping it beside the checks means a new code cannot be
 /// introduced without its message.
@@ -58,6 +71,19 @@ pub extern "C" fn hirari_stem_separator_validation_message(code: u8) -> *const c
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_codes_map_to_their_display_names() {
+        for (code, name) in ["Heuristic", "ONNX Runtime", "LibTorch", "External Process"]
+            .iter()
+            .enumerate()
+        {
+            let actual = unsafe { CStr::from_ptr(hirari_stem_separator_backend_name(code as u8)) };
+            assert_eq!(actual.to_str().unwrap(), *name);
+        }
+        let unknown = unsafe { CStr::from_ptr(hirari_stem_separator_backend_name(200)) };
+        assert_eq!(unknown.to_str().unwrap(), "Unknown");
+    }
 
     #[test]
     fn every_validation_code_has_a_message() {

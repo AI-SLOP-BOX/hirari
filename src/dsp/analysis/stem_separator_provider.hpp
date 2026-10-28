@@ -21,13 +21,7 @@ enum class StemSeparatorBackend : uint8_t {
 };
 
 inline const char* stemSeparatorBackendName(StemSeparatorBackend backend) noexcept {
-    switch (backend) {
-        case StemSeparatorBackend::Heuristic: return "Heuristic";
-        case StemSeparatorBackend::OnnxRuntime: return "ONNX Runtime";
-        case StemSeparatorBackend::LibTorch: return "LibTorch";
-        case StemSeparatorBackend::ExternalProcess: return "External Process";
-    }
-    return "Unknown";
+    return hirari_stem_separator_backend_name(static_cast<uint8_t>(backend));
 }
 
 struct StemSeparatorConfig {

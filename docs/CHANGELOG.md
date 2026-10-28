@@ -214,6 +214,9 @@ production support.
   failure and state-mailbox error codes to their hyphenated status strings, so
   `failureText` and `stateErrorText` no longer carry switch tables and a new
   code cannot drift between the native and Rust sides.
+- Stem-separator backend names are also Rust-owned, so the C++ adapter no
+  longer restates the Heuristic / ONNX Runtime / LibTorch / External Process
+  display mapping.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
