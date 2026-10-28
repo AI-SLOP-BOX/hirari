@@ -206,6 +206,10 @@ production support.
   the `$HOME/.hirari` fallback with `/tmp/.hirari`, creates the directory and
   owns the cached `plugin_cache_v8.bin` string, and `cacheKey` forwards empty
   or oversized paths to `plugin_cache_key`, which already rejects them.
+- Stem-separator validation messages live with the checks. The code-to-text
+  table moved from `validateStemSeparatorModel` into
+  `stem_separator_validation.rs`, so C++ only maps a non-zero code to the
+  message Rust returns.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

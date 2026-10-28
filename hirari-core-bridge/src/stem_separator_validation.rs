@@ -1,3 +1,4 @@
+use std::ffi::{c_char, CStr};
 use std::path::Path;
 
 /// Validate the model-file constraints shared by the optional stem runtimes.
@@ -33,4 +34,39 @@ pub unsafe extern "C" fn hirari_stem_separator_validate_model(
     if backend == 1 && extension != "onnx" { return 7; }
     if backend == 2 && extension != "pt" && extension != "pth" { return 9; }
     0
+}
+
+/// Human-readable text for a validation code. The C++ adapter used to hold
+/// this table; keeping it beside the checks means a new code cannot be
+/// introduced without its message.
+#[no_mangle]
+pub extern "C" fn hirari_stem_separator_validation_message(code: u8) -> *const c_char {
+    let message: &'static CStr = match code {
+        1 => c"model path is empty",
+        2 => c"model sample rate is outside the supported range",
+        3 => c"model channel count is outside the supported range",
+        4 => c"model path is not a regular file",
+        5 => c"model file is empty or unreadable",
+        6 => c"model file exceeds the 4 GiB safety limit",
+        7 => c"ONNX Runtime backend requires an .onnx model",
+        9 => c"LibTorch backend requires a .pt or .pth model",
+        _ => c"model validation failed",
+    };
+    message.as_ptr()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_validation_code_has_a_message() {
+        for code in 1..=9u8 {
+            let message = unsafe { CStr::from_ptr(hirari_stem_separator_validation_message(code)) };
+            assert!(!message.to_bytes().is_empty(), "code {code}");
+        }
+        let unknown =
+            unsafe { CStr::from_ptr(hirari_stem_separator_validation_message(200)) };
+        assert_eq!(unknown.to_str().unwrap(), "model validation failed");
+    }
 }

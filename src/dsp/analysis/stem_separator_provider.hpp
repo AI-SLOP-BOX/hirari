@@ -57,20 +57,8 @@ inline bool validateStemSeparatorModel(const StemSeparatorModelSpec& spec,
         reinterpret_cast<const uint8_t*>(spec.config.modelPath.data()),
         spec.config.modelPath.size(), spec.config.modelSampleRate,
         spec.config.maxChannels);
-    const char* message = nullptr;
-    switch (code) {
-        case 0: return true;
-        case 1: message = "model path is empty"; break;
-        case 2: message = "model sample rate is outside the supported range"; break;
-        case 3: message = "model channel count is outside the supported range"; break;
-        case 4: message = "model path is not a regular file"; break;
-        case 5: message = "model file is empty or unreadable"; break;
-        case 6: message = "model file exceeds the 4 GiB safety limit"; break;
-        case 7: message = "ONNX Runtime backend requires an .onnx model"; break;
-        case 9: message = "LibTorch backend requires a .pt or .pth model"; break;
-        default: message = "model validation failed"; break;
-    }
-    if (error) *error = message;
+    if (code == 0) return true;
+    if (error) *error = hirari_stem_separator_validation_message(code);
     return false;
 }
 
