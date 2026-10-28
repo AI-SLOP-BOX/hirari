@@ -124,6 +124,11 @@ production support.
   the engine keeps the atomic the audio callback reads. The bridge no longer
   clamps requests with `min(4)` before validation, so an invalid mode can no
   longer arm AutoPunch recording.
+- The built-in effect catalog now lives in Rust. Serialized plugin types map to
+  processor paths through one table (`Hirari/BusLimiter` in a bus's limiter
+  slot), unknown types stay unresolved instead of loading an inert processor,
+  and the name-to-type bridge lookup shares the same table. Track and bus
+  chains ask Rust for the path; the C++ host still constructs the processor.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

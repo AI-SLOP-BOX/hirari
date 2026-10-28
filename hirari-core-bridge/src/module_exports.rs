@@ -129,6 +129,7 @@ pub mod history;
 pub mod immersive;
 pub mod immersive_bus;
 pub mod input_stage;
+pub mod internal_plugin_catalog;
 pub mod interchange;
 pub mod interpolation;
 pub mod k_weighting_filter;

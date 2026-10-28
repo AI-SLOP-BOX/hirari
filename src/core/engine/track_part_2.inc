@@ -14,22 +14,11 @@
         markProjectLayoutChanged();
     }
     virtual bool addPlugin(uint32_t pluginType) {
-        // The only currently operational insertion is the built-in Hirari
-        // limiter. External formats must fail explicitly; retaining metadata
-        // for an instance that cannot process audio is misleading.
-        if (pluginType > 10) return false;
-
-        const char* pluginPath = "Hirari/Limiter";
-        if (pluginType == 1) pluginPath = "Hirari/Compressor";
-        else if (pluginType == 2) pluginPath = "Hirari/Gate";
-        else if (pluginType == 3) pluginPath = "Hirari/Saturation";
-        else if (pluginType == 4) pluginPath = "Hirari/Transient";
-        else if (pluginType == 5) pluginPath = "Hirari/DeEsser";
-        else if (pluginType == 6) pluginPath = "Hirari/Delay";
-        else if (pluginType == 7) pluginPath = "Hirari/Reverb";
-        else if (pluginType == 8) pluginPath = "Hirari/DynamicEQ";
-        else if (pluginType == 9) pluginPath = "Hirari/MidSide";
-        else if (pluginType == 10) pluginPath = "Hirari/Width";
+        // The built-in catalog (type <-> path) is Rust-owned. Unknown types
+        // must fail explicitly; retaining metadata for an instance that
+        // cannot process audio is misleading.
+        const char* pluginPath = hirari_internal_plugin_path(pluginType, false);
+        if (!pluginPath) return false;
         auto processor = std::make_shared<Hirari::Core::Plugin::ExternalPluginHost>(
             pluginPath,
             Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);

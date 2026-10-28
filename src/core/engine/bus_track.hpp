@@ -38,18 +38,10 @@ public:
     }
 
     bool addPlugin(uint32_t pluginType) override {
-        if (pluginType > 10) return false;
-        const char* pluginPath = "Hirari/BusLimiter";
-        if (pluginType == 1) pluginPath = "Hirari/Compressor";
-        else if (pluginType == 2) pluginPath = "Hirari/Gate";
-        else if (pluginType == 3) pluginPath = "Hirari/Saturation";
-        else if (pluginType == 4) pluginPath = "Hirari/Transient";
-        else if (pluginType == 5) pluginPath = "Hirari/DeEsser";
-        else if (pluginType == 6) pluginPath = "Hirari/Delay";
-        else if (pluginType == 7) pluginPath = "Hirari/Reverb";
-        else if (pluginType == 8) pluginPath = "Hirari/DynamicEQ";
-        else if (pluginType == 9) pluginPath = "Hirari/MidSide";
-        else if (pluginType == 10) pluginPath = "Hirari/Width";
+        // A bus draws from the same Rust-owned catalog, except that the
+        // limiter slot resolves to the bus limiter.
+        const char* pluginPath = hirari_internal_plugin_path(pluginType, true);
+        if (!pluginPath) return false;
         auto processor = std::make_shared<Hirari::Core::Plugin::ExternalPluginHost>(
             pluginPath,
             Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);

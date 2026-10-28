@@ -79,26 +79,14 @@ impl HirariCore {
             .to_string();
         }
         if plugin.format == "internal" {
-            let plugin_type = match plugin.path.as_str() {
-                "Hirari/Limiter" => 0,
-                "Hirari/Compressor" => 1,
-                "Hirari/Gate" => 2,
-                "Hirari/Saturation" => 3,
-                "Hirari/Transient" => 4,
-                "Hirari/DeEsser" => 5,
-                "Hirari/Delay" => 6,
-                "Hirari/Reverb" => 7,
-                "Hirari/DynamicEQ" => 8,
-                "Hirari/MidSide" => 9,
-                "Hirari/Width" => 10,
-                _ => {
-                    return serde_json::json!({
-                        "ok": false,
-                        "code": "unknown_internal_plugin",
-                        "path": plugin.path,
-                    })
-                    .to_string()
-                }
+            let Some(plugin_type) = crate::internal_plugin_catalog::internal_plugin_type(&plugin.path)
+            else {
+                return serde_json::json!({
+                    "ok": false,
+                    "code": "unknown_internal_plugin",
+                    "path": plugin.path,
+                })
+                .to_string();
             };
             let result = self.add_plugin_diagnostic_json(track_id, plugin_type);
             return serde_json::json!({
