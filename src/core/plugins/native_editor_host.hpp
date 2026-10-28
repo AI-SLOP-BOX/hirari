@@ -3,17 +3,24 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <unordered_map>
+#include <utility>
+
+#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Plugins {
 
-// Platform UI code (Cocoa/Win32/Wayland/Qt/etc.) binds these callbacks at
-// application startup.  The audio core only owns lifecycle and never touches
-// a native window from the realtime thread.
+// Platform UI code binds these callbacks at startup; the (track, plug-in)
+// session table and its key packing live in Rust (`native_editor_sessions.rs`).
+// The audio core only owns lifecycle and never touches a window on the RT thread.
 class NativeEditorHost {
 public:
     using OpenCallback = std::function<uint64_t(uint32_t, uint32_t, uintptr_t)>;
     using CloseCallback = std::function<bool(uint64_t)>;
+
+    NativeEditorHost() : m_sessions(hirari_native_editor_sessions_create()) {}
+    ~NativeEditorHost() { hirari_native_editor_sessions_destroy(m_sessions); }
+    NativeEditorHost(const NativeEditorHost&) = delete;
+    NativeEditorHost& operator=(const NativeEditorHost&) = delete;
 
     void bind(OpenCallback open, CloseCallback close) {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -25,7 +32,7 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         m_open = {};
         m_close = {};
-        m_sessions.clear();
+        hirari_native_editor_sessions_clear(m_sessions);
     }
 
     bool open(uint32_t track, uint32_t plugin, uintptr_t parent, uint64_t& session) {
@@ -40,27 +47,21 @@ public:
         // the session mutex across that platform callback.
         const uint64_t handle = openCallback(track, plugin, parent);
         if (handle == 0) return false;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_sessions[key(track, plugin)] = handle;
+        hirari_native_editor_sessions_adopt(m_sessions, track, plugin, handle);
         session = handle;
         return true;
     }
 
     bool close(uint32_t track, uint32_t plugin) {
-        uint64_t handle = 0;
+        const uint64_t handle = hirari_native_editor_sessions_session(m_sessions, track, plugin);
+        if (handle == 0) return false;
         CloseCallback closeCallback;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
-            const auto it = m_sessions.find(key(track, plugin));
-            if (it == m_sessions.end()) return false;
-            handle = it->second;
             closeCallback = m_close;
         }
         const bool ok = !closeCallback || closeCallback(handle);
-        if (ok) {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_sessions.erase(key(track, plugin));
-        }
+        if (ok) hirari_native_editor_sessions_forget(m_sessions, track, plugin);
         return ok;
     }
 
@@ -68,35 +69,26 @@ public:
     // used when the host has no wrapper callback but the processor can attach
     // its own VST3/AU view to the supplied parent surface.
     void adopt(uint32_t track, uint32_t plugin, uint64_t session) {
-        if (session == 0) return;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_sessions[key(track, plugin)] = session;
+        hirari_native_editor_sessions_adopt(m_sessions, track, plugin, session);
     }
 
     bool forget(uint32_t track, uint32_t plugin) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_sessions.erase(key(track, plugin)) != 0;
+        return hirari_native_editor_sessions_forget(m_sessions, track, plugin);
     }
 
     bool embedded(uint32_t track, uint32_t plugin) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_sessions.find(key(track, plugin)) != m_sessions.end();
+        return hirari_native_editor_sessions_embedded(m_sessions, track, plugin);
     }
 
     uint64_t session(uint32_t track, uint32_t plugin) const noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        const auto it = m_sessions.find(key(track, plugin));
-        return it == m_sessions.end() ? 0 : it->second;
+        return hirari_native_editor_sessions_session(m_sessions, track, plugin);
     }
 
 private:
-    static uint64_t key(uint32_t track, uint32_t plugin) noexcept {
-        return (static_cast<uint64_t>(track) << 32u) | plugin;
-    }
     mutable std::mutex m_mutex;
     OpenCallback m_open;
     CloseCallback m_close;
-    std::unordered_map<uint64_t, uint64_t> m_sessions;
+    void* m_sessions = nullptr;
 };
 
 } // namespace Hirari::Core::Plugins

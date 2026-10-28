@@ -173,6 +173,7 @@ pub mod midi_device_profiles;
 pub mod midi_devices;
 pub mod midi_file;
 pub mod midi_fragment_transport;
+pub mod native_editor_sessions;
 pub mod midi_input_buffer;
 pub mod midi_learn;
 pub mod midi_logical_editor;

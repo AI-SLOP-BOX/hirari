@@ -189,6 +189,10 @@ production support.
   `processSendPdc` and both fanout calls are removed; the Rust tables reject
   out-of-range nodes and the fanout/PDC entries already refuse null buffers and
   zero frames. An FFI-level test pins the absent-edge reads.
+- Native plug-in editor sessions now live in Rust. `native_editor_sessions.rs`
+  owns the `(track, plug-in)` key packing and the session table, so
+  open/close/adopt/forget/embedded on `NativeEditorHost` forward to Rust while
+  C++ keeps only the platform callbacks and never holds a lock across one.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

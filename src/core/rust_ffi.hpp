@@ -845,6 +845,12 @@ extern "C" bool hirari_native_test_isolation();
 // Audio configuration bounds (audio_config_rules.rs).
 extern "C" bool hirari_audio_config_valid(float tempo, double sampleRate, uint32_t blockSize);
 extern "C" bool hirari_audio_format_valid(double sampleRate, uint32_t blockSize);
+// Native editor session registry (native_editor_sessions.rs).
+extern "C" void* hirari_native_editor_sessions_create();
+extern "C" void hirari_native_editor_sessions_destroy(void* state), hirari_native_editor_sessions_clear(void* state);
+extern "C" void hirari_native_editor_sessions_adopt(void* state, uint32_t track, uint32_t plugin, uint64_t session);
+extern "C" bool hirari_native_editor_sessions_forget(void* state, uint32_t track, uint32_t plugin), hirari_native_editor_sessions_embedded(const void* state, uint32_t track, uint32_t plugin);
+extern "C" uint64_t hirari_native_editor_sessions_session(const void* state, uint32_t track, uint32_t plugin);
 extern "C" void* hirari_region_waveform(
     void* host, uint32_t trackId, uint32_t regionId, uint32_t numPeaks);
 extern "C" void hirari_region_waveform_forget(void* host, uint32_t regionId);
