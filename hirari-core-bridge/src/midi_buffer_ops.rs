@@ -146,6 +146,84 @@ pub unsafe extern "C" fn hirari_midi_buffer_add(
     }
 }
 
+const NOTE_ON_STATUS: u8 = 0x90;
+const NOTE_OFF_STATUS: u8 = 0x80;
+const CONTROL_CHANGE_STATUS: u8 = 0xb0;
+const ALL_NOTES_OFF_CONTROLLER: u8 = 123;
+
+/// Builds a channel status byte from the bridge's 1-based channel number.
+/// Channels 0 and above 16 are rejected, matching the previous inline gate.
+fn channel_status(base: u8, channel: u8) -> Option<u8> {
+    (1..=16).contains(&channel).then(|| base | (channel - 1))
+}
+
+unsafe fn add_channel_event(
+    state: *mut c_void,
+    base_status: u8,
+    channel: u8,
+    data_b: u8,
+    data_c: u8,
+    sample_offset: u64,
+    articulation_id: u8,
+) {
+    let Some(status) = channel_status(base_status, channel) else {
+        return;
+    };
+    let data = [status, data_b, data_c];
+    unsafe { hirari_midi_buffer_add(state, sample_offset, data.as_ptr(), 3, articulation_id) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_buffer_add_note_on(
+    state: *mut c_void,
+    channel: u8,
+    pitch: u8,
+    velocity: u8,
+    sample_offset: u64,
+    articulation_id: u8,
+) {
+    unsafe {
+        add_channel_event(
+            state,
+            NOTE_ON_STATUS,
+            channel,
+            pitch,
+            velocity,
+            sample_offset,
+            articulation_id,
+        )
+    };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_buffer_add_note_off(
+    state: *mut c_void,
+    channel: u8,
+    pitch: u8,
+    sample_offset: u64,
+) {
+    unsafe { add_channel_event(state, NOTE_OFF_STATUS, channel, pitch, 0, sample_offset, 0) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_buffer_add_all_notes_off(
+    state: *mut c_void,
+    channel: u8,
+    sample_offset: u64,
+) {
+    unsafe {
+        add_channel_event(
+            state,
+            CONTROL_CHANGE_STATUS,
+            channel,
+            ALL_NOTES_OFF_CONTROLLER,
+            0,
+            sample_offset,
+            0,
+        )
+    };
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_midi_buffer_copy(
     state: *mut c_void,
@@ -596,6 +674,40 @@ mod owned_state_tests {
         }
         assert!(unsafe { hirari_midi_buffer_overflowed(state) });
         assert_eq!(unsafe { hirari_midi_buffer_take_dropped(state) }, 3);
+        unsafe {
+            hirari_midi_buffer_clear(state);
+            hirari_midi_buffer_drop_in_place(state);
+        }
+    }
+
+    #[test]
+    fn note_helpers_build_channel_messages_and_reject_out_of_range_channels() {
+        let bytes = std::mem::size_of::<MidiBufferState>();
+        let words = bytes.div_ceil(std::mem::size_of::<u64>());
+        let mut storage = vec![0_u64; words];
+        let state = unsafe { hirari_midi_buffer_init(storage.as_mut_ptr().cast(), words * 8) };
+        assert!(!state.is_null());
+        unsafe {
+            hirari_midi_buffer_add_note_on(state, 1, 60, 100, 10, 7);
+            hirari_midi_buffer_add_note_on(state, 16, 61, 90, 20, 0);
+            hirari_midi_buffer_add_note_off(state, 2, 60, 30);
+            hirari_midi_buffer_add_all_notes_off(state, 3, 40);
+            // Out-of-range channels are dropped before a status byte exists.
+            hirari_midi_buffer_add_note_on(state, 0, 60, 100, 50, 0);
+            hirari_midi_buffer_add_note_on(state, 17, 60, 100, 50, 0);
+            hirari_midi_buffer_add_note_off(state, 0, 60, 50);
+            hirari_midi_buffer_add_all_notes_off(state, 17, 50);
+        }
+        assert_eq!(unsafe { hirari_midi_buffer_event_count(state) }, 4);
+        let events = unsafe { hirari_midi_buffer_event_data(state).cast::<MidiEvent>() };
+        let event = |index: isize| unsafe { &*events.offset(index) };
+        assert_eq!(event(0).data[..3], [0x90, 60, 100]);
+        assert_eq!(event(0)._articulation_id, 7);
+        assert_eq!(event(1).data[..3], [0x9f, 61, 90]);
+        assert_eq!(event(2).data[..3], [0x81, 60, 0]);
+        assert_eq!(event(2).sample_offset, 30);
+        assert_eq!(event(3).data[..3], [0xb2, 123, 0]);
+        assert_eq!(event(3).sample_offset, 40);
         unsafe {
             hirari_midi_buffer_clear(state);
             hirari_midi_buffer_drop_in_place(state);

@@ -275,6 +275,10 @@ extern "C" void hirari_midi_buffer_destroy(void* state);
 extern "C" void hirari_midi_buffer_add(
     void* state, uint64_t sample_offset, const uint8_t* data, uint32_t size,
     uint8_t articulation_id);
+// Channel validation and status-byte construction are Rust-owned.
+extern "C" void hirari_midi_buffer_add_note_on(void* state, uint8_t channel, uint8_t pitch, uint8_t velocity, uint64_t sampleOffset, uint8_t articulationId);
+extern "C" void hirari_midi_buffer_add_note_off(void* state, uint8_t channel, uint8_t pitch, uint64_t sampleOffset);
+extern "C" void hirari_midi_buffer_add_all_notes_off(void* state, uint8_t channel, uint64_t sampleOffset);
 extern "C" void* hirari_mixer_telemetry_create();
 extern "C" void hirari_mixer_telemetry_destroy(void* state);
 extern "C" bool hirari_midi_buffer_copy(void* state, const void* event);

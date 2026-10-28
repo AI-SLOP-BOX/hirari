@@ -53,22 +53,10 @@ public:
     }
 
     void addNoteOn(uint8_t channel, uint8_t pitch, uint8_t velocity, uint64_t sampleOffset, uint8_t articulationId = 0) {
-        if (channel == 0 || channel > 16) return;
-        uint8_t data[3] = { static_cast<uint8_t>(0x90 | (channel - 1)), pitch, velocity };
-        addEvent(sampleOffset, data, 3, articulationId);
+        hirari_midi_buffer_add_note_on(m_state, channel, pitch, velocity, sampleOffset, articulationId);
     }
-
-    void addNoteOff(uint8_t channel, uint8_t pitch, uint64_t sampleOffset) {
-        if (channel == 0 || channel > 16) return;
-        uint8_t data[3] = { static_cast<uint8_t>(0x80 | (channel - 1)), pitch, 0 };
-        addEvent(sampleOffset, data, 3, 0);
-    }
-
-    void addAllNotesOff(uint8_t channel, uint64_t sampleOffset) {
-        if (channel == 0 || channel > 16) return;
-        uint8_t data[3] = { static_cast<uint8_t>(0xB0 | (channel - 1)), 123, 0 };
-        addEvent(sampleOffset, data, 3, 0);
-    }
+    void addNoteOff(uint8_t channel, uint8_t pitch, uint64_t sampleOffset) { hirari_midi_buffer_add_note_off(m_state, channel, pitch, sampleOffset); }
+    void addAllNotesOff(uint8_t channel, uint64_t sampleOffset) { hirari_midi_buffer_add_all_notes_off(m_state, channel, sampleOffset); }
 
     /**
      * @brief Stable, in-place timestamp sort with safe same-sample note order.

@@ -168,6 +168,10 @@ production support.
   flag are read in `audio_device_mode.rs` with tests, replacing five copies of
   the `getenv`/`strcmp` checks across engine construction, device restart,
   reconnect and configuration apply.
+- MIDI note helpers on the realtime buffer are Rust-owned. Note on/off and
+  All Notes Off validate the 1-based channel range and compose the status
+  bytes in `midi_buffer_ops.rs`, so the C++ buffer only forwards arguments and
+  an out-of-range channel can never produce an event.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
