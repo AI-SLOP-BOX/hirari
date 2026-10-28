@@ -513,6 +513,87 @@ mod tests {
         }
     }
 
+    #[test]
+    fn realtime_bus_guards_reject_bad_arguments() {
+        let state = super::hirari_bus_audio_create();
+        assert!(!state.is_null());
+        let left = [1.0_f32; 4];
+        let right = [1.0_f32; 4];
+        let mut out_l = [0.0_f32; 4];
+        let mut out_r = [0.0_f32; 4];
+        unsafe {
+            assert!(!super::hirari_bus_audio_accumulate(
+                state,
+                std::ptr::null(),
+                right.as_ptr(),
+                4,
+                1.0,
+            ));
+            assert!(!super::hirari_bus_audio_accumulate(
+                state,
+                left.as_ptr(),
+                std::ptr::null(),
+                4,
+                1.0,
+            ));
+            assert!(!super::hirari_bus_audio_accumulate(
+                state,
+                left.as_ptr(),
+                right.as_ptr(),
+                0,
+                1.0,
+            ));
+            assert!(!super::hirari_bus_audio_accumulate(
+                state,
+                left.as_ptr(),
+                right.as_ptr(),
+                8_193,
+                1.0,
+            ));
+            for gain in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                assert!(!super::hirari_bus_audio_accumulate(
+                    state,
+                    left.as_ptr(),
+                    right.as_ptr(),
+                    4,
+                    gain,
+                ));
+            }
+            assert_eq!(super::hirari_bus_audio_samples(state), 0);
+            assert!(!super::hirari_bus_audio_replace_post(
+                state,
+                std::ptr::null(),
+                right.as_ptr(),
+                4,
+            ));
+            assert!(!super::hirari_bus_audio_replace_post(
+                state,
+                left.as_ptr(),
+                right.as_ptr(),
+                8_193,
+            ));
+            assert!(!super::hirari_bus_audio_commit_dry(state, 0));
+            assert!(!super::hirari_bus_audio_commit_dry(state, 8_193));
+            assert!(!super::hirari_bus_audio_read(
+                state,
+                std::ptr::null_mut(),
+                out_r.as_mut_ptr(),
+                4,
+                false,
+            ));
+            assert!(!super::hirari_bus_audio_read(
+                state,
+                out_l.as_mut_ptr(),
+                out_r.as_mut_ptr(),
+                8_193,
+                true,
+            ));
+            super::hirari_bus_audio_clear(state, 8_193);
+            assert_eq!(super::hirari_bus_audio_samples(state), 0);
+            super::hirari_bus_audio_destroy(state);
+        }
+    }
+
     #[cfg(feature = "dsp-differential-reference")]
     unsafe extern "C" {
         fn hirari_bus_accumulate_stereo_reference(

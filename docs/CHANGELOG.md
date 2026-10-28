@@ -177,6 +177,12 @@ production support.
   block-size (1 to 16384) checks in `audio_config_rules.rs` gate both the
   bridge's `apply_config`/`try_apply_config` and the engine's
   `prepareToPlay`, replacing three copies of the same predicate.
+- Realtime bus stage calls now rely on Rust validation only. `addSamples`,
+  `replacePostSamples`, `commitDryToPost` and `read` forward straight to
+  `bus_audio.rs`, which already rejects null buffers, zero or oversized
+  frames and a non-finite gain; `clear` clamps the frame count in Rust too, so
+  the duplicated guards in the C++ bus header are gone. A new Rust test covers
+  each rejection path.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

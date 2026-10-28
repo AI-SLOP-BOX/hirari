@@ -35,24 +35,18 @@ public:
 
     bool addSamples(const float* l, const float* r, uint32_t len,
                     float gain = 1.0f) noexcept {
-        if (!l || !r || len == 0 || len > kMaxSamples) return false;
-        if (!std::isfinite(gain)) return false;
         return hirari_bus_audio_accumulate(m_audioState, l, r, len, gain);
     }
 
     bool replacePostSamples(const float* l, const float* r, uint32_t len) noexcept {
-        if (!l || !r || len == 0 || len > kMaxSamples) return false;
         return hirari_bus_audio_replace_post(m_audioState, l, r, len);
     }
 
-    void clear(uint32_t len) noexcept {
-        hirari_bus_audio_clear(m_audioState, std::min(len, kMaxSamples));
-    }
+    void clear(uint32_t len) noexcept { hirari_bus_audio_clear(m_audioState, len); }
 
     // Copies the pre-FX stage to the post-FX stage.  A BusTrack can replace
     // this stage with the result of its Track FX chain afterwards.
     bool commitDryToPost(uint32_t len) noexcept {
-        if (len == 0 || len > kMaxSamples) return false;
         return hirari_bus_audio_commit_dry(m_audioState, len);
     }
 
@@ -63,7 +57,6 @@ public:
 private:
     friend class BusSystem;
     bool read(float* l, float* r, uint32_t len, bool post) const noexcept {
-        if (!l || !r || len == 0 || len > kMaxSamples) return false;
         return hirari_bus_audio_read(m_audioState, l, r, len, post);
     }
 
