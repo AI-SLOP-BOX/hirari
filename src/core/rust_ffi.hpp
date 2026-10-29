@@ -1957,8 +1957,10 @@ extern "C" void hirari_track_automation_capture_destroy(void* state);
 extern "C" bool hirari_track_automation_capture_record(
     const void* state, const void* recorder, uint32_t track_id,
     uint64_t sample_position, float volume, float pan);
-extern "C" size_t hirari_track_automation_capture_flush(
-    const void* state, HirariTrackAutomationCapturePoint* output, size_t capacity);
+extern "C" HirariTrackAutomationCapturePoint* hirari_track_automation_capture_drain(
+    const void* state, size_t* drained);
+extern "C" void hirari_track_automation_capture_points_free(
+    HirariTrackAutomationCapturePoint* points, size_t count);
 extern "C" float hirari_track_eq_gain(float boost_db, float cut_db);
 extern "C" void* hirari_track_pdc_delay_create();
 extern "C" void hirari_track_pdc_delay_destroy(void* state);

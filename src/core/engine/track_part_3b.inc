@@ -14,25 +14,17 @@
     // after draining the callback queue, keeping serialization and UI reads
     // consistent with what was actually recorded.
     uint32_t flushRecordedAutomation() {
-        size_t capacity = hirari_track_automation_capture_flush(
-            m_trackAutomationCaptureState, nullptr, 0);
-        if (capacity == 0) return 0;
-        std::vector<HirariTrackAutomationCapturePoint> captured;
         size_t drained = 0;
-        for (;;) {
-            captured.resize(capacity);
-            drained = hirari_track_automation_capture_flush(
-                m_trackAutomationCaptureState, captured.data(), captured.size());
-            if (drained <= captured.size()) break;
-            capacity = drained;
-        }
-        captured.resize(drained);
+        auto* captured = hirari_track_automation_capture_drain(
+            m_trackAutomationCaptureState, &drained);
+        if (!captured) return 0;
         auto volume = getVolumeAutomationPoints();
         auto pan = getPanAutomationPoints();
-        for (const auto& point : captured) {
-            volume.push_back({point.time, point.volume, 0.0f});
-            pan.push_back({point.time, point.pan, 0.0f});
+        for (size_t index = 0; index < drained; ++index) {
+            volume.push_back({captured[index].time, captured[index].volume, 0.0f});
+            pan.push_back({captured[index].time, captured[index].pan, 0.0f});
         }
+        hirari_track_automation_capture_points_free(captured, drained);
         setVolumeAutomation(volume);
         setPanAutomation(pan);
         return static_cast<uint32_t>(std::min<size_t>(drained, UINT32_MAX));

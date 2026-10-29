@@ -376,25 +376,52 @@ pub unsafe extern "C" fn hirari_track_automation_capture_record(
     state.record(track_id, sample_position, volume, pan, recorder)
 }
 
+/// Drains every pending capture point into a buffer this side owns. The
+/// control thread merges the points into its automation lists and then hands
+/// the buffer back through `points_free`; no C++ count can size a foreign
+/// resize. Returns null when nothing is pending or the state is invalid.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_track_automation_capture_flush(
+pub unsafe extern "C" fn hirari_track_automation_capture_drain(
     state: *const c_void,
-    output: *mut TrackAutomationCapturePoint,
-    capacity: usize,
-) -> usize {
+    drained: *mut usize,
+) -> *mut TrackAutomationCapturePoint {
+    if let Some(drained) = unsafe { drained.as_mut() } {
+        *drained = 0;
+    }
     let Some(state) = (unsafe { state.cast::<TrackCaptureInner>().as_ref() }) else {
-        return 0;
+        return std::ptr::null_mut();
     };
     let write = state.write.load(Ordering::Acquire);
     let read = state.read.load(Ordering::Relaxed);
     let count = write
         .saturating_sub(read)
         .min(TRACK_CAPTURE_CAPACITY as u64) as usize;
-    if output.is_null() || capacity < count {
-        return count;
+    if count == 0 {
+        return std::ptr::null_mut();
     }
-    let output = unsafe { std::slice::from_raw_parts_mut(output, capacity) };
-    state.flush_into(output).unwrap_or(0)
+    let mut buffer = vec![TrackAutomationCapturePoint::default(); count].into_boxed_slice();
+    let Some(written) = state.flush_into(&mut buffer) else {
+        return std::ptr::null_mut();
+    };
+    if written == 0 {
+        return std::ptr::null_mut();
+    }
+    if let Some(drained) = unsafe { drained.as_mut() } {
+        *drained = written;
+    }
+    Box::into_raw(buffer).cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_track_automation_capture_points_free(
+    points: *mut TrackAutomationCapturePoint,
+    count: usize,
+) {
+    if points.is_null() {
+        return;
+    }
+    let slice = std::ptr::slice_from_raw_parts_mut(points, count);
+    unsafe { drop(Box::from_raw(slice)) };
 }
 
 #[cfg(test)]
@@ -477,6 +504,38 @@ mod tests {
         assert_eq!(output[0].volume, 0.75);
         assert_eq!(output[0].pan, 1.0);
         assert_eq!(capture.read.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn drain_hands_pending_points_to_the_control_thread_once() {
+        let recorder = AutomationRecorderState::new();
+        let capture = hirari_track_automation_capture_create();
+        assert!(unsafe {
+            hirari_track_automation_capture_record(capture, &recorder as *const _ as *const c_void, 7, 100, 0.5, 0.25)
+        });
+        assert!(unsafe {
+            hirari_track_automation_capture_record(capture, &recorder as *const _ as *const c_void, 7, 200, 0.75, -0.5)
+        });
+
+        let mut drained = 0usize;
+        let points = unsafe { hirari_track_automation_capture_drain(capture, &mut drained) };
+        assert!(!points.is_null());
+        assert_eq!(drained, 2);
+        let merged = unsafe { std::slice::from_raw_parts(points, drained) };
+        assert_eq!(merged[0].time, 100.0);
+        assert_eq!(merged[0].volume, 0.5);
+        assert_eq!(merged[0].pan, 0.25);
+        assert_eq!(merged[1].time, 200.0);
+        assert_eq!(merged[1].volume, 0.75);
+        assert_eq!(merged[1].pan, -0.5);
+        unsafe { hirari_track_automation_capture_points_free(points, drained) };
+
+        let mut again = 1usize;
+        assert!(unsafe { hirari_track_automation_capture_drain(capture, &mut again) }.is_null());
+        assert_eq!(again, 0);
+        assert!(unsafe { hirari_track_automation_capture_drain(std::ptr::null(), &mut again) }.is_null());
+        assert_eq!(again, 0);
+        unsafe { hirari_track_automation_capture_destroy(capture) };
     }
 
     #[test]

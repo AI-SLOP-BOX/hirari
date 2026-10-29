@@ -264,6 +264,11 @@ production support.
   4096-frame engine cap, the split at the loop boundary and the in-place cycle
   restart, so `processBlockDirect` only forwards the current playhead and loop
   bounds and processes the returned chunk length.
+- Recorded-automation draining moved to Rust.
+  `hirari_track_automation_capture_drain` sizes and grows its own buffer and
+  returns the pending points with a release entry point, so
+  `Track::flushRecordedAutomation` no longer retries a caller-sized flush and
+  only merges the returned points into the volume and pan lists.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
