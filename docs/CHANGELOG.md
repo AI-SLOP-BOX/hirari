@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Four C++ contract programs that no build script or CMake target referenced
+  are deleted. Their contracts are covered elsewhere: the plugin-sandbox IPC
+  assertions by the Rust `plugin_sandbox_workflow` integration tests, the
+  MIDI-buffer ordering by the Rust differential reference test, and the VST3
+  and input-queue checks asserted the fallback paths those types still keep.
 - The harmonic-context singleton moved to Rust (`harmonic_context.rs`), so
   structure analysis and auto-arrangement read the same Rust-owned
   tension/valence/stability state. The unused C++ `TrackPresetStore`,

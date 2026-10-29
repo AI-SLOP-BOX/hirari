@@ -568,7 +568,7 @@ cargo test -p hirari-core-bridge --lib    # 346 passed
 scripts/audit_session_singletons.sh
 scripts/check_realtime_boundary.sh
 scripts/run_native_plugin_compile_contract.sh
-plugin_sandbox_ipc_contract (builtin and minimal-gain CLAP modes)
+plugin sandbox IPC contract (Rust `plugin_sandbox_workflow`: builtin and minimal-gain CLAP modes)
 ```
 
 The current full CMake integration gate also passes locally: Rust/UI
