@@ -267,7 +267,7 @@ void HirariUnifiedEngine::new_project() {
     set_test_tone(false);
     set_playhead(0);
     hirari_mpe_state_reset(m_mpeState);
-    MPEManager::getInstance().reset();
+    hirari_mpe_manager_reset(m_mpeManager);
     m_undoManager.clear();
     hirari_native_pdc_reset_for_project(m_pdcState);
     m_sidechainManager.resetForProject();

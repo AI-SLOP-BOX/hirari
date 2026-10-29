@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The MPE manager adapter is gone. `MPEManager` only wrapped
+  `hirari_mpe_manager_*` and its sole caller used `reset()`, so the engine now
+  holds the Rust handle and calls `hirari_mpe_manager_reset` on project reset;
+  five unreachable declarations were dropped from the FFI header.
 - Bus summing handles are no longer a C++ class. `Bus` forwarded every call to
   `bus_audio.rs`; `BusSystem` now creates the per-bus handles once, binds them
   into the Rust-owned system, and hands the raw handle to `BusTrack`, which

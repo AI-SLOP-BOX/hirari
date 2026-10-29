@@ -24,7 +24,6 @@
 #include "engine/bus_system.hpp"
 #include "engine/bus_track.hpp"
 #include "midi_learn_manager.hpp"
-#include "engine/mpe_manager.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
 #include "io/audio_decoder.hpp"

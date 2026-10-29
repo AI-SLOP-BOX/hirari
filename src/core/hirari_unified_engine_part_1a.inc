@@ -72,6 +72,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_automation_lane_group_destroy(m_automationLanes);
     hirari_mpe_state_free(m_mpeState);
     hirari_routing_engine_destroy(m_routingEngine);
+    hirari_mpe_manager_destroy(m_mpeManager);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,

@@ -20,6 +20,9 @@
     static constexpr uint32_t kPdcMasterDestination = 0xFFFFFFFFu;
     UndoTransactionManager m_undoManager;
     void* m_tempoState = hirari_tempo_map_create();
+    // MPE channel/voice ownership lives in Rust (mpe.rs); the engine keeps the
+    // singleton handle so project reset can clear it without a C++ adapter.
+    void* m_mpeManager = hirari_mpe_manager_create();
     // Rust (routing_engine_core.rs) owns the graph, gain, feedback, send-PDC
     // and topology stores; this is the single opaque handle the engine keeps.
     void* m_routingEngine = hirari_routing_engine_create();

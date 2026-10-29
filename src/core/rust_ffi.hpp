@@ -2255,16 +2255,8 @@ extern "C" void hirari_mastering_kernel_process(
 extern "C" float hirari_mastering_kernel_rms_dbfs(const void* state);
 extern "C" float* hirari_mastering_kernel_write_pointer(const void* state, int32_t channel);
 extern "C" void* hirari_mpe_manager_create();
-extern "C" void* hirari_mpe_manager_clone(const void* state);
 extern "C" void hirari_mpe_manager_destroy(void* state);
-extern "C" uint8_t hirari_mpe_manager_allocate(void* state, uint8_t note);
-extern "C" void hirari_mpe_manager_release(void* state, uint8_t note);
 extern "C" void hirari_mpe_manager_reset(void* state);
-extern "C" void hirari_mpe_manager_update(
-    void* state, uint8_t channel, float pressure, float timbre, float bend);
-extern "C" bool hirari_mpe_manager_get(
-    const void* state, uint8_t channel, uint8_t* note, bool* active,
-    float* pressure, float* timbre, float* pitch_bend);
 
 using HirariForensicJournalRecoveryCallback = void (*)(
     void*, uint32_t, uint32_t, float, uint64_t);
