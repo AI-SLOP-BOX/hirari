@@ -12,8 +12,6 @@
     bool set_track_name(uint32_t id, std::string_view name);
     uint32_t get_track_count() const;
     std::vector<std::shared_ptr<Track>> get_tracks_snapshot() const;
-    rust::Slice<const float> get_track_peaks_l() const;
-    rust::Slice<const float> get_track_peaks_r() const;
     Track& get_track(uint32_t id);
 
     // Regions & Plugins

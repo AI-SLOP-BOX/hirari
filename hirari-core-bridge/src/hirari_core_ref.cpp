@@ -21,11 +21,6 @@ void HIRARI_LOG(uint32_t level, const std::string& msg) {
 
 namespace Hirari::Core::Bridge {
 
-void initialize_gpu() {
-    // Explicitly seed the GPU kernel before the first block arrives
-    ::Hirari::DSP::Spatial::MetalAudioKernel::getInstance().initialize();
-}
-
 } // namespace Hirari::Core::Bridge
 
 // Frozen reference for the pre-migration AnalogSaturator / Oversampler2x path.

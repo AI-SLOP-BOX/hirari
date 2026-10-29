@@ -67,6 +67,16 @@ production support.
 
 ### Changed
 
+- Dead bridge surface is removed rather than left as a second entry point:
+  the borrowed track-peak accessors (Rust only ever used the owned copies),
+  `initialize_gpu` (Rust calls the status-returning variant), and the
+  `AudioEngine` forwarders for `start_audio_device`,
+  `set_track_solo_for_offline_render`, `clear_preview_sample`,
+  `get_track_count` and `get_region_audio_interleaved` are deleted together
+  with the engine members only they reached: the arrangement marker/part
+  accessors, tap-tempo helpers, automation-lane group helpers, and the
+  telemetry getters. Marker and part storage still round-trips through the
+  project file; the tap-tempo and automation-lane behaviour lives in Rust.
 - The C++ `MidiLearnManager` and `PreviewSynth` wrappers are gone. The engine
   now holds the Rust-owned midi-learn and preview-synth handles directly, so
   CC binding, CC14 binding, preview reset and preview block rendering call the

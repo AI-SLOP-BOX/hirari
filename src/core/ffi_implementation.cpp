@@ -17,13 +17,6 @@ namespace Hirari::Core::Bridge {
         return bridge.get_core();
     }
 
-    rust::Slice<const float> get_track_peaks_l(const Engine::HirariUnifiedEngine& engine) {
-        return engine.get_track_peaks_l();
-    }
-    rust::Slice<const float> get_track_peaks_r(const Engine::HirariUnifiedEngine& engine) {
-        return engine.get_track_peaks_r();
-    }
-
     rust::Vec<float> get_track_peaks_l_owned(const Engine::HirariUnifiedEngine& engine) {
         rust::Vec<float> result;
         for (int attempt = 0; attempt < 4; ++attempt) {

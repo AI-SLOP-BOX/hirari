@@ -64,14 +64,12 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_control_room_state_destroy(m_controlRoomState);
     hirari_native_pdc_destroy(m_pdcState);
     hirari_tempo_map_destroy(m_tempoState);
-    hirari_tap_tempo_destroy(m_tapTempo);
     hirari_external_sync_destroy(m_externalSync);
     hirari_metronome_destroy(m_metronome);
     hirari_mixer_telemetry_destroy(m_mixerTelemetry);
     hirari_macro_mapping_destroy(m_macroControl);
     hirari_midi_learn_destroy(m_midiLearnState);
     hirari_preview_synth_destroy(m_previewSynthState);
-    hirari_automation_lane_group_destroy(m_automationLanes);
     hirari_mpe_state_free(m_mpeState);
     hirari_routing_engine_destroy(m_routingEngine);
     hirari_mpe_manager_destroy(m_mpeManager);

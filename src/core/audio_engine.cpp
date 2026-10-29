@@ -53,24 +53,6 @@ AudioEngine::AudioEngine(bool startDevice)
 #endif
     }
 
-bool AudioEngine::start_audio_device() const {
-    if (hirari_audio_device_mode_offline()) return false;
-#if defined(__APPLE__)
-    if (hirari_native_test_isolation()) return false;
-#endif
-    std::lock_guard<std::mutex> lock(m_configMutex);
-    const bool started = m_driver && m_driver->start();
-    if (!started && m_engine) {
-        // A failed device transition is also a transport boundary. Do not
-        // leave the graph logically playing while no callback can consume it.
-        m_engine->set_playing(false);
-    }
-#if !defined(__APPLE__)
-    if (started) sync_jack_graph_config();
-#endif
-    return started;
-}
-
     AudioEngine::~AudioEngine() {
         hirari_layout_snapshot_owner_release(m_layoutSnapshotOwnerId);
         std::lock_guard<std::mutex> lock(m_configMutex);

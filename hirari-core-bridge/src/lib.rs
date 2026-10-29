@@ -119,7 +119,6 @@ pub mod ffi {
         // --- LIFECYCLE: No more global singletons ---
         fn new_audio_engine() -> UniquePtr<AudioEngine>;
         fn new_audio_engine_offline() -> UniquePtr<AudioEngine>;
-        fn start_audio_device(self: &AudioEngine) -> bool;
 
         fn set_playing(self: &AudioEngine, p: bool);
         fn try_set_playing(self: &AudioEngine, p: bool) -> bool;
@@ -175,7 +174,6 @@ pub mod ffi {
         fn set_track_pan(self: &AudioEngine, tid: u32, value: f32) -> bool;
         fn set_track_mute(self: &AudioEngine, tid: u32, muted: bool) -> bool;
         fn set_track_solo(self: &AudioEngine, tid: u32, solo: bool) -> bool;
-        fn set_track_solo_for_offline_render(self: &AudioEngine, tid: u32, solo: bool) -> bool;
         fn set_offline_render_target(self: &AudioEngine, tid: u32) -> bool;
         fn clear_offline_render_target(self: &AudioEngine);
         fn set_offline_render_tail_seconds(self: &AudioEngine, seconds: f32);
@@ -249,7 +247,6 @@ pub mod ffi {
         fn set_preview_sample(self: &AudioEngine, samples: &[f32], source_rate: f64);
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn trigger_preview_sample(self: &AudioEngine);
-        fn clear_preview_sample(self: &AudioEngine);
         fn shutdown(self: &AudioEngine);
         fn add_track(self: &AudioEngine, t_type: u32) -> u32;
         fn add_vca_group(self: &AudioEngine, group_id: u32, gain: f32) -> bool;
@@ -705,7 +702,6 @@ pub mod ffi {
             high_cut_db: f32,
         ) -> bool;
         fn get_track_correlation(self: &AudioEngine, tid: u32) -> f32;
-        fn get_track_count(self: &AudioEngine) -> u32;
         fn get_project_layout_json(self: &AudioEngine) -> String;
         fn request_project_layout_snapshot(self: &AudioEngine) -> u64;
         fn poll_project_layout_snapshot(self: &AudioEngine, request_id: u64) -> String;
@@ -745,7 +741,6 @@ pub mod ffi {
         fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
         fn poll_region_waveform(self: &AudioEngine, request: u64) -> Vec<f32>;
         fn region_waveform_pending(self: &AudioEngine, request: u64) -> bool;
-        fn get_region_audio_interleaved(self: &AudioEngine, tid: u32, rid: u32) -> Vec<f32>;
         fn get_region_audio_interleaved_range(
             self: &AudioEngine,
             tid: u32,
@@ -759,8 +754,6 @@ pub mod ffi {
         fn get_region_channel_count(self: &AudioEngine, tid: u32, rid: u32) -> u32;
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
         fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
-        fn get_track_peaks_l(engine: &HirariUnifiedEngine) -> &[f32];
-        fn get_track_peaks_r(engine: &HirariUnifiedEngine) -> &[f32];
         fn get_track_peaks_l_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;
         fn get_track_peaks_r_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;
         fn pop_event(engine: &HirariUnifiedEngine, event: &mut BridgeEvent) -> bool;
@@ -772,7 +765,6 @@ pub mod ffi {
         fn get_song_structure_json(engine: &HirariUnifiedEngine) -> String;
 
         // --- GPU: Explicit deterministic initialization ---
-        fn initialize_gpu();
         fn initialize_gpu_with_status() -> bool;
     }
 

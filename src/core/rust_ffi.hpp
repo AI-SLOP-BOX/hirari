@@ -106,11 +106,6 @@ extern "C" double hirari_external_sync_rate(const void* state);
 extern "C" void hirari_external_sync_tick(void* state, uint64_t timestamp);
 extern "C" uint64_t hirari_external_sync_ticks(const void* state);
 extern "C" uint64_t hirari_external_sync_last_tick(const void* state);
-extern "C" void* hirari_tap_tempo_create(size_t max_taps);
-extern "C" void hirari_tap_tempo_destroy(void* state);
-extern "C" void hirari_tap_tempo_tap(void* state, uint64_t timestamp_ms);
-extern "C" void hirari_tap_tempo_clear(void* state);
-extern "C" double hirari_tap_tempo_bpm(const void* state);
 using HirariWaveformSampleCount = bool (*)(void*, uint64_t*);
 using HirariWaveformSample = bool (*)(void*, uint64_t, float*);
 extern "C" void hirari_audio_buffer_clear(
@@ -236,10 +231,6 @@ extern "C" bool hirari_audio_buffer_deinterleave_interleaved(
     float* const* channel_pointers, uint32_t channel_count, uint32_t frames);
 extern "C" void* hirari_macro_mapping_create();
 extern "C" void hirari_macro_mapping_destroy(void* state);
-extern "C" void* hirari_automation_lane_group_create();
-extern "C" void hirari_automation_lane_group_destroy(void* state);
-extern "C" bool hirari_automation_lane_group_add(void* state, uint32_t id), hirari_automation_lane_group_link(void* state, uint32_t id, bool linked), hirari_automation_lane_group_protect(void* state, uint32_t id, bool protected_lane);
-extern "C" bool hirari_automation_lane_group_preview(void* state, uint32_t id, float value);
 extern "C" void hirari_macro_control_set_value(
     void* state, uint32_t macro_index, float value);
 extern "C" void* hirari_channel_strip_create();

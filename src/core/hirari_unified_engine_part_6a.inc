@@ -431,28 +431,6 @@ namespace {
 }();
 }  // namespace
 
-rust::Slice<const float> HirariUnifiedEngine::get_track_peaks_l() const {
-    thread_local std::array<float, 256> snapshot{};
-    TelemetryData telemetry{};
-    if (!copy_telemetry(get_active_telemetry_idx(), telemetry)) {
-        return rust::Slice<const float>(snapshot.data(), 0);
-    }
-    const uint32_t count = std::min<uint32_t>(telemetry.count, snapshot.size());
-    std::copy_n(telemetry.peaksL, count, snapshot.data());
-    return rust::Slice<const float>(snapshot.data(), count);
-}
-
-rust::Slice<const float> HirariUnifiedEngine::get_track_peaks_r() const {
-    thread_local std::array<float, 256> snapshot{};
-    TelemetryData telemetry{};
-    if (!copy_telemetry(get_active_telemetry_idx(), telemetry)) {
-        return rust::Slice<const float>(snapshot.data(), 0);
-    }
-    const uint32_t count = std::min<uint32_t>(telemetry.count, snapshot.size());
-    std::copy_n(telemetry.peaksR, count, snapshot.data());
-    return rust::Slice<const float>(snapshot.data(), count);
-}
-
 HirariUnifiedEngine::MeterData HirariUnifiedEngine::getMasterMeterData() const {
     if (m_analyzer) {
         auto d = m_analyzer->getLatestData();

@@ -309,7 +309,6 @@
         return m_engine && m_engine->set_track_eq(tid, lowBoostDb, lowCutDb, highBoostDb, highCutDb);
     }
     float get_track_correlation(uint32_t tid) const { return m_engine ? m_engine->get_track_correlation(tid) : 0.0f; }
-    uint32_t get_track_count() const { return m_engine ? m_engine->get_track_count() : 0; }
     bool execute_auto_mixing() const { return m_engine && m_engine->execute_auto_mixing(); }
     bool execute_auto_arrangement() const { return m_engine && m_engine->execute_auto_arrangement(); }
     bool set_project_scale(int32_t root, int32_t type) const {
@@ -554,10 +553,6 @@
     }
     bool region_waveform_pending(uint64_t request) const noexcept {
         return request != 0 && hirari_waveform_snapshot_pending(request);
-    }
-    rust::Vec<float> get_region_audio_interleaved(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->get_region_audio_interleaved(tid, rid, 16u * 1024u * 1024u)
-                        : rust::Vec<float>{};
     }
     rust::Vec<float> get_region_audio_interleaved_range(uint32_t tid, uint32_t rid,
                                                         uint64_t startFrame,

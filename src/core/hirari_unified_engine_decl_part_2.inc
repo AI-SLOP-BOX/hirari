@@ -19,18 +19,6 @@
     // survive here, for the driver config and the native contract test.
     float get_tempo() const;
     bool set_tempo(float bpm);
-    bool add_marker(uint64_t sample, std::string_view name, uint32_t color) { return m_arrangement.upsertMarker({sample, std::string(name), color}); }
-    bool remove_marker(uint64_t sample) { return m_arrangement.removeMarker(sample); }
-    std::vector<uint64_t> marker_positions() const { std::vector<uint64_t> out; for (const auto& m : m_arrangement.markers()) out.push_back(m.sample); return out; }
-    bool set_arranger_parts(std::vector<::Hirari::Core::Composition::ArrangerPart> parts) { return m_arrangement.setArrangerParts(std::move(parts)); }
-    std::vector<::Hirari::Core::Composition::ArrangerPart> arranger_parts() const { return m_arrangement.arrangerParts(); }
-    void tap_tempo(uint64_t timestamp_ms) noexcept {
-        hirari_tap_tempo_tap(m_tapTempo, timestamp_ms);
-        const double bpm = hirari_tap_tempo_bpm(m_tapTempo);
-        if (bpm > 0.0) hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(bpm));
-    }
-    void clear_tap_tempo() noexcept { hirari_tap_tempo_clear(m_tapTempo); }
-    double tapped_tempo() const noexcept { return hirari_tap_tempo_bpm(m_tapTempo); }
     void midi_clock_tick(uint64_t timestamp) noexcept { hirari_external_sync_tick(m_externalSync, timestamp); }
     uint64_t midi_clock_ticks() const noexcept { return hirari_external_sync_ticks(m_externalSync); }
     uint64_t midi_clock_last_tick() const noexcept { return hirari_external_sync_last_tick(m_externalSync); }
@@ -56,10 +44,6 @@
         }) != m_tracks.end();
     }
     std::string plugin_compatibility_snapshot_json() const;
-    bool add_automation_lane(uint32_t id) { return hirari_automation_lane_group_add(m_automationLanes, id); }
-    bool set_automation_lane_linked(uint32_t id, bool linked) { return hirari_automation_lane_group_link(m_automationLanes, id, linked); }
-    bool set_automation_lane_protected(uint32_t id, bool protectedLane) { return hirari_automation_lane_group_protect(m_automationLanes, id, protectedLane); }
-    bool preview_automation_lane(uint32_t id, float value) { return hirari_automation_lane_group_preview(m_automationLanes, id, value); }
     float get_master_gain() const noexcept;
     float get_track_volume(uint32_t tid) const;
     bool set_track_solo_for_offline_render(uint32_t tid, bool solo);

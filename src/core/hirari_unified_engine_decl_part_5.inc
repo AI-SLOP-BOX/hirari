@@ -65,14 +65,12 @@
     };
 
     uint32_t get_active_telemetry_idx() const { return m_activeTelemetryIdx.load(std::memory_order_acquire); }
-    const TelemetryData& get_telemetry(uint32_t idx) const { return m_telemetryBuffers[idx]; }
     bool copy_telemetry(uint32_t idx, TelemetryData& destination) const {
         if (idx >= 2 || m_telemetryCopyLock.test_and_set(std::memory_order_acquire)) return false;
         destination = m_telemetryBuffers[idx];
         m_telemetryCopyLock.clear(std::memory_order_release);
         return true;
     }
-    uint64_t get_telemetry_sequence() const { return m_telemetrySequence.load(std::memory_order_acquire); }
     
     void push_event(const ::Hirari::Core::EngineEvent& e);
     bool pop_event(::Hirari::Core::EngineEvent& e) const;

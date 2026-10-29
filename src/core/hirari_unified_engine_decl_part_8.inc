@@ -44,8 +44,6 @@
     // engine owns nothing but the lifetime.
     void* m_controlRoomState = hirari_control_room_state_create();
     ::Hirari::Core::Plugins::PluginCompatibilityRegistry m_pluginCompatibility;
-    void* m_automationLanes = hirari_automation_lane_group_create();
-    void* m_tapTempo = hirari_tap_tempo_create(8);
     // MIDI clock receive state lives in Rust (external_sync_runtime.rs).
     void* m_externalSync = hirari_external_sync_create();
     ::Hirari::Core::Composition::ArrangementEditModel m_arrangement;

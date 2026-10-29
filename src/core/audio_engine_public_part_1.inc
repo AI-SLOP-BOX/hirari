@@ -3,10 +3,6 @@ public:
     explicit AudioEngine(bool startDevice);
     ~AudioEngine();
 
-    // Explicit lifecycle API for CLI, preview, and offline sessions. The
-    // default constructor retains legacy product startup behavior.
-    bool start_audio_device() const;
-
     void set_playing(bool playing) const {
         (void)try_set_playing(playing);
     }
@@ -97,9 +93,6 @@ public:
     }
     bool set_track_solo(uint32_t tid, bool solo) const {
         return m_engine && hirari_routing_edit_set_track_solo(m_engine.get(), tid, solo);
-    }
-    bool set_track_solo_for_offline_render(uint32_t tid, bool solo) const {
-        return m_engine && m_engine->set_track_solo_for_offline_render(tid, solo);
     }
     bool set_offline_render_target(uint32_t tid) const {
         return m_engine && m_engine->set_offline_render_target(tid);
@@ -326,7 +319,6 @@ public:
     }
 
     void trigger_preview_sample() const { if (m_engine) m_engine->trigger_preview_sample(); }
-    void clear_preview_sample() const { if (m_engine) m_engine->clear_preview_sample(); }
     void apply_config(float tempo, uint32_t sr, uint32_t bs) const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         (void)apply_config_locked(tempo, sr, bs);

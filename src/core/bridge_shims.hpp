@@ -23,8 +23,6 @@ namespace Hirari::Core::Bridge {
 
     rust::Vec<float> get_runtime_telemetry(const BridgeFFI::AudioEngine& bridge);
 
-    rust::Slice<const float> get_track_peaks_l(const Engine::HirariUnifiedEngine& engine);
-    rust::Slice<const float> get_track_peaks_r(const Engine::HirariUnifiedEngine& engine);
     rust::Vec<float> get_track_peaks_l_owned(const Engine::HirariUnifiedEngine& engine);
     rust::Vec<float> get_track_peaks_r_owned(const Engine::HirariUnifiedEngine& engine);
     bool pop_event(const Engine::HirariUnifiedEngine& engine, BridgeEvent& ev);
@@ -43,7 +41,6 @@ namespace Hirari::Core::Bridge {
                       uint64_t expected_audio_generation);
 
     void report_hirari_log(uint32_t level, rust::Str msg) noexcept;
-    void initialize_gpu();
     bool initialize_gpu_with_status();
 }
 
