@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Track freeze/unfreeze/cache-path/restore calls and plugin state get/set now
+  dispatch from Rust straight to their Rust implementations; the `AudioEngine`
+  relay methods, their cxx declarations and the C++ declarations of the freeze
+  and plugin-state FFI entry points are gone.
 - Track volume/pan/mute/solo edits and undo clearing now go straight from
   Rust to their Rust implementations; the `AudioEngine` relay methods, their
   bridge declarations and the C++ declarations of those FFI entry points are

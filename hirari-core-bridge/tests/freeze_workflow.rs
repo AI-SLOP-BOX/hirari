@@ -1,3 +1,4 @@
+use hirari_core_bridge::engine_edit_ext::TrackEditExt;
 use hirari_core_bridge::ffi;
 
 mod support {

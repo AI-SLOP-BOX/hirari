@@ -11,33 +11,6 @@
     bool set_low_latency_mode(bool active) const { return m_engine && m_engine->set_low_latency_mode(active); }
     bool low_latency_mode() const { return m_engine && m_engine->low_latency_mode(); }
     uint32_t duplicate_track(uint32_t id) const { return m_engine ? m_engine->duplicate_track(id) : 0; }
-    bool freeze_track(uint32_t tid, uint64_t totalSamples, uint32_t sampleRate) const {
-        return m_engine && hirari_track_freeze(m_engine.get(), tid, totalSamples, sampleRate);
-    }
-    bool freeze_track_to_file(uint32_t tid, rust::Str path, uint64_t totalSamples, uint32_t sampleRate) const {
-        return m_engine && hirari_track_freeze_to_file(
-            m_engine.get(), tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(),
-            totalSamples, sampleRate);
-    }
-    bool set_track_freeze_cache_path(uint32_t tid, rust::Str path) const {
-        return m_engine && hirari_track_set_freeze_cache_path(
-            m_engine.get(), tid, reinterpret_cast<const uint8_t*>(path.data()), path.size());
-    }
-    bool restore_track_freeze_from_file(uint32_t tid, rust::Str path,
-                                        uint64_t totalSamples, uint32_t sampleRate) const {
-        return m_engine && hirari_track_restore_freeze(
-            m_engine.get(), tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(),
-            totalSamples, sampleRate);
-    }
-    bool unfreeze_track(uint32_t tid) const {
-        return m_engine && hirari_track_unfreeze(m_engine.get(), tid);
-    }
-    bool is_track_frozen(uint32_t tid) const {
-        return m_engine && hirari_track_is_frozen(m_engine.get(), tid);
-    }
-    bool freeze_track_to_project_end(uint32_t tid, uint32_t sampleRate) const {
-        return m_engine && hirari_track_freeze_to_project_end(m_engine.get(), tid, sampleRate);
-    }
     bool region_table_mirror_matches(uint32_t tid) const {
         return m_engine && m_engine->region_table_mirror_matches(tid);
     }
@@ -56,26 +29,6 @@
     }
     
     bool add_plugin(uint32_t tid, uint32_t pluginType) const { return m_engine && m_engine->add_plugin(tid, pluginType); }
-    rust::Vec<uint8_t> get_plugin_state(uint32_t tid, uint32_t pluginIndex) const {
-        rust::Vec<uint8_t> out;
-        if (!m_engine) return out;
-        const size_t required = hirari_plugin_edit_get_state(
-            m_engine.get(), tid, pluginIndex, nullptr, 0);
-        if (required == 0) return out;
-        std::vector<uint8_t> state(required);
-        if (hirari_plugin_edit_get_state(m_engine.get(), tid, pluginIndex,
-                                         state.data(), required) != required) {
-            return out;
-        }
-        out.reserve(required);
-        for (const auto byte : state) out.push_back(byte);
-        return out;
-    }
-    bool set_plugin_state(uint32_t tid, uint32_t pluginIndex,
-                          rust::Slice<const uint8_t> state) const {
-        return m_engine && hirari_plugin_edit_set_state(
-                               m_engine.get(), tid, pluginIndex, state.data(), state.size());
-    }
     bool remove_plugin(uint32_t tid, uint32_t pluginIndex) const { return m_engine && m_engine->remove_plugin(tid, pluginIndex); }
     bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex) const { return m_engine && m_engine->move_plugin(tid, fromIndex, toIndex); }
     bool add_sandboxed_plugin(uint32_t tid, rust::Str path) const {

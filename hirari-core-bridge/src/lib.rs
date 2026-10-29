@@ -256,29 +256,7 @@ pub mod ffi {
         fn set_track_name(self: &AudioEngine, id: u32, name: &str) -> bool;
         fn new_project(self: &AudioEngine);
         fn duplicate_track(self: &AudioEngine, id: u32) -> u32;
-        fn freeze_track(self: &AudioEngine, tid: u32, total_samples: u64, sample_rate: u32)
-            -> bool;
-        fn freeze_track_to_project_end(self: &AudioEngine, tid: u32, sample_rate: u32) -> bool;
-        fn freeze_track_to_file(
-            self: &AudioEngine,
-            tid: u32,
-            path: &str,
-            total_samples: u64,
-            sample_rate: u32,
-        ) -> bool;
-        fn set_track_freeze_cache_path(self: &AudioEngine, tid: u32, path: &str) -> bool;
-        fn restore_track_freeze_from_file(
-            self: &AudioEngine,
-            tid: u32,
-            path: &str,
-            total_samples: u64,
-            sample_rate: u32,
-        ) -> bool;
-        fn unfreeze_track(self: &AudioEngine, tid: u32) -> bool;
-        fn is_track_frozen(self: &AudioEngine, tid: u32) -> bool;
         fn add_plugin(self: &AudioEngine, tid: u32, plugin_type: u32) -> bool;
-        fn get_plugin_state(self: &AudioEngine, tid: u32, plugin_index: u32) -> Vec<u8>;
-        fn set_plugin_state(self: &AudioEngine, tid: u32, plugin_index: u32, state: &[u8]) -> bool;
         fn remove_plugin(self: &AudioEngine, tid: u32, plugin_index: u32) -> bool;
         fn move_plugin(self: &AudioEngine, tid: u32, from_index: u32, to_index: u32) -> bool;
         fn add_sandboxed_plugin(self: &AudioEngine, tid: u32, path: &str) -> bool;
