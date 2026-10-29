@@ -327,25 +327,7 @@ pub mod ffi {
         fn clear_region_processing(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn duplicate_region(self: &AudioEngine, tid: u32, rid: u32, start_sample: u64) -> u32;
         fn set_region_gain(self: &AudioEngine, tid: u32, rid: u32, gain: f32) -> bool;
-        fn set_region_range_edit(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            start: u64,
-            end: u64,
-            gain: f32,
-            fade_in: u64,
-            fade_out: u64,
-        ) -> bool;
-        fn clear_region_range_edits(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn set_region_muted(self: &AudioEngine, tid: u32, rid: u32, muted: bool) -> bool;
-        fn set_region_comp_ranges(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            packed_ranges: &[u64],
-            managed: bool,
-        ) -> bool;
         fn set_region_fades(
             self: &AudioEngine,
             tid: u32,
@@ -510,9 +492,6 @@ pub mod ffi {
             start_sample: u64,
             length_samples: u64,
         );
-        fn set_spatial_position(self: &AudioEngine, tid: u32, x: f32, y: f32, z: f32) -> bool;
-        fn set_hrtf_kernel(self: &AudioEngine, tid: u32, left: Vec<f32>, right: Vec<f32>) -> bool;
-        fn clear_hrtf_kernel(self: &AudioEngine, tid: u32) -> bool;
         fn set_track_armed(self: &AudioEngine, tid: u32, armed: bool) -> bool;
         fn set_track_input_monitor(self: &AudioEngine, tid: u32, enabled: bool) -> bool;
         fn set_track_input_monitor_channels(
@@ -522,32 +501,14 @@ pub mod ffi {
             left: u32,
             right: u32,
         ) -> bool;
-        fn set_automation_data(
-            self: &AudioEngine,
-            tid: u32,
-            param_id: u32,
-            packed_points: Vec<f64>,
-        ) -> bool;
         fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
         fn plugin_compatibility_snapshot_json(self: &AudioEngine) -> String;
-        fn set_track_delay_automation(
-            self: &AudioEngine,
-            tid: u32,
-            packed_points: Vec<f64>,
-        ) -> bool;
         fn set_plugin_parameter(
             self: &AudioEngine,
             tid: u32,
             plugin_index: u32,
             parameter_id: u32,
             value: f32,
-        ) -> bool;
-        fn set_plugin_automation(
-            self: &AudioEngine,
-            tid: u32,
-            plugin_index: u32,
-            parameter_id: u32,
-            packed_points: Vec<f64>,
         ) -> bool;
         fn set_plugin_parameter_without_undo(
             self: &AudioEngine,
@@ -569,8 +530,6 @@ pub mod ffi {
             plugin_index: u32,
             parameter_id: u32,
         ) -> String;
-        fn save_plugin_preset(self: &AudioEngine, tid: u32, plugin_index: u32, path: &str) -> bool;
-        fn load_plugin_preset(self: &AudioEngine, tid: u32, plugin_index: u32, path: &str) -> bool;
         fn set_plugin_bypass(
             self: &AudioEngine,
             tid: u32,
@@ -649,14 +608,6 @@ pub mod ffi {
         fn execute_auto_mixing(self: &AudioEngine) -> bool;
         fn execute_auto_arrangement(self: &AudioEngine) -> bool;
         fn set_project_scale(self: &AudioEngine, root: i32, scale_type: i32) -> bool;
-        fn undo(self: &AudioEngine);
-        fn redo(self: &AudioEngine);
-        fn is_undo_transaction_active(self: &AudioEngine) -> bool;
-        fn begin_undo_transaction(self: &AudioEngine, name: &str);
-        fn end_undo_transaction(self: &AudioEngine) -> bool;
-        fn abort_undo_transaction(self: &AudioEngine) -> bool;
-        fn get_undo_count(self: &AudioEngine) -> u32;
-        fn get_redo_count(self: &AudioEngine) -> u32;
         fn execute_vocal_remover(self: &AudioEngine, tid: u32) -> bool;
         fn set_articulation_map(self: &AudioEngine, tid: u32, map_hash: u32) -> bool;
         fn set_expression_map(

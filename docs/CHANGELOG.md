@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Plugin preset/preset-automation, region comp-range and range-edit calls,
+  spatial/HRTF placement, track and plugin automation curves, and the whole
+  undo/redo/transaction surface now dispatch from Rust straight to their Rust
+  implementations; the `AudioEngine` relays, their cxx declarations and the
+  C++ declarations of those FFI entry points are gone.
 - Track freeze/unfreeze/cache-path/restore calls and plugin state get/set now
   dispatch from Rust straight to their Rust implementations; the `AudioEngine`
   relay methods, their cxx declarations and the C++ declarations of the freeze

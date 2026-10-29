@@ -813,18 +813,6 @@ extern "C" bool hirari_region_edit_set_warp_markers(
     const uint64_t* sourceSamples, size_t sourceCount,
     const uint64_t* timelineSamples, size_t timelineCount,
     const uint8_t* transientFlags, size_t flagCount);
-extern "C" bool hirari_region_edit_range_edit_set(void* host, uint32_t trackId,
-                                                  uint32_t regionId, uint64_t start,
-                                                  uint64_t end, float gain, uint64_t fadeIn,
-                                                  uint64_t fadeOut);
-extern "C" bool hirari_region_edit_range_edits_clear(void* host, uint32_t trackId,
-                                                     uint32_t regionId);
-// Adopts a comp-range batch packed as four words per range after the Rust
-// policy accepts it.
-extern "C" bool hirari_region_edit_comp_ranges_set(void* host, uint32_t trackId,
-                                                   uint32_t regionId,
-                                                   const uint64_t* packedWords,
-                                                   size_t wordCount, bool managed);
 // Decodes `path`, swaps it into the region and records the undo pair. Rust
 // owns the path/rate policy and the snapshots; C++ performs the swap.
 extern "C" bool hirari_region_edit_replace_audio(void* host, uint32_t trackId,
@@ -862,12 +850,7 @@ struct HirariAutomationHostOps {
 };
 
 extern "C" void hirari_automation_host_install(const HirariAutomationHostOps* ops);
-extern "C" bool hirari_automation_edit_track(void* host, uint32_t trackId, int32_t kind,
-                                             uint32_t parameterId, const double* packed,
-                                             size_t packedLen);
-extern "C" bool hirari_automation_edit_plugin(void* host, uint32_t trackId,
-                                              uint32_t pluginIndex, uint32_t parameterId,
-                                              const double* packed, size_t packedLen);
+
 // Rust-side mirror of a track's region table (stage 1 of the Region storage
 // migration). C++ stays authoritative and replaces the mirror on every publish.
 struct HirariRegionTable;
@@ -1600,12 +1583,6 @@ struct HirariTrackControlHostOps {
     void (*clearHrtf)(void*) = nullptr;
 };
 extern "C" void hirari_track_control_host_install(const HirariTrackControlHostOps* ops);
-extern "C" bool hirari_track_set_spatial_position(
-    void* host, uint32_t trackId, float x, float y, float z);
-extern "C" bool hirari_track_set_hrtf_kernel(void* host, uint32_t trackId, const float* left,
-                                             size_t leftLength, const float* right,
-                                             size_t rightLength);
-extern "C" bool hirari_track_clear_hrtf_kernel(void* host, uint32_t trackId);
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 extern "C" bool hirari_plugin_edit_move(
@@ -1614,10 +1591,6 @@ extern "C" bool hirari_plugin_edit_set_parameter(
     void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
 extern "C" bool hirari_plugin_edit_set_parameter_without_undo(
     void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId, float value);
-extern "C" bool hirari_plugin_edit_load_preset(
-    void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* path, size_t pathLength);
-extern "C" bool hirari_plugin_edit_save_preset(
-    void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* path, size_t pathLength);
 
 // Status pointers refer to Track::SandboxStatus, mirrored field for field in
 // plugin_sandbox_maintenance.rs.
@@ -1965,17 +1938,6 @@ extern "C" size_t hirari_undo_manager_top_name(
     const void* state, bool redo, uint8_t* output, size_t capacity);
 extern "C" void hirari_undo_manager_clear(void* state);
 
-// History control for the engine facade. The stacks live in Rust; `host` is
-// the engine the replayed structural edit resyncs against.
-extern "C" void hirari_undo_edit_undo(void* undo, const void* log, void* host);
-extern "C" void hirari_undo_edit_redo(void* undo, const void* log, void* host);
-extern "C" bool hirari_undo_edit_transaction_active(const void* undo);
-extern "C" void hirari_undo_edit_begin_transaction(
-    void* undo, const uint8_t* name, size_t name_len);
-extern "C" bool hirari_undo_edit_end_transaction(void* undo);
-extern "C" bool hirari_undo_edit_abort_transaction(void* undo, void* host);
-extern "C" uint32_t hirari_undo_edit_undo_count(const void* undo);
-extern "C" uint32_t hirari_undo_edit_redo_count(const void* undo);
 
 // MIDI expression-map edit policy. Rust validates and applies the packed map
 // through the track's articulation runtime; the engine only resolves the

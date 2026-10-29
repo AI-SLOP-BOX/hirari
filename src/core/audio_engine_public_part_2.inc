@@ -111,12 +111,6 @@
                               uint32_t parameterId, float value) const {
         return m_engine && m_engine->set_plugin_parameter(tid, pluginIndex, parameterId, value);
     }
-    bool set_plugin_automation(uint32_t tid, uint32_t pluginIndex,
-                               uint32_t parameterId, rust::Vec<double> packedPoints) const {
-        return m_engine && hirari_automation_edit_plugin(
-                               m_engine.get(), tid, pluginIndex, parameterId,
-                               packedPoints.data(), packedPoints.size());
-    }
     bool set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
                                            uint32_t parameterId, float value) const {
         return m_engine && m_engine->set_plugin_parameter_without_undo(
@@ -132,16 +126,6 @@
     rust::String get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
                                            uint32_t parameterId) const {
         return rust::String(m_engine ? m_engine->get_plugin_parameter_name(tid, pluginIndex, parameterId) : "");
-    }
-    bool save_plugin_preset(uint32_t tid, uint32_t pluginIndex, rust::Str path) const {
-        return m_engine && hirari_plugin_edit_save_preset(
-                               m_engine.get(), tid, pluginIndex,
-                               reinterpret_cast<const uint8_t*>(path.data()), path.size());
-    }
-    bool load_plugin_preset(uint32_t tid, uint32_t pluginIndex, rust::Str path) const {
-        return m_engine && hirari_plugin_edit_load_preset(
-                               m_engine.get(), tid, pluginIndex,
-                               reinterpret_cast<const uint8_t*>(path.data()), path.size());
     }
     bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) const {
         return m_engine && m_engine->set_plugin_bypass(tid, pluginIndex, bypassed);
@@ -240,12 +224,6 @@
     bool cancel_bounce() const noexcept { return m_engine && m_engine->cancel_bounce(); }
     bool pause_bounce() const noexcept { return m_engine && m_engine->pause_bounce(); }
     bool resume_bounce() const noexcept { return m_engine && m_engine->resume_bounce(); }
-    uint32_t get_undo_count() const {
-        return m_engine ? hirari_undo_edit_undo_count(m_engine->undo_state()) : 0;
-    }
-    uint32_t get_redo_count() const {
-        return m_engine ? hirari_undo_edit_redo_count(m_engine->undo_state()) : 0;
-    }
     bool execute_vocal_remover(uint32_t tid) const { return m_engine && m_engine->execute_vocal_remover(tid); }
     bool set_articulation_map(uint32_t tid, uint32_t mapHash) const { return m_engine && m_engine->set_articulation_map(tid, mapHash); }
     bool set_expression_map(uint32_t tid, rust::Vec<uint32_t> packed, rust::String json,
@@ -267,35 +245,6 @@
     bool set_project_scale(int32_t root, int32_t type) const {
         return m_engine && m_engine->set_project_scale(root, type);
     }
-    void undo() const {
-        if (m_engine) {
-            hirari_undo_edit_undo(m_engine->undo_state(), m_engine->log_state(),
-                                  m_engine.get());
-        }
-    }
-    void redo() const {
-        if (m_engine) {
-            hirari_undo_edit_redo(m_engine->undo_state(), m_engine->log_state(),
-                                  m_engine.get());
-        }
-    }
-    bool is_undo_transaction_active() const {
-        return m_engine && hirari_undo_edit_transaction_active(m_engine->undo_state());
-    }
-    void begin_undo_transaction(rust::Str name) const {
-        if (m_engine) {
-            hirari_undo_edit_begin_transaction(
-                m_engine->undo_state(), reinterpret_cast<const uint8_t*>(name.data()),
-                name.size());
-        }
-    }
-    bool end_undo_transaction() const {
-        return m_engine && hirari_undo_edit_end_transaction(m_engine->undo_state());
-    }
-    bool abort_undo_transaction() const {
-        return m_engine &&
-            hirari_undo_edit_abort_transaction(m_engine->undo_state(), m_engine.get());
-    }
 
     bool move_region(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region(tid, rid, startBeat); }
     bool move_region_sync_group(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region_sync_group(tid, rid, startBeat); }
@@ -305,21 +254,7 @@
     uint32_t duplicate_region(uint32_t tid, uint32_t rid, uint64_t startSample) const { return m_engine ? m_engine->duplicate_region(tid, rid, startSample) : 0; }
     bool set_region_gain(uint32_t tid, uint32_t rid, float gain) const { return m_engine && m_engine->set_region_gain(tid, rid, gain); }
     bool set_region_muted(uint32_t tid, uint32_t rid, bool muted) const { return m_engine && m_engine->set_region_muted(tid, rid, muted); }
-    bool set_region_comp_ranges(uint32_t tid, uint32_t rid,
-                               rust::Slice<const uint64_t> packedRanges, bool managed) const {
-        return m_engine && hirari_region_edit_comp_ranges_set(
-                               m_engine.get(), tid, rid, packedRanges.data(),
-                               packedRanges.size(), managed);
-    }
     bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) const { return m_engine && m_engine->set_region_fades(tid, rid, fadeIn, fadeOut); }
-    bool set_region_range_edit(uint32_t tid, uint32_t rid, uint64_t start, uint64_t end,
-                               float gain, uint64_t fadeIn, uint64_t fadeOut) const {
-        return m_engine && hirari_region_edit_range_edit_set(m_engine.get(), tid, rid, start,
-                                                            end, gain, fadeIn, fadeOut);
-    }
-    bool clear_region_range_edits(uint32_t tid, uint32_t rid) const {
-        return m_engine && hirari_region_edit_range_edits_clear(m_engine.get(), tid, rid);
-    }
     bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) const { return m_engine && m_engine->set_region_reverse(tid, rid, reverse); }
     bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio) const { return m_engine && m_engine->set_region_warp_ratio(tid, rid, ratio); }
     bool set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled) const { return m_engine && m_engine->set_region_pitch_preserve_warp(tid, rid, enabled); }
@@ -421,33 +356,10 @@
         (void)hirari_midi_notes_pack(raw, notes.size(), packed.data(), packed.size());
         return packed;
     }
-    bool set_spatial_position(uint32_t tid, float x, float y, float z) const {
-        return m_engine && hirari_track_set_spatial_position(m_engine.get(), tid, x, y, z);
-    }
-    bool set_hrtf_kernel(uint32_t tid, rust::Vec<float> left,
-                         rust::Vec<float> right) const {
-        return m_engine && hirari_track_set_hrtf_kernel(
-            m_engine.get(), tid, left.data(), left.size(), right.data(), right.size());
-    }
-    bool clear_hrtf_kernel(uint32_t tid) const {
-        return m_engine && hirari_track_clear_hrtf_kernel(m_engine.get(), tid);
-    }
     bool set_automation_record_mode(uint32_t mode) const {
         return m_engine && m_engine->set_automation_record_mode(mode);
     }
     rust::String plugin_compatibility_snapshot_json() const { return m_engine ? rust::String(m_engine->plugin_compatibility_snapshot_json()) : rust::String("[]"); }
-    bool set_automation_data(uint32_t tid, uint32_t paramId,
-                             rust::Vec<double> packedPoints) const {
-        if (!m_engine) return false;
-        const int32_t kind = paramId == 0 ? kHirariAutomationVolume : kHirariAutomationPan;
-        return hirari_automation_edit_track(m_engine.get(), tid, kind, paramId,
-                                            packedPoints.data(), packedPoints.size());
-    }
-    bool set_track_delay_automation(uint32_t tid, rust::Vec<double> packedPoints) const {
-        return m_engine && hirari_automation_edit_track(
-                               m_engine.get(), tid, kHirariAutomationTrackDelay, 0,
-                               packedPoints.data(), packedPoints.size());
-    }
     // Compatibility API: stop only this wrapper's device.  The underlying
     // HirariUnifiedEngine is a process-wide singleton and must not be shut down
     // when one Rust/FFI handle is dropped.

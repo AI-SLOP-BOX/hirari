@@ -2,6 +2,7 @@
 mod tests {
     use std::sync::{Mutex, OnceLock};
 
+    use crate::engine_edit_ext::TrackEditExt;
     use crate::hirari_wavetable_synth::HirariWavetableSynthEngine;
     use crate::loudness_analyzer::LoudnessAnalyzerEngine;
     use crate::passive_curing_eq::PassiveCuringEqEngine;

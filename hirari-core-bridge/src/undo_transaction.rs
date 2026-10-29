@@ -542,6 +542,7 @@ pub unsafe extern "C" fn hirari_undo_manager_clear(state: *mut std::ffi::c_void)
 
 #[cfg(test)]
 mod tests {
+    use crate::engine_edit_ext::TrackEditExt;
     use super::{
         hirari_undo_manager_abort_transaction, hirari_undo_manager_apply_history,
         hirari_undo_manager_begin_transaction, hirari_undo_manager_create,
