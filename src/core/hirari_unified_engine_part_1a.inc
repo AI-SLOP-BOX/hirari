@@ -538,8 +538,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         // One callback-local scratch pair is reused for each sequential Send
         // edge. Delay histories live in RoutingEngine and no buffer is
         // allocated while the audio callback is running.
-        std::array<float, Hirari::Core::Engine::Bus::kMaxSamples> sendPdcLeft;
-        std::array<float, Hirari::Core::Engine::Bus::kMaxSamples> sendPdcRight;
+        std::array<float, Hirari::Core::Engine::BusSystem::kMaxSamples> sendPdcLeft;
+        std::array<float, Hirari::Core::Engine::BusSystem::kMaxSamples> sendPdcRight;
         std::array<HirariRoutingTrackDestination, kMaxTracks> routingDestinations{};
         size_t routingDestinationCount = 0;
         for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
@@ -598,7 +598,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                 source->getTrackDelaySamples(), routingDestinations.data(),
                 routingDestinationCount, output.getWritePointer(0, off),
                 output.getWritePointer(1, off), sendPdcLeft.data(), sendPdcRight.data(),
-                sz, Hirari::Core::Engine::Bus::kMaxSamples, addBusPreFx);
+                sz, Hirari::Core::Engine::BusSystem::kMaxSamples, addBusPreFx);
         };
 
         auto publishBusIfNeeded = [&](Track* track) {

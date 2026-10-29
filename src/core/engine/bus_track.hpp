@@ -14,6 +14,8 @@ namespace Hirari::Core::Engine {
 /** AUX/Bus track with an explicit pre-FX input and post-FX output boundary. */
 class BusTrack : public Track {
 public:
+    static constexpr uint32_t kMaxSamples = BusSystem::kMaxSamples;
+
     BusTrack(uint32_t id, const std::string& name, uint32_t busId,
              SidechainManager* sidechainManager = nullptr,
              std::shared_ptr<ProjectLayoutRevision> layoutRevision = {})
@@ -21,14 +23,7 @@ public:
           m_busId(busId), m_trackState(hirari_bus_track_create(), &hirari_bus_track_destroy),
           m_busEffectChain(sidechainManager) {}
 
-    void resolveBus(std::shared_ptr<::Hirari::Core::Engine::Bus> bus) noexcept {
-        m_cachedBus = std::move(bus);
-        m_cachedBusRaw = m_cachedBus.get();
-    }
-    void resolveBus(::Hirari::Core::Engine::Bus* bus) noexcept {
-        m_cachedBus.reset();
-        m_cachedBusRaw = bus;
-    }
+    void resolveBus(void* busState) noexcept { m_busState = busState; }
     uint32_t busId() const noexcept { return m_busId; }
 
     uint32_t getTotalLatencySamples() const noexcept override {
@@ -99,21 +94,21 @@ public:
     }
 
     bool addPreFxInput(const AudioBuffer& input, uint32_t len, float gain) noexcept {
-        if (!m_cachedBusRaw || input.getNumChannels() < 2 || len == 0 ||
-            len > Bus::kMaxSamples || input.getNumSamples() < len) return false;
+        if (input.getNumChannels() < 2 || input.getNumSamples() < len) return false;
         return addPreFxInput(input.getReadPointer(0), input.getReadPointer(1), len, gain);
     }
 
     bool addPreFxInput(const float* left, const float* right,
                        uint32_t len, float gain) noexcept {
-        if (!m_cachedBusRaw || len == 0 || len > Bus::kMaxSamples) return false;
-        return m_cachedBusRaw->addSamples(left, right, len, gain);
+        if (!m_busState || len == 0 || len > BusSystem::kMaxSamples) return false;
+        return hirari_bus_audio_accumulate(m_busState, left, right, len, gain);
     }
 
     bool loadPreFxIntoWork(uint32_t len) noexcept {
-        if (!m_cachedBusRaw || len == 0 || len > Bus::kMaxSamples || !canProcess(len)) return false;
+        if (!m_busState || len == 0 || len > BusSystem::kMaxSamples || !canProcess(len)) return false;
         auto& work = getWorkBuffer(len);
-        return m_cachedBusRaw->readPre(work.getWritePointer(0), work.getWritePointer(1), len);
+        return hirari_bus_audio_read(m_busState, work.getWritePointer(0),
+                                     work.getWritePointer(1), len, false);
     }
 
     void setReadPostFx(bool postFx) noexcept {
@@ -132,35 +127,35 @@ public:
     // allocation-free and is intended for the audio thread.
     void fetchAudio(float* l, float* r, uint64_t /*start*/, uint32_t len,
                     const ::Hirari::DSP::ProcessContext& /*context*/) {
-        if (!l || !r || len == 0 || !m_cachedBusRaw) return;
+        if (!l || !r || len == 0 || !m_busState) return;
         (void)hirari_bus_track_fetch_audio(
-            m_trackState.get(), m_cachedBusRaw->nativeAudioState(), l, r, len);
+            m_trackState.get(), m_busState, l, r, len);
     }
 
     // BusTrack processing boundary: pre-FX bus input is placed in the Track
     // work buffer, then the inherited Track chain processes it and the result
     // is published as the bus post-FX stage. No allocation is performed here.
     bool processBus(uint32_t len, uint64_t playhead) noexcept {
-        if (!m_cachedBusRaw || len == 0 || len > ::Hirari::Core::Engine::Bus::kMaxSamples || !canProcess(len)) return false;
+        if (!m_busState || len == 0 || len > kMaxSamples || !canProcess(len)) return false;
         auto& work = getWorkBuffer(len);
         float* left = work.getWritePointer(0);
         float* right = work.getWritePointer(1);
         fetchAudio(left, right, playhead, len, {});
         if (!processAccumulated(len, playhead)) return false;
-        return m_cachedBusRaw->replacePostSamples(work.getReadPointer(0), work.getReadPointer(1), len);
+        return hirari_bus_audio_replace_post(m_busState, work.getReadPointer(0),
+                                             work.getReadPointer(1), len);
     }
 
     bool publishPostFx(uint32_t len) noexcept {
-        if (!m_cachedBusRaw || len == 0 || len > Bus::kMaxSamples || !canProcess(len)) return false;
+        if (!m_busState || len == 0 || len > kMaxSamples || !canProcess(len)) return false;
         auto& work = getWorkBuffer(len);
-        return m_cachedBusRaw->replacePostSamples(work.getReadPointer(0),
-                                                  work.getReadPointer(1), len);
+        return hirari_bus_audio_replace_post(m_busState, work.getReadPointer(0),
+                                             work.getReadPointer(1), len);
     }
 
 private:
     uint32_t m_busId = 0;
-    std::shared_ptr<::Hirari::Core::Engine::Bus> m_cachedBus;
-    ::Hirari::Core::Engine::Bus* m_cachedBusRaw = nullptr;
+    void* m_busState = nullptr;
     std::unique_ptr<void, decltype(&hirari_bus_track_destroy)> m_trackState{
         nullptr, &hirari_bus_track_destroy};
     Hirari::Core::EffectChain m_busEffectChain;

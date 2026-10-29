@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Bus summing handles are no longer a C++ class. `Bus` forwarded every call to
+  `bus_audio.rs`; `BusSystem` now creates the per-bus handles once, binds them
+  into the Rust-owned system, and hands the raw handle to `BusTrack`, which
+  calls `hirari_bus_audio_*` directly. Nine routing/audio declarations that no
+  C++ code reaches were dropped from the FFI header.
 - Routing state now has one owner. The graph, gain, feedback, send-PDC and
   topology stores live in `hirari-core-bridge/src/routing_engine_core.rs`
   behind a single opaque handle; the C++ `RoutingEngine` class, its 39
