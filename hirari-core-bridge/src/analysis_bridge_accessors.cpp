@@ -67,11 +67,13 @@ rust::String get_song_structure_json(const Engine::HirariUnifiedEngine& engine) 
         regionStarts.push_back(0);
         maxLen = static_cast<uint64_t>(sr) * 30;
     }
-    const auto harmony = Composition::HarmonicContextTracker::getInstance().getState();
+    float harmonyTension = 0.5f;
+    float harmonyValence = 0.5f;
+    hirari_harmonic_context_get(&harmonyTension, &harmonyValence, nullptr);
     const auto sections = ::Hirari::Core::Bridge::analysis_structure_sections(
         rust::Slice<const uint64_t>(regionStarts.data(), regionStarts.size()),
         maxLen, hirari_tempo_map_get_current_bpm(engine.tempo_state()),
-        sr, harmony.tension, harmony.valence);
+        sr, harmonyTension, harmonyValence);
     std::vector<uint8_t> kinds;
     std::vector<uint64_t> starts;
     std::vector<uint64_t> ends;

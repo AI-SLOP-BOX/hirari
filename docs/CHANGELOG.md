@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- The harmonic-context singleton moved to Rust (`harmonic_context.rs`), so
+  structure analysis and auto-arrangement read the same Rust-owned
+  tension/valence/stability state. The unused C++ `TrackPresetStore`,
+  `ChannelConfiguration` and `ChannelConfigurationStore` types are deleted;
+  nothing constructed or referenced them.
 - The unused C++ `MasteringKernel` adapter and twelve dead FFI declarations
   (bus-audio clear/commit/samples, automation-lane removal, VariAudio split,
   group warp maps) are deleted. The mastering behavior was already Rust-owned,

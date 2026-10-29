@@ -2365,3 +2365,7 @@ extern "C" bool hirari_project_layout_write_json(
     HirariLayoutIsCancelledCallback is_cancelled, const void* cancel_context,
     const uint8_t** json_data, size_t* json_size);
 extern "C" void hirari_project_layout_json_free(const uint8_t* json_data, size_t json_size);
+
+// Rust-owned harmonic context shared by structure analysis and auto-arrangement.
+extern "C" void hirari_harmonic_context_get(
+    float* tension, float* valence, float* stability);

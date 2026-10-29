@@ -43,7 +43,6 @@
     // callback renders with; C++ never interprets the state itself, so the
     // engine owns nothing but the lifetime.
     void* m_controlRoomState = hirari_control_room_state_create();
-    ::Hirari::Core::Mixing::TrackPresetStore m_trackPresets;
     ::Hirari::Core::Plugins::PluginCompatibilityRegistry m_pluginCompatibility;
     void* m_automationLanes = hirari_automation_lane_group_create();
     void* m_tapTempo = hirari_tap_tempo_create(8);

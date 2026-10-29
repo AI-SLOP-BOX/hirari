@@ -125,6 +125,7 @@ pub mod group_edit_history;
 pub mod hardware;
 pub mod hardware_insert;
 pub mod harmonic;
+pub mod harmonic_context;
 pub mod harmonic_reconstructor;
 pub mod help_catalog;
 pub mod hirari_sampler_advanced;

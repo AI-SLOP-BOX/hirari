@@ -198,10 +198,12 @@ bool HirariUnifiedEngine::execute_auto_arrangement() {
     // Project extent, section boundaries and marker lengths are Rust-owned.
     // The engine keeps the region storage and the event queue behind the
     // host callbacks and the marker sink below.
-    const auto harmony = Composition::HarmonicContextTracker::getInstance().getState();
+    float harmonyTension = 0.5f;
+    float harmonyValence = 0.5f;
+    hirari_harmonic_context_get(&harmonyTension, &harmonyValence, nullptr);
     return hirari_engine_auto_arrange(
         this, hirari_tempo_map_get_current_bpm(m_tempoState), m_sampleRate.load(),
-        harmony.tension, harmony.valence,
+        harmonyTension, harmonyValence,
         [](void* context, uint64_t start, uint64_t length) {
             auto* engine = static_cast<HirariUnifiedEngine*>(context);
             ::Hirari::Core::EngineEvent event{};
