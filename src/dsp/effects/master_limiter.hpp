@@ -64,8 +64,7 @@ public:
     }
     void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
         if (!outName || maxSize == 0) return;
-        const char* names[] = {"Threshold", "Ceiling", "Release", "Lookahead"};
-        std::snprintf(outName, maxSize, "%s", id < 4 ? names[id] : "");
+        std::snprintf(outName, maxSize, "%s", hirari_builtin_effect_parameter_name(1, id));
     }
     std::vector<uint8_t> getState() const override {
         std::vector<uint8_t> state(32);

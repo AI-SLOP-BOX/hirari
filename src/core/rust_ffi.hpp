@@ -2239,6 +2239,8 @@ extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bu
 extern "C" size_t hirari_plugin_sandbox_find(const uint32_t*, size_t, uint32_t);
 extern "C" size_t hirari_plugin_sandbox_remove(uint32_t*, uint32_t*, size_t, uint32_t);
 extern "C" const char* hirari_plugin_sandbox_failure_name(uint8_t code), *hirari_plugin_sandbox_state_error_name(uint8_t code);
+// Built-in effect parameter names; kind matches the Rust-builtin effect table.
+extern "C" const char* hirari_builtin_effect_parameter_name(uint32_t kind, uint32_t id);
 extern "C" uint32_t hirari_plugin_sandbox_block_outcome(
     bool produced, uint32_t overruns, uint8_t failure_code, bool failed);
 extern "C" uint32_t hirari_plugin_sandbox_transport_retry_delay(uint32_t attempt, uint8_t failure);

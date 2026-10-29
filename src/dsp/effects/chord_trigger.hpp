@@ -30,7 +30,7 @@ public:
         if (id != 0) return false; out = {0.0f, 1.0f, false}; return true;
     }
     void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
-        if (outName && maxSize > 0) std::snprintf(outName, maxSize, "%s", id == 0 ? "Strum Time" : "");
+        if (outName && maxSize > 0) std::snprintf(outName, maxSize, "%s", hirari_builtin_effect_parameter_name(5, id));
     }
 
     void prepareToPlay(double sr, uint32_t bs) noexcept override {

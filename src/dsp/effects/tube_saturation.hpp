@@ -35,10 +35,8 @@ public:
         return true;
     }
     void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
-        if (outName && maxSize > 0) {
-            std::snprintf(outName, maxSize, "%s",
-                          id == 0 ? "Drive" : (id == 1 ? "Bias" : (id == 2 ? "Dry/Wet" : "")));
-        }
+        if (outName && maxSize > 0)
+            std::snprintf(outName, maxSize, "%s", hirari_builtin_effect_parameter_name(3, id));
     }
 
     std::vector<uint8_t> getState() const override {

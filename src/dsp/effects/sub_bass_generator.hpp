@@ -49,7 +49,7 @@ public:
         return true;
     }
     void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
-        if (outName && maxSize > 0) std::snprintf(outName, maxSize, "%s", id == 0 ? "Sub Amount" : "");
+        if (outName && maxSize > 0) std::snprintf(outName, maxSize, "%s", hirari_builtin_effect_parameter_name(4, id));
     }
     bool setState(const std::vector<uint8_t>& state) override {
         if (!IProcessor::setState(state)) return false;

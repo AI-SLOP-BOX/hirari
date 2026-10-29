@@ -45,8 +45,7 @@ public:
     uint32_t getNumParameters() const noexcept override { return 1; }
     void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
         if (!outName || maxSize == 0) return;
-        const char* name = id == 0 ? "Threshold" : "";
-        std::strncpy(outName, name, maxSize - 1);
+        std::strncpy(outName, hirari_builtin_effect_parameter_name(2, id), maxSize - 1);
         outName[maxSize - 1] = '\0';
     }
 

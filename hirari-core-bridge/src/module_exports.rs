@@ -55,6 +55,7 @@ pub mod bounce_core;
 pub mod bounce_plan;
 pub mod bounce_orchestrator_final;
 pub mod built_in_midi_instrument;
+pub mod builtin_effect_names;
 pub mod bus_audio;
 pub mod bus_router;
 pub mod bus_system;

@@ -242,6 +242,10 @@ production support.
   `hirari_plugin_sandbox_block_outcome` owns the consecutive-overrun threshold,
   the process-failed latch and the MIDI-invalidation failure set, so
   `ProcessSandboxProcessor::processBlock` only stores the returned flags.
+- Built-in effect parameter names moved to Rust.
+  `hirari_builtin_effect_parameter_name` holds the compressor, limiter, tube
+  saturation, sub-bass and chord-trigger name tables, so each C++ facade only
+  copies the returned string into its caller buffer.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

@@ -70,11 +70,7 @@ public:
     }
     void getParameterName(uint32_t id, char* outName, uint32_t maxSize) const noexcept override {
         if (!outName || maxSize == 0) return;
-        static constexpr const char* names[] = {
-            "Threshold", "Ratio", "Attack", "Release", "Makeup", "Knee", "Lookahead"
-        };
-        const char* name = id < 7 ? names[id] : "";
-        std::strncpy(outName, name, maxSize - 1);
+        std::strncpy(outName, hirari_builtin_effect_parameter_name(0, id), maxSize - 1);
         outName[maxSize - 1] = '\0';
     }
 
