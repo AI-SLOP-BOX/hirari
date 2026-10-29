@@ -75,22 +75,16 @@ int main(int argc, char** argv) {
     const uint32_t delayMilliseconds = options.delayMilliseconds;
 #if !defined(_WIN32)
     const bool builtinPassthrough = options.builtinPassthrough != 0;
-    const bool pathIsClap = options.pathIsClap != 0;
-    const bool pathIsVst3 = options.pathIsVst3 != 0;
-    const bool pathIsAudioUnit = options.pathIsAudioUnit != 0;
-    const bool isClap = (options.requestedFormat == 2 || options.requestedFormat == 0) && pathIsClap;
-    const bool isVst3 = (options.requestedFormat == 3 || options.requestedFormat == 0) && pathIsVst3;
-    const bool isAudioUnit = (options.requestedFormat == 4 || options.requestedFormat == 0) && pathIsAudioUnit;
-    const bool requestedBuiltin = options.requestedFormat == 1;
-    if ((options.requestedFormat == 2 && !pathIsClap) ||
-        (options.requestedFormat == 3 && !pathIsVst3) ||
-        (options.requestedFormat == 4 && !pathIsAudioUnit) ||
-        (requestedBuiltin && !builtinPassthrough)) {
+    const uint32_t formats = options.resolvedFormats;
+    if (formats == UINT32_MAX) {
         const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorUnsupported;
         (void)::write(statusFd, &error, sizeof(error));
         hirari_plugin_worker_unmap_shared(shared, sizeof(*shared));
         return 12;
     }
+    const bool isClap = (formats & 1u) != 0;
+    const bool isVst3 = (formats & 2u) != 0;
+    const bool isAudioUnit = (formats & 4u) != 0;
     if (isVst3) {
 #if defined(HIRARI_ENABLE_VST3_SDK)
         if (!vst3Runtime.load(pluginPath, sampleRate, maxFrames)) {
@@ -163,14 +157,11 @@ int main(int argc, char** argv) {
             pluginImage.c_str(), pluginPath, sampleRate, minFrames, maxFrames,
             &clapInstance, &midiInstrument);
         if (loadResult != 0) {
-            const uint8_t error = loadResult == 1
-                ? Hirari::Core::Plugins::SandboxProtocol::kErrorLoad
-                : (loadResult == 2
-                    ? Hirari::Core::Plugins::SandboxProtocol::kErrorAbi
-                    : Hirari::Core::Plugins::SandboxProtocol::kErrorInstance);
+            const uint32_t failure = hirari_plugin_worker_load_failure(loadResult);
+            const uint8_t error = static_cast<uint8_t>(failure >> 8);
             (void)::write(statusFd, &error, sizeof(error));
             hirari_plugin_worker_unmap_shared(shared, sizeof(*shared));
-            return loadResult == 1 ? 6 : (loadResult == 2 ? 8 : 10);
+            return static_cast<int>(failure & 0xffu);
         }
         clapPlugin = hirari_clap_instance_plugin(clapInstance);
         clapState = hirari_clap_instance_state(clapInstance);

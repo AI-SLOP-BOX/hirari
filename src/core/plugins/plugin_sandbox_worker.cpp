@@ -43,11 +43,13 @@ struct HirariPluginWorkerLaunchOptions {
     uint8_t pathIsVst3;
     uint8_t pathIsAudioUnit;
     uint8_t builtinPassthrough;
+    uint32_t resolvedFormats;
 };
 extern "C" bool hirari_plugin_worker_parse_args(
     int32_t argc, const char* const* argv,
     HirariPluginWorkerLaunchOptions* output, uint32_t* errorKind);
 extern "C" const char* hirari_plugin_worker_parse_error_text(uint32_t errorKind);
+extern "C" uint32_t hirari_plugin_worker_load_failure(int32_t loadResult);
 extern "C" int32_t hirari_plugin_worker_run(
     int32_t controlFd, void* shared, void* backendContext,
     const HirariPluginWorkerBackend* backend,

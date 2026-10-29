@@ -250,6 +250,12 @@ production support.
   now takes the macro state and derives morph, detune, drive, cutoff,
   resonance and output gain from targets 0..5, so the engine no longer
   computes those curves and just forwards `m_macroControl`.
+- Worker format resolution moved into the Rust argument parser.
+  `hirari_plugin_worker_parse_args` now resolves the auto/explicit CLAP, VST3
+  and AU adapter bits from the requested format and plugin path, so the worker
+  reads one `resolvedFormats` word, and
+  `hirari_plugin_worker_load_failure` maps a failed CLAP instance load to its
+  sandbox error byte and exit status instead of the nested C++ ternaries.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

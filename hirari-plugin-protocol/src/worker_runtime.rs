@@ -250,6 +250,8 @@ pub struct WorkerLaunchOptions {
     pub path_is_vst3: u8,
     pub path_is_audio_unit: u8,
     pub builtin_passthrough: u8,
+    /// Adapter bits resolved from the requested format and the plugin path.
+    pub resolved_formats: u32,
 }
 
 fn option_value<'a>(value: *const c_char) -> Option<&'a [u8]> {
@@ -328,6 +330,7 @@ pub unsafe extern "C" fn hirari_plugin_worker_parse_args(
         path_is_vst3: 0,
         path_is_audio_unit: 0,
         builtin_passthrough: 0,
+        resolved_formats: 0,
     };
     let args = unsafe { std::slice::from_raw_parts(argv, argc as usize) };
     let mut index = 1;
@@ -435,6 +438,13 @@ pub unsafe extern "C" fn hirari_plugin_worker_parse_args(
     parsed.path_is_vst3 = u8::from(path_has_extension(plugin_path, b".vst3"));
     parsed.path_is_audio_unit = u8::from(path_has_extension(plugin_path, b".component"));
     parsed.builtin_passthrough = u8::from(plugin_path.starts_with(b"builtin://"));
+    parsed.resolved_formats = resolve_formats(
+        parsed.requested_format,
+        parsed.path_is_clap != 0,
+        parsed.path_is_vst3 != 0,
+        parsed.path_is_audio_unit != 0,
+        parsed.builtin_passthrough != 0,
+    );
 
     if std::env::var_os("HIRARI_PLUGIN_TEST_FAULTS").is_some() {
         if let Some(value) = std::env::var_os("HIRARI_PLUGIN_WORKER_CRASH_AFTER_BLOCKS") {
@@ -688,5 +698,142 @@ mod tests {
         assert_eq!(text(2), "unknown or invalid command-line option");
         assert_eq!(text(0), "unknown or invalid command-line option");
         assert_eq!(text(200), "unknown or invalid command-line option");
+    }
+}
+
+/// Adapter bits resolved by [`resolve_formats`].
+pub const WORKER_FORMAT_CLAP: u32 = 1;
+pub const WORKER_FORMAT_VST3: u32 = 2;
+pub const WORKER_FORMAT_AUDIO_UNIT: u32 = 4;
+/// Returned when the launcher asked for a format the path cannot provide.
+pub const WORKER_FORMAT_UNSUPPORTED: u32 = u32::MAX;
+
+/// Resolves which isolated adapter the worker may load.
+///
+/// `requested_format` follows the launcher's numeric contract: 0 auto,
+/// 1 builtin, 2 CLAP, 3 VST3, 4 AU. Auto reports every adapter whose path
+/// matched (possibly none), while an explicit request returns only that
+/// adapter or [`WORKER_FORMAT_UNSUPPORTED`] so the worker never silently loads
+/// a different format than the one the host selected.
+fn resolve_formats(
+    requested_format: u32,
+    path_is_clap: bool,
+    path_is_vst3: bool,
+    path_is_audio_unit: bool,
+    builtin_passthrough: bool,
+) -> u32 {
+    let clap = if path_is_clap { WORKER_FORMAT_CLAP } else { 0 };
+    let vst3 = if path_is_vst3 { WORKER_FORMAT_VST3 } else { 0 };
+    let audio_unit = if path_is_audio_unit {
+        WORKER_FORMAT_AUDIO_UNIT
+    } else {
+        0
+    };
+    match requested_format {
+        0 => clap | vst3 | audio_unit,
+        1 if builtin_passthrough => 0,
+        2 if path_is_clap => WORKER_FORMAT_CLAP,
+        3 if path_is_vst3 => WORKER_FORMAT_VST3,
+        4 if path_is_audio_unit => WORKER_FORMAT_AUDIO_UNIT,
+        1 | 2 | 3 | 4 => WORKER_FORMAT_UNSUPPORTED,
+        _ => 0,
+    }
+}
+
+/// Sandbox error bytes reported for each `hirari_clap_instance_load` result.
+/// These mirror `SandboxProtocol::kErrorLoad`/`kErrorAbi`/`kErrorInstance`.
+const SANDBOX_ERROR_LOAD: u8 = 0xB0;
+const SANDBOX_ERROR_ABI: u8 = 0xB1;
+const SANDBOX_ERROR_INSTANCE: u8 = 0xB2;
+
+/// Maps a CLAP instance-load result (0 ok, 1 load, 2 ABI, other instance) to
+/// the worker's `(error << 8) | exit status` failure envelope.
+#[no_mangle]
+pub extern "C" fn hirari_plugin_worker_load_failure(load_result: i32) -> u32 {
+    let (error, exit) = match load_result {
+        1 => (SANDBOX_ERROR_LOAD, 6),
+        2 => (SANDBOX_ERROR_ABI, 8),
+        _ => (SANDBOX_ERROR_INSTANCE, 10),
+    };
+    (u32::from(error) << 8) | exit
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::*;
+
+    #[test]
+    fn auto_reports_only_the_matching_adapters() {
+        assert_eq!(resolve_formats(0, false, false, false, false), 0);
+        assert_eq!(
+            resolve_formats(0, true, false, true, false),
+            WORKER_FORMAT_CLAP | WORKER_FORMAT_AUDIO_UNIT
+        );
+    }
+
+    #[test]
+    fn explicit_requests_never_fall_back_to_another_format() {
+        assert_eq!(
+            resolve_formats(2, true, true, true, true),
+            WORKER_FORMAT_CLAP
+        );
+        assert_eq!(
+            resolve_formats(3, true, false, true, true),
+            WORKER_FORMAT_UNSUPPORTED
+        );
+        assert_eq!(
+            resolve_formats(4, false, false, true, false),
+            WORKER_FORMAT_AUDIO_UNIT
+        );
+    }
+
+    #[test]
+    fn builtin_requests_require_the_builtin_scheme() {
+        assert_eq!(resolve_formats(1, false, false, false, true), 0);
+        assert_eq!(
+            resolve_formats(1, true, false, false, false),
+            WORKER_FORMAT_UNSUPPORTED
+        );
+    }
+
+    #[test]
+    fn load_failures_carry_error_and_exit_status() {
+        assert_eq!(hirari_plugin_worker_load_failure(1), (0xB0 << 8) | 6);
+        assert_eq!(hirari_plugin_worker_load_failure(2), (0xB1 << 8) | 8);
+        assert_eq!(hirari_plugin_worker_load_failure(-1), (0xB2 << 8) | 10);
+    }
+
+    #[test]
+    fn parse_args_publishes_the_resolved_formats() {
+        let owned: std::vec::Vec<std::ffi::CString> = [
+            "worker",
+            "--control-fd",
+            "3",
+            "--status-fd",
+            "4",
+            "--shared-name",
+            "block",
+            "--plugin",
+            "/plugins/demo.component",
+            "--format",
+            "auto",
+        ]
+        .iter()
+        .map(|value| std::ffi::CString::new(*value).unwrap())
+        .collect();
+        let argv: std::vec::Vec<*const c_char> = owned.iter().map(|value| value.as_ptr()).collect();
+        let mut options: WorkerLaunchOptions = unsafe { std::mem::zeroed() };
+        let mut error_kind = 99;
+        let parsed = unsafe {
+            hirari_plugin_worker_parse_args(
+                argv.len() as i32,
+                argv.as_ptr(),
+                &mut options,
+                &mut error_kind,
+            )
+        };
+        assert!(parsed);
+        assert_eq!(error_kind, 0);
+        assert_eq!(options.resolved_formats, WORKER_FORMAT_AUDIO_UNIT);
     }
 }
