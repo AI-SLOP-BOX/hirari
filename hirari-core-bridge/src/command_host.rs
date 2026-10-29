@@ -184,6 +184,49 @@ pub extern "C" fn hirari_engine_last_command_error(host: *mut c_void) -> u8 {
     last_error(host)
 }
 
+/// Commands the audio callback applies to its published track directly.
+pub const AUDIO_COMMAND_NONE: u32 = 0;
+pub const AUDIO_COMMAND_VOLUME: u32 = 1;
+pub const AUDIO_COMMAND_PAN: u32 = 2;
+pub const AUDIO_COMMAND_MUTE: u32 = 3;
+pub const AUDIO_COMMAND_SOLO: u32 = 4;
+
+// Mirrors `Hirari::Core::CommandType` from src/core/bridge_types.hpp.
+const COMMAND_TYPE_SET_VOLUME: u32 = 0;
+const COMMAND_TYPE_SET_PAN: u32 = 1;
+const COMMAND_TYPE_SET_MUTE: u32 = 2;
+const COMMAND_TYPE_SET_SOLO: u32 = 3;
+
+/// Sanitises a queued command for the audio callback.
+///
+/// Volume and pan are clamped only for finite values; a non-finite value is
+/// dropped exactly as the previous inline C++ checks did. `out_value` receives
+/// the value the caller should apply, and the returned id selects the setter.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_audio_command(
+    command_type: u32,
+    value: f32,
+    out_value: *mut f32,
+) -> u32 {
+    let Some(output) = (unsafe { out_value.as_mut() }) else {
+        return AUDIO_COMMAND_NONE;
+    };
+    *output = value;
+    match command_type {
+        COMMAND_TYPE_SET_VOLUME if value.is_finite() => {
+            *output = value.clamp(0.0, 2.0);
+            AUDIO_COMMAND_VOLUME
+        }
+        COMMAND_TYPE_SET_PAN if value.is_finite() => {
+            *output = value.clamp(-1.0, 1.0);
+            AUDIO_COMMAND_PAN
+        }
+        COMMAND_TYPE_SET_MUTE => AUDIO_COMMAND_MUTE,
+        COMMAND_TYPE_SET_SOLO => AUDIO_COMMAND_SOLO,
+        _ => AUDIO_COMMAND_NONE,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +421,48 @@ mod tests {
         assert!(!push_impl(&ops, 8_usize as *mut c_void, 0, 5, 1.0, 10, 7, 3));
         assert!(take_log().is_empty());
         assert_eq!(error_for(8_usize as *mut c_void), COMMAND_ERROR_NONE);
+    }
+}
+
+#[cfg(test)]
+mod audio_command_tests {
+    use super::*;
+
+    fn decide(command_type: u32, value: f32) -> (u32, f32) {
+        let mut applied = 0.0f32;
+        let op = unsafe { hirari_engine_audio_command(command_type, value, &mut applied) };
+        (op, applied)
+    }
+
+    #[test]
+    fn volume_and_pan_are_clamped() {
+        assert_eq!(decide(0, 3.5), (AUDIO_COMMAND_VOLUME, 2.0));
+        assert_eq!(decide(0, -1.0), (AUDIO_COMMAND_VOLUME, 0.0));
+        assert_eq!(decide(1, -4.0), (AUDIO_COMMAND_PAN, -1.0));
+        assert_eq!(decide(1, 0.25), (AUDIO_COMMAND_PAN, 0.25));
+    }
+
+    #[test]
+    fn non_finite_volume_and_pan_are_dropped() {
+        let (op, applied) = decide(0, f32::NAN);
+        assert_eq!(op, AUDIO_COMMAND_NONE);
+        assert!(applied.is_nan());
+        assert_eq!(decide(1, f32::INFINITY).0, AUDIO_COMMAND_NONE);
+    }
+
+    #[test]
+    fn mute_and_solo_pass_their_threshold_value() {
+        assert_eq!(decide(2, 0.75), (AUDIO_COMMAND_MUTE, 0.75));
+        assert_eq!(decide(3, 0.1), (AUDIO_COMMAND_SOLO, 0.1));
+        assert_eq!(decide(2, f32::NAN).0, AUDIO_COMMAND_MUTE);
+    }
+
+    #[test]
+    fn other_commands_and_missing_output_are_ignored() {
+        assert_eq!(decide(4, 1.0), (AUDIO_COMMAND_NONE, 1.0));
+        let op = unsafe {
+            hirari_engine_audio_command(0, 1.0, core::ptr::null_mut())
+        };
+        assert_eq!(op, AUDIO_COMMAND_NONE);
     }
 }

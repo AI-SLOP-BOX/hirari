@@ -249,21 +249,14 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
             if (command.tid >= kMaxTrackMap) continue;
             Track* target = state.trackMap[command.tid];
             if (!target) continue;
-            switch (command.type) {
-                case CommandType::SetVolume:
-                    if (std::isfinite(command.val)) target->setVolume(std::clamp(command.val, 0.0f, 2.0f));
-                    break;
-                case CommandType::SetPan:
-                    if (std::isfinite(command.val)) target->setPan(std::clamp(command.val, -1.0f, 1.0f));
-                    break;
-                case CommandType::SetMute:
-                    target->setMuted(command.val >= 0.5f);
-                    break;
-                case CommandType::SetSolo:
-                    target->setSolo(command.val >= 0.5f);
-                    break;
-                default:
-                    break;
+            float value = 0.0f;
+            switch (hirari_engine_audio_command(
+                        static_cast<uint32_t>(command.type), command.val, &value)) {
+                case 1: target->setVolume(value); break;   // SetVolume
+                case 2: target->setPan(value); break;      // SetPan
+                case 3: target->setMuted(value >= 0.5f); break;  // SetMute
+                case 4: target->setSolo(value >= 0.5f); break;   // SetSolo
+                default: break;
             }
         }
         // Keep the device callback primed while stopped, but do not traverse

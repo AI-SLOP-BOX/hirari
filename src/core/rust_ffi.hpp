@@ -1768,6 +1768,8 @@ extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t t
                                            uint64_t expectedProjectGeneration,
                                            uint64_t expectedAudioGeneration);
 extern "C" uint8_t hirari_engine_last_command_error(void* host);
+extern "C" uint32_t hirari_engine_audio_command(
+    uint32_t commandType, float value, float* outValue);
 
 // Track control policy (spatial validation, HRTF admission, auto-mix curve).
 struct HirariTrackControlHostOps {

@@ -256,6 +256,10 @@ production support.
   reads one `resolvedFormats` word, and
   `hirari_plugin_worker_load_failure` maps a failed CLAP instance load to its
   sandbox error byte and exit status instead of the nested C++ ternaries.
+- Audio-callback command sanitising moved to Rust.
+  `hirari_engine_audio_command` clamps volume and pan, drops non-finite values
+  and reports the setter to apply, so the engine's command loop only switches
+  on the returned id instead of repeating the finite/clamp checks inline.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
