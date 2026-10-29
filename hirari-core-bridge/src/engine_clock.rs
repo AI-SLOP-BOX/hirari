@@ -114,6 +114,40 @@ impl EngineClockOrchestrator {
     }
 }
 
+/// Bounded engine block size used when a hardware callback is larger.
+pub const ENGINE_BLOCK_SIZE: u32 = 4096;
+/// Set in the upper half of the plan when the playhead sits on the cycle end
+/// and must restart at the cycle start before any audio is processed.
+pub const CHUNK_RESTART_PLAYHEAD: u64 = 1 << 32;
+
+/// Chooses the next engine chunk for a hardware callback.
+///
+/// The low 32 bits hold the frames to process. A playhead that already reached
+/// the cycle end reports [`CHUNK_RESTART_PLAYHEAD`] so the caller rewinds and
+/// retries; a chunk straddling the cycle end stops at the boundary so notes,
+/// automation and click timing never observe a playhead past the loop.
+#[no_mangle]
+pub extern "C" fn hirari_engine_chunk_plan(
+    remaining: u32,
+    playing: bool,
+    loop_enabled: bool,
+    cycle_start: u64,
+    cycle_end: u64,
+    playhead: u64,
+) -> u64 {
+    let mut chunk = ENGINE_BLOCK_SIZE.min(remaining);
+    if playing && loop_enabled && cycle_end > cycle_start {
+        if playhead >= cycle_end {
+            return CHUNK_RESTART_PLAYHEAD;
+        }
+        let until_cycle_end = cycle_end - playhead;
+        if until_cycle_end < u64::from(chunk) {
+            chunk = until_cycle_end as u32;
+        }
+    }
+    u64::from(chunk)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MusicalTime {
     pub bar: i32,
@@ -167,5 +201,33 @@ mod tests {
         assert_eq!(position.sixteenth, 1);
         assert_eq!(position.tick, 0);
         assert_eq!(position.total_ticks, 4 * MusicalTime::TICKS_PER_BEAT);
+    }
+}
+
+#[cfg(test)]
+mod chunk_plan_tests {
+    use super::*;
+
+    fn plan(remaining: u32, playing: bool, loop_enabled: bool, start: u64, end: u64, head: u64) -> u64 {
+        hirari_engine_chunk_plan(remaining, playing, loop_enabled, start, end, head)
+    }
+
+    #[test]
+    fn plain_blocks_are_capped_at_the_engine_block_size() {
+        assert_eq!(plan(1024, true, true, 0, 100_000, 0), 1024);
+        assert_eq!(plan(20_000, false, false, 0, 100_000, 0), 4096);
+    }
+
+    #[test]
+    fn a_chunk_straddling_the_cycle_end_stops_at_the_boundary() {
+        assert_eq!(plan(4096, true, true, 0, 10_000, 9_000), 1000);
+        assert_eq!(plan(4096, true, false, 0, 10_000, 9_000), 4096);
+        assert_eq!(plan(4096, true, true, 10_000, 10_000, 9_000), 4096);
+    }
+
+    #[test]
+    fn a_playhead_on_the_cycle_end_requests_a_restart() {
+        assert_eq!(plan(512, true, true, 0, 10_000, 10_000), CHUNK_RESTART_PLAYHEAD);
+        assert_eq!(plan(512, false, true, 0, 10_000, 10_000), 512);
     }
 }

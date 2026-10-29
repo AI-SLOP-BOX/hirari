@@ -260,6 +260,10 @@ production support.
   `hirari_engine_audio_command` clamps volume and pan, drops non-finite values
   and reports the setter to apply, so the engine's command loop only switches
   on the returned id instead of repeating the finite/clamp checks inline.
+- Hardware-callback chunking moved to Rust. `hirari_engine_chunk_plan` owns the
+  4096-frame engine cap, the split at the loop boundary and the in-place cycle
+  restart, so `processBlockDirect` only forwards the current playhead and loop
+  bounds and processes the returned chunk length.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

@@ -258,31 +258,20 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
     // silently skipping every track whose prepared buffer is smaller.
     AudioBuffer wrap;
     wrap.wrapChannels(buffers, numChannels, numSamples);
-    constexpr uint32_t kEngineBlockSize = 4096;
     for (uint32_t offset = 0; offset < numSamples;) {
-        const uint32_t remaining = numSamples - offset;
-        uint32_t chunk = std::min(kEngineBlockSize, remaining);
-
-        // A hardware callback may straddle the cycle end.  Process the tail
-        // of the current cycle and the head of the next cycle as separate
-        // engine chunks so notes, automation and click timing never observe
-        // a playhead that runs past the loop boundary.
-        if (m_isPlaying.load(std::memory_order_acquire) &&
-            m_loopEnabled.load(std::memory_order_acquire)) {
-            const uint64_t cycleStart = m_cycleStart.load(std::memory_order_acquire);
-            const uint64_t cycleEnd = m_cycleEnd.load(std::memory_order_acquire);
-            const uint64_t playhead = m_playhead.load(std::memory_order_relaxed);
-            if (cycleEnd > cycleStart) {
-                if (playhead >= cycleEnd) {
-                    m_playhead.store(cycleStart, std::memory_order_relaxed);
-                    continue;
-                }
-                const uint64_t untilCycleEnd = cycleEnd - playhead;
-                if (untilCycleEnd < chunk) {
-                    chunk = static_cast<uint32_t>(untilCycleEnd);
-                }
-            }
+        // Rust owns the engine block cap and the cycle-boundary split so a
+        // hardware callback never feeds a playhead past the loop end.
+        const uint64_t plan = hirari_engine_chunk_plan(
+            numSamples - offset, m_isPlaying.load(std::memory_order_acquire),
+            m_loopEnabled.load(std::memory_order_acquire),
+            m_cycleStart.load(std::memory_order_acquire),
+            m_cycleEnd.load(std::memory_order_acquire),
+            m_playhead.load(std::memory_order_relaxed));
+        if ((plan >> 32) != 0) {
+            m_playhead.store(m_cycleStart.load(std::memory_order_acquire), std::memory_order_relaxed);
+            continue;
         }
+        const uint32_t chunk = static_cast<uint32_t>(plan);
         if (chunk == 0) continue;
         m_inputMonitorBlockOffset = offset;
         m_talkbackInputOffset = offset;
