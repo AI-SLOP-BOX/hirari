@@ -238,6 +238,10 @@ production support.
   `hirari_track_analysis_spectrogram` splits the first channel into ranges and
   returns the clamped rms/peak mix, so `Track::AnalysisEngine` no longer keeps
   its own bin arithmetic and non-finite sanitising loop.
+- Sandbox block failure classification moved to Rust.
+  `hirari_plugin_sandbox_block_outcome` owns the consecutive-overrun threshold,
+  the process-failed latch and the MIDI-invalidation failure set, so
+  `ProcessSandboxProcessor::processBlock` only stores the returned flags.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

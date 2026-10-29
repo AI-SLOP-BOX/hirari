@@ -22,7 +22,9 @@ public:
     static constexpr size_t kMaxStateBytes = SandboxProtocol::kMaxStateBytes;
     static constexpr uint32_t kMaxParameterSnapshotEntries =
         SandboxProtocol::kMaxParameterChanges;
-    static constexpr uint32_t kConsecutiveOverrunLimit = 8;
+    // Bits returned by hirari_plugin_sandbox_block_outcome.
+    static constexpr uint32_t kBlockLatchFailure = 1;
+    static constexpr uint32_t kBlockClearMidi = 2;
 
     explicit ProcessSandboxProcessor(std::string pluginPath, double sampleRate = 44100.0,
                                      uint32_t maxBlockSize = 512, std::string requestedFormat = "auto")
@@ -156,35 +158,21 @@ public:
         const bool produced = m_host.process(buffer, midi);
         const bool deadlineMissed = m_host.takeLastProcessOverrun();
         const bool completedLate = produced && m_host.takeCompletedSequenceOverrun();
-        if (deadlineMissed || completedLate) {
-            const uint32_t count = m_consecutiveOverruns.fetch_add(1, std::memory_order_acq_rel) + 1;
-            if (count >= kConsecutiveOverrunLimit) {
-                m_failed.store(true, std::memory_order_release);
-            }
-        } else if (produced) {
+        uint32_t overruns = m_consecutiveOverruns.load(std::memory_order_acquire);
+        if (deadlineMissed || completedLate)
+            overruns = m_consecutiveOverruns.fetch_add(1, std::memory_order_acq_rel) + 1;
+        else if (produced)
             m_consecutiveOverruns.store(0, std::memory_order_release);
-        }
-        if (!produced) {
-            buffer.clear();
-            // A false result is also the normal first half of the mailbox
-            // pipeline: the block was submitted and its output is collected
-            // on the next call. Only the explicit worker-side process error
-            // is a processor failure.
-            const auto failure = m_host.failure();
-            if (failure == PluginSandboxHost::Failure::ProcessFailed)
-                m_failed.store(true, std::memory_order_release);
-            // Once the mailbox is no longer a valid source of output, do not
-            // let input MIDI survive into a later recovery block. The normal
-            // pending-mailbox path deliberately preserves MIDI; this branch
-            // is only for an actual failure or quarantine state.
-            if (m_failed.load(std::memory_order_acquire) ||
-                failure == PluginSandboxHost::Failure::PluginQuarantined ||
-                failure == PluginSandboxHost::Failure::ProcessExited ||
-                failure == PluginSandboxHost::Failure::ProcessHung ||
-                failure == PluginSandboxHost::Failure::ProcessFailed) {
-                midi.clear();
-            }
-        }
+        if (!produced) buffer.clear();
+        // Failure latching and MIDI invalidation are classified in Rust; the
+        // counters and the flags they feed stay native.
+        const uint32_t outcome = hirari_plugin_sandbox_block_outcome(
+            produced, overruns, failureCode(), m_failed.load(std::memory_order_acquire));
+        if ((outcome & kBlockLatchFailure) != 0)
+            m_failed.store(true, std::memory_order_release);
+        if (!produced &&
+            ((outcome & kBlockClearMidi) != 0 || m_failed.load(std::memory_order_acquire)))
+            midi.clear();
         return produced && !m_failed.load(std::memory_order_acquire);
     }
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi,

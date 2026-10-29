@@ -43,9 +43,98 @@ pub extern "C" fn hirari_plugin_sandbox_state_error_name(code: u8) -> *const c_c
     name.as_ptr()
 }
 
+/// Failure codes that make a sandbox worker unusable. Mirrors
+/// `PluginSandboxHost::Failure`.
+const FAILURE_PLUGIN_QUARANTINED: u8 = 10;
+const FAILURE_PROCESS_EXITED: u8 = 11;
+const FAILURE_PROCESS_HUNG: u8 = 12;
+const FAILURE_PROCESS_FAILED: u8 = 13;
+
+/// Late blocks in a row after which the processor is quarantined.
+const CONSECUTIVE_OVERRUN_LIMIT: u32 = 8;
+
+/// Bit 0: latch the processor failure state.
+const OUTCOME_LATCH_FAILURE: u32 = 1;
+/// Bit 1: drop the input MIDI because no mailbox can deliver its output.
+const OUTCOME_CLEAR_MIDI: u32 = 2;
+
+/// Realtime classification for `ProcessSandboxProcessor::processBlock`.
+///
+/// A missing block is normal: it is the first half of the mailbox pipeline, so
+/// `produced == false` alone never fails the processor. Only explicit worker
+/// failures and a run of late blocks latch the failure state. When the mailbox
+/// can no longer deliver output, input MIDI must not survive into a recovery
+/// block.
+#[no_mangle]
+pub extern "C" fn hirari_plugin_sandbox_block_outcome(
+    produced: bool,
+    overruns: u32,
+    failure_code: u8,
+    failed: bool,
+) -> u32 {
+    let mut outcome = 0;
+    if !failed
+        && (overruns >= CONSECUTIVE_OVERRUN_LIMIT
+            || (!produced && failure_code == FAILURE_PROCESS_FAILED))
+    {
+        outcome |= OUTCOME_LATCH_FAILURE;
+    }
+    if !produced
+        && matches!(
+            failure_code,
+            FAILURE_PLUGIN_QUARANTINED
+                | FAILURE_PROCESS_EXITED
+                | FAILURE_PROCESS_HUNG
+                | FAILURE_PROCESS_FAILED
+        )
+    {
+        outcome |= OUTCOME_CLEAR_MIDI;
+    }
+    outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_mailbox_block_is_not_a_failure() {
+        assert_eq!(hirari_plugin_sandbox_block_outcome(false, 0, 0, false), 0);
+    }
+
+    #[test]
+    fn overrun_limit_latches_only_at_the_threshold() {
+        assert_eq!(hirari_plugin_sandbox_block_outcome(true, 7, 0, false), 0);
+        assert_eq!(
+            hirari_plugin_sandbox_block_outcome(true, 8, 0, false),
+            OUTCOME_LATCH_FAILURE
+        );
+        assert_eq!(hirari_plugin_sandbox_block_outcome(true, 9, 0, true), 0);
+    }
+
+    #[test]
+    fn process_failure_without_output_latches_and_drops_midi() {
+        assert_eq!(
+            hirari_plugin_sandbox_block_outcome(false, 0, FAILURE_PROCESS_FAILED, false),
+            OUTCOME_LATCH_FAILURE | OUTCOME_CLEAR_MIDI
+        );
+        assert_eq!(
+            hirari_plugin_sandbox_block_outcome(true, 0, FAILURE_PROCESS_FAILED, false),
+            0
+        );
+        assert_eq!(
+            hirari_plugin_sandbox_block_outcome(false, 0, FAILURE_PROCESS_FAILED, true),
+            OUTCOME_CLEAR_MIDI
+        );
+        assert_eq!(
+            hirari_plugin_sandbox_block_outcome(false, 0, FAILURE_PLUGIN_QUARANTINED, false),
+            OUTCOME_CLEAR_MIDI
+        );
+        assert_eq!(
+            hirari_plugin_sandbox_block_outcome(false, 0, FAILURE_PROCESS_HUNG, true),
+            OUTCOME_CLEAR_MIDI
+        );
+    }
 
     #[test]
     fn every_failure_code_has_a_distinct_name() {
