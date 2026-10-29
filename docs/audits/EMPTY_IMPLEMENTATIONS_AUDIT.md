@@ -62,8 +62,8 @@
   - 状態・パラメータ・レイテンシ等のデフォルト値が未接続を隠す。`isParameterAutomated()`も常にtrue。
 - [celestial_reverb.hpp:29-35](../src/dsp/plugins/celestial_reverb.hpp:29)
   - パラメータ取得が0.5固定、設定値を無視。
-- [mastering_kernel.hpp:48-55](../src/core/mixing/mastering_kernel.hpp:48)
-  - LUFSが-14固定、write pointerがnullptr。
+- mastering_kernel.hpp は削除済み。C++側はLUFS固定・write pointer nullptrの空実装だったが、
+  実挙動はRustの `mastering_kernel.rs` にあり、未使用のC++アダプタだけを撤去した。
 - [track.hpp:173-178](../src/core/engine/track.hpp:173)
   - Trackのspectrogram APIが空配列。
 - [automation_controller.hpp:22-28](../src/core/engine/automation_controller.hpp:22)

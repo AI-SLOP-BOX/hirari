@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The unused C++ `MasteringKernel` adapter and twelve dead FFI declarations
+  (bus-audio clear/commit/samples, automation-lane removal, VariAudio split,
+  group warp maps) are deleted. The mastering behavior was already Rust-owned,
+  and no C++ call site referenced any of these entry points.
 - Stem separation now lives entirely in Rust. `stem_separator_registry.rs`
   owns the backend selection, model validation, status naming and split
   dispatch, and `stem_extraction_pipeline.rs` owns the background workers that

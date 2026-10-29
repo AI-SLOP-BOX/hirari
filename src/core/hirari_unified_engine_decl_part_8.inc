@@ -38,8 +38,6 @@
 
     // Engine Infrastructure
 
-    // RT-Safe Pre-allocated Kernels
-    ::Hirari::Core::Mixing::MasteringKernel m_masteringKernel;
     // The Control Room model is implemented in Rust
     // (control_room_runtime.rs). This is only the handle its audio
     // callback renders with; C++ never interprets the state itself, so the

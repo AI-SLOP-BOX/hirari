@@ -179,11 +179,8 @@ extern "C" bool hirari_bus_audio_accumulate(
     uint32_t frames, float gain);
 extern "C" bool hirari_bus_audio_replace_post(
     void* state, const float* left, const float* right, uint32_t frames);
-extern "C" void hirari_bus_audio_clear(void* state, uint32_t frames);
-extern "C" bool hirari_bus_audio_commit_dry(void* state, uint32_t frames);
 extern "C" bool hirari_bus_audio_read(
     void* state, float* left, float* right, uint32_t frames, bool post);
-extern "C" uint32_t hirari_bus_audio_samples(const void* state);
 extern "C" void* hirari_bus_track_create();
 extern "C" void hirari_bus_track_destroy(void* state);
 extern "C" void hirari_bus_track_set_input_gain(void* state, float gain);
@@ -240,7 +237,7 @@ extern "C" bool hirari_audio_buffer_deinterleave_interleaved(
 extern "C" void* hirari_macro_mapping_create();
 extern "C" void hirari_macro_mapping_destroy(void* state);
 extern "C" void* hirari_automation_lane_group_create();
-extern "C" void hirari_automation_lane_group_destroy(void* state), hirari_automation_lane_group_remove(void* state, uint32_t id);
+extern "C" void hirari_automation_lane_group_destroy(void* state);
 extern "C" bool hirari_automation_lane_group_add(void* state, uint32_t id), hirari_automation_lane_group_link(void* state, uint32_t id, bool linked), hirari_automation_lane_group_protect(void* state, uint32_t id, bool protected_lane);
 extern "C" bool hirari_automation_lane_group_preview(void* state, uint32_t id, float value);
 extern "C" void hirari_macro_control_set_value(
@@ -414,20 +411,6 @@ bool hirari_region_vari_audio_store_load(
 // Applies the region-add policy in place (cap, drop malformed, normalize
 // anchor windows, sort, rebuild phases).
 bool hirari_region_vari_audio_store_normalize(HirariRegionVariAudioStore* store);
-
-// Splits the note table at a timeline boundary into two fresh stores,
-// windowing segments and rebuilding boundary anchors from the source curve.
-bool hirari_region_vari_audio_store_split(
-    const HirariRegionVariAudioStore* source, HirariRegionVariAudioStore* left,
-    HirariRegionVariAudioStore* right, double sample_rate, uint64_t split_offset,
-    uint64_t region_length);
-
-// Same split policy, read from the immutable published snapshot so a
-// concurrent note edit cannot mutate the table mid-read.
-bool hirari_region_vari_audio_frozen_split(
-    const HirariVariAudioFrozen* source, HirariRegionVariAudioStore* left,
-    HirariRegionVariAudioStore* right, double sample_rate, uint64_t split_offset,
-    uint64_t region_length);
 }
 
 extern "C" char* hirari_xml_escape_attribute(const char* input);
@@ -2137,32 +2120,6 @@ extern "C" bool hirari_expression_map_edit_set(
 extern "C" bool hirari_expression_map_edit_set_pro(
     void* host, uint32_t trackId, const uint8_t* json, size_t jsonLength,
     void* undo, const void* log);
-struct HirariAudioQuantizeChannelView {
-    const float* samples = nullptr;
-    uint64_t span = 0;
-    double sourceFramesPerTimelineFrame = 1.0;
-};
-struct HirariAudioQuantizerTargetView {
-    uint64_t sourceSpan = 0;
-    double sourceFramesPerTimelineFrame = 1.0;
-};
-extern "C" {
-bool hirari_audio_quantizer_settings_validate(
-    uint32_t track_id, uint32_t region_id, float strength,
-    double grid_beats, float swing);
-void* hirari_audio_quantizer_build_group_warp_maps(
-    const HirariAudioQuantizeChannelView* channels, size_t channel_count,
-    const HirariAudioQuantizerTargetView* targets, size_t target_count,
-    uint64_t timeline_length, uint64_t timeline_start,
-    double grid_beats, float strength, float swing,
-    double sample_rate, double base_tempo,
-    const HirariTempoEvent* tempo_events, size_t tempo_event_count);
-size_t hirari_audio_quantizer_group_warp_map_count(const void* maps, size_t target_index);
-bool hirari_audio_quantizer_group_warp_map_copy(
-    const void* maps, size_t target_index,
-    HirariWarpMarker* output, size_t output_capacity);
-void hirari_audio_quantizer_group_warp_maps_destroy(void* maps);
-}
 extern "C" uint8_t hirari_plugin_admission_error(const char* path);
 extern "C" const char* hirari_plugin_scan_rejection(const char* path);
 extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bus);
@@ -2220,13 +2177,6 @@ extern "C" bool hirari_delay_pitch_process(
     void* state, const float* input, float* output, uint32_t samples,
     float ratio, float f0, double sample_rate,
     float formant_ratio, float timing_ratio);
-extern "C" void* hirari_mastering_kernel_create();
-extern "C" void hirari_mastering_kernel_destroy(void* state);
-extern "C" void hirari_mastering_kernel_set_target(void* state, float rms);
-extern "C" void hirari_mastering_kernel_process(
-    void* state, float* left, float* right, uint32_t samples);
-extern "C" float hirari_mastering_kernel_rms_dbfs(const void* state);
-extern "C" float* hirari_mastering_kernel_write_pointer(const void* state, int32_t channel);
 extern "C" void* hirari_mpe_manager_create();
 extern "C" void hirari_mpe_manager_destroy(void* state);
 extern "C" void hirari_mpe_manager_reset(void* state);
