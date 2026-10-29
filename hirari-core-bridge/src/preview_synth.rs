@@ -208,6 +208,28 @@ pub unsafe extern "C" fn hirari_preview_synth_reset(state: *mut c_void) {
     state.reset();
 }
 
+/// Built-in preview voice parameters derived from macro targets 0..5.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PreviewVoiceParams {
+    morph: f32,
+    detune_ratio: f64,
+    drive: f32,
+    cutoff: f32,
+    resonance: f32,
+    output_gain: f32,
+}
+
+fn preview_voice_params(value: impl Fn(u32) -> f32) -> PreviewVoiceParams {
+    PreviewVoiceParams {
+        morph: value(0),
+        detune_ratio: 2.0_f64.powf((value(1) as f64 - 0.5) * 40.0 / 1200.0),
+        drive: 0.75 + value(2) * 3.0,
+        cutoff: 0.01 + value(3) * 0.35,
+        resonance: value(4) * 0.25,
+        output_gain: 0.25 + value(5) * 1.25,
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_preview_synth_process(
     state: *mut c_void,
@@ -218,16 +240,14 @@ pub unsafe extern "C" fn hirari_preview_synth_process(
     frames: u32,
     playhead: u64,
     sample_rate: f64,
-    morph: f32,
-    detune_ratio: f64,
-    drive: f32,
-    cutoff: f32,
-    resonance: f32,
-    output_gain: f32,
+    macros: *const c_void,
 ) {
     let Some(state) = (unsafe { state.cast::<PreviewSynth>().as_mut() }) else {
         return;
     };
+    let params = preview_voice_params(|index| unsafe {
+        crate::macro_mapping::hirari_macro_control_get_value(macros, index)
+    });
     unsafe {
         state.process(
             events.cast(),
@@ -237,12 +257,12 @@ pub unsafe extern "C" fn hirari_preview_synth_process(
             frames as usize,
             playhead,
             sample_rate,
-            morph,
-            detune_ratio,
-            drive,
-            cutoff,
-            resonance,
-            output_gain,
+            params.morph,
+            params.detune_ratio,
+            params.drive,
+            params.cutoff,
+            params.resonance,
+            params.output_gain,
         );
     }
 }
@@ -250,6 +270,26 @@ pub unsafe extern "C" fn hirari_preview_synth_process(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_voice_params_follow_macro_targets() {
+        let mid = preview_voice_params(|_| 0.5);
+        assert_eq!(mid.morph, 0.5);
+        assert_eq!(mid.detune_ratio, 1.0);
+        assert_eq!(mid.drive, 0.75 + 0.5 * 3.0);
+        assert_eq!(mid.cutoff, 0.01 + 0.5 * 0.35);
+        assert_eq!(mid.resonance, 0.5 * 0.25);
+        assert_eq!(mid.output_gain, 0.25 + 0.5 * 1.25);
+
+        let low = preview_voice_params(|_| 0.0);
+        assert_eq!(low.detune_ratio, 2.0_f64.powf(-0.5 * 40.0 / 1200.0));
+        assert_eq!(low.output_gain, 0.25);
+
+        let high = preview_voice_params(|_| 1.0);
+        assert_eq!(high.detune_ratio, 2.0_f64.powf(0.5 * 40.0 / 1200.0));
+        assert_eq!(high.drive, 3.75);
+        assert_eq!(high.output_gain, 1.5);
+    }
 
     #[cfg(feature = "dsp-differential-reference")]
     unsafe extern "C" {

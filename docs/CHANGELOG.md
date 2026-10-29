@@ -246,6 +246,10 @@ production support.
   `hirari_builtin_effect_parameter_name` holds the compressor, limiter, tube
   saturation, sub-bass and chord-trigger name tables, so each C++ facade only
   copies the returned string into its caller buffer.
+- Preview voice macro mapping moved to Rust. `hirari_preview_synth_process`
+  now takes the macro state and derives morph, detune, drive, cutoff,
+  resonance and output gain from targets 0..5, so the engine no longer
+  computes those curves and just forwards `m_macroControl`.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

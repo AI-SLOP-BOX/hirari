@@ -136,8 +136,7 @@ extern "C" void hirari_preview_synth_set_engine(void* state, uint32_t engine);
 extern "C" void hirari_preview_synth_reset(void* state);
 extern "C" void hirari_preview_synth_process(
     void* state, const void* events, size_t event_count, float* left, float* right,
-    uint32_t frames, uint64_t playhead, double sample_rate, float morph,
-    double detune_ratio, float drive, float cutoff, float resonance, float output_gain);
+    uint32_t frames, uint64_t playhead, double sample_rate, const void* macros);
 extern "C" void* hirari_master_limiter_create(double sample_rate);
 extern "C" void hirari_master_limiter_destroy(void* state);
 extern "C" void hirari_master_limiter_prepare(void* state, double sample_rate);

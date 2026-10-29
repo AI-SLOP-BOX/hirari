@@ -15,13 +15,11 @@ public:
 
     void setEngine(uint32_t engine) { hirari_preview_synth_set_engine(state_, engine); }
     void reset() { hirari_preview_synth_reset(state_); }
+    // Macro-to-voice mapping is Rust-owned; this only forwards the macro state.
     void process(const MidiEvent* events, size_t eventCount, float* left, float* right,
-                 uint32_t frames, uint64_t playhead, double sampleRate, float morph,
-                 double detuneRatio, float drive, float cutoff, float resonance,
-                 float outputGain) {
+                 uint32_t frames, uint64_t playhead, double sampleRate, const void* macros) {
         hirari_preview_synth_process(state_, events, eventCount, left, right, frames,
-                                     playhead, sampleRate, morph, detuneRatio, drive,
-                                     cutoff, resonance, outputGain);
+                                     playhead, sampleRate, macros);
     }
 
 private:

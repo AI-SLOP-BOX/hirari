@@ -410,15 +410,9 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         // Deterministic built-in preview instrument. This is intentionally a
         // small built-in voice so MIDI playback can be verified without plugins.
         const double sr = std::max(1.0, m_sampleRate.load(std::memory_order_relaxed));
-        const float morph = hirari_macro_control_get_value(m_macroControl, 0);
-        const double detuneRatio = std::pow(2.0, (static_cast<double>(hirari_macro_control_get_value(m_macroControl, 1)) - 0.5) * 40.0 / 1200.0);
-        const float drive = 0.75f + hirari_macro_control_get_value(m_macroControl, 2) * 3.0f;
-        const float cutoff = 0.01f + hirari_macro_control_get_value(m_macroControl, 3) * 0.35f;
-        const float resonance = hirari_macro_control_get_value(m_macroControl, 4) * 0.25f;
-        const float synthGain = 0.25f + hirari_macro_control_get_value(m_macroControl, 5) * 1.25f;
         m_previewSynth.process(m_blockMidi.getEvents(), m_blockMidi.size(),
             output.getWritePointer(0, off), output.getWritePointer(1, off), sz,
-            currentPlayhead, sr, morph, detuneRatio, drive, cutoff, resonance, synthGain);
+            currentPlayhead, sr, m_macroControl);
         float* previewL = output.getWritePointer(0, off);
         float* previewR = output.getWritePointer(1, off);
 
