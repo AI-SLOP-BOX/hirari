@@ -59,21 +59,14 @@ bool HirariUnifiedEngine::replace_midi_notes(const std::vector<ScheduledMidiNote
 }
 
 std::vector<HirariUnifiedEngine::ScheduledMidiNote> HirariUnifiedEngine::midi_notes_snapshot() const {
-    std::vector<ScheduledMidiNote> notes;
-    const size_t count = hirari_midi_notes_snapshot_copy(m_midiSnapshotStore, nullptr, 0);
-    if (count == 0) return notes;
-    notes.resize(count);
-    for (;;) {
-        const size_t copied = hirari_midi_notes_snapshot_copy(
-            m_midiSnapshotStore, reinterpret_cast<HirariScheduledMidiNote*>(notes.data()),
-            notes.size());
-        if (copied <= notes.size()) {
-            notes.resize(copied);
-            break;
-        }
-        notes.resize(copied);
-    }
-    return notes;
+    size_t count = 0;
+    auto* notes = hirari_midi_notes_snapshot_take(m_midiSnapshotStore, &count);
+    if (!notes) return {};
+    std::vector<ScheduledMidiNote> copy(
+        reinterpret_cast<const ScheduledMidiNote*>(notes),
+        reinterpret_cast<const ScheduledMidiNote*>(notes) + count);
+    hirari_midi_notes_snapshot_take_free(notes, count);
+    return copy;
 }
 
 bool HirariUnifiedEngine::remove_midi_notes_range(uint32_t trackId, uint64_t startSample,

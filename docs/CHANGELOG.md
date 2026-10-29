@@ -269,6 +269,10 @@ production support.
   returns the pending points with a release entry point, so
   `Track::flushRecordedAutomation` no longer retries a caller-sized flush and
   only merges the returned points into the volume and pan lists.
+- MIDI note snapshots moved to Rust-owned buffers.
+  `hirari_midi_notes_snapshot_take` returns the published note list in storage
+  it owns, so `midi_notes_snapshot` copies once and releases instead of
+  growing a caller vector across repeated count/copy calls.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

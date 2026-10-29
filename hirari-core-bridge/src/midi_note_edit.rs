@@ -595,6 +595,44 @@ pub unsafe extern "C" fn hirari_midi_notes_snapshot_copy(
     notes.len()
 }
 
+/// Hands the published note list to the caller in a buffer this side owns so
+/// no caller-specified capacity can size a foreign resize. Returns null, and
+/// leaves `count` at zero, for an empty list or an unknown store.
+///
+/// # Safety
+/// `count` must be null or writable for one `usize`.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_snapshot_take(
+    store: *const c_void,
+    count: *mut usize,
+) -> *mut ScheduledMidiNoteFfi {
+    if let Some(count) = unsafe { count.as_mut() } {
+        *count = 0;
+    }
+    let Some(store) = (unsafe { store.cast::<MidiSnapshotStore>().as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    let notes = store.snapshot_notes();
+    if notes.is_empty() {
+        return std::ptr::null_mut();
+    }
+    if let Some(count) = unsafe { count.as_mut() } {
+        *count = notes.len();
+    }
+    Box::into_raw(notes.into_boxed_slice()).cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_midi_notes_snapshot_take_free(
+    notes: *mut ScheduledMidiNoteFfi,
+    count: usize,
+) {
+    if notes.is_null() {
+        return;
+    }
+    unsafe { drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(notes, count))) };
+}
+
 /// Replaces the scheduled note list, rejecting a null store or more than
 /// 100,000 notes, and records the "Replace MIDI Notes" history entry when
 /// asked.
@@ -982,6 +1020,32 @@ mod edit_host_tests {
             unsafe { hirari_midi_notes_snapshot_copy(store, notes.as_mut_ptr(), notes.len()) };
         notes.truncate(copied);
         notes
+    }
+
+    #[test]
+    fn snapshot_take_hands_the_published_list_over_once() {
+        let store = hirari_midi_snapshot_store_create();
+        let notes = [note(1, 60, 0), note(2, 64, 960)];
+        unsafe {
+            assert!(hirari_midi_notes_replace(
+                store,
+                notes.as_ptr(),
+                notes.len(),
+                false,
+                std::ptr::null_mut(),
+                std::ptr::null()
+            ));
+        }
+        let mut count = 0usize;
+        let taken = unsafe { hirari_midi_notes_snapshot_take(store, &mut count) };
+        assert!(!taken.is_null());
+        assert_eq!(count, 2);
+        assert_eq!(unsafe { std::slice::from_raw_parts(taken, count) }, &notes);
+        unsafe { hirari_midi_notes_snapshot_take_free(taken, count) };
+        let mut again = 9usize;
+        assert!(unsafe { hirari_midi_notes_snapshot_take(std::ptr::null(), &mut again) }.is_null());
+        assert_eq!(again, 0);
+        unsafe { hirari_midi_snapshot_store_destroy(store) };
     }
 
     #[test]
