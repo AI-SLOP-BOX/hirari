@@ -492,7 +492,6 @@ mod tests {
     unsafe extern "C" {
         fn hirari_audio_task_scheduler_cpp_smoke() -> bool;
         fn hirari_rust_thread_pool_cpp_smoke() -> bool;
-        fn hirari_scae_stem_pipeline_cpp_smoke() -> bool;
     }
 
     #[test]
@@ -601,11 +600,5 @@ mod tests {
     fn cpp_future_thread_pool_runs_and_propagates_exceptions_via_rust_workers() {
         // SAFETY: The smoke owns all submitted work and waits for each future.
         assert!(unsafe { hirari_rust_thread_pool_cpp_smoke() });
-    }
-
-    #[test]
-    fn scae_stem_pipeline_runs_on_rust_owned_background_workers() {
-        // SAFETY: The fixture waits for its callback and owns the input through completion.
-        assert!(unsafe { hirari_scae_stem_pipeline_cpp_smoke() });
     }
 }

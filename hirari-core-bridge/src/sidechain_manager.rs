@@ -1335,7 +1335,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_capture_track(
         return false;
     };
     unsafe {
-        with_control(engine, |gate| unsafe {
+        with_control(engine, |gate| {
             hirari_sidechain_capture_track(gate, track, context, callback)
         })
     }

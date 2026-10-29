@@ -78,6 +78,59 @@ pub unsafe extern "C" fn hirari_stem_split_process(
     true
 }
 
+/// Four separated planes, one vector of `samples` values per channel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StemPlanes {
+    pub drums: Vec<Vec<f32>>,
+    pub bass: Vec<Vec<f32>>,
+    pub vocals: Vec<Vec<f32>>,
+    pub other: Vec<Vec<f32>>,
+}
+
+/// Safe channel/sample validation and buffer ownership for the kernel above.
+/// Mirrors the former C++ `StemSplitter::split` contract: it rejects empty or
+/// oversized layouts and non-positive rates instead of allocating partials.
+pub fn split_stems(input: &[Vec<f32>], sample_rate: f64) -> Option<StemPlanes> {
+    let channels = input.len();
+    let samples = input.first()?.len();
+    if channels > MAX_CHANNELS
+        || samples == 0
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+    {
+        return None;
+    }
+    if input.iter().any(|plane| plane.len() != samples) {
+        return None;
+    }
+    let mut output = StemPlanes {
+        drums: vec![vec![0.0; samples]; channels],
+        bass: vec![vec![0.0; samples]; channels],
+        vocals: vec![vec![0.0; samples]; channels],
+        other: vec![vec![0.0; samples]; channels],
+    };
+    let input_ptrs: Vec<*const f32> = input.iter().map(Vec::as_ptr).collect();
+    let mut drums: Vec<*mut f32> = output.drums.iter_mut().map(Vec::as_mut_ptr).collect();
+    let mut bass: Vec<*mut f32> = output.bass.iter_mut().map(Vec::as_mut_ptr).collect();
+    let mut vocals: Vec<*mut f32> = output.vocals.iter_mut().map(Vec::as_mut_ptr).collect();
+    let mut other: Vec<*mut f32> = output.other.iter_mut().map(Vec::as_mut_ptr).collect();
+    // SAFETY: Every plane was allocated with exactly `samples` elements and the
+    // pointer arrays hold one entry per channel for the duration of the call.
+    let ok = unsafe {
+        hirari_stem_split_process(
+            input_ptrs.as_ptr(),
+            drums.as_mut_ptr(),
+            bass.as_mut_ptr(),
+            vocals.as_mut_ptr(),
+            other.as_mut_ptr(),
+            channels as u32,
+            samples as u32,
+            sample_rate,
+        )
+    };
+    ok.then_some(output)
+}
+
 #[cfg(all(test, feature = "dsp-differential-reference"))]
 mod tests {
     use super::hirari_stem_split_process;

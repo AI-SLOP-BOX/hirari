@@ -18,7 +18,6 @@ void HIRARI_LOG(uint32_t level, const std::string& msg) {
 #include "core/status_queue.hpp"
 #include "core/concurrency/audio_task_manager.hpp"
 #include "core/concurrency/thread_pool.hpp"
-#include "scae/stem_extraction_pipeline.hpp"
 
 namespace Hirari::Core::Bridge {
 
@@ -148,28 +147,6 @@ extern "C" bool hirari_rust_thread_pool_cpp_smoke() {
     } catch (...) {
         return false;
     }
-}
-
-extern "C" bool hirari_scae_stem_pipeline_cpp_smoke() {
-    using Pipeline = Hirari::SCAE::Intelligence::StemExtractionPipeline;
-    using Stems = std::map<std::string, std::vector<float>>;
-    auto promise = std::make_shared<std::promise<Stems>>();
-    auto result = promise->get_future();
-    auto samples = std::make_shared<std::vector<float>>(256);
-    for (size_t index = 0; index < samples->size(); ++index) {
-        (*samples)[index] = std::sin(static_cast<float>(index) * 0.11f);
-    }
-    Pipeline::Task task{7, samples, 44100.0, [promise](Stems&& stems) {
-        promise->set_value(std::move(stems));
-    }};
-    Pipeline::getInstance().enqueue(std::move(task));
-    if (result.wait_for(std::chrono::seconds(5)) != std::future_status::ready) return false;
-    const auto stems = result.get();
-    for (const char* name : {"vocals", "drums", "bass", "other"}) {
-        const auto found = stems.find(name);
-        if (found == stems.end() || found->second.size() != samples->size()) return false;
-    }
-    return true;
 }
 
 extern "C" bool hirari_midi_region_cpp_wrapper_smoke() {

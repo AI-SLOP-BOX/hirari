@@ -215,15 +215,6 @@ extern "C" bool hirari_audio_buffer_copy(
     float* destination_left, float* destination_right,
     const float* source_left, const float* source_right, uint32_t sample_count);
 extern "C" float hirari_audio_buffer_magnitude(const float* samples, uint32_t sample_count);
-extern "C" bool hirari_stem_split_process(
-    const float* const* inputs,
-    float* const* drums,
-    float* const* bass,
-    float* const* vocals,
-    float* const* other,
-    uint32_t channels,
-    uint32_t samples,
-    double sample_rate);
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
 extern "C" float* hirari_audio_buffer_storage_data(const void* storage);
 extern "C" size_t hirari_audio_buffer_storage_capacity(const void* storage);
@@ -2221,11 +2212,6 @@ extern "C" bool hirari_project_db_query(
     void* context, HirariProjectDbCallback callback);
 extern "C" bool hirari_project_db_flush(
     const void* state, const uint8_t* path, size_t path_size);
-extern "C" uint8_t hirari_stem_separator_validate_model(
-    uint8_t backend, const uint8_t* path, size_t path_size,
-    uint32_t model_sample_rate, uint32_t max_channels);
-extern "C" const char* hirari_stem_separator_validation_message(uint8_t code);
-extern "C" const char* hirari_stem_separator_backend_name(uint8_t backend);
 extern "C" void* hirari_delay_pitch_create(double sample_rate);
 extern "C" void* hirari_delay_pitch_clone(const void* state);
 extern "C" void hirari_delay_pitch_destroy(void* state);

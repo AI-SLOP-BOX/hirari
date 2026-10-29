@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Stem separation now lives entirely in Rust. `stem_separator_registry.rs`
+  owns the backend selection, model validation, status naming and split
+  dispatch, and `stem_extraction_pipeline.rs` owns the background workers that
+  feed it; the C++ provider, splitter wrapper and extraction pipeline, their
+  declarations and the unbuilt C++ test are deleted, with the contract moved
+  into Rust tests.
 - The sidechain manager's gate, writer lock and control/reader entry points
   now live in `sidechain_manager.rs` behind one engine handle. Calling into a
   link is a single FFI call; the C++ class keeps only the transfer types and
