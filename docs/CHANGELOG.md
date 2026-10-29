@@ -234,6 +234,10 @@ production support.
   the empty-path, missing-path, directory and regular-file checks (plus the
   single-inspect fallback) and returns the rejection text, so
   `PluginScanner::scanInSandbox` only records the returned reason.
+- Track work-buffer spectrogram features moved to Rust.
+  `hirari_track_analysis_spectrogram` splits the first channel into ranges and
+  returns the clamped rms/peak mix, so `Track::AnalysisEngine` no longer keeps
+  its own bin arithmetic and non-finite sanitising loop.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

@@ -165,6 +165,47 @@ pub unsafe extern "C" fn hirari_analysis_engine_get_stats(state: *const c_void, 
     }
 }
 
+/// Per-track spectrogram features for `Track::getAnalysisEngine()`.
+///
+/// The first channel is split into `bins` equal sample ranges (the caller
+/// passes `min(32, frames)`), each range reports `0.5 * (rms + peak)` clamped
+/// to 0..1. Non-finite samples count as silence, and a range whose rms or peak
+/// is non-finite reports 0. Writes at most `capacity` values and returns how
+/// many were written.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_track_analysis_spectrogram(
+    samples: *const f32,
+    sample_count: u32,
+    output: *mut f32,
+    capacity: usize,
+) -> usize {
+    if samples.is_null() || output.is_null() || sample_count == 0 || capacity == 0 {
+        return 0;
+    }
+    let source = std::slice::from_raw_parts(samples, sample_count as usize);
+    let bins = (capacity as u32).min(sample_count);
+    for bin in 0..bins {
+        // Split with the same integer arithmetic the native loop used.
+        let begin = ((bin * sample_count) / bins) as usize;
+        let end = (((bin + 1) * sample_count) / bins) as usize;
+        let count = if end > begin { end - begin } else { 1 };
+        let mut energy = 0.0_f64;
+        let mut peak = 0.0_f32;
+        for &raw in &source[begin..end] {
+            let sample = if raw.is_finite() { raw } else { 0.0 };
+            energy += (sample as f64) * (sample as f64);
+            peak = peak.max(sample.abs());
+        }
+        let rms = (energy / count as f64).sqrt() as f32;
+        *output.add(bin as usize) = if rms.is_finite() && peak.is_finite() {
+            (0.5_f32 * (rms + peak)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+    }
+    bins as usize
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_analysis_engine_get_band(
     state: *const c_void,
@@ -179,5 +220,51 @@ pub unsafe extern "C" fn hirari_analysis_engine_get_band(
         core.spectrum_left.get_band(band as usize)
     } else {
         core.spectrum_right.get_band(band as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_spectrogram_splits_and_clamps_ranges() {
+        // 8 samples, 4 bins: each bin is 2 samples.
+        let samples = [0.5_f32, -0.5, 2.0, -2.0, 0.0, 0.0, 1.0, 1.0];
+        let mut out = [0.0_f32; 4];
+        let written = unsafe {
+            hirari_track_analysis_spectrogram(samples.as_ptr(), 8, out.as_mut_ptr(), out.len())
+        };
+        assert_eq!(written, 4);
+        // bin0: rms=0.5, peak=0.5 -> 0.5
+        assert!((out[0] - 0.5).abs() < 1e-6);
+        // bin1: rms=2, peak=2 -> 2 clamped to 1
+        assert_eq!(out[1], 1.0);
+        // bin2: silence -> 0
+        assert_eq!(out[2], 0.0);
+        // bin3: rms=1, peak=1 -> 1
+        assert_eq!(out[3], 1.0);
+    }
+
+    #[test]
+    fn track_spectrogram_rejects_empty_input() {
+        let mut out = [0.0_f32; 4];
+        assert_eq!(unsafe {
+            hirari_track_analysis_spectrogram(std::ptr::null(), 8, out.as_mut_ptr(), out.len())
+        }, 0);
+        assert_eq!(unsafe {
+            hirari_track_analysis_spectrogram(out.as_ptr(), 0, out.as_mut_ptr(), out.len())
+        }, 0);
+    }
+
+    #[test]
+    fn track_spectrogram_treats_non_finite_as_silence() {
+        let samples = [f32::NAN, f32::INFINITY];
+        let mut out = [1.0_f32; 1];
+        let written = unsafe {
+            hirari_track_analysis_spectrogram(samples.as_ptr(), 2, out.as_mut_ptr(), out.len())
+        };
+        assert_eq!(written, 1);
+        assert_eq!(out[0], 0.0);
     }
 }

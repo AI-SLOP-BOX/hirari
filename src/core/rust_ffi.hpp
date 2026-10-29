@@ -1858,6 +1858,10 @@ extern "C" void hirari_analysis_engine_update(
     void* state, const float* left, const float* right, uint32_t frames, double sample_rate);
 extern "C" void hirari_analysis_engine_get_stats(const void* state, float* output);
 extern "C" float hirari_analysis_engine_get_band(const void* state, uint32_t channel, uint32_t band);
+// Track work-buffer spectrogram features: splits the first channel into
+// `capacity` ranges and returns 0.5*(rms+peak) clamped to 0..1 per range.
+extern "C" size_t hirari_track_analysis_spectrogram(
+    const float* samples, uint32_t sample_count, float* output, size_t capacity);
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);

@@ -103,33 +103,19 @@
     struct AnalysisEngine {
         explicit AnalysisEngine(const AudioBuffer* buffer) : m_buffer(buffer) {}
 
+        // Range splitting, the rms/peak mix and the clamp are Rust-owned; this
+        // wrapper only supplies the first channel and sizes the result.
         std::vector<float> getSpectrogramL() const {
             constexpr uint32_t kMaxBins = 32;
             if (m_buffer == nullptr || m_buffer->getNumChannels() == 0 ||
                 m_buffer->getNumSamples() == 0) {
                 return {};
             }
-
             const uint32_t samples = m_buffer->getNumSamples();
-            const uint32_t bins = std::min(kMaxBins, samples);
-            std::vector<float> features(bins, 0.0f);
-            const float* left = m_buffer->getReadPointer(0);
-            for (uint32_t bin = 0; bin < bins; ++bin) {
-                const uint32_t begin = (bin * samples) / bins;
-                const uint32_t end = ((bin + 1) * samples) / bins;
-                const uint32_t count = end > begin ? end - begin : 1;
-                double energy = 0.0;
-                float peak = 0.0f;
-                for (uint32_t i = begin; i < end; ++i) {
-                    const float sample = std::isfinite(left[i]) ? left[i] : 0.0f;
-                    energy += static_cast<double>(sample) * sample;
-                    peak = std::max(peak, std::abs(sample));
-                }
-                const float rms = static_cast<float>(std::sqrt(energy / count));
-                features[bin] = std::isfinite(rms) && std::isfinite(peak)
-                    ? std::clamp(0.5f * (rms + peak), 0.0f, 1.0f)
-                    : 0.0f;
-            }
+            std::vector<float> features(std::min(kMaxBins, samples), 0.0f);
+            const size_t written = hirari_track_analysis_spectrogram(
+                m_buffer->getReadPointer(0), samples, features.data(), features.size());
+            features.resize(written);
             return features;
         }
 
