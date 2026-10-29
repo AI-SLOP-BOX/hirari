@@ -211,7 +211,7 @@
         m_commandQueue.clear();
         hirari_native_pdc_reset_for_project(m_pdcState);
         sidechainManager.resetForProject();
-        m_routingEngine.resetForProject();
+        hirari_routing_engine_reset(m_routingEngine);
         m_busSystem.resetForProject();
         hirari_control_room_reset(m_controlRoomState);
         m_sidechainRoutes.clear();
@@ -220,8 +220,9 @@
         m_tracks = std::move(loadedTracks);
         mark_project_layout_changed();
         for (const auto& route : state.routes) {
-            m_routingEngine.addConnection(route.sourceId, route.destinationId, route.gain,
-                                          route.send, route.preFader);
+            hirari_routing_engine_add_connection(
+                m_routingEngine, route.sourceId, route.destinationId, route.gain,
+                route.send, route.preFader);
         }
         for (const auto& track : m_tracks) {
             if (auto* busTrack = dynamic_cast<BusTrack*>(track.get())) {
@@ -451,8 +452,10 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         serialized.sample = event.samplePos; serialized.bpm = event.bpm; serialized.ramp = event.ramp ? 1 : 0;
         state.tempoEvents.push_back(serialized);
     }
-    std::vector<Hirari::Core::Engine::RoutingEngine::Connection> routeConnections;
-    m_routingEngine.copyConnections(routeConnections);
+    size_t routeCount = 0;
+    void* rawRoutes = hirari_routing_engine_copy_connections(m_routingEngine, &routeCount);
+    std::vector<Hirari::Core::Engine::RoutingEngine::Connection> routeConnections =
+        takeRoutingConnections(rawRoutes, routeCount);
     state.routes.reserve(routeConnections.size());
     for (const auto& connection : routeConnections) {
         Bridge::NativeRouteState serialized;

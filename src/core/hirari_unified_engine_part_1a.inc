@@ -23,6 +23,27 @@ inline thread_local bool hirari_offline_render_thread = false;
 
 using ScopedDenormalGuard = ::Hirari::Core::Concurrency::ScopedDenormalGuard;
 
+namespace {
+// Rust hands back an owned array for every routing snapshot. Copy the records
+// once, then release the Rust allocation through the matching free entry so
+// no control path has to remember the take/cast/free sequence.
+std::vector<RoutingEngine::Connection> takeRoutingConnections(void* records, size_t count) {
+    if (!records) return {};
+    const auto* typed = static_cast<const RoutingEngine::Connection*>(records);
+    std::vector<RoutingEngine::Connection> out(typed, typed + count);
+    hirari_routing_connection_array_free(records, count);
+    return out;
+}
+
+std::vector<RoutingEngine::FeedbackConnection> takeRoutingFeedback(void* records, size_t count) {
+    if (!records) return {};
+    const auto* typed = static_cast<const RoutingEngine::FeedbackConnection*>(records);
+    std::vector<RoutingEngine::FeedbackConnection> out(typed, typed + count);
+    hirari_routing_feedback_array_free(records, count);
+    return out;
+}
+}  // namespace
+
 // Singleton Implementation
 HirariUnifiedEngine& HirariUnifiedEngine::getInstance() {
     static HirariUnifiedEngine instance;
@@ -50,6 +71,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_macro_mapping_destroy(m_macroControl);
     hirari_automation_lane_group_destroy(m_automationLanes);
     hirari_mpe_state_free(m_mpeState);
+    hirari_routing_engine_destroy(m_routingEngine);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -451,7 +473,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         }
         const bool offlineTargetActive = m_offlineTargetActive.load(std::memory_order_acquire);
         const uint32_t offlineTargetId = m_offlineTargetId.load(std::memory_order_acquire);
-        auto& routing = m_routingEngine;
+        void* routing = m_routingEngine;
         m_busSystem.clear(sz);
         for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
             if (state.activeTracks[i] && state.activeTracks[i]->canProcess(sz)) {
@@ -473,8 +495,9 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
 
         auto shouldProcess = [&](Track* track) noexcept {
             if (!track) return false;
-            return routing.shouldProcessNode(track->getId(), offlineTargetActive,
-                                             offlineTargetId, anySolo, track->isSolo());
+            return hirari_routing_engine_should_process(
+                routing, track->getId(), offlineTargetActive, offlineTargetId, anySolo,
+                track->isSolo());
         };
 
         // Feedback edges are explicitly delayed by one engine block. They are
@@ -484,8 +507,9 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
             Track* track = state.activeTracks[i];
             if (!track || !track->canProcess(sz)) continue;
             auto& work = track->getWorkBuffer(sz);
-            routing.injectFeedback(track->getId(), work.getWritePointer(0),
-                                   work.getWritePointer(1), sz);
+            hirari_routing_engine_inject_feedback(
+                routing, track->getId(), work.getWritePointer(0),
+                work.getWritePointer(1), sz);
         }
 
         // Feed the live driver input into the selected monitor track before
@@ -567,8 +591,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                 ? sendPost.getReadPointer(0, 0) : nullptr;
             const float* sendPostRight = sendPost.getNumChannels() >= 2 && sendPost.getNumSamples() >= sz
                 ? sendPost.getReadPointer(1, 0) : nullptr;
-            hirari_routing_process_track_fanout(
-                routing.nativeGainState(), routing.nativeSendPdcState(), source->getId(),
+            hirari_routing_engine_process_track_fanout(
+                routing, source->getId(),
                 sourceBuffer.getArrayOfReadPointers(), sourceBuffer.getNumChannels(),
                 sendPreLeft, sendPreRight, sendPostLeft, sendPostRight,
                 source->getTrackDelaySamples(), routingDestinations.data(),
@@ -591,8 +615,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         std::array<uint32_t, kMaxTracks + Hirari::Core::Engine::RoutingEngine::kMaxNodes>
             processOrder{};
         uint32_t processOrderCount = 0;
-        if (!hirari_routing_topology_resolve_process_order(
-                routing.nativeTopologyState(), activeTrackIds.data(), activeTrackCount,
+        if (!hirari_routing_engine_resolve_process_order(
+                routing, activeTrackIds.data(), activeTrackCount,
                 processOrder.data(), processOrder.size(), &processOrderCount)) {
             processOrderCount = static_cast<uint32_t>(activeTrackCount);
             std::copy_n(activeTrackIds.begin(), activeTrackCount, processOrder.begin());

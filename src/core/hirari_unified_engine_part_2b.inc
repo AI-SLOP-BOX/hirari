@@ -131,8 +131,8 @@ void HirariUnifiedEngine::syncStructuralChanges() {
         }
     }
     m_busSystem.reconcileBuses(activeBuses);
-    auto& routing = m_routingEngine;
-    routing.buildGraph();
+    void* routing = m_routingEngine;
+    hirari_routing_engine_build(routing);
     
     // Publish the audio-thread track snapshot.
     uint32_t nextIdx = 1 - m_activeStateIdx.load();
@@ -169,7 +169,12 @@ void HirariUnifiedEngine::syncStructuralChanges() {
         hirari_native_pdc_set_track_latency(pdc, track->getId(), track->getTotalLatencySamples());
     }
     std::vector<Hirari::Core::Engine::RoutingEngine::Connection> connections;
-    routing.copyConnections(connections);
+    {
+        size_t connectionCount = 0;
+        void* rawConnections =
+            hirari_routing_engine_copy_connections(routing, &connectionCount);
+        connections = takeRoutingConnections(rawConnections, connectionCount);
+    }
     for (const auto& connection : connections) {
         if (connection.send) {
             if (connection.sourceId < kPdcMaxTracks &&
@@ -188,8 +193,8 @@ void HirariUnifiedEngine::syncStructuralChanges() {
         if (!connection.send ||
             connection.sourceId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes ||
             connection.destId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes) continue;
-        routing.setSendPdcCompensationSamples(
-            connection.sourceId, connection.destId,
+        hirari_routing_engine_set_send_pdc(
+            routing, connection.sourceId, connection.destId,
             hirari_native_pdc_get_send_offset(pdc, connection.sourceId, connection.destId));
     }
     for (const auto& track : m_tracks) {
@@ -453,9 +458,16 @@ void HirariUnifiedEngine::installTrackEditHost() {
                 originalIndex = static_cast<size_t>(it - engine->m_tracks.begin());
                 engine->m_sidechainManager.removeLinksForTrack(tid);
                 engine->eraseSidechainRoutesLocked(tid, &sidechainRouteBackup);
-                engine->m_routingEngine.removeProcessingDependenciesForNode(tid);
-                engine->m_routingEngine.removeConnectionsForNode(tid, routingBackup);
-                engine->m_routingEngine.removeFeedbackConnectionsForNode(tid, feedbackBackup);
+                void* routingHandle = engine->m_routingEngine;
+                hirari_routing_engine_remove_dependencies_for_node(routingHandle, tid);
+                size_t routingCount = 0;
+                size_t feedbackCount = 0;
+                void* removedRouting = hirari_routing_engine_remove_connections_for_node(
+                    routingHandle, tid, &routingCount);
+                void* removedFeedback = hirari_routing_engine_remove_feedback_for_node(
+                    routingHandle, tid, &feedbackCount);
+                routingBackup = takeRoutingConnections(removedRouting, routingCount);
+                feedbackBackup = takeRoutingFeedback(removedFeedback, feedbackCount);
                 removed = engine->detachTrackLocked(tid, false);
                 if (tid == 1 && engine->m_tracks.empty()) {
                     // new_project() creates the bootstrap at ID 1 and advances the
@@ -478,15 +490,20 @@ void HirariUnifiedEngine::installTrackEditHost() {
                 if (dropSidechainLinks) engine->m_sidechainManager.removeLinksForTrack(handle->id);
                 if (dropRouting) {
                     engine->eraseSidechainRoutesLocked(handle->id, nullptr);
-                    engine->m_routingEngine.removeProcessingDependenciesForNode(handle->id);
+                    hirari_routing_engine_remove_dependencies_for_node(
+                        engine->m_routingEngine, handle->id);
                 }
                 engine->detachTrackLocked(handle->id, false);
             }
             if (!dropRouting) return true;
-            std::vector<RoutingEngine::Connection> discardedRoutes;
-            engine->m_routingEngine.removeConnectionsForNode(handle->id, discardedRoutes);
-            std::vector<RoutingEngine::FeedbackConnection> discardedFeedback;
-            engine->m_routingEngine.removeFeedbackConnectionsForNode(handle->id, discardedFeedback);
+            size_t discardedRouteCount = 0;
+            size_t discardedFeedbackCount = 0;
+            void* discardedRouteRecords = hirari_routing_engine_remove_connections_for_node(
+                engine->m_routingEngine, handle->id, &discardedRouteCount);
+            void* discardedFeedbackRecords = hirari_routing_engine_remove_feedback_for_node(
+                engine->m_routingEngine, handle->id, &discardedFeedbackCount);
+            takeRoutingConnections(discardedRouteRecords, discardedRouteCount);
+            takeRoutingFeedback(discardedFeedbackRecords, discardedFeedbackCount);
             return true;
         },
         [](void* host, void* raw, bool stampGeneration) -> bool {
@@ -504,8 +521,9 @@ void HirariUnifiedEngine::installTrackEditHost() {
                                    current.pluginIndex == route.pluginIndex;
                         });
                     if (duplicate == engine->m_sidechainRoutes.end()) {
-                        if (engine->m_routingEngine.addProcessingDependency(
-                                route.sourceId, route.destinationId)) {
+                        if (hirari_routing_engine_add_dependency(
+                                engine->m_routingEngine, route.sourceId,
+                                route.destinationId)) {
                             engine->m_sidechainRoutes.push_back(route);
                         }
                     }
@@ -513,12 +531,13 @@ void HirariUnifiedEngine::installTrackEditHost() {
             }
             engine->m_sidechainManager.restoreLinks(handle->sidechainLinks);
             for (const auto& connection : handle->routing)
-                engine->m_routingEngine.addConnection(connection.sourceId, connection.destId,
-                                                      connection.gain, connection.send,
-                                                      connection.preFader);
+                hirari_routing_engine_add_connection(
+                    engine->m_routingEngine, connection.sourceId, connection.destId,
+                    connection.gain, connection.send, connection.preFader);
             for (const auto& connection : handle->feedback)
-                engine->m_routingEngine.addFeedbackConnection(connection.sourceId,
-                                                              connection.destId, connection.gain);
+                hirari_routing_engine_add_feedback(
+                    engine->m_routingEngine, connection.sourceId, connection.destId,
+                    connection.gain);
             return true;
         },
         [](void* raw) { delete static_cast<Handle*>(raw); },

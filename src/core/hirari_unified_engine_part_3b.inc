@@ -95,12 +95,12 @@ void HirariUnifiedEngine::installRoutingEditHost() {
     static const HirariRoutingHostOps ops = {
         [](void* host, uint32_t sourceId, uint32_t destId, HirariRoutingEdgeState* out) {
             if (!out) return false;
-            auto& routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
-            out->routeEnabled = routing.hasConnection(sourceId, destId);
-            out->routeGain = routing.connectionGain(sourceId, destId);
-            out->sendGain = routing.sendConnectionGain(sourceId, destId);
-            out->sendPreFader = routing.sendPreFader(sourceId, destId);
-            out->feedbackGain = routing.feedbackConnectionGain(sourceId, destId);
+            void* routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
+            out->routeEnabled = hirari_routing_engine_has_connection(routing, sourceId, destId);
+            out->routeGain = hirari_routing_engine_connection_gain(routing, sourceId, destId);
+            out->sendGain = hirari_routing_engine_send_gain(routing, sourceId, destId);
+            out->sendPreFader = hirari_routing_engine_send_pre_fader(routing, sourceId, destId);
+            out->feedbackGain = hirari_routing_engine_feedback_gain(routing, sourceId, destId);
             return true;
         },
         [](void* host, uint32_t trackId, HirariRoutingTrackState* out) {
@@ -161,29 +161,33 @@ void HirariUnifiedEngine::installRoutingEditHost() {
         },
         [](void* host, const HirariRoutingEditPayload* payload) {
             if (!payload) return false;
-            auto& routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
+            void* routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
             if (payload->op == kHirariRoutingEditSend) {
                 if (payload->enabled) {
-                    routing.addConnection(payload->sourceId, payload->destId, payload->gain,
-                                          true, payload->preFader);
+                    hirari_routing_engine_add_connection(
+                        routing, payload->sourceId, payload->destId, payload->gain,
+                        true, payload->preFader);
                 } else {
-                    routing.removeSendConnection(payload->sourceId, payload->destId);
+                    hirari_routing_engine_remove_send(
+                        routing, payload->sourceId, payload->destId);
                 }
             } else if (payload->enabled) {
-                routing.addConnection(payload->sourceId, payload->destId,
-                                      payload->gain > 0.0f ? payload->gain : 1.0f);
+                hirari_routing_engine_add_connection(
+                    routing, payload->sourceId, payload->destId,
+                    payload->gain > 0.0f ? payload->gain : 1.0f, false, false);
             } else {
-                routing.removeConnection(payload->sourceId, payload->destId);
+                hirari_routing_engine_remove_connection(
+                    routing, payload->sourceId, payload->destId);
             }
             return true;
         },
         [](void* host, uint32_t sourceId, uint32_t destId, float gain) {
-            auto& routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
+            void* routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
             if (gain < 0.0f) {
-                routing.removeFeedbackConnection(sourceId, destId);
+                hirari_routing_engine_remove_feedback(routing, sourceId, destId);
                 return true;
             }
-            return routing.addFeedbackConnection(sourceId, destId, gain);
+            return hirari_routing_engine_add_feedback(routing, sourceId, destId, gain);
         },
         [](void* host, uint32_t trackId, int32_t op, bool enabled, uint32_t samples) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
@@ -260,23 +264,24 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             return true;
         },
         [](void* host, uint32_t sourceId, uint32_t destId) {
-            return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine
-                .addProcessingDependency(sourceId, destId);
+            return hirari_routing_engine_add_dependency(
+                static_cast<HirariUnifiedEngine*>(host)->m_routingEngine, sourceId, destId);
         },
         [](void* host, uint32_t sourceId, uint32_t destId) {
-            static_cast<HirariUnifiedEngine*>(host)->m_routingEngine
-                .removeProcessingDependency(sourceId, destId);
+            hirari_routing_engine_remove_dependency(
+                static_cast<HirariUnifiedEngine*>(host)->m_routingEngine, sourceId, destId);
             return true;
         },
         [](void* host) {
-            static_cast<HirariUnifiedEngine*>(host)->m_routingEngine.buildGraph();
+            hirari_routing_engine_build(
+                static_cast<HirariUnifiedEngine*>(host)->m_routingEngine);
         },
         [](void* host) {
             static_cast<HirariUnifiedEngine*>(host)->mark_project_layout_changed();
         },
         [](void* host) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            engine->m_routingEngine.buildGraph();
+            hirari_routing_engine_build(engine->m_routingEngine);
             // syncStructuralChanges takes m_tracksMutex itself; Rust calls this
             // only after every mutation callback has released its lock.
             engine->syncStructuralChanges();

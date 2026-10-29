@@ -2,8 +2,9 @@
             Track* track = state.activeTracks[i];
             if (!track || !track->canProcess(sz)) continue;
             const auto& work = track->getWorkBuffer(sz);
-            routing.captureFeedback(track->getId(), work.getReadPointer(0),
-                                    work.getReadPointer(1), sz);
+            hirari_routing_engine_capture_feedback(
+                routing, track->getId(), work.getReadPointer(0),
+                work.getReadPointer(1), sz);
         }
 
         // Publish per-track post-FX peaks through the lock-free telemetry

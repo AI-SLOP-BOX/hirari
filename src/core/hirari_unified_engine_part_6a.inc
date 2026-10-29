@@ -67,8 +67,10 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
         std::vector<HirariLayoutRegion> regions;
     };
 
-    std::vector<Hirari::Core::Engine::RoutingEngine::FeedbackConnection> feedbackConnections;
-    m_routingEngine.copyFeedbackConnections(feedbackConnections);
+    size_t feedbackCount = 0;
+    void* rawFeedback = hirari_routing_engine_copy_feedback(m_routingEngine, &feedbackCount);
+    std::vector<Hirari::Core::Engine::RoutingEngine::FeedbackConnection> feedbackConnections =
+        takeRoutingFeedback(rawFeedback, feedbackCount);
 
     const double timelineSampleRate = m_sampleRate.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -284,7 +286,11 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
 }
 
 rust::String HirariUnifiedEngine::get_routing_snapshot_json() const {
-    return rust::String(m_routingEngine.getConnectionsJson());
+    char* json = hirari_routing_engine_connections_json(m_routingEngine);
+    if (!json) return rust::String("[]");
+    rust::String result(json);
+    hirari_routing_engine_connections_json_free(json);
+    return result;
 }
 
 uint64_t HirariUnifiedEngine::get_project_generation() const {

@@ -1416,56 +1416,9 @@ extern "C" void hirari_tempo_map_set_current_bpm(void* state, float bpm);
 // that method straight off the engine singleton.
 extern "C" bool hirari_tempo_edit_set_tempo(void* tempo, void* undo, const void* log,
                                              uint64_t playhead, double sample_rate, float bpm);
-extern "C" void* hirari_routing_graph_create();
-extern "C" void hirari_routing_graph_destroy(void* state);
-extern "C" void* hirari_routing_graph_snapshot_create(const void* state);
-extern "C" size_t hirari_routing_graph_snapshot_count(const void* snapshot);
-extern "C" size_t hirari_routing_graph_snapshot_copy(
-    const void* snapshot, void* output, size_t capacity);
-extern "C" void hirari_routing_graph_snapshot_destroy(void* snapshot);
-extern "C" char* hirari_routing_graph_snapshot_json(const void* handle);
-extern "C" void hirari_routing_graph_json_free(char* ptr);
-extern "C" void* hirari_routing_topology_create();
-extern "C" void hirari_routing_topology_destroy(void* state);
-extern "C" bool hirari_routing_topology_build(void* topology, const void* graph);
-extern "C" bool hirari_routing_topology_copy(
-    const void* state, uint32_t* output, size_t output_capacity, uint32_t* count_out);
-extern "C" bool hirari_routing_topology_resolve_process_order(
-    const void* state, const uint32_t* active_ids, size_t active_count,
-    uint32_t* output, size_t output_capacity, uint32_t* count_out);
-extern "C" uint32_t hirari_routing_topology_node_count(const void* state);
-extern "C" bool hirari_routing_runtime_add_connection(
-    const void* graph, void* gains, void* topology,
-    uint32_t source, uint32_t destination, float gain, bool send, bool pre_fader);
-extern "C" void hirari_routing_runtime_remove_connection(
-    const void* graph, void* gains, void* topology,
-    uint32_t source, uint32_t destination);
-extern "C" void hirari_routing_runtime_remove_send(
-    const void* graph, void* gains, void* send_pdc, void* topology,
-    uint32_t source, uint32_t destination);
-extern "C" bool hirari_routing_runtime_add_dependency(
-    const void* graph, void* topology, uint32_t source, uint32_t destination);
-extern "C" void hirari_routing_runtime_remove_dependency(
-    const void* graph, void* topology, uint32_t source, uint32_t destination);
-extern "C" void hirari_routing_runtime_remove_dependencies_for_node(
-    const void* graph, void* topology, uint32_t node);
-extern "C" void hirari_routing_runtime_reset(
-    const void* graph, const void* gains, const void* feedback,
-    void* send_pdc, void* topology);
-extern "C" void* hirari_routing_runtime_remove_connections_for_node(
-    const void* graph, void* gains, void* send_pdc, void* topology,
-    uint32_t node);
-extern "C" void hirari_routing_fanout_stereo(
-    const void* gains, uint32_t source,
-    const float* left, const float* right,
-    float* const* destination_left, float* const* destination_right,
-    const uint32_t* destination_ids, uint32_t destination_count, uint32_t frames);
-extern "C" void hirari_routing_fanout_planar(
-    const void* gains, uint32_t source,
-    const float* const* source_channels,
-    float* const* const* destination_channels,
-    const uint32_t* destination_ids, uint32_t destination_count,
-    uint32_t channel_count, uint32_t frames);
+// Fanout descriptors consumed by the routing engine handle. The graph, gain,
+// feedback, send-PDC and topology stores are reached only through
+// hirari_routing_engine_* (routing_engine_core.rs).
 struct HirariRoutingTrackDestination {
     uint32_t id;
     uint8_t can_process;
@@ -1475,8 +1428,64 @@ struct HirariRoutingTrackDestination {
     void* bus_context;
 };
 using HirariBusPreFxAdd = bool (*)(void*, const float*, const float*, uint32_t, float);
-extern "C" void hirari_routing_process_track_fanout(
-    const void* gains, void* send_pdc, uint32_t source_id,
+
+// Routing engine composition root (hirari-core-bridge/src/routing_engine_core.rs).
+// One opaque handle owns the graph/gain/feedback/send-PDC/topology stores.
+extern "C" void* hirari_routing_engine_create();
+extern "C" void hirari_routing_engine_destroy(void* state);
+extern "C" void hirari_routing_engine_reset(void* state);
+extern "C" bool hirari_routing_engine_add_connection(
+    void* state, uint32_t source, uint32_t destination, float gain, bool send, bool pre_fader);
+extern "C" void hirari_routing_engine_remove_connection(
+    void* state, uint32_t source, uint32_t destination);
+extern "C" void hirari_routing_engine_remove_send(
+    void* state, uint32_t source, uint32_t destination);
+extern "C" bool hirari_routing_engine_add_dependency(
+    void* state, uint32_t source, uint32_t destination);
+extern "C" void hirari_routing_engine_remove_dependency(
+    void* state, uint32_t source, uint32_t destination);
+extern "C" void hirari_routing_engine_remove_dependencies_for_node(void* state, uint32_t node);
+extern "C" void* hirari_routing_engine_remove_connections_for_node(
+    void* state, uint32_t node, size_t* count);
+extern "C" void* hirari_routing_engine_copy_connections(const void* state, size_t* count);
+extern "C" void hirari_routing_connection_array_free(void* records, size_t count);
+extern "C" void* hirari_routing_engine_remove_feedback_for_node(
+    void* state, uint32_t node, size_t* count);
+extern "C" void* hirari_routing_engine_copy_feedback(const void* state, size_t* count);
+extern "C" void hirari_routing_feedback_array_free(void* records, size_t count);
+extern "C" bool hirari_routing_engine_has_connection(
+    const void* state, uint32_t source, uint32_t destination);
+extern "C" float hirari_routing_engine_connection_gain(
+    const void* state, uint32_t source, uint32_t destination);
+extern "C" float hirari_routing_engine_send_gain(
+    const void* state, uint32_t source, uint32_t destination);
+extern "C" bool hirari_routing_engine_send_pre_fader(
+    const void* state, uint32_t source, uint32_t destination);
+extern "C" float hirari_routing_engine_feedback_gain(
+    const void* state, uint32_t source, uint32_t destination);
+extern "C" bool hirari_routing_engine_should_process(
+    const void* state, uint32_t source, bool offline_target_active, uint32_t offline_target,
+    bool any_solo, bool source_solo);
+extern "C" bool hirari_routing_engine_add_feedback(
+    void* state, uint32_t source, uint32_t destination, float gain);
+extern "C" void hirari_routing_engine_remove_feedback(
+    void* state, uint32_t source, uint32_t destination);
+extern "C" bool hirari_routing_engine_build(void* state);
+extern "C" void hirari_routing_engine_inject_feedback(
+    const void* state, uint32_t destination, float* left, float* right, uint32_t frames);
+extern "C" void hirari_routing_engine_capture_feedback(
+    void* state, uint32_t source, const float* left, const float* right, uint32_t frames);
+extern "C" char* hirari_routing_engine_connections_json(const void* state);
+extern "C" void hirari_routing_engine_connections_json_free(char* json);
+extern "C" bool hirari_routing_engine_set_send_pdc(
+    void* state, uint32_t source, uint32_t destination, uint32_t samples);
+extern "C" void hirari_routing_engine_enter_send_pdc_read(void* state);
+extern "C" void hirari_routing_engine_leave_send_pdc_read(void* state);
+extern "C" bool hirari_routing_engine_resolve_process_order(
+    const void* state, const uint32_t* active_ids, size_t active_count,
+    uint32_t* output, size_t output_capacity, uint32_t* count_out);
+extern "C" void hirari_routing_engine_process_track_fanout(
+    const void* state, uint32_t source_id,
     const float* const* source_channels, uint32_t source_channel_count,
     const float* source_send_pre_left, const float* source_send_pre_right,
     const float* source_send_post_left, const float* source_send_post_right,
@@ -1485,35 +1494,6 @@ extern "C" void hirari_routing_process_track_fanout(
     float* master_left, float* master_right, float* send_pdc_left,
     float* send_pdc_right, uint32_t frames, uint32_t max_send_frames,
     HirariBusPreFxAdd bus_add);
-extern "C" void* hirari_routing_gains_create();
-extern "C" void hirari_routing_gains_destroy(void* state);
-extern "C" float hirari_routing_gains_route(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" bool hirari_routing_should_process_node(
-    const void* state, uint32_t source, bool offlineTargetActive,
-    uint32_t offlineTarget, bool anySolo, bool sourceSolo);
-extern "C" float hirari_routing_gains_send(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" bool hirari_routing_gains_has_send(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" bool hirari_routing_gains_send_pre_fader(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" void* hirari_routing_feedback_create();
-extern "C" void hirari_routing_feedback_destroy(void* state);
-extern "C" bool hirari_routing_feedback_add(
-    const void* state, uint32_t source, uint32_t destination, float gain);
-extern "C" void hirari_routing_feedback_remove(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" size_t hirari_routing_feedback_remove_node(
-    const void* state, uint32_t node, void* output_connections, size_t capacity);
-extern "C" float hirari_routing_feedback_gain(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" size_t hirari_routing_feedback_copy(
-    const void* state, void* output_connections, size_t capacity);
-extern "C" void hirari_routing_feedback_inject(
-    const void* state, uint32_t destination, float* left, float* right, uint32_t frames);
-extern "C" void hirari_routing_feedback_capture(
-    const void* state, uint32_t source, const float* left, const float* right, uint32_t frames);
 
 // Routing edit host bridge.
 //
@@ -1826,20 +1806,6 @@ extern "C" void hirari_plugin_sandbox_maintenance_host_install(
 extern "C" uint32_t hirari_plugin_sandbox_maintain(void* host, bool autoRestart);
 extern "C" void hirari_plugin_sandbox_maintenance_forget(void* host);
 
-extern "C" void* hirari_send_pdc_manager_create();
-extern "C" void hirari_send_pdc_manager_destroy(void* handle);
-extern "C" void hirari_send_pdc_manager_enter_read(void* handle);
-extern "C" void hirari_send_pdc_manager_leave_read(void* handle);
-extern "C" bool hirari_send_pdc_manager_set_delay(
-    void* handle, uint32_t source, uint32_t destination, uint32_t samples);
-extern "C" void hirari_send_pdc_manager_retire(
-    void* handle, uint32_t source, uint32_t destination);
-extern "C" void hirari_send_pdc_manager_retire_all(void* handle);
-extern "C" bool hirari_send_pdc_manager_process(
-    void* handle, uint32_t source, uint32_t destination,
-    const float* input_left, const float* input_right,
-    float* output_left, float* output_right, uint32_t frames,
-    uint32_t additional_delay, float input_gain);
 extern "C" void* hirari_native_pdc_create();
 extern "C" void hirari_native_pdc_destroy(void* state);
 extern "C" bool hirari_native_pdc_bind_control_thread(const void* state);

@@ -271,7 +271,7 @@ void HirariUnifiedEngine::new_project() {
     m_undoManager.clear();
     hirari_native_pdc_reset_for_project(m_pdcState);
     m_sidechainManager.resetForProject();
-    m_routingEngine.resetForProject();
+    hirari_routing_engine_reset(m_routingEngine);
     m_busSystem.resetForProject();
     hirari_control_room_reset(m_controlRoomState);
     hirari_tempo_map_set_current_bpm(m_tempoState, 120.0f);

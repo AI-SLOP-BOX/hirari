@@ -20,7 +20,9 @@
     static constexpr uint32_t kPdcMasterDestination = 0xFFFFFFFFu;
     UndoTransactionManager m_undoManager;
     void* m_tempoState = hirari_tempo_map_create();
-    RoutingEngine m_routingEngine;
+    // Rust (routing_engine_core.rs) owns the graph, gain, feedback, send-PDC
+    // and topology stores; this is the single opaque handle the engine keeps.
+    void* m_routingEngine = hirari_routing_engine_create();
     SidechainManager m_sidechainManager;
     BusSystem m_busSystem;
     static constexpr size_t kMaxMacros = 128;

@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Routing state now has one owner. The graph, gain, feedback, send-PDC and
+  topology stores live in `hirari-core-bridge/src/routing_engine_core.rs`
+  behind a single opaque handle; the C++ `RoutingEngine` class, its 39
+  forwarding methods and their direct FFI declarations are gone, and the
+  engine calls `hirari_routing_engine_*` from the audio and control paths.
+  Removed connection/feedback snapshots are returned in Rust-owned arrays
+  with matching release entry points.
 - Project-layout JSON serialization now runs in Rust. The engine gathers a
   borrowed model snapshot under the track lock and calls
   `hirari_project_layout_write_json`; key order, escaping, six-decimal number
