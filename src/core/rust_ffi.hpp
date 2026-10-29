@@ -2230,6 +2230,7 @@ bool hirari_audio_quantizer_group_warp_map_copy(
 void hirari_audio_quantizer_group_warp_maps_destroy(void* maps);
 }
 extern "C" uint8_t hirari_plugin_admission_error(const char* path);
+extern "C" const char* hirari_plugin_scan_rejection(const char* path);
 extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bus);
 extern "C" size_t hirari_plugin_sandbox_find(const uint32_t*, size_t, uint32_t);
 extern "C" size_t hirari_plugin_sandbox_remove(uint32_t*, uint32_t*, size_t, uint32_t);

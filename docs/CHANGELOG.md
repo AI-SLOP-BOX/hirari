@@ -230,6 +230,10 @@ production support.
   published states are terminal, cancellable, pausable or resumable, so the
   engine's retry, cancel, pause and resume checks no longer restate the state
   sets that the render loop publishes.
+- Plugin scan admission moved to Rust. `hirari_plugin_scan_rejection` performs
+  the empty-path, missing-path, directory and regular-file checks (plus the
+  single-inspect fallback) and returns the rejection text, so
+  `PluginScanner::scanInSandbox` only records the returned reason.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks

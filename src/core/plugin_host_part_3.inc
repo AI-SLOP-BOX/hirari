@@ -32,29 +32,9 @@ public:
             m_isScanning.store(false, std::memory_order_release);
         };
 
-        if (path.empty()) {
-            reject("plugin scan rejected: path is empty");
-            return;
-        }
-
-        std::error_code ec;
-        const std::filesystem::path candidate(path);
-        if (!std::filesystem::exists(candidate, ec)) {
-            reject(ec ? "plugin scan rejected: unable to inspect path"
-                      : "plugin scan rejected: path does not exist");
-            return;
-        }
-        if (ec) {
-            reject("plugin scan rejected: unable to inspect path");
-            return;
-        }
-        if (std::filesystem::is_directory(candidate, ec)) {
-            reject("plugin scan rejected: path is a directory");
-            return;
-        }
-        if (ec || !std::filesystem::is_regular_file(candidate, ec)) {
-            reject(ec ? "plugin scan rejected: unable to inspect file"
-                      : "plugin scan rejected: path is not a regular file");
+        const char* rejection = hirari_plugin_scan_rejection(path.c_str());
+        if (rejection) {
+            reject(rejection);
             return;
         }
 
