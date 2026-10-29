@@ -300,19 +300,6 @@ extern "C" bool hirari_processor_state_encode(
 extern "C" bool hirari_processor_state_decode(
     const uint8_t* input, size_t input_len, uint8_t* bypassed_out,
     float* mix_out, uint32_t* sidechain_bus_out);
-extern "C" void* hirari_chord_trigger_create();
-extern "C" void hirari_chord_trigger_destroy(void* state);
-extern "C" void hirari_chord_trigger_prepare(void* state, double sample_rate);
-extern "C" void hirari_chord_trigger_set_strum_ms(void* state, float value);
-extern "C" float hirari_chord_trigger_get_strum_ms(const void* state);
-extern "C" bool hirari_chord_trigger_save_state(
-    const void* state, bool bypassed, float mix, uint32_t sidechain_bus_id,
-    uint8_t* output, size_t capacity);
-extern "C" bool hirari_chord_trigger_restore_state(
-    void* state, const uint8_t* input, size_t length, bool* bypassed,
-    float* mix, uint32_t* sidechain_bus_id);
-extern "C" void hirari_chord_trigger_reset(void* state);
-extern "C" bool hirari_chord_trigger_process(void* state, void* input_midi_state);
 struct HirariRegionRangeEdit {
     uint64_t start;
     uint64_t end;

@@ -646,7 +646,6 @@ mod owned_state_tests {
 
     unsafe extern "C" {
         fn hirari_midi_buffer_cpp_wrapper_smoke() -> bool;
-        fn hirari_chord_trigger_cpp_wrapper_smoke() -> bool;
     }
 
     #[test]
@@ -732,10 +731,6 @@ mod owned_state_tests {
         assert!(unsafe { hirari_midi_buffer_cpp_wrapper_smoke() });
     }
 
-    #[test]
-    fn cpp_chord_trigger_runs_through_the_rust_realtime_buffer_path() {
-        assert!(unsafe { hirari_chord_trigger_cpp_wrapper_smoke() });
-    }
 }
 
 unsafe fn event_storage_mut(

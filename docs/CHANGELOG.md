@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The `ChordTrigger` processor wrapper is gone. It held a Rust handle and
+  forwarded every call to `midi_fx.rs` with no production registration, so the
+  class, its wrapper smoke test and the nine unreachable declarations it needed
+  were removed.
 - The MPE manager adapter is gone. `MPEManager` only wrapped
   `hirari_mpe_manager_*` and its sole caller used `reset()`, so the engine now
   holds the Rust handle and calls `hirari_mpe_manager_reset` on project reset;

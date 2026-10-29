@@ -19,7 +19,6 @@ void HIRARI_LOG(uint32_t level, const std::string& msg) {
 #include "core/concurrency/audio_task_manager.hpp"
 #include "core/concurrency/thread_pool.hpp"
 #include "scae/stem_extraction_pipeline.hpp"
-#include "dsp/effects/chord_trigger.hpp"
 
 namespace Hirari::Core::Bridge {
 
@@ -190,28 +189,4 @@ extern "C" bool hirari_midi_region_cpp_wrapper_smoke() {
         return false;
     return region.updateNote(0, Hirari::Core::MIDINote{61, 88, 0.25, 0.75}) &&
         region.copyProcessedNotes(notes) && notes.size() == 2 && notes[0].pitch == 61;
-}
-
-extern "C" bool hirari_chord_trigger_cpp_wrapper_smoke() {
-    Hirari::DSP::Effects::ChordTrigger effect;
-    Hirari::Core::AudioBuffer audio;
-    Hirari::Core::MidiBuffer midi;
-    Hirari::DSP::ProcessContext context{};
-    effect.prepareToPlay(48'000.0, 64);
-    effect.setStrumMs(1.0f);
-    Hirari::DSP::Effects::ChordTrigger restored;
-    if (!restored.setState(effect.getState()) ||
-        std::abs(restored.getParameter(0) - effect.getParameter(0)) > 1.0e-6f) return false;
-    midi.addNoteOn(2, 60, 96, 100, 7);
-    midi.addNoteOff(2, 60, 200);
-    effect.process(audio, midi, context);
-    if (midi.size() != 6) return false;
-    const auto* events = midi.getEvents();
-    return events[0].sampleOffset == 100 && events[0].data[0] == 0x91 &&
-        events[0].data[1] == 60 && events[0].articulationId == 7 &&
-        events[1].sampleOffset == 148 && events[1].data[1] == 64 &&
-        events[2].sampleOffset == 196 && events[2].data[1] == 67 &&
-        events[3].sampleOffset == 200 && events[3].data[0] == 0x81 &&
-        events[3].data[1] == 60 && events[3].articulationId == 0 &&
-        events[4].data[1] == 64 && events[5].data[1] == 67;
 }
