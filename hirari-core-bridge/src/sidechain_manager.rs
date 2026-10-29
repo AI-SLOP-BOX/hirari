@@ -1055,3 +1055,288 @@ impl SidechainOrchestrator {
         true
     }
 }
+
+// ---- Engine handle: gate + writer lock ownership lives in Rust ----------
+//
+// The C++ adapter used to carry the publication gate, a writer mutex and the
+// begin/end control calls around every mutation. This handle owns all three so
+// each exported call is a single FFI entry point.
+
+struct SidechainEngine {
+    gate: *mut c_void,
+    writer: std::sync::Mutex<()>,
+}
+
+unsafe impl Send for SidechainEngine {}
+
+unsafe fn engine_ref<'a>(state: *const c_void) -> Option<&'a SidechainEngine> {
+    // SAFETY: forwarded from each public engine function's live handle.
+    unsafe { state.cast::<SidechainEngine>().as_ref() }
+}
+
+fn control_lock(engine: &SidechainEngine) -> std::sync::MutexGuard<'_, ()> {
+    engine
+        .writer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+unsafe fn with_control<T>(engine: &SidechainEngine, body: impl FnOnce(*const c_void) -> T) -> T {
+    let _guard = control_lock(engine);
+    unsafe { hirari_sidechain_publication_gate_begin_control(engine.gate) };
+    let result = body(engine.gate);
+    unsafe { hirari_sidechain_publication_gate_end_control(engine.gate) };
+    result
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_sidechain_engine_create() -> *mut c_void {
+    Box::into_raw(Box::new(SidechainEngine {
+        gate: hirari_sidechain_publication_gate_create(),
+        writer: std::sync::Mutex::new(()),
+    }))
+    .cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_destroy(state: *mut c_void) {
+    if state.is_null() {
+        return;
+    }
+    // SAFETY: caller hands back a handle from hirari_sidechain_engine_create.
+    let engine = unsafe { Box::from_raw(state.cast::<SidechainEngine>()) };
+    unsafe { hirari_sidechain_publication_gate_destroy(engine.gate) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_register_link(
+    state: *const c_void,
+    destination_track: u32,
+    plugin_index: u32,
+    source_track: u32,
+    source_left: *const f32,
+    source_right: *const f32,
+    frames: u32,
+    sample_rate: u32,
+    source_generation: u64,
+    level: f32,
+    tap_point: u8,
+) -> bool {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return false;
+    };
+    unsafe {
+        with_control(engine, |gate| unsafe {
+            hirari_sidechain_register_link(
+                gate,
+                destination_track,
+                plugin_index,
+                source_track,
+                source_left,
+                source_right,
+                frames,
+                sample_rate,
+                source_generation,
+                level,
+                tap_point,
+            )
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_register_silent_link(
+    state: *const c_void,
+    destination_track: u32,
+    plugin_index: u32,
+    source_track: u32,
+    frames: u32,
+    sample_rate: u32,
+    source_generation: u64,
+    level: f32,
+    tap_point: u8,
+) -> bool {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return false;
+    };
+    unsafe {
+        with_control(engine, |gate| unsafe {
+            hirari_sidechain_register_silent_link(
+                gate,
+                destination_track,
+                plugin_index,
+                source_track,
+                frames,
+                sample_rate,
+                source_generation,
+                level,
+                tap_point,
+            )
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_remove_link(
+    state: *const c_void,
+    destination_track: u32,
+    plugin_index: u32,
+) -> bool {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return false;
+    };
+    unsafe {
+        with_control(engine, |gate| unsafe {
+            hirari_sidechain_remove_link(gate, destination_track, plugin_index)
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_has_link(
+    state: *const c_void,
+    destination_track: u32,
+    plugin_index: u32,
+    source_track: u32,
+) -> bool {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return false;
+    };
+    unsafe { hirari_sidechain_has_link(engine.gate, destination_track, plugin_index, source_track) }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_remove_track(state: *const c_void, track: u32) {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return;
+    };
+    unsafe {
+        with_control(engine, |gate| unsafe {
+            hirari_sidechain_remove_track(gate, track)
+        })
+    };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_reset(state: *const c_void) {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return;
+    };
+    unsafe {
+        with_control(engine, |gate| unsafe { hirari_sidechain_reset(gate) })
+    };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_copy_link(
+    state: *const c_void,
+    destination_track: u32,
+    plugin_index: u32,
+    output_left: *mut f32,
+    output_right: *mut f32,
+    capacity: u32,
+    metadata: *mut u64,
+) -> u32 {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return 0;
+    };
+    if !unsafe { hirari_sidechain_publication_gate_enter_reader(engine.gate) } {
+        return 0;
+    }
+    let frames = unsafe {
+        hirari_sidechain_copy_link(
+            engine.gate,
+            destination_track,
+            plugin_index,
+            output_left,
+            output_right,
+            capacity,
+            metadata,
+        )
+    };
+    unsafe { hirari_sidechain_publication_gate_leave_reader(engine.gate) };
+    frames
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_refresh_source(
+    state: *const c_void,
+    source_track: u32,
+    left: *const f32,
+    right: *const f32,
+    frames: u32,
+    sample_rate: u32,
+    source_generation: u64,
+) -> bool {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return false;
+    };
+    unsafe {
+        with_control(engine, |gate| unsafe {
+            hirari_sidechain_refresh_source(
+                gate,
+                source_track,
+                left,
+                right,
+                frames,
+                sample_rate,
+                source_generation,
+            )
+        })
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_publish_source(
+    state: *const c_void,
+    source_track: u32,
+    pre_left: *const f32,
+    pre_right: *const f32,
+    post_left: *const f32,
+    post_right: *const f32,
+    fader_left: *const f32,
+    fader_right: *const f32,
+    frames: u32,
+    sample_rate: u32,
+    source_generation: u64,
+) {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return;
+    };
+    if !unsafe { hirari_sidechain_publication_gate_try_begin_audio(engine.gate) } {
+        return;
+    }
+    unsafe {
+        hirari_sidechain_publish_source(
+            engine.gate,
+            source_track,
+            pre_left,
+            pre_right,
+            post_left,
+            post_right,
+            fader_left,
+            fader_right,
+            frames,
+            sample_rate,
+            source_generation,
+        )
+    };
+    unsafe { hirari_sidechain_publication_gate_end_audio(engine.gate) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_capture_track(
+    state: *const c_void,
+    track: u32,
+    context: *mut c_void,
+    callback: Option<SidechainCaptureCallback>,
+) -> bool {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return false;
+    };
+    unsafe {
+        with_control(engine, |gate| unsafe {
+            hirari_sidechain_capture_track(gate, track, context, callback)
+        })
+    }
+}

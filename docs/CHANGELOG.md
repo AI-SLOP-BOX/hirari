@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The sidechain manager's gate, writer lock and control/reader entry points
+  now live in `sidechain_manager.rs` behind one engine handle. Calling into a
+  link is a single FFI call; the C++ class keeps only the transfer types and
+  the capture callback that materializes `LinkState` values.
 - The `ChordTrigger` processor wrapper is gone. It held a Rust handle and
   forwarded every call to `midi_fx.rs` with no production registration, so the
   class, its wrapper smoke test and the nine unreachable declarations it needed
