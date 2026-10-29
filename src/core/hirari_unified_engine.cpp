@@ -10,7 +10,6 @@
 #include "engine/track.hpp"
 #include "concurrency/audio_task_manager.hpp"
 
-#include "dsp/haptic_metadata.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
 #include <thread>
@@ -73,25 +72,6 @@ std::vector<EventType> readTempoSnapshot(const void* state) {
 std::vector<HirariTempoEvent> readTempoEvents(const void* state) {
     return readTempoSnapshot<HirariTempoEvent, hirari_tempo_map_get_event_count,
                              hirari_tempo_map_copy_events>(state);
-}
-
-std::vector<HirariTimeSignatureEvent> readTempoSignatures(const void* state) {
-    return readTempoSnapshot<HirariTimeSignatureEvent, hirari_tempo_map_get_signature_count,
-                             hirari_tempo_map_copy_signatures>(state);
-}
-
-std::optional<HirariTempoEvent> readTempoEventAt(const void* state, uint64_t pos) {
-    HirariTempoEvent event{};
-    return hirari_tempo_map_get_event_at(state, pos, &event)
-        ? std::optional<HirariTempoEvent>(event)
-        : std::nullopt;
-}
-
-std::optional<HirariTimeSignatureEvent> readTempoSignatureAt(const void* state, double beat) {
-    HirariTimeSignatureEvent event{};
-    return hirari_tempo_map_get_signature_at(state, beat, &event)
-        ? std::optional<HirariTimeSignatureEvent>(event)
-        : std::nullopt;
 }
 
 #include "hirari_unified_engine_part_1a.inc"

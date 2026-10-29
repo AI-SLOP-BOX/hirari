@@ -172,17 +172,4 @@ protected:
     uint32_t m_sidechainBusId = 0;
 };
 
-/**
- * @class PurityPassProcessor
- * @brief THE NULL OBJECT: Branches are for trees, let the audio flow.
- * Guaranteed NO-OP.
- */
-class PurityPassProcessor : public IProcessor {
-public:
-    void prepareToPlay(double, uint32_t) noexcept override {}
-    void process(Core::AudioBuffer&, Core::MidiBuffer&, const ProcessContext&) noexcept override {}
-    void reset() noexcept override {}
-    std::string getName() const override { return "PurityPass"; }
-};
-
 } // namespace Hirari::DSP

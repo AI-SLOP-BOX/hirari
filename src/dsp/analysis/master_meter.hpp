@@ -5,7 +5,6 @@
 #include <cmath>
 #include <vector>
 
-#include "analysis_engine.hpp"
 #include "goniometer.hpp"
 #include "../../core/rust_ffi.hpp"
 

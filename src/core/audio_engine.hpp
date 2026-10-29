@@ -14,7 +14,6 @@
 #include "rust/cxx.h"
 #include "hirari_unified_engine.hpp"
 #include "plugins/native_editor_host.hpp"
-#include "dsp/vocal/psola_pitch_shifter.hpp"
 #include "bridge_types.hpp"
 #include "../io/wav_loader_utils.hpp"
 

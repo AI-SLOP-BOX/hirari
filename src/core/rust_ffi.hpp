@@ -983,14 +983,6 @@ struct HirariAudioNoteCurveView {
     double correctionBeforeSeconds = 0.0;
     double formantOffsetCents = 0.0;
 };
-struct HirariAudioNotePhaseView {
-    double startSeconds = 0.0;
-    double endSeconds = 0.0;
-    double pitchOffsetCents = 0.0;
-    const HirariAudioNoteAnchor* anchors = nullptr;
-    size_t anchorCount = 0;
-    const double* integralPrefix = nullptr;
-};
 struct HirariAudioNoteSegmentRange {
     double startSeconds = 0.0;
     double endSeconds = 0.0;
@@ -1317,19 +1309,6 @@ static_assert(offsetof(HirariTempoEvent, samplePos) == 0 && offsetof(HirariTempo
               offsetof(HirariTempoEvent, ramp) == 16 &&
               offsetof(HirariTempoEvent, worldBeats) == 24 && sizeof(HirariTempoEvent) == 32);
 
-struct HirariTimeSignatureEvent {
-    uint64_t samplePos;
-    uint8_t numerator;
-    uint8_t denominator;
-    double beat;
-};
-static_assert(std::is_standard_layout_v<HirariTimeSignatureEvent>);
-static_assert(offsetof(HirariTimeSignatureEvent, samplePos) == 0 &&
-              offsetof(HirariTimeSignatureEvent, numerator) == 8 &&
-              offsetof(HirariTimeSignatureEvent, denominator) == 9 &&
-              offsetof(HirariTimeSignatureEvent, beat) == 16 &&
-              sizeof(HirariTimeSignatureEvent) == 24);
-
 extern "C" void* hirari_tempo_map_create();
 extern "C" void hirari_tempo_map_destroy(void* state);
 extern "C" bool hirari_tempo_map_add_tempo(
@@ -1337,13 +1316,6 @@ extern "C" bool hirari_tempo_map_add_tempo(
 extern "C" bool hirari_tempo_map_clear(void* state, double sample_rate, double initial_bpm);
 extern "C" size_t hirari_tempo_map_get_event_count(const void* state);
 extern "C" size_t hirari_tempo_map_copy_events(const void* state, void* output, size_t capacity);
-extern "C" bool hirari_tempo_map_get_event_at(
-    const void* state, uint64_t sample_pos, void* output);
-extern "C" size_t hirari_tempo_map_get_signature_count(const void* state);
-extern "C" size_t hirari_tempo_map_copy_signatures(
-    const void* state, void* output, size_t capacity);
-extern "C" bool hirari_tempo_map_get_signature_at(
-    const void* state, double beat, void* output);
 extern "C" double hirari_tempo_map_samples_to_beats(
     const void* state, uint64_t samples, double sample_rate);
 extern "C" uint64_t hirari_tempo_map_beats_to_samples(
@@ -1762,12 +1734,6 @@ extern "C" uint32_t hirari_native_pdc_get_track_offset(const void* state, uint32
 extern "C" uint32_t hirari_native_pdc_get_send_offset(
     const void* state, uint32_t source, uint32_t destination);
 extern "C" bool hirari_native_pdc_low_latency_mode(const void* state);
-extern "C" void* hirari_analysis_engine_create(double sample_rate);
-extern "C" void hirari_analysis_engine_destroy(void* state);
-extern "C" void hirari_analysis_engine_update(
-    void* state, const float* left, const float* right, uint32_t frames, double sample_rate);
-extern "C" void hirari_analysis_engine_get_stats(const void* state, float* output);
-extern "C" float hirari_analysis_engine_get_band(const void* state, uint32_t channel, uint32_t band);
 // Track work-buffer spectrogram features: splits the first channel into
 // `capacity` ranges and returns 0.5*(rms+peak) clamped to 0..1 per range.
 extern "C" size_t hirari_track_analysis_spectrogram(
@@ -2160,14 +2126,6 @@ extern "C" bool hirari_project_db_query(
     void* context, HirariProjectDbCallback callback);
 extern "C" bool hirari_project_db_flush(
     const void* state, const uint8_t* path, size_t path_size);
-extern "C" void* hirari_delay_pitch_create(double sample_rate);
-extern "C" void* hirari_delay_pitch_clone(const void* state);
-extern "C" void hirari_delay_pitch_destroy(void* state);
-extern "C" void hirari_delay_pitch_reset(void* state);
-extern "C" bool hirari_delay_pitch_process(
-    void* state, const float* input, float* output, uint32_t samples,
-    float ratio, float f0, double sample_rate,
-    float formant_ratio, float timing_ratio);
 extern "C" void* hirari_mpe_manager_create();
 extern "C" void hirari_mpe_manager_destroy(void* state);
 extern "C" void hirari_mpe_manager_reset(void* state);

@@ -6,10 +6,16 @@
 #include <memory>
 #include <algorithm>
 #include <cmath>
-#include "audio_types.hpp"
 #include "midi_buffer.hpp"
 
 namespace Hirari::Core {
+
+struct MIDINote {
+    uint8_t pitch = 60;
+    uint8_t velocity = 100;
+    double startBeat = 0.0;
+    double lengthBeats = 1.0;
+};
 
 static_assert(sizeof(MIDINote) == 24 && offsetof(MIDINote, pitch) == 0 &&
               offsetof(MIDINote, velocity) == 1 && offsetof(MIDINote, startBeat) == 8 &&

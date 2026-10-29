@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Unreferenced engine helpers and types are deleted: the tempo-map
+  signature/event readers, `PurityPassProcessor`, and the analysis-engine,
+  PSOLA pitch-shifter and haptic-metadata headers no longer exist. The live
+  `MIDINote` ABI struct now lives with its only consumer
+  (`midi_region.hpp`) instead of the catch-all `audio_types.hpp` header.
 - Dead bridge surface is removed rather than left as a second entry point:
   the borrowed track-peak accessors (Rust only ever used the owned copies),
   `initialize_gpu` (Rust calls the status-returning variant), and the
