@@ -18,10 +18,6 @@
 namespace hirari::limits {
 /// Cents per octave, the denominator of every cents-to-ratio conversion.
 constexpr double kCentsPerOctave = 1200.0;
-/// Cents of pitch offset a note edit may apply.
-constexpr double kMaxPitchCents = 4800.0;
-/// Cents of formant offset a note edit may apply.
-constexpr double kMaxFormantCents = 2400.0;
 /// Lowest sample rate any module accepts, in Hz.
 constexpr double kMinSampleRate = 8000.0;
 /// Highest sample rate any module accepts, in Hz.
@@ -341,19 +337,6 @@ typedef struct HirariVariAudioFrozen HirariVariAudioFrozen;
 extern "C" {
 HirariRegionVariAudioStore* hirari_region_vari_audio_store_new();
 void hirari_region_vari_audio_store_clear(HirariRegionVariAudioStore* store);
-bool hirari_region_vari_audio_store_upsert(HirariRegionVariAudioStore* store,
-                                           HirariAudioNoteSegment segment,
-                                           const HirariAudioNoteAnchor* anchors,
-                                           size_t anchor_count);
-bool hirari_region_vari_audio_store_remove(HirariRegionVariAudioStore* store,
-                                           double start_seconds);
-uint32_t hirari_region_vari_audio_store_count(HirariRegionVariAudioStore* store);
-bool hirari_region_vari_audio_store_upsert_anchor(
-    HirariRegionVariAudioStore* store, double segment_start, double position_seconds,
-    double pitch_cents, double formant_cents);
-bool hirari_region_vari_audio_store_warp(HirariRegionVariAudioStore* store,
-                                         double segment_start, double new_start,
-                                         double new_end);
 bool hirari_region_vari_audio_store_clear_segments(HirariRegionVariAudioStore* store);
 // Replaces the whole table. `anchor_offsets` / `anchor_counts` describe the
 // flat `anchors` layout, one entry per segment.
@@ -404,9 +387,6 @@ bool hirari_region_vari_audio_store_load(
 bool hirari_region_vari_audio_store_normalize(HirariRegionVariAudioStore* store);
 }
 
-extern "C" char* hirari_xml_escape_attribute(const char* input);
-extern "C" char* hirari_xml_unescape_attribute(const char* input);
-extern "C" void hirari_xml_string_free(char* value);
 // Region range edits are a pure transform: Rust reads the caller's current
 // edits and returns a buffer it owns. Nothing is written through a pointer into
 // caller storage, so no returned count can drive a container resize over data
@@ -1038,21 +1018,6 @@ struct HirariTrackRegionRenderInput {
 extern "C" bool hirari_region_needs_spectral_stretch(
     double source_rate, size_t warp_marker_count, float pitch_semitones,
     const HirariAudioNoteCurveView* note_curves, size_t note_curve_count);
-extern "C" void hirari_audio_note_curve_build_integral_prefix(
-    const HirariAudioNoteAnchor* anchors, size_t anchor_count,
-    double pitch_offset_cents, double* prefix_output);
-extern "C" size_t hirari_audio_note_curve_upsert_anchor(
-    HirariAudioNoteAnchor* anchors, size_t anchor_count, size_t capacity,
-    double segment_start, double segment_end,
-    double position_seconds, double pitch_cents, double formant_cents);
-extern "C" void hirari_audio_note_curve_at(
-    const HirariAudioNoteAnchor* anchors, size_t anchor_count,
-    double seconds, double pitch_offset_cents, double formant_offset_cents,
-    double* output_pitch_formant);
-extern "C" double hirari_audio_note_curve_integral_at(
-    const HirariAudioNoteAnchor* anchors, size_t anchor_count,
-    const double* prefix, double start_seconds, double end_seconds,
-    double pitch_offset_cents, double seconds);
 extern "C" void* hirari_native_noise_gate_create();
 extern "C" void hirari_native_noise_gate_destroy(void* state);
 extern "C" void hirari_native_noise_gate_reset(const void* state);
@@ -1230,28 +1195,6 @@ extern "C" bool hirari_plugin_registry_set_blacklisted(
 extern "C" bool hirari_plugin_registry_snapshot_json(
     const void* state, uint8_t** output, size_t* output_size);
 extern "C" void hirari_plugin_registry_snapshot_json_free(uint8_t* bytes, size_t size);
-extern "C" void* hirari_wav_float32_stream_create(
-    const char* path, size_t path_size, uint32_t sample_rate, uint16_t channels);
-extern "C" uint8_t hirari_wav_float32_stream_write(
-    void* stream, const float* const* channels, uint32_t frame_count);
-extern "C" uint8_t hirari_wav_float32_stream_finish(void* stream);
-extern "C" uint64_t hirari_wav_float32_stream_frames(const void* stream);
-extern "C" void hirari_wav_float32_stream_free(void* stream);
-extern "C" void* hirari_wav_pcm_stream_create(
-    const char* path, size_t path_size, uint64_t frames, uint32_t sample_rate,
-    uint16_t channels, uint16_t bit_depth, uint8_t broadcast_wave);
-extern "C" uint8_t hirari_wav_pcm_stream_write(
-    void* stream, const float* const* channels, uint32_t frame_count);
-extern "C" uint8_t hirari_wav_pcm_stream_finish(void* stream);
-extern "C" void hirari_wav_pcm_stream_free(void* stream);
-extern "C" void* hirari_wav_wave64_stream_create(
-    const char* path, size_t path_size, uint64_t frames, uint32_t sample_rate,
-    uint16_t channels);
-extern "C" uint8_t hirari_wav_wave64_stream_write(
-    void* stream, const float* const* channels, uint32_t frame_count);
-extern "C" uint8_t hirari_wav_wave64_stream_finish(void* stream);
-extern "C" uint64_t hirari_wav_wave64_stream_frames(const void* stream);
-extern "C" void hirari_wav_wave64_stream_free(void* stream);
 
 struct HirariWave64DecodedOwned {
     uint32_t sample_rate;
@@ -1514,11 +1457,6 @@ extern "C" bool hirari_routing_edit_set_phase_invert(
     void* host, uint32_t trackId, bool inverted);
 extern "C" bool hirari_routing_edit_set_track_delay_samples(
     void* host, uint32_t trackId, uint32_t samples);
-extern "C" bool hirari_routing_edit_set_track_volume(
-    void* host, uint32_t trackId, float value);
-extern "C" bool hirari_routing_edit_set_track_pan(void* host, uint32_t trackId, float value);
-extern "C" bool hirari_routing_edit_set_track_mute(void* host, uint32_t trackId, bool muted);
-extern "C" bool hirari_routing_edit_set_track_solo(void* host, uint32_t trackId, bool solo);
 extern "C" void hirari_routing_edit_apply_payloads(
     void* host, const HirariRoutingEditPayload* entries, size_t count);
 
@@ -2054,7 +1992,6 @@ extern "C" void hirari_undo_edit_begin_transaction(
     void* undo, const uint8_t* name, size_t name_len);
 extern "C" bool hirari_undo_edit_end_transaction(void* undo);
 extern "C" bool hirari_undo_edit_abort_transaction(void* undo, void* host);
-extern "C" void hirari_undo_edit_clear(void* undo);
 extern "C" uint32_t hirari_undo_edit_undo_count(const void* undo);
 extern "C" uint32_t hirari_undo_edit_redo_count(const void* undo);
 
@@ -2104,8 +2041,6 @@ extern "C" void hirari_midi_learn_add_mapping_14bit(
     void* state, uint16_t controller, uint8_t channel, const void* macro_state,
     uint32_t macro_index,
     float minimum, float maximum, float curve, bool pickup);
-extern "C" void hirari_midi_learn_remove_mapping(
-    void* state, uint8_t cc, uint8_t channel);
 extern "C" void hirari_midi_learn_handle_cc(
     const void* state, uint8_t channel, uint8_t cc, uint8_t value);
 extern "C" void hirari_midi_learn_handle_cc14(

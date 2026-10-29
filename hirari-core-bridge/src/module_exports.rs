@@ -36,6 +36,7 @@ pub mod audio_pitch_analysis;
 pub mod audio_pool_peaks;
 pub mod audio_resampler;
 pub mod audio_test_tone;
+pub mod engine_edit_ext;
 pub mod auditor;
 pub mod auto_filter;
 pub mod auto_pitch_corrector;

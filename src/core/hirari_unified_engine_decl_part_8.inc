@@ -1,10 +1,3 @@
-    // SBF-v6 Workspace Sovereignty
-    struct Workspace {
-        std::atomic<float> zoomX{1.0f}, zoomY{1.0f};
-        std::atomic<uint64_t> scrollPos{0};
-        std::atomic<uint32_t> focusedTrackId{0};
-    } m_workspace;
-
     // Phase 9: waveform peak cache lives in Rust (region_audio.rs); this
     // translation unit no longer holds per-region peak state.
 

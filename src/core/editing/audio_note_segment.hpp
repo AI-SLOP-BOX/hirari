@@ -1,10 +1,8 @@
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
-#include <cmath>
 #include <cstdint>
-#include <limits>
+#include <memory>
 #include <vector>
 #include <type_traits>
 #include "../rust_ffi.hpp"
@@ -28,88 +26,6 @@ struct AudioNoteSegment {
     double pitchOffsetCents = 0.0;
     double formantOffsetCents = 0.0;
     std::vector<AudioNoteAnchor> anchors;
-    // Rebuilt on the control side; deliberately omitted from project files.
-    std::vector<double> pitchRatioIntegralPrefix;
-    double pitchRatioCorrectionBeforeSeconds = 0.0;
-
-    void evaluateAt(double seconds, double& pitch, double& formant) const noexcept {
-        double output[2]{};
-        hirari_audio_note_curve_at(anchors.data(), anchors.size(), seconds,
-                                   pitchOffsetCents, formantOffsetCents, output);
-        pitch = output[0];
-        formant = output[1];
-    }
-
-    double pitchAt(double seconds) const noexcept {
-        double pitch = 0.0, formant = 0.0;
-        evaluateAt(seconds, pitch, formant);
-        return pitch;
-    }
-
-    double formantAt(double seconds) const noexcept {
-        double pitch = 0.0, formant = 0.0;
-        evaluateAt(seconds, pitch, formant);
-        return formant;
-    }
-
-    bool valid() const noexcept {
-        return std::isfinite(startSeconds) && std::isfinite(endSeconds) &&
-               endSeconds > startSeconds && std::isfinite(detectedPitchCents) &&
-               std::isfinite(pitchOffsetCents) && std::isfinite(formantOffsetCents);
-    }
-
-    void setTiming(double start, double end) {
-        if (std::isfinite(start) && std::isfinite(end) && end > start) {
-            startSeconds = start;
-            endSeconds = end;
-            rebuildPitchRatioIntegral();
-        }
-    }
-
-    void setPitchOffset(double cents) {
-        if (std::isfinite(cents)) {
-            pitchOffsetCents = std::clamp(cents, -hirari::limits::kMaxPitchCents, hirari::limits::kMaxPitchCents);
-            rebuildPitchRatioIntegral();
-        }
-    }
-
-    void setFormantOffset(double cents) noexcept {
-        if (std::isfinite(cents)) formantOffsetCents = std::clamp(cents, -hirari::limits::kMaxFormantCents, hirari::limits::kMaxFormantCents);
-    }
-
-    void upsertAnchor(AudioNoteAnchor anchor) {
-        if (!std::isfinite(anchor.positionSeconds) ||
-            !std::isfinite(anchor.pitchCents) || !std::isfinite(anchor.formantCents) ||
-            anchor.positionSeconds < startSeconds || anchor.positionSeconds > endSeconds) return;
-        std::vector<AudioNoteAnchor> normalized(anchors.size() + 1);
-        std::copy(anchors.begin(), anchors.end(), normalized.begin());
-        const size_t count = hirari_audio_note_curve_upsert_anchor(
-            normalized.data(), anchors.size(), normalized.size(), startSeconds, endSeconds,
-            anchor.positionSeconds, anchor.pitchCents, anchor.formantCents);
-        if (count == std::numeric_limits<size_t>::max()) return;
-        normalized.resize(count);
-        anchors = std::move(normalized);
-        rebuildPitchRatioIntegral();
-    }
-
-    void rebuildPitchRatioIntegral() {
-        pitchRatioIntegralPrefix.assign(anchors.size(), 0.0);
-        hirari_audio_note_curve_build_integral_prefix(
-            anchors.data(), anchors.size(), pitchOffsetCents,
-            pitchRatioIntegralPrefix.data());
-    }
-
-    // Integrates the pitch ratio in seconds from segment start to `seconds`.
-    // The exact exponential integral over linear-in-cents anchors keeps the
-    // pitch shifter's phase trajectory continuous through edited glides.
-    double pitchRatioIntegralAt(double seconds) const noexcept {
-        if (pitchRatioIntegralPrefix.size() != anchors.size()) return 0.0;
-        return hirari_audio_note_curve_integral_at(
-            anchors.data(), anchors.size(), pitchRatioIntegralPrefix.data(),
-            startSeconds, endSeconds, pitchOffsetCents, seconds);
-    }
-
-private:
 };
 
 // ============================================================
@@ -185,9 +101,7 @@ public:
                 segment.detectedPitchCents = ranges_[index].detectedPitchCents;
                 segment.pitchOffsetCents = curve.pitchOffsetCents;
                 segment.formantOffsetCents = curve.formantOffsetCents;
-                segment.pitchRatioCorrectionBeforeSeconds = curve.correctionBeforeSeconds;
                 segment.anchors.assign(curve.anchors, curve.anchors + curve.anchorCount);
-                segment.rebuildPitchRatioIntegral();
                 out.push_back(std::move(segment));
             }
             return true;
@@ -207,10 +121,6 @@ public:
         return replace(segments, hirari_region_vari_audio_store_load);
     }
 
-    bool empty() const {
-        return !store_ || hirari_region_vari_audio_store_count(store_.get()) == 0;
-    }
-
     void clear() const {
         if (store_) (void)hirari_region_vari_audio_store_clear_segments(store_.get());
     }
@@ -218,28 +128,6 @@ public:
     /// Region-add policy in place.
     bool normalize() const {
         return store_ && hirari_region_vari_audio_store_normalize(store_.get());
-    }
-
-    // ---- mutators (all delegate to Rust) ----
-    bool upsert(const AudioNoteSegment& segment) const {
-        return store_ && hirari_region_vari_audio_store_upsert(
-                             store_.get(), toAbi(segment), segment.anchors.data(),
-                             segment.anchors.size());
-    }
-
-    bool upsertAnchor(double segmentStart, double position, double pitchCents,
-                      double formantCents) const {
-        return store_ && hirari_region_vari_audio_store_upsert_anchor(
-                             store_.get(), segmentStart, position, pitchCents, formantCents);
-    }
-
-    bool warp(double segmentStart, double newStart, double newEnd) const {
-        return store_ && hirari_region_vari_audio_store_warp(
-                             store_.get(), segmentStart, newStart, newEnd);
-    }
-
-    bool remove(double segmentStart) const {
-        return store_ && hirari_region_vari_audio_store_remove(store_.get(), segmentStart);
     }
 
     // ---- published projection (audio thread reads these) ----
@@ -306,7 +194,6 @@ private:
                 anchors.begin() + static_cast<std::ptrdiff_t>(offsets[index]),
                 anchors.begin() + static_cast<std::ptrdiff_t>(offsets[index] +
                                                               counts[index]));
-            segment.rebuildPitchRatioIntegral();
             out.push_back(std::move(segment));
         }
         return true;

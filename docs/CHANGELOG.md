@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Track volume/pan/mute/solo edits and undo clearing now go straight from
+  Rust to their Rust implementations; the `AudioEngine` relay methods, their
+  bridge declarations and the C++ declarations of those FFI entry points are
+  gone. `RegionNoteEdits` also drops the note-curve mutators and pitch-integral
+  prefix that only fed the deleted `AudioNoteSegment` helpers, and unused
+  engine members (`m_vibeData`, `m_vibeVersion`, `m_workspace`,
+  `m_pluginGuiStates`) are removed.
 - Unreferenced engine helpers and types are deleted: the tempo-map
   signature/event readers, `PurityPassProcessor`, and the analysis-engine,
   PSOLA pitch-shifter and haptic-metadata headers no longer exist. The live

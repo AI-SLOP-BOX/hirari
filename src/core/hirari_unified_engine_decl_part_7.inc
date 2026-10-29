@@ -3,11 +3,6 @@
     ::Hirari::Core::Concurrency::AudioTaskStealingScheduler m_threadPool;
     std::unique_ptr<::Hirari::DSP::Analysis::MasterMeter> m_analyzer;
     std::unique_ptr<::Hirari::DSP::Effects::MasterLimiter> m_masterLimiter;
-    
-    // Aesthetic Sovereignty
-    // INDUSTRIAL: Lock-Free Atomic State (Trivially Copyable)
-    std::atomic<Mixing::AestheticFeatures> m_vibeData{ Mixing::AestheticFeatures{} };
-    std::atomic<uint32_t> m_vibeVersion{0}; 
 
     TelemetryData m_telemetryBuffers[2];
     // Per-engine Rust telemetry is allocated on the control thread and reused

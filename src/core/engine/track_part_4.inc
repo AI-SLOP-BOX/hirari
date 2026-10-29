@@ -191,7 +191,6 @@
     std::atomic<uint32_t> m_midiInstrumentPluginCount{0};
     std::vector<std::shared_ptr<Hirari::Core::MidiRegion>> m_midiRegions;
     std::vector<std::string> m_sandboxedPluginPaths;
-    std::vector<std::vector<uint8_t>> m_pluginGuiStates;
     std::vector<uint32_t> m_sandboxedPluginIndices;
     std::atomic<uint8_t> m_lastSandboxFailure{0};
     std::string m_lastSandboxFailureText = "none";

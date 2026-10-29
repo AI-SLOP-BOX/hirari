@@ -41,9 +41,6 @@ public:
     uint64_t midi_clock_last_tick() const { return m_engine ? m_engine->midi_clock_last_tick() : 0; }
     double midi_clock_rate() const { return m_engine ? m_engine->midi_clock_rate() : 120.0; }
     void set_midi_clock_rate(double bpm) const { if (m_engine) m_engine->set_midi_clock_rate(bpm); }
-    bool set_track_volume(uint32_t tid, float value) const {
-        return m_engine && hirari_routing_edit_set_track_volume(m_engine.get(), tid, value);
-    }
     float get_track_volume(uint32_t tid) const {
         return m_engine ? m_engine->get_track_volume(tid) : -1.0f;
     }
@@ -73,9 +70,6 @@ public:
     bool bus_track_exists(uint32_t busTrackId) const {
         return m_engine && m_engine->bus_track_exists(busTrackId);
     }
-    void clear_undo_history() const {
-        if (m_engine) hirari_undo_edit_clear(m_engine->undo_state());
-    }
     float get_master_gain() const noexcept {
         return m_engine ? m_engine->get_master_gain() : 1.0f;
     }
@@ -84,15 +78,6 @@ public:
     }
     uint32_t get_track_delay_samples(uint32_t tid) const {
         return m_engine ? m_engine->get_track_delay_samples(tid) : 0u;
-    }
-    bool set_track_pan(uint32_t tid, float value) const {
-        return m_engine && hirari_routing_edit_set_track_pan(m_engine.get(), tid, value);
-    }
-    bool set_track_mute(uint32_t tid, bool muted) const {
-        return m_engine && hirari_routing_edit_set_track_mute(m_engine.get(), tid, muted);
-    }
-    bool set_track_solo(uint32_t tid, bool solo) const {
-        return m_engine && hirari_routing_edit_set_track_solo(m_engine.get(), tid, solo);
     }
     bool set_offline_render_target(uint32_t tid) const {
         return m_engine && m_engine->set_offline_render_target(tid);
