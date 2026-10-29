@@ -399,6 +399,41 @@ pub unsafe extern "C" fn hirari_track_midi_expression_map_copy(
     bytes.len()
 }
 
+/// Hands the expression-map bytes over in storage this side owns, so the
+/// caller never has to size a buffer from a count query and retry.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_track_midi_expression_map_take(
+    state: *const c_void,
+    map_kind: u8,
+    size: *mut usize,
+) -> *mut u8 {
+    if let Some(size) = unsafe { size.as_mut() } {
+        *size = 0;
+    }
+    let Some(state) = (unsafe { state.cast::<ArticulationRuntime>().as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    let Some(map) = state.expression_maps.get(map_kind as usize) else {
+        return std::ptr::null_mut();
+    };
+    let bytes = map.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if bytes.is_empty() {
+        return std::ptr::null_mut();
+    }
+    if let Some(size) = unsafe { size.as_mut() } {
+        *size = bytes.len();
+    }
+    Box::into_raw(bytes.clone().into_boxed_slice()).cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_track_midi_expression_map_take_free(data: *mut u8, size: usize) {
+    if data.is_null() {
+        return;
+    }
+    unsafe { drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(data, size))) };
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_track_midi_articulation_begin(
     state: *const c_void,
@@ -902,5 +937,28 @@ mod tests {
             assert_eq!(generated[1].data, [0x90, 60, 90]);
             hirari_track_midi_articulation_destroy(state);
         }
+    }
+
+    #[test]
+    fn expression_map_take_hands_the_bytes_over_once() {
+        let state = ArticulationRuntime::new();
+        let raw = &state as *const ArticulationRuntime as *const c_void;
+        let json = b"{\"a\":1}";
+        assert!(unsafe {
+            hirari_track_midi_expression_map_set(raw, 1, json.as_ptr(), json.len())
+        });
+
+        let mut size = 0usize;
+        let taken = unsafe { hirari_track_midi_expression_map_take(raw, 1, &mut size) };
+        assert!(!taken.is_null());
+        assert_eq!(unsafe { std::slice::from_raw_parts(taken, size) }, json);
+        unsafe { hirari_track_midi_expression_map_take_free(taken, size) };
+
+        let mut again = 4usize;
+        assert!(
+            unsafe { hirari_track_midi_expression_map_take(std::ptr::null(), 1, &mut again) }
+                .is_null()
+        );
+        assert_eq!(again, 0);
     }
 }

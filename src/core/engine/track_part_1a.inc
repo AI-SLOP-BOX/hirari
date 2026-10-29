@@ -406,19 +406,12 @@ private:
     }
 
     std::string copyExpressionMapJson(uint8_t mapKind) const {
-        size_t required = hirari_track_midi_expression_map_copy(
-            m_articulationState, mapKind, nullptr, 0);
-        std::string result(required, '\0');
-        for (;;) {
-            const size_t copied = hirari_track_midi_expression_map_copy(
-                m_articulationState, mapKind,
-                reinterpret_cast<uint8_t*>(result.data()), result.size());
-            if (copied <= result.size()) {
-                result.resize(copied);
-                return result;
-            }
-            result.resize(copied);
-        }
+        size_t size = 0;
+        auto* json = hirari_track_midi_expression_map_take(m_articulationState, mapKind, &size);
+        if (!json) return {};
+        std::string result(reinterpret_cast<const char*>(json), size);
+        hirari_track_midi_expression_map_take_free(json, size);
+        return result;
     }
 
     void process(AudioBuffer& buffer, uint32_t sz, uint64_t playhead, bool clearInput,

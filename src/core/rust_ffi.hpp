@@ -1925,8 +1925,9 @@ extern "C" void* hirari_track_midi_articulation_create();
 extern "C" void hirari_track_midi_articulation_destroy(void* state);
 extern "C" bool hirari_track_midi_expression_map_set(
     const void* state, uint8_t map_kind, const uint8_t* data, size_t length);
-extern "C" size_t hirari_track_midi_expression_map_copy(
-    const void* state, uint8_t map_kind, uint8_t* output, size_t capacity);
+extern "C" uint8_t* hirari_track_midi_expression_map_take(
+    const void* state, uint8_t map_kind, size_t* size);
+extern "C" void hirari_track_midi_expression_map_take_free(uint8_t*, size_t);
 extern "C" size_t hirari_track_midi_timed_outputs(
     const void* state, uint8_t articulation_id, bool transitions,
     HirariTimedKeySwitchOutput* output, size_t capacity);

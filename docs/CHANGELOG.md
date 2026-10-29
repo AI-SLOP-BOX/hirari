@@ -273,6 +273,10 @@ production support.
   `hirari_midi_notes_snapshot_take` returns the published note list in storage
   it owns, so `midi_notes_snapshot` copies once and releases instead of
   growing a caller vector across repeated count/copy calls.
+- Expression-map reads moved to Rust-owned buffers.
+  `hirari_track_midi_expression_map_take` hands the stored bytes over with a
+  release entry point, so `copyExpressionMapJson` no longer sizes a string
+  from a count query and retries the copy until it stops growing.
 - Track lifecycle edits now run through the Rust track-edit host. Rust owns the
   `Track <id>` / `Bus <id>` naming, the `Add Track`, `Duplicate Track` and
   `Remove Track` labels, and the undo/redo decisions: created and copied tracks
