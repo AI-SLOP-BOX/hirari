@@ -56,15 +56,15 @@ bool HirariUnifiedEngine::bind_midi_cc14_to_macro(uint8_t channel, uint16_t cont
 }
 void HirariUnifiedEngine::handle_midi_cc(uint8_t channel, uint8_t cc,
                                        uint8_t value) noexcept {
-    m_midiLearnManager.handleMidiCC(channel, cc, value);
+    hirari_midi_learn_handle_cc(m_midiLearnState, channel, cc, value);
 }
 
 void HirariUnifiedEngine::handle_midi_cc14(uint8_t channel, uint16_t controller,
                                          uint16_t value) noexcept {
-    m_midiLearnManager.handleMidiCC14(channel, controller, value);
+    hirari_midi_learn_handle_cc14(m_midiLearnState, channel, controller, value);
 }
 void HirariUnifiedEngine::set_preview_synth_engine(uint32_t engine) {
-    m_previewSynth.setEngine(engine);
+    hirari_preview_synth_set_engine(m_previewSynthState, engine);
 }
 bool HirariUnifiedEngine::set_route(uint32_t sourceId, uint32_t destId, bool enabled) {
     return hirari_routing_edit_set_route(this, sourceId, destId, enabled);
@@ -430,13 +430,13 @@ void HirariUnifiedEngine::installControlEditHost() {
             const void* targetState = engine->m_macroControl;
             if (targetState == nullptr) return false;
             if (cc14) {
-                engine->m_midiLearnManager.addMapping14Bit(
-                    controller, channel, targetState, macroIndex, minimum, maximum, curve,
-                    pickup);
-            } else {
-                engine->m_midiLearnManager.addMappingAdvanced(
-                    static_cast<uint8_t>(controller), channel, targetState, macroIndex,
+                hirari_midi_learn_add_mapping_14bit(
+                    engine->m_midiLearnState, controller, channel, targetState, macroIndex,
                     minimum, maximum, curve, pickup);
+            } else {
+                hirari_midi_learn_add_mapping(
+                    engine->m_midiLearnState, static_cast<uint8_t>(controller), channel,
+                    targetState, macroIndex, minimum, maximum, curve, pickup);
             }
             return true;
         },

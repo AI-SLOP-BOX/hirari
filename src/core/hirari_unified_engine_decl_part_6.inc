@@ -85,7 +85,7 @@ private:
     // preview/plugin dispatch, so articulation and MPE transformations affect
     // every downstream instrument consistently.
     HirariMpeState* m_mpeState = hirari_mpe_state_create();
-    PreviewSynth m_previewSynth;
+    void* m_previewSynthState = hirari_preview_synth_create();
     // Audio-thread ownership. This preserves the preview routing decision for
     // a held note even if a plug-in is inserted or removed before Note Off.
     uint32_t m_previewFallbackActiveNotes[16][128]{};

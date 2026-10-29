@@ -8,7 +8,6 @@
 #include <array>
 #include "audio_buffer.hpp"
 #include "midi_buffer.hpp"
-#include "preview_synth.hpp"
 #include "engine_types.hpp"
 #include "bridge_types.hpp"
 #include "engine_types.hpp"
@@ -23,7 +22,6 @@
 #include "engine/track_freeze_manager.hpp"
 #include "engine/bus_system.hpp"
 #include "engine/bus_track.hpp"
-#include "midi_learn_manager.hpp"
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
 #include "io/audio_decoder.hpp"

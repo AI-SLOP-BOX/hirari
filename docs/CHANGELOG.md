@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The C++ `MidiLearnManager` and `PreviewSynth` wrappers are gone. The engine
+  now holds the Rust-owned midi-learn and preview-synth handles directly, so
+  CC binding, CC14 binding, preview reset and preview block rendering call the
+  Rust implementation without an intermediate C++ object.
 - Four C++ contract programs that no build script or CMake target referenced
   are deleted. Their contracts are covered elsewhere: the plugin-sandbox IPC
   assertions by the Rust `plugin_sandbox_workflow` integration tests, the

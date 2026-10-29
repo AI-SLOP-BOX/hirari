@@ -69,6 +69,8 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_metronome_destroy(m_metronome);
     hirari_mixer_telemetry_destroy(m_mixerTelemetry);
     hirari_macro_mapping_destroy(m_macroControl);
+    hirari_midi_learn_destroy(m_midiLearnState);
+    hirari_preview_synth_destroy(m_previewSynthState);
     hirari_automation_lane_group_destroy(m_automationLanes);
     hirari_mpe_state_free(m_mpeState);
     hirari_routing_engine_destroy(m_routingEngine);
@@ -256,7 +258,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
             return;
         }
         if (m_previewVoicesNeedReset.exchange(false, std::memory_order_acq_rel)) {
-            m_previewSynth.reset();
+            hirari_preview_synth_reset(m_previewSynthState);
             for (auto& channel : m_previewFallbackActiveNotes)
                 std::fill(std::begin(channel), std::end(channel), 0u);
         }
@@ -326,7 +328,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                 !midiSnapshotPinned;
             const bool panicMidi = reconcileMidiState;
             if (panicMidi) {
-                m_previewSynth.reset();
+                hirari_preview_synth_reset(m_previewSynthState);
                 for (auto& channel : m_previewFallbackActiveNotes)
                     std::fill(std::begin(channel), std::end(channel), 0u);
                 for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
@@ -426,9 +428,9 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         // Deterministic built-in preview instrument. This is intentionally a
         // small built-in voice so MIDI playback can be verified without plugins.
         const double sr = std::max(1.0, m_sampleRate.load(std::memory_order_relaxed));
-        m_previewSynth.process(m_blockMidi.getEvents(), m_blockMidi.size(),
-            output.getWritePointer(0, off), output.getWritePointer(1, off), sz,
-            currentPlayhead, sr, m_macroControl);
+        hirari_preview_synth_process(m_previewSynthState, m_blockMidi.getEvents(),
+            m_blockMidi.size(), output.getWritePointer(0, off),
+            output.getWritePointer(1, off), sz, currentPlayhead, sr, m_macroControl);
         float* previewL = output.getWritePointer(0, off);
         float* previewR = output.getWritePointer(1, off);
 
