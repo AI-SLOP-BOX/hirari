@@ -28,7 +28,7 @@ constexpr size_t kMaxEditEntries = 4096;
 constexpr uint64_t kMaxAudioQuantizerWarpSamples = 16'777'216u;
 } // namespace hirari::limits
 
-extern "C" void* hirari_log_buffer_init(void* storage, size_t bytes);
+extern "C" const void* hirari_log_buffer_default_state();
 extern "C" uint64_t hirari_log_buffer_timestamp();
 extern "C" void hirari_log_buffer_post(
     const void* state, uint32_t level, uint32_t component_id,

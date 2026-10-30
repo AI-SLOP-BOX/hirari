@@ -1,11 +1,11 @@
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 const LOG_CAPACITY: usize = 1024;
 const LOG_TEXT_BYTES: usize = 96;
-const STATE_STORAGE_BYTES: usize = 128 * 1024;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -126,23 +126,18 @@ impl LogQueue {
     }
 }
 
-const _: () = assert!(std::mem::size_of::<LogQueue>() <= STATE_STORAGE_BYTES);
+const _: () = assert!(std::mem::size_of::<LogQueue>() <= 128 * 1024);
 
 static CLOCK_ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+static DEFAULT_QUEUE: OnceLock<Box<LogQueue>> = OnceLock::new();
+
+fn default_queue() -> &'static LogQueue {
+    DEFAULT_QUEUE.get_or_init(|| Box::new(LogQueue::new()))
+}
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_log_buffer_init(storage: *mut c_void, bytes: usize) -> *mut c_void {
-    if storage.is_null()
-        || (storage as usize) % std::mem::align_of::<LogQueue>() != 0
-        || bytes < std::mem::size_of::<LogQueue>()
-    {
-        return std::ptr::null_mut();
-    }
-    let state = storage.cast::<LogQueue>();
-    // SAFETY: the caller supplies exclusive aligned storage of sufficient size.
-    unsafe { std::ptr::write(state, LogQueue::new()) };
-    let _ = CLOCK_ORIGIN.get_or_init(Instant::now);
-    state.cast()
+pub extern "C" fn hirari_log_buffer_default_state() -> *const c_void {
+    default_queue() as *const LogQueue as *const c_void
 }
 
 #[no_mangle]
@@ -197,4 +192,40 @@ pub unsafe extern "C" fn hirari_log_buffer_pop(
     // SAFETY: output is a writable LogEntry supplied by the C++ adapter.
     unsafe { output.write(entry) };
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_state_is_shared_and_round_trips() {
+        let state = hirari_log_buffer_default_state();
+        assert_eq!(state, hirari_log_buffer_default_state());
+        assert!(!state.is_null());
+        assert_eq!((state as usize) % std::mem::align_of::<LogQueue>(), 0);
+
+        let message = b"HIRARI_RING";
+        // SAFETY: state is the process-wide queue and the message is live.
+        unsafe {
+            hirari_log_buffer_post(state, 3, 0xA001, message.as_ptr(), message.len());
+        }
+        let mut entry = LogEntry::default();
+        let mut found = false;
+        // Other tests may post to the same process-wide ring, so search a
+        // bounded window instead of assuming this entry is at the head.
+        for _ in 0..LOG_CAPACITY {
+            // SAFETY: entry is a writable LogEntry on this stack frame.
+            if !unsafe { hirari_log_buffer_pop(state, &mut entry) } {
+                break;
+            }
+            if entry.level == 3 && entry.component_id == 0xA001 {
+                assert_eq!(&entry.message[..message.len()], message);
+                assert_eq!(entry.message[message.len()], 0);
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "posted entry was not found in the default ring");
+    }
 }

@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The diagnostic log ring is now a process-wide Rust singleton handed out by
+  `hirari_log_buffer_default_state`, so the C++ `LogBuffer` adapter no longer
+  owns its 128 KiB aligned storage or initialises the ring.
 - The engine's hot-swap quiesce now reads a process-wide Rust hot-swap state
   through `hirari_hot_swap_default_quiesce_requested` and
   `hirari_hot_swap_default_acknowledge`, so the C++ `DiagnosticsKernel`
