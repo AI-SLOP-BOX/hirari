@@ -317,10 +317,10 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(_engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
-        let result = if engine.execute_auto_mixing() {
+        let result = if self.apply_auto_mixing() {
             return serde_json::json!({
                 "ok": true,
                 "operation": "execute_mixing_advice",

@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Auto-mixing now runs in Rust. The equal-power target for the current track
+  count, the 20% fader approach, the unity-range clamp and the bus skip are
+  computed from the project layout instead of inside the C++ engine, so the
+  engine no longer owns that mixing policy.
+
 - The C++ `SidechainManager` adapter is gone. The engine, tracks and effect
   chains now call the Rust sidechain engine directly: link registration,
   silent links, per-block copy with metadata, source publication/refresh,

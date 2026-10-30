@@ -12,7 +12,6 @@
         float balance = 0.0f;
     };
     MeterData getMasterMeterData() const;
-    bool execute_auto_mixing();
     bool execute_auto_arrangement();
     rust::String get_project_layout_json() const;
     rust::String get_project_layout_json_cancellable(

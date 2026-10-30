@@ -144,7 +144,6 @@
         return m_engine && m_engine->set_track_eq(tid, lowBoostDb, lowCutDb, highBoostDb, highCutDb);
     }
 
-    bool execute_auto_mixing() const { return m_engine && m_engine->execute_auto_mixing(); }
     bool execute_auto_arrangement() const { return m_engine && m_engine->execute_auto_arrangement(); }
     bool set_project_scale(int32_t root, int32_t type) const {
         return m_engine && m_engine->set_project_scale(root, type);

@@ -390,7 +390,6 @@ pub mod ffi {
         fn midi_clock_last_tick(self: &HirariUnifiedEngine) -> u64;
         fn midi_clock_rate(self: &HirariUnifiedEngine) -> f64;
         fn set_midi_clock_rate(self: &AudioEngine, bpm: f64);
-        fn execute_auto_mixing(self: &AudioEngine) -> bool;
         fn execute_auto_arrangement(self: &AudioEngine) -> bool;
         fn set_project_scale(self: &AudioEngine, root: i32, scale_type: i32) -> bool;
         fn execute_vocal_remover(self: &AudioEngine, tid: u32) -> bool;

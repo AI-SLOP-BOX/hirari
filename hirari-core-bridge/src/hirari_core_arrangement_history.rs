@@ -570,10 +570,42 @@ impl HirariCore {
             .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
-    pub fn execute_auto_mixing(&self) {
-        if let Some(e) = self.engine.as_ref() {
-            let _ = e.execute_auto_mixing();
+    /// Auto-mix gain staging. The target is the equal-power headroom for the
+    /// current track count, every non-bus fader moves 20% of the way toward
+    /// it, and the result stays inside the unity fader range.
+    pub fn apply_auto_mixing(&self) -> bool {
+        let Some(engine) = self.engine.as_ref() else {
+            return false;
+        };
+        let Ok(tracks) = serde_json::from_str::<serde_json::Value>(&self.get_project_layout_json())
+        else {
+            return false;
+        };
+        let Some(tracks) = tracks.as_array() else {
+            return false;
+        };
+        if tracks.is_empty() {
+            return false;
         }
+        let target = 1.0 / (tracks.len() as f32).sqrt();
+        for track in tracks {
+            let Some(id) = track.get("id").and_then(serde_json::Value::as_u64) else {
+                continue;
+            };
+            if track.get("type").and_then(serde_json::Value::as_str) == Some("Bus") {
+                continue;
+            }
+            let Some(current) = track.get("volume").and_then(serde_json::Value::as_f64) else {
+                continue;
+            };
+            let next = (current as f32 * 0.8 + target * 0.2).clamp(0.0, 1.0);
+            let _ = engine.set_track_volume(id as u32, next);
+        }
+        true
+    }
+
+    pub fn execute_auto_mixing(&self) {
+        self.apply_auto_mixing();
     }
     pub fn execute_auto_arrangement(&self) {
         if let Some(e) = self.engine.as_ref() {
@@ -582,10 +614,10 @@ impl HirariCore {
     }
 
     pub fn execute_auto_mixing_diagnostic_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(_engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
-        if engine.execute_auto_mixing() {
+        if self.apply_auto_mixing() {
             return "{\"ok\":true,\"operation\":\"execute_auto_mixing\"}".to_owned();
         }
         serde_json::to_string(

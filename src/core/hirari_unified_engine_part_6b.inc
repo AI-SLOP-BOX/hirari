@@ -181,19 +181,6 @@ namespace {
 }();
 }  // namespace
 
-bool HirariUnifiedEngine::execute_auto_mixing() {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    if (m_tracks.empty()) return false;
-    float targetVolume = 1.0f / std::sqrt(static_cast<float>(m_tracks.size()));
-    for (auto& track : m_tracks) {
-        if (track->getType() != Track::Type::Bus) {
-            float currentVol = track->getVolume();
-            float newVol = currentVol * 0.8f + targetVolume * 0.2f;
-            track->setVolume(std::clamp(newVol, 0.0f, 1.0f));
-        }
-    }
-    return true;
-}
 bool HirariUnifiedEngine::execute_auto_arrangement() {
     // Project extent, section boundaries and marker lengths are Rust-owned.
     // The engine keeps the region storage and the event queue behind the
