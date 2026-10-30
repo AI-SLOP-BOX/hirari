@@ -1859,13 +1859,10 @@ extern "C" bool hirari_midi_extended_ring_pop(
 extern "C" size_t hirari_midi_extended_ring_size(const void* state);
 extern "C" void* hirari_realtime_memory_pool_default_allocate(size_t size_bytes);
 extern "C" void hirari_forensic_scratchpad_reset();
-extern "C" void* hirari_status_queue_init(void* storage, size_t bytes);
-extern "C" void hirari_status_queue_destroy(void* state);
-extern "C" bool hirari_status_queue_push(
-    const void* state, uint32_t severity, const uint8_t* text, size_t text_size);
-extern "C" bool hirari_status_queue_pop(const void* state, void* output_message);
-extern "C" uint64_t hirari_status_queue_dropped(const void* state);
-extern "C" uint64_t hirari_status_queue_take_dropped(const void* state);
+extern "C" bool hirari_status_queue_push_default(
+    uint32_t severity, const uint8_t* text, size_t text_size);
+extern "C" bool hirari_status_queue_pop_default(void* output_message);
+extern "C" uint64_t hirari_status_queue_take_dropped_default();
 using HirariVoiceTriggerCallback = void (*)(void*, uint8_t, uint8_t);
 using HirariVoiceReleaseCallback = void (*)(void*, uint8_t);
 using HirariVoiceRenderCallback = void (*)(void*, float*, float*, size_t);

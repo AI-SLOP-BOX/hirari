@@ -76,8 +76,7 @@ public:
             &m_storage, channels, m_numChannels, samples, m_capacity,
             m_isExternal, &needsDataAllocation);
         if (result == 1) {
-            StatusQueue::getInstance().pushFromAudio(
-                StatusQueue::Severity::Critical,
+            pushEngineStatus(StatusSeverity::Critical,
                 needsDataAllocation ? "AUDIO_BUFFER_RESIZE_ATTEMPTED"
                                     : "AUDIO_BUFFER_POINTER_RESIZE_ATTEMPTED");
             return false;

@@ -1,10 +1,9 @@
 use std::cell::UnsafeCell;
-use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::OnceLock;
 
 const QUEUE_CAPACITY: usize = 256;
 const MESSAGE_TEXT_BYTES: usize = 128;
-const STATE_STORAGE_BYTES: usize = 48 * 1024;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,44 +126,19 @@ impl StatusQueue {
     }
 }
 
-const _: () = assert!(std::mem::size_of::<StatusQueue>() <= STATE_STORAGE_BYTES);
+static DEFAULT_QUEUE: OnceLock<StatusQueue> = OnceLock::new();
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_status_queue_init(
-    storage: *mut c_void,
-    bytes: usize,
-) -> *mut c_void {
-    if storage.is_null()
-        || (storage as usize) % std::mem::align_of::<StatusQueue>() != 0
-        || bytes < std::mem::size_of::<StatusQueue>()
-    {
-        return std::ptr::null_mut();
-    }
-    let state = storage.cast::<StatusQueue>();
-    // SAFETY: The caller supplies suitably aligned, sufficiently large storage
-    // that remains alive until the matching destroy call.
-    unsafe { std::ptr::write(state, StatusQueue::new()) };
-    storage
+fn default_queue() -> &'static StatusQueue {
+    DEFAULT_QUEUE.get_or_init(StatusQueue::new)
 }
 
+/// Publishes one engine notification; text is truncated to the fixed payload.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_status_queue_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        // SAFETY: State was initialized in place and is destroyed exactly once.
-        unsafe { std::ptr::drop_in_place(state.cast::<StatusQueue>()) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_status_queue_push(
-    state: *const c_void,
+pub unsafe extern "C" fn hirari_status_queue_push_default(
     severity: u32,
     text: *const u8,
     text_size: usize,
 ) -> bool {
-    let Some(state) = state.cast::<StatusQueue>().as_ref() else {
-        return false;
-    };
     if text_size != 0 && text.is_null() {
         return false;
     }
@@ -177,21 +151,15 @@ pub unsafe extern "C" fn hirari_status_queue_push(
         // SAFETY: Caller supplies text_size readable bytes; destination is fixed and bounded.
         unsafe { std::ptr::copy_nonoverlapping(text, message.text.as_mut_ptr(), copy_size) };
     }
-    state.push(message)
+    default_queue().push(message)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_status_queue_pop(
-    state: *const c_void,
-    output: *mut StatusMessage,
-) -> bool {
-    let (Some(state), Some(output)) = (
-        state.cast::<StatusQueue>().as_ref(),
-        output.cast::<StatusMessage>().as_mut(),
-    ) else {
+pub unsafe extern "C" fn hirari_status_queue_pop_default(output: *mut StatusMessage) -> bool {
+    let Some(output) = output.as_mut() else {
         return false;
     };
-    let Some(message) = state.pop() else {
+    let Some(message) = default_queue().pop() else {
         return false;
     };
     *output = message;
@@ -199,19 +167,8 @@ pub unsafe extern "C" fn hirari_status_queue_pop(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_status_queue_dropped(state: *const c_void) -> u64 {
-    state
-        .cast::<StatusQueue>()
-        .as_ref()
-        .map_or(0, |state| state.dropped.load(Ordering::Relaxed))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_status_queue_take_dropped(state: *const c_void) -> u64 {
-    state
-        .cast::<StatusQueue>()
-        .as_ref()
-        .map_or(0, |state| state.dropped.swap(0, Ordering::AcqRel))
+pub extern "C" fn hirari_status_queue_take_dropped_default() -> u64 {
+    default_queue().dropped.swap(0, Ordering::AcqRel)
 }
 
 #[cfg(test)]

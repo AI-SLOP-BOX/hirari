@@ -37,15 +37,15 @@ AudioEngine::AudioEngine(bool startDevice)
                               "Audio device startup failed: status=%s error=%d",
                               m_driver->status(),
                               static_cast<int>(m_driver->last_error_code()));
-                ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
-                    ::Hirari::Core::StatusQueue::Severity::Warning, message);
+                ::Hirari::Core::pushEngineStatus(
+                    ::Hirari::Core::StatusSeverity::Warning, message);
             }
         }
 #else
         const bool started = m_driver->start();
         if (!started) {
-            ::Hirari::Core::StatusQueue::getInstance().pushFromAudio(
-            ::Hirari::Core::StatusQueue::Severity::Warning,
+            ::Hirari::Core::pushEngineStatus(
+            ::Hirari::Core::StatusSeverity::Warning,
             "Audio backend unavailable on this platform; using offline backend.");
         } else {
             sync_jack_graph_config();

@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The engine status queue is now a process-wide Rust singleton with
+  `pushEngineStatus`/`popEngineStatus` free functions, so the C++ `StatusQueue`
+  class, its inline state storage and the handle-based queue ABI are gone.
 - The realtime arena now hands out the scheduler's job storage through a
   process-wide Rust pool, and the engine's per-block scratch reset calls the
   Rust entry point directly; the C++ `RealtimeMemoryPool` and

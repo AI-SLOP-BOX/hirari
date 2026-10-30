@@ -9,8 +9,8 @@ int main() {
     using namespace Hirari::Core;
 
     // Drain notifications left by other contract tests in the same process.
-    StatusQueue::Message message{};
-    while (StatusQueue::getInstance().pop(message)) {}
+    StatusMessage message{};
+    while (popEngineStatus(message)) {}
 
     MidiBuffer midi;
     for (size_t i = 0; i < MidiBuffer::kMaxEventsPerBlock; ++i) {
@@ -48,8 +48,8 @@ int main() {
     AudioBuffer::setRTThread(false);
 
     assert(AudioBuffer::realtimeResizeAttempts() == attemptsBefore + 1);
-    assert(StatusQueue::getInstance().pop(message));
-    assert(message.severity == StatusQueue::Severity::Critical);
+    assert(popEngineStatus(message));
+    assert(message.severity == StatusSeverity::Critical);
 
     return 0;
 }

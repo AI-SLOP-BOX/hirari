@@ -83,17 +83,17 @@ extern "C" bool hirari_midi_buffer_cpp_wrapper_smoke() {
 }
 
 extern "C" bool hirari_status_queue_cpp_wrapper_smoke() {
-    auto& queue = Hirari::Core::StatusQueue::getInstance();
-    Hirari::Core::StatusQueue::Message message{};
-    queue.pushFromAudio(Hirari::Core::StatusQueue::Severity::Warning, "C++ bridge status");
-    if (!queue.pop(message) || message.severity != Hirari::Core::StatusQueue::Severity::Warning ||
+    Hirari::Core::StatusMessage message{};
+    Hirari::Core::pushEngineStatus(Hirari::Core::StatusSeverity::Warning, "C++ bridge status");
+    if (!Hirari::Core::popEngineStatus(message) ||
+        message.severity != Hirari::Core::StatusSeverity::Warning ||
         std::string_view(message.text) != "C++ bridge status") return false;
     for (size_t index = 0; index < 256; ++index) {
-        queue.pushFromAudio(Hirari::Core::StatusQueue::Severity::Info, "bounded");
+        Hirari::Core::pushEngineStatus(Hirari::Core::StatusSeverity::Info, "bounded");
     }
-    queue.pushFromAudio(Hirari::Core::StatusQueue::Severity::Error, "overflow");
-    const bool counted = queue.takeDroppedCount() == 1;
-    while (queue.pop(message)) {}
+    Hirari::Core::pushEngineStatus(Hirari::Core::StatusSeverity::Error, "overflow");
+    const bool counted = Hirari::Core::takeDroppedEngineStatus() == 1;
+    while (Hirari::Core::popEngineStatus(message)) {}
     return counted;
 }
 
