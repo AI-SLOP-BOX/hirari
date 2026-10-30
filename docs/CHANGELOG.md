@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- `rust_ffi.hpp` dropped the declarations and types that no C++ call site
+  references any more: 58 `hirari_*` entry points, the alignment-target and
+  region-scalar field types, and fourteen unused audio-graph, bounce, sampler,
+  waveform and voice-callback contracts. The enums still read by the host
+  (region edit ops, routing edit ops, automation edit kinds) stay.
 - Twenty-three more two-layer engine edits moved into the same Rust inherent
   methods: region import queueing and source analysis, note-segment anchor
   and warp edits, region alignment/quantize jobs, plugin parameter writes,
