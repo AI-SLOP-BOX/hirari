@@ -189,7 +189,7 @@ extern "C" bool hirari_plugin_parameter_snapshot_visit(
     const void* handle, void* context, HirariPluginParameterVisitCallback callback);
 extern "C" void* hirari_bus_system_create();
 extern "C" void hirari_bus_system_destroy(void* state);
-extern "C" bool hirari_bus_system_bind(void* state, uint32_t bus_id, void* bus_audio_state);
+extern "C" void* hirari_bus_system_bus(const void* state, uint32_t bus_id);
 extern "C" bool hirari_bus_system_register(void* state, uint32_t bus_id);
 extern "C" bool hirari_bus_system_reconcile(
     void* state, const bool* active, uint32_t count);

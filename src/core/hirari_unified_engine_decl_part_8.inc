@@ -20,7 +20,9 @@
     // and topology stores; this is the single opaque handle the engine keeps.
     void* m_routingEngine = hirari_routing_engine_create();
     SidechainManager m_sidechainManager;
-    BusSystem m_busSystem;
+    // Rust (bus_audio.rs) owns the per-bus summing stages and the summing
+    // system; the engine only keeps the handle.
+    void* m_busSystem = hirari_bus_system_create();
     static constexpr size_t kMaxMacros = 128;
     void* m_macroControl = hirari_macro_mapping_create();
     void* m_midiLearnState = hirari_midi_learn_create();

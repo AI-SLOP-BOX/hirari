@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The bus summing system now owns its per-bus audio stages inside Rust and
+  the engine keeps a single handle, so the C++ `BusSystem` adapter class and
+  its header are gone.
 - The engine status queue is now a process-wide Rust singleton with
   `pushEngineStatus`/`popEngineStatus` free functions, so the C++ `StatusQueue`
   class, its inline state storage and the handle-based queue ABI are gone.

@@ -73,6 +73,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_mpe_state_free(m_mpeState);
     hirari_routing_engine_destroy(m_routingEngine);
     hirari_mpe_manager_destroy(m_mpeManager);
+    hirari_bus_system_destroy(m_busSystem);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -475,7 +476,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         const bool offlineTargetActive = m_offlineTargetActive.load(std::memory_order_acquire);
         const uint32_t offlineTargetId = m_offlineTargetId.load(std::memory_order_acquire);
         void* routing = m_routingEngine;
-        m_busSystem.clear(sz);
+        hirari_bus_system_clear(m_busSystem, sz);
         for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
             if (state.activeTracks[i] && state.activeTracks[i]->canProcess(sz)) {
                 state.activeTracks[i]->setTransportState(
@@ -539,8 +540,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         // One callback-local scratch pair is reused for each sequential Send
         // edge. Delay histories live in RoutingEngine and no buffer is
         // allocated while the audio callback is running.
-        std::array<float, Hirari::Core::Engine::BusSystem::kMaxSamples> sendPdcLeft;
-        std::array<float, Hirari::Core::Engine::BusSystem::kMaxSamples> sendPdcRight;
+        std::array<float, BusTrack::kMaxSamples> sendPdcLeft;
+        std::array<float, BusTrack::kMaxSamples> sendPdcRight;
         std::array<HirariRoutingTrackDestination, kMaxTracks> routingDestinations{};
         size_t routingDestinationCount = 0;
         for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
@@ -599,7 +600,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                 source->getTrackDelaySamples(), routingDestinations.data(),
                 routingDestinationCount, output.getWritePointer(0, off),
                 output.getWritePointer(1, off), sendPdcLeft.data(), sendPdcRight.data(),
-                sz, Hirari::Core::Engine::BusSystem::kMaxSamples, addBusPreFx);
+                sz, BusTrack::kMaxSamples, addBusPreFx);
         };
 
         auto publishBusIfNeeded = [&](Track* track) {

@@ -7,14 +7,14 @@
 #include <string>
 
 #include "track.hpp"
-#include "bus_system.hpp"
 
 namespace Hirari::Core::Engine {
 
 /** AUX/Bus track with an explicit pre-FX input and post-FX output boundary. */
 class BusTrack : public Track {
 public:
-    static constexpr uint32_t kMaxSamples = BusSystem::kMaxSamples;
+    static constexpr uint32_t kMaxSamples = 8192;
+    static constexpr uint32_t kMaxBuses = 128;
 
     BusTrack(uint32_t id, const std::string& name, uint32_t busId,
              SidechainManager* sidechainManager = nullptr,
@@ -100,12 +100,12 @@ public:
 
     bool addPreFxInput(const float* left, const float* right,
                        uint32_t len, float gain) noexcept {
-        if (!m_busState || len == 0 || len > BusSystem::kMaxSamples) return false;
+        if (!m_busState || len == 0 || len > kMaxSamples) return false;
         return hirari_bus_audio_accumulate(m_busState, left, right, len, gain);
     }
 
     bool loadPreFxIntoWork(uint32_t len) noexcept {
-        if (!m_busState || len == 0 || len > BusSystem::kMaxSamples || !canProcess(len)) return false;
+        if (!m_busState || len == 0 || len > kMaxSamples || !canProcess(len)) return false;
         auto& work = getWorkBuffer(len);
         return hirari_bus_audio_read(m_busState, work.getWritePointer(0),
                                      work.getWritePointer(1), len, false);

@@ -272,7 +272,7 @@ void HirariUnifiedEngine::new_project() {
     hirari_native_pdc_reset_for_project(m_pdcState);
     m_sidechainManager.resetForProject();
     hirari_routing_engine_reset(m_routingEngine);
-    m_busSystem.resetForProject();
+    hirari_bus_system_reset(m_busSystem);
     hirari_control_room_reset(m_controlRoomState);
     hirari_tempo_map_set_current_bpm(m_tempoState, 120.0f);
     m_masterGain.store(1.0f, std::memory_order_release);

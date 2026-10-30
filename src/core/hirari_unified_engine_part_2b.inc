@@ -122,7 +122,7 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
 
 void HirariUnifiedEngine::syncStructuralChanges() {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
-    std::array<bool, Hirari::Core::Engine::BusSystem::kMaxBuses> activeBuses{};
+    std::array<bool, BusTrack::kMaxBuses> activeBuses{};
     for (const auto& track : m_tracks) {
         auto* busTrack = track && track->getType() == Track::Type::Bus
             ? dynamic_cast<BusTrack*>(track.get()) : nullptr;
@@ -130,7 +130,8 @@ void HirariUnifiedEngine::syncStructuralChanges() {
             activeBuses[busTrack->busId()] = true;
         }
     }
-    m_busSystem.reconcileBuses(activeBuses);
+    hirari_bus_system_reconcile(
+        m_busSystem, activeBuses.data(), static_cast<uint32_t>(activeBuses.size()));
     void* routing = m_routingEngine;
     hirari_routing_engine_build(routing);
     
@@ -282,7 +283,8 @@ std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::st
     if (type != Track::Type::Bus)
         return std::make_shared<Track>(id, name, type, &m_sidechainManager, m_projectLayoutRevision);
     auto bus = std::make_shared<BusTrack>(id, name, id, &m_sidechainManager, m_projectLayoutRevision);
-    bus->resolveBus(m_busSystem.registerBus(id));
+    bus->resolveBus(hirari_bus_system_register(m_busSystem, id)
+        ? hirari_bus_system_bus(m_busSystem, id) : nullptr);
     return bus;
 }
 

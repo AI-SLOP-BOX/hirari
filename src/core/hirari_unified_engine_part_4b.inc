@@ -212,7 +212,7 @@
         hirari_native_pdc_reset_for_project(m_pdcState);
         sidechainManager.resetForProject();
         hirari_routing_engine_reset(m_routingEngine);
-        m_busSystem.resetForProject();
+        hirari_bus_system_reset(m_busSystem);
         hirari_control_room_reset(m_controlRoomState);
         m_sidechainRoutes.clear();
         m_regionIdCounter.store(nextRegionId, std::memory_order_release);
@@ -226,7 +226,9 @@
         }
         for (const auto& track : m_tracks) {
             if (auto* busTrack = dynamic_cast<BusTrack*>(track.get())) {
-                busTrack->resolveBus(m_busSystem.registerBus(busTrack->busId()));
+                const uint32_t busId = busTrack->busId();
+                busTrack->resolveBus(hirari_bus_system_register(m_busSystem, busId)
+                    ? hirari_bus_system_bus(m_busSystem, busId) : nullptr);
             }
         }
         lock.unlock();

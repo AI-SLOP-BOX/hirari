@@ -255,7 +255,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
                 auto busTrack = std::make_shared<BusTrack>(
                     ts.id, trackName.empty() ? "Bus" : trackName, ts.id,
                     &m_sidechainManager, m_projectLayoutRevision);
-                // Do not mutate the process/session BusSystem while the
+                // Do not mutate the process/session bus summing system while the
                 // replacement document is still provisional. If hydration
                 // later fails, the old project must remain the only visible
                 // routing state. Resolve the bus after the commit point.

@@ -245,31 +245,45 @@ unsafe fn bus_system_mut(handle: *mut c_void) -> Option<&'static mut BusSystemSt
 
 #[no_mangle]
 pub extern "C" fn hirari_bus_system_create() -> *mut c_void {
-    Box::into_raw(Box::new(BusSystemState::new())).cast()
+    let mut state = BusSystemState::new();
+    for slot in state.buses.iter_mut() {
+        let bus = hirari_bus_audio_create();
+        if bus.is_null() {
+            for created in state.buses {
+                if created != 0 {
+                    unsafe { hirari_bus_audio_destroy(created as *mut c_void) };
+                }
+            }
+            return std::ptr::null_mut();
+        }
+        *slot = bus as usize;
+    }
+    Box::into_raw(Box::new(state)).cast()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn hirari_bus_system_destroy(handle: *mut c_void) {
-    if !handle.is_null() {
-        unsafe { drop(Box::from_raw(handle.cast::<BusSystemState>())) };
+    if handle.is_null() {
+        return;
     }
+    let buses = unsafe { (*handle.cast::<BusSystemState>()).buses };
+    for bus in buses {
+        if bus != 0 {
+            unsafe { hirari_bus_audio_destroy(bus as *mut c_void) };
+        }
+    }
+    unsafe { drop(Box::from_raw(handle.cast::<BusSystemState>())) };
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_bus_system_bind(
-    handle: *mut c_void,
-    bus_id: u32,
-    bus_audio_state: *mut c_void,
-) -> bool {
-    let Some(state) = (unsafe { bus_system_mut(handle) }) else {
-        return false;
+pub unsafe extern "C" fn hirari_bus_system_bus(handle: *const c_void, bus_id: u32) -> *mut c_void {
+    let Some(state) = (unsafe { handle.cast::<BusSystemState>().as_ref() }) else {
+        return std::ptr::null_mut();
     };
-    if bus_id as usize >= MAX_BUSES || bus_audio_state.is_null() {
-        return false;
+    if bus_id as usize >= MAX_BUSES {
+        return std::ptr::null_mut();
     }
-    // Bindings are installed during engine construction before audio starts.
-    state.buses[bus_id as usize] = bus_audio_state as usize;
-    true
+    state.buses[bus_id as usize] as *mut c_void
 }
 
 #[no_mangle]
@@ -393,15 +407,14 @@ mod tests {
     #[test]
     fn rust_bus_system_preserves_route_order_membership_and_clear() {
         let system = super::hirari_bus_system_create();
-        let first = super::hirari_bus_audio_create();
-        let second = super::hirari_bus_audio_create();
         let first_l = [0.25_f32; 2];
         let first_r = [-0.25_f32; 2];
         let second_l = [0.5_f32; 2];
         let second_r = [-0.5_f32; 2];
         unsafe {
-            assert!(super::hirari_bus_system_bind(system, 2, first));
-            assert!(super::hirari_bus_system_bind(system, 5, second));
+            let first = super::hirari_bus_system_bus(system, 2);
+            let second = super::hirari_bus_system_bus(system, 5);
+            assert!(!first.is_null() && !second.is_null());
             assert!(super::hirari_bus_system_register(system, 2));
             assert!(super::hirari_bus_system_register(system, 5));
             assert!(super::hirari_bus_audio_accumulate(
@@ -460,8 +473,6 @@ mod tests {
             super::hirari_bus_system_reset(system);
             assert!(!super::hirari_bus_system_is_present(system, 2));
             super::hirari_bus_system_destroy(system);
-            super::hirari_bus_audio_destroy(first);
-            super::hirari_bus_audio_destroy(second);
         }
     }
 
