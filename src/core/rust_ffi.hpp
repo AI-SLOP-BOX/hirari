@@ -484,8 +484,6 @@ struct HirariRegionState {
 //
 // Splits a region at `splitBeat` (an absolute timeline sample position) and
 // returns the new right-hand id, or 0.
-extern "C" uint32_t hirari_region_split(void* host, uint32_t trackId,
-                                        uint32_t regionId, double splitBeat);
 // Duplicates a region at `startSample` and returns the new id, or 0.
 
 // Pre-v42 region hydration policy is Rust-owned: the source-rate migration
@@ -735,11 +733,6 @@ extern "C" void* hirari_region_waveform(
     void* host, uint32_t trackId, uint32_t regionId, uint32_t numPeaks);
 extern "C" void hirari_region_waveform_forget(void* host, uint32_t regionId);
 extern "C" void hirari_region_waveform_clear(void* host);
-extern "C" void* hirari_region_audio_interleaved(
-    void* host, uint32_t trackId, uint32_t regionId, uint32_t maxFrames);
-extern "C" void* hirari_region_audio_interleaved_range(
-    void* host, uint32_t trackId, uint32_t regionId, uint64_t startFrame,
-    uint32_t frames, uint32_t channels);
 extern "C" bool hirari_region_edit_set_warp_markers(
     void* host, uint32_t trackId, uint32_t regionId,
     const uint64_t* sourceSamples, size_t sourceCount,
@@ -1418,10 +1411,7 @@ extern "C" void hirari_builtin_midi_instrument_process(
     float* left, float* right, uint32_t frames, double sample_rate);
 extern "C" float hirari_realtime_automation_evaluate(
     const void* points, size_t count, double time, size_t* last_index_hint);
-extern "C" bool hirari_vca_add_group(uint32_t group_id, float gain);
-extern "C" void hirari_vca_resolve_hierarchy();
 extern "C" bool hirari_vca_assign_track(uint32_t track_id, uint32_t group_id);
-extern "C" size_t hirari_vca_snapshot_json(uint8_t* output, size_t capacity);
 struct HirariRegionOverlapView {
     uint64_t start;
     uint64_t length;

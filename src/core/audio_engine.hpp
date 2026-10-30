@@ -203,11 +203,6 @@ private:
 using AudioDriverHost = UnavailableAudioDriver;
 #endif
 
-struct BridgeScoreGlyph {
-    uint32_t type;
-    float x, y;
-};
-
 /**
  * @class AudioEngine
  * @brief Industrial-grade Audio Engine wrapper for Hirari Studio Pro.

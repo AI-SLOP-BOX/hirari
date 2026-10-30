@@ -1,3 +1,27 @@
+namespace {
+
+// Rust returns an owned float buffer so the native wrapper can copy it into
+// the CXX vector without keeping a second decoder path alive here.
+rust::Vec<float> takeFloatBuffer(void* buffer) {
+    rust::Vec<float> samples;
+    if (!buffer) return samples;
+    const float* data = hirari_float_buffer_data(buffer);
+    const size_t count = hirari_float_buffer_len(buffer);
+    if (data && count != 0) {
+        samples.reserve(count);
+        for (size_t index = 0; index < count; ++index) samples.push_back(data[index]);
+    }
+    hirari_float_buffer_destroy(buffer);
+    return samples;
+}
+
+}  // namespace
+
+rust::Vec<float> HirariUnifiedEngine::get_region_waveform(uint32_t tid, uint32_t rid,
+                                                          uint32_t numPeaks) {
+    return takeFloatBuffer(hirari_region_waveform(this, tid, rid, numPeaks));
+}
+
 uint64_t HirariUnifiedEngine::get_video_frame_revision() const noexcept {
 #if defined(__APPLE__)
     return ::Hirari::Core::Engine::VideoBridge::frameRevision();
@@ -25,41 +49,6 @@ bool HirariUnifiedEngine::load_video(std::string_view path) {
     (void)path;
     return false;
 #endif
-}
-
-namespace {
-
-// Rust returns an owned float buffer so the native wrapper can copy it into
-// the CXX vector without keeping a second decoder path alive here.
-rust::Vec<float> takeFloatBuffer(void* buffer) {
-    rust::Vec<float> samples;
-    if (!buffer) return samples;
-    const float* data = hirari_float_buffer_data(buffer);
-    const size_t count = hirari_float_buffer_len(buffer);
-    if (data && count != 0) {
-        samples.reserve(count);
-        for (size_t index = 0; index < count; ++index) samples.push_back(data[index]);
-    }
-    hirari_float_buffer_destroy(buffer);
-    return samples;
-}
-
-}  // namespace
-
-rust::Vec<float> HirariUnifiedEngine::get_region_waveform(uint32_t tid, uint32_t rid,
-                                                          uint32_t numPeaks) {
-    return takeFloatBuffer(hirari_region_waveform(this, tid, rid, numPeaks));
-}
-
-rust::Vec<float> HirariUnifiedEngine::get_region_audio_interleaved(uint32_t tid, uint32_t rid,
-                                                                   uint32_t maxFrames) {
-    return takeFloatBuffer(hirari_region_audio_interleaved(this, tid, rid, maxFrames));
-}
-
-rust::Vec<float> HirariUnifiedEngine::get_region_audio_interleaved_range(
-    uint32_t tid, uint32_t rid, uint64_t startFrame, uint32_t frames, uint32_t channels) {
-    return takeFloatBuffer(
-        hirari_region_audio_interleaved_range(this, tid, rid, startFrame, frames, channels));
 }
 
 

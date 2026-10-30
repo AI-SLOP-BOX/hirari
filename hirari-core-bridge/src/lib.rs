@@ -223,10 +223,7 @@ pub mod ffi {
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn trigger_preview_sample(self: &AudioEngine);
         fn shutdown(self: &AudioEngine);
-        fn add_vca_group(self: &AudioEngine, group_id: u32, gain: f32) -> bool;
         fn assign_track_to_vca(self: &AudioEngine, track_id: u32, group_id: u32) -> bool;
-        fn set_vca_group_gain(self: &AudioEngine, group_id: u32, gain: f32) -> bool;
-        fn get_vca_snapshot_json(self: &AudioEngine) -> String;
         fn new_project(self: &AudioEngine);
         fn move_plugin(self: &AudioEngine, tid: u32, from_index: u32, to_index: u32) -> bool;
         fn process_sandboxed_plugin_block(
@@ -243,7 +240,6 @@ pub mod ffi {
             frames: u32,
             midi_data: &[u8],
         ) -> Vec<u8>;
-        fn maintain_sandboxed_plugins(self: &AudioEngine, auto_restart: bool) -> u32;
         fn take_watchdog_trips(self: &AudioEngine) -> u32;
         fn non_finite_plugin_samples(self: &AudioEngine) -> u64;
         fn retry_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
@@ -276,8 +272,6 @@ pub mod ffi {
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
         fn region_table_mirror_matches(self: &AudioEngine, tid: u32) -> bool;
-        fn split_region(self: &AudioEngine, tid: u32, rid: u32, split: f64) -> bool;
-        fn split_region_with_right_id(self: &AudioEngine, tid: u32, rid: u32, split: f64) -> u32;
         fn append_region_processing(
             self: &AudioEngine,
             tid: u32,
@@ -329,13 +323,6 @@ pub mod ffi {
             length_samples: u64,
         );
         fn set_track_input_monitor(self: &AudioEngine, tid: u32, enabled: bool) -> bool;
-        fn set_track_input_monitor_channels(
-            self: &AudioEngine,
-            tid: u32,
-            enabled: bool,
-            left: u32,
-            right: u32,
-        ) -> bool;
         fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
         fn plugin_compatibility_snapshot_json(self: &AudioEngine) -> String;
         fn get_plugin_parameter(
@@ -359,14 +346,6 @@ pub mod ffi {
         ) -> bool;
         fn get_plugin_bypass(self: &AudioEngine, tid: u32, plugin_index: u32) -> bool;
         fn set_preview_synth_engine(self: &AudioEngine, engine: u32);
-        fn set_sidechain_link(
-            self: &AudioEngine,
-            source_id: u32,
-            dest_id: u32,
-            plugin_index: u32,
-            tap_point: u32,
-            enabled: bool,
-        ) -> bool;
         fn has_sidechain_link(
             self: &AudioEngine,
             source_id: u32,
@@ -451,18 +430,9 @@ pub mod ffi {
             expected_audio_generation: u64,
         ) -> bool;
 
-        fn get_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> Vec<f32>;
         fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
         fn poll_region_waveform(self: &AudioEngine, request: u64) -> Vec<f32>;
         fn region_waveform_pending(self: &AudioEngine, request: u64) -> bool;
-        fn get_region_audio_interleaved_range(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            start_frame: u64,
-            frames: u32,
-            channels: u32,
-        ) -> Vec<f32>;
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
         fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
         fn get_track_peaks_l_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;

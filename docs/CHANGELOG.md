@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Ten more engine relays now land in Rust directly: VCA group add/gain and
+  snapshot JSON, region split, waveform/audio-range reads, sandbox
+  maintenance, input-monitor channels and sidechain links. The C++
+  `takeFloatBuffer` copy helper and the matching bridge declarations are gone;
+  Rust owns the buffer hand-off. Orphaned C++ helpers with no remaining caller
+  anywhere in the tree (dead `DSPUtils`, bounce/warp/freeze accessors, plugin
+  scan wrappers) were removed as well.
 - `rust_ffi.hpp` dropped the declarations and types that no C++ call site
   references any more: 58 `hirari_*` entry points, the alignment-target and
   region-scalar field types, and fourteen unused audio-graph, bounce, sampler,

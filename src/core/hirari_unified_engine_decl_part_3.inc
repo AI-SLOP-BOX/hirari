@@ -1,8 +1,5 @@
     // Tracks
-    bool add_vca_group(uint32_t group_id, float gain);
     bool assign_track_to_vca(uint32_t track_id, uint32_t group_id);
-    bool set_vca_group_gain(uint32_t group_id, float gain);
-    rust::String get_vca_snapshot_json() const;
     void new_project();
     uint32_t get_track_count() const;
     std::vector<std::shared_ptr<Track>> get_tracks_snapshot() const;

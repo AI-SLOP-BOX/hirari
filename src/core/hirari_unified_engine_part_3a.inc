@@ -1,6 +1,10 @@
 
 
 
+uint32_t HirariUnifiedEngine::maintain_sandboxed_plugins(bool autoRestart) {
+    return hirari_plugin_sandbox_maintain(this, autoRestart);
+}
+
 bool HirariUnifiedEngine::process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
                                                        float* left, float* right, uint32_t frames) {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -20,10 +24,6 @@ std::vector<uint8_t> HirariUnifiedEngine::process_sandboxed_plugin_midi_block(
             return track->processSandboxedPluginMidiBlock(sandboxIndex, frames, midiData, midiSize);
     }
     return {};
-}
-
-uint32_t HirariUnifiedEngine::maintain_sandboxed_plugins(bool autoRestart) {
-    return hirari_plugin_sandbox_maintain(this, autoRestart);
 }
 
 // The maintenance pass itself lives in Rust; these handlers only resolve a

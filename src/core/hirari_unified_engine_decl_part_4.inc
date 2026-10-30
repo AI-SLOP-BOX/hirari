@@ -1,6 +1,4 @@
 public:
-    bool split_region(uint32_t tid, uint32_t rid, double splitBeat);
-    uint32_t split_region_with_right_id(uint32_t tid, uint32_t rid, double splitSample);
     void clear_midi_notes();
     struct ScheduledMidiNote {
         uint32_t trackId = 0;
@@ -44,8 +42,3 @@ public:
     bool request_video_frame(double seconds);
     bool load_video(std::string_view path);
     rust::Vec<float> get_region_waveform(uint32_t tid, uint32_t rid, uint32_t numPeaks);
-    rust::Vec<float> get_region_audio_interleaved(uint32_t tid, uint32_t rid, uint32_t maxFrames);
-    rust::Vec<float> get_region_audio_interleaved_range(uint32_t tid, uint32_t rid,
-                                                        uint64_t startFrame,
-                                                        uint32_t frames,
-                                                        uint32_t channels);

@@ -213,12 +213,6 @@ uint32_t HirariUnifiedEngine::allocateRegionIdLocked() noexcept {
 }
 
 
-bool HirariUnifiedEngine::add_vca_group(uint32_t groupId, float gain) {
-    if (!hirari_vca_add_group(groupId, gain)) return false;
-    hirari_vca_resolve_hierarchy();
-    return true;
-}
-
 bool HirariUnifiedEngine::assign_track_to_vca(uint32_t trackId, uint32_t groupId) {
     if (trackId == 0 || groupId == 0) return false;
     {
@@ -228,21 +222,6 @@ bool HirariUnifiedEngine::assign_track_to_vca(uint32_t trackId, uint32_t groupId
         if (!exists) return false;
     }
     return hirari_vca_assign_track(trackId, groupId);
-}
-
-bool HirariUnifiedEngine::set_vca_group_gain(uint32_t groupId, float gain) {
-    if (!hirari_vca_add_group(groupId, gain)) return false;
-    hirari_vca_resolve_hierarchy();
-    return true;
-}
-
-
-rust::String HirariUnifiedEngine::get_vca_snapshot_json() const {
-    const size_t required = hirari_vca_snapshot_json(nullptr, 0);
-    if (required == 0) return rust::String("[]");
-    std::string json(required - 1, '\0');
-    hirari_vca_snapshot_json(reinterpret_cast<uint8_t*>(json.data()), required);
-    return rust::String(std::move(json));
 }
 
 

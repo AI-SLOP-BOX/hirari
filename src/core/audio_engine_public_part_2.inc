@@ -1,7 +1,4 @@
-    bool add_vca_group(uint32_t groupId, float gain) const { return m_engine && m_engine->add_vca_group(groupId, gain); }
     bool assign_track_to_vca(uint32_t trackId, uint32_t groupId) const { return m_engine && m_engine->assign_track_to_vca(trackId, groupId); }
-    bool set_vca_group_gain(uint32_t groupId, float gain) const { return m_engine && m_engine->set_vca_group_gain(groupId, gain); }
-    rust::String get_vca_snapshot_json() const { return m_engine ? m_engine->get_vca_snapshot_json() : rust::String("[]"); }
     void new_project() const { if (m_engine) m_engine->new_project(); }
     bool set_low_latency_mode(bool active) const { return m_engine && m_engine->set_low_latency_mode(active); }
     bool low_latency_mode() const { return m_engine && m_engine->low_latency_mode(); }
@@ -28,9 +25,6 @@
             tid, sandbox_index, frames, midi_data.data(), static_cast<uint32_t>(midi_data.size()));
         for (const auto byte : output) result.push_back(byte);
         return result;
-    }
-    uint32_t maintain_sandboxed_plugins(bool autoRestart) const {
-        return m_engine ? m_engine->maintain_sandboxed_plugins(autoRestart) : 0;
     }
     uint32_t take_watchdog_trips() const {
         return m_engine ? m_engine->take_watchdog_trips() : 0;
@@ -116,10 +110,6 @@
         if (m_engine) m_engine->handle_midi_cc14(channel, controller, value);
     }
     void set_preview_synth_engine(uint32_t engine) const { if (m_engine) m_engine->set_preview_synth_engine(engine); }
-    bool set_sidechain_link(uint32_t sourceId, uint32_t destId,
-                            uint32_t pluginIndex, uint32_t tapPoint, bool enabled) const {
-        return m_engine && m_engine->set_sidechain_link(sourceId, destId, pluginIndex, tapPoint, enabled);
-    }
     bool has_sidechain_link(uint32_t sourceId, uint32_t destId, uint32_t pluginIndex) const {
         return m_engine && m_engine->has_sidechain_link(sourceId, destId, pluginIndex);
     }
@@ -179,8 +169,6 @@
         return m_engine && m_engine->set_project_scale(root, type);
     }
 
-    bool split_region(uint32_t tid, uint32_t rid, double split) const { return m_engine && m_engine->split_region(tid, rid, split); }
-    uint32_t split_region_with_right_id(uint32_t tid, uint32_t rid, double split) const { return m_engine ? m_engine->split_region_with_right_id(tid, rid, split) : 0; }
 
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, rust::Str operation, float parameter, bool enabled) const {
         return m_engine && m_engine->append_region_processing(tid, rid, stepId, std::string_view(operation.data(), operation.size()), parameter, enabled);
@@ -244,9 +232,6 @@
     bool load_video(rust::Str path) const {
         return m_engine && m_engine->load_video(std::string_view(path.data(), path.size()));
     }
-    rust::Vec<float> get_region_waveform(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->get_region_waveform(tid, rid, 128) : rust::Vec<float>{};
-    }
     uint64_t queue_region_waveform(uint32_t tid, uint32_t rid) const {
         if (!m_engine || tid == 0 || rid == 0) return 0;
         auto* context = new (std::nothrow) std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>(m_engine);
@@ -282,13 +267,6 @@
     }
     bool region_waveform_pending(uint64_t request) const noexcept {
         return request != 0 && hirari_waveform_snapshot_pending(request);
-    }
-    rust::Vec<float> get_region_audio_interleaved_range(uint32_t tid, uint32_t rid,
-                                                        uint64_t startFrame,
-                                                        uint32_t frames,
-                                                        uint32_t channels) const {
-        return m_engine ? m_engine->get_region_audio_interleaved_range(
-            tid, rid, startFrame, frames, channels) : rust::Vec<float>{};
     }
     float get_cpu_total_v() const;
     rust::String get_project_layout_json() const;

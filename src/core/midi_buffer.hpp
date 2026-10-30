@@ -147,25 +147,6 @@ public:
     const MidiEvent* begin() const { return getEvents(); }
     const MidiEvent* end() const { return getEvents() + size(); }
 
-    class Iterator {
-    public:
-        explicit Iterator(const MidiBuffer& buffer) : m_buffer(buffer) {}
-        bool getNextEvent(uint32_t& offset, uint8_t* data, uint32_t& size) {
-            if (m_index >= m_buffer.size()) return false;
-            const auto& event = m_buffer.getEvents()[m_index++];
-            offset = event.sampleOffset > UINT32_MAX
-                ? UINT32_MAX : static_cast<uint32_t>(event.sampleOffset);
-            size = std::min<uint32_t>(event.size, static_cast<uint32_t>(sizeof(event.data)));
-            if (size > 0 && data != nullptr) {
-                std::copy(event.data, event.data + size, data);
-            }
-            return true;
-        }
-    private:
-        const MidiBuffer& m_buffer;
-        size_t m_index = 0;
-    };
-
 private:
     void* m_state = nullptr;
 };

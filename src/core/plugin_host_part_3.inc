@@ -44,10 +44,6 @@ public:
         m_isScanning.store(false, std::memory_order_release);
     }
 
-    bool isScanning() const noexcept {
-        return m_isScanning.load(std::memory_order_acquire);
-    }
-
     ScanState state() const noexcept {
         return m_state.load(std::memory_order_acquire);
     }
@@ -55,11 +51,6 @@ public:
     std::string lastError() const {
         std::lock_guard<std::mutex> lock(m_metadataMutex);
         return m_lastError;
-    }
-
-    std::string lastPath() const {
-        std::lock_guard<std::mutex> lock(m_metadataMutex);
-        return m_lastPath;
     }
 
 private:

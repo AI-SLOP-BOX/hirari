@@ -98,6 +98,4 @@ private:
     void* m_noteState = nullptr;
 };
 
-using MIDIRegion = MidiRegion;
-
 } // namespace Hirari::Core

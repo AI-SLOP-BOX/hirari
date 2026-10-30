@@ -26,7 +26,6 @@
 #include "../editing/audio_note_segment.hpp"
 #include "../editing/audio_pitch_analysis.hpp"
 #include "../editing/event_processing_history.hpp"
-#include "../../dsp/utils/dsp_utils.hpp"
 
 namespace Hirari::Core::Engine {
 

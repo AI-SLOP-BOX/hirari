@@ -91,10 +91,6 @@ public:
     bool set_track_input_monitor(uint32_t tid, bool enabled) const {
         return m_engine && m_engine->set_track_input_monitor(tid, enabled);
     }
-    bool set_track_input_monitor_channels(uint32_t tid, bool enabled,
-                                          uint32_t left, uint32_t right) const {
-        return m_engine && m_engine->set_track_input_monitor_channels(tid, enabled, left, right);
-    }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = m_driver && m_driver->is_running();

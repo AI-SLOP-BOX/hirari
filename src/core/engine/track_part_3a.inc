@@ -179,11 +179,6 @@
             validPreFader ? m_preFaderBuffer.getArrayOfWritePointers() : nullptr,
             validPreFader ? m_preFaderBuffer.getNumChannels() : 0);
     }
-    void setSpatialMode(uint32_t mode) {
-        invalidateFrozenForEdit();
-        m_spatialMode.store(mode <= 2 ? mode : 0, std::memory_order_relaxed);
-        markProjectLayoutChanged();
-    }
     void setSpatialPosition(float x, float y, float z) {
         // Spatial coordinates are control-thread input. Never publish a
         // non-finite value to the real-time panner.
@@ -247,12 +242,6 @@
     // Rust mirror of the region table as of the last snapshot publish. Every
     // mutation of m_regions ends in publishRegionSnapshot(), which refreshes it.
     const HirariRegionTable* regionTableMirror() const noexcept { return m_regionTable; }
-    void clearRegions() {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        m_regions.clear();
-        publishRegionSnapshot();
-    }
-
     bool copyAudioNoteSegments(uint32_t regionId,
                                std::vector<::hirari::editing::AudioNoteSegment>& output) const {
         const auto* snapshot = getRegionSnapshot();
@@ -587,31 +576,6 @@
         return false;
     }
 
-    bool setRegionPitchPreserveWarp(uint32_t rid, bool enabled) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id == rid) {
-                if (region.locked) return false;
-                if (region.pitchPreserveWarp != enabled) {
-                    if (region.sourceLength == 0) region.sourceLength = region.len;
-                    region.pitchPreserveWarp = enabled;
-                    publishRegionSnapshot();
-                }
-                return true;
-            }
-        }
-        return false;
-    }
-
-    std::optional<double> getRegionWarpRatio(uint32_t rid) const {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (const auto& region : m_regions) {
-            if (region.id == rid) return region.warpRatio;
-        }
-        return std::nullopt;
-    }
-
     // Validates and orders warp markers through the Rust pure transform.
     //
     // Rust returns a buffer it owns and never writes into caller storage, so
@@ -668,14 +632,6 @@
         it->warpMarkers = std::move(markers);
         publishRegionSnapshot();
         return true;
-    }
-
-    std::vector<Region::WarpMarker> getRegionWarpMarkers(uint32_t rid) const {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        const auto it = std::find_if(m_regions.begin(), m_regions.end(), [rid](const Region& r) {
-            return r.id == rid;
-        });
-        return it == m_regions.end() ? std::vector<Region::WarpMarker>{} : it->warpMarkers;
     }
 
     // Audio-thread producer for write automation. The queue is deliberately

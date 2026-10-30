@@ -28,6 +28,13 @@ bool HirariUnifiedEngine::set_track_input_monitor_channels(
         this, tid, enabled, leftChannel, rightChannel);
 }
 
+bool HirariUnifiedEngine::set_sidechain_link(uint32_t sourceId, uint32_t destId,
+                                             uint32_t pluginIndex, uint32_t tapPoint,
+                                             bool enabled) {
+    return hirari_routing_edit_set_sidechain_link(this, sourceId, destId, pluginIndex, tapPoint,
+                                                  enabled);
+}
+
 void HirariUnifiedEngine::handle_midi_cc(uint8_t channel, uint8_t cc,
                                        uint8_t value) noexcept {
     hirari_midi_learn_handle_cc(m_midiLearnState, channel, cc, value);
@@ -40,13 +47,6 @@ void HirariUnifiedEngine::handle_midi_cc14(uint8_t channel, uint16_t controller,
 void HirariUnifiedEngine::set_preview_synth_engine(uint32_t engine) {
     hirari_preview_synth_set_engine(m_previewSynthState, engine);
 }
-bool HirariUnifiedEngine::set_sidechain_link(uint32_t sourceId, uint32_t destId,
-                                             uint32_t pluginIndex, uint32_t tapPoint,
-                                             bool enabled) {
-    return hirari_routing_edit_set_sidechain_link(this, sourceId, destId, pluginIndex, tapPoint,
-                                                  enabled);
-}
-
 // Routing edit host callbacks. Rust decides every edit and the undo capture;
 // these handlers only apply the resolved mutation to the live objects, under
 // the same locks the previous per-method code took.
@@ -660,11 +660,3 @@ bool HirariUnifiedEngine::has_sidechain_link(uint32_t sourceId, uint32_t destId,
     return m_sidechainManager.hasLink(
         destId, pluginIndex, sourceId);
 }
-bool HirariUnifiedEngine::split_region(uint32_t tid, uint32_t rid, double splitBeat) {
-    return split_region_with_right_id(tid, rid, splitBeat) != 0;
-}
-
-uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t rid, double splitBeat) {
-    return hirari_region_split(this, tid, rid, splitBeat);
-}
-

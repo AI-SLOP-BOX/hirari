@@ -32,16 +32,6 @@ public:
     /**
      * @brief Pins the buffer in physical RAM to prevent kernel page-faults.
      */
-    void lockMemory() {
-#if !defined(_WIN32)
-        if (m_data) (void)mlock(m_data, m_capacity * sizeof(float));
-#else
-        // Windows page locking requires process-specific privilege handling;
-        // allocation remains valid even when physical pinning is unavailable.
-        (void)m_data;
-#endif
-    }
-
     AudioBuffer(AudioBuffer&& other) noexcept : AudioBuffer() { *this = std::move(other); }
     AudioBuffer& operator=(AudioBuffer&& other) noexcept {
         if (this != &other) {
@@ -107,10 +97,6 @@ public:
 
     static size_t lastRealtimeRequestedCapacity() noexcept {
         return hirari_audio_buffer_last_realtime_requested_capacity();
-    }
-
-    static size_t lastRealtimeCapacity() noexcept {
-        return hirari_audio_buffer_last_realtime_capacity();
     }
 
     static void resetRealtimeResizeStats() noexcept {
@@ -222,16 +208,6 @@ public:
     uint32_t getNumChannels() const { return m_numChannels; }
     uint32_t getNumSamples() const { return m_numSamples; }
     bool isEmpty() const { return m_numSamples == 0 || m_numChannels == 0; }
-
-    bool copyFrom(const float* l, const float* r, uint32_t numSamples) {
-        if (l == nullptr || r == nullptr) return false;
-        if (m_numChannels < 2 || m_numSamples < numSamples) {
-            if (!resize(2, numSamples)) return false;
-        }
-        m_isDirty = true;
-        return hirari_audio_buffer_copy(
-            getWritePointer(0), getWritePointer(1), l, r, numSamples);
-    }
 
     float getMagnitude(uint32_t channel) const {
         return getMagnitude(channel, 0, m_numSamples);

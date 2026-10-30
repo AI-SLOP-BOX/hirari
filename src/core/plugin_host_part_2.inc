@@ -260,23 +260,6 @@ public:
 #endif
     }
 
-    bool startExternal() {
-        if (!m_external) return false;
-        const bool started = m_external->start();
-        m_state = started ? LoadState::Operational : LoadState::Failed;
-        if (!started) {
-            m_error = m_external->failureText();
-        } else {
-            m_processFailed.store(false, std::memory_order_release);
-            m_parameterQueueFailed.store(false, std::memory_order_release);
-            m_error.clear();
-        }
-        return started;
-    }
-    void stopExternal() noexcept {
-        if (m_external) m_external->stop();
-        if (m_state == LoadState::Operational) m_state = LoadState::Unloaded;
-    }
     bool pollExternalHealth() {
         if (!m_external) return false;
         const bool healthy = m_external->pollHealth();

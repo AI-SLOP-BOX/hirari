@@ -5,20 +5,27 @@
 
 use std::ffi::c_void;
 
-use crate::{control_edit_host, ffi, plugin_edit_host, region_edit_host, region_jobs};
+use crate::{
+    control_edit_host, ffi, plugin_edit_host, plugin_sandbox_maintenance, region_edit_host,
+    region_jobs,
+};
 
-use crate::realtime_vca_manager::{hirari_vca_clear, hirari_vca_get_cumulative_gain};
+use crate::realtime_vca_manager::{
+    hirari_vca_add_group, hirari_vca_clear, hirari_vca_get_cumulative_gain,
+    hirari_vca_resolve_hierarchy, hirari_vca_snapshot_json,
+};
 use crate::region_alignment::HirariRegionAlignmentTargetId;
 use crate::region_audio::{
-    hirari_region_audio_channel_count, hirari_region_source_frame_count,
-    hirari_region_source_sample_rate,
+    hirari_float_buffer_data, hirari_float_buffer_destroy, hirari_float_buffer_len,
+    hirari_region_audio_channel_count, hirari_region_audio_interleaved_range,
+    hirari_region_source_frame_count, hirari_region_source_sample_rate, hirari_region_waveform,
 };
 use crate::region_time_jobs::{hirari_region_finalize_quantize, hirari_region_quantize_status};
 use crate::routing_edit_host::{
     hirari_routing_edit_set_feedback_route, hirari_routing_edit_set_phase_invert,
     hirari_routing_edit_set_route, hirari_routing_edit_set_route_gain,
-    hirari_routing_edit_set_send_route, hirari_routing_edit_set_track_armed,
-    hirari_routing_edit_set_track_delay_samples,
+    hirari_routing_edit_set_send_route, hirari_routing_edit_set_sidechain_link,
+    hirari_routing_edit_set_track_armed, hirari_routing_edit_set_track_delay_samples,
 };
 use crate::track_edit_host::{hirari_track_add, hirari_track_duplicate, hirari_track_remove};
 
@@ -478,5 +485,128 @@ impl ffi::AudioEngine {
 
     fn set_region_scalar(&self, tid: u32, rid: u32, field: i32, a: f32, b: f32) -> bool {
         unsafe { region_edit_host::hirari_region_edit_scalar(host(self), tid, rid, field, a, b) }
+    }
+}
+
+/// Rust hands out owned float buffers; copying and releasing one here keeps the
+/// single decoder path in Rust instead of keeping a C++ mirror of it.
+fn take_float_buffer(buffer: *mut c_void) -> Vec<f32> {
+    if buffer.is_null() {
+        return Vec::new();
+    }
+    let (data, count) = unsafe {
+        (
+            hirari_float_buffer_data(buffer),
+            hirari_float_buffer_len(buffer),
+        )
+    };
+    let mut samples = Vec::new();
+    if !data.is_null() && count != 0 {
+        samples.extend_from_slice(unsafe { std::slice::from_raw_parts(data, count) });
+    }
+    unsafe { hirari_float_buffer_destroy(buffer) };
+    samples
+}
+
+impl ffi::AudioEngine {
+    pub fn add_vca_group(&self, group_id: u32, gain: f32) -> bool {
+        if !hirari_vca_add_group(group_id, gain) {
+            return false;
+        }
+        hirari_vca_resolve_hierarchy();
+        true
+    }
+
+    pub fn set_vca_group_gain(&self, group_id: u32, gain: f32) -> bool {
+        if !hirari_vca_add_group(group_id, gain) {
+            return false;
+        }
+        hirari_vca_resolve_hierarchy();
+        true
+    }
+
+    pub fn get_vca_snapshot_json(&self) -> String {
+        let required = unsafe { hirari_vca_snapshot_json(std::ptr::null_mut(), 0) };
+        if required == 0 {
+            return "[]".to_string();
+        }
+        let mut buffer = vec![0u8; required];
+        unsafe { hirari_vca_snapshot_json(buffer.as_mut_ptr(), required) };
+        let end = buffer.iter().position(|&b| b == 0).unwrap_or(required);
+        String::from_utf8_lossy(&buffer[..end]).into_owned()
+    }
+
+    pub fn split_region(&self, tid: u32, rid: u32, split: f64) -> bool {
+        self.split_region_with_right_id(tid, rid, split) != 0
+    }
+
+    pub fn split_region_with_right_id(&self, tid: u32, rid: u32, split: f64) -> u32 {
+        unsafe { region_edit_host::hirari_region_split(host(self), tid, rid, split) }
+    }
+
+    pub fn get_region_waveform(&self, tid: u32, rid: u32) -> Vec<f32> {
+        take_float_buffer(unsafe { hirari_region_waveform(host(self), tid, rid, 128) })
+    }
+
+    pub fn get_region_audio_interleaved_range(
+        &self,
+        tid: u32,
+        rid: u32,
+        start_frame: u64,
+        frames: u32,
+        channels: u32,
+    ) -> Vec<f32> {
+        take_float_buffer(unsafe {
+            hirari_region_audio_interleaved_range(
+                host(self),
+                tid,
+                rid,
+                start_frame,
+                frames,
+                channels,
+            )
+        })
+    }
+
+    pub fn maintain_sandboxed_plugins(&self, auto_restart: bool) -> u32 {
+        unsafe { plugin_sandbox_maintenance::hirari_plugin_sandbox_maintain(host(self), auto_restart) }
+    }
+
+    pub fn set_track_input_monitor_channels(
+        &self,
+        tid: u32,
+        enabled: bool,
+        left: u32,
+        right: u32,
+    ) -> bool {
+        unsafe {
+            control_edit_host::hirari_control_edit_set_input_monitor(
+                host(self),
+                tid,
+                enabled,
+                left,
+                right,
+            )
+        }
+    }
+
+    pub fn set_sidechain_link(
+        &self,
+        source_id: u32,
+        dest_id: u32,
+        plugin_index: u32,
+        tap_point: u32,
+        enabled: bool,
+    ) -> bool {
+        unsafe {
+            hirari_routing_edit_set_sidechain_link(
+                host(self),
+                source_id,
+                dest_id,
+                plugin_index,
+                tap_point,
+                enabled,
+            )
+        }
     }
 }
