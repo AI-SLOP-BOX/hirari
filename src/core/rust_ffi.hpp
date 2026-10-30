@@ -1003,62 +1003,22 @@ struct HirariTrackRegionRenderInput {
 extern "C" bool hirari_region_needs_spectral_stretch(
     double source_rate, size_t warp_marker_count, float pitch_semitones,
     const HirariAudioNoteCurveView* note_curves, size_t note_curve_count);
-extern "C" void* hirari_native_noise_gate_create();
-extern "C" void hirari_native_noise_gate_destroy(void* state);
-extern "C" void hirari_native_noise_gate_reset(const void* state);
-extern "C" void hirari_native_noise_gate_set_threshold(const void* state, float value);
-extern "C" float hirari_native_noise_gate_get_threshold(const void* state);
-extern "C" void hirari_native_noise_gate_process(
-    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
-extern "C" void* hirari_native_transient_shaper_create();
-extern "C" void hirari_native_transient_shaper_destroy(void* state);
-extern "C" void hirari_native_transient_shaper_reset(const void* state);
-extern "C" void hirari_native_transient_shaper_set_amount(const void* state, float value);
-extern "C" float hirari_native_transient_shaper_get_amount(const void* state);
-extern "C" void hirari_native_transient_shaper_process(
-    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
-extern "C" void* hirari_native_deesser_create();
-extern "C" void hirari_native_deesser_destroy(void* state);
-extern "C" void hirari_native_deesser_reset(const void* state);
-extern "C" void hirari_native_deesser_set_amount(const void* state, float value);
-extern "C" float hirari_native_deesser_get_amount(const void* state);
-extern "C" void hirari_native_deesser_process(
-    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
-extern "C" void* hirari_native_delay_create();
-extern "C" void hirari_native_delay_destroy(void* state);
-extern "C" void hirari_native_delay_prepare(const void* state, double sample_rate);
-extern "C" void hirari_native_delay_reset(const void* state);
-extern "C" void hirari_native_delay_set_mix(const void* state, float value);
-extern "C" float hirari_native_delay_get_mix(const void* state);
-extern "C" void hirari_native_delay_process(
-    const void* state, float* const* channels, uint32_t channel_count,
+// Native built-in DSP processors share one dispatch surface; the kind index
+// selects the effect inside Rust.
+extern "C" int32_t hirari_native_processor_kind_for_path(const uint8_t* path, size_t path_size);
+extern "C" void* hirari_native_processor_create(int32_t kind);
+extern "C" void hirari_native_processor_destroy(int32_t kind, void* state);
+extern "C" void hirari_native_processor_prepare(int32_t kind, const void* state, double sample_rate);
+extern "C" void hirari_native_processor_reset(int32_t kind, const void* state);
+extern "C" void hirari_native_processor_process(
+    int32_t kind, const void* state, float* const* channels, uint32_t channel_count,
     uint32_t frames, double bpm);
-extern "C" void* hirari_native_reverb_create();
-extern "C" void hirari_native_reverb_destroy(void* state);
-extern "C" void hirari_native_reverb_reset(const void* state);
-extern "C" void hirari_native_reverb_set_mix(const void* state, float value);
-extern "C" float hirari_native_reverb_get_mix(const void* state);
-extern "C" void hirari_native_reverb_process(
-    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
-extern "C" void* hirari_native_dynamic_eq_create();
-extern "C" void hirari_native_dynamic_eq_destroy(void* state);
-extern "C" void hirari_native_dynamic_eq_reset(const void* state);
-extern "C" void hirari_native_dynamic_eq_set_amount(const void* state, float value);
-extern "C" float hirari_native_dynamic_eq_get_amount(const void* state);
-extern "C" void hirari_native_dynamic_eq_process(
-    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
-extern "C" void* hirari_native_mid_side_create();
-extern "C" void hirari_native_mid_side_destroy(void* state);
-extern "C" void hirari_native_mid_side_set(const void* state, float value);
-extern "C" float hirari_native_mid_side_get(const void* state);
-extern "C" void hirari_native_mid_side_process(
-    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
-extern "C" void* hirari_native_stereo_width_create();
-extern "C" void hirari_native_stereo_width_destroy(void* state);
-extern "C" void hirari_native_stereo_width_set(const void* state, float value);
-extern "C" float hirari_native_stereo_width_get(const void* state);
-extern "C" void hirari_native_stereo_width_process(
-    const void* state, float* const* channels, uint32_t channel_count, uint32_t frames);
+extern "C" void hirari_native_processor_set_parameter(
+    int32_t kind, const void* state, uint32_t id, float value);
+extern "C" float hirari_native_processor_get_parameter(int32_t kind, const void* state, uint32_t id);
+extern "C" uint32_t hirari_native_processor_parameter_count(int32_t kind);
+extern "C" uint32_t hirari_native_processor_tail_samples(int32_t kind);
+extern "C" const char* hirari_native_processor_name(int32_t kind);
 extern "C" void* hirari_pro_limiter_create(double sample_rate);
 extern "C" void hirari_pro_limiter_destroy(void* state);
 extern "C" void hirari_pro_limiter_prepare(void* state, double sample_rate);

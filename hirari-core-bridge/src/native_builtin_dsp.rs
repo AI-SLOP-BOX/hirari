@@ -730,3 +730,289 @@ pub unsafe extern "C" fn hirari_native_stereo_width_process(
         }
     }
 }
+
+// --- Generic dispatch for the native C++ adapter ---------------------------
+//
+// The engine's internal plug-in host used to declare one C++ class per
+// built-in effect, each repeating the same create/process/reset/parameter
+// plumbing. The kind table below lets one C++ adapter cover them all, and the
+// per-effect differences (prepare, tail length, parameter accessor, display
+// name) stay in Rust next to the processors themselves.
+
+const KIND_GATE: i32 = 2;
+const KIND_TRANSIENT: i32 = 4;
+const KIND_DEESSER: i32 = 5;
+const KIND_DELAY: i32 = 6;
+const KIND_REVERB: i32 = 7;
+const KIND_DYNAMIC_EQ: i32 = 8;
+const KIND_MID_SIDE: i32 = 9;
+const KIND_STEREO_WIDTH: i32 = 10;
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_processor_kind_for_path(
+    path: *const u8,
+    path_len: usize,
+) -> i32 {
+    if path.is_null() {
+        return -1;
+    }
+    let path = unsafe { std::slice::from_raw_parts(path, path_len) };
+    match path {
+        b"Hirari/Gate" => KIND_GATE,
+        b"Hirari/Transient" => KIND_TRANSIENT,
+        b"Hirari/DeEsser" => KIND_DEESSER,
+        b"Hirari/Delay" => KIND_DELAY,
+        b"Hirari/Reverb" => KIND_REVERB,
+        b"Hirari/DynamicEQ" => KIND_DYNAMIC_EQ,
+        b"Hirari/MidSide" => KIND_MID_SIDE,
+        b"Hirari/Width" => KIND_STEREO_WIDTH,
+        _ => -1,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_native_processor_create(kind: i32) -> *mut c_void {
+    match kind {
+        KIND_GATE => hirari_native_noise_gate_create(),
+        KIND_TRANSIENT => hirari_native_transient_shaper_create(),
+        KIND_DEESSER => hirari_native_deesser_create(),
+        KIND_DELAY => hirari_native_delay_create(),
+        KIND_REVERB => hirari_native_reverb_create(),
+        KIND_DYNAMIC_EQ => hirari_native_dynamic_eq_create(),
+        KIND_MID_SIDE => hirari_native_mid_side_create(),
+        KIND_STEREO_WIDTH => hirari_native_stereo_width_create(),
+        _ => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_processor_destroy(kind: i32, state: *mut c_void) {
+    match kind {
+        KIND_GATE => unsafe { hirari_native_noise_gate_destroy(state) },
+        KIND_TRANSIENT => unsafe { hirari_native_transient_shaper_destroy(state) },
+        KIND_DEESSER => unsafe { hirari_native_deesser_destroy(state) },
+        KIND_DELAY => unsafe { hirari_native_delay_destroy(state) },
+        KIND_REVERB => unsafe { hirari_native_reverb_destroy(state) },
+        KIND_DYNAMIC_EQ => unsafe { hirari_native_dynamic_eq_destroy(state) },
+        KIND_MID_SIDE => unsafe { hirari_native_mid_side_destroy(state) },
+        KIND_STEREO_WIDTH => unsafe { hirari_native_stereo_width_destroy(state) },
+        _ => {}
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_processor_prepare(
+    kind: i32,
+    state: *const c_void,
+    sample_rate: f64,
+) {
+    match kind {
+        KIND_DELAY => unsafe { hirari_native_delay_prepare(state, sample_rate) },
+        KIND_TRANSIENT => unsafe { hirari_native_transient_shaper_reset(state) },
+        KIND_DEESSER => unsafe { hirari_native_deesser_reset(state) },
+        KIND_REVERB => unsafe { hirari_native_reverb_reset(state) },
+        KIND_DYNAMIC_EQ => unsafe { hirari_native_dynamic_eq_reset(state) },
+        _ => {}
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_processor_reset(kind: i32, state: *const c_void) {
+    match kind {
+        KIND_GATE => unsafe { hirari_native_noise_gate_reset(state) },
+        KIND_TRANSIENT => unsafe { hirari_native_transient_shaper_reset(state) },
+        KIND_DEESSER => unsafe { hirari_native_deesser_reset(state) },
+        KIND_DELAY => unsafe { hirari_native_delay_reset(state) },
+        KIND_REVERB => unsafe { hirari_native_reverb_reset(state) },
+        KIND_DYNAMIC_EQ => unsafe { hirari_native_dynamic_eq_reset(state) },
+        _ => {}
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_processor_process(
+    kind: i32,
+    state: *const c_void,
+    channels: *mut *mut f32,
+    channel_count: u32,
+    frames: u32,
+    bpm: f64,
+) {
+    match kind {
+        KIND_GATE => unsafe {
+            hirari_native_noise_gate_process(state, channels, channel_count, frames)
+        },
+        KIND_TRANSIENT => unsafe {
+            hirari_native_transient_shaper_process(state, channels, channel_count, frames)
+        },
+        KIND_DEESSER => unsafe {
+            hirari_native_deesser_process(state, channels, channel_count, frames)
+        },
+        KIND_DELAY => unsafe {
+            hirari_native_delay_process(state, channels, channel_count, frames, bpm)
+        },
+        KIND_REVERB => unsafe {
+            hirari_native_reverb_process(state, channels, channel_count, frames)
+        },
+        KIND_DYNAMIC_EQ => unsafe {
+            hirari_native_dynamic_eq_process(state, channels, channel_count, frames)
+        },
+        KIND_MID_SIDE => unsafe {
+            hirari_native_mid_side_process(state, channels, channel_count, frames)
+        },
+        KIND_STEREO_WIDTH => unsafe {
+            hirari_native_stereo_width_process(state, channels, channel_count, frames)
+        },
+        _ => {}
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_processor_set_parameter(
+    kind: i32,
+    state: *const c_void,
+    id: u32,
+    value: f32,
+) {
+    if id != 0 {
+        return;
+    }
+    match kind {
+        KIND_GATE => unsafe { hirari_native_noise_gate_set_threshold(state, value) },
+        KIND_TRANSIENT => unsafe { hirari_native_transient_shaper_set_amount(state, value) },
+        KIND_DEESSER => unsafe { hirari_native_deesser_set_amount(state, value) },
+        KIND_DELAY => unsafe { hirari_native_delay_set_mix(state, value) },
+        KIND_REVERB => unsafe { hirari_native_reverb_set_mix(state, value) },
+        KIND_DYNAMIC_EQ => unsafe { hirari_native_dynamic_eq_set_amount(state, value) },
+        KIND_MID_SIDE => unsafe { hirari_native_mid_side_set(state, value) },
+        KIND_STEREO_WIDTH => unsafe { hirari_native_stereo_width_set(state, value) },
+        _ => {}
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_processor_get_parameter(
+    kind: i32,
+    state: *const c_void,
+    id: u32,
+) -> f32 {
+    if id != 0 {
+        return 0.0;
+    }
+    match kind {
+        KIND_GATE => unsafe { hirari_native_noise_gate_get_threshold(state) },
+        KIND_TRANSIENT => unsafe { hirari_native_transient_shaper_get_amount(state) },
+        KIND_DEESSER => unsafe { hirari_native_deesser_get_amount(state) },
+        KIND_DELAY => unsafe { hirari_native_delay_get_mix(state) },
+        KIND_REVERB => unsafe { hirari_native_reverb_get_mix(state) },
+        KIND_DYNAMIC_EQ => unsafe { hirari_native_dynamic_eq_get_amount(state) },
+        KIND_MID_SIDE => unsafe { hirari_native_mid_side_get(state) },
+        KIND_STEREO_WIDTH => unsafe { hirari_native_stereo_width_get(state) },
+        _ => 0.0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_native_processor_parameter_count(kind: i32) -> u32 {
+    match kind {
+        KIND_GATE | KIND_TRANSIENT | KIND_DEESSER | KIND_DELAY | KIND_REVERB
+        | KIND_DYNAMIC_EQ | KIND_MID_SIDE | KIND_STEREO_WIDTH => 1,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_native_processor_tail_samples(kind: i32) -> u32 {
+    match kind {
+        KIND_DELAY => 65_536 * 8,
+        KIND_REVERB => 8_192 * 24,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_native_processor_name(kind: i32) -> *const std::ffi::c_char {
+    let name: &'static std::ffi::CStr = match kind {
+        KIND_GATE => c"Hirari Gate",
+        KIND_TRANSIENT => c"Hirari Transient Shaper",
+        KIND_DEESSER => c"Hirari De-Esser",
+        KIND_DELAY => c"Hirari Delay",
+        KIND_REVERB => c"Hirari Reverb",
+        KIND_DYNAMIC_EQ => c"Hirari Dynamic EQ",
+        KIND_MID_SIDE => c"Hirari Mid/Side",
+        KIND_STEREO_WIDTH => c"Hirari Stereo Width",
+        _ => return std::ptr::null(),
+    };
+    name.as_ptr()
+}
+
+#[cfg(test)]
+mod processor_dispatch_tests {
+    use super::*;
+
+    const BUILTINS: &[(&[u8], i32, &str)] = &[
+        (b"Hirari/Gate", KIND_GATE, "Hirari Gate"),
+        (b"Hirari/Transient", KIND_TRANSIENT, "Hirari Transient Shaper"),
+        (b"Hirari/DeEsser", KIND_DEESSER, "Hirari De-Esser"),
+        (b"Hirari/Delay", KIND_DELAY, "Hirari Delay"),
+        (b"Hirari/Reverb", KIND_REVERB, "Hirari Reverb"),
+        (b"Hirari/DynamicEQ", KIND_DYNAMIC_EQ, "Hirari Dynamic EQ"),
+        (b"Hirari/MidSide", KIND_MID_SIDE, "Hirari Mid/Side"),
+        (b"Hirari/Width", KIND_STEREO_WIDTH, "Hirari Stereo Width"),
+    ];
+
+    #[test]
+    fn path_lookup_maps_each_builtin_and_rejects_unknown() {
+        for &(path, kind, _) in BUILTINS {
+            assert_eq!(
+                unsafe { hirari_native_processor_kind_for_path(path.as_ptr(), path.len()) },
+                kind
+            );
+        }
+        let unknown = b"Hirari/Unknown";
+        assert_eq!(
+            unsafe { hirari_native_processor_kind_for_path(unknown.as_ptr(), unknown.len()) },
+            -1
+        );
+        assert_eq!(
+            unsafe { hirari_native_processor_kind_for_path(std::ptr::null(), 0) },
+            -1
+        );
+    }
+
+    #[test]
+    fn dispatch_metadata_matches_each_builtin_contract() {
+        for &(_, kind, name) in BUILTINS {
+            assert_eq!(hirari_native_processor_parameter_count(kind), 1);
+            let reported = hirari_native_processor_name(kind);
+            assert!(!reported.is_null());
+            assert_eq!(unsafe { std::ffi::CStr::from_ptr(reported) }.to_str(), Ok(name));
+        }
+        assert_eq!(hirari_native_processor_tail_samples(KIND_DELAY), 65_536 * 8);
+        assert_eq!(hirari_native_processor_tail_samples(KIND_REVERB), 8_192 * 24);
+        assert_eq!(hirari_native_processor_tail_samples(KIND_GATE), 0);
+        assert_eq!(hirari_native_processor_parameter_count(-1), 0);
+        assert!(hirari_native_processor_name(-1).is_null());
+        assert!(hirari_native_processor_create(-1).is_null());
+    }
+
+    #[test]
+    fn dispatch_lifecycle_round_trips_parameter_state() {
+        let state = hirari_native_processor_create(KIND_GATE);
+        assert!(!state.is_null());
+        unsafe {
+            hirari_native_processor_prepare(KIND_GATE, state, 48_000.0);
+            hirari_native_processor_set_parameter(KIND_GATE, state, 0, 0.25);
+            assert_eq!(hirari_native_processor_get_parameter(KIND_GATE, state, 0), 0.25);
+            // Ids beyond the first are ignored, matching the per-effect classes.
+            hirari_native_processor_set_parameter(KIND_GATE, state, 1, 0.9);
+            assert_eq!(hirari_native_processor_get_parameter(KIND_GATE, state, 1), 0.0);
+            let mut left = vec![0.5_f32; 16];
+            let mut right = vec![0.5_f32; 16];
+            let mut channels = [left.as_mut_ptr(), right.as_mut_ptr()];
+            hirari_native_processor_process(KIND_GATE, state, channels.as_mut_ptr(), 2, 16, 120.0);
+            hirari_native_processor_reset(KIND_GATE, state);
+            hirari_native_processor_destroy(KIND_GATE, state);
+        }
+    }
+}

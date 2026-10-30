@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The eight Rust-backed internal processors now share one `NativeProcessor`
+  adapter driven by `hirari_native_processor_kind_for_path`, moving path
+  matching, names, tail lengths, prepare/reset policy and parameter ids into
+  Rust and deleting the per-effect C++ classes and FFI declarations.
 - The WAV diagnostic JSON is produced by a single Rust entry point taking the
   file path, so `WavLoader` drops its C++ decode-then-format structured path
   and only copies the returned bytes.
