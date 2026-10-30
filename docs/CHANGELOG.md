@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- All twelve built-in effect paths now resolve through the single Rust
+  `NativeProcessor` dispatch: limiter, compressor, sub bass and saturation
+  joined the gate/transient/de-esser/delay/reverb/dynamic-EQ/mid-side/width
+  family, so their latency, parameter names, display names and byte-exact
+  persisted state formats live in Rust and the four C++ adapter headers were
+  deleted.
 - The legacy C++ video frame cache is gone: nothing ever published into it,
   and the Rust video runtime already owns decoding and caching, so
   `get_video_frame` now only forwards the platform bridge result.

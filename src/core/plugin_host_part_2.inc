@@ -16,10 +16,6 @@ public:
             const int32_t nativeKind = hirari_native_processor_kind_for_path(
                 reinterpret_cast<const uint8_t*>(m_path.data()), m_path.size());
             if (nativeKind >= 0) m_internal = std::make_unique<NativeProcessor>(nativeKind);
-            else if (m_path == "Hirari/Limiter") m_internal = std::make_unique<DSP::Effects::ProLimiter>();
-            else if (m_path == "Hirari/SubBass") m_internal = std::make_unique<DSP::Effects::SubBassGenerator>();
-            else if (m_path == "Hirari/Compressor") m_internal = std::make_unique<DSP::Effects::DynamicCompressor>();
-            else if (m_path == "Hirari/Saturation") m_internal = std::make_unique<DSP::Effects::TubeSaturation>();
             // NeuralCloner is not part of the available processor interface;
             // leave it failed rather than manufacturing an external bridge.
             m_state = m_internal ? LoadState::Operational : LoadState::Failed;

@@ -94,7 +94,11 @@ int main() {
     // merely a header-only type. Exercise prepare/process/parameter/state so
     // a future refactor cannot leave the browser-visible plugin unlinked.
     {
-        Hirari::DSP::Effects::DynamicCompressor compressor;
+        const std::string compressorPath = "Hirari/Compressor";
+        const int32_t compressorKind = hirari_native_processor_kind_for_path(
+            reinterpret_cast<const uint8_t*>(compressorPath.data()), compressorPath.size());
+        if (compressorKind < 0) return 69;
+        Hirari::Core::Plugin::NativeProcessor compressor(compressorKind);
         compressor.prepareToPlay(48'000.0, 128);
         compressor.setParameter(0, 0.7f);
         compressor.setParameter(1, 0.25f);
@@ -110,7 +114,7 @@ int main() {
         compressor.process(block, midi, context);
         if (block.sanitizeNonFinite() != 0 || compressor.getNumParameters() != 7) return 67;
         const auto state = compressor.getState();
-        Hirari::DSP::Effects::DynamicCompressor restored;
+        Hirari::Core::Plugin::NativeProcessor restored(compressorKind);
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }

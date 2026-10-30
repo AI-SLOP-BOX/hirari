@@ -1017,44 +1017,18 @@ extern "C" void hirari_native_processor_set_parameter(
     int32_t kind, const void* state, uint32_t id, float value);
 extern "C" float hirari_native_processor_get_parameter(int32_t kind, const void* state, uint32_t id);
 extern "C" uint32_t hirari_native_processor_parameter_count(int32_t kind);
-extern "C" uint32_t hirari_native_processor_tail_samples(int32_t kind);
+extern "C" uint32_t hirari_native_processor_tail_samples(int32_t kind, const void* state);
+extern "C" uint32_t hirari_native_processor_latency_samples(int32_t kind, const void* state);
 extern "C" const char* hirari_native_processor_name(int32_t kind);
-extern "C" void* hirari_pro_limiter_create(double sample_rate);
-extern "C" void hirari_pro_limiter_destroy(void* state);
-extern "C" void hirari_pro_limiter_prepare(void* state, double sample_rate);
-extern "C" void hirari_pro_limiter_reset(void* state);
-extern "C" void hirari_pro_limiter_process(
-    void* state, float* left, float* right, size_t frames);
-extern "C" void hirari_pro_limiter_set_parameter(void* state, uint32_t id, float value);
-extern "C" float hirari_pro_limiter_get_parameter(const void* state, uint32_t id);
-extern "C" void hirari_pro_limiter_set_threshold_db(const void* state, float db);
-extern "C" float hirari_pro_limiter_threshold_linear(const void* state);
-extern "C" bool hirari_pro_limiter_restore_threshold(const void* state, float threshold);
-extern "C" uint32_t hirari_pro_limiter_tail(const void* state);
-extern "C" void* hirari_tube_saturation_create();
-extern "C" void hirari_tube_saturation_destroy(void* state);
-extern "C" void hirari_tube_saturation_reset(void* state);
-extern "C" void hirari_tube_saturation_set_parameter(
-    const void* state, uint32_t id, float value);
-extern "C" float hirari_tube_saturation_get_parameter(const void* state, uint32_t id);
-extern "C" size_t hirari_tube_saturation_save_state(
-    const void* state, uint8_t bypassed, float mix, uint32_t sidechain_bus_id,
-    uint8_t* output, size_t capacity);
-extern "C" bool hirari_tube_saturation_restore_state(
-    void* state, const uint8_t* bytes, size_t size,
+extern "C" const char* hirari_native_processor_parameter_name(int32_t kind, uint32_t id);
+// A zero return means this kind has no serializer of its own and the host
+// envelope is authoritative; the four formats that do exist stay byte-exact.
+extern "C" size_t hirari_native_processor_state_save(
+    int32_t kind, const void* state, uint8_t bypassed, float mix,
+    uint32_t sidechain_bus_id, uint8_t* output, size_t capacity);
+extern "C" bool hirari_native_processor_state_restore(
+    int32_t kind, void* state, const uint8_t* bytes, size_t size,
     uint8_t* bypassed, float* mix, uint32_t* sidechain_bus_id);
-extern "C" void hirari_tube_saturation_set_control(
-    const void* state, uint32_t control, float value);
-extern "C" void hirari_tube_saturation_process(
-    const void* state, float* left, float* right, size_t frames);
-extern "C" void* hirari_sub_bass_create(double sample_rate);
-extern "C" void hirari_sub_bass_destroy(void* state);
-extern "C" void hirari_sub_bass_prepare(void* state, double sample_rate);
-extern "C" void hirari_sub_bass_reset(void* state);
-extern "C" void hirari_sub_bass_set_parameter(const void* state, uint32_t id, float value);
-extern "C" float hirari_sub_bass_get_parameter(const void* state, uint32_t id);
-extern "C" void hirari_sub_bass_process(
-    void* state, float* left, float* right, size_t frames);
 extern "C" void* hirari_tpdf_dither_create();
 extern "C" void* hirari_tpdf_dither_create_with_seed(uint32_t seed);
 extern "C" void hirari_tpdf_dither_destroy(void* state);
@@ -1085,24 +1059,6 @@ extern "C" void hirari_goniometer_process(
 extern "C" bool hirari_goniometer_snapshot(
     const void* state, float* left, float* right, size_t frames,
     float* correlation, float* balance);
-extern "C" void* hirari_dynamic_compressor_create(double sample_rate);
-extern "C" void hirari_dynamic_compressor_destroy(void* state);
-extern "C" void hirari_dynamic_compressor_prepare(void* state, double sample_rate);
-extern "C" void hirari_dynamic_compressor_reset(void* state);
-extern "C" void hirari_dynamic_compressor_process(
-    void* state, float* left, float* right, size_t frames);
-extern "C" void hirari_dynamic_compressor_set_parameter(
-    void* state, uint32_t id, float value);
-extern "C" float hirari_dynamic_compressor_get_parameter(
-    const void* state, uint32_t id);
-extern "C" void hirari_dynamic_compressor_set_control(
-    void* state, uint32_t control, float value);
-extern "C" size_t hirari_dynamic_compressor_save_state(
-    const void* state, uint8_t* output, size_t capacity);
-extern "C" bool hirari_dynamic_compressor_restore_state(
-    void* state, const uint8_t* bytes, size_t size);
-extern "C" uint32_t hirari_dynamic_compressor_latency(const void* state);
-extern "C" uint32_t hirari_dynamic_compressor_tail(const void* state);
 extern "C" uint8_t hirari_plugin_fingerprint(const char* path, size_t path_size,
                                                uint64_t* output);
 

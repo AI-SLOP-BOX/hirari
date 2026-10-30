@@ -15,7 +15,7 @@
 #include "src/core/plugins/midi_fragment_transport.hpp"
 #include "src/core/concurrency/audio_task_manager.hpp"
 #include "src/core/concurrency/thread_pool.hpp"
-#include "src/dsp/effects/compressor.hpp"
+#include "src/core/plugin_host.hpp"
 #include "src/core/database/project_db.hpp"
 #include "src/core/external/jack_bridge_deep.hpp"
 #include "src/core/HirariPluginSDK.hpp"
