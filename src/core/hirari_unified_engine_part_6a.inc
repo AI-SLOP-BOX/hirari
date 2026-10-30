@@ -358,11 +358,6 @@ Track& HirariUnifiedEngine::get_track(uint32_t id) {
     return fallbackTrack;
 }
 
-uint32_t HirariUnifiedEngine::get_track_count() const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    return static_cast<uint32_t>(m_tracks.size());
-}
-
 std::vector<std::shared_ptr<Track>> HirariUnifiedEngine::get_tracks_snapshot() const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     return m_tracks;

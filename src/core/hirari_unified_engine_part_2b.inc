@@ -8,19 +8,6 @@ float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
     return -1.0f;
 }
 
-bool HirariUnifiedEngine::set_track_solo_for_offline_render(uint32_t tid, bool solo) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track && track->getId() == tid) {
-            // Offline stem selection is render transaction state, not an
-            // editable user action. Do not append it to Undo/Redo.
-            track->setSolo(solo);
-            return true;
-        }
-    }
-    return false;
-}
-
 bool HirariUnifiedEngine::set_offline_render_target(uint32_t tid) {
     // 0 is reserved for the master target. Track/bus IDs are validated
     // against the current graph before activation so a stale CLI target

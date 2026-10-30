@@ -76,7 +76,11 @@ production support.
   polyphonic sampler, preview synth, holographic panner and spectral gain. The
   differential tests compare the same production Rust paths against these
   ports unchanged. Only the signalsmith-backed time-stretch oracle remains in
-  C++ because it exercises the third-party engine directly.
+  C++ because it exercises the third-party engine directly; its
+  arrangement-section generator also moved to Rust.
+- Removed two engine methods that no caller in C++, Rust or the bridge still
+  referenced (`set_track_solo_for_offline_render`, `get_track_count`). Offline
+  solo selection and track counting already go through the Rust call sites.
 - Read-only engine getters now go straight from Rust to the session engine:
   `AudioEngine` exposes its inner engine once (`get_core`) and the 28
   transport, plugin, sandbox and bounce getters that used to have a C++

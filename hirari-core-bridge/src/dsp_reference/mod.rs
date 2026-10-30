@@ -7,6 +7,7 @@
 // differential tests keep comparing the production path against it.
 
 pub mod analysis;
+pub mod analysis_structure;
 pub mod audio_note_curve;
 pub mod automation;
 pub mod builtin_midi;

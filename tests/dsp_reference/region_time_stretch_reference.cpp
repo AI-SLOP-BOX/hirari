@@ -4,54 +4,6 @@
 #include <cstdint>
 #include <vector>
 
-extern "C" size_t hirari_analysis_structure_reference(
-    const uint64_t* region_starts, size_t region_count, uint64_t total_length,
-    double bpm, double sample_rate, float tension, float valence,
-    uint64_t* starts, uint64_t* ends, uint8_t* kinds,
-    float* energies, uint32_t* motivic_ids, float* flows, size_t capacity) {
-    (void)region_starts;
-    (void)region_count;
-    struct Section {
-        uint64_t start;
-        uint64_t end;
-        uint8_t type;
-        float energy;
-        uint32_t motivic;
-        float flow;
-    };
-    std::vector<Section> sections;
-    const double samples_per_beat = (60.0 / bpm) * sample_rate;
-    const uint64_t bar_block = static_cast<uint64_t>(samples_per_beat * 4 * 8);
-    for (uint64_t t = 0; t < total_length; t += bar_block) {
-        Section section{};
-        section.start = t;
-        section.end = std::min(t + bar_block, total_length);
-        section.energy = tension;
-        section.flow = tension * valence;
-        section.type = section.energy > 0.8f ? 2 : section.energy < 0.2f ? 1 : 3;
-        section.motivic = static_cast<uint32_t>(section.energy * 1000);
-        sections.push_back(section);
-    }
-    std::sort(sections.begin(), sections.end(), [](const Section& a, const Section& b) {
-        return a.start < b.start;
-    });
-    for (size_t i = 1; i < sections.size(); ++i) {
-        const float previous = sections[i - 1].energy;
-        if (std::abs(sections[i].energy - previous) > 0.5f)
-            sections[i].energy = previous + (sections[i].energy - previous) * 0.5f;
-    }
-    if (sections.size() > capacity) return 0;
-    for (size_t i = 0; i < sections.size(); ++i) {
-        starts[i] = sections[i].start;
-        ends[i] = sections[i].end;
-        kinds[i] = sections[i].type;
-        energies[i] = sections[i].energy;
-        motivic_ids[i] = sections[i].motivic;
-        flows[i] = sections[i].flow;
-    }
-    return sections.size();
-}
-
 extern "C" bool hirari_signalsmith_stft_analyse_reference(
     const float* input, size_t block_size, size_t interval,
     float* spectrum_real, float* spectrum_imag, size_t spectrum_capacity,

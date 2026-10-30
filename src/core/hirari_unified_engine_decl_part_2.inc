@@ -46,7 +46,6 @@
     std::string plugin_compatibility_snapshot_json() const;
     float get_master_gain() const noexcept;
     float get_track_volume(uint32_t tid) const;
-    bool set_track_solo_for_offline_render(uint32_t tid, bool solo);
     // Offline render target selection is control-side state. When active,
     // the audio graph keeps only the target and its upstream route closure,
     // then publishes the target output to the master buffer.

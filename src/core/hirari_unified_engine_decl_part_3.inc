@@ -1,7 +1,6 @@
     // Tracks
     bool assign_track_to_vca(uint32_t track_id, uint32_t group_id);
     void new_project();
-    uint32_t get_track_count() const;
     std::vector<std::shared_ptr<Track>> get_tracks_snapshot() const;
     Track& get_track(uint32_t id);
 
