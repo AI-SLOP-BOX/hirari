@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The legacy C++ video frame cache is gone: nothing ever published into it,
+  and the Rust video runtime already owns decoding and caching, so
+  `get_video_frame` now only forwards the platform bridge result.
 - The eight Rust-backed internal processors now share one `NativeProcessor`
   adapter driven by `hirari_native_processor_kind_for_path`, moving path
   matching, names, tail lengths, prepare/reset policy and parameter ids into

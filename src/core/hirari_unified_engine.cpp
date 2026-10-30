@@ -1,7 +1,6 @@
 /* Hirari DAW Ultimate - (c) 2026 Hirari DAW Project */
 #include "hirari_unified_engine.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
-#include "engine/video_engine.hpp"
 #include "engine/video_system_bridge.hpp"
 #include "engine/bus_track.hpp"
 #include "engine/sidechain_manager.hpp"

@@ -484,29 +484,9 @@ rust::Vec<uint8_t> HirariUnifiedEngine::get_video_frame() {
         for (uint32_t shift = 0; shift < 32; shift += 8) frame.push_back(static_cast<uint8_t>((width >> shift) & 0xffu));
         for (uint32_t shift = 0; shift < 32; shift += 8) frame.push_back(static_cast<uint8_t>((height >> shift) & 0xffu));
         for (uint8_t value : rgba) frame.push_back(value);
-        return frame;
     }
 #endif
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return frame;
-#if !defined(__APPLE__)
-    ::Hirari::Core::Scheduler::VideoFrame source;
-    const double seconds = static_cast<double>(m_playhead.load(std::memory_order_relaxed)) / sampleRate;
-    if (!::Hirari::Core::Scheduler::VideoEngine::getInstance().copyFrameAt(seconds, source) ||
-        source.width <= 0 || source.height <= 0 || source.rgbData.empty()) return frame;
-    const size_t pixelCount = static_cast<size_t>(source.width) * static_cast<size_t>(source.height);
-    if (source.rgbData.size() != pixelCount * 3u || pixelCount > (16u * 1024u * 1024u)) return frame;
-    frame.reserve(8u + pixelCount * 4u);
-    for (uint32_t shift = 0; shift < 32; shift += 8) frame.push_back(static_cast<uint8_t>((static_cast<uint32_t>(source.width) >> shift) & 0xffu));
-    for (uint32_t shift = 0; shift < 32; shift += 8) frame.push_back(static_cast<uint8_t>((static_cast<uint32_t>(source.height) >> shift) & 0xffu));
-    for (size_t i = 0; i < pixelCount; ++i) {
-        frame.push_back(source.rgbData[i * 3u]);
-        frame.push_back(source.rgbData[i * 3u + 1u]);
-        frame.push_back(source.rgbData[i * 3u + 2u]);
-        frame.push_back(255u);
-    }
+    // Without the platform video bridge there is no frame producer: the
+    // Rust video runtime owns decoding and caching, so this stays empty.
     return frame;
-#else
-    return frame;
-#endif
 }
