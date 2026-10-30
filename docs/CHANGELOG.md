@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The WAV diagnostic JSON is produced by a single Rust entry point taking the
+  file path, so `WavLoader` drops its C++ decode-then-format structured path
+  and only copies the returned bytes.
 - The diagnostic log ring is now a process-wide Rust singleton handed out by
   `hirari_log_buffer_default_state`, so the C++ `LogBuffer` adapter no longer
   owns its 128 KiB aligned storage or initialises the ring.

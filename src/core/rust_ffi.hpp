@@ -1174,10 +1174,8 @@ struct HirariWave64DecodedOwned {
 extern "C" uint8_t hirari_wave64_decode(
     const char* path, size_t path_size, HirariWave64DecodedOwned* output);
 extern "C" void hirari_wave64_decoded_free(HirariWave64DecodedOwned* output);
-extern "C" void* hirari_wav_diagnostic_json(
-    bool ok, bool wave64, const uint8_t* error, size_t error_length,
-    uint32_t sample_rate, uint16_t channels, uint16_t bit_depth, uint64_t frames,
-    const float* const* planes, size_t samples_per_channel);
+extern "C" void* hirari_wav_diagnostic_json_for_path(
+    const uint8_t* path, size_t path_size, bool wave64);
 extern "C" const uint8_t* hirari_wav_diagnostic_json_data(const void* value);
 extern "C" size_t hirari_wav_diagnostic_json_size(const void* value);
 extern "C" void hirari_wav_diagnostic_json_free(void* value);

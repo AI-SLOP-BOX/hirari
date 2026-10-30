@@ -1,3 +1,9 @@
+use crate::export::{
+    hirari_wave64_decode, hirari_wave64_decoded_free, Wave64DecodedOwned,
+};
+use crate::preview_audio_runtime::hirari_free_decoded_audio;
+use crate::wav_decoder_compat::decode_wav_file;
+
 pub struct WavDiagnosticJson {
     bytes: Vec<u8>,
 }
@@ -17,62 +23,38 @@ fn escape_json_string(value: &[u8]) -> Vec<u8> {
     escaped
 }
 
-/// Formats the native WAV decoder's diagnostic after C++ has supplied its
-/// decoded metadata and channel planes.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_wav_diagnostic_json(
+fn build_json(
     ok: bool,
     wave64: bool,
-    error: *const u8,
-    error_length: usize,
+    error: &[u8],
     sample_rate: u32,
     channels: u16,
     bit_depth: u16,
     frames: u64,
-    planes: *const *const f32,
-    samples_per_channel: usize,
-) -> *mut WavDiagnosticJson {
-    if error_length != 0 && error.is_null() {
-        return std::ptr::null_mut();
-    }
-    if ok && (channels == 0 || planes.is_null()) {
-        return std::ptr::null_mut();
-    }
-    let error = if error_length == 0 {
-        &[][..]
-    } else {
-        unsafe { std::slice::from_raw_parts(error, error_length) }
-    };
+    samples: &[f32],
+) -> Vec<u8> {
     let format = if wave64 { "WAVE64" } else { "WAVE" };
     let mut json = format!("{{\"ok\":{},\"format\":\"{}\"", ok, format).into_bytes();
     if ok {
-        json.extend_from_slice(format!(
-            ",\"sample_rate\":{},\"channels\":{},\"bit_depth\":{},\"samples\":{}",
-            sample_rate, channels, bit_depth, frames
-        ).as_bytes());
-        let channel_planes = unsafe { std::slice::from_raw_parts(planes, channels as usize) };
+        json.extend_from_slice(
+            format!(
+                ",\"sample_rate\":{},\"channels\":{},\"bit_depth\":{},\"samples\":{}",
+                sample_rate, channels, bit_depth, frames
+            )
+            .as_bytes(),
+        );
         let mut peak = 0.0_f64;
         let mut sum_squares = 0.0_f64;
         let mut finite_samples = 0_u64;
         let mut non_finite_samples = 0_u64;
-        for &plane in channel_planes {
-            if plane.is_null() && samples_per_channel != 0 {
-                return std::ptr::null_mut();
+        for &sample in samples {
+            if !sample.is_finite() {
+                non_finite_samples += 1;
+                continue;
             }
-            let values = if samples_per_channel == 0 {
-                &[][..]
-            } else {
-                unsafe { std::slice::from_raw_parts(plane, samples_per_channel) }
-            };
-            for &sample in values {
-                if !sample.is_finite() {
-                    non_finite_samples += 1;
-                    continue;
-                }
-                peak = peak.max(f64::from(sample).abs());
-                sum_squares += f64::from(sample) * f64::from(sample);
-                finite_samples += 1;
-            }
+            peak = peak.max(f64::from(sample).abs());
+            sum_squares += f64::from(sample) * f64::from(sample);
+            finite_samples += 1;
         }
         let mean_square = if finite_samples == 0 {
             0.0
@@ -93,7 +75,89 @@ pub unsafe extern "C" fn hirari_wav_diagnostic_json(
         json.push(b'"');
     }
     json.push(b'}');
+    json
+}
+
+fn into_handle(json: Vec<u8>) -> *mut WavDiagnosticJson {
     Box::into_raw(Box::new(WavDiagnosticJson { bytes: json }))
+}
+
+/// Decodes the file and formats its diagnostic in one call. The decode,
+/// failure-reason wording and statistics all live here; C++ only forwards the
+/// path and wraps the returned bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_wav_diagnostic_json_for_path(
+    path: *const u8,
+    path_size: usize,
+    wave64: bool,
+) -> *mut WavDiagnosticJson {
+    if path.is_null() {
+        return std::ptr::null_mut();
+    }
+    let path_bytes = unsafe { std::slice::from_raw_parts(path, path_size) };
+    if wave64 {
+        let mut decoded = Wave64DecodedOwned {
+            sample_rate: 0,
+            channels: 0,
+            bit_depth: 0,
+            frames: 0,
+            samples: std::ptr::null_mut(),
+            sample_count: 0,
+            error: std::ptr::null_mut(),
+            error_size: 0,
+        };
+        let decoded_ok = unsafe { hirari_wave64_decode(path.cast(), path_size, &mut decoded) } != 0;
+        if decoded_ok {
+            let samples =
+                unsafe { std::slice::from_raw_parts(decoded.samples, decoded.sample_count) };
+            let json = build_json(
+                true,
+                true,
+                &[],
+                decoded.sample_rate,
+                decoded.channels,
+                decoded.bit_depth,
+                decoded.frames,
+                samples,
+            );
+            unsafe { hirari_wave64_decoded_free(&mut decoded) };
+            return into_handle(json);
+        }
+        let detail = if decoded.error.is_null() {
+            b"unsupported or invalid file".to_vec()
+        } else {
+            unsafe { std::slice::from_raw_parts(decoded.error, decoded.error_size) }.to_vec()
+        };
+        unsafe { hirari_wave64_decoded_free(&mut decoded) };
+        let mut message = b"WAVE64 decode failed: ".to_vec();
+        message.extend_from_slice(&detail);
+        message.extend_from_slice(b": ");
+        message.extend_from_slice(path_bytes);
+        return into_handle(build_json(false, true, &message, 0, 0, 0, 0, &[]));
+    }
+    match decode_wav_file(path_bytes) {
+        Some(decoded) => {
+            let samples =
+                unsafe { std::slice::from_raw_parts(decoded.samples, decoded.sample_count) };
+            let json = build_json(
+                true,
+                false,
+                &[],
+                decoded.sample_rate as u32,
+                decoded.channels as u16,
+                decoded.bits_per_sample as u16,
+                (decoded.sample_count / decoded.channels as usize) as u64,
+                samples,
+            );
+            unsafe { hirari_free_decoded_audio(decoded.samples, decoded.sample_count) };
+            into_handle(json)
+        }
+        None => {
+            let mut message = b"Invalid or unsupported WAVE file: ".to_vec();
+            message.extend_from_slice(path_bytes);
+            into_handle(build_json(false, false, &message, 0, 0, 0, 0, &[]))
+        }
+    }
 }
 
 #[no_mangle]

@@ -30,50 +30,13 @@ public:
         uint64_t numSamples;
     };
 
-    struct DiagnosticResult {
-        bool ok = false;
-        std::string format;
-        std::string error;
-        WavInfo info{};
-        std::vector<std::vector<float>> channels;
-    };
-
-    /// Structured native read boundary.  The throwing load APIs remain for
-    /// legacy callers, while bridge/diagnostic callers can preserve the
-    /// actual parser failure instead of collapsing it to `false`.
-    static DiagnosticResult loadDiagnostic(const std::string& path,
-                                           bool wave64 = false) noexcept {
-        DiagnosticResult result;
-        result.format = wave64 ? "WAVE64" : "WAVE";
-        try {
-            result.channels = wave64 ? loadWave64(path, result.info)
-                                     : load(path, result.info);
-            result.ok = true;
-        } catch (const std::exception& exception) {
-            result.error = exception.what();
-        } catch (...) {
-            result.error = "unknown WAVE decoder failure";
-        }
-        return result;
-    }
-
     /// Stable JSON-shaped diagnostic for FFI and native contract callers.
-    /// This is deliberately dependency-free because the reader is used by
-    /// low-level native compile contracts as well as the application bridge.
+    /// Decoding, failure wording and statistics all run in Rust; this only
+    /// copies the returned bytes.
     static std::string loadDiagnosticJson(const std::string& path,
                                           bool wave64 = false) noexcept {
-        const auto result = loadDiagnostic(path, wave64);
-        std::vector<const float*> planes;
-        if (result.ok) {
-            planes.reserve(result.channels.size());
-            for (const auto& channel : result.channels) planes.push_back(channel.data());
-        }
-        void* raw = hirari_wav_diagnostic_json(
-            result.ok, wave64,
-            reinterpret_cast<const uint8_t*>(result.error.data()), result.error.size(),
-            result.info.sampleRate, result.info.numChannels, result.info.bitDepth,
-            result.info.numSamples, planes.data(),
-            result.ok && !result.channels.empty() ? result.channels.front().size() : 0);
+        void* raw = hirari_wav_diagnostic_json_for_path(
+            reinterpret_cast<const uint8_t*>(path.data()), path.size(), wave64);
         if (!raw) return {};
         std::unique_ptr<char, decltype(&hirari_wav_diagnostic_json_free)>
             json(static_cast<char*>(raw), &hirari_wav_diagnostic_json_free);

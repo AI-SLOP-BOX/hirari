@@ -13,6 +13,44 @@ struct WavDecoderState {
     bits_per_sample: u32,
 }
 
+pub(crate) struct DecodedWav {
+    pub samples: *mut f32,
+    pub sample_count: usize,
+    pub channels: u32,
+    pub sample_rate: f64,
+    pub bits_per_sample: u32,
+}
+
+/// Shared RIFF/RF64 decode boundary used by the AudioBuffer adapter and the
+/// path-based diagnostic. A `None` result owns nothing.
+pub(crate) fn decode_wav_file(path_bytes: &[u8]) -> Option<DecodedWav> {
+    if path_bytes.is_empty() || path_bytes.len() > 1024 * 1024 || !supported_wav_path(path_bytes) {
+        return None;
+    }
+    let c_path = CString::new(path_bytes.split(|byte| *byte == 0).next().unwrap_or_default()).ok()?;
+    let decoded: NativeDecodedAudio = unsafe { hirari_decode_audio_file(c_path.as_ptr()) };
+    if decoded.status != 0 || decoded.samples.is_null() || decoded.channels == 0
+        || decoded.channels > 32 || decoded.sample_count == 0
+        || decoded.sample_count % decoded.channels as usize != 0
+        || decoded.sample_count > (512_u64 * 1024 * 1024 / 4) as usize
+        || !decoded.sample_rate.is_finite()
+        || !(8_000.0..=384_000.0).contains(&decoded.sample_rate)
+        || decoded.sample_count / decoded.channels as usize > u32::MAX as usize
+    {
+        if !decoded.samples.is_null() {
+            unsafe { hirari_free_decoded_audio(decoded.samples, decoded.sample_count) };
+        }
+        return None;
+    }
+    Some(DecodedWav {
+        samples: decoded.samples,
+        sample_count: decoded.sample_count,
+        channels: decoded.channels,
+        sample_rate: decoded.sample_rate,
+        bits_per_sample: decoded.bits_per_sample,
+    })
+}
+
 impl WavDecoderState {
     fn new() -> Self {
         Self { samples: std::ptr::null_mut(), sample_count: 0, channels: 0,
@@ -74,31 +112,13 @@ pub unsafe extern "C" fn hirari_wav_decoder_open(
 ) -> bool {
     let Some(state) = (unsafe { state.cast::<WavDecoderState>().as_mut() }) else { return false };
     state.clear();
-    if path.is_null() || path_size == 0 || path_size > 1024 * 1024 {
+    if path.is_null() || path_size == 0 {
         return false;
     }
-    let path_bytes = unsafe { std::slice::from_raw_parts(path, path_size) };
-    if !supported_wav_path(path_bytes) {
+    let Some(decoded) = decode_wav_file(unsafe { std::slice::from_raw_parts(path, path_size) })
+    else {
         return false;
-    }
-    let c_path = match CString::new(path_bytes.split(|byte| *byte == 0).next().unwrap_or_default()) {
-        Ok(path) => path,
-        Err(_) => return false,
     };
-    let decoded: NativeDecodedAudio = unsafe { hirari_decode_audio_file(c_path.as_ptr()) };
-    if decoded.status != 0 || decoded.samples.is_null() || decoded.channels == 0
-        || decoded.channels > 32 || decoded.sample_count == 0
-        || decoded.sample_count % decoded.channels as usize != 0
-        || decoded.sample_count > (512_u64 * 1024 * 1024 / 4) as usize
-        || !decoded.sample_rate.is_finite()
-        || !(8_000.0..=384_000.0).contains(&decoded.sample_rate)
-        || decoded.sample_count / decoded.channels as usize > u32::MAX as usize
-    {
-        if !decoded.samples.is_null() {
-            unsafe { hirari_free_decoded_audio(decoded.samples, decoded.sample_count) };
-        }
-        return false;
-    }
     state.samples = decoded.samples;
     state.sample_count = decoded.sample_count;
     state.channels = decoded.channels;
