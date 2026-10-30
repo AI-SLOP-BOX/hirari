@@ -1144,27 +1144,6 @@ extern "C" uint32_t hirari_dynamic_compressor_tail(const void* state);
 extern "C" uint8_t hirari_plugin_fingerprint(const char* path, size_t path_size,
                                                uint64_t* output);
 
-struct HirariPluginBlacklistRecord {
-    uint8_t* path;
-    size_t path_size;
-    uint32_t reason;
-};
-extern "C" void* hirari_plugin_blacklist_create(const uint8_t* path, size_t path_size);
-extern "C" void hirari_plugin_blacklist_destroy(void* state);
-extern "C" bool hirari_plugin_blacklist_is_blocked(
-    const void* state, const char* path, size_t path_size,
-    uint64_t fingerprint, bool has_fingerprint);
-extern "C" uint32_t hirari_plugin_blacklist_reason(
-    const void* state, const char* path, size_t path_size);
-extern "C" bool hirari_plugin_blacklist_set(
-    void* state, const char* path, size_t path_size, uint32_t reason,
-    uint64_t fingerprint, bool has_fingerprint);
-extern "C" bool hirari_plugin_blacklist_remove(
-    void* state, const char* path, size_t path_size);
-extern "C" bool hirari_plugin_blacklist_snapshot(
-    const void* state, HirariPluginBlacklistRecord** output, size_t* output_count);
-extern "C" void hirari_plugin_blacklist_snapshot_free(
-    HirariPluginBlacklistRecord* records, size_t count);
 extern "C" void* hirari_plugin_registry_create();
 extern "C" void hirari_plugin_registry_destroy(void* state);
 extern "C" bool hirari_plugin_registry_record_scan_failure(
@@ -1970,11 +1949,6 @@ extern "C" uint32_t hirari_plugin_sandbox_block_outcome(
     bool produced, uint32_t overruns, uint8_t failure_code, bool failed);
 extern "C" uint32_t hirari_plugin_sandbox_transport_retry_delay(uint32_t attempt, uint8_t failure);
 extern "C" size_t hirari_plugin_sandbox_move(uint32_t*, uint32_t*, size_t, size_t, uint32_t, uint32_t);
-extern "C" bool hirari_plugin_cache_key(
-    const uint8_t* path, size_t path_size, uint8_t* output,
-    size_t output_capacity, size_t* output_size);
-extern "C" const char* hirari_plugin_cache_path();
-
 extern "C" void* hirari_midi_learn_create();
 extern "C" void hirari_midi_learn_destroy(void* state);
 extern "C" void hirari_midi_learn_add_mapping(

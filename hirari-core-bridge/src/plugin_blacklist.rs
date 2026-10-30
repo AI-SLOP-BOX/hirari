@@ -1,18 +1,10 @@
 //! Rust-owned, fingerprint-aware blacklist for plug-in scan failures.
 
 use std::collections::BTreeMap;
-use std::ffi::{c_char, c_void};
 use std::io::Write;
 use std::path::{Component, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-
-#[repr(C)]
-pub struct PluginBlacklistRecord {
-    pub path: *mut u8,
-    pub path_size: usize,
-    pub reason: u32,
-}
 
 #[derive(Clone, Copy)]
 struct Entry {
@@ -195,221 +187,183 @@ fn cache_key(value: &str) -> String {
     normalized.to_string_lossy().replace('\\', "/")
 }
 
-/// Produces the canonical slash-separated identity used by blacklist records
-/// and the plugin cache facade. A null output with zero capacity queries the
-/// required byte count; output is not NUL terminated.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_cache_key(
-    path: *const u8,
-    path_size: usize,
-    output: *mut u8,
-    output_capacity: usize,
-    output_size: *mut usize,
-) -> bool {
-    if path.is_null() || path_size == 0 || path_size > 1024 * 1024 || output_size.is_null() {
-        return false;
+// ---- process-wide scan cache -------------------------------------------------
+//
+// The plug-in host used to spell "key + fingerprint + blacklist record" out in
+// C++ for every admission decision. The whole rule lives here now: callers hand
+// over the on-disk path and this facade resolves the canonical key and content
+// fingerprint before touching the shared record.
+
+static SCAN_CACHE: std::sync::OnceLock<Option<Blacklist>> = std::sync::OnceLock::new();
+
+fn scan_cache() -> Option<&'static Blacklist> {
+    SCAN_CACHE
+        .get_or_init(|| {
+            let mut path = crate::plugin_cache_path::cache_file_path()?
+                .clone()
+                .into_os_string();
+            path.push(".blacklist");
+            Some(Blacklist::open(PathBuf::from(path)))
+        })
+        .as_ref()
+}
+
+fn valid_path(path: *const u8, path_size: usize) -> Option<String> {
+    if path.is_null() || path_size == 0 || path_size > 1024 * 1024 {
+        return None;
     }
-    let path_bytes = unsafe { std::slice::from_raw_parts(path, path_size) };
-    let Ok(path) = std::str::from_utf8(path_bytes) else {
-        return false;
-    };
+    let text = std::str::from_utf8(unsafe { std::slice::from_raw_parts(path, path_size) }).ok()?;
+    (!text.contains('\0')).then(|| text.to_owned())
+}
+
+fn key_fingerprint(path: &str) -> (String, Option<u64>) {
     let key = cache_key(path);
-    unsafe { *output_size = key.len() };
-    if key.is_empty() {
-        return true;
-    }
-    if output.is_null() && output_capacity == 0 {
-        return true;
-    }
-    if output.is_null() || output_capacity < key.len() {
-        return false;
-    }
-    unsafe { std::ptr::copy_nonoverlapping(key.as_ptr(), output, key.len()) };
-    true
+    let fingerprint = crate::plugin_fingerprint::fingerprint_path(std::path::Path::new(&key));
+    (key, fingerprint)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_create(
-    path: *const u8,
-    path_size: usize,
-) -> *mut c_void {
-    if path.is_null() || path_size == 0 || path_size > 4096 {
-        return std::ptr::null_mut();
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(path, path_size) };
-    #[cfg(unix)]
-    let path = {
-        use std::os::unix::ffi::OsStrExt;
-        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
-    };
-    #[cfg(not(unix))]
-    let path = match std::str::from_utf8(bytes) {
-        Ok(path) => PathBuf::from(path),
-        Err(_) => return std::ptr::null_mut(),
-    };
-    Box::into_raw(Box::new(Blacklist::open(path))).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        unsafe { drop(Box::from_raw(state.cast::<Blacklist>())) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_is_blocked(
-    state: *const c_void,
-    path: *const c_char,
-    path_size: usize,
-    fingerprint: u64,
-    has_fingerprint: bool,
-) -> bool {
-    let Some(state) = (unsafe { state.cast::<Blacklist>().as_ref() }) else {
-        return false;
-    };
-    let Some(path) = (unsafe { read_string(path, path_size) }) else {
-        return false;
-    };
+fn blocked(state: &Blacklist, key: &str, fingerprint: Option<u64>) -> bool {
     let Ok(entries) = state.entries.lock() else {
         return false;
     };
-    let Some(entry) = entries.get(&path) else {
+    let Some(entry) = entries.get(key) else {
         return false;
     };
     match entry.fingerprint {
         None => true,
-        Some(saved) => has_fingerprint && saved == fingerprint,
+        Some(saved) => fingerprint == Some(saved),
     }
 }
 
+/// Admission gate: an empty path is never scanned, and a path whose current
+/// content fingerprint still matches a recorded failure stays blocked. A
+/// replaced plug-in binary therefore becomes scannable again.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_reason(
-    state: *const c_void,
-    path: *const c_char,
+pub unsafe extern "C" fn hirari_plugin_scan_cache_should_scan(
+    path: *const u8,
     path_size: usize,
-) -> u32 {
-    let Some(state) = (unsafe { state.cast::<Blacklist>().as_ref() }) else {
-        return 0;
+) -> bool {
+    let Some(path) = (unsafe { valid_path(path, path_size) }) else {
+        return false;
     };
-    let Some(path) = (unsafe { read_string(path, path_size) }) else {
-        return 0;
+    let Some(state) = scan_cache() else {
+        return true;
     };
-    state
-        .entries
-        .lock()
-        .ok()
-        .and_then(|entries| entries.get(&path).map(|entry| entry.reason))
-        .unwrap_or(0)
+    let (key, fingerprint) = key_fingerprint(&path);
+    !key.is_empty() && !blocked(state, &key, fingerprint)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_set(
-    state: *mut c_void,
-    path: *const c_char,
+pub unsafe extern "C" fn hirari_plugin_scan_cache_record_failure(
+    path: *const u8,
     path_size: usize,
     reason: u32,
-    fingerprint: u64,
-    has_fingerprint: bool,
 ) -> bool {
-    let Some(state) = (unsafe { state.cast::<Blacklist>().as_mut() }) else {
+    let Some(path) = (unsafe { valid_path(path, path_size) }) else {
         return false;
     };
-    let Some(path) = (unsafe { read_string(path, path_size) }) else {
+    let Some(state) = scan_cache() else {
         return false;
     };
+    let (key, _) = key_fingerprint(&path);
+    if key.is_empty() {
+        return false;
+    }
+    // The record stores the fingerprint of the path the host actually probed,
+    // matching the native scan, which fingerprints the file it just loaded.
+    let fingerprint = crate::plugin_fingerprint::fingerprint_path(std::path::Path::new(&path));
     let Ok(mut entries) = state.entries.lock() else {
         return false;
     };
     entries.insert(
-        path,
+        key,
         Entry {
             reason,
-            fingerprint: has_fingerprint.then_some(fingerprint),
+            fingerprint,
         },
     );
     state.persist(&entries).is_ok()
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_remove(
-    state: *mut c_void,
-    path: *const c_char,
+pub unsafe extern "C" fn hirari_plugin_scan_cache_record_success(
+    path: *const u8,
     path_size: usize,
 ) -> bool {
-    let Some(state) = (unsafe { state.cast::<Blacklist>().as_mut() }) else {
+    let Some(path) = (unsafe { valid_path(path, path_size) }) else {
         return false;
     };
-    let Some(path) = (unsafe { read_string(path, path_size) }) else {
+    let Some(state) = scan_cache() else {
         return false;
     };
+    let key = cache_key(&path);
     let Ok(mut entries) = state.entries.lock() else {
         return false;
     };
-    entries.remove(&path);
+    entries.remove(&key);
     state.persist(&entries).is_ok()
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_snapshot(
-    state: *const c_void,
-    output: *mut *mut PluginBlacklistRecord,
-    output_count: *mut usize,
-) -> bool {
-    if state.is_null() || output.is_null() || output_count.is_null() {
-        return false;
-    }
-    unsafe {
-        output.write(std::ptr::null_mut());
-        output_count.write(0);
-    }
-    let state = unsafe { &*state.cast::<Blacklist>() };
-    let Ok(entries) = state.entries.lock() else {
-        return false;
-    };
-    let mut records = Vec::with_capacity(entries.len());
-    for (path, entry) in entries.iter() {
-        let bytes = path.as_bytes().to_vec().into_boxed_slice();
-        let size = bytes.len();
-        records.push(PluginBlacklistRecord {
-            path: Box::into_raw(bytes) as *mut u8,
-            path_size: size,
-            reason: entry.reason,
-        });
-    }
-    if !records.is_empty() {
-        let records = records.into_boxed_slice();
-        unsafe {
-            output_count.write(records.len());
-            output.write(Box::into_raw(records) as *mut PluginBlacklistRecord);
-        }
-    }
-    true
-}
+#[cfg(test)]
+mod scan_cache_tests {
+    use super::*;
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_blacklist_snapshot_free(
-    records: *mut PluginBlacklistRecord,
-    count: usize,
-) {
-    if records.is_null() {
-        return;
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hirari-scan-cache-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        dir
     }
-    let records = std::ptr::slice_from_raw_parts_mut(records, count);
-    for record in unsafe { &mut *records } {
-        if !record.path.is_null() {
-            let bytes = std::ptr::slice_from_raw_parts_mut(record.path, record.path_size);
-            unsafe { drop(Box::from_raw(bytes)) };
-        }
-    }
-    unsafe { drop(Box::from_raw(records)) };
-}
 
-unsafe fn read_string(path: *const c_char, path_size: usize) -> Option<String> {
-    if path.is_null() || path_size == 0 || path_size > 1024 * 1024 {
-        return None;
+    #[test]
+    fn recorded_failure_blocks_until_the_plugin_changes() {
+        let dir = scratch("failure");
+        let plugin = dir.join("plugin.clap");
+        std::fs::write(&plugin, b"plugin-v1").expect("write plugin");
+        let text = plugin.to_string_lossy().to_string();
+
+        let (key, fingerprint) = key_fingerprint(&text);
+        let fingerprint = fingerprint.expect("fingerprint");
+        let store = Blacklist::open(dir.join("blacklist"));
+        assert!(!blocked(&store, &key, Some(fingerprint)));
+
+        entries_with(&store, &key, fingerprint, 17);
+        assert!(blocked(&store, &key, Some(fingerprint)));
+        // The record survives a reopen, which is the persisted cache contract.
+        let reopened = Blacklist::open(dir.join("blacklist"));
+        assert!(blocked(&reopened, &key, Some(fingerprint)));
+
+        // A "/./" alias canonicalises to the same key.
+        let alias = dir.join(".").join("plugin.clap");
+        assert_eq!(cache_key(&alias.to_string_lossy()), key);
+
+        // Replacing the binary invalidates the recorded fingerprint.
+        std::fs::write(&plugin, b"plugin-v2-with-new-content").expect("replace plugin");
+        let (_, replaced) = key_fingerprint(&text);
+        assert_ne!(replaced, Some(fingerprint));
+        assert!(!blocked(&store, &key, replaced));
+        let _ = std::fs::remove_dir_all(&dir);
     }
-    let bytes = unsafe { std::slice::from_raw_parts(path.cast::<u8>(), path_size) };
-    let text = std::str::from_utf8(bytes).ok()?;
-    (!text.contains('\0')).then(|| text.to_owned())
+
+    #[test]
+    fn empty_path_is_never_admitted() {
+        assert!(unsafe { hirari_plugin_scan_cache_should_scan(std::ptr::null(), 0) } == false);
+        let text = b"";
+        assert!(!unsafe { hirari_plugin_scan_cache_should_scan(text.as_ptr(), text.len()) });
+    }
+
+    fn entries_with(store: &Blacklist, key: &str, fingerprint: u64, reason: u32) {
+        let mut entries = store.entries.lock().expect("entries");
+        entries.insert(
+            key.to_owned(),
+            Entry {
+                reason,
+                fingerprint: Some(fingerprint),
+            },
+        );
+        store.persist(&entries).expect("persist");
+    }
 }

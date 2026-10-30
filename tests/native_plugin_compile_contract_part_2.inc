@@ -164,27 +164,27 @@
         std::ofstream pluginFile(pluginFingerprintPath, std::ios::binary | std::ios::trunc);
         pluginFile << "plugin-v1";
     }
-    const auto fingerprintV1 = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(
+    const auto fingerprintV1 = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(
         pluginFingerprintPath);
     if (!fingerprintV1) return 32;
     {
         std::ofstream pluginFile(pluginFingerprintPath, std::ios::binary | std::ios::trunc);
         pluginFile << "plugin-v2-with-new-content";
     }
-    const auto fingerprintV2 = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(
+    const auto fingerprintV2 = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(
         pluginFingerprintPath);
-    auto& pluginCache = Hirari::Core::Plugins::PluginCacheManager::getInstance();
-    pluginCache.recordScanFailure(pluginFingerprintPath.string(), 17);
-    if (!pluginCache.isBlacklisted(pluginFingerprintPath.string())) return 43;
+    Hirari::Core::Plugins::PluginScanCache::recordScanFailure(pluginFingerprintPath.string(), 17);
+    if (Hirari::Core::Plugins::PluginScanCache::shouldScan(pluginFingerprintPath.string())) return 43;
     const auto aliasPath = pluginFingerprintPath.parent_path() / "." /
                            pluginFingerprintPath.filename();
-    if (!pluginCache.isBlacklisted(aliasPath.string())) return 47;
+    if (Hirari::Core::Plugins::PluginScanCache::shouldScan(aliasPath.string())) return 47;
     {
         std::ofstream pluginFile(pluginFingerprintPath, std::ios::binary | std::ios::trunc);
         pluginFile << "plugin-v3-replaced";
     }
-    if (pluginCache.isBlacklisted(pluginFingerprintPath.string())) return 44;
-    pluginCache.clearScanFailure(aliasPath.string());
+    if (!Hirari::Core::Plugins::PluginScanCache::shouldScan(pluginFingerprintPath.string())) return 44;
+    Hirari::Core::Plugins::PluginScanCache::recordScanSuccess(aliasPath.string());
+    if (!Hirari::Core::Plugins::PluginScanCache::shouldScan(pluginFingerprintPath.string())) return 48;
     std::filesystem::remove(pluginFingerprintPath, offlineCleanup);
     if (!fingerprintV2 || *fingerprintV1 == *fingerprintV2) return 33;
 

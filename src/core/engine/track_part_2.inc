@@ -161,11 +161,11 @@
             m_lastSandboxFailureText = processor->failureCode() == 0
                 ? "sandbox-start-failed"
                 : processor->failureText();
-            Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanFailure(
+            Hirari::Core::Plugins::PluginScanCache::recordScanFailure(
                 pluginPath, processor->failureCode());
             return false;
         }
-        Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(pluginPath);
+        Hirari::Core::Plugins::PluginScanCache::recordScanSuccess(pluginPath);
         m_lastSandboxFailure.store(0, std::memory_order_release);
         m_lastSandboxFailureText = "none";
         const bool midiInstrument = processor->isMidiInstrument();
@@ -343,7 +343,7 @@
         const bool restarted = sandbox && sandbox->restart(true);
         if (restarted) markProjectLayoutChanged();
         if (restarted && sandboxIndex < m_sandboxedPluginPaths.size()) {
-            Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(
+            Hirari::Core::Plugins::PluginScanCache::recordScanSuccess(
                 m_sandboxedPluginPaths[sandboxIndex]);
         }
         return restarted;
@@ -358,7 +358,7 @@
             if (sandbox->pollHealth()) continue;
             if (autoRestart && sandbox->canAutoRetry() && sandbox->autoRestart()) {
                 if (sandboxIndex < m_sandboxedPluginPaths.size()) {
-                    Hirari::Core::Plugins::PluginCacheManager::getInstance().recordScanSuccess(
+                    Hirari::Core::Plugins::PluginScanCache::recordScanSuccess(
                         m_sandboxedPluginPaths[sandboxIndex]);
                 }
                 ++recovered;

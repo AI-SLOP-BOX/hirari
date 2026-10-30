@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Plug-in scan admission is now path-based: `PluginCacheManager`'s key
+  computation, content fingerprinting, blacklist record and persistence moved
+  into the Rust scan cache, so callers pass only the plug-in path and the
+  obsolete blacklist handle API (and its C++ declarations) is gone.
 - Plugin preset/preset-automation, region comp-range and range-edit calls,
   spatial/HRTF placement, track and plugin automation curves, and the whole
   undo/redo/transaction surface now dispatch from Rust straight to their Rust

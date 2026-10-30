@@ -46,7 +46,6 @@ int main() {
         if (invalid.isValid()) return 69;
         const auto cache_key = descriptor.stateCacheKey();
         if (cache_key.find("com.hirari.sdk.contract@1.0.0") == std::string::npos) return 70;
-        if (Hirari::Core::Plugins::PluginCacheManager::stateCacheKey(descriptor) != cache_key) return 72;
         invalid = descriptor;
         invalid.stateSchemaVersion++;
         if (invalid.stateCacheKey() == cache_key) return 71;
@@ -264,13 +263,13 @@ int main() {
         std::ofstream output(temp, std::ios::binary | std::ios::trunc);
         output << "version-one";
     }
-    const auto first = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(temp);
+    const auto first = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(temp);
     if (!first || *first == 0) return 2;
     {
         std::ofstream output(temp, std::ios::binary | std::ios::trunc);
         output << "version-two-with-a-different-size";
     }
-    const auto second = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(temp);
+    const auto second = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(temp);
     std::error_code cleanup;
     std::filesystem::remove(temp, cleanup);
     if (!second || *second == *first) return 3;
@@ -281,7 +280,7 @@ int main() {
         std::ofstream(directoryFingerprint / "z.bin", std::ios::binary) << "z";
         std::ofstream(directoryFingerprint / "nested" / "a.bin", std::ios::binary) << "a";
     }
-    const auto directoryFirst = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
+    const auto directoryFirst = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(directoryFingerprint);
     std::filesystem::remove_all(directoryFingerprint, cleanup);
     std::filesystem::create_directories(directoryFingerprint / "nested", cleanup);
     {
@@ -290,6 +289,6 @@ int main() {
         std::ofstream(directoryFingerprint / "nested" / "a.bin", std::ios::binary) << "a";
         std::ofstream(directoryFingerprint / "z.bin", std::ios::binary) << "z";
     }
-    const auto directorySecond = Hirari::Core::Plugins::PluginCacheManager::fingerprintForPath(directoryFingerprint);
+    const auto directorySecond = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(directoryFingerprint);
     std::filesystem::remove_all(directoryFingerprint, cleanup);
     if (!directoryFirst || !directorySecond || *directoryFirst != *directorySecond) return 4;
