@@ -10,21 +10,12 @@ bool HirariUnifiedEngine::move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t
     syncStructuralChanges();
     return true;
 }
-bool HirariUnifiedEngine::set_phase_invert(uint32_t tid, bool inverted) {
-    return hirari_routing_edit_set_phase_invert(this, tid, inverted);
-}
-bool HirariUnifiedEngine::set_track_delay_samples(uint32_t tid, uint32_t samples) {
-    return hirari_routing_edit_set_track_delay_samples(this, tid, samples);
-}
 uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
         if (track && track->getId() == tid) return track->getTrackDelaySamples();
     }
     return 0;
-}
-bool HirariUnifiedEngine::set_track_armed(uint32_t tid, bool armed) {
-    return hirari_routing_edit_set_track_armed(this, tid, armed);
 }
 
 bool HirariUnifiedEngine::set_track_input_monitor(uint32_t tid, bool enabled) {
@@ -37,9 +28,6 @@ bool HirariUnifiedEngine::set_track_input_monitor_channels(
         this, tid, enabled, leftChannel, rightChannel);
 }
 
-void HirariUnifiedEngine::set_macro_value(uint32_t macroIndex, float value) {
-    hirari_control_edit_set_macro_value(this, macroIndex, value);
-}
 bool HirariUnifiedEngine::bind_midi_cc_to_macro(uint8_t channel, uint8_t cc,
                                                uint32_t macroIndex, float minimum,
                                                float maximum, float curve,
@@ -65,9 +53,6 @@ void HirariUnifiedEngine::handle_midi_cc14(uint8_t channel, uint16_t controller,
 }
 void HirariUnifiedEngine::set_preview_synth_engine(uint32_t engine) {
     hirari_preview_synth_set_engine(m_previewSynthState, engine);
-}
-bool HirariUnifiedEngine::set_route(uint32_t sourceId, uint32_t destId, bool enabled) {
-    return hirari_routing_edit_set_route(this, sourceId, destId, enabled);
 }
 bool HirariUnifiedEngine::set_route_gain(uint32_t sourceId, uint32_t destId, float gain,
                                          bool enabled) {
@@ -709,6 +694,3 @@ uint32_t HirariUnifiedEngine::split_region_with_right_id(uint32_t tid, uint32_t 
     return hirari_region_split(this, tid, rid, splitBeat);
 }
 
-uint32_t HirariUnifiedEngine::duplicate_region(uint32_t tid, uint32_t rid, uint64_t startSample) {
-    return hirari_region_duplicate(this, tid, rid, startSample);
-}

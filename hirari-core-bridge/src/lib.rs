@@ -169,13 +169,11 @@ pub mod ffi {
         fn bus_track_exists(self: &AudioEngine, bus_track_id: u32) -> bool;
         fn get_master_gain(self: &AudioEngine) -> f32;
         fn get_track_volume(self: &AudioEngine, tid: u32) -> f32;
-        fn set_track_delay_samples(self: &AudioEngine, tid: u32, samples: u32) -> bool;
         fn get_track_delay_samples(self: &AudioEngine, tid: u32) -> u32;
         fn set_offline_render_target(self: &AudioEngine, tid: u32) -> bool;
         fn clear_offline_render_target(self: &AudioEngine);
         fn set_offline_render_tail_seconds(self: &AudioEngine, seconds: f32);
         fn set_offline_render_options(self: &AudioEngine, pre_fader: bool, include_inserts: bool);
-        fn set_phase_invert(self: &AudioEngine, tid: u32, inverted: bool) -> bool;
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
         fn is_silent_fallback(self: &AudioEngine) -> bool;
         fn audio_driver_status(self: &AudioEngine) -> String;
@@ -245,21 +243,12 @@ pub mod ffi {
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn trigger_preview_sample(self: &AudioEngine);
         fn shutdown(self: &AudioEngine);
-        fn add_track(self: &AudioEngine, t_type: u32) -> u32;
         fn add_vca_group(self: &AudioEngine, group_id: u32, gain: f32) -> bool;
         fn assign_track_to_vca(self: &AudioEngine, track_id: u32, group_id: u32) -> bool;
         fn set_vca_group_gain(self: &AudioEngine, group_id: u32, gain: f32) -> bool;
-        fn get_vca_track_gain(self: &AudioEngine, track_id: u32) -> f32;
         fn get_vca_snapshot_json(self: &AudioEngine) -> String;
-        fn clear_vca_groups(self: &AudioEngine);
-        fn remove_track(self: &AudioEngine, id: u32) -> bool;
-        fn set_track_name(self: &AudioEngine, id: u32, name: &str) -> bool;
         fn new_project(self: &AudioEngine);
-        fn duplicate_track(self: &AudioEngine, id: u32) -> u32;
-        fn add_plugin(self: &AudioEngine, tid: u32, plugin_type: u32) -> bool;
-        fn remove_plugin(self: &AudioEngine, tid: u32, plugin_index: u32) -> bool;
         fn move_plugin(self: &AudioEngine, tid: u32, from_index: u32, to_index: u32) -> bool;
-        fn add_sandboxed_plugin(self: &AudioEngine, tid: u32, path: &str) -> bool;
         fn process_sandboxed_plugin_block(
             self: &AudioEngine,
             tid: u32,
@@ -308,13 +297,8 @@ pub mod ffi {
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
         fn region_table_mirror_matches(self: &AudioEngine, tid: u32) -> bool;
         fn queue_region_import(self: &AudioEngine, tid: u32, path: &str, start_sample: u64) -> u64;
-        fn complete_region_import(self: &AudioEngine, ticket: u64) -> u8;
-        fn replace_region_audio(self: &AudioEngine, tid: u32, rid: u32, path: &str) -> bool;
-        fn move_region(self: &AudioEngine, tid: u32, rid: u32, start: f64) -> bool;
-        fn move_region_sync_group(self: &AudioEngine, tid: u32, rid: u32, start: f64) -> bool;
         fn split_region(self: &AudioEngine, tid: u32, rid: u32, split: f64) -> bool;
         fn split_region_with_right_id(self: &AudioEngine, tid: u32, rid: u32, split: f64) -> u32;
-        fn remove_region(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn append_region_processing(
             self: &AudioEngine,
             tid: u32,
@@ -325,18 +309,6 @@ pub mod ffi {
             enabled: bool,
         ) -> bool;
         fn clear_region_processing(self: &AudioEngine, tid: u32, rid: u32) -> bool;
-        fn duplicate_region(self: &AudioEngine, tid: u32, rid: u32, start_sample: u64) -> u32;
-        fn set_region_gain(self: &AudioEngine, tid: u32, rid: u32, gain: f32) -> bool;
-        fn set_region_muted(self: &AudioEngine, tid: u32, rid: u32, muted: bool) -> bool;
-        fn set_region_fades(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            fade_in: f32,
-            fade_out: f32,
-        ) -> bool;
-        fn set_region_reverse(self: &AudioEngine, tid: u32, rid: u32, reverse: bool) -> bool;
-        fn set_region_sync_group(self: &AudioEngine, tid: u32, rid: u32, group: u32) -> bool;
         fn set_region_warp_markers(
             self: &AudioEngine,
             tid: u32,
@@ -370,20 +342,11 @@ pub mod ffi {
             grid_beats: f64,
             swing: f32,
         ) -> bool;
-        fn region_quantize_status(self: &AudioEngine, tid: u32, rid: u32) -> u8;
-        fn finalize_region_quantize(self: &AudioEngine, tid: u32, rid: u32) -> bool;
-        fn set_region_warp_ratio(self: &AudioEngine, tid: u32, rid: u32, ratio: f64) -> bool;
         fn set_region_pitch_preserve_warp(
             self: &AudioEngine,
             tid: u32,
             rid: u32,
             enabled: bool,
-        ) -> bool;
-        fn set_region_pitch_semitones(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            semitones: f32,
         ) -> bool;
         fn set_region_audio_note_segment(
             self: &AudioEngine,
@@ -429,7 +392,6 @@ pub mod ffi {
             value_cents: f64,
             edit_formant: bool,
         ) -> bool;
-        fn clear_region_audio_note_segments(self: &AudioEngine, tid: u32, rid: u32) -> bool;
         fn warp_region_audio_note_segment(
             self: &AudioEngine,
             tid: u32,
@@ -452,15 +414,6 @@ pub mod ffi {
             sample_rate: f64,
         ) -> bool;
         fn region_audio_note_analysis_status(self: &AudioEngine, tid: u32, rid: u32) -> u8;
-        fn finalize_region_audio_note_analysis(self: &AudioEngine, tid: u32, rid: u32) -> bool;
-        fn set_region_loop_count(self: &AudioEngine, tid: u32, rid: u32, count: u32) -> bool;
-        fn set_region_trim(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            start_norm: f32,
-            end_norm: f32,
-        ) -> bool;
         fn clear_midi_notes(self: &AudioEngine);
         fn replace_midi_notes(self: &AudioEngine, packed: Vec<u64>, record_undo: bool) -> bool;
         fn midi_notes_snapshot(self: &AudioEngine) -> Vec<u64>;
@@ -492,7 +445,6 @@ pub mod ffi {
             start_sample: u64,
             length_samples: u64,
         );
-        fn set_track_armed(self: &AudioEngine, tid: u32, armed: bool) -> bool;
         fn set_track_input_monitor(self: &AudioEngine, tid: u32, enabled: bool) -> bool;
         fn set_track_input_monitor_channels(
             self: &AudioEngine,
@@ -537,9 +489,7 @@ pub mod ffi {
             bypassed: bool,
         ) -> bool;
         fn get_plugin_bypass(self: &AudioEngine, tid: u32, plugin_index: u32) -> bool;
-        fn set_macro_value(self: &AudioEngine, macro_index: u32, value: f32);
         fn set_preview_synth_engine(self: &AudioEngine, engine: u32);
-        fn set_route(self: &AudioEngine, source_id: u32, dest_id: u32, enabled: bool) -> bool;
         fn set_route_gain(
             self: &AudioEngine,
             source_id: u32,
@@ -617,7 +567,6 @@ pub mod ffi {
             json: String,
             articulation_id: u32,
         ) -> bool;
-        fn set_expression_map_pro(self: &AudioEngine, tid: u32, json: String) -> bool;
         fn set_track_eq(
             self: &AudioEngine,
             tid: u32,
@@ -674,9 +623,6 @@ pub mod ffi {
             frames: u32,
             channels: u32,
         ) -> Vec<f32>;
-        fn get_region_source_frame_count(self: &AudioEngine, tid: u32, rid: u32) -> u64;
-        fn get_region_sample_rate(self: &AudioEngine, tid: u32, rid: u32) -> f64;
-        fn get_region_channel_count(self: &AudioEngine, tid: u32, rid: u32) -> u32;
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
         fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
         fn get_track_peaks_l_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;

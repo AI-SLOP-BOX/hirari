@@ -1,11 +1,4 @@
-bool HirariUnifiedEngine::remove_track(uint32_t tid) {
-    return hirari_track_remove(this, tid);
-}
 
-bool HirariUnifiedEngine::set_track_name(uint32_t tid, std::string_view name) {
-    return hirari_control_edit_rename_track(
-        this, tid, reinterpret_cast<const uint8_t*>(name.data()), name.size());
-}
 
 float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -233,9 +226,6 @@ uint64_t HirariUnifiedEngine::queue_region_import(
         this, tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(), startSample);
 }
 
-uint8_t HirariUnifiedEngine::complete_region_import(uint64_t ticket) {
-    return hirari_region_import_complete(this, ticket);
-}
 
 void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) {
     uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);

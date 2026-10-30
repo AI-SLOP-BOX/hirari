@@ -62,17 +62,8 @@ rust::Vec<float> HirariUnifiedEngine::get_region_audio_interleaved_range(
         hirari_region_audio_interleaved_range(this, tid, rid, startFrame, frames, channels));
 }
 
-uint64_t HirariUnifiedEngine::get_region_source_frame_count(uint32_t tid, uint32_t rid) {
-    return hirari_region_source_frame_count(this, tid, rid);
-}
 
-double HirariUnifiedEngine::get_region_sample_rate(uint32_t tid, uint32_t rid) {
-    return hirari_region_source_sample_rate(this, tid, rid);
-}
 
-uint32_t HirariUnifiedEngine::get_region_channel_count(uint32_t tid, uint32_t rid) {
-    return hirari_region_audio_channel_count(this, tid, rid);
-}
 
 bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
     // Formats 0/3 are PCM16/PCM24 RIFF/RF64, 1 is Float32 WAVE64, and 2 is

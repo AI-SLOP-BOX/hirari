@@ -54,10 +54,7 @@
     void clear_offline_render_target() noexcept;
     void set_offline_render_tail_seconds(float seconds) noexcept;
     void set_offline_render_options(bool pre_fader, bool include_inserts) noexcept;
-    bool set_phase_invert(uint32_t tid, bool inverted);
-    bool set_track_delay_samples(uint32_t tid, uint32_t samples);
     uint32_t get_track_delay_samples(uint32_t tid) const;
-    bool set_track_armed(uint32_t tid, bool armed);
     bool set_track_input_monitor(uint32_t tid, bool enabled);
     bool set_track_input_monitor_channels(uint32_t tid, bool enabled,
                                           uint32_t leftChannel, uint32_t rightChannel);

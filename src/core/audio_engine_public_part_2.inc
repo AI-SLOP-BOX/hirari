@@ -1,16 +1,10 @@
-    uint32_t add_track(uint32_t type) const { return m_engine ? m_engine->add_track(type) : 0; }
     bool add_vca_group(uint32_t groupId, float gain) const { return m_engine && m_engine->add_vca_group(groupId, gain); }
     bool assign_track_to_vca(uint32_t trackId, uint32_t groupId) const { return m_engine && m_engine->assign_track_to_vca(trackId, groupId); }
     bool set_vca_group_gain(uint32_t groupId, float gain) const { return m_engine && m_engine->set_vca_group_gain(groupId, gain); }
-    float get_vca_track_gain(uint32_t trackId) const { return m_engine ? m_engine->get_vca_track_gain(trackId) : 1.0f; }
     rust::String get_vca_snapshot_json() const { return m_engine ? m_engine->get_vca_snapshot_json() : rust::String("[]"); }
-    void clear_vca_groups() const { if (m_engine) m_engine->clear_vca_groups(); }
-    bool remove_track(uint32_t id) const { return m_engine && m_engine->remove_track(id); }
-    bool set_track_name(uint32_t id, rust::Str name) const { return m_engine && m_engine->set_track_name(id, std::string_view(name.data(), name.size())); }
     void new_project() const { if (m_engine) m_engine->new_project(); }
     bool set_low_latency_mode(bool active) const { return m_engine && m_engine->set_low_latency_mode(active); }
     bool low_latency_mode() const { return m_engine && m_engine->low_latency_mode(); }
-    uint32_t duplicate_track(uint32_t id) const { return m_engine ? m_engine->duplicate_track(id) : 0; }
     bool region_table_mirror_matches(uint32_t tid) const {
         return m_engine && m_engine->region_table_mirror_matches(tid);
     }
@@ -21,19 +15,8 @@
         return m_engine ? m_engine->queue_region_import(
             tid, std::string_view(path.data(), path.size()), startSample) : 0;
     }
-    uint8_t complete_region_import(uint64_t ticket) const {
-        return m_engine ? m_engine->complete_region_import(ticket) : 3;
-    }
-    bool replace_region_audio(uint32_t tid, uint32_t rid, rust::Str path) const {
-        return m_engine && m_engine->replace_region_audio(tid, rid, std::string_view(path.data(), path.size()));
-    }
     
-    bool add_plugin(uint32_t tid, uint32_t pluginType) const { return m_engine && m_engine->add_plugin(tid, pluginType); }
-    bool remove_plugin(uint32_t tid, uint32_t pluginIndex) const { return m_engine && m_engine->remove_plugin(tid, pluginIndex); }
     bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex) const { return m_engine && m_engine->move_plugin(tid, fromIndex, toIndex); }
-    bool add_sandboxed_plugin(uint32_t tid, rust::Str path) const {
-        return m_engine && m_engine->add_sandboxed_plugin(tid, std::string_view(path.data(), path.size()));
-    }
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandbox_index,
                                         rust::Slice<float> left, rust::Slice<float> right) const {
         if (!m_engine || left.empty() || left.size() != right.size()) return false;
@@ -139,9 +122,6 @@
     float get_track_pdc_compensation_ms(uint32_t tid) const {
         return m_engine ? m_engine->get_track_pdc_compensation_ms(tid) : 0.0f;
     }
-    void set_macro_value(uint32_t macroIndex, float value) const {
-        if (m_engine) m_engine->set_macro_value(macroIndex, value);
-    }
     bool bind_midi_cc_to_macro(uint8_t channel, uint8_t cc, uint32_t macroIndex,
                                float minimum, float maximum, float curve,
                                bool pickup) const {
@@ -161,9 +141,6 @@
             channel, controller, macro_index, minimum, maximum, curve, pickup);
     }
     void set_preview_synth_engine(uint32_t engine) const { if (m_engine) m_engine->set_preview_synth_engine(engine); }
-    bool set_route(uint32_t sourceId, uint32_t destId, bool enabled) const {
-        return m_engine && m_engine->set_route(sourceId, destId, enabled);
-    }
     bool set_route_gain(uint32_t sourceId, uint32_t destId, float gain, bool enabled) const {
         return m_engine && m_engine->set_route_gain(sourceId, destId, gain, enabled);
     }
@@ -232,9 +209,6 @@
         std::vector<uint32_t> native(packed.begin(), packed.end());
         return m_engine->set_expression_map(tid, native, std::string(json.data(), json.size()), articulationId);
     }
-    bool set_expression_map_pro(uint32_t tid, rust::String json) const {
-        return m_engine && m_engine->set_expression_map_pro(tid, std::string(json.data(), json.size()));
-    }
     bool set_track_eq(uint32_t tid, float lowBoostDb, float lowCutDb,
                       float highBoostDb, float highCutDb) const {
         return m_engine && m_engine->set_track_eq(tid, lowBoostDb, lowCutDb, highBoostDb, highCutDb);
@@ -246,19 +220,9 @@
         return m_engine && m_engine->set_project_scale(root, type);
     }
 
-    bool move_region(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region(tid, rid, startBeat); }
-    bool move_region_sync_group(uint32_t tid, uint32_t rid, double startBeat) const { return m_engine && m_engine->move_region_sync_group(tid, rid, startBeat); }
     bool split_region(uint32_t tid, uint32_t rid, double split) const { return m_engine && m_engine->split_region(tid, rid, split); }
     uint32_t split_region_with_right_id(uint32_t tid, uint32_t rid, double split) const { return m_engine ? m_engine->split_region_with_right_id(tid, rid, split) : 0; }
-    bool remove_region(uint32_t tid, uint32_t rid) const { return m_engine && m_engine->remove_region(tid, rid); }
-    uint32_t duplicate_region(uint32_t tid, uint32_t rid, uint64_t startSample) const { return m_engine ? m_engine->duplicate_region(tid, rid, startSample) : 0; }
-    bool set_region_gain(uint32_t tid, uint32_t rid, float gain) const { return m_engine && m_engine->set_region_gain(tid, rid, gain); }
-    bool set_region_muted(uint32_t tid, uint32_t rid, bool muted) const { return m_engine && m_engine->set_region_muted(tid, rid, muted); }
-    bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) const { return m_engine && m_engine->set_region_fades(tid, rid, fadeIn, fadeOut); }
-    bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) const { return m_engine && m_engine->set_region_reverse(tid, rid, reverse); }
-    bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio) const { return m_engine && m_engine->set_region_warp_ratio(tid, rid, ratio); }
     bool set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled) const { return m_engine && m_engine->set_region_pitch_preserve_warp(tid, rid, enabled); }
-    bool set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones) const { return m_engine && m_engine->set_region_pitch_semitones(tid, rid, semitones); }
     bool set_region_audio_note_segment(uint32_t tid, uint32_t rid, double startSeconds,
                                        double endSeconds, double pitchOffsetCents,
                                        double formantOffsetCents) const {
@@ -295,9 +259,6 @@
             tid, rid, segmentStartSeconds, oldPositionSeconds, newPositionSeconds,
             valueCents, editFormant);
     }
-    bool clear_region_audio_note_segments(uint32_t tid, uint32_t rid) const {
-        return m_engine && m_engine->clear_region_audio_note_segments(tid, rid);
-    }
     bool warp_region_audio_note_segment(uint32_t tid, uint32_t rid, double segmentStart,
                                         double newStart, double newEnd) const {
         return m_engine && m_engine->warp_region_audio_note_segment(tid, rid, segmentStart, newStart, newEnd);
@@ -312,16 +273,10 @@
     uint8_t region_audio_note_analysis_status(uint32_t tid, uint32_t rid) const {
         return m_engine ? m_engine->region_audio_note_analysis_status(tid, rid) : 0;
     }
-    bool finalize_region_audio_note_analysis(uint32_t tid, uint32_t rid) const {
-        return m_engine && m_engine->finalize_region_audio_note_analysis(tid, rid);
-    }
-    bool set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count) const { return m_engine && m_engine->set_region_loop_count(tid, rid, count); }
-    bool set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group) const { return m_engine && m_engine->set_region_sync_group(tid, rid, group); }
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, rust::Str operation, float parameter, bool enabled) const {
         return m_engine && m_engine->append_region_processing(tid, rid, stepId, std::string_view(operation.data(), operation.size()), parameter, enabled);
     }
     bool clear_region_processing(uint32_t tid, uint32_t rid) const { return m_engine && m_engine->clear_region_processing(tid, rid); }
-    bool set_region_trim(uint32_t tid, uint32_t rid, float startNorm, float endNorm) const { return m_engine && m_engine->set_region_trim(tid, rid, startNorm, endNorm); }
     void clear_midi_notes() const { if (m_engine) m_engine->clear_midi_notes(); }
     bool remove_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample) const { return m_engine && m_engine->remove_midi_notes_range(trackId, startSample, endSample); }
     bool transpose_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample, int32_t semitones) const { return m_engine && m_engine->transpose_midi_notes_range(trackId, startSample, endSample, semitones); }
@@ -425,15 +380,6 @@
                                                         uint32_t channels) const {
         return m_engine ? m_engine->get_region_audio_interleaved_range(
             tid, rid, startFrame, frames, channels) : rust::Vec<float>{};
-    }
-    uint64_t get_region_source_frame_count(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->get_region_source_frame_count(tid, rid) : 0;
-    }
-    double get_region_sample_rate(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->get_region_sample_rate(tid, rid) : 0.0;
-    }
-    uint32_t get_region_channel_count(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->get_region_channel_count(tid, rid) : 0;
     }
     float get_cpu_total_v() const;
     rust::String get_project_layout_json() const;

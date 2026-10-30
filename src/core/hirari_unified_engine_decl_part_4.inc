@@ -1,12 +1,6 @@
 public:
     bool split_region(uint32_t tid, uint32_t rid, double splitBeat);
     uint32_t split_region_with_right_id(uint32_t tid, uint32_t rid, double splitSample);
-    bool remove_region(uint32_t tid, uint32_t rid);
-    uint32_t duplicate_region(uint32_t tid, uint32_t rid, uint64_t startSample);
-    bool move_region(uint32_t tid, uint32_t rid, double startBeat);
-    bool move_region_sync_group(uint32_t tid, uint32_t rid, double startBeat);
-    bool set_region_gain(uint32_t tid, uint32_t rid, float gain);
-    bool set_region_muted(uint32_t tid, uint32_t rid, bool muted);
     void clear_midi_notes();
     struct ScheduledMidiNote {
         uint32_t trackId = 0;
@@ -26,11 +20,7 @@ public:
     bool move_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample, int64_t deltaSamples);
     void set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
                        uint64_t startSample, uint64_t lengthSamples);
-    bool set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut);
-    bool set_region_reverse(uint32_t tid, uint32_t rid, bool reverse);
-    bool set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio);
     bool set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled);
-    bool set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones);
     bool set_region_audio_note_segment(uint32_t tid, uint32_t rid,
                                        double startSeconds, double endSeconds,
                                        double pitchOffsetCents, double formantOffsetCents);
@@ -51,7 +41,6 @@ public:
                                        double newPositionSeconds,
                                        double valueCents,
                                        bool editFormant);
-    bool clear_region_audio_note_segments(uint32_t tid, uint32_t rid);
     bool warp_region_audio_note_segment(uint32_t tid, uint32_t rid,
                                         double segmentStartSeconds,
                                         double newStartSeconds, double newEndSeconds);
@@ -60,20 +49,14 @@ public:
 
     bool start_region_audio_note_analysis(uint32_t tid, uint32_t rid, double sampleRate);
     uint8_t region_audio_note_analysis_status(uint32_t tid, uint32_t rid) const;
-    bool finalize_region_audio_note_analysis(uint32_t tid, uint32_t rid);
-    bool set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count);
-    bool set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group);
     bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
                                     const std::vector<::HirariRegionAlignmentTargetId>& targets);
     uint8_t region_alignment_status(uint32_t referenceTid, uint32_t referenceRid) const;
     bool finalize_region_alignment(uint32_t referenceTid, uint32_t referenceRid);
     bool quantize_region_sync_group(uint32_t tid, uint32_t rid,
                                     float strength, double gridBeats, float swing);
-    uint8_t region_quantize_status(uint32_t tid, uint32_t rid) const;
-    bool finalize_region_quantize(uint32_t tid, uint32_t rid);
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled);
     bool clear_region_processing(uint32_t tid, uint32_t rid);
-    bool set_region_trim(uint32_t tid, uint32_t rid, float startNorm, float endNorm);
 
     // Project
     bool saveProject(std::string_view path);
@@ -100,6 +83,3 @@ public:
                                                         uint64_t startFrame,
                                                         uint32_t frames,
                                                         uint32_t channels);
-    uint64_t get_region_source_frame_count(uint32_t tid, uint32_t rid);
-    double get_region_sample_rate(uint32_t tid, uint32_t rid);
-    uint32_t get_region_channel_count(uint32_t tid, uint32_t rid);

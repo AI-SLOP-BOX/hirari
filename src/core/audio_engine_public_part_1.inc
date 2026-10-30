@@ -73,9 +73,6 @@ public:
     float get_master_gain() const noexcept {
         return m_engine ? m_engine->get_master_gain() : 1.0f;
     }
-    bool set_track_delay_samples(uint32_t tid, uint32_t samples) const {
-        return m_engine && m_engine->set_track_delay_samples(tid, samples);
-    }
     uint32_t get_track_delay_samples(uint32_t tid) const {
         return m_engine ? m_engine->get_track_delay_samples(tid) : 0u;
     }
@@ -90,12 +87,6 @@ public:
     }
     void set_offline_render_options(bool preFader, bool includeInserts) const noexcept {
         if (m_engine) m_engine->set_offline_render_options(preFader, includeInserts);
-    }
-    bool set_phase_invert(uint32_t tid, bool inverted) const {
-        return m_engine && m_engine->set_phase_invert(tid, inverted);
-    }
-    bool set_track_armed(uint32_t tid, bool armed) const {
-        return m_engine && m_engine->set_track_armed(tid, armed);
     }
     bool set_track_input_monitor(uint32_t tid, bool enabled) const {
         return m_engine && m_engine->set_track_input_monitor(tid, enabled);
@@ -295,12 +286,6 @@ public:
                                     float strength, double gridBeats, float swing) const {
         return m_engine && m_engine->quantize_region_sync_group(
             tid, rid, strength, gridBeats, swing);
-    }
-    uint8_t region_quantize_status(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->region_quantize_status(tid, rid) : 0;
-    }
-    bool finalize_region_quantize(uint32_t tid, uint32_t rid) const {
-        return m_engine && m_engine->finalize_region_quantize(tid, rid);
     }
 
     void trigger_preview_sample() const { if (m_engine) m_engine->trigger_preview_sample(); }

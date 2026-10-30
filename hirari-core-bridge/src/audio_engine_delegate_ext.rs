@@ -1,0 +1,205 @@
+//! Inherent entry points for the engine operations that used to be relayed
+//! through two C++ layers: the `AudioEngine` wrapper forwarder and a
+//! `HirariUnifiedEngine` method that only called one `hirari_*` function.
+//! Both layers are gone; the calls land in the same Rust policy directly.
+
+use std::ffi::c_void;
+
+use crate::{control_edit_host, ffi, plugin_edit_host, region_edit_host, region_jobs};
+
+use crate::realtime_vca_manager::{hirari_vca_clear, hirari_vca_get_cumulative_gain};
+use crate::region_audio::{
+    hirari_region_audio_channel_count, hirari_region_source_frame_count,
+    hirari_region_source_sample_rate,
+};
+use crate::region_time_jobs::{hirari_region_finalize_quantize, hirari_region_quantize_status};
+use crate::routing_edit_host::{
+    hirari_routing_edit_set_phase_invert, hirari_routing_edit_set_route,
+    hirari_routing_edit_set_track_armed, hirari_routing_edit_set_track_delay_samples,
+};
+use crate::track_edit_host::{hirari_track_add, hirari_track_duplicate, hirari_track_remove};
+
+// Scalar field ids shared with the C++ mirror in rust_ffi.hpp.
+const SCALAR_CLIP_GAIN: i32 = 1;
+const SCALAR_MUTED: i32 = 2;
+const SCALAR_REVERSE: i32 = 3;
+const SCALAR_PITCH_SEMITONES: i32 = 4;
+const SCALAR_LOOP_COUNT: i32 = 5;
+const SCALAR_SYNC_GROUP: i32 = 6;
+const SCALAR_FADES: i32 = 7;
+
+fn host(engine: &ffi::AudioEngine) -> *mut c_void {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    core as *mut c_void
+}
+
+fn bytes(text: &str) -> *const u8 {
+    text.as_ptr()
+}
+
+impl ffi::AudioEngine {
+    pub fn add_track(&self, t_type: u32) -> u32 {
+        unsafe { hirari_track_add(host(self), t_type) }
+    }
+
+    pub fn remove_track(&self, id: u32) -> bool {
+        unsafe { hirari_track_remove(host(self), id) }
+    }
+
+    pub fn duplicate_track(&self, id: u32) -> u32 {
+        unsafe { hirari_track_duplicate(host(self), id) }
+    }
+
+    pub fn set_track_name(&self, id: u32, name: &str) -> bool {
+        unsafe { control_edit_host::hirari_control_edit_rename_track(host(self), id, bytes(name), name.len()) }
+    }
+
+    pub fn add_plugin(&self, tid: u32, plugin_type: u32) -> bool {
+        unsafe { plugin_edit_host::hirari_plugin_edit_add(host(self), tid, plugin_type) }
+    }
+
+    pub fn remove_plugin(&self, tid: u32, plugin_index: u32) -> bool {
+        unsafe { plugin_edit_host::hirari_plugin_edit_remove(host(self), tid, plugin_index) }
+    }
+
+    pub fn add_sandboxed_plugin(&self, tid: u32, path: &str) -> bool {
+        unsafe {
+            plugin_edit_host::hirari_plugin_edit_add_sandboxed(host(self), tid, bytes(path), path.len())
+        }
+    }
+
+    pub fn set_phase_invert(&self, tid: u32, inverted: bool) -> bool {
+        unsafe { hirari_routing_edit_set_phase_invert(host(self), tid, inverted) }
+    }
+
+    pub fn set_track_armed(&self, tid: u32, armed: bool) -> bool {
+        unsafe { hirari_routing_edit_set_track_armed(host(self), tid, armed) }
+    }
+
+    pub fn set_track_delay_samples(&self, tid: u32, samples: u32) -> bool {
+        unsafe { hirari_routing_edit_set_track_delay_samples(host(self), tid, samples) }
+    }
+
+    pub fn set_route(&self, source_id: u32, dest_id: u32, enabled: bool) -> bool {
+        unsafe { hirari_routing_edit_set_route(host(self), source_id, dest_id, enabled) }
+    }
+
+    pub fn set_macro_value(&self, macro_index: u32, value: f32) {
+        unsafe { control_edit_host::hirari_control_edit_set_macro_value(host(self), macro_index, value) }
+    }
+
+    pub fn get_vca_track_gain(&self, track_id: u32) -> f32 {
+        hirari_vca_get_cumulative_gain(track_id)
+    }
+
+    pub fn clear_vca_groups(&self) {
+        hirari_vca_clear()
+    }
+
+    pub fn set_expression_map_pro(&self, tid: u32, json: String) -> bool {
+        unsafe {
+            crate::expression_map_edit_host::hirari_expression_map_edit_set_pro(
+                host(self),
+                tid,
+                bytes(&json),
+                json.len(),
+                self.undo_state() as *mut c_void,
+                self.log_state() as *const c_void,
+            )
+        }
+    }
+
+    pub fn replace_region_audio(&self, tid: u32, rid: u32, path: &str) -> bool {
+        unsafe {
+            region_edit_host::hirari_region_edit_replace_audio(host(self), tid, rid, bytes(path), path.len())
+        }
+    }
+
+    pub fn complete_region_import(&self, ticket: u64) -> u8 {
+        unsafe { region_jobs::hirari_region_import_complete(host(self), ticket) }
+    }
+
+    pub fn move_region(&self, tid: u32, rid: u32, start: f64) -> bool {
+        unsafe { region_edit_host::hirari_region_edit_move(host(self), tid, rid, start) }
+    }
+
+    pub fn move_region_sync_group(&self, tid: u32, rid: u32, start: f64) -> bool {
+        unsafe { region_edit_host::hirari_region_edit_move_sync_group(host(self), tid, rid, start) }
+    }
+
+    pub fn remove_region(&self, tid: u32, rid: u32) -> bool {
+        unsafe { region_edit_host::hirari_region_edit_remove(host(self), tid, rid) }
+    }
+
+    pub fn duplicate_region(&self, tid: u32, rid: u32, start_sample: u64) -> u32 {
+        unsafe { region_edit_host::hirari_region_duplicate(host(self), tid, rid, start_sample) }
+    }
+
+    pub fn set_region_gain(&self, tid: u32, rid: u32, gain: f32) -> bool {
+        self.set_region_scalar(tid, rid, SCALAR_CLIP_GAIN, gain, 0.0)
+    }
+
+    pub fn set_region_muted(&self, tid: u32, rid: u32, muted: bool) -> bool {
+        self.set_region_scalar(tid, rid, SCALAR_MUTED, if muted { 1.0 } else { 0.0 }, 0.0)
+    }
+
+    pub fn set_region_fades(&self, tid: u32, rid: u32, fade_in: f32, fade_out: f32) -> bool {
+        self.set_region_scalar(tid, rid, SCALAR_FADES, fade_in, fade_out)
+    }
+
+    pub fn set_region_reverse(&self, tid: u32, rid: u32, reverse: bool) -> bool {
+        self.set_region_scalar(tid, rid, SCALAR_REVERSE, if reverse { 1.0 } else { 0.0 }, 0.0)
+    }
+
+    pub fn set_region_trim(&self, tid: u32, rid: u32, start_norm: f32, end_norm: f32) -> bool {
+        unsafe { region_edit_host::hirari_region_edit_trim(host(self), tid, rid, start_norm, end_norm) }
+    }
+
+    pub fn set_region_warp_ratio(&self, tid: u32, rid: u32, ratio: f64) -> bool {
+        unsafe { region_edit_host::hirari_region_edit_warp_ratio(host(self), tid, rid, ratio) }
+    }
+
+    pub fn set_region_pitch_semitones(&self, tid: u32, rid: u32, semitones: f32) -> bool {
+        self.set_region_scalar(tid, rid, SCALAR_PITCH_SEMITONES, semitones, 0.0)
+    }
+
+    pub fn set_region_loop_count(&self, tid: u32, rid: u32, count: u32) -> bool {
+        self.set_region_scalar(tid, rid, SCALAR_LOOP_COUNT, f32::from_bits(count), 0.0)
+    }
+
+    pub fn set_region_sync_group(&self, tid: u32, rid: u32, group: u32) -> bool {
+        self.set_region_scalar(tid, rid, SCALAR_SYNC_GROUP, f32::from_bits(group), 0.0)
+    }
+
+    pub fn clear_region_audio_note_segments(&self, tid: u32, rid: u32) -> bool {
+        unsafe { region_edit_host::hirari_region_edit_note_clear(host(self), tid, rid) }
+    }
+
+    pub fn finalize_region_audio_note_analysis(&self, tid: u32, rid: u32) -> bool {
+        unsafe { region_jobs::hirari_region_pitch_analysis_finalize(host(self), tid, rid) }
+    }
+
+    pub fn region_quantize_status(&self, tid: u32, rid: u32) -> u8 {
+        unsafe { hirari_region_quantize_status(host(self), tid, rid) }
+    }
+
+    pub fn finalize_region_quantize(&self, tid: u32, rid: u32) -> bool {
+        unsafe { hirari_region_finalize_quantize(host(self), tid, rid) }
+    }
+
+    pub fn get_region_source_frame_count(&self, tid: u32, rid: u32) -> u64 {
+        unsafe { hirari_region_source_frame_count(host(self), tid, rid) }
+    }
+
+    pub fn get_region_sample_rate(&self, tid: u32, rid: u32) -> f64 {
+        unsafe { hirari_region_source_sample_rate(host(self), tid, rid) }
+    }
+
+    pub fn get_region_channel_count(&self, tid: u32, rid: u32) -> u32 {
+        unsafe { hirari_region_audio_channel_count(host(self), tid, rid) }
+    }
+
+    fn set_region_scalar(&self, tid: u32, rid: u32, field: i32, a: f32, b: f32) -> bool {
+        unsafe { region_edit_host::hirari_region_edit_scalar(host(self), tid, rid, field, a, b) }
+    }
+}

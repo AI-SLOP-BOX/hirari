@@ -1,15 +1,9 @@
     // Tracks
-    uint32_t add_track(uint32_t type);
     bool add_vca_group(uint32_t group_id, float gain);
     bool assign_track_to_vca(uint32_t track_id, uint32_t group_id);
     bool set_vca_group_gain(uint32_t group_id, float gain);
-    float get_vca_track_gain(uint32_t track_id) const;
     rust::String get_vca_snapshot_json() const;
-    void clear_vca_groups();
-    bool remove_track(uint32_t id);
-    uint32_t duplicate_track(uint32_t id);
     void new_project();
-    bool set_track_name(uint32_t id, std::string_view name);
     uint32_t get_track_count() const;
     std::vector<std::shared_ptr<Track>> get_tracks_snapshot() const;
     Track& get_track(uint32_t id);
@@ -20,12 +14,7 @@
     uint64_t queue_region_import(uint32_t trackId, std::string_view path,
                                  uint64_t start_sample);
     // 0 = still decoding, 1 = committed, 2 = failed or stale, 3 = unknown ticket.
-    uint8_t complete_region_import(uint64_t ticket);
-    bool replace_region_audio(uint32_t trackId, uint32_t regionId, std::string_view path);
-    bool add_plugin(uint32_t tid, uint32_t pluginType);
-    bool remove_plugin(uint32_t tid, uint32_t pluginIndex);
     bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex);
-    bool add_sandboxed_plugin(uint32_t tid, std::string_view pluginPath);
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
                                         float* left, float* right, uint32_t frames);
     std::vector<uint8_t> process_sandboxed_plugin_midi_block(
@@ -65,9 +54,7 @@
     std::string get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId) const;
     bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed);
     bool get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const;
-    void set_macro_value(uint32_t macroIndex, float value);
     void set_preview_synth_engine(uint32_t engine);
-    bool set_route(uint32_t sourceId, uint32_t destId, bool enabled);
     bool set_route_gain(uint32_t sourceId, uint32_t destId, float gain, bool enabled);
     bool set_send_route(uint32_t sourceId, uint32_t destId, float gain,
                         bool preFader, bool enabled);

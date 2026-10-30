@@ -212,9 +212,6 @@ uint32_t HirariUnifiedEngine::allocateRegionIdLocked() noexcept {
     return 0;
 }
 
-uint32_t HirariUnifiedEngine::add_track(uint32_t type) {
-    return hirari_track_add(this, type);
-}
 
 bool HirariUnifiedEngine::add_vca_group(uint32_t groupId, float gain) {
     if (!hirari_vca_add_group(groupId, gain)) return false;
@@ -239,9 +236,6 @@ bool HirariUnifiedEngine::set_vca_group_gain(uint32_t groupId, float gain) {
     return true;
 }
 
-float HirariUnifiedEngine::get_vca_track_gain(uint32_t trackId) const {
-    return hirari_vca_get_cumulative_gain(trackId);
-}
 
 rust::String HirariUnifiedEngine::get_vca_snapshot_json() const {
     const size_t required = hirari_vca_snapshot_json(nullptr, 0);
@@ -251,9 +245,6 @@ rust::String HirariUnifiedEngine::get_vca_snapshot_json() const {
     return rust::String(std::move(json));
 }
 
-void HirariUnifiedEngine::clear_vca_groups() {
-    hirari_vca_clear();
-}
 
 void HirariUnifiedEngine::new_project() {
     set_playing(false);
@@ -309,6 +300,3 @@ void HirariUnifiedEngine::new_project() {
     publishTrackSnapshotLocked(true);
 }
 
-uint32_t HirariUnifiedEngine::duplicate_track(uint32_t tid) {
-    return hirari_track_duplicate(this, tid);
-}

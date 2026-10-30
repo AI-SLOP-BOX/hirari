@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- Thirty-seven engine edits that were relayed through two C++ layers (an
+  `AudioEngine` forwarder plus a one-line `HirariUnifiedEngine` delegation)
+  now live as Rust inherent methods on the bridge type, calling the same
+  `hirari_*` policy directly: track/plugin add-remove-duplicate, region
+  move/remove/duplicate/trim/scalar edits, VCA gain reads, route and macro
+  writes, expression-map Pro install, region import completion and the
+  region source-accessor queries. Both C++ layers and their bridge
+  declarations were deleted.
 - All twelve built-in effect paths now resolve through the single Rust
   `NativeProcessor` dispatch: limiter, compressor, sub bass and saturation
   joined the gate/transient/de-esser/delay/reverb/dynamic-EQ/mid-side/width

@@ -1,20 +1,5 @@
-bool HirariUnifiedEngine::replace_region_audio(uint32_t tid, uint32_t rid, std::string_view path) {
-    return hirari_region_edit_replace_audio(this, tid, rid,
-                                            reinterpret_cast<const uint8_t*>(path.data()),
-                                            path.size());
-}
-bool HirariUnifiedEngine::add_plugin(uint32_t tid, uint32_t pluginType) {
-    return hirari_plugin_edit_add(this, tid, pluginType);
-}
 
-bool HirariUnifiedEngine::remove_plugin(uint32_t tid, uint32_t pluginIndex) {
-    return hirari_plugin_edit_remove(this, tid, pluginIndex);
-}
 
-bool HirariUnifiedEngine::add_sandboxed_plugin(uint32_t tid, std::string_view pluginPath) {
-    return hirari_plugin_edit_add_sandboxed(
-        this, tid, reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size());
-}
 
 bool HirariUnifiedEngine::process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
                                                        float* left, float* right, uint32_t frames) {

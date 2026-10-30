@@ -228,11 +228,6 @@ bool HirariUnifiedEngine::set_expression_map(uint32_t trackId,
         undo_state(), log_state());
 }
 
-bool HirariUnifiedEngine::set_expression_map_pro(uint32_t trackId, const std::string& json) {
-    return hirari_expression_map_edit_set_pro(
-        this, trackId, reinterpret_cast<const uint8_t*>(json.data()), json.size(),
-        undo_state(), log_state());
-}
 
 void HirariUnifiedEngine::installExpressionMapEditHost() {
     const HirariExpressionMapEditHostOps ops{

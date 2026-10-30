@@ -1,40 +1,11 @@
-bool HirariUnifiedEngine::move_region(uint32_t tid, uint32_t rid, double startBeat) {
-    return hirari_region_edit_move(this, tid, rid, startBeat);
-}
 
-bool HirariUnifiedEngine::move_region_sync_group(uint32_t tid, uint32_t rid, double startSample) {
-    return hirari_region_edit_move_sync_group(this, tid, rid, startSample);
-}
 
-bool HirariUnifiedEngine::remove_region(uint32_t tid, uint32_t rid) {
-    return hirari_region_edit_remove(this, tid, rid);
-}
 
-bool HirariUnifiedEngine::set_region_gain(uint32_t tid, uint32_t rid, float gain) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarClipGain, gain, 0.0f);
-}
 
-bool HirariUnifiedEngine::set_region_muted(uint32_t tid, uint32_t rid, bool muted) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarMuted,
-                                     muted ? 1.0f : 0.0f, 0.0f);
-}
 
-bool HirariUnifiedEngine::set_region_fades(uint32_t tid, uint32_t rid, float fadeIn, float fadeOut) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarFades, fadeIn, fadeOut);
-}
 
-bool HirariUnifiedEngine::set_region_reverse(uint32_t tid, uint32_t rid, bool reverse) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarReverse,
-                                     reverse ? 1.0f : 0.0f, 0.0f);
-}
 
-bool HirariUnifiedEngine::set_region_trim(uint32_t tid, uint32_t rid, float startNorm, float endNorm) {
-    return hirari_region_edit_trim(this, tid, rid, startNorm, endNorm);
-}
 
-bool HirariUnifiedEngine::set_region_warp_ratio(uint32_t tid, uint32_t rid, double ratio) {
-    return hirari_region_edit_warp_ratio(this, tid, rid, ratio);
-}
 
 bool HirariUnifiedEngine::set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid,
                                                         bool enabled) {
@@ -42,10 +13,6 @@ bool HirariUnifiedEngine::set_region_pitch_preserve_warp(uint32_t tid, uint32_t 
                                      enabled ? 1.0f : 0.0f, 0.0f);
 }
 
-bool HirariUnifiedEngine::set_region_pitch_semitones(uint32_t tid, uint32_t rid, float semitones) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarPitchSemitones, semitones,
-                                     0.0f);
-}
 
 bool HirariUnifiedEngine::set_region_audio_note_segment(
     uint32_t tid, uint32_t rid, double startSeconds, double endSeconds,
@@ -84,9 +51,6 @@ bool HirariUnifiedEngine::move_region_audio_note_anchor(
                                                valueCents, editFormant);
 }
 
-bool HirariUnifiedEngine::clear_region_audio_note_segments(uint32_t tid, uint32_t rid) {
-    return hirari_region_edit_note_clear(this, tid, rid);
-}
 
 bool HirariUnifiedEngine::warp_region_audio_note_segment(
     uint32_t tid, uint32_t rid, double segmentStartSeconds,
@@ -114,19 +78,8 @@ uint8_t HirariUnifiedEngine::region_audio_note_analysis_status(uint32_t tid,
         const_cast<HirariUnifiedEngine*>(this), tid, rid);
 }
 
-bool HirariUnifiedEngine::finalize_region_audio_note_analysis(uint32_t tid, uint32_t rid) {
-    return hirari_region_pitch_analysis_finalize(this, tid, rid);
-}
 
-bool HirariUnifiedEngine::set_region_loop_count(uint32_t tid, uint32_t rid, uint32_t count) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarLoopCount,
-                                     std::bit_cast<float>(count), 0.0f);
-}
 
-bool HirariUnifiedEngine::set_region_sync_group(uint32_t tid, uint32_t rid, uint32_t group) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarSyncGroup,
-                                     std::bit_cast<float>(group), 0.0f);
-}
 // Alignment and sync-group quantize are Rust jobs: validation, the job
 // registry, analysis threads, staleness checks and the marker commit all live
 // in hirari-core-bridge/src/region_time_jobs.rs. The engine only provides the
@@ -154,13 +107,7 @@ bool HirariUnifiedEngine::quantize_region_sync_group(
     return hirari_region_quantize_sync_group(this, tid, rid, strength, gridBeats, swing);
 }
 
-uint8_t HirariUnifiedEngine::region_quantize_status(uint32_t tid, uint32_t rid) const {
-    return hirari_region_quantize_status(const_cast<HirariUnifiedEngine*>(this), tid, rid);
-}
 
-bool HirariUnifiedEngine::finalize_region_quantize(uint32_t tid, uint32_t rid) {
-    return hirari_region_finalize_quantize(this, tid, rid);
-}
 bool HirariUnifiedEngine::append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled) {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (auto& track : m_tracks) if (track->getId() == tid)
