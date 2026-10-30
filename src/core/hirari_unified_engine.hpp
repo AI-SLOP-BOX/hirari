@@ -54,7 +54,6 @@ namespace Hirari::Core::Video { class VideoSync; }
 #include "diagnostics/engine_diagnostics.hpp"
 #include "engine/routing_engine.hpp"
 #include "rust_ffi.hpp"
-#include "composition/arrangement_edit_model.hpp"
 #include <thread>
 #include <future>
 

@@ -7,7 +7,8 @@
 //! file with a JSON parser error.
 
 use crate::ffi::{
-    NativeProjectState, NativeRouteState, NativeSidechainState, NativeTrackState,
+    NativeArrangerPartState, NativeMarkerState, NativeProjectState, NativeRouteState,
+    NativeSidechainState, NativeTrackState,
 };
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -546,6 +547,40 @@ pub fn native_project_load(path: &str) -> NativeProjectState {
 /// Bridge entrypoint: encode and store an engine state record as `ARUA`.
 pub fn native_project_save(path: &str, state: &NativeProjectState) -> bool {
     save_state(path, state)
+}
+
+/// Bridge entrypoint: encode and store an engine state record as `ARUA`,
+/// taking the timeline markers and arranger parts from the Rust arrangement
+/// document so the engine does not have to mirror them.
+pub fn native_project_save_with_arrangement(
+    path: &str,
+    state: &NativeProjectState,
+    arrangement_document: usize,
+) -> bool {
+    let Some((markers, parts)) =
+        crate::arrangement_document::snapshot(arrangement_document as *mut std::ffi::c_void)
+    else {
+        return false;
+    };
+    let mut state = state.clone();
+    state.markers = markers
+        .into_iter()
+        .map(|(sample, name, color)| NativeMarkerState {
+            sample,
+            name: String::from_utf8_lossy(&name).into_owned(),
+            color,
+        })
+        .collect();
+    state.arrangerParts = parts
+        .into_iter()
+        .map(|(start, length, name, repeats)| NativeArrangerPartState {
+            start,
+            length,
+            name: String::from_utf8_lossy(&name).into_owned(),
+            repeats,
+        })
+        .collect();
+    save_state(path, &state)
 }
 
 #[cfg(test)]

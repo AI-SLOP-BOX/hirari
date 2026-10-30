@@ -10,6 +10,7 @@ pub mod alternatives;
 pub mod analog_saturator;
 pub mod analysis_engine;
 pub mod analysis_views;
+pub mod arrangement_document;
 pub mod analyzer_8khz;
 pub mod arpeggiator;
 pub mod arpeggio;

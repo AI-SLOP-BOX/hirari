@@ -235,15 +235,22 @@
         m_rootNote.store(state.rootNote, std::memory_order_relaxed);
         m_scaleType.store(state.scaleType, std::memory_order_relaxed);
         // Restore timeline markers as part of the document, not as transient UI state.
-        m_arrangement.clearMarkers();
+        hirari_arrangement_document_reset_markers(m_arrangementDocument);
         for (const auto& marker : state.markers) {
-            m_arrangement.upsertMarker({marker.sample, std::string(marker.name), marker.color});
+            (void)hirari_arrangement_document_upsert_marker(
+                m_arrangementDocument, marker.sample,
+                reinterpret_cast<const uint8_t*>(marker.name.data()), marker.name.size(),
+                marker.color);
         }
-        std::vector<Composition::ArrangerPart> arrangerParts;
+        std::vector<HirariArrangementPartInput> arrangerParts;
         arrangerParts.reserve(state.arrangerParts.size());
-        for (const auto& part : state.arrangerParts)
-            arrangerParts.push_back({part.start, part.length, std::string(part.name), part.repeats});
-        m_arrangement.setArrangerParts(std::move(arrangerParts));
+        for (const auto& part : state.arrangerParts) {
+            arrangerParts.push_back({part.start, part.length,
+                reinterpret_cast<const uint8_t*>(part.name.data()), part.name.size(),
+                part.repeats});
+        }
+        (void)hirari_arrangement_document_set_parts(
+            m_arrangementDocument, arrangerParts.data(), arrangerParts.size());
         hirari_tempo_map_clear(m_tempoState, projectSampleRate, state.bpm);
         for (const auto& event : state.tempoEvents)
             hirari_tempo_map_add_tempo(m_tempoState, event.sample, event.bpm, projectSampleRate, event.ramp != 0);
@@ -435,19 +442,6 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         serialized.tapPoint = sidechain.tapPoint;
         state.sidechains.push_back(serialized);
     }
-    for (const auto& marker : m_arrangement.markers()) {
-        Bridge::NativeMarkerState serialized;
-        serialized.sample = marker.sample;
-        serialized.name = rust::String(marker.name);
-        serialized.color = marker.color;
-        state.markers.push_back(std::move(serialized));
-    }
-    for (const auto& part : m_arrangement.arrangerParts()) {
-        Bridge::NativeArrangerPartState serialized;
-        serialized.start = part.start; serialized.length = part.length;
-        serialized.name = rust::String(part.name); serialized.repeats = part.repeats;
-        state.arrangerParts.push_back(std::move(serialized));
-    }
     for (const auto& event : readTempoEvents(m_tempoState)) {
         Bridge::NativeTempoEventState serialized;
         serialized.sample = event.samplePos; serialized.bpm = event.bpm; serialized.ramp = event.ramp ? 1 : 0;
@@ -468,7 +462,11 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         state.routes.push_back(serialized);
     }
 
-    return Bridge::native_project_save(rust::Str(path.data(), path.size()), state);
+    // Timeline markers and arranger parts are read from the Rust arrangement
+    // document by the encoder, so the engine never materializes them here.
+    return Bridge::native_project_save_with_arrangement(
+        rust::Str(path.data(), path.size()), state,
+        reinterpret_cast<size_t>(m_arrangementDocument));
 }
 
 rust::Vec<uint8_t> HirariUnifiedEngine::get_video_frame() {

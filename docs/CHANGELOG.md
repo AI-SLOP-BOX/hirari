@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Timeline markers and arranger parts are now stored by the Rust arrangement
+  document. The C++ `ArrangementEditModel` is gone: marker ordering and
+  replacement, arranger-part validation and sorting, and the storage itself
+  live in Rust, and the project save path has the encoder read the document
+  directly instead of mirroring it in the engine.
+
 - Auto-mixing now runs in Rust. The equal-power target for the current track
   count, the 20% fader approach, the unity-range clamp and the bus skip are
   computed from the project layout instead of inside the C++ engine, so the

@@ -43,7 +43,9 @@
     ::Hirari::Core::Plugins::PluginCompatibilityRegistry m_pluginCompatibility;
     // MIDI clock receive state lives in Rust (external_sync_runtime.rs).
     void* m_externalSync = hirari_external_sync_create();
-    ::Hirari::Core::Composition::ArrangementEditModel m_arrangement;
+    // Timeline markers and arranger parts are a Rust-owned document
+    // (arrangement_document.rs); the engine only owns the handle.
+    void* m_arrangementDocument = hirari_arrangement_document_create();
     mutable std::atomic<bool> m_ecoModeLogTriggered{false};
     mutable std::atomic<bool> m_videoSyncLogTriggered{false};
 

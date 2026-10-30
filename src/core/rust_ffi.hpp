@@ -1422,6 +1422,23 @@ extern "C" void hirari_builtin_midi_instrument_process(
     void* state, const void* events, size_t event_count,
     float* left, float* right, uint32_t frames, double sample_rate);
 extern "C" bool hirari_vca_assign_track(uint32_t track_id, uint32_t group_id);
+// Arrangement timeline document (markers and arranger parts) is a Rust-owned
+// store; the engine only keeps the handle and the save path lets Rust read
+// the document directly.
+struct HirariArrangementPartInput {
+    uint64_t start;
+    uint64_t length;
+    const uint8_t* name;
+    size_t name_len;
+    uint32_t repeats;
+};
+extern "C" void* hirari_arrangement_document_create();
+extern "C" void hirari_arrangement_document_destroy(void* state);
+extern "C" void hirari_arrangement_document_reset_markers(void* state);
+extern "C" bool hirari_arrangement_document_upsert_marker(
+    void* state, uint64_t sample, const uint8_t* name, size_t name_len, uint32_t color);
+extern "C" bool hirari_arrangement_document_set_parts(
+    void* state, const HirariArrangementPartInput* parts, size_t count);
 struct HirariRegionOverlapView {
     uint64_t start;
     uint64_t length;

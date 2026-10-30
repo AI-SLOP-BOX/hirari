@@ -662,6 +662,13 @@ pub mod ffi {
         fn native_project_load(path: &str) -> NativeProjectState;
         /// Encodes and atomically stores an `ARUA` container.
         fn native_project_save(path: &str, state: &NativeProjectState) -> bool;
+        /// Encodes and atomically stores an `ARUA` container whose timeline
+        /// markers and arranger parts come from the Rust arrangement document.
+        fn native_project_save_with_arrangement(
+            path: &str,
+            state: &NativeProjectState,
+            arrangement_document: usize,
+        ) -> bool;
 
         fn report_hirari_log(level: u32, msg: &str);
 
@@ -763,6 +770,8 @@ pub fn analysis_structure_sections(
     })
     .collect()
 }
-pub use native_project::{native_project_load, native_project_save};
+pub use native_project::{
+    native_project_load, native_project_save, native_project_save_with_arrangement,
+};
 
 include!("lib_runtime.rs");
