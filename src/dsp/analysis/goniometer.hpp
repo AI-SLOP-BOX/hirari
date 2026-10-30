@@ -29,13 +29,6 @@ public:
         hirari_goniometer_process(m_state, left, right, samples);
     }
 
-    Data getLatest() const {
-        Data data{};
-        hirari_goniometer_snapshot(m_state, data.xyHistoryL.data(), data.xyHistoryR.data(),
-                                   kHistorySize, &data.correlation, &data.balance);
-        return data;
-    }
-
 private:
     void* m_state = nullptr;
 };

@@ -40,16 +40,6 @@ struct EngineContext {
     /**
      * @brief Helper to calculate musical position from sample playhead.
      */
-    void updateMusicalPos() {
-        double beatsPerSecond = tempo / 60.0;
-        double totalBeats = (static_cast<double>(playhead) / sampleRate) * beatsPerSecond;
-        
-        musicalPos.bar = static_cast<int32_t>(totalBeats / timeSig.numerator) + 1;
-        musicalPos.beat = static_cast<int32_t>(std::fmod(totalBeats, timeSig.numerator)) + 1;
-        
-        double subBeat = std::fmod(totalBeats, 1.0);
-        musicalPos.tick = static_cast<int32_t>(subBeat * MusicalTime::kTicksPerBeat);
-    }
 };
 
 } // namespace Hirari::Core::Engine

@@ -300,16 +300,6 @@
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         return sandbox ? sandbox->stateErrorText() : "state-unavailable";
     }
-    bool pollSandboxedPluginHealth(size_t sandboxIndex) noexcept {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
-        const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
-        if (index >= m_pluginTypes.size()) return false;
-        // The sandbox processor is owned by the effect chain. Health checks
-        // are control-thread maintenance and never run from processBlock().
-        auto processor = m_effectChain.getProcessor(index);
-        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
-        return sandbox && sandbox->pollHealth();
-    }
     bool restartSandboxedPlugin(size_t sandboxIndex) {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
         const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
@@ -321,19 +311,6 @@
         const bool restarted = sandbox && sandbox->restart(true);
         if (restarted) markProjectLayoutChanged();
         return restarted;
-    }
-    bool resetSandboxedPlugin(size_t sandboxIndex) {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
-        const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
-        auto processor = m_effectChain.getProcessor(index);
-        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
-        if (!sandbox) return false;
-        sandbox->reset();
-        const bool reset = sandbox->resetPluginControlPlane();
-        // reset() may already have changed the processor's serialized state,
-        // even when rebuilding its control plane fails.
-        markProjectLayoutChanged();
-        return reset;
     }
     bool retrySandboxedPlugin(size_t sandboxIndex) {
         if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;

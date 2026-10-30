@@ -44,9 +44,6 @@ public:
     void addNote(MIDINote n) {
         (void)hirari_midi_region_state_add(m_noteState, &n);
     }
-    bool removeNote(uint32_t index) {
-        return hirari_midi_region_state_remove(m_noteState, index);
-    }
     void removeNotesAt(double beat, int pitch, double tolerance = 0.125) {
         hirari_midi_region_state_remove_notes_at(m_noteState, beat, pitch, tolerance);
     }

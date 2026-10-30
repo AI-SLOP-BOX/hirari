@@ -92,16 +92,6 @@ public:
         return instance;
     }
 
-    ImportStatus getLastImportStatus() const {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        return m_lastImportStatus;
-    }
-
-    double getLastSampleRate() const noexcept {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        return m_lastSampleRate;
-    }
-
     std::shared_ptr<AudioBuffer> importFile(const std::string& path,
                                             double* sampleRateOut = nullptr) {
         if (sampleRateOut) *sampleRateOut = 0.0;

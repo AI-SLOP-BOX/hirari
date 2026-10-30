@@ -42,11 +42,6 @@ public:
         hirari_forensic_journaler_log(m_state, type, tid, value, timestamp);
     }
 
-    void logDescription(uint32_t type, const std::string& description, float value) {
-        hirari_forensic_journaler_log_description(m_state, type,
-            reinterpret_cast<const uint8_t*>(description.data()), description.size(), value);
-    }
-
     void stop() { hirari_forensic_journaler_stop(m_state); }
 
     static std::vector<Entry> recover(const std::string& path) {

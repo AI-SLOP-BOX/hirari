@@ -42,19 +42,6 @@ public:
                                      buffer.getNumChannels(), offset, numSamples);
     }
 
-    void processWithMirror(Core::AudioBuffer& buffer, Core::AudioBuffer& mirror,
-                           uint32_t numSamples) {
-        if (numSamples == 0 || buffer.getNumChannels() == 0 ||
-            buffer.getNumSamples() < numSamples) return;
-        const uint32_t channels = buffer.getNumChannels();
-        const bool hasMirror = mirror.getNumChannels() >= channels &&
-                               mirror.getNumSamples() >= numSamples;
-        float** mirrorChannels = hasMirror ? mirror.getArrayOfWritePointers() : nullptr;
-        hirari_channel_strip_process_mirror(
-            m_state, buffer.getArrayOfWritePointers(), channels,
-            mirrorChannels, hasMirror ? mirror.getNumChannels() : 0, 0, numSamples);
-    }
-
     const void* nativeState() const noexcept { return m_state; }
 
 private:

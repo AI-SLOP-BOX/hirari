@@ -126,25 +126,6 @@ public:
         }
     }
 
-    bool moveRegion(uint32_t rid, uint64_t newStart) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id == rid) {
-                const auto input = regionGeometryForRust(region);
-                HirariNativeRegionGeometry output{};
-                if (!hirari_region_move_geometry(&input, newStart, &output)) return false;
-                region.start = output.start;
-                region.baseStart = output.base_start;
-                std::sort(m_regions.begin(), m_regions.end(),
-                          [](const Region& a, const Region& b) { return a.start < b.start; });
-                publishRegionSnapshot();
-                return true;
-            }
-        }
-        return false;
-    }
-
     // Adopts a decoded replacement. Path/rate policy and the undo snapshots
     // live in `region_edit_host.rs`; the null check keeps a bad handle from
     // replacing the region's audio outright.
@@ -313,21 +294,6 @@ public:
     }
 
     enum class OfflineRenderTap : uint8_t { PostFader = 0, PreInsert = 1, PreFader = 2 };
-
-    bool processInto(AudioBuffer& output, uint32_t sz, uint64_t playhead,
-                     OfflineRenderTap tap = OfflineRenderTap::PostFader) {
-        if (sz == 0 || output.getNumChannels() == 0 || output.getNumSamples() < sz ||
-            m_activeBuffer.getNumChannels() < 2 || m_activeBuffer.getNumSamples() < sz) {
-            return false;
-        }
-        process(m_activeBuffer, sz, playhead, false);
-        const AudioBuffer* source = &m_activeBuffer;
-        if (tap == OfflineRenderTap::PreInsert) source = &m_preInsertBuffer;
-        else if (tap == OfflineRenderTap::PreFader) source = &m_preFaderBuffer;
-        if (source->getNumChannels() < 2 || source->getNumSamples() < sz) return false;
-        output.addFrom(*source, sz);
-        return true;
-    }
 
     // Process the already accumulated work buffer without clearing it first.
     // The audio graph uses this at a topological boundary after upstream

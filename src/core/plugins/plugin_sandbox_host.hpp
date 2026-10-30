@@ -92,14 +92,6 @@ public:
         return {context.project, context.plugin, context.audio, context.state};
     }
 
-    bool enqueueExtendedMidi(uint64_t sampleOffset, uint8_t articulationId,
-                             const uint8_t* bytes, size_t size) noexcept {
-        if (bytes == nullptr) size = 0;
-        return m_host->enqueue_extended_midi(
-            sampleOffset, articulationId,
-            ::rust::Slice<const uint8_t>(bytes, size));
-    }
-
     bool enqueueParameterChange(uint32_t parameterId, double value,
                                 uint32_t sampleOffset = 0) noexcept {
         return m_host->enqueue_parameter_change(parameterId, value, sampleOffset);

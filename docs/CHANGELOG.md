@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Swept the remaining C++ functions that nothing in `src`, `tests` or the Rust
+  call sites referenced any more: sandbox health/reset helpers, automation and
+  region-editing leftovers, arrangement/diagnostics conveniences and the
+  unused compatibility-registry writers. No call site changed.
 - Ten more engine relays now land in Rust directly: VCA group add/gain and
   snapshot JSON, region split, waveform/audio-range reads, sandbox
   maintenance, input-monitor channels and sidechain links. The C++

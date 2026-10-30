@@ -41,23 +41,6 @@ public:
             reinterpret_cast<const uint8_t*>(value.data()), value.size());
     }
 
-    std::vector<DBRecord> queryByCategory(const std::string& category) {
-        std::vector<DBRecord> result;
-        hirari_project_db_query(state_,
-            reinterpret_cast<const uint8_t*>(category.data()), category.size(),
-            &result, [](void* context, uint64_t timestamp,
-                        const uint8_t* recordCategory, size_t categorySize,
-                        const uint8_t* key, size_t keySize,
-                        const uint8_t* value, size_t valueSize) {
-                auto& records = *static_cast<std::vector<DBRecord>*>(context);
-                records.push_back({timestamp,
-                    std::string(reinterpret_cast<const char*>(recordCategory), categorySize),
-                    std::string(reinterpret_cast<const char*>(key), keySize),
-                    std::string(reinterpret_cast<const char*>(value), valueSize)});
-            });
-        return result;
-    }
-
     bool flushToDisk(const std::string& path) {
         return hirari_project_db_flush(state_,
             reinterpret_cast<const uint8_t*>(path.data()), path.size());

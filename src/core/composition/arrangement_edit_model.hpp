@@ -15,9 +15,6 @@ struct ArrangerPart { uint64_t start = 0, length = 0; std::string name; uint32_t
 
 class ArrangementEditModel {
 public:
-    void setSnap(SnapMode mode, uint64_t gridSamples = 1) noexcept {
-        m_snap = mode; m_grid = std::max<uint64_t>(1, gridSamples);
-    }
     SnapMode snapMode() const noexcept { return m_snap; }
     uint64_t snap(uint64_t sample, uint64_t relativeTo = 0) const noexcept {
         if (m_snap == SnapMode::Off) return sample;
@@ -33,10 +30,6 @@ public:
         if (it != m_markers.end() && it->sample == marker.sample) *it = std::move(marker);
         else m_markers.insert(it, std::move(marker));
         return true;
-    }
-    bool removeMarker(uint64_t sample) {
-        auto it = std::find_if(m_markers.begin(), m_markers.end(), [sample](const auto& m){ return m.sample == sample; });
-        if (it == m_markers.end()) return false; m_markers.erase(it); return true;
     }
     void clearMarkers() noexcept { m_markers.clear(); }
     const std::vector<ArrangementMarker>& markers() const noexcept { return m_markers; }

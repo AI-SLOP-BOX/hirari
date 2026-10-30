@@ -16,22 +16,6 @@ public:
     PluginCompatibilityRegistry(const PluginCompatibilityRegistry&) = delete;
     PluginCompatibilityRegistry& operator=(const PluginCompatibilityRegistry&) = delete;
 
-    void markScanFailure(const std::string& id, const std::string& error) {
-        (void)hirari_plugin_registry_record_scan_failure(
-            m_state, reinterpret_cast<const uint8_t*>(id.data()), id.size(),
-            reinterpret_cast<const uint8_t*>(error.data()), error.size());
-    }
-
-    void markCrash(const std::string& id) {
-        (void)hirari_plugin_registry_record_crash(
-            m_state, reinterpret_cast<const uint8_t*>(id.data()), id.size());
-    }
-
-    void setBlacklisted(const std::string& id, bool value) {
-        (void)hirari_plugin_registry_set_blacklisted(
-            m_state, reinterpret_cast<const uint8_t*>(id.data()), id.size(), value);
-    }
-
     std::string snapshotJson() const {
         uint8_t* bytes = nullptr;
         size_t size = 0;

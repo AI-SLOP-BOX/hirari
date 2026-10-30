@@ -43,10 +43,6 @@ inline constexpr uint32_t kRecoveryQuarantined = 1u;
 
 // Modular comparison remains correct when a uint64 sequence wraps. Never
 // compare mailbox sequence numbers with plain >= or <=.
-inline bool sequenceReached(uint64_t completed, uint64_t requested) noexcept {
-    return static_cast<int64_t>(completed - requested) >= 0;
-}
-
 // Whether a serialized plugin state carrying `version` can be read by this
 // build. The Rust validator in hirari-plugin-protocol rejects anything that is
 // not exactly STATE_PROTOCOL_VERSION, so this predicate mirrors that contract

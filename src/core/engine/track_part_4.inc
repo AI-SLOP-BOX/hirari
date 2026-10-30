@@ -146,13 +146,6 @@
         markProjectLayoutChanged();
     }
 
-    static float evaluateAutomation(const AutomationList& points, double time, size_t& lastIndexHint) {
-        static_assert(sizeof(ProjectAutomationPoint) == 16);
-        static_assert(offsetof(ProjectAutomationPoint, value) == 8);
-        static_assert(offsetof(ProjectAutomationPoint, curve) == 12);
-        return hirari_realtime_automation_evaluate(
-            points.data(), points.size(), time, &lastIndexHint);
-    }
     std::shared_ptr<ProjectLayoutRevision> m_layoutRevision;
     uint32_t m_id;
     std::string m_name;

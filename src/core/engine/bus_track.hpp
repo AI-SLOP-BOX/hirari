@@ -111,14 +111,6 @@ public:
                                      work.getWritePointer(1), len, false);
     }
 
-    void setReadPostFx(bool postFx) noexcept {
-        hirari_bus_track_set_read_post_fx(m_trackState.get(), postFx);
-    }
-
-    void setInputGain(float gain) noexcept {
-        hirari_bus_track_set_input_gain(m_trackState.get(), gain);
-    }
-
     void setPhaseInverted(bool inverted) noexcept {
         hirari_bus_track_set_phase_inverted(m_trackState.get(), inverted);
     }
@@ -135,17 +127,6 @@ public:
     // BusTrack processing boundary: pre-FX bus input is placed in the Track
     // work buffer, then the inherited Track chain processes it and the result
     // is published as the bus post-FX stage. No allocation is performed here.
-    bool processBus(uint32_t len, uint64_t playhead) noexcept {
-        if (!m_busState || len == 0 || len > kMaxSamples || !canProcess(len)) return false;
-        auto& work = getWorkBuffer(len);
-        float* left = work.getWritePointer(0);
-        float* right = work.getWritePointer(1);
-        fetchAudio(left, right, playhead, len, {});
-        if (!processAccumulated(len, playhead)) return false;
-        return hirari_bus_audio_replace_post(m_busState, work.getReadPointer(0),
-                                             work.getReadPointer(1), len);
-    }
-
     bool publishPostFx(uint32_t len) noexcept {
         if (!m_busState || len == 0 || len > kMaxSamples || !canProcess(len)) return false;
         auto& work = getWorkBuffer(len);

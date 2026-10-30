@@ -1,21 +1,9 @@
 public:
     uint32_t getId() const { return m_id; }
-    bool hasMidiInstrumentRealtime() const noexcept {
-        return (m_type == Type::Midi || m_type == Type::Instrument) &&
-            m_midiInstrumentPluginCount.load(std::memory_order_acquire) != 0;
-    }
     void markProjectLayoutChanged() noexcept {
         if (m_layoutRevision) m_layoutRevision->markChanged();
     }
 
-    uint64_t getEndSample() const {
-        uint64_t end = 0;
-        for (const auto& region : getRegions()) {
-            if (region.start > UINT64_MAX - region.len) return UINT64_MAX;
-            end = std::max(end, region.start + region.len);
-        }
-        return end;
-    }
     const std::string& getName() const { return m_name; }
     void setName(std::string name) {
         if (!name.empty() && name != m_name) {

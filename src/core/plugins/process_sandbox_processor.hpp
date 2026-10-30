@@ -226,9 +226,6 @@ public:
         return m_latencySamples.load(std::memory_order_acquire);
     }
     bool processFailed() const noexcept { return m_failed.load(std::memory_order_acquire); }
-    uint32_t consecutiveMailboxOverruns() const noexcept {
-        return m_consecutiveOverruns.load(std::memory_order_acquire);
-    }
     RecoveryMode recoveryMode() const noexcept {
         return m_failed.load(std::memory_order_acquire)
             ? RecoveryMode::Quarantined : RecoveryMode::ClearBlock;
