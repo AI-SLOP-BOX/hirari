@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The engine's hot-swap quiesce now reads a process-wide Rust hot-swap state
+  through `hirari_hot_swap_default_quiesce_requested` and
+  `hirari_hot_swap_default_acknowledge`, so the C++ `DiagnosticsKernel`
+  facade, its callback plumbing and header are gone.
 - The forensic journal writer now parks and wakes itself inside Rust, so the
   start entry point no longer takes host wake callbacks and the C++ adapter
   drops its atomic wake sequence.

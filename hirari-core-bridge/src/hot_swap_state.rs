@@ -2,7 +2,7 @@
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -35,15 +35,19 @@ struct HotSwapState {
     daemon_running: AtomicBool,
     daemon: Mutex<Option<JoinHandle<()>>>,
     callback_context: usize,
-    log: LogCallback,
-    cpu_load: CpuLoadCallback,
+    log: Option<LogCallback>,
+    cpu_load: Option<CpuLoadCallback>,
 }
 
 unsafe impl Send for HotSwapState {}
 unsafe impl Sync for HotSwapState {}
 
 impl HotSwapState {
-    fn new(callback_context: *mut c_void, log: LogCallback, cpu_load: CpuLoadCallback) -> Self {
+    fn new(
+        callback_context: *mut c_void,
+        log: Option<LogCallback>,
+        cpu_load: Option<CpuLoadCallback>,
+    ) -> Self {
         Self {
             phase: AtomicU8::new(IDLE),
             quiesce_requested: AtomicBool::new(false),
@@ -67,7 +71,7 @@ pub extern "C" fn hirari_hot_swap_state_create(
     cpu_load: Option<CpuLoadCallback>,
 ) -> *mut c_void {
     let (Some(log), Some(cpu_load)) = (log, cpu_load) else { return std::ptr::null_mut() };
-    Box::into_raw(Box::new(HotSwapState::new(context, log, cpu_load))).cast()
+    Box::into_raw(Box::new(HotSwapState::new(context, Some(log), Some(cpu_load)))).cast()
 }
 
 #[no_mangle]
@@ -126,9 +130,11 @@ pub unsafe extern "C" fn hirari_hot_swap_state_start(state: *mut c_void) {
             audit_counter += 1;
             if audit_counter >= 100 {
                 audit_counter = 0;
-                let load = unsafe { (state.cpu_load)(state.callback_context as *mut c_void) };
-                if load > 98.0 {
-                    log(state, 1, 0xFF, b"WATCHDOG | CPU_OVERLOAD | REBALANCE_TRIGGERED");
+                if let Some(cpu_load) = state.cpu_load {
+                    let load = unsafe { cpu_load(state.callback_context as *mut c_void) };
+                    if load > 98.0 {
+                        log(state, 1, 0xFF, b"WATCHDOG | CPU_OVERLOAD | REBALANCE_TRIGGERED");
+                    }
                 }
             }
         }
@@ -146,8 +152,10 @@ pub unsafe extern "C" fn hirari_hot_swap_state_stop(state: *mut c_void) {
 }
 
 fn log(state: &HotSwapState, level: u32, code: u32, message: &[u8]) {
-    unsafe { (state.log)(state.callback_context as *mut c_void, level, code,
-        message.as_ptr(), message.len()) };
+    if let Some(log) = state.log {
+        unsafe { log(state.callback_context as *mut c_void, level, code,
+            message.as_ptr(), message.len()) };
+    }
 }
 
 fn finish_hot_swap(state: &HotSwapState, action: u8) {
@@ -214,4 +222,23 @@ pub unsafe extern "C" fn hirari_hot_swap_state_quiesce_blocks(state: *const c_vo
 #[no_mangle]
 pub unsafe extern "C" fn hirari_hot_swap_state_exceeded_budget(state: *const c_void) -> bool {
     unsafe { hirari_hot_swap_state_quiesce_blocks(state) > MAX_QUIESCE_BLOCKS }
+}
+
+static DEFAULT_STATE: OnceLock<Box<HotSwapState>> = OnceLock::new();
+
+fn default_state() -> &'static HotSwapState {
+    DEFAULT_STATE.get_or_init(|| Box::new(HotSwapState::new(std::ptr::null_mut(), None, None)))
+}
+
+/// Quiesce state shared by the engine when no hot-swap host is installed.
+#[no_mangle]
+pub extern "C" fn hirari_hot_swap_default_quiesce_requested() -> bool {
+    default_state().quiesce_requested.load(Ordering::Acquire)
+}
+
+#[no_mangle]
+pub extern "C" fn hirari_hot_swap_default_acknowledge() {
+    let state = default_state();
+    state.acknowledged.store(true, Ordering::Release);
+    state.quiesce_blocks.fetch_add(1, Ordering::Relaxed);
 }

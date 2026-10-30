@@ -187,6 +187,8 @@ extern "C" bool hirari_plugin_parameter_snapshot_get(const void* handle, uint32_
 using HirariPluginParameterVisitCallback = bool (*)(void* context, uint32_t parameter_id, double value);
 extern "C" bool hirari_plugin_parameter_snapshot_visit(
     const void* handle, void* context, HirariPluginParameterVisitCallback callback);
+extern "C" bool hirari_hot_swap_default_quiesce_requested();
+extern "C" void hirari_hot_swap_default_acknowledge();
 extern "C" void* hirari_bus_system_create();
 extern "C" void hirari_bus_system_destroy(void* state);
 extern "C" void* hirari_bus_system_bus(const void* state, uint32_t bus_id);

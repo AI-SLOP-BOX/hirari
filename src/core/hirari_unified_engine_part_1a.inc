@@ -226,9 +226,8 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         }
         // Hot-swap quiesce: bounded backoff (max 200 x 50µs = 10ms)
         // Tight spin avoided: background daemon clears flag in <5ms by design.
-        auto& diagnostics = ::Hirari::Core::Diagnostics::DiagnosticsKernel::getInstance();
-        if (diagnostics.isQuiesceRequested()) {
-            diagnostics.acknowledgeQuiesce();
+        if (hirari_hot_swap_default_quiesce_requested()) {
+            hirari_hot_swap_default_acknowledge();
             // Never sleep or spin on the audio thread. The next block will see
             // the request again if the structural transaction is still active.
             output.clear(off, sz);

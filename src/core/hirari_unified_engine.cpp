@@ -26,7 +26,6 @@
 #include <unistd.h>
 #include "concurrency/audio_task_manager.hpp"
 #include "log_buffer.hpp"
-#include "diagnostics_kernel.hpp"
 #include "database/project_db.hpp"
 #include "rust_ffi.hpp"
 
