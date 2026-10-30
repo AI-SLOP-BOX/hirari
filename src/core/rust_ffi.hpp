@@ -1980,16 +1980,10 @@ extern "C" void hirari_mpe_manager_reset(void* state);
 
 using HirariForensicJournalRecoveryCallback = void (*)(
     void*, uint32_t, uint32_t, float, uint64_t);
-using HirariAtomicSequenceLoadCallback = uint64_t (*)(void*);
-using HirariAtomicSequenceWaitCallback = void (*)(void*, uint64_t);
-using HirariAtomicSequenceWakeCallback = void (*)(void*);
 extern "C" void* hirari_forensic_journaler_create();
 extern "C" void hirari_forensic_journaler_destroy(void* state);
 extern "C" bool hirari_forensic_journaler_start(
-    void* state, const uint8_t* path, size_t path_size, void* wait_context,
-    HirariAtomicSequenceLoadCallback load_sequence,
-    HirariAtomicSequenceWaitCallback wait_sequence,
-    HirariAtomicSequenceWakeCallback wake_sequence);
+    void* state, const uint8_t* path, size_t path_size);
 extern "C" bool hirari_forensic_journaler_log(
     const void* state, uint32_t type, uint32_t track_id, float value, uint64_t timestamp);
 extern "C" bool hirari_forensic_journaler_log_description(

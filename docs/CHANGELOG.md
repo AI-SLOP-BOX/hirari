@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The forensic journal writer now parks and wakes itself inside Rust, so the
+  start entry point no longer takes host wake callbacks and the C++ adapter
+  drops its atomic wake sequence.
 - The bus summing system now owns its per-bus audio stages inside Rust and
   the engine keeps a single handle, so the C++ `BusSystem` adapter class and
   its header are gone.
