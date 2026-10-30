@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Twenty-three more two-layer engine edits moved into the same Rust inherent
+  methods: region import queueing and source analysis, note-segment anchor
+  and warp edits, region alignment/quantize jobs, plugin parameter writes,
+  MIDI-CC macro bindings, route/send/feedback gains and expression-map
+  install. Each pair of C++ relay layers and its bridge declaration is gone.
 - Thirty-seven engine edits that were relayed through two C++ layers (an
   `AudioEngine` forwarder plus a one-line `HirariUnifiedEngine` delegation)
   now live as Rust inherent methods on the bridge type, calling the same

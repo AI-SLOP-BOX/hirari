@@ -32,8 +32,6 @@
         if (m_projectLayoutRevision) m_projectLayoutRevision->markChanged();
     }
     bool set_articulation_map(uint32_t trackId, uint32_t mapHash);
-    bool set_expression_map(uint32_t trackId, const std::vector<uint32_t>& packed,
-                           const std::string& json, uint32_t articulationId);
     static void installExpressionMapEditHost();
     bool set_track_eq(uint32_t trackId, float lowBoostDb, float lowCutDb,
                       float highBoostDb, float highCutDb);

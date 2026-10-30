@@ -220,11 +220,6 @@ bool HirariUnifiedEngine::add_region(uint32_t tid, std::string_view path, double
     return result == 0;
 }
 
-uint64_t HirariUnifiedEngine::queue_region_import(
-    uint32_t tid, std::string_view path, uint64_t startSample) {
-    return hirari_region_import_queue(
-        this, tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(), startSample);
-}
 
 
 void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) {

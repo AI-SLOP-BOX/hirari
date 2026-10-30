@@ -70,12 +70,6 @@
     void set_metronome_enabled(bool enabled) noexcept;
     bool is_metronome_enabled() const noexcept;
     void set_test_tone(bool enabled);
-    bool bind_midi_cc_to_macro(uint8_t channel, uint8_t cc, uint32_t macro_index,
-                               float minimum, float maximum, float curve,
-                               bool pickup) noexcept;
-    bool bind_midi_cc14_to_macro(uint8_t channel, uint16_t controller, uint32_t macro_index,
-                                 float minimum, float maximum, float curve,
-                                 bool pickup) noexcept;
     void handle_midi_cc(uint8_t channel, uint8_t cc, uint8_t value) noexcept;
     void handle_midi_cc14(uint8_t channel, uint16_t controller, uint16_t value) noexcept;
     // Preview sampler bridge. The sample is replaced off the audio thread;

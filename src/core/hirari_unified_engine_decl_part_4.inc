@@ -20,41 +20,7 @@ public:
     bool move_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample, int64_t deltaSamples);
     void set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
                        uint64_t startSample, uint64_t lengthSamples);
-    bool set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled);
-    bool set_region_audio_note_segment(uint32_t tid, uint32_t rid,
-                                       double startSeconds, double endSeconds,
-                                       double pitchOffsetCents, double formantOffsetCents);
-    bool set_region_audio_note_anchor(uint32_t tid, uint32_t rid,
-                                      double segmentStartSeconds, double positionSeconds,
-                                      double pitchCents, double formantCents);
-    bool set_region_audio_note_pitch_anchor(uint32_t tid, uint32_t rid,
-                                            double segmentStartSeconds,
-                                            double positionSeconds,
-                                            double pitchCents);
-    bool set_region_audio_note_formant_anchor(uint32_t tid, uint32_t rid,
-                                              double segmentStartSeconds,
-                                              double positionSeconds,
-                                              double formantCents);
-    bool move_region_audio_note_anchor(uint32_t tid, uint32_t rid,
-                                       double segmentStartSeconds,
-                                       double oldPositionSeconds,
-                                       double newPositionSeconds,
-                                       double valueCents,
-                                       bool editFormant);
-    bool warp_region_audio_note_segment(uint32_t tid, uint32_t rid,
-                                        double segmentStartSeconds,
-                                        double newStartSeconds, double newEndSeconds);
-    bool remove_region_audio_note_segment(uint32_t tid, uint32_t rid,
-                                          double segmentStartSeconds);
 
-    bool start_region_audio_note_analysis(uint32_t tid, uint32_t rid, double sampleRate);
-    uint8_t region_audio_note_analysis_status(uint32_t tid, uint32_t rid) const;
-    bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
-                                    const std::vector<::HirariRegionAlignmentTargetId>& targets);
-    uint8_t region_alignment_status(uint32_t referenceTid, uint32_t referenceRid) const;
-    bool finalize_region_alignment(uint32_t referenceTid, uint32_t referenceRid);
-    bool quantize_region_sync_group(uint32_t tid, uint32_t rid,
-                                    float strength, double gridBeats, float swing);
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled);
     bool clear_region_processing(uint32_t tid, uint32_t rid);
 

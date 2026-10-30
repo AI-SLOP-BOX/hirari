@@ -28,20 +28,6 @@ bool HirariUnifiedEngine::set_track_input_monitor_channels(
         this, tid, enabled, leftChannel, rightChannel);
 }
 
-bool HirariUnifiedEngine::bind_midi_cc_to_macro(uint8_t channel, uint8_t cc,
-                                               uint32_t macroIndex, float minimum,
-                                               float maximum, float curve,
-                                               bool pickup) noexcept {
-    return hirari_control_edit_bind_midi_cc(
-        this, channel, cc, macroIndex, minimum, maximum, curve, pickup);
-}
-bool HirariUnifiedEngine::bind_midi_cc14_to_macro(uint8_t channel, uint16_t controller,
-                                                 uint32_t macroIndex, float minimum,
-                                                 float maximum, float curve,
-                                                 bool pickup) noexcept {
-    return hirari_control_edit_bind_midi_cc14(
-        this, channel, controller, macroIndex, minimum, maximum, curve, pickup);
-}
 void HirariUnifiedEngine::handle_midi_cc(uint8_t channel, uint8_t cc,
                                        uint8_t value) noexcept {
     hirari_midi_learn_handle_cc(m_midiLearnState, channel, cc, value);
@@ -53,18 +39,6 @@ void HirariUnifiedEngine::handle_midi_cc14(uint8_t channel, uint16_t controller,
 }
 void HirariUnifiedEngine::set_preview_synth_engine(uint32_t engine) {
     hirari_preview_synth_set_engine(m_previewSynthState, engine);
-}
-bool HirariUnifiedEngine::set_route_gain(uint32_t sourceId, uint32_t destId, float gain,
-                                         bool enabled) {
-    return hirari_routing_edit_set_route_gain(this, sourceId, destId, gain, enabled);
-}
-bool HirariUnifiedEngine::set_send_route(uint32_t sourceId, uint32_t destId, float gain,
-                                         bool preFader, bool enabled) {
-    return hirari_routing_edit_set_send_route(this, sourceId, destId, gain, preFader, enabled);
-}
-bool HirariUnifiedEngine::set_feedback_route(uint32_t sourceId, uint32_t destId, float gain,
-                                             bool enabled) {
-    return hirari_routing_edit_set_feedback_route(this, sourceId, destId, gain, enabled);
 }
 bool HirariUnifiedEngine::set_sidechain_link(uint32_t sourceId, uint32_t destId,
                                              uint32_t pluginIndex, uint32_t tapPoint,

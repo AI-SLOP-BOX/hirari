@@ -11,8 +11,6 @@
     // Regions & Plugins
     bool add_region(uint32_t trackId, std::string_view path, double start_beat);
     bool region_table_mirror_matches(uint32_t trackId) const;
-    uint64_t queue_region_import(uint32_t trackId, std::string_view path,
-                                 uint64_t start_sample);
     // 0 = still decoding, 1 = committed, 2 = failed or stale, 3 = unknown ticket.
     bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex);
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
@@ -39,11 +37,8 @@
                                   const std::vector<uint8_t>& state);
     uint8_t get_sandbox_plugin_state_error(uint32_t trackId, uint32_t sandboxIndex) const;
     std::string get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const;
-    bool set_plugin_parameter(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId, float value);
     // Internal automation/hydration path. It applies the value without
     // creating a user-facing Undo step for every generated control event.
-    bool set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
-                                           uint32_t parameterId, float value);
     float get_plugin_parameter(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId) const;
     uint32_t get_plugin_parameter_count(uint32_t tid, uint32_t pluginIndex) const;
     bool has_plugin_native_editor(uint32_t tid, uint32_t pluginIndex) const;
@@ -55,10 +50,6 @@
     bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed);
     bool get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const;
     void set_preview_synth_engine(uint32_t engine);
-    bool set_route_gain(uint32_t sourceId, uint32_t destId, float gain, bool enabled);
-    bool set_send_route(uint32_t sourceId, uint32_t destId, float gain,
-                        bool preFader, bool enabled);
-    bool set_feedback_route(uint32_t sourceId, uint32_t destId, float gain, bool enabled);
     bool set_sidechain_link(uint32_t sourceId, uint32_t destId,
                             uint32_t pluginIndex, uint32_t tapPoint, bool enabled);
     bool has_sidechain_link(uint32_t sourceId, uint32_t destId, uint32_t pluginIndex) const;

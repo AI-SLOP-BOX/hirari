@@ -218,15 +218,6 @@ bool HirariUnifiedEngine::set_articulation_map(uint32_t trackId, uint32_t mapHas
     return true;
 }
 
-bool HirariUnifiedEngine::set_expression_map(uint32_t trackId,
-                                             const std::vector<uint32_t>& packed,
-                                             const std::string& json,
-                                             uint32_t articulationId) {
-    return hirari_expression_map_edit_set(
-        this, trackId, packed.data(), packed.size(),
-        reinterpret_cast<const uint8_t*>(json.data()), json.size(), articulationId,
-        undo_state(), log_state());
-}
 
 
 void HirariUnifiedEngine::installExpressionMapEditHost() {

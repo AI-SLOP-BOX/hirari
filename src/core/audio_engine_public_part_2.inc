@@ -11,10 +11,6 @@
     bool add_region(uint32_t tid, rust::Str path, double startBeat) const {
         return m_engine && m_engine->add_region(tid, std::string_view(path.data(), path.size()), startBeat);
     }
-    uint64_t queue_region_import(uint32_t tid, rust::Str path, uint64_t startSample) const {
-        return m_engine ? m_engine->queue_region_import(
-            tid, std::string_view(path.data(), path.size()), startSample) : 0;
-    }
     
     bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex) const { return m_engine && m_engine->move_plugin(tid, fromIndex, toIndex); }
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandbox_index,
@@ -90,15 +86,6 @@
         return rust::String(m_engine ? m_engine->get_sandbox_plugin_state_error_text(trackId, sandboxIndex)
                                      : "state-unavailable");
     }
-    bool set_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
-                              uint32_t parameterId, float value) const {
-        return m_engine && m_engine->set_plugin_parameter(tid, pluginIndex, parameterId, value);
-    }
-    bool set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
-                                           uint32_t parameterId, float value) const {
-        return m_engine && m_engine->set_plugin_parameter_without_undo(
-            tid, pluginIndex, parameterId, value);
-    }
     float get_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
                                uint32_t parameterId) const {
         return m_engine ? m_engine->get_plugin_parameter(tid, pluginIndex, parameterId) : 0.0f;
@@ -122,35 +109,13 @@
     float get_track_pdc_compensation_ms(uint32_t tid) const {
         return m_engine ? m_engine->get_track_pdc_compensation_ms(tid) : 0.0f;
     }
-    bool bind_midi_cc_to_macro(uint8_t channel, uint8_t cc, uint32_t macroIndex,
-                               float minimum, float maximum, float curve,
-                               bool pickup) const {
-        return m_engine && m_engine->bind_midi_cc_to_macro(
-            channel, cc, macroIndex, minimum, maximum, curve, pickup);
-    }
     void handle_midi_cc(uint8_t channel, uint8_t cc, uint8_t value) const noexcept {
         if (m_engine) m_engine->handle_midi_cc(channel, cc, value);
     }
     void handle_midi_cc14(uint8_t channel, uint16_t controller, uint16_t value) const noexcept {
         if (m_engine) m_engine->handle_midi_cc14(channel, controller, value);
     }
-    bool bind_midi_cc14_to_macro(uint8_t channel, uint16_t controller, uint32_t macro_index,
-                                 float minimum, float maximum, float curve,
-                                 bool pickup) const noexcept {
-        return m_engine && m_engine->bind_midi_cc14_to_macro(
-            channel, controller, macro_index, minimum, maximum, curve, pickup);
-    }
     void set_preview_synth_engine(uint32_t engine) const { if (m_engine) m_engine->set_preview_synth_engine(engine); }
-    bool set_route_gain(uint32_t sourceId, uint32_t destId, float gain, bool enabled) const {
-        return m_engine && m_engine->set_route_gain(sourceId, destId, gain, enabled);
-    }
-    bool set_send_route(uint32_t sourceId, uint32_t destId, float gain,
-                        bool preFader, bool enabled) const {
-        return m_engine && m_engine->set_send_route(sourceId, destId, gain, preFader, enabled);
-    }
-    bool set_feedback_route(uint32_t sourceId, uint32_t destId, float gain, bool enabled) const {
-        return m_engine && m_engine->set_feedback_route(sourceId, destId, gain, enabled);
-    }
     bool set_sidechain_link(uint32_t sourceId, uint32_t destId,
                             uint32_t pluginIndex, uint32_t tapPoint, bool enabled) const {
         return m_engine && m_engine->set_sidechain_link(sourceId, destId, pluginIndex, tapPoint, enabled);
@@ -203,12 +168,6 @@
     bool resume_bounce() const noexcept { return m_engine && m_engine->resume_bounce(); }
     bool execute_vocal_remover(uint32_t tid) const { return m_engine && m_engine->execute_vocal_remover(tid); }
     bool set_articulation_map(uint32_t tid, uint32_t mapHash) const { return m_engine && m_engine->set_articulation_map(tid, mapHash); }
-    bool set_expression_map(uint32_t tid, rust::Vec<uint32_t> packed, rust::String json,
-                            uint32_t articulationId) const {
-        if (!m_engine) return false;
-        std::vector<uint32_t> native(packed.begin(), packed.end());
-        return m_engine->set_expression_map(tid, native, std::string(json.data(), json.size()), articulationId);
-    }
     bool set_track_eq(uint32_t tid, float lowBoostDb, float lowCutDb,
                       float highBoostDb, float highCutDb) const {
         return m_engine && m_engine->set_track_eq(tid, lowBoostDb, lowCutDb, highBoostDb, highCutDb);
@@ -222,57 +181,7 @@
 
     bool split_region(uint32_t tid, uint32_t rid, double split) const { return m_engine && m_engine->split_region(tid, rid, split); }
     uint32_t split_region_with_right_id(uint32_t tid, uint32_t rid, double split) const { return m_engine ? m_engine->split_region_with_right_id(tid, rid, split) : 0; }
-    bool set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid, bool enabled) const { return m_engine && m_engine->set_region_pitch_preserve_warp(tid, rid, enabled); }
-    bool set_region_audio_note_segment(uint32_t tid, uint32_t rid, double startSeconds,
-                                       double endSeconds, double pitchOffsetCents,
-                                       double formantOffsetCents) const {
-        return m_engine && m_engine->set_region_audio_note_segment(
-            tid, rid, startSeconds, endSeconds, pitchOffsetCents, formantOffsetCents);
-    }
-    bool set_region_audio_note_anchor(uint32_t tid, uint32_t rid, double segmentStartSeconds,
-                                      double positionSeconds, double pitchCents,
-                                      double formantCents) const {
-        return m_engine && m_engine->set_region_audio_note_anchor(
-            tid, rid, segmentStartSeconds, positionSeconds, pitchCents, formantCents);
-    }
-    bool set_region_audio_note_pitch_anchor(uint32_t tid, uint32_t rid,
-                                            double segmentStartSeconds,
-                                            double positionSeconds,
-                                            double pitchCents) const {
-        return m_engine && m_engine->set_region_audio_note_pitch_anchor(
-            tid, rid, segmentStartSeconds, positionSeconds, pitchCents);
-    }
-    bool set_region_audio_note_formant_anchor(uint32_t tid, uint32_t rid,
-                                              double segmentStartSeconds,
-                                              double positionSeconds,
-                                              double formantCents) const {
-        return m_engine && m_engine->set_region_audio_note_formant_anchor(
-            tid, rid, segmentStartSeconds, positionSeconds, formantCents);
-    }
-    bool move_region_audio_note_anchor(uint32_t tid, uint32_t rid,
-                                       double segmentStartSeconds,
-                                       double oldPositionSeconds,
-                                       double newPositionSeconds,
-                                       double valueCents,
-                                       bool editFormant) const {
-        return m_engine && m_engine->move_region_audio_note_anchor(
-            tid, rid, segmentStartSeconds, oldPositionSeconds, newPositionSeconds,
-            valueCents, editFormant);
-    }
-    bool warp_region_audio_note_segment(uint32_t tid, uint32_t rid, double segmentStart,
-                                        double newStart, double newEnd) const {
-        return m_engine && m_engine->warp_region_audio_note_segment(tid, rid, segmentStart, newStart, newEnd);
-    }
-    bool remove_region_audio_note_segment(uint32_t tid, uint32_t rid, double segmentStart) const {
-        return m_engine && m_engine->remove_region_audio_note_segment(tid, rid, segmentStart);
-    }
 
-    bool start_region_audio_note_analysis(uint32_t tid, uint32_t rid, double sampleRate) const {
-        return m_engine && m_engine->start_region_audio_note_analysis(tid, rid, sampleRate);
-    }
-    uint8_t region_audio_note_analysis_status(uint32_t tid, uint32_t rid) const {
-        return m_engine ? m_engine->region_audio_note_analysis_status(tid, rid) : 0;
-    }
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, rust::Str operation, float parameter, bool enabled) const {
         return m_engine && m_engine->append_region_processing(tid, rid, stepId, std::string_view(operation.data(), operation.size()), parameter, enabled);
     }

@@ -7,76 +7,20 @@
 
 
 
-bool HirariUnifiedEngine::set_region_pitch_preserve_warp(uint32_t tid, uint32_t rid,
-                                                        bool enabled) {
-    return hirari_region_edit_scalar(this, tid, rid, kHirariRegionScalarPitchPreserveWarp,
-                                     enabled ? 1.0f : 0.0f, 0.0f);
-}
 
 
-bool HirariUnifiedEngine::set_region_audio_note_segment(
-    uint32_t tid, uint32_t rid, double startSeconds, double endSeconds,
-    double pitchOffsetCents, double formantOffsetCents) {
-    return hirari_region_edit_note_segment(this, tid, rid, startSeconds, endSeconds,
-                                           pitchOffsetCents, formantOffsetCents);
-}
-
-bool HirariUnifiedEngine::set_region_audio_note_anchor(
-    uint32_t tid, uint32_t rid, double segmentStartSeconds,
-    double positionSeconds, double pitchCents, double formantCents) {
-    return hirari_region_edit_note_anchor(this, tid, rid, segmentStartSeconds,
-                                          positionSeconds, pitchCents, formantCents);
-}
-
-bool HirariUnifiedEngine::set_region_audio_note_formant_anchor(
-    uint32_t tid, uint32_t rid, double segmentStartSeconds,
-    double positionSeconds, double formantCents) {
-    return hirari_region_edit_note_formant_anchor(this, tid, rid, segmentStartSeconds,
-                                                  positionSeconds, formantCents);
-}
-
-bool HirariUnifiedEngine::set_region_audio_note_pitch_anchor(
-    uint32_t tid, uint32_t rid, double segmentStartSeconds,
-    double positionSeconds, double pitchCents) {
-    return hirari_region_edit_note_pitch_anchor(this, tid, rid, segmentStartSeconds,
-                                                positionSeconds, pitchCents);
-}
-
-bool HirariUnifiedEngine::move_region_audio_note_anchor(
-    uint32_t tid, uint32_t rid, double segmentStartSeconds,
-    double oldPositionSeconds, double newPositionSeconds,
-    double valueCents, bool editFormant) {
-    return hirari_region_edit_note_move_anchor(this, tid, rid, segmentStartSeconds,
-                                               oldPositionSeconds, newPositionSeconds,
-                                               valueCents, editFormant);
-}
 
 
-bool HirariUnifiedEngine::warp_region_audio_note_segment(
-    uint32_t tid, uint32_t rid, double segmentStartSeconds,
-    double newStartSeconds, double newEndSeconds) {
-    return hirari_region_edit_note_warp(this, tid, rid, segmentStartSeconds,
-                                        newStartSeconds, newEndSeconds);
-}
 
-bool HirariUnifiedEngine::remove_region_audio_note_segment(uint32_t tid, uint32_t rid,
-                                                          double segmentStartSeconds) {
-    return hirari_region_edit_note_remove(this, tid, rid, segmentStartSeconds);
-}
+
+
+
+
 
 // Pitch analysis is a Rust job (region_jobs.rs): rate validation, the worker,
 // its registry limits, the staleness check and the undo pair all live there.
 // The engine only exposes the retained-track storage callbacks (part_4z).
-bool HirariUnifiedEngine::start_region_audio_note_analysis(
-    uint32_t tid, uint32_t rid, double sampleRate) {
-    return hirari_region_pitch_analysis_start(this, tid, rid, sampleRate);
-}
 
-uint8_t HirariUnifiedEngine::region_audio_note_analysis_status(uint32_t tid,
-                                                              uint32_t rid) const {
-    return hirari_region_pitch_analysis_status(
-        const_cast<HirariUnifiedEngine*>(this), tid, rid);
-}
 
 
 
@@ -84,28 +28,9 @@ uint8_t HirariUnifiedEngine::region_audio_note_analysis_status(uint32_t tid,
 // registry, analysis threads, staleness checks and the marker commit all live
 // in hirari-core-bridge/src/region_time_jobs.rs. The engine only provides the
 // host callbacks (part_4z) that expose storage.
-bool HirariUnifiedEngine::align_regions_to_reference(
-    uint32_t referenceTid, uint32_t referenceRid,
-    const std::vector<::HirariRegionAlignmentTargetId>& targets) {
-    return hirari_region_align_to_reference(this, referenceTid, referenceRid,
-                                            targets.data(), targets.size());
-}
 
-uint8_t HirariUnifiedEngine::region_alignment_status(uint32_t referenceTid,
-                                                     uint32_t referenceRid) const {
-    return hirari_region_alignment_status(
-        const_cast<HirariUnifiedEngine*>(this), referenceTid, referenceRid);
-}
 
-bool HirariUnifiedEngine::finalize_region_alignment(uint32_t referenceTid,
-                                                    uint32_t referenceRid) {
-    return hirari_region_finalize_alignment(this, referenceTid, referenceRid);
-}
 
-bool HirariUnifiedEngine::quantize_region_sync_group(
-    uint32_t tid, uint32_t rid, float strength, double gridBeats, float swing) {
-    return hirari_region_quantize_sync_group(this, tid, rid, strength, gridBeats, swing);
-}
 
 
 bool HirariUnifiedEngine::append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled) {

@@ -265,28 +265,6 @@ public:
             timeline_samples.data(), timeline_samples.size(),
             transient_flags.data(), transient_flags.size());
     }
-    bool align_regions_to_reference(uint32_t referenceTid, uint32_t referenceRid,
-                                    rust::Slice<const uint32_t> targetTids,
-                                    rust::Slice<const uint32_t> targetRids) const {
-        if (!m_engine || targetTids.size() != targetRids.size() ||
-            targetTids.empty() || targetTids.size() > 32) return false;
-        std::vector<::HirariRegionAlignmentTargetId> targets;
-        targets.reserve(targetTids.size());
-        for (size_t i = 0; i < targetTids.size(); ++i)
-            targets.push_back({targetTids[i], targetRids[i]});
-        return m_engine->align_regions_to_reference(referenceTid, referenceRid, targets);
-    }
-    uint8_t region_alignment_status(uint32_t referenceTid, uint32_t referenceRid) const {
-        return m_engine ? m_engine->region_alignment_status(referenceTid, referenceRid) : 0;
-    }
-    bool finalize_region_alignment(uint32_t referenceTid, uint32_t referenceRid) const {
-        return m_engine && m_engine->finalize_region_alignment(referenceTid, referenceRid);
-    }
-    bool quantize_region_sync_group(uint32_t tid, uint32_t rid,
-                                    float strength, double gridBeats, float swing) const {
-        return m_engine && m_engine->quantize_region_sync_group(
-            tid, rid, strength, gridBeats, swing);
-    }
 
     void trigger_preview_sample() const { if (m_engine) m_engine->trigger_preview_sample(); }
     void apply_config(float tempo, uint32_t sr, uint32_t bs) const {

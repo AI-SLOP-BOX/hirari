@@ -173,16 +173,7 @@ std::string HirariUnifiedEngine::get_sandbox_plugin_state_error_text(uint32_t tr
         if (track && track->getId() == trackId) return track->sandboxedPluginStateErrorText(sandboxIndex);
     return "state-unavailable";
 }
-bool HirariUnifiedEngine::set_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
-                                             uint32_t parameterId, float value) {
-    return hirari_plugin_edit_set_parameter(this, tid, pluginIndex, parameterId, value);
-}
 
-bool HirariUnifiedEngine::set_plugin_parameter_without_undo(uint32_t tid, uint32_t pluginIndex,
-                                                          uint32_t parameterId, float value) {
-    return hirari_plugin_edit_set_parameter_without_undo(
-        this, tid, pluginIndex, parameterId, value);
-}
 float HirariUnifiedEngine::get_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
                                               uint32_t parameterId) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
