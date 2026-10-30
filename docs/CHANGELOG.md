@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The sidechain snapshot contract now lives in Rust. Its assertions
+  (registration admission, generation bump on refresh, level clamping,
+  capture/restore, owned publication and the single-writer seqlock race) run
+  against the Rust engine handle, and the 183-line C++ contract translation
+  unit is gone.
+
 - Single-project bounce orchestration now runs in Rust. The render driver owns
   extent planning, block chunking, pause/cancel, deterministic dither,
   progress/state publication and the publish boundary; C++ keeps the audio
