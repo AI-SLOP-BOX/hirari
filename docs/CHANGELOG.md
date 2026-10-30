@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Read-only engine getters now go straight from Rust to the session engine:
+  `AudioEngine` exposes its inner engine once (`get_core`) and the 28
+  transport, plugin, sandbox and bounce getters that used to have a C++
+  forwarder each are called on `HirariUnifiedEngine` directly. Fifteen
+  `extern "C"` declarations that no longer had a C++ definition or caller were
+  removed from `rust_ffi.hpp`.
 - Swept the remaining C++ functions that nothing in `src`, `tests` or the Rust
   call sites referenced any more: sandbox health/reset helpers, automation and
   region-editing leftovers, arrangement/diagnostics conveniences and the

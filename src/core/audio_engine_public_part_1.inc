@@ -15,19 +15,17 @@ public:
     void set_loop(bool enabled) const { if (m_engine) { m_engine->set_loop(enabled); m_engine->mark_project_state_changed(); } }
     bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { if (!m_engine || !m_engine->set_cycle_range(start_sample, end_sample, enabled)) return false; m_engine->mark_project_state_changed(); return true; }
     bool is_loop_enabled() const { return m_engine && m_engine->is_loop_enabled(); }
-    uint64_t cycle_start() const { return m_engine ? m_engine->cycle_start() : 0; }
-    uint64_t cycle_end() const { return m_engine ? m_engine->cycle_end() : 0; }
+
+
     void set_metronome_enabled(bool enabled) const {
         if (m_engine) { m_engine->set_metronome_enabled(enabled); m_engine->mark_project_state_changed(); }
     }
-    bool is_metronome_enabled() const {
-        return m_engine && m_engine->is_metronome_enabled();
-    }
+
     bool is_playing() const { return m_engine && m_engine->is_playing(); }
     void set_playhead(uint64_t pos) const { if (m_engine) m_engine->set_playhead(pos); }
-    uint64_t get_playhead() const { return m_engine ? m_engine->get_playhead() : 0; }
-    double samples_to_beats(uint64_t samples) const { return m_engine ? m_engine->samples_to_beats(samples) : 0.0; }
-    uint64_t beats_to_samples(double beats) const { return m_engine ? m_engine->beats_to_samples(beats) : 0; }
+
+
+
     // Tempo and time-signature editing moved to Rust with the objects it
     // touches (hirari_core_engine_tempo.rs), which reach them through the
     // three handles above; nothing about it is relayed through here now. The
@@ -37,9 +35,9 @@ public:
     float get_tempo() const { return m_engine ? m_engine->get_tempo() : 120.0f; }
     bool set_tempo(float bpm) const { if (!m_engine || !m_engine->set_tempo(bpm)) return false; m_engine->mark_project_state_changed(); return true; }
     void midi_clock_tick(uint64_t timestamp) const { if (m_engine) m_engine->midi_clock_tick(timestamp); }
-    uint64_t midi_clock_ticks() const { return m_engine ? m_engine->midi_clock_ticks() : 0; }
-    uint64_t midi_clock_last_tick() const { return m_engine ? m_engine->midi_clock_last_tick() : 0; }
-    double midi_clock_rate() const { return m_engine ? m_engine->midi_clock_rate() : 120.0; }
+
+
+
     void set_midi_clock_rate(double bpm) const { if (m_engine) m_engine->set_midi_clock_rate(bpm); }
     float get_track_volume(uint32_t tid) const {
         return m_engine ? m_engine->get_track_volume(tid) : -1.0f;
@@ -67,15 +65,11 @@ public:
     void mark_project_state_changed() const {
         if (m_engine) m_engine->mark_project_state_changed();
     }
-    bool bus_track_exists(uint32_t busTrackId) const {
-        return m_engine && m_engine->bus_track_exists(busTrackId);
-    }
+
     float get_master_gain() const noexcept {
         return m_engine ? m_engine->get_master_gain() : 1.0f;
     }
-    uint32_t get_track_delay_samples(uint32_t tid) const {
-        return m_engine ? m_engine->get_track_delay_samples(tid) : 0u;
-    }
+
     bool set_offline_render_target(uint32_t tid) const {
         return m_engine && m_engine->set_offline_render_target(tid);
     }
@@ -221,7 +215,7 @@ public:
         return m_engine ? m_engine->get_audio_config_generation() : 0;
     }
     uint32_t get_block_size() const { return m_engine ? m_engine->get_block_size() : 0; }
-    float get_latency_ms() const { return m_engine ? m_engine->get_latency_ms() : 0.0f; }
+
     void set_test_tone(bool enabled) const { if (m_engine) m_engine->set_test_tone(enabled); }
     void set_preview_sample(rust::Slice<const float> samples, double sourceRate) const {
         if (m_engine) m_engine->set_preview_sample(samples.data(), samples.size(), sourceRate);

@@ -1,10 +1,8 @@
     bool assign_track_to_vca(uint32_t trackId, uint32_t groupId) const { return m_engine && m_engine->assign_track_to_vca(trackId, groupId); }
     void new_project() const { if (m_engine) m_engine->new_project(); }
     bool set_low_latency_mode(bool active) const { return m_engine && m_engine->set_low_latency_mode(active); }
-    bool low_latency_mode() const { return m_engine && m_engine->low_latency_mode(); }
-    bool region_table_mirror_matches(uint32_t tid) const {
-        return m_engine && m_engine->region_table_mirror_matches(tid);
-    }
+
+
     bool add_region(uint32_t tid, rust::Str path, double startBeat) const {
         return m_engine && m_engine->add_region(tid, std::string_view(path.data(), path.size()), startBeat);
     }
@@ -29,9 +27,7 @@
     uint32_t take_watchdog_trips() const {
         return m_engine ? m_engine->take_watchdog_trips() : 0;
     }
-    uint64_t non_finite_plugin_samples() const {
-        return m_engine ? m_engine->non_finite_plugin_samples() : 0;
-    }
+
     bool retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
         return m_engine && m_engine->retry_sandboxed_plugin(trackId, sandboxIndex);
     }
@@ -73,20 +69,13 @@
         std::vector<uint8_t> bytes(state.begin(), state.end());
         return m_engine && m_engine->set_sandbox_plugin_state(trackId, sandboxIndex, bytes);
     }
-    uint8_t get_sandbox_plugin_state_error(uint32_t trackId, uint32_t sandboxIndex) const {
-        return m_engine ? m_engine->get_sandbox_plugin_state_error(trackId, sandboxIndex) : 5u;
-    }
+
     rust::String get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const {
         return rust::String(m_engine ? m_engine->get_sandbox_plugin_state_error_text(trackId, sandboxIndex)
                                      : "state-unavailable");
     }
-    float get_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
-                               uint32_t parameterId) const {
-        return m_engine ? m_engine->get_plugin_parameter(tid, pluginIndex, parameterId) : 0.0f;
-    }
-    uint32_t get_plugin_parameter_count(uint32_t tid, uint32_t pluginIndex) const {
-        return m_engine ? m_engine->get_plugin_parameter_count(tid, pluginIndex) : 0;
-    }
+
+
     rust::String get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
                                            uint32_t parameterId) const {
         return rust::String(m_engine ? m_engine->get_plugin_parameter_name(tid, pluginIndex, parameterId) : "");
@@ -94,15 +83,9 @@
     bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) const {
         return m_engine && m_engine->set_plugin_bypass(tid, pluginIndex, bypassed);
     }
-    bool get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const {
-        return m_engine && m_engine->get_plugin_bypass(tid, pluginIndex);
-    }
-    float get_track_latency_ms(uint32_t tid) const {
-        return m_engine ? m_engine->get_track_latency_ms(tid) : 0.0f;
-    }
-    float get_track_pdc_compensation_ms(uint32_t tid) const {
-        return m_engine ? m_engine->get_track_pdc_compensation_ms(tid) : 0.0f;
-    }
+
+
+
     void handle_midi_cc(uint8_t channel, uint8_t cc, uint8_t value) const noexcept {
         if (m_engine) m_engine->handle_midi_cc(channel, cc, value);
     }
@@ -110,9 +93,7 @@
         if (m_engine) m_engine->handle_midi_cc14(channel, controller, value);
     }
     void set_preview_synth_engine(uint32_t engine) const { if (m_engine) m_engine->set_preview_synth_engine(engine); }
-    bool has_sidechain_link(uint32_t sourceId, uint32_t destId, uint32_t pluginIndex) const {
-        return m_engine && m_engine->has_sidechain_link(sourceId, destId, pluginIndex);
-    }
+
     bool save_project(rust::Str path) const { return m_engine && m_engine->saveProject(std::string_view(path.data(), path.size())); }
     bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }
     bool bounce_project(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project(std::string_view(path.data(), path.size()), format); }
@@ -122,8 +103,8 @@
         return rust::String(::Hirari::IO::WavLoader::loadDiagnosticJson(input, format == 1));
     }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
-    float get_bounce_progress() const noexcept { return m_engine ? m_engine->get_bounce_progress() : 0.0f; }
-    uint32_t get_bounce_state() const noexcept { return m_engine ? m_engine->get_bounce_state() : 0; }
+
+
     bool has_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const noexcept {
         return m_engine && m_engine->has_plugin_native_editor(trackId, pluginIndex);
     }
@@ -162,7 +143,7 @@
                       float highBoostDb, float highCutDb) const {
         return m_engine && m_engine->set_track_eq(tid, lowBoostDb, lowCutDb, highBoostDb, highCutDb);
     }
-    float get_track_correlation(uint32_t tid) const { return m_engine ? m_engine->get_track_correlation(tid) : 0.0f; }
+
     bool execute_auto_mixing() const { return m_engine && m_engine->execute_auto_mixing(); }
     bool execute_auto_arrangement() const { return m_engine && m_engine->execute_auto_arrangement(); }
     bool set_project_scale(int32_t root, int32_t type) const {
@@ -221,13 +202,9 @@
     // final shutdown path, after all AudioEngine handles are gone.
     static void shutdown_process() noexcept;
 
-    bool audio_range_overflowed() const noexcept {
-        return m_engine && m_engine->audio_range_overflowed();
-    }
+
     rust::Vec<uint8_t> get_video_frame() const;
-    uint64_t get_video_frame_revision() const noexcept {
-        return m_engine ? m_engine->get_video_frame_revision() : 0;
-    }
+
     bool request_video_frame(double seconds) const { return m_engine && m_engine->request_video_frame(seconds); }
     bool load_video(rust::Str path) const {
         return m_engine && m_engine->load_video(std::string_view(path.data(), path.size()));
@@ -300,9 +277,7 @@
     uint64_t get_project_generation() const {
         return m_engine ? m_engine->get_project_generation() : 0;
     }
-    uint64_t get_project_layout_revision() const {
-        return m_engine ? m_engine->get_project_layout_revision() : 0;
-    }
+
     uint64_t get_project_state_revision() const {
         return m_engine ? m_engine->get_project_state_revision() : 0;
     }

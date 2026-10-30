@@ -117,6 +117,11 @@ pub mod ffi {
         #[namespace = "Hirari::Core::Engine"]
         type HirariUnifiedEngine;
 
+        // The inner engine is a per-session object that never changes identity.
+        // Rust reaches its getters directly here instead of through an
+        // AudioEngine forwarder per getter.
+        fn get_core(self: &AudioEngine) -> &HirariUnifiedEngine;
+
         // --- LIFECYCLE: No more global singletons ---
         fn new_audio_engine() -> UniquePtr<AudioEngine>;
         fn new_audio_engine_offline() -> UniquePtr<AudioEngine>;
@@ -130,15 +135,15 @@ pub mod ffi {
             end_sample: u64,
             enabled: bool,
         ) -> bool;
-        fn is_loop_enabled(self: &AudioEngine) -> bool;
-        fn cycle_start(self: &AudioEngine) -> u64;
-        fn cycle_end(self: &AudioEngine) -> u64;
+        fn is_loop_enabled(self: &HirariUnifiedEngine) -> bool;
+        fn cycle_start(self: &HirariUnifiedEngine) -> u64;
+        fn cycle_end(self: &HirariUnifiedEngine) -> u64;
         fn set_metronome_enabled(self: &AudioEngine, enabled: bool);
-        fn is_metronome_enabled(self: &AudioEngine) -> bool;
+        fn is_metronome_enabled(self: &HirariUnifiedEngine) -> bool;
         fn is_playing(self: &AudioEngine) -> bool;
-        fn get_playhead(self: &AudioEngine) -> u64;
-        fn samples_to_beats(self: &AudioEngine, samples: u64) -> f64;
-        fn beats_to_samples(self: &AudioEngine, beats: f64) -> u64;
+        fn get_playhead(self: &HirariUnifiedEngine) -> u64;
+        fn samples_to_beats(self: &HirariUnifiedEngine, samples: u64) -> f64;
+        fn beats_to_samples(self: &HirariUnifiedEngine, beats: f64) -> u64;
         // Tempo and time-signature editing is not declared here: those
         // operations live in hirari_core_engine_tempo.rs and work on the
         // addresses above. These two remain on the C++ path because the
@@ -166,10 +171,10 @@ pub mod ffi {
         // "The project changed" revision the UI polls. The shims that used to
         // bump it after an edit moved into Rust along with the edit itself.
         fn mark_project_state_changed(self: &AudioEngine);
-        fn bus_track_exists(self: &AudioEngine, bus_track_id: u32) -> bool;
-        fn get_master_gain(self: &AudioEngine) -> f32;
-        fn get_track_volume(self: &AudioEngine, tid: u32) -> f32;
-        fn get_track_delay_samples(self: &AudioEngine, tid: u32) -> u32;
+        fn bus_track_exists(self: &HirariUnifiedEngine, bus_track_id: u32) -> bool;
+        fn get_master_gain(self: &HirariUnifiedEngine) -> f32;
+        fn get_track_volume(self: &HirariUnifiedEngine, tid: u32) -> f32;
+        fn get_track_delay_samples(self: &HirariUnifiedEngine, tid: u32) -> u32;
         fn set_offline_render_target(self: &AudioEngine, tid: u32) -> bool;
         fn clear_offline_render_target(self: &AudioEngine);
         fn set_offline_render_tail_seconds(self: &AudioEngine, seconds: f32);
@@ -241,7 +246,7 @@ pub mod ffi {
             midi_data: &[u8],
         ) -> Vec<u8>;
         fn take_watchdog_trips(self: &AudioEngine) -> u32;
-        fn non_finite_plugin_samples(self: &AudioEngine) -> u64;
+        fn non_finite_plugin_samples(self: &HirariUnifiedEngine) -> u64;
         fn retry_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
         fn restart_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
         fn get_sandbox_statuses(self: &AudioEngine) -> Vec<u32>;
@@ -260,7 +265,7 @@ pub mod ffi {
             state: &[u8],
         ) -> bool;
         fn get_sandbox_plugin_state_error(
-            self: &AudioEngine,
+            self: &HirariUnifiedEngine,
             track_id: u32,
             sandbox_index: u32,
         ) -> u8;
@@ -271,7 +276,7 @@ pub mod ffi {
         ) -> String;
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
-        fn region_table_mirror_matches(self: &AudioEngine, tid: u32) -> bool;
+        fn region_table_mirror_matches(self: &HirariUnifiedEngine, tid: u32) -> bool;
         fn append_region_processing(
             self: &AudioEngine,
             tid: u32,
@@ -326,12 +331,16 @@ pub mod ffi {
         fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
         fn plugin_compatibility_snapshot_json(self: &AudioEngine) -> String;
         fn get_plugin_parameter(
-            self: &AudioEngine,
+            self: &HirariUnifiedEngine,
             tid: u32,
             plugin_index: u32,
             parameter_id: u32,
         ) -> f32;
-        fn get_plugin_parameter_count(self: &AudioEngine, tid: u32, plugin_index: u32) -> u32;
+        fn get_plugin_parameter_count(
+            self: &HirariUnifiedEngine,
+            tid: u32,
+            plugin_index: u32,
+        ) -> u32;
         fn get_plugin_parameter_name(
             self: &AudioEngine,
             tid: u32,
@@ -344,10 +353,10 @@ pub mod ffi {
             plugin_index: u32,
             bypassed: bool,
         ) -> bool;
-        fn get_plugin_bypass(self: &AudioEngine, tid: u32, plugin_index: u32) -> bool;
+        fn get_plugin_bypass(self: &HirariUnifiedEngine, tid: u32, plugin_index: u32) -> bool;
         fn set_preview_synth_engine(self: &AudioEngine, engine: u32);
         fn has_sidechain_link(
-            self: &AudioEngine,
+            self: &HirariUnifiedEngine,
             source_id: u32,
             dest_id: u32,
             plugin_index: u32,
@@ -357,8 +366,8 @@ pub mod ffi {
         fn bounce_project(self: &AudioEngine, path: &str, format: u32) -> bool;
         fn read_wav_diagnostic_json(self: &AudioEngine, path: &str, format: u32) -> String;
         fn bounce_project_async(self: &AudioEngine, path: &str, format: u32) -> bool;
-        fn get_bounce_progress(self: &AudioEngine) -> f32;
-        fn get_bounce_state(self: &AudioEngine) -> u32;
+        fn get_bounce_progress(self: &HirariUnifiedEngine) -> f32;
+        fn get_bounce_state(self: &HirariUnifiedEngine) -> u32;
         fn cancel_bounce(self: &AudioEngine) -> bool;
         fn pause_bounce(self: &AudioEngine) -> bool;
         fn resume_bounce(self: &AudioEngine) -> bool;
@@ -377,9 +386,9 @@ pub mod ffi {
         fn close_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32)
             -> bool;
         fn midi_clock_tick(self: &AudioEngine, timestamp: u64);
-        fn midi_clock_ticks(self: &AudioEngine) -> u64;
-        fn midi_clock_last_tick(self: &AudioEngine) -> u64;
-        fn midi_clock_rate(self: &AudioEngine) -> f64;
+        fn midi_clock_ticks(self: &HirariUnifiedEngine) -> u64;
+        fn midi_clock_last_tick(self: &HirariUnifiedEngine) -> u64;
+        fn midi_clock_rate(self: &HirariUnifiedEngine) -> f64;
         fn set_midi_clock_rate(self: &AudioEngine, bpm: f64);
         fn execute_auto_mixing(self: &AudioEngine) -> bool;
         fn execute_auto_arrangement(self: &AudioEngine) -> bool;
@@ -394,29 +403,29 @@ pub mod ffi {
             high_boost_db: f32,
             high_cut_db: f32,
         ) -> bool;
-        fn get_track_correlation(self: &AudioEngine, tid: u32) -> f32;
+        fn get_track_correlation(self: &HirariUnifiedEngine, tid: u32) -> f32;
         fn get_project_layout_json(self: &AudioEngine) -> String;
         fn request_project_layout_snapshot(self: &AudioEngine) -> u64;
         fn poll_project_layout_snapshot(self: &AudioEngine, request_id: u64) -> String;
         fn cancel_project_layout_snapshot(self: &AudioEngine, request_id: u64) -> bool;
         fn get_routing_snapshot_json(self: &AudioEngine) -> String;
         fn get_project_generation(self: &AudioEngine) -> u64;
-        fn get_project_layout_revision(self: &AudioEngine) -> u64;
+        fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
         fn get_project_state_revision(self: &AudioEngine) -> u64;
         fn mark_project_layout_changed(self: &AudioEngine);
         fn get_last_command_error(self: &AudioEngine) -> u8;
-        fn audio_range_overflowed(self: &AudioEngine) -> bool;
+        fn audio_range_overflowed(self: &HirariUnifiedEngine) -> bool;
 
         fn get_runtime_telemetry(bridge: &AudioEngine) -> Vec<f32>;
 
         fn get_block_size(self: &AudioEngine) -> u32;
-        fn get_latency_ms(self: &AudioEngine) -> f32;
-        fn get_track_latency_ms(self: &AudioEngine, tid: u32) -> f32;
-        fn get_track_pdc_compensation_ms(self: &AudioEngine, tid: u32) -> f32;
+        fn get_latency_ms(self: &HirariUnifiedEngine) -> f32;
+        fn get_track_latency_ms(self: &HirariUnifiedEngine, tid: u32) -> f32;
+        fn get_track_pdc_compensation_ms(self: &HirariUnifiedEngine, tid: u32) -> f32;
         fn set_low_latency_mode(self: &AudioEngine, active: bool) -> bool;
-        fn low_latency_mode(self: &AudioEngine) -> bool;
+        fn low_latency_mode(self: &HirariUnifiedEngine) -> bool;
         fn get_video_frame(self: &AudioEngine) -> Vec<u8>;
-        fn get_video_frame_revision(self: &AudioEngine) -> u64;
+        fn get_video_frame_revision(self: &HirariUnifiedEngine) -> u64;
         fn request_video_frame(self: &AudioEngine, seconds: f64) -> bool;
         fn load_video(self: &AudioEngine, path: &str) -> bool;
 

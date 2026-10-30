@@ -610,3 +610,110 @@ impl ffi::AudioEngine {
         }
     }
 }
+
+// Simple getters read the inner engine through `get_core`; the AudioEngine
+// forwarders for them are gone.
+impl ffi::AudioEngine {
+    pub fn is_loop_enabled(&self) -> bool {
+        self.get_core().is_loop_enabled()
+    }
+
+    pub fn get_master_gain(&self) -> f32 {
+        self.get_core().get_master_gain()
+    }
+
+    pub fn get_track_volume(&self, tid: u32) -> f32 {
+        self.get_core().get_track_volume(tid)
+    }
+}
+
+// Read-only engine getters. The AudioEngine forwarders for these are gone:
+// Rust reaches the same inner engine through `get_core`.
+impl ffi::AudioEngine {
+    pub fn cycle_start(&self) -> u64 {
+        self.get_core().cycle_start()
+    }
+    pub fn cycle_end(&self) -> u64 {
+        self.get_core().cycle_end()
+    }
+    pub fn is_metronome_enabled(&self) -> bool {
+        self.get_core().is_metronome_enabled()
+    }
+    pub fn get_playhead(&self) -> u64 {
+        self.get_core().get_playhead()
+    }
+    pub fn samples_to_beats(&self, samples: u64) -> f64 {
+        self.get_core().samples_to_beats(samples)
+    }
+    pub fn beats_to_samples(&self, beats: f64) -> u64 {
+        self.get_core().beats_to_samples(beats)
+    }
+    pub fn midi_clock_ticks(&self) -> u64 {
+        self.get_core().midi_clock_ticks()
+    }
+    pub fn midi_clock_last_tick(&self) -> u64 {
+        self.get_core().midi_clock_last_tick()
+    }
+    pub fn midi_clock_rate(&self) -> f64 {
+        self.get_core().midi_clock_rate()
+    }
+    pub fn bus_track_exists(&self, bus_track_id: u32) -> bool {
+        self.get_core().bus_track_exists(bus_track_id)
+    }
+    pub fn get_track_delay_samples(&self, tid: u32) -> u32 {
+        self.get_core().get_track_delay_samples(tid)
+    }
+    pub fn get_latency_ms(&self) -> f32 {
+        self.get_core().get_latency_ms()
+    }
+    pub fn low_latency_mode(&self) -> bool {
+        self.get_core().low_latency_mode()
+    }
+    pub fn region_table_mirror_matches(&self, tid: u32) -> bool {
+        self.get_core().region_table_mirror_matches(tid)
+    }
+    pub fn non_finite_plugin_samples(&self) -> u64 {
+        self.get_core().non_finite_plugin_samples()
+    }
+    pub fn get_sandbox_plugin_state_error(&self, track_id: u32, sandbox_index: u32) -> u8 {
+        self.get_core().get_sandbox_plugin_state_error(track_id, sandbox_index)
+    }
+    pub fn get_plugin_parameter(&self, tid: u32, plugin_index: u32, parameter_id: u32) -> f32 {
+        self.get_core()
+            .get_plugin_parameter(tid, plugin_index, parameter_id)
+    }
+    pub fn get_plugin_parameter_count(&self, tid: u32, plugin_index: u32) -> u32 {
+        self.get_core().get_plugin_parameter_count(tid, plugin_index)
+    }
+    pub fn get_plugin_bypass(&self, tid: u32, plugin_index: u32) -> bool {
+        self.get_core().get_plugin_bypass(tid, plugin_index)
+    }
+    pub fn get_track_latency_ms(&self, tid: u32) -> f32 {
+        self.get_core().get_track_latency_ms(tid)
+    }
+    pub fn get_track_pdc_compensation_ms(&self, tid: u32) -> f32 {
+        self.get_core().get_track_pdc_compensation_ms(tid)
+    }
+    pub fn has_sidechain_link(&self, source_id: u32, dest_id: u32, plugin_index: u32) -> bool {
+        self.get_core()
+            .has_sidechain_link(source_id, dest_id, plugin_index)
+    }
+    pub fn get_bounce_progress(&self) -> f32 {
+        self.get_core().get_bounce_progress()
+    }
+    pub fn get_bounce_state(&self) -> u32 {
+        self.get_core().get_bounce_state()
+    }
+    pub fn audio_range_overflowed(&self) -> bool {
+        self.get_core().audio_range_overflowed()
+    }
+    pub fn get_video_frame_revision(&self) -> u64 {
+        self.get_core().get_video_frame_revision()
+    }
+    pub fn get_track_correlation(&self, tid: u32) -> f32 {
+        self.get_core().get_track_correlation(tid)
+    }
+    pub fn get_project_layout_revision(&self) -> u64 {
+        self.get_core().get_project_layout_revision()
+    }
+}
