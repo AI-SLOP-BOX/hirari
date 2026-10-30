@@ -67,6 +67,16 @@ production support.
 
 ### Changed
 
+- The differential-test oracles now live in Rust: all but one of the frozen
+  C++ copies under `tests/dsp_reference` were ported to `dsp_reference/*.rs`
+  and deleted — analysis, note curves, automation, MIDI buffers, bus/master
+  output, limiter/de-esser/transient/chroma-glow, PDC delay, effect chains,
+  region gain and stem splitting, masking analysis, warp mapping, the
+  windowed-sinc resampler, pitch-correction delays, WSOLA grain selection, the
+  polyphonic sampler, preview synth, holographic panner and spectral gain. The
+  differential tests compare the same production Rust paths against these
+  ports unchanged. Only the signalsmith-backed time-stretch oracle remains in
+  C++ because it exercises the third-party engine directly.
 - Read-only engine getters now go straight from Rust to the session engine:
   `AudioEngine` exposes its inner engine once (`get_core`) and the 28
   transport, plugin, sandbox and bounce getters that used to have a C++

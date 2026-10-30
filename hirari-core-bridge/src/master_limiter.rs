@@ -471,7 +471,7 @@ mod tests {
                 rust_right[start + 9] = f32::NAN;
                 cpp_right[start + 9] = f32::NAN;
             }
-            let (threshold, ceiling, release, lookahead) = match block {
+            let (threshold, ceiling, release, lookahead): (f32, f32, f32, f32) = match block {
                 0..=1 => (1.25, 0.99, 50.0, 2.0),
                 2..=4 => (0.8, 0.8, 120.0, 0.0),
                 _ => (1.5, 0.95, 8.0, 12.5),

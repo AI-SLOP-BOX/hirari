@@ -74,3 +74,6 @@ pub mod region_processor_state;
 pub mod zero_crossing_engine;
 pub mod zerocrossing;
 include!("cli_render_tests.rs");
+
+#[cfg(feature = "dsp-differential-reference")]
+pub mod dsp_reference;

@@ -23,7 +23,6 @@ unsafe extern "C" {
         seconds: f64,
         output: *mut f64,
     );
-    fn audio_note_curve_cpp_wrapper_probe(output: *mut f64);
     fn audio_note_segment_lookup_reference(
         ranges: *const HirariAudioNoteSegmentRange,
         count: usize,
@@ -179,62 +178,6 @@ fn rust_audio_note_curves_match_frozen_cpp_interpolation_and_integral() {
         4_800.0,
         -2_400.0,
     );
-}
-
-#[test]
-fn cpp_audio_note_segment_wrapper_routes_to_rust_curve_kernels() {
-    let anchors = [
-        HirariAudioNoteAnchor {
-            position_seconds: 0.2,
-            pitch_cents: -300.0,
-            formant_cents: 100.0,
-        },
-        HirariAudioNoteAnchor {
-            position_seconds: 0.8,
-            pitch_cents: 600.0,
-            formant_cents: -250.0,
-        },
-    ];
-    let mut prefix = [0.0; 2];
-    let mut pitch_formant = [0.0; 2];
-    unsafe {
-        hirari_audio_note_curve_build_integral_prefix(
-            anchors.as_ptr(),
-            anchors.len(),
-            100.0,
-            prefix.as_mut_ptr(),
-        );
-        hirari_audio_note_curve_at(
-            anchors.as_ptr(),
-            anchors.len(),
-            0.45,
-            100.0,
-            -50.0,
-            pitch_formant.as_mut_ptr(),
-        );
-    }
-    let integral = unsafe {
-        hirari_audio_note_curve_integral_at(
-            anchors.as_ptr(),
-            anchors.len(),
-            prefix.as_ptr(),
-            0.0,
-            1.0,
-            100.0,
-            0.45,
-        )
-    };
-    let mut cpp_wrapper = [0.0; 3];
-    unsafe { audio_note_curve_cpp_wrapper_probe(cpp_wrapper.as_mut_ptr()) };
-    for (rust, cpp) in [pitch_formant[0], pitch_formant[1], integral]
-        .iter()
-        .zip(cpp_wrapper)
-    {
-        assert!(
-            (rust - cpp).abs() <= 1.0e-10,
-            "Rust={rust}, C++ wrapper={cpp}"
-        );
-    }
 }
 
 #[test]
