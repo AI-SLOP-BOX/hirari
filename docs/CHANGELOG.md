@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The C++ `SidechainManager` adapter is gone. The engine, tracks and effect
+  chains now call the Rust sidechain engine directly: link registration,
+  silent links, per-block copy with metadata, source publication/refresh,
+  track removal, and the undo capture/restore snapshot (including link
+  validation) are all Rust-owned. This removes the third parallel copy of
+  sidechain policy from the live engine and drops the C++ sidechain header.
 - The differential-test oracles now live in Rust: all but one of the frozen
   C++ copies under `tests/dsp_reference` were ported to `dsp_reference/*.rs`
   and deleted — analysis, note curves, automation, MIDI buffers, bus/master

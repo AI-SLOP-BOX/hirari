@@ -11,7 +11,7 @@
 #include <chrono>
 #include <limits>
 #include "../dsp/iprocessor.hpp"
-#include "engine/sidechain_manager.hpp"
+#include "rust_ffi.hpp"
 
 namespace Hirari::Core {
 
@@ -33,9 +33,12 @@ public:
         bool parallel = false;
     };
 
-    explicit EffectChain(Engine::SidechainManager* sidechainManager = nullptr)
-        : m_sidechainManager(sidechainManager ? sidechainManager
-                                               : &Engine::SidechainManager::getInstance()),
+    // Bound shared by the Rust publication slots and this reader scratch pair.
+    static constexpr uint32_t kMaxSidechainBlockSize = 4096;
+
+    explicit EffectChain(void* sidechainEngine = nullptr)
+        : m_sidechainEngine(sidechainEngine ? sidechainEngine
+                                            : hirari_sidechain_engine_default()),
           m_rustState(hirari_effect_chain_runtime_create()) {}
 
     ~EffectChain() {
@@ -376,20 +379,23 @@ private:
         ProcessCallbackContext& call, DSP::IProcessor& processor, Core::AudioBuffer& target,
         uint32_t index, float* mix) {
         DSP::ProcessContext pluginContext = *call.context;
-        Engine::SidechainManager::LinkSnapshot sidechainSnapshot{};
-        std::array<float, Engine::SidechainManager::kMaxBlockSize> sidechainLeft{};
-        std::array<float, Engine::SidechainManager::kMaxBlockSize> sidechainRight{};
-        const bool hasSidechain = call.context->blockSize <=
-                Engine::SidechainManager::kMaxBlockSize &&
-            call.owner->m_sidechainManager->copySidechainBlock(
-                call.trackId, index, sidechainLeft.data(), sidechainRight.data(),
-                static_cast<uint32_t>(call.context->blockSize), sidechainSnapshot);
+        std::array<float, kMaxSidechainBlockSize> sidechainLeft{};
+        std::array<float, kMaxSidechainBlockSize> sidechainRight{};
+        uint64_t sidechainMetadata[6]{};
+        uint32_t sidechainFrames = 0;
+        if (call.context->blockSize <= kMaxSidechainBlockSize) {
+            sidechainFrames = hirari_sidechain_engine_copy_link(
+                call.owner->m_sidechainEngine, call.trackId, index, sidechainLeft.data(),
+                sidechainRight.data(), static_cast<uint32_t>(call.context->blockSize),
+                sidechainMetadata);
+        }
         Core::AudioBuffer sidechainView;
-        if (hasSidechain && call.context->blockSize > 0 &&
-            sidechainSnapshot.frames >= call.context->blockSize &&
-            static_cast<uint32_t>(call.context->sampleRate) == sidechainSnapshot.sampleRate &&
+        if (sidechainFrames != 0 && call.context->blockSize > 0 &&
+            sidechainFrames >= call.context->blockSize &&
+            static_cast<uint32_t>(call.context->sampleRate) ==
+                static_cast<uint32_t>(sidechainMetadata[3]) &&
             (call.context->audioConfigGeneration == 0 ||
-             sidechainSnapshot.sourceGeneration == call.context->audioConfigGeneration)) {
+             sidechainMetadata[4] == call.context->audioConfigGeneration)) {
             float* sidechainChannels[2] = {sidechainLeft.data(), sidechainRight.data()};
             sidechainView.wrapChannels(sidechainChannels, 2,
                 static_cast<uint32_t>(call.context->blockSize));
@@ -446,9 +452,9 @@ private:
         hirari_effect_chain_runtime_end_mutation(m_rustState);
     }
 
-    // Session-owned when injected; the process-wide singleton remains only as
-    // a source-compatible fallback for legacy callers.
-    Engine::SidechainManager* m_sidechainManager = nullptr;
+    // Session-owned when injected; Rust's process-wide default handle is only
+    // the source-compatible fallback for legacy callers.
+    void* m_sidechainEngine = nullptr;
     double m_sampleRate = 0.0;
     uint32_t m_maxBlockSize = 0;
     AudioBuffer m_parallelBuffer;

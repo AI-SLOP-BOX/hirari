@@ -19,7 +19,9 @@
     // Rust (routing_engine_core.rs) owns the graph, gain, feedback, send-PDC
     // and topology stores; this is the single opaque handle the engine keeps.
     void* m_routingEngine = hirari_routing_engine_create();
-    SidechainManager m_sidechainManager;
+    // Rust owns the publication gate, writer lock and captured undo snapshot;
+    // this is the single handle the engine keeps.
+    void* m_sidechainEngine = hirari_sidechain_engine_create();
     // Rust (bus_audio.rs) owns the per-bus summing stages and the summing
     // system; the engine only keeps the handle.
     void* m_busSystem = hirari_bus_system_create();

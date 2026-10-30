@@ -17,11 +17,11 @@ public:
     static constexpr uint32_t kMaxBuses = 128;
 
     BusTrack(uint32_t id, const std::string& name, uint32_t busId,
-             SidechainManager* sidechainManager = nullptr,
+             void* sidechainEngine = nullptr,
              std::shared_ptr<ProjectLayoutRevision> layoutRevision = {})
-        : Track(id, name, Track::Type::Bus, sidechainManager, std::move(layoutRevision)),
+        : Track(id, name, Track::Type::Bus, sidechainEngine, std::move(layoutRevision)),
           m_busId(busId), m_trackState(hirari_bus_track_create(), &hirari_bus_track_destroy),
-          m_busEffectChain(sidechainManager) {}
+          m_busEffectChain(sidechainEngine) {}
 
     void resolveBus(void* busState) noexcept { m_busState = busState; }
     uint32_t busId() const noexcept { return m_busId; }

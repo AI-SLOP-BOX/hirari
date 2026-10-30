@@ -8,7 +8,7 @@ FILES="$ROOT/src/core/hirari_unified_engine_part_1.inc $ROOT/src/core/hirari_uni
 # Project/audio state must use the owning HirariUnifiedEngine member instead.
 ALLOW='HirariUnifiedEngine::getInstance|VideoEngine::getInstance|AudioDecoderManager::getInstance|ForensicJournaler::getInstance|EngineDiagnostics::getInstance|DiagnosticsKernel::getInstance|EngineOrchestrator::getInstance|TrigLUT512::getInstance|QualitativeMetricEngine::getInstance|LogBuffer::BlackBoxRegister::getInstance|AudioDecoderManager::getInstance'
 
-violations=$(rg -n "(PDCManager|UndoTransactionManager|TempoMap|RoutingEngine|SidechainManager|BusSystem|MacroControlManager)::getInstance" $FILES || true)
+violations=$(rg -n "(PDCManager|UndoTransactionManager|TempoMap|RoutingEngine|BusSystem|MacroControlManager)::getInstance" $FILES || true)
 if [ -n "$violations" ]; then
   echo "session-owned singleton references detected:"
   echo "$violations"

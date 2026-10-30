@@ -100,7 +100,7 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
             out->blockSize = engine->m_context && engine->m_context->blockSize > 0
                 ? std::min(engine->m_context->blockSize,
-                           Hirari::Core::Engine::SidechainManager::kMaxBlockSize)
+                           ::Hirari::Core::EffectChain::kMaxSidechainBlockSize)
                 : 512u;
             out->sampleRate = static_cast<uint32_t>(std::max(
                 1.0, engine->m_sampleRate.load(std::memory_order_acquire)));
@@ -165,7 +165,8 @@ void HirariUnifiedEngine::installRoutingEditHost() {
         [](void* host, uint32_t destId, uint32_t pluginIndex) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const bool removed = engine->m_sidechainManager.removeLink(destId, pluginIndex);
+            const bool removed = hirari_sidechain_engine_remove_link(
+                engine->m_sidechainEngine, destId, pluginIndex);
             auto& routes = engine->m_sidechainRoutes;
             const size_t before = routes.size();
             routes.erase(
@@ -182,11 +183,11 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             if (!context) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const auto tap = static_cast<Hirari::Core::Engine::SidechainTapPoint>(tapPoint);
             if (silent) {
-                return engine->m_sidechainManager.registerSilentLink(
-                    destId, pluginIndex, sourceId, context->blockSize, context->sampleRate,
-                    context->generation, 1.0f, tap);
+                return hirari_sidechain_engine_register_silent_link(
+                    engine->m_sidechainEngine, destId, pluginIndex, sourceId,
+                    context->blockSize, context->sampleRate, context->generation, 1.0f,
+                    static_cast<uint8_t>(tapPoint));
             }
             Track* source = nullptr;
             for (const auto& track : engine->m_tracks) {
@@ -194,19 +195,15 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             }
             if (!source) return false;
             auto& sourceBuffer = source->getWorkBuffer(context->blockSize);
-            Hirari::Core::Engine::SidechainLink link;
-            link.sourceBufferL = sourceBuffer.getReadPointer(0);
-            link.sourceBufferR = sourceBuffer.getNumChannels() > 1
-                ? sourceBuffer.getReadPointer(1) : link.sourceBufferL;
-            link.sourceTrackId = sourceId;
-            link.sourceSampleRate = context->sampleRate;
-            link.sourceGeneration = context->generation;
-            link.level = 1.0f;
-            link.tapPoint = tap;
-            // Registration copies one prepared block into manager-owned
-            // storage; supplying the frame count is part of that contract.
-            link.sourceFrames = context->blockSize;
-            return engine->m_sidechainManager.registerLink(destId, pluginIndex, link);
+            const float* left = sourceBuffer.getReadPointer(0);
+            const float* right = sourceBuffer.getNumChannels() > 1
+                ? sourceBuffer.getReadPointer(1) : left;
+            // Registration copies one prepared block into Rust-owned storage;
+            // supplying the frame count is part of that contract.
+            return hirari_sidechain_engine_register_link(
+                engine->m_sidechainEngine, destId, pluginIndex, sourceId, left, right,
+                context->blockSize, context->sampleRate, context->generation, 1.0f,
+                static_cast<uint8_t>(tapPoint));
         },
         [](void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex,
            uint32_t tapPoint) {
@@ -657,6 +654,6 @@ namespace {
 
 bool HirariUnifiedEngine::has_sidechain_link(uint32_t sourceId, uint32_t destId,
                                            uint32_t pluginIndex) const {
-    return m_sidechainManager.hasLink(
-        destId, pluginIndex, sourceId);
+    return hirari_sidechain_engine_has_link(
+        m_sidechainEngine, destId, pluginIndex, sourceId);
 }

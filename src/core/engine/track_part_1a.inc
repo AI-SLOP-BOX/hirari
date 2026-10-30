@@ -5,10 +5,10 @@ public:
         std::vector<Hirari::Core::ProjectPluginAutomationLane>;
 
     Track(uint32_t id, const std::string& n, Type t,
-          SidechainManager* sidechainManager = nullptr,
+          void* sidechainEngine = nullptr,
           std::shared_ptr<ProjectLayoutRevision> layoutRevision = {})
         : m_layoutRevision(std::move(layoutRevision)), m_id(id), m_name(n), m_type(t),
-          m_effectChain(sidechainManager), m_analysis(&m_activeBuffer) {
+          m_effectChain(sidechainEngine), m_analysis(&m_activeBuffer) {
         if (t == Type::Midi || t == Type::Instrument) {
             m_builtInMidiState = hirari_builtin_midi_instrument_create();
         }

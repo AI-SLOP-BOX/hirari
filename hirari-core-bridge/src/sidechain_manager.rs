@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 const SIDECHAIN_SLOTS: usize = 256;
 const SIDECHAIN_BLOCK: usize = 4096;
@@ -1065,6 +1065,7 @@ impl SidechainOrchestrator {
 struct SidechainEngine {
     gate: *mut c_void,
     writer: std::sync::Mutex<()>,
+    legacy_misuse: AtomicBool,
 }
 
 unsafe impl Send for SidechainEngine {}
@@ -1094,8 +1095,53 @@ pub extern "C" fn hirari_sidechain_engine_create() -> *mut c_void {
     Box::into_raw(Box::new(SidechainEngine {
         gate: hirari_sidechain_publication_gate_create(),
         writer: std::sync::Mutex::new(()),
+        legacy_misuse: AtomicBool::new(false),
     }))
     .cast()
+}
+
+// Process-wide fallback for native callers that build an effect chain without
+// an engine handle. It is created once and intentionally never freed; the
+// engine-owned handles cover the real session.
+static DEFAULT_ENGINE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+#[no_mangle]
+pub extern "C" fn hirari_sidechain_engine_default() -> *mut c_void {
+    let existing = DEFAULT_ENGINE.load(Ordering::Acquire);
+    if !existing.is_null() {
+        return existing;
+    }
+    let created = hirari_sidechain_engine_create();
+    match DEFAULT_ENGINE.compare_exchange(
+        std::ptr::null_mut(),
+        created,
+        Ordering::AcqRel,
+        Ordering::Acquire,
+    ) {
+        Ok(_) => created,
+        Err(raced) => {
+            unsafe { hirari_sidechain_engine_destroy(created) };
+            raced
+        }
+    }
+}
+
+/// Legacy entry point kept so the retired in-place registration API still
+/// reports its misuse exactly once per reset.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_resolve_links(state: *const c_void) -> bool {
+    if let Some(engine) = unsafe { engine_ref(state) } {
+        engine.legacy_misuse.store(true, Ordering::Release);
+    }
+    false
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_take_legacy_misuse(state: *const c_void) -> bool {
+    match unsafe { engine_ref(state) } {
+        Some(engine) => engine.legacy_misuse.swap(false, Ordering::AcqRel),
+        None => false,
+    }
 }
 
 #[no_mangle]
@@ -1339,4 +1385,139 @@ pub unsafe extern "C" fn hirari_sidechain_engine_capture_track(
             hirari_sidechain_capture_track(gate, track, context, callback)
         })
     }
+}
+
+// ---- Captured links: the undo snapshot for a removed track ---------------
+//
+// Detaching a track has to remember its sidechain links so reinserting it can
+// restore them. The snapshot is owned here; the engine only holds the handle.
+
+struct CapturedLink {
+    destination: u32,
+    plugin_index: u32,
+    source: u32,
+    level: f32,
+    tap: u8,
+    sample_rate: u32,
+    generation: u64,
+    left: Vec<f32>,
+    right: Vec<f32>,
+}
+
+struct CapturedLinks(Vec<CapturedLink>);
+
+unsafe extern "C" fn capture_links_callback(
+    context: *mut c_void,
+    destination: u32,
+    plugin_index: u32,
+    source: u32,
+    level: f32,
+    tap: u8,
+    sample_rate: u32,
+    generation: u64,
+    left: *const f32,
+    right: *const f32,
+    frames: u32,
+) -> bool {
+    if context.is_null() || left.is_null() || right.is_null() || frames == 0 {
+        return false;
+    }
+    // SAFETY: the context is the Vec this call is collecting into, and the
+    // gate keeps the published buffers alive for the duration of the walk.
+    let links = unsafe { &mut *context.cast::<Vec<CapturedLink>>() };
+    let count = frames as usize;
+    links.push(CapturedLink {
+        destination,
+        plugin_index,
+        source,
+        level,
+        tap,
+        sample_rate,
+        generation,
+        left: unsafe { std::slice::from_raw_parts(left, count) }.to_vec(),
+        right: unsafe { std::slice::from_raw_parts(right, count) }.to_vec(),
+    });
+    true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_capture_links(
+    state: *const c_void,
+    track: u32,
+) -> *mut c_void {
+    let Some(engine) = (unsafe { engine_ref(state) }) else {
+        return std::ptr::null_mut();
+    };
+    if track == 0 {
+        return std::ptr::null_mut();
+    }
+    let mut links: Vec<CapturedLink> = Vec::new();
+    let captured = unsafe {
+        with_control(engine, |gate| unsafe {
+            hirari_sidechain_capture_track(
+                gate,
+                track,
+                (&mut links as *mut Vec<CapturedLink>).cast(),
+                Some(capture_links_callback),
+            )
+        })
+    };
+    if !captured {
+        return std::ptr::null_mut();
+    }
+    Box::into_raw(Box::new(CapturedLinks(links))).cast()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_restore_links(
+    state: *const c_void,
+    handle: *const c_void,
+) -> bool {
+    if state.is_null() || handle.is_null() {
+        return false;
+    }
+    // SAFETY: handle comes from hirari_sidechain_engine_capture_links and is
+    // only read here until it is handed back for freeing.
+    let links = unsafe { &*handle.cast::<CapturedLinks>() };
+    let mut all_registered = true;
+    for link in &links.0 {
+        // Same admission the retired adapter applied before re-registering:
+        // an unowned or malformed capture is skipped, not propagated.
+        if link.destination == 0
+            || link.source == 0
+            || link.left.is_empty()
+            || link.left.len() != link.right.len()
+            || link.left.len() > SIDECHAIN_BLOCK
+            || link.sample_rate == 0
+            || link.generation == 0
+        {
+            continue;
+        }
+        let registered = unsafe {
+            hirari_sidechain_engine_register_link(
+                state,
+                link.destination,
+                link.plugin_index,
+                link.source,
+                link.left.as_ptr(),
+                link.right.as_ptr(),
+                link.left.len() as u32,
+                link.sample_rate,
+                link.generation,
+                link.level,
+                link.tap,
+            )
+        };
+        all_registered &= registered;
+    }
+    all_registered
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_sidechain_engine_free_captured_links(handle: *mut c_void) {
+    if handle.is_null() {
+        return;
+    }
+    // SAFETY: handle is exclusively owned by the caller at this point.
+    drop(unsafe { Box::from_raw(handle.cast::<CapturedLinks>()) });
 }

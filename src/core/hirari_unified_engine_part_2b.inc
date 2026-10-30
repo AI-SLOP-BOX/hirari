@@ -87,8 +87,8 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
             t->prepareToPlay(sr, bs);
             if (t->canProcess(bs)) {
                 auto& work = t->getWorkBuffer(bs);
-                m_sidechainManager.controlRefreshSourceBuffer(
-                    t->getId(), work.getReadPointer(0),
+                hirari_sidechain_engine_refresh_source(
+                    m_sidechainEngine, t->getId(), work.getReadPointer(0),
                     work.getNumChannels() > 1 ? work.getReadPointer(1) : work.getReadPointer(0),
                     bs, static_cast<uint32_t>(sr),
                     m_audioConfigGeneration.load(std::memory_order_acquire));
@@ -253,8 +253,8 @@ void HirariUnifiedEngine::eraseSidechainRoutesLocked(uint32_t tid,
 std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::string& name,
                                                      Track::Type type) {
     if (type != Track::Type::Bus)
-        return std::make_shared<Track>(id, name, type, &m_sidechainManager, m_projectLayoutRevision);
-    auto bus = std::make_shared<BusTrack>(id, name, id, &m_sidechainManager, m_projectLayoutRevision);
+        return std::make_shared<Track>(id, name, type, m_sidechainEngine, m_projectLayoutRevision);
+    auto bus = std::make_shared<BusTrack>(id, name, id, m_sidechainEngine, m_projectLayoutRevision);
     bus->resolveBus(hirari_bus_system_register(m_busSystem, id)
         ? hirari_bus_system_bus(m_busSystem, id) : nullptr);
     return bus;
@@ -291,7 +291,7 @@ void HirariUnifiedEngine::installTrackEditHost() {
         std::shared_ptr<Track> track;
         size_t index = 0;
         uint32_t id = 0;
-        std::vector<SidechainManager::LinkState> sidechainLinks;
+        void* sidechainLinks = nullptr;
         std::vector<SidechainRoute> sidechainRoutes;
         std::vector<RoutingEngine::Connection> routing;
         std::vector<RoutingEngine::FeedbackConnection> feedback;
@@ -418,7 +418,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
         [](void* host, uint32_t tid) -> void* {
             if (!host) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            auto sidechainBackup = engine->m_sidechainManager.captureLinksForTrack(tid);
+            void* sidechainBackup = hirari_sidechain_engine_capture_links(
+                engine->m_sidechainEngine, tid);
             std::shared_ptr<Track> removed;
             std::vector<SidechainRoute> sidechainRouteBackup;
             std::vector<RoutingEngine::Connection> routingBackup;
@@ -430,7 +431,7 @@ void HirariUnifiedEngine::installTrackEditHost() {
                                        [tid](const auto& track) { return track->getId() == tid; });
                 if (it == engine->m_tracks.end()) return nullptr;
                 originalIndex = static_cast<size_t>(it - engine->m_tracks.begin());
-                engine->m_sidechainManager.removeLinksForTrack(tid);
+                hirari_sidechain_engine_remove_track(engine->m_sidechainEngine, tid);
                 engine->eraseSidechainRoutesLocked(tid, &sidechainRouteBackup);
                 void* routingHandle = engine->m_routingEngine;
                 hirari_routing_engine_remove_dependencies_for_node(routingHandle, tid);
@@ -451,9 +452,9 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     engine->m_trackIdCounter.store(1, std::memory_order_release);
                 }
             }
-            return new Handle{std::move(removed), originalIndex, tid,
-                              std::move(sidechainBackup), std::move(sidechainRouteBackup),
-                              std::move(routingBackup), std::move(feedbackBackup)};
+            return new Handle{std::move(removed), originalIndex, tid, sidechainBackup,
+                              std::move(sidechainRouteBackup), std::move(routingBackup),
+                              std::move(feedbackBackup)};
         },
         [](void* host, void* raw, bool dropSidechainLinks, bool dropRouting) -> bool {
             if (!host || !raw) return false;
@@ -461,7 +462,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
             auto* handle = static_cast<Handle*>(raw);
             {
                 std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                if (dropSidechainLinks) engine->m_sidechainManager.removeLinksForTrack(handle->id);
+                if (dropSidechainLinks)
+                    hirari_sidechain_engine_remove_track(engine->m_sidechainEngine, handle->id);
                 if (dropRouting) {
                     engine->eraseSidechainRoutesLocked(handle->id, nullptr);
                     hirari_routing_engine_remove_dependencies_for_node(
@@ -503,7 +505,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     }
                 }
             }
-            engine->m_sidechainManager.restoreLinks(handle->sidechainLinks);
+            (void)hirari_sidechain_engine_restore_links(engine->m_sidechainEngine,
+                                                        handle->sidechainLinks);
             for (const auto& connection : handle->routing)
                 hirari_routing_engine_add_connection(
                     engine->m_routingEngine, connection.sourceId, connection.destId,
@@ -514,7 +517,11 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     connection.gain);
             return true;
         },
-        [](void* raw) { delete static_cast<Handle*>(raw); },
+        [](void* raw) {
+            auto* handle = static_cast<Handle*>(raw);
+            hirari_sidechain_engine_free_captured_links(handle->sidechainLinks);
+            delete handle;
+        },
         &HirariUnifiedEngine::recordNativeReplay,
         &HirariUnifiedEngine::syncNative,
     };

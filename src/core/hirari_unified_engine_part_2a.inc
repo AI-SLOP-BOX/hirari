@@ -240,7 +240,7 @@ void HirariUnifiedEngine::new_project() {
     hirari_mpe_manager_reset(m_mpeManager);
     m_undoManager.clear();
     hirari_native_pdc_reset_for_project(m_pdcState);
-    m_sidechainManager.resetForProject();
+    hirari_sidechain_engine_reset(m_sidechainEngine);
     hirari_routing_engine_reset(m_routingEngine);
     hirari_bus_system_reset(m_busSystem);
     hirari_control_room_reset(m_controlRoomState);
@@ -270,7 +270,7 @@ void HirariUnifiedEngine::new_project() {
     // Start with one audio track so a new project is immediately usable for
     // importing or recording, instead of presenting a dead empty canvas.
     auto bootstrapTrack = std::make_shared<Track>(1, "Audio 1", Track::Audio,
-                                                  &m_sidechainManager, m_projectLayoutRevision);
+                                                  m_sidechainEngine, m_projectLayoutRevision);
     if (m_context) {
         bootstrapTrack->prepareToPlay(m_context->sampleRate, m_context->blockSize);
     }

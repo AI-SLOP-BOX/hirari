@@ -126,7 +126,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             if (trackType == Track::Type::Bus) {
                 auto busTrack = std::make_shared<BusTrack>(
                     ts.id, trackName.empty() ? "Bus" : trackName, ts.id,
-                    &m_sidechainManager, m_projectLayoutRevision);
+                    m_sidechainEngine, m_projectLayoutRevision);
                 // Do not mutate the process/session bus summing system while the
                 // replacement document is still provisional. If hydration
                 // later fails, the old project must remain the only visible
@@ -135,7 +135,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             } else {
                 t = std::make_shared<Track>(ts.id,
                     trackName.empty() ? "Track" : trackName, trackType,
-                    &m_sidechainManager, m_projectLayoutRevision);
+                    m_sidechainEngine, m_projectLayoutRevision);
             }
             // Plugin arrays are positional within a serialized track. The
             // codec rejected inconsistent counts before this state was marked

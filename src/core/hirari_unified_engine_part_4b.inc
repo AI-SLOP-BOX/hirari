@@ -204,13 +204,12 @@
         // Commit point: all validation and hydration above completed while
         // the old project remained published.  Only now replace the graph,
         // reset project-scoped managers, and publish fresh ID allocators.
-        auto& sidechainManager = m_sidechainManager;
         for (const auto& track : m_tracks) {
-            sidechainManager.removeLinksForTrack(track->getId());
+            hirari_sidechain_engine_remove_track(m_sidechainEngine, track->getId());
         }
         m_commandQueue.clear();
         hirari_native_pdc_reset_for_project(m_pdcState);
-        sidechainManager.resetForProject();
+        hirari_sidechain_engine_reset(m_sidechainEngine);
         hirari_routing_engine_reset(m_routingEngine);
         hirari_bus_system_reset(m_busSystem);
         hirari_control_room_reset(m_controlRoomState);

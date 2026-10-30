@@ -1036,6 +1036,42 @@ struct HirariRoutingTrackDestination {
 };
 using HirariBusPreFxAdd = bool (*)(void*, const float*, const float*, uint32_t, float);
 
+// Sidechain engine handle (hirari-core-bridge/src/sidechain_manager.rs).
+// One handle owns the publication gate, the writer lock and the captured
+// undo snapshot; C++ keeps only the pointer and calls these entry points.
+extern "C" void* hirari_sidechain_engine_create();
+extern "C" void* hirari_sidechain_engine_default();
+extern "C" void hirari_sidechain_engine_destroy(void* state);
+extern "C" bool hirari_sidechain_engine_register_link(
+    void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track,
+    const float* source_left, const float* source_right, uint32_t frames, uint32_t sample_rate,
+    uint64_t source_generation, float level, uint8_t tap_point);
+extern "C" bool hirari_sidechain_engine_register_silent_link(
+    void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track,
+    uint32_t frames, uint32_t sample_rate, uint64_t source_generation, float level,
+    uint8_t tap_point);
+extern "C" bool hirari_sidechain_engine_remove_link(
+    void* state, uint32_t destination_track, uint32_t plugin_index);
+extern "C" bool hirari_sidechain_engine_has_link(
+    const void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track);
+extern "C" void hirari_sidechain_engine_remove_track(void* state, uint32_t track);
+extern "C" void hirari_sidechain_engine_reset(void* state);
+extern "C" uint32_t hirari_sidechain_engine_copy_link(
+    const void* state, uint32_t destination_track, uint32_t plugin_index, float* output_left,
+    float* output_right, uint32_t capacity, uint64_t* metadata);
+extern "C" bool hirari_sidechain_engine_refresh_source(
+    const void* state, uint32_t source_track, const float* left, const float* right,
+    uint32_t frames, uint32_t sample_rate, uint64_t source_generation);
+extern "C" void hirari_sidechain_engine_publish_source(
+    const void* state, uint32_t source_track, const float* pre_left, const float* pre_right,
+    const float* post_left, const float* post_right, const float* fader_left,
+    const float* fader_right, uint32_t frames, uint32_t sample_rate, uint64_t source_generation);
+extern "C" void* hirari_sidechain_engine_capture_links(const void* state, uint32_t track);
+extern "C" bool hirari_sidechain_engine_restore_links(const void* state, const void* handle);
+extern "C" void hirari_sidechain_engine_free_captured_links(void* handle);
+extern "C" bool hirari_sidechain_engine_resolve_links(const void* state);
+extern "C" bool hirari_sidechain_engine_take_legacy_misuse(const void* state);
+
 // Routing engine composition root (hirari-core-bridge/src/routing_engine_core.rs).
 // One opaque handle owns the graph/gain/feedback/send-PDC/topology stores.
 extern "C" void* hirari_routing_engine_create();
