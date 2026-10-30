@@ -566,6 +566,29 @@ extern "C" uint8_t hirari_bounce_stream_write(
 extern "C" uint8_t hirari_bounce_stream_finish(void* stream);
 extern "C" void hirari_bounce_stream_free(void* stream);
 
+// Host operations for the Rust bounce render driver. The engine owns the
+// graph, transport atomics and streaming writers; the driver owns chunking,
+// pause/cancel, dither, progress and state publication. Every entry must be
+// set: a missing operation fails the render.
+struct HirariBounceHostOps {
+    uint8_t (*begin)(void* host);
+    void (*finish)(void* host);
+    void (*reset)(void* host);
+    int32_t (*plan)(void* host, HirariBouncePlan* out);
+    void (*render)(void* host, float* left, float* right, uint32_t frames);
+    uint32_t (*render_chunk)(void* host);
+    void (*publish)(void* host, float progress, uint8_t state);
+    uint8_t (*control)(void* host);
+    void (*read_transport)(void* host, uint64_t* playhead, uint8_t* playing);
+    void (*set_transport)(void* host, uint64_t playhead, uint8_t playing);
+    uint8_t (*finish_stream)(void* host, void* stream);
+    void (*log)(void* host, uint32_t level, const uint8_t* message, size_t length);
+};
+
+extern "C" bool hirari_bounce_render_driver(
+    void* host, const HirariBounceHostOps* ops, const uint8_t* path,
+    size_t path_length, uint32_t format);
+
 enum HirariRegionEditOp : int32_t {
     // Replace the editable state and republish it (normalising add path).
     kHirariRegionEditState = 1,

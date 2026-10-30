@@ -55,6 +55,7 @@ pub mod automation_recorder;
 pub mod aux;
 pub mod bitcrusher;
 pub mod bounce_core;
+pub mod bounce_driver;
 pub mod bounce_plan;
 pub mod bounce_orchestrator_final;
 pub mod built_in_midi_instrument;

@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Single-project bounce orchestration now runs in Rust. The render driver owns
+  extent planning, block chunking, pause/cancel, deterministic dither,
+  progress/state publication and the publish boundary; C++ keeps the audio
+  graph, transport atomics and streaming handles behind a host-ops table.
+
 - Timeline markers and arranger parts are now stored by the Rust arrangement
   document. The C++ `ArrangementEditModel` is gone: marker ordering and
   replacement, arranger-part validation and sorting, and the storage itself
