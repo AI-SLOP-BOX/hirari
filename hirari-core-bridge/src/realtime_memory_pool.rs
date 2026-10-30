@@ -2,6 +2,7 @@ use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::OnceLock;
 
 const ARENA_COUNT: usize = 8;
 const ARENA_SIZE: usize = 4 * 1024 * 1024;
@@ -96,40 +97,18 @@ impl RealtimeMemoryPool {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn hirari_realtime_memory_pool_create() -> *mut c_void {
-    let Some(pool) = RealtimeMemoryPool::new() else {
-        return std::ptr::null_mut();
-    };
-    Box::into_raw(Box::new(pool)).cast()
+static DEFAULT_POOL: OnceLock<Option<RealtimeMemoryPool>> = OnceLock::new();
+
+fn default_pool() -> Option<&'static RealtimeMemoryPool> {
+    DEFAULT_POOL.get_or_init(RealtimeMemoryPool::new).as_ref()
 }
 
+/// Process-wide pool used by the audio task scheduler's job storage.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_realtime_memory_pool_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        // SAFETY: Handle comes from the matching constructor and is destroyed once.
-        drop(Box::from_raw(state.cast::<RealtimeMemoryPool>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_realtime_memory_pool_reset(state: *const c_void, frame: u32) {
-    if let Some(state) = state.cast::<RealtimeMemoryPool>().as_ref() {
-        state.reset(frame);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_realtime_memory_pool_allocate(
-    state: *const c_void,
-    size_bytes: usize,
-) -> *mut c_void {
-    state
-        .cast::<RealtimeMemoryPool>()
-        .as_ref()
-        .map_or(std::ptr::null_mut(), |state| {
-            state.allocate(size_bytes).cast()
-        })
+pub extern "C" fn hirari_realtime_memory_pool_default_allocate(size_bytes: usize) -> *mut c_void {
+    default_pool().map_or(std::ptr::null_mut(), |pool| {
+        pool.allocate(size_bytes).cast()
+    })
 }
 
 #[cfg(test)]
@@ -152,6 +131,16 @@ mod tests {
         assert!(pool.allocate(0).is_null());
         pool.reset(0);
         assert_eq!(pool.allocate(1), first);
+    }
+
+    #[test]
+    fn default_pool_is_shared_and_validates_requests() {
+        let first = super::hirari_realtime_memory_pool_default_allocate(64);
+        let second = super::hirari_realtime_memory_pool_default_allocate(64);
+        assert!(!first.is_null());
+        assert_eq!(second as usize - first as usize, ALIGNMENT);
+        assert_eq!(super::hirari_realtime_memory_pool_default_allocate(0), std::ptr::null_mut());
+        assert_eq!(super::hirari_realtime_memory_pool_default_allocate(ARENA_SIZE), std::ptr::null_mut());
     }
 
     #[test]

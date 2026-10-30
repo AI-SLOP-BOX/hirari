@@ -5,7 +5,7 @@
 #include <pthread.h>
 #endif
 
-#include "../memory/realtime_memory_pool.hpp"
+#include "../rust_ffi.hpp"
 
 #include <thread>
 #include <atomic>
@@ -118,8 +118,7 @@ public:
 
     bool enqueue(uint32_t worker, AudioTask task) {
         if (!task.func) return false;
-        auto* pool = &Memory::RealtimeMemoryPool::getInstance();
-        void* storage = pool->allocate(sizeof(CallbackAudioTaskJob));
+        void* storage = hirari_realtime_memory_pool_default_allocate(sizeof(CallbackAudioTaskJob));
         if (!storage) return false;
         auto* job = new (storage) CallbackAudioTaskJob(task);
         return enqueue(worker, job);

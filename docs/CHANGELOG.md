@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The realtime arena now hands out the scheduler's job storage through a
+  process-wide Rust pool, and the engine's per-block scratch reset calls the
+  Rust entry point directly; the C++ `RealtimeMemoryPool` and
+  `ForensicScratchpad` adapters and their headers are gone.
 - Plug-in scan admission is now path-based: `PluginCacheManager`'s key
   computation, content fingerprinting, blacklist record and persistence moved
   into the Rust scan cache, so callers pass only the plug-in path and the

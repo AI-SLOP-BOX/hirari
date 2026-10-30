@@ -235,7 +235,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         }
 
         // INDUSTRIAL: Sovereign Memory Reset
-        ::Hirari::Core::Concurrency::ForensicScratchpad::getThreadLocal().reset();
+        hirari_forensic_scratchpad_reset();
 
         uint64_t currentPlayhead = m_playhead.load(std::memory_order_relaxed);
         const uint64_t cycleStart = m_cycleStart.load(std::memory_order_acquire);

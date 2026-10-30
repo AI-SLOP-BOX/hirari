@@ -28,7 +28,6 @@
 #include "log_buffer.hpp"
 #include "diagnostics_kernel.hpp"
 #include "database/project_db.hpp"
-#include "concurrency/forensic_scratchpad.hpp"
 #include "rust_ffi.hpp"
 
 namespace {

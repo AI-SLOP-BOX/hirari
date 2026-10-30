@@ -11,9 +11,8 @@
 ### 1. `src/core/` (DAWの骨格・中枢神経)
 - **役割**: オーディオスレッドの生命線管理、ルーティング、コンカレンシー（並行処理）、プロセッサーグラフ。
 - **重要ファイル**:
-  - `memory/realtime_memory_pool.hpp`: Rust所有のリアルタイムarena allocatorへのC++互換API。
   - `status_queue.hpp`: Rust所有の有界MPMC通知キューへのC++互換API。
-  - `concurrency/audio_task_manager.hpp`: Rust所有のtask dequeを使うworker scheduler。タスク実行・OS affinityはC++側。
+  - `concurrency/audio_task_manager.hpp`: Rust所有のtask dequeとrealtime arenaを使うworker scheduler。タスク実行・OS affinityはC++側。
   - `engine/timeline_system.hpp`: メインの再生エンジン。トラックごとの読み込みとWarp（タイムストレッチ）を指揮。
   - `audio_region.hpp`: タイムライン上の波形クリップの実体。SmartWarpAI（演奏の自動グリッド吸着）を内包。
 

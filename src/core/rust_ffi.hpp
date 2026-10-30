@@ -1857,10 +1857,8 @@ extern "C" bool hirari_midi_extended_ring_push(
 extern "C" bool hirari_midi_extended_ring_pop(
     void* state, void* destination_message, size_t destination_bytes);
 extern "C" size_t hirari_midi_extended_ring_size(const void* state);
-extern "C" void* hirari_realtime_memory_pool_create();
-extern "C" void hirari_realtime_memory_pool_destroy(void* state);
-extern "C" void hirari_realtime_memory_pool_reset(const void* state, uint32_t frame);
-extern "C" void* hirari_realtime_memory_pool_allocate(const void* state, size_t size_bytes);
+extern "C" void* hirari_realtime_memory_pool_default_allocate(size_t size_bytes);
+extern "C" void hirari_forensic_scratchpad_reset();
 extern "C" void* hirari_status_queue_init(void* storage, size_t bytes);
 extern "C" void hirari_status_queue_destroy(void* state);
 extern "C" bool hirari_status_queue_push(
