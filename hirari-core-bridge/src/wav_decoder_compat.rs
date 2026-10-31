@@ -371,6 +371,52 @@ mod tests {
     }
 
     #[test]
+    fn decoder_reads_twenty_thousand_frames_across_the_chunk_boundary() {
+        let path = temp_path("chunked");
+        let frames = 20_000;
+        let left: Vec<f32> = (0..frames)
+            .map(|frame| if frame % 97 == 0 { 0.75 } else { -0.125 })
+            .collect();
+        let right: Vec<f32> = (0..frames)
+            .map(|frame| if frame % 113 == 0 { -0.5 } else { 0.25 })
+            .collect();
+        assert_eq!(write_planes(&path, &[left, right], 48_000, 0), 0);
+        let (samples, channels, rate) = decode(&path).expect("decode");
+        assert_eq!((channels, rate), (2, 48_000));
+        assert_eq!(samples.len(), frames * 2);
+        assert!((samples[16_384 * 2] + 0.125).abs() < 0.01);
+        assert!((samples[(frames - 1) * 2 + 1] - 0.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn decoder_refuses_a_sparse_file_that_would_expand_past_the_buffer_limit() {
+        let path = temp_path("oversized");
+        const EXPANSION_DATA_BYTES: u32 = 300 * 1024 * 1024;
+        let mut header = Vec::with_capacity(44);
+        header.extend_from_slice(b"RIFF");
+        header.extend_from_slice(&(36 + EXPANSION_DATA_BYTES).to_le_bytes());
+        header.extend_from_slice(b"WAVEfmt ");
+        header.extend_from_slice(&16u32.to_le_bytes());
+        header.extend_from_slice(&1u16.to_le_bytes());
+        header.extend_from_slice(&2u16.to_le_bytes());
+        header.extend_from_slice(&48_000u32.to_le_bytes());
+        header.extend_from_slice(&(48_000u32 * 4).to_le_bytes());
+        header.extend_from_slice(&4u16.to_le_bytes());
+        header.extend_from_slice(&16u16.to_le_bytes());
+        header.extend_from_slice(b"data");
+        header.extend_from_slice(&EXPANSION_DATA_BYTES.to_le_bytes());
+        let file = std::fs::File::create(&path).expect("create");
+        use std::io::Write;
+        let mut file = file;
+        file.write_all(&header).expect("header");
+        file.set_len(44 + u64::from(EXPANSION_DATA_BYTES))
+            .expect("sparse");
+        drop(file);
+        assert!(decode(&path).is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn decoder_reads_rf64_data_chunk_sizes() {
         let path = temp_path("rf64");
         let mut bytes = Vec::new();

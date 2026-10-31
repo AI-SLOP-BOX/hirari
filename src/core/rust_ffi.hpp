@@ -974,20 +974,6 @@ extern "C" bool hirari_plugin_registry_snapshot_json(
     const void* state, uint8_t** output, size_t* output_size);
 extern "C" void hirari_plugin_registry_snapshot_json_free(uint8_t* bytes, size_t size);
 
-struct HirariWave64DecodedOwned {
-    uint32_t sample_rate;
-    uint16_t channels;
-    uint16_t bit_depth;
-    uint64_t frames;
-    float* samples;
-    size_t sample_count;
-    uint8_t* error;
-    size_t error_size;
-};
-
-extern "C" uint8_t hirari_wave64_decode(
-    const char* path, size_t path_size, HirariWave64DecodedOwned* output);
-extern "C" void hirari_wave64_decoded_free(HirariWave64DecodedOwned* output);
 extern "C" void* hirari_wav_diagnostic_json_for_path(
     const uint8_t* path, size_t path_size, bool wave64);
 extern "C" const uint8_t* hirari_wav_diagnostic_json_data(const void* value);
@@ -1820,11 +1806,6 @@ extern "C" uint64_t hirari_waveform_snapshot_request(
 extern "C" bool hirari_waveform_snapshot_poll(
     uint64_t id, void* context, HirariWaveformVisitor visit);
 extern "C" bool hirari_waveform_snapshot_pending(uint64_t id);
-extern "C" uint8_t hirari_wav_write_planar(
-    const uint8_t* path, size_t path_size, const float* const* channels,
-    size_t channel_count, uint64_t frames, uint32_t sample_rate, uint8_t format);
-extern "C" bool hirari_wav_planar_shapes_valid(
-    const size_t* sizes, size_t channel_count, uint64_t frames);
 using HirariVideoDecodeCallback = bool (*)(void*, double, uint64_t, void**);
 using HirariVideoReadFrameCallback = bool (*)(
     void*, uint32_t*, uint32_t*, double*, const uint8_t**, size_t*);

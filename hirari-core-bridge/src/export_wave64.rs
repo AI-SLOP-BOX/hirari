@@ -317,3 +317,69 @@ pub unsafe extern "C" fn hirari_wave64_decoded_free(output: *mut Wave64DecodedOw
         error_size: 0,
     };
 }
+
+#[cfg(test)]
+mod wave64_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "hirari-wave64-contract-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn multichannel_float32_round_trips() {
+        let path = temp_path("multichannel.w64");
+        let samples = [0.0_f32, -0.25, 0.75, 0.25, 0.5, -0.5];
+        write_wave64_float32(&path, &samples, 48_000, 3).expect("write");
+        let (rate, channels, restored) = read_wave64_float32(&path).expect("read");
+        assert_eq!((rate, channels), (48_000, 3));
+        assert_eq!(restored, samples);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn oversized_sparse_files_are_refused_before_reading() {
+        let path = temp_path("oversized.w64");
+        let file = fs::File::create(&path).expect("create");
+        file.set_len(512 * 1024 * 1024 + 2 * 1024 * 1024)
+            .expect("sparse length");
+        drop(file);
+        assert!(matches!(
+            read_wave64_float32(&path),
+            Err(WavExportError::FileTooLarge)
+        ));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn malformed_fmt_chunks_are_rejected() {
+        let path = temp_path("malformed.w64");
+        write_wave64_float32(&path, &[0.0_f32, 0.25, -0.25, 0.5], 48_000, 2).expect("write");
+        let mut bytes = fs::read(&path).expect("read");
+        assert!(bytes.len() >= 64);
+        // The fmt chunk size must cover at least the 16-byte format payload.
+        for byte in &mut bytes[56..64] {
+            *byte = 0;
+        }
+        fs::write(&path, &bytes).expect("rewrite");
+        assert!(read_wave64_float32(&path).is_err());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn missing_files_report_the_os_reason() {
+        let path = temp_path("missing.w64");
+        let error = read_wave64_float32(&path).expect_err("missing file");
+        let WavExportError::Io(detail) = error else {
+            panic!("expected io error");
+        };
+        assert!(detail.contains("No such file or directory"), "{detail}");
+    }
+}

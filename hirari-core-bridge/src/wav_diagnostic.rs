@@ -180,3 +180,57 @@ pub unsafe extern "C" fn hirari_wav_diagnostic_json_free(value: *mut WavDiagnost
         drop(unsafe { Box::from_raw(value) });
     }
 }
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    fn diagnostic(path: &std::path::Path, wave64: bool) -> String {
+        let bytes = path.to_string_lossy().into_owned().into_bytes();
+        let handle = unsafe {
+            hirari_wav_diagnostic_json_for_path(bytes.as_ptr(), bytes.len(), wave64)
+        };
+        assert!(!handle.is_null());
+        let data = unsafe { hirari_wav_diagnostic_json_data(handle) };
+        let size = unsafe { hirari_wav_diagnostic_json_size(handle) };
+        let text = String::from_utf8(unsafe { std::slice::from_raw_parts(data, size) }.to_vec())
+            .expect("utf8 json");
+        unsafe { hirari_wav_diagnostic_json_free(handle) };
+        text
+    }
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "hirari-wav-diagnostic-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn reports_ok_error_and_missing_files() {
+        let path = temp_path("probe.w64");
+        crate::export::write_wave64_float32(&path, &[0.0_f32, 0.25, -0.25, 0.5], 48_000, 2)
+            .expect("write");
+        let ok = diagnostic(&path, true);
+        assert!(ok.contains("\"ok\":true"), "{ok}");
+        assert!(ok.contains("\"format\":\"WAVE64\""), "{ok}");
+        assert!(ok.contains("\"channels\":2"), "{ok}");
+
+        let mut bytes = std::fs::read(&path).expect("read");
+        for byte in &mut bytes[56..64] {
+            *byte = 0;
+        }
+        std::fs::write(&path, &bytes).expect("rewrite");
+        let broken = diagnostic(&path, true);
+        assert!(broken.contains("\"ok\":false"), "{broken}");
+        assert!(broken.contains("\"error\":\""), "{broken}");
+
+        let missing = diagnostic(&path.with_file_name("hirari-wav-does-not-exist.w64"), true);
+        assert!(missing.contains("\"ok\":false"), "{missing}");
+        assert!(missing.contains("No such file or directory"), "{missing}");
+        assert!(missing.contains("hirari-wav-does-not-exist.w64"), "{missing}");
+        let _ = std::fs::remove_file(path);
+    }
+}

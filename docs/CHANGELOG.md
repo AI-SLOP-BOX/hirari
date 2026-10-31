@@ -67,6 +67,15 @@ production support.
 
 ### Changed
 
+- The test-only WAV/WAVE64 write, decode and diagnostic wrappers are gone.
+  `WavSaver` and `WavLoader::load/loadLegacy/loadWave64` had no production
+  callers, and their contract assertions (RIFF/RF64 headers, planar and
+  streaming exports, NaN/Inf sanitising, WAVE64 round trips, oversize refusal,
+  diagnostics and plug-in fingerprints) now run beside the Rust
+  implementations. The native contract's XML escaping block moved to the Rust
+  C-ABI test as well, which also repairs the contract the removed
+  declarations had left uncompilable.
+
 - The WAV write/decode contract now lives in Rust. Planar shape admission is a
   Rust predicate (`hirari_wav_planar_shapes_valid`) so `WavSaver::writePlanar`
   no longer re-derives the frame rule, and the decode/round-trip assertions

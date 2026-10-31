@@ -7,32 +7,6 @@ int main() {
             jack.lastError().find("HIRARI_ENABLE_JACK") == std::string::npos) return 88;
 #endif
     }
-    // Attribute escaping at the persistence boundary is Rust-owned. This
-    // contract used to cover the retired C++ SessionIO helpers, which had no
-    // production callers; the escaping contract itself is unchanged and is now
-    // exercised against the implementation that actually writes projects.
-    const std::string xmlProbe = "C:\\Audio & Mix/<take>\"lead\"'";
-    {
-        char* escaped = hirari_xml_escape_attribute(xmlProbe.c_str());
-        if (!escaped) return 81;
-        const std::string escapedText(escaped);
-        char* restored = hirari_xml_unescape_attribute(escaped);
-        hirari_xml_string_free(escaped);
-        if (!restored) return 81;
-        const std::string restoredText(restored);
-        hirari_xml_string_free(restored);
-        if (restoredText != xmlProbe) return 81;
-        if (escapedText.find("&amp;") == std::string::npos ||
-            escapedText.find("&lt;take&gt;") == std::string::npos ||
-            escapedText.find("&quot;") == std::string::npos) return 84;
-        // Decoding is a single ordered pass, so an already-escaped entity is
-        // never re-expanded. This is the persisted format's long-standing
-        // behavior and the exporter's encoder implies it.
-        char* nested = hirari_xml_unescape_attribute("&amp;lt;");
-        const std::string nestedText(nested ? nested : "");
-        hirari_xml_string_free(nested);
-        if (nestedText != "&lt;") return 85;
-    }
     {
         SDKContractFactory factory;
         const auto descriptor = factory.getDescriptor();

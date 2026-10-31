@@ -102,6 +102,33 @@ mod tests {
             assert_eq!(unescape_xml(&escape_xml(value)), value);
         }
     }
+
+    #[test]
+    fn c_abi_round_trips_and_reports_null_input() {
+        let probe = std::ffi::CString::new(PROBE).expect("probe");
+        unsafe {
+            let escaped = super::hirari_xml_escape_attribute(probe.as_ptr());
+            assert!(!escaped.is_null());
+            let escaped_text = std::ffi::CStr::from_ptr(escaped).to_str().expect("utf8");
+            assert!(escaped_text.contains("&amp;"));
+            assert!(escaped_text.contains("&lt;take&gt;"));
+            assert!(escaped_text.contains("&quot;"));
+            let restored = super::hirari_xml_unescape_attribute(escaped);
+            super::hirari_xml_string_free(escaped);
+            assert!(!restored.is_null());
+            assert_eq!(std::ffi::CStr::from_ptr(restored).to_str(), Ok(PROBE));
+            super::hirari_xml_string_free(restored);
+
+            let nested_input = std::ffi::CString::new("&amp;lt;").expect("nested");
+            let nested = super::hirari_xml_unescape_attribute(nested_input.as_ptr());
+            assert_eq!(std::ffi::CStr::from_ptr(nested).to_str(), Ok("&lt;"));
+            super::hirari_xml_string_free(nested);
+
+            assert!(super::hirari_xml_escape_attribute(std::ptr::null()).is_null());
+            assert!(super::hirari_xml_unescape_attribute(std::ptr::null()).is_null());
+            super::hirari_xml_string_free(std::ptr::null_mut());
+        }
+    }
 }
 
 // --- C ABI for the native contract -------------------------------------

@@ -149,3 +149,24 @@ fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
 fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
     Some(PathBuf::from(std::str::from_utf8(bytes).ok()?))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprints_track_content_and_reject_missing_files() {
+        let dir = std::env::temp_dir().join(format!("hirari-fingerprint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let plugin = dir.join("plugin.clap");
+        std::fs::write(&plugin, b"plugin-v1").expect("write");
+        let stable = fingerprint_path(&plugin).expect("fingerprint");
+        assert_eq!(fingerprint_path(&plugin), Some(stable));
+        std::fs::write(&plugin, b"plugin-v2-with-new-content").expect("replace");
+        let replaced = fingerprint_path(&plugin).expect("fingerprint");
+        assert_ne!(replaced, stable);
+        assert!(fingerprint_path(&dir.join("missing.clap")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
