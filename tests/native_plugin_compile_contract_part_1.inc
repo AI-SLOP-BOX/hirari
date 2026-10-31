@@ -116,71 +116,9 @@ int main() {
     (void)recovery;
 
 
-    // Transactional undo coverage, migrated onto the Rust-owned undo manager.
-    //
-    // The old Hirari::Core::Undo::UndoManager singleton was deleted by the Rust
-    // migration (commit b6c5e68 removed src/core/undo/undo_manager.hpp), but the
-    // guarantee it covered still exists and is now implemented in
-    // hirari-core-bridge/src/undo_transaction.rs. The behavioural contract is
-    // unchanged and still asserted here: actions recorded inside a transaction
-    // take effect immediately, and aborting the transaction rolls every one of
-    // them back, leaving an empty undo stack and no active transaction.
-    {
-        int transactionValue = 0;
-        // Each registration owns its context: the manager stores a destroy
-        // function per callback and runs it when the registration is dropped,
-        // so sharing one heap allocation across two registrations would free it
-        // twice. Allocate one per callback.
-        struct UndoContext { int* value = nullptr; int delta = 0; };
-        auto invokeUndo = [](void* raw) {
-            static_cast<UndoContext*>(raw)->value[0] -= static_cast<UndoContext*>(raw)->delta;
-        };
-        auto invokeRedo = [](void* raw) {
-            static_cast<UndoContext*>(raw)->value[0] += static_cast<UndoContext*>(raw)->delta;
-        };
-        auto releaseContext = [](void* raw) { delete static_cast<UndoContext*>(raw); };
-
-        void* undoState = hirari_undo_manager_create(64, 0);
-        if (undoState == nullptr) return 16;
-        const uint64_t firstUndo = hirari_undo_manager_register_native_callback(
-            undoState, new UndoContext{&transactionValue, 2}, invokeUndo, releaseContext);
-        const uint64_t firstRedo = hirari_undo_manager_register_native_callback(
-            undoState, new UndoContext{&transactionValue, 2}, invokeRedo, releaseContext);
-        const uint64_t secondUndo = hirari_undo_manager_register_native_callback(
-            undoState, new UndoContext{&transactionValue, 3}, invokeUndo, releaseContext);
-        const uint64_t secondRedo = hirari_undo_manager_register_native_callback(
-            undoState, new UndoContext{&transactionValue, 3}, invokeRedo, releaseContext);
-        if (firstUndo == 0 || firstRedo == 0 || secondUndo == 0 || secondRedo == 0) return 16;
-        // NOTE: hirari_undo_manager_clear() also empties native_callbacks, which
-        // would run every destroy function and invalidate the contexts
-        // registered above. A freshly created manager already has empty history,
-        // so no clear is needed here.
-
-        static const char kTransactionName[] = "partial-operation";
-        static const char kFirstName[] = "first";
-        static const char kSecondName[] = "second";
-        if (!hirari_undo_manager_begin_transaction(
-                undoState,
-                reinterpret_cast<const uint8_t*>(kTransactionName),
-                sizeof(kTransactionName) - 1)) return 16;
-        if (!hirari_undo_manager_record(
-                undoState, reinterpret_cast<const uint8_t*>(kFirstName), sizeof(kFirstName) - 1,
-                firstUndo, firstRedo, hirari_undo_manager_timestamp_ms(), false)) return 16;
-        if (!hirari_undo_manager_invoke_native_callback(undoState, firstRedo)) return 16;
-        if (!hirari_undo_manager_record(
-                undoState, reinterpret_cast<const uint8_t*>(kSecondName), sizeof(kSecondName) - 1,
-                secondUndo, secondRedo, hirari_undo_manager_timestamp_ms(), false)) return 16;
-        if (!hirari_undo_manager_invoke_native_callback(undoState, secondRedo)) return 16;
-
-        // Both actions have already taken effect and the transaction is still open.
-        if (transactionValue != 5 || !hirari_undo_manager_transaction_active(undoState)) return 16;
-        // Aborting must undo every action recorded in the transaction, in reverse.
-        if (!hirari_undo_manager_abort_and_invoke(undoState)) return 17;
-        if (transactionValue != 0 || hirari_undo_manager_transaction_active(undoState) ||
-            hirari_undo_manager_undo_count(undoState) != 0) return 17;
-        hirari_undo_manager_destroy(undoState);
-    }
-
+    // Transactional undo is covered by hirari-core-bridge/src/undo_transaction.rs
+    // (native-callback routing and abort rollback). The engine-side facade is
+    // still exercised here because it owns the C++ closures.
     auto& engineUndo = Hirari::Core::Engine::UndoTransactionManager::getInstance();
     engineUndo.clear();
 
@@ -235,38 +173,3 @@ int main() {
     midiIngress.addEvent(0, oversizedMidi, sizeof(oversizedMidi));
     if (!midiIngress.overflowed() || midiIngress.takeOversizeEvents() != 1 ||
         midiIngress.takeExtendedEvents() != 1 || midiIngress.size() != 0) return 15;
-
-    const auto temp = std::filesystem::temp_directory_path() / "hirari-plugin-cache-contract.bin";
-    {
-        std::ofstream output(temp, std::ios::binary | std::ios::trunc);
-        output << "version-one";
-    }
-    const auto first = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(temp);
-    if (!first || *first == 0) return 2;
-    {
-        std::ofstream output(temp, std::ios::binary | std::ios::trunc);
-        output << "version-two-with-a-different-size";
-    }
-    const auto second = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(temp);
-    std::error_code cleanup;
-    std::filesystem::remove(temp, cleanup);
-    if (!second || *second == *first) return 3;
-    const auto directoryFingerprint = std::filesystem::temp_directory_path() / "hirari-plugin-fingerprint-directory";
-    std::filesystem::remove_all(directoryFingerprint, cleanup);
-    std::filesystem::create_directories(directoryFingerprint / "nested", cleanup);
-    {
-        std::ofstream(directoryFingerprint / "z.bin", std::ios::binary) << "z";
-        std::ofstream(directoryFingerprint / "nested" / "a.bin", std::ios::binary) << "a";
-    }
-    const auto directoryFirst = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(directoryFingerprint);
-    std::filesystem::remove_all(directoryFingerprint, cleanup);
-    std::filesystem::create_directories(directoryFingerprint / "nested", cleanup);
-    {
-        // Create in the opposite order: the fingerprint must not depend on
-        // filesystem iterator ordering.
-        std::ofstream(directoryFingerprint / "nested" / "a.bin", std::ios::binary) << "a";
-        std::ofstream(directoryFingerprint / "z.bin", std::ios::binary) << "z";
-    }
-    const auto directorySecond = Hirari::Core::Plugins::PluginScanCache::fingerprintForPath(directoryFingerprint);
-    std::filesystem::remove_all(directoryFingerprint, cleanup);
-    if (!directoryFirst || !directorySecond || *directoryFirst != *directorySecond) return 4;

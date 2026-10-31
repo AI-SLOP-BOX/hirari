@@ -32,6 +32,7 @@
         if (!restored.valid || restored.regions.size() != 1 || restored.regions[0].id != 9001) {
             return 6;
         }
+        std::error_code cleanup;
         std::filesystem::remove(project, cleanup);
     }
 

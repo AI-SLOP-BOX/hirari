@@ -67,6 +67,15 @@ production support.
 
 ### Changed
 
+- The plug-in fingerprint and undo-manager C++ contract blocks are gone.
+  Native plug-in admission hashes paths inside Rust (`plugin_blacklist`), so
+  the `hirari_plugin_fingerprint` C ABI, its `PluginScanCache::fingerprintForPath`
+  wrapper and the duplicated native-contract assertions were dead weight; the
+  Rust unit tests now cover content changes, missing files and
+  filesystem-iterator ordering. Transactional undo likewise stays asserted in
+  `undo_transaction.rs`, while the C++ `UndoTransactionManager` facade keeps its
+  own closure-level contract.
+
 - The test-only WAV/WAVE64 write, decode and diagnostic wrappers are gone.
   `WavSaver` and `WavLoader::load/loadLegacy/loadWave64` had no production
   callers, and their contract assertions (RIFF/RF64 headers, planar and

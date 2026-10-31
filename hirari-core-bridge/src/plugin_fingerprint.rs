@@ -117,39 +117,6 @@ fn mix_byte(hash: &mut u64, byte: u8) {
     *hash = hash.wrapping_mul(FNV_PRIME);
 }
 
-/// C ABI for native plug-in admission and cache callers. Returns success
-/// separately so every `u64` fingerprint value remains representable.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_fingerprint(
-    path: *const std::ffi::c_char,
-    path_size: usize,
-    output: *mut u64,
-) -> u8 {
-    if path.is_null() || output.is_null() || path_size == 0 {
-        return 0;
-    }
-    let bytes = std::slice::from_raw_parts(path.cast::<u8>(), path_size);
-    let Some(path) = path_from_bytes(bytes) else {
-        return 0;
-    };
-    let Some(fingerprint) = fingerprint_path(&path) else {
-        return 0;
-    };
-    *output = fingerprint;
-    1
-}
-
-#[cfg(unix)]
-fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
-    use std::os::unix::ffi::OsStrExt;
-    Some(PathBuf::from(std::ffi::OsStr::from_bytes(bytes)))
-}
-
-#[cfg(not(unix))]
-fn path_from_bytes(bytes: &[u8]) -> Option<PathBuf> {
-    Some(PathBuf::from(std::str::from_utf8(bytes).ok()?))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +135,26 @@ mod tests {
         assert_ne!(replaced, stable);
         assert!(fingerprint_path(&dir.join("missing.clap")).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn directory_fingerprints_ignore_iterator_order() {
+        let root = std::env::temp_dir().join(format!("hirari-fingerprint-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("nested")).expect("scratch dir");
+        std::fs::write(root.join("z.bin"), b"z").expect("write");
+        std::fs::write(root.join("nested/a.bin"), b"a").expect("write");
+        let first = fingerprint_path(&root).expect("fingerprint");
+        assert_eq!(fingerprint_path(&root), Some(first));
+
+        std::fs::remove_dir_all(&root).expect("rebuild");
+        std::fs::create_dir_all(root.join("nested")).expect("scratch dir");
+        std::fs::write(root.join("nested/a.bin"), b"a").expect("write");
+        std::fs::write(root.join("z.bin"), b"z").expect("write");
+        assert_eq!(fingerprint_path(&root), Some(first));
+
+        std::fs::write(root.join("z.bin"), b"zz").expect("replace");
+        assert_ne!(fingerprint_path(&root), Some(first));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

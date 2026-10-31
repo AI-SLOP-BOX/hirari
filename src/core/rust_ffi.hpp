@@ -965,8 +965,6 @@ extern "C" void* hirari_goniometer_create();
 extern "C" void hirari_goniometer_destroy(void* state);
 extern "C" void hirari_goniometer_process(
     const void* state, const float* left, const float* right, size_t frames);
-extern "C" uint8_t hirari_plugin_fingerprint(const char* path, size_t path_size,
-                                               uint64_t* output);
 
 extern "C" void* hirari_plugin_registry_create();
 extern "C" void hirari_plugin_registry_destroy(void* state);
