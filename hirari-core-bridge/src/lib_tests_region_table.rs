@@ -22,7 +22,7 @@ fn region_table_mirror_tracks_the_cpp_region_list_through_edits() {
     assert!(engine_ref.region_table_mirror_matches(track_id), "after adds");
 
     let layout: serde_json::Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let region_id = layout[0]["regions"][0]["id"].as_u64().expect("region id") as u32;
 
     assert!(engine_ref.set_region_gain(track_id, region_id, 0.5));
@@ -55,7 +55,7 @@ fn split_and_duplicate_apply_the_rust_policy_through_the_engine() {
     assert!(e.add_region(tid, source, 0.0));
 
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     let region = &layout[0]["regions"][0];
     let rid = region["id"].as_u64().expect("region id") as u32;
     let start = region["start"].as_u64().expect("start");
@@ -73,7 +73,7 @@ fn split_and_duplicate_apply_the_rust_policy_through_the_engine() {
     assert!(e.region_table_mirror_matches(tid), "mirror after split");
 
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     let regions = layout[0]["regions"].as_array().expect("regions");
     assert_eq!(regions.len(), 2);
     let left = regions
@@ -115,7 +115,7 @@ fn split_and_duplicate_apply_the_rust_policy_through_the_engine() {
     e.undo();
     assert!(e.region_table_mirror_matches(tid), "mirror after split undo");
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     let restored = layout[0]["regions"].as_array().expect("regions");
     assert_eq!(restored.len(), 1);
     assert_eq!(restored[0]["id"].as_u64(), Some(rid as u64));
@@ -123,7 +123,7 @@ fn split_and_duplicate_apply_the_rust_policy_through_the_engine() {
     e.redo();
     assert!(e.region_table_mirror_matches(tid), "mirror after split redo");
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     assert_eq!(layout[0]["regions"].as_array().map(Vec::len), Some(2));
 
     // Duplicate keeps the trimmed source span and backs the base up by the
@@ -133,7 +133,7 @@ fn split_and_duplicate_apply_the_rust_policy_through_the_engine() {
     assert_ne!(duplicate_id, 0, "duplicate must produce a region");
     assert!(e.region_table_mirror_matches(tid), "mirror after duplicate");
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     let duplicate = layout[0]["regions"]
         .as_array()
         .expect("regions")
@@ -167,7 +167,7 @@ fn region_table_mirror_holds_after_every_region_mutator() {
     assert!(e.bounce_project(source, 0));
     assert!(e.add_region(tid, source, 0.0));
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     let rid = layout[0]["regions"][0]["id"].as_u64().expect("region id") as u32;
 
     // Whether or not a mutator accepts its input, the mirror must still equal

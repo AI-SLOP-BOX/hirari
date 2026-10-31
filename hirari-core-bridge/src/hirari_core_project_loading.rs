@@ -585,7 +585,7 @@ impl HirariCore {
                     region.id
                 )));
             }
-            let layout = engine.get_project_layout_json();
+            let layout = engine.get_core().get_project_layout_json();
             let native_regions: Vec<NativeLayoutTrack> = serde_json::from_str(&layout)
                 .context("native engine returned malformed project layout")
                 .map_err(rollback_error)?;

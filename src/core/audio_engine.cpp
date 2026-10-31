@@ -121,12 +121,4 @@ AudioEngine::AudioEngine(bool startDevice)
             info.channelCount, info.frameCount, kMaxFrames);
     }
 
-    rust::String AudioEngine::get_project_layout_json() const {
-        return m_engine ? m_engine->get_project_layout_json() : rust::String();
-    }
-
-    rust::String AudioEngine::get_routing_snapshot_json() const {
-        return m_engine ? m_engine->get_routing_snapshot_json() : rust::String();
-    }
-
 } // namespace Hirari::Core::BridgeFFI

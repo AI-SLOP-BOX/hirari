@@ -41,9 +41,6 @@
         return ::Hirari::Core::Bridge::sandbox_statuses_packed(
             reinterpret_cast<size_t>(m_engine.get()));
     }
-    uint32_t get_last_sandbox_failure(uint32_t trackId) const {
-        return m_engine ? m_engine->get_last_sandbox_failure(trackId) : 0u;
-    }
     rust::String get_last_sandbox_failure_text(uint32_t trackId) const {
         return rust::String(m_engine ? m_engine->get_last_sandbox_failure_text(trackId)
                                      : "engine-unavailable");
@@ -69,6 +66,8 @@
         std::vector<uint8_t> bytes(state.begin(), state.end());
         return m_engine && m_engine->set_sandbox_plugin_state(trackId, sandboxIndex, bytes);
     }
+
+
 
     rust::String get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const {
         return rust::String(m_engine ? m_engine->get_sandbox_plugin_state_error_text(trackId, sandboxIndex)
@@ -244,8 +243,9 @@
     bool region_waveform_pending(uint64_t request) const noexcept {
         return request != 0 && hirari_waveform_snapshot_pending(request);
     }
-    float get_cpu_total_v() const;
-    rust::String get_project_layout_json() const;
+    void mark_project_layout_changed() const {
+        if (m_engine) m_engine->mark_project_layout_changed();
+    }
     uint64_t request_project_layout_snapshot() const {
         if (!m_engine) return 0;
         auto* context = new (std::nothrow) ProjectLayoutSnapshotContext{m_engine};
@@ -271,17 +271,6 @@
     }
     bool cancel_project_layout_snapshot(uint64_t requestId) const {
         return requestId != 0 && hirari_layout_snapshot_cancel(requestId, m_layoutSnapshotOwnerId);
-    }
-    rust::String get_routing_snapshot_json() const;
-    uint64_t get_project_generation() const {
-        return m_engine ? m_engine->get_project_generation() : 0;
-    }
-
-    uint64_t get_project_state_revision() const {
-        return m_engine ? m_engine->get_project_state_revision() : 0;
-    }
-    void mark_project_layout_changed() const {
-        if (m_engine) m_engine->mark_project_layout_changed();
     }
 
     // Command Dispatch (admission lives in Rust; the engine keeps the queue)

@@ -248,7 +248,7 @@ pub mod ffi {
         fn retry_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
         fn restart_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
         fn get_sandbox_statuses(self: &AudioEngine) -> Vec<u32>;
-        fn get_last_sandbox_failure(self: &AudioEngine, track_id: u32) -> u32;
+        fn get_last_sandbox_failure(self: &HirariUnifiedEngine, track_id: u32) -> u8;
         fn get_last_sandbox_failure_text(self: &AudioEngine, track_id: u32) -> String;
         fn get_sandbox_plugin_paths(self: &AudioEngine) -> Vec<String>;
         fn get_sandbox_plugin_state(
@@ -401,14 +401,14 @@ pub mod ffi {
             high_cut_db: f32,
         ) -> bool;
         fn get_track_correlation(self: &HirariUnifiedEngine, tid: u32) -> f32;
-        fn get_project_layout_json(self: &AudioEngine) -> String;
+        fn get_project_layout_json(self: &HirariUnifiedEngine) -> String;
         fn request_project_layout_snapshot(self: &AudioEngine) -> u64;
         fn poll_project_layout_snapshot(self: &AudioEngine, request_id: u64) -> String;
         fn cancel_project_layout_snapshot(self: &AudioEngine, request_id: u64) -> bool;
-        fn get_routing_snapshot_json(self: &AudioEngine) -> String;
-        fn get_project_generation(self: &AudioEngine) -> u64;
+        fn get_routing_snapshot_json(self: &HirariUnifiedEngine) -> String;
+        fn get_project_generation(self: &HirariUnifiedEngine) -> u64;
         fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
-        fn get_project_state_revision(self: &AudioEngine) -> u64;
+        fn get_project_state_revision(self: &HirariUnifiedEngine) -> u64;
         fn mark_project_layout_changed(self: &AudioEngine);
         fn get_last_command_error(self: &AudioEngine) -> u8;
         fn audio_range_overflowed(self: &HirariUnifiedEngine) -> bool;

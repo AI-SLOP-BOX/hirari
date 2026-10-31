@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- `AudioEngine` stopped duplicating engine getters that had no remaining
+  callers. Five layout/generation readers now cross the cxx bridge bound to the
+  engine itself, so Rust reads them without a forwarding hop, and the unused
+  `is_loop_enabled`, `get_track_volume`, `get_master_gain` and `get_cpu_total_v`
+  wrappers are gone.
 - Dead C++ scaffolding left the engine boundary. The unused
   `PluginScanner` translation-unit fragment (its only entry point,
   `scanInSandbox`, had no callers — admission is decided by

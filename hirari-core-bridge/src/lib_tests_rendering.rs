@@ -1319,17 +1319,17 @@ fn queued_region_import_commits_and_undoes_as_one_step() {
     assert_eq!(e.complete_region_import(ticket), 3, "tickets are consumed");
 
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     assert_eq!(layout[0]["regions"].as_array().map(Vec::len), Some(1));
 
     e.undo();
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     assert_eq!(layout[0]["regions"].as_array().map(Vec::len), Some(0));
 
     e.redo();
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     assert_eq!(layout[0]["regions"].as_array().map(Vec::len), Some(1));
 
     let _ = std::fs::remove_file(&wav_path);
@@ -1352,7 +1352,7 @@ fn queued_pitch_analysis_finishes_and_finalizes() {
     assert!(e.add_region(track, source, 0.0));
 
     let layout: serde_json::Value =
-        serde_json::from_str(&e.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&e.get_core().get_project_layout_json().to_string()).unwrap();
     let region = layout[0]["regions"][0]["id"].as_u64().expect("region id") as u32;
 
     assert!(!e.start_region_audio_note_analysis(track, region, 1_000.0));

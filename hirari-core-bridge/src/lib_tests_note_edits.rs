@@ -47,7 +47,7 @@ fn note_edit_round_trip_flows_through_the_rust_store() {
     assert!(engine_ref.bounce_project(source, 0));
     assert!(engine_ref.add_region(track_id, source, 0.0));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let region_id = layout
         .as_array()
         .and_then(|tracks| tracks.first())
@@ -86,7 +86,7 @@ fn note_edit_round_trip_flows_through_the_rust_store() {
         0.0
     ));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let segments = note_segments_of(&layout, region_id);
     assert_eq!(segments.len(), 2, "both non-overlapping segments must survive");
     assert_eq!(segments[0]["start"], 1.0);
@@ -107,7 +107,7 @@ fn note_edit_round_trip_flows_through_the_rust_store() {
         track_id, region_id, 1.0, 0.5, 2.5
     ));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let segments = note_segments_of(&layout, region_id);
     assert_eq!(segments.len(), 2);
     assert_eq!(segments[0]["start"], 0.5);
@@ -126,7 +126,7 @@ fn note_edit_round_trip_flows_through_the_rust_store() {
     engine_ref.new_project();
     assert!(engine_ref.load_project(project));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let segments = note_segments_of(&layout, region_id);
     assert_eq!(segments.len(), 2, "note edits must survive a project round trip");
     assert_eq!(segments[0]["end"], 2.5);
@@ -144,7 +144,7 @@ fn note_edit_round_trip_flows_through_the_rust_store() {
     assert!(engine_ref.clear_region_audio_note_segments(track_id, region_id));
     assert!(!engine_ref.clear_region_audio_note_segments(track_id, region_id));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     assert!(note_segments_of(&layout, region_id).is_empty());
 
     let _ = std::fs::remove_file(source_path);
@@ -164,7 +164,7 @@ fn scalar_region_edits_round_trip_through_the_shared_policy_path() {
     assert!(engine_ref.bounce_project(source, 0));
     assert!(engine_ref.add_region(track_id, source, 0.0));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let region_id = layout
         .as_array()
         .and_then(|tracks| tracks.first())
@@ -177,7 +177,7 @@ fn scalar_region_edits_round_trip_through_the_shared_policy_path() {
 
     let region = |engine: &crate::ffi::AudioEngine| -> Value {
         let layout: Value =
-            serde_json::from_str(&engine.get_project_layout_json().to_string()).unwrap();
+            serde_json::from_str(&engine.get_core().get_project_layout_json().to_string()).unwrap();
         layout
             .as_array()
             .and_then(|tracks| tracks.first())
@@ -238,7 +238,7 @@ fn comp_range_edits_are_adjudicated_by_the_rust_policy() {
     assert!(engine_ref.bounce_project(source, 0));
     assert!(engine_ref.add_region(track_id, source, 0.0));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let (region_id, region_len) = layout
         .as_array()
         .and_then(|tracks| tracks.first())
@@ -308,7 +308,7 @@ fn processing_history_policy_is_enforced_end_to_end() {
     assert!(engine_ref.bounce_project(source, 0));
     assert!(engine_ref.add_region(track_id, source, 0.0));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let region_id = layout
         .as_array()
         .and_then(|tracks| tracks.first())
@@ -375,7 +375,7 @@ fn processing_history_survives_a_save_and_load_round_trip() {
     assert!(engine_ref.bounce_project(source, 0));
     assert!(engine_ref.add_region(track_id, source, 0.0));
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let region_id = layout
         .as_array()
         .and_then(|tracks| tracks.first())
@@ -399,7 +399,7 @@ fn processing_history_survives_a_save_and_load_round_trip() {
     assert!(engine_ref.load_project(project));
 
     let layout: Value =
-        serde_json::from_str(&engine_ref.get_project_layout_json().to_string()).unwrap();
+        serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string()).unwrap();
     let reloaded_id = layout
         .as_array()
         .and_then(|tracks| tracks.first())

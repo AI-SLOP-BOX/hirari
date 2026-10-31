@@ -137,7 +137,7 @@
         assert!(engine_ref.bounce_project(source, 0));
         assert!(engine_ref.add_region(track_id, source, 0.0));
         let layout: serde_json::Value =
-            serde_json::from_str(&engine_ref.get_project_layout_json().to_string())
+            serde_json::from_str(&engine_ref.get_core().get_project_layout_json().to_string())
                 .expect("native layout must be valid JSON");
         let region_id = layout
             .as_array()

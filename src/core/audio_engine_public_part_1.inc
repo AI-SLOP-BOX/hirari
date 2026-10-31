@@ -14,7 +14,6 @@ public:
     }
     void set_loop(bool enabled) const { if (m_engine) { m_engine->set_loop(enabled); m_engine->mark_project_state_changed(); } }
     bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { if (!m_engine || !m_engine->set_cycle_range(start_sample, end_sample, enabled)) return false; m_engine->mark_project_state_changed(); return true; }
-    bool is_loop_enabled() const { return m_engine && m_engine->is_loop_enabled(); }
 
 
     void set_metronome_enabled(bool enabled) const {
@@ -39,9 +38,6 @@ public:
 
 
     void set_midi_clock_rate(double bpm) const { if (m_engine) m_engine->set_midi_clock_rate(bpm); }
-    float get_track_volume(uint32_t tid) const {
-        return m_engine ? m_engine->get_track_volume(tid) : -1.0f;
-    }
     bool set_master_gain(float value) const {
         if (!m_engine || !m_engine->set_master_gain(value)) return false;
         m_engine->mark_project_state_changed(); return true;
@@ -66,9 +62,6 @@ public:
         if (m_engine) m_engine->mark_project_state_changed();
     }
 
-    float get_master_gain() const noexcept {
-        return m_engine ? m_engine->get_master_gain() : 1.0f;
-    }
 
     bool set_offline_render_target(uint32_t tid) const {
         return m_engine && m_engine->set_offline_render_target(tid);

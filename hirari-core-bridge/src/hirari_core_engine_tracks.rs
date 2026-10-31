@@ -19,7 +19,7 @@ impl HirariCore {
         if id != 0 && matches!(t_type, 0..=2) {
             if let Some(engine) = self.engine.as_ref() {
                 if let Ok(layout) =
-                    serde_json::from_str::<serde_json::Value>(&engine.get_project_layout_json())
+                    serde_json::from_str::<serde_json::Value>(&engine.get_core().get_project_layout_json())
                 {
                     if let Some(bus_id) = layout
                         .get("tracks")

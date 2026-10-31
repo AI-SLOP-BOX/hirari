@@ -19,7 +19,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
     let engine = engine.as_ref().expect("offline engine must be created");
     let track = engine.add_track(0);
     assert_ne!(track, 0);
-    let project = engine.get_project_generation();
+    let project = engine.get_core().get_project_generation();
     let audio = engine.get_audio_config_generation();
 
     assert!(ffi::push_command(
@@ -73,7 +73,7 @@ fn a_full_command_queue_is_reported_as_a_failure() {
     let engine = ffi::new_audio_engine_offline();
     let engine = engine.as_ref().expect("offline engine must be created");
     let track = engine.add_track(0);
-    let project = engine.get_project_generation();
+    let project = engine.get_core().get_project_generation();
     let audio = engine.get_audio_config_generation();
 
     let mut accepted = 0u32;

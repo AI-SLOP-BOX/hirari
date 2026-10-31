@@ -11,9 +11,7 @@ impl HirariCore {
 
     pub fn last_sandbox_failure(&self, track_id: u32) -> u8 {
         self.engine.as_ref().map_or(0, |engine| {
-            engine
-                .get_last_sandbox_failure(track_id)
-                .min(u8::MAX as u32) as u8
+            engine.get_core().get_last_sandbox_failure(track_id)
         })
     }
 

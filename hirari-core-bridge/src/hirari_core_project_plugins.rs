@@ -36,7 +36,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\"}".to_owned();
         };
-        let tracks: serde_json::Value = serde_json::from_str(&engine.get_project_layout_json())
+        let tracks: serde_json::Value = serde_json::from_str(&engine.get_core().get_project_layout_json())
             .unwrap_or(serde_json::Value::Array(Vec::new()));
         let mut entries = Vec::new();
         if let Some(items) = tracks.as_array() {
@@ -235,7 +235,7 @@ impl HirariCore {
     pub fn audio_routes_json(&self) -> String {
         self.engine
             .as_ref()
-            .map(|engine| engine.get_routing_snapshot_json().to_string())
+            .map(|engine| engine.get_core().get_routing_snapshot_json().to_string())
             .unwrap_or_else(|| "[]".to_owned())
     }
 
@@ -356,7 +356,7 @@ impl HirariCore {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let layout: serde_json::Value =
-            match serde_json::from_str(engine.get_project_layout_json().as_str()) {
+            match serde_json::from_str(engine.get_core().get_project_layout_json().as_str()) {
                 Ok(value) => value,
                 Err(_) => {
                     return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}"
@@ -455,7 +455,7 @@ impl HirariCore {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let layout: serde_json::Value =
-            match serde_json::from_str(engine.get_project_layout_json().as_str()) {
+            match serde_json::from_str(engine.get_core().get_project_layout_json().as_str()) {
                 Ok(layout) => layout,
                 Err(_) => {
                     return "{\"code\":\"invalid_project_snapshot\",\"retryable\":false}"

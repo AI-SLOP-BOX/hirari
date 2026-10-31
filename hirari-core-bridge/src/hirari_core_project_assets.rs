@@ -56,7 +56,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return String::new();
         };
-        let raw = engine.get_project_layout_json();
+        let raw = engine.get_core().get_project_layout_json();
         Self::normalize_project_layout_json(raw, &self.aux_track_ids_json())
     }
 
@@ -67,7 +67,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return (String::new(), 0, aux_track_ids);
         };
-        let raw = engine.get_project_layout_json();
+        let raw = engine.get_core().get_project_layout_json();
         let native_fingerprint = crate::command_api::snapshot_generation(raw.as_bytes());
         let layout = Self::normalize_project_layout_json(raw, &aux_track_ids);
         (layout, native_fingerprint, aux_track_ids)
@@ -134,7 +134,7 @@ impl HirariCore {
     pub fn native_project_layout_fingerprint(&self) -> u64 {
         self.engine
             .as_ref()
-            .map_or(0, |engine| engine.get_project_generation())
+            .map_or(0, |engine| engine.get_core().get_project_generation())
     }
 
     /// Cheap change token for integration polling. It advances when native
@@ -151,7 +151,7 @@ impl HirariCore {
     pub fn project_state_revision(&self) -> u64 {
         let native = self.engine
             .as_ref()
-            .map_or(0, |engine| engine.get_project_state_revision());
+            .map_or(0, |engine| engine.get_core().get_project_state_revision());
         let revisions = [
             native,
             self.scheduled_midi_notes.revision(),

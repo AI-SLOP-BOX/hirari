@@ -89,7 +89,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return Err(anyhow::anyhow!("AudioEngine is unavailable"));
         };
-        if engine.get_project_state_revision() != native_revision
+        if engine.get_core().get_project_state_revision() != native_revision
             || self.project_state_revision() != project_revision
             || document_seed.as_ref().is_some_and(|document| {
                 (document.sample_rate - engine.get_sample_rate()).abs() > 0.5
@@ -217,7 +217,7 @@ impl HirariCore {
             )?,
         };
         document.audio_routes =
-            serde_json::from_str(engine.get_routing_snapshot_json().as_str())
+            serde_json::from_str(engine.get_core().get_routing_snapshot_json().as_str())
                 .map_err(|_| anyhow::anyhow!("native routing snapshot is malformed"))?;
         document.cycle_start_sample = engine.cycle_start();
         document.cycle_end_sample = engine.cycle_end();
@@ -403,7 +403,7 @@ impl HirariCore {
             )
             .collect();
         let stale = if let Some((native_revision, project_revision)) = expected_revisions {
-            engine.get_project_state_revision() != native_revision
+            engine.get_core().get_project_state_revision() != native_revision
                 || self.project_state_revision() != project_revision
         } else {
             self.native_project_layout_fingerprint() != native_layout_fingerprint.unwrap_or(0)

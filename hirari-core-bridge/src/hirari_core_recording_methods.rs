@@ -7,6 +7,7 @@ impl HirariCore {
             .engine
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("audio engine is unavailable"))?
+            .get_core()
             .get_project_layout_json();
         let tracks: Vec<NativeLayoutTrack> = serde_json::from_str(&layout)
             .map_err(|error| anyhow::anyhow!("recorded region layout is invalid: {error}"))?;
