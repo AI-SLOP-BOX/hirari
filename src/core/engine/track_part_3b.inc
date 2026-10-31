@@ -92,28 +92,5 @@
 
     AudioBuffer& getWorkBuffer(uint32_t) { return m_activeBuffer; }
     double getSampleRate() const noexcept { return m_sampleRate; }
-    struct AnalysisEngine {
-        explicit AnalysisEngine(const AudioBuffer* buffer) : m_buffer(buffer) {}
-
-        // Range splitting, the rms/peak mix and the clamp are Rust-owned; this
-        // wrapper only supplies the first channel and sizes the result.
-        std::vector<float> getSpectrogramL() const {
-            constexpr uint32_t kMaxBins = 32;
-            if (m_buffer == nullptr || m_buffer->getNumChannels() == 0 ||
-                m_buffer->getNumSamples() == 0) {
-                return {};
-            }
-            const uint32_t samples = m_buffer->getNumSamples();
-            std::vector<float> features(std::min(kMaxBins, samples), 0.0f);
-            const size_t written = hirari_track_analysis_spectrogram(
-                m_buffer->getReadPointer(0), samples, features.data(), features.size());
-            features.resize(written);
-            return features;
-        }
-
-    private:
-        const AudioBuffer* m_buffer;
-    };
-    const AnalysisEngine& getAnalysisEngine() const { return m_analysis; }
 
 private:

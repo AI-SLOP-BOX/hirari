@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- The dead per-track C++ analysis wrapper is gone. `Track::AnalysisEngine`,
+  its `getAnalysisEngine()` accessor, the `m_analysis` member and the
+  `hirari_track_analysis_spectrogram` declaration had no callers; the Rust
+  range-feature implementation and its tests remain the single authority and
+  still expose the same C ABI for other consumers.
 - Note-edit stores are cloned in Rust. The C++ `AudioNoteSegment` transfer
   type and its marshal/unmarshal helpers are gone: analysis snapshots deep-copy
   the store through `hirari_region_vari_audio_store_clone`, region-add detach

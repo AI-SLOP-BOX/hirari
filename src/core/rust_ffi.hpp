@@ -1361,10 +1361,6 @@ extern "C" uint32_t hirari_native_pdc_get_track_offset(const void* state, uint32
 extern "C" uint32_t hirari_native_pdc_get_send_offset(
     const void* state, uint32_t source, uint32_t destination);
 extern "C" bool hirari_native_pdc_low_latency_mode(const void* state);
-// Track work-buffer spectrogram features: splits the first channel into
-// `capacity` ranges and returns 0.5*(rms+peak) clamped to 0..1 per range.
-extern "C" size_t hirari_track_analysis_spectrogram(
-    const float* samples, uint32_t sample_count, float* output, size_t capacity);
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
