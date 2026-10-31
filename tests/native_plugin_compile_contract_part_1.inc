@@ -88,13 +88,15 @@ int main() {
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }
-    // The sandbox host owns bounded shared-memory staging arrays sized for
-    // the maximum plugin protocol block. Allocate it on the heap to keep
-    // this broad native contract below the platform thread-stack limit.
-    auto sandbox = std::make_unique<Hirari::Core::Plugins::PluginSandboxHost>("builtin://compile-contract");
+    // The Rust-owned sandbox supervisor owns bounded shared-memory staging
+    // arrays sized for the maximum plugin protocol block. Allocate it on the
+    // heap to keep this broad native contract below the platform stack limit.
+    auto sandbox = Hirari::Core::Bridge::Sandbox::new_sandbox_host(
+        "builtin://compile-contract", 44100.0, 512,
+        Hirari::Core::Plugins::SandboxProtocol::kMaxChannels, "auto");
     Hirari::Core::EffectChain chain;
     Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode recovery =
-        sandbox->isAlive()
+        sandbox->is_alive()
             ? Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock
             : Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined;
     static_assert(Hirari::Core::Plugins::SandboxProtocol::kStatusHeaderV9 == 0x41555209u);

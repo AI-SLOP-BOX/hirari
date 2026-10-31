@@ -8,13 +8,30 @@
 #include <mutex>
 #include <string>
 #include <vector>
-#include "plugin_sandbox_host.hpp"
+#include "hirari-core-bridge/src/plugin_sandbox_host.rs.h"
+#include "../audio_buffer.hpp"
+#include "../midi_buffer.hpp"
+#include "plugin_sandbox_protocol.hpp"
 #include "../../dsp/iprocessor.hpp"
 
 namespace Hirari::Core::Plugins {
 
+// The process lifecycle, IPC framing, shared-memory mailbox, timeouts and
+// restart policy live in the Rust-owned `SandboxHost`
+// (hirari-core-bridge/src/plugin_sandbox_host.rs). This processor is the C++
+// DSP boundary the engine's virtual chain calls; it holds the Rust host box
+// directly and marshals audio/MIDI around it.
 class ProcessSandboxProcessor final : public DSP::IProcessor {
 public:
+    struct GenerationContext {
+        uint64_t project = 0;
+        uint64_t plugin = 0;
+        uint64_t audio = 0;
+        uint64_t state = 0;
+        bool valid() const noexcept {
+            return project != 0 && plugin != 0 && audio != 0 && state != 0;
+        }
+    };
     enum class RecoveryMode : uint8_t {
         ClearBlock = SandboxProtocol::kRecoveryClearBlock,
         Quarantined = SandboxProtocol::kRecoveryQuarantined
@@ -28,8 +45,9 @@ public:
 
     explicit ProcessSandboxProcessor(std::string pluginPath, double sampleRate = 44100.0,
                                      uint32_t maxBlockSize = 512, std::string requestedFormat = "auto")
-        : m_host(std::move(pluginPath), sampleRate, maxBlockSize,
-                 SandboxProtocol::kMaxChannels, std::move(requestedFormat)),
+        : m_host(::Hirari::Core::Bridge::Sandbox::new_sandbox_host(
+              ::rust::Str(pluginPath), sampleRate, maxBlockSize,
+              SandboxProtocol::kMaxChannels, ::rust::Str(requestedFormat))),
           m_preparedSampleRate(sampleRate),
           m_preparedBlockSize(std::min(maxBlockSize, SandboxProtocol::kMaxFrames)) {
         // State IPC is generation-protected. A newly created processor must
@@ -37,79 +55,82 @@ public:
         // its first full generation tuple; the lifecycle can replace this
         // unique non-zero bootstrap context later.
         const uint64_t instance = s_generationSeed.fetch_add(1, std::memory_order_relaxed) + 1;
-        m_host.setGenerationContext({1, instance, 1, 1});
+        m_host->set_generation_context(1, instance, 1, 1);
         m_parameterSnapshot = hirari_plugin_parameter_snapshot_create();
     }
 
     ~ProcessSandboxProcessor() override {
+        m_host->stop();
         hirari_plugin_parameter_snapshot_destroy(m_parameterSnapshot);
     }
 
     bool start() {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        const bool started = m_host.start();
+        const bool started = m_host->start();
         if (!started) return false;
         if (replayParameterSnapshotLocked()) return true;
-        m_host.stop();
+        m_host->stop();
         return false;
     }
     void stop() noexcept {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        m_host.stop();
+        m_host->stop();
     }
-    bool isAlive() const noexcept { return m_host.isAlive(); }
-    bool isMidiInstrument() const noexcept override { return m_host.isMidiInstrument(); }
+    bool isAlive() const noexcept { return m_host->is_alive(); }
+    bool isMidiInstrument() const noexcept override { return m_host->is_midi_instrument(); }
     bool pollHealth() noexcept {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        return m_host.pollHealth() && !m_failed.load(std::memory_order_acquire);
+        return m_host->poll_health() && !m_failed.load(std::memory_order_acquire);
     }
     bool restart(bool force = true) {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        const bool restarted = m_host.restart(force);
+        const bool restarted = m_host->restart(force);
         if (restarted) {
             const bool parametersRestored = replayParameterSnapshotLocked();
             // A successful explicit restart is the recovery boundary.  Clear
             // any quarantine edge that raced with the old worker shutdown so
             // status snapshots cannot report a healthy worker as quarantined.
-            m_host.clearQuarantine();
+            m_host->clear_quarantine();
             m_failed.store(false, std::memory_order_release);
             m_consecutiveOverruns.store(0, std::memory_order_release);
             if (!parametersRestored) {
                 m_failed.store(true, std::memory_order_release);
-                m_host.stop();
+                m_host->stop();
             }
         }
         return restarted && !m_failed.load(std::memory_order_acquire);
     }
-    bool setGenerationContext(PluginSandboxHost::GenerationContext context) noexcept {
+    bool setGenerationContext(GenerationContext context) noexcept {
+        if (!context.valid()) return false;
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        return m_host.setGenerationContext(context);
+        return m_host->set_generation_context(context.project, context.plugin,
+                                              context.audio, context.state);
     }
-    PluginSandboxHost::GenerationContext generationContext() const noexcept {
-        return m_host.generationContext();
+    GenerationContext generationContext() const noexcept {
+        const auto context = m_host->generation_context();
+        return {context.project, context.plugin, context.audio, context.state};
     }
     bool autoRestart() {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        const bool restarted = m_host.autoRestart();
+        const bool restarted = m_host->auto_restart();
         if (restarted) {
             const bool parametersRestored = replayParameterSnapshotLocked();
             m_failed.store(false, std::memory_order_release);
             m_consecutiveOverruns.store(0, std::memory_order_release);
             if (!parametersRestored) {
                 m_failed.store(true, std::memory_order_release);
-                m_host.stop();
+                m_host->stop();
             }
         }
         return restarted && !m_failed.load(std::memory_order_acquire);
     }
-    PluginSandboxHost::Failure failure() const noexcept { return m_host.failure(); }
-    bool canRetry() const noexcept { return m_host.canRetry(); }
-    bool canAutoRetry() const noexcept { return m_host.canAutoRetry(); }
-    bool isQuarantined() const noexcept { return m_host.isQuarantined(); }
-    uint32_t restartAttempts() const noexcept { return m_host.restartAttempts(); }
+    bool canRetry() const noexcept { return m_host->can_retry(); }
+    bool canAutoRetry() const noexcept { return m_host->can_auto_retry(); }
+    bool isQuarantined() const noexcept { return m_host->is_quarantined(); }
+    uint32_t restartAttempts() const noexcept { return m_host->restart_attempts(); }
     void clearQuarantine() noexcept {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        m_host.clearQuarantine();
+        m_host->clear_quarantine();
         // Clearing the host quarantine is an explicit user/control action.
         // Reset the processor-side recovery latch as well, otherwise the
         // processor would remain permanently silent after a successful host
@@ -133,7 +154,7 @@ public:
                              m_preparedBlockSize != safeBlockSize;
         if (!changed) return;
         try {
-            if (!m_host.reconfigure(sampleRate, safeBlockSize)) {
+            if (!m_host->reconfigure(sampleRate, safeBlockSize)) {
                 m_failed.store(true, std::memory_order_release);
                 return;
             }
@@ -143,24 +164,74 @@ public:
         }
         m_preparedSampleRate = sampleRate;
         m_preparedBlockSize = safeBlockSize;
-        if (m_host.isAlive() && !replayParameterSnapshotLocked()) {
+        if (m_host->is_alive() && !replayParameterSnapshotLocked()) {
             m_failed.store(true, std::memory_order_release);
-            m_host.stop();
+            m_host->stop();
             return;
         }
         m_failed.store(false, std::memory_order_release);
         m_consecutiveOverruns.store(0, std::memory_order_release);
     }
-    bool processBlock(Core::AudioBuffer& buffer, Core::MidiBuffer& midi) noexcept {
-        const bool produced = m_host.process(buffer, midi);
-        const bool deadlineMissed = m_host.takeLastProcessOverrun();
-        const bool completedLate = produced && m_host.takeCompletedSequenceOverrun();
+
+    // Audio-thread boundary: atomics and the preallocated shared mailbox only.
+    bool processBlock(Core::AudioBuffer& audio, Core::MidiBuffer& midi) noexcept {
+        const uint32_t channels = audio.getNumChannels();
+        const uint32_t frames = audio.getNumSamples();
+        bool produced = false;
+        if (m_host->is_alive()) {
+            m_host->reset_staged_midi();
+            if (midi.size() > 0) {
+                for (size_t index = 0; index < midi.size(); ++index) {
+                    const auto& event = midi.getEvents()[index];
+                    // The Rust mailbox mirrors the exact slice deadline and
+                    // the oversized-payload ring; rejected events increment
+                    // the same truncation telemetry the C++ host used.
+                    (void)m_host->stage_input_midi(
+                        event.sampleOffset, event.articulationId,
+                        ::rust::Slice<const uint8_t>(event.data, event.size), frames);
+                }
+            }
+            const float* left = nullptr;
+            const float* right = nullptr;
+            if (channels > 0) left = audio.getReadPointer(0);
+            if (channels > 1) right = audio.getReadPointer(1);
+            if (!((channels > 0 && left == nullptr) || (channels > 1 && right == nullptr))) {
+                const uint8_t flags = m_host->process(
+                    ::rust::Slice<float>(const_cast<float*>(left), channels > 0 ? frames : 0),
+                    ::rust::Slice<float>(const_cast<float*>(right), channels > 1 ? frames : 0),
+                    channels, frames);
+                if ((flags & 2) != 0) {
+                    midi.clear();
+                } else if ((flags & 1) != 0) {
+                    produced = true;
+                    // Collect the plugin's output MIDI into the caller's
+                    // buffer. The input events are already present, so one
+                    // sort at the boundary restores monotonic offsets.
+                    const uint32_t outputCount = m_host->output_midi_count();
+                    uint8_t payload[SandboxProtocol::kMaxMidiPayloadBytes]{};
+                    for (uint32_t index = 0; index < outputCount; ++index) {
+                        uint64_t sampleOffset = 0;
+                        uint8_t articulationId = 0;
+                        const uint32_t size = m_host->copy_output_midi(
+                            index, sampleOffset, articulationId,
+                            ::rust::Slice<uint8_t>(payload, sizeof(payload)));
+                        if (size > 0 && sampleOffset < frames) {
+                            midi.addEvent(static_cast<uint32_t>(sampleOffset), payload, size,
+                                          articulationId);
+                        }
+                    }
+                    midi.sort();
+                }
+            }
+        }
+        const bool deadlineMissed = m_host->take_last_process_overrun();
+        const bool completedLate = m_host->take_completed_sequence_overrun();
         uint32_t overruns = m_consecutiveOverruns.load(std::memory_order_acquire);
         if (deadlineMissed || completedLate)
             overruns = m_consecutiveOverruns.fetch_add(1, std::memory_order_acq_rel) + 1;
         else if (produced)
             m_consecutiveOverruns.store(0, std::memory_order_release);
-        if (!produced) buffer.clear();
+        if (!produced) audio.clear();
         // Failure latching and MIDI invalidation are classified in Rust; the
         // counters and the flags they feed stay native.
         const uint32_t outcome = hirari_plugin_sandbox_block_outcome(
@@ -187,7 +258,7 @@ public:
         // full distinct-ID capacity for lifecycle replay. The sparse cache is
         // keyed by native ID instead of treating the ID as an array index.
         (void)hirari_plugin_parameter_snapshot_set(m_parameterSnapshot, parameterId, value);
-        return m_host.enqueueParameterChange(parameterId, value, sampleOffset);
+        return m_host->enqueue_parameter_change(parameterId, value, sampleOffset);
     }
     // EffectChain and UI automation use the base IProcessor parameter
     // contract.  Previously a sandboxed third-party plugin inherited the
@@ -217,7 +288,7 @@ public:
         // from a clean, non-quarantined boundary.
         m_failed.store(false, std::memory_order_release);
         m_consecutiveOverruns.store(0, std::memory_order_release);
-        m_host.clearQuarantine();
+        m_host->clear_quarantine();
     }
     uint32_t getLatencySamples() const noexcept override {
         return m_latencySamples.load(std::memory_order_acquire);
@@ -227,14 +298,16 @@ public:
             ? RecoveryMode::Quarantined : RecoveryMode::ClearBlock;
     }
     uint32_t takeInputMidiTruncations() noexcept {
-        return m_host.takeInputMidiTruncations();
+        return m_host->take_input_midi_truncations();
     }
-    void recordInputMidiRejection() noexcept { m_host.recordInputMidiRejection(); }
-    uint32_t takeDroppedOutputMidi() noexcept { return m_host.takeDroppedOutputMidi(); }
-    uint32_t takeMailboxOverruns() noexcept { return m_host.takeMailboxOverruns(); }
-    uint8_t failureCode() const noexcept { return static_cast<uint8_t>(m_host.failure()); }
-    uint8_t stateErrorCode() const noexcept { return m_host.stateErrorCode(); }
-    const char* stateErrorText() const noexcept { return m_host.stateErrorText(); }
+    void recordInputMidiRejection() noexcept { m_host->record_input_midi_rejection(); }
+    uint32_t takeDroppedOutputMidi() noexcept { return m_host->take_dropped_output_midi(); }
+    uint32_t takeMailboxOverruns() noexcept { return m_host->take_mailbox_overruns(); }
+    uint8_t failureCode() const noexcept { return m_host->failure(); }
+    uint8_t stateErrorCode() const noexcept { return m_host->state_error_code(); }
+    const char* stateErrorText() const noexcept {
+        return hirari_plugin_sandbox_state_error_name(stateErrorCode());
+    }
     const char* failureText() const noexcept {
         return hirari_plugin_sandbox_failure_name(failureCode());
     }
@@ -243,14 +316,15 @@ public:
     // touches this vector, so project save/load cannot introduce RT allocation.
     std::vector<uint8_t> getState() const override {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        return m_host.getState();
+        const auto bytes = m_host->get_state();
+        return std::vector<uint8_t>(bytes.begin(), bytes.end());
     }
     bool setState(const std::vector<uint8_t>& data) override {
         return restoreStateChecked(data);
     }
     bool restoreStateChecked(const std::vector<uint8_t>& data) override {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        const bool restored = m_host.setState(data.data(), data.size());
+        const bool restored = m_host->set_state(::rust::Slice<const uint8_t>(data.data(), data.size()));
         if (!restored) m_failed.store(true, std::memory_order_release);
         return restored;
     }
@@ -261,11 +335,11 @@ private:
             m_parameterSnapshot, this,
             [](void* context, uint32_t parameterId, double value) -> bool {
                 auto* processor = static_cast<ProcessSandboxProcessor*>(context);
-                return processor->m_host.enqueueParameterChange(parameterId, value, 0);
+                return processor->m_host->enqueue_parameter_change(parameterId, value, 0);
             });
     }
 
-    PluginSandboxHost m_host;
+    ::rust::Box<::Hirari::Core::Bridge::Sandbox::SandboxHost> m_host;
     // Control-plane lifecycle serialization. processBlock() deliberately does
     // not take this mutex: audio callbacks must never wait for worker control.
     mutable std::mutex m_lifecycleMutex;

@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The C++ `PluginSandboxHost` forwarding facade is gone: the sandboxed plugin
+  processor holds the Rust-owned `SandboxHost` box directly and marshals
+  audio/MIDI, so nothing outside Rust renames or relays the lifecycle, state
+  and telemetry calls it already owned. The native contract drives the Rust
+  host handle itself, and the realtime guard now watches the processor's
+  block-copy boundary.
 - Track automation list storage now lives in Rust
   (`track_automation_store.rs`): volume, pan and track-delay lists, plugin
   automation lanes and the captured-take merge are published as immutable

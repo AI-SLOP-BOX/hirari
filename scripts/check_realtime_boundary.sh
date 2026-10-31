@@ -10,12 +10,12 @@ chain_file="$root_dir/src/core/effect_chain.hpp"
 
 # The unified engine is split across *.inc parts, so search every part rather
 # than a single hardcoded file name. A guard that points at a stale path
-# silently stops guarding anything. The sandbox host is now a single C++
-# forwarding facade over the Rust lifecycle owner.
+# silently stops guarding anything. The sandbox host is a Rust-owned type; the
+# C++ audio boundary that marshals around it is ProcessSandboxProcessor.
 shopt -s nullglob
 engine_parts=("$root_dir"/src/core/hirari_unified_engine_part_*.inc)
 shopt -u nullglob
-sandbox_parts=("$root_dir/src/core/plugins/plugin_sandbox_host.hpp")
+sandbox_parts=("$root_dir/src/core/plugins/process_sandbox_processor.hpp")
 
 if [ "${#engine_parts[@]}" -eq 0 ]; then
     echo "realtime boundary check error: no unified engine sources found" >&2
@@ -105,8 +105,8 @@ fi
 # The sandbox process() path is also an audio-thread boundary. It may use
 # atomics and preallocated shared memory, but must not acquire locks, perform
 # filesystem/process control, or allocate while exchanging a block.
-sandbox_body="$(extract_function 'bool process(AudioBuffer& audio, MidiBuffer& midi)' "${sandbox_parts[@]}")"
-assert_clean_body "$sandbox_body" "PluginSandboxHost::process" "$sandbox_forbidden"
+sandbox_body="$(extract_function 'bool processBlock(Core::AudioBuffer& audio, Core::MidiBuffer& midi)' "${sandbox_parts[@]}")"
+assert_clean_body "$sandbox_body" "ProcessSandboxProcessor::processBlock" "$sandbox_forbidden"
 
 # The CoreAudio device callback is owned by Rust now, so the C++ guard above
 # cannot see it. Printing, formatting, allocating, or locking there blocks the
