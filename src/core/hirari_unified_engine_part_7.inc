@@ -7,10 +7,6 @@ bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
     return true;
 }
 
-std::string HirariUnifiedEngine::plugin_compatibility_snapshot_json() const {
-    return m_pluginCompatibility.snapshotJson();
-}
-
 bool HirariUnifiedEngine::execute_vocal_remover(uint32_t tid) {
     Track* track = findPublishedTrack(tid);
     if (!track) return false;

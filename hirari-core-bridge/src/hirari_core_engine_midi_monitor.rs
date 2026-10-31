@@ -323,12 +323,6 @@ impl HirariCore {
         }
     }
 
-    pub fn plugin_compatibility_snapshot_json(&self) -> String {
-        self.engine
-            .as_ref()
-            .map(|engine| engine.plugin_compatibility_snapshot_json())
-            .unwrap_or_else(|| "[]".to_owned())
-    }
     pub fn media_usage_diagnostic_json(&self, timeline_json: &str, media_dir: &str) -> String {
         let assets = crate::asset::AssetOrchestrator::new();
         assets

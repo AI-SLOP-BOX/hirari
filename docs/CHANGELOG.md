@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The `ForensicJournaler` and `PluginCompatibilityRegistry` C++ adapter
+  classes are deleted; the engine now calls the Rust `hirari_forensic_journaler_*`
+  ABI directly for journal lifecycle and command logging. The unused
+  registration snapshot accessor and its `hirari_plugin_registry_*` externs,
+  which only ever returned an empty `[]` snapshot, are removed along with the
+  dead recovery callback typedef.
 - The unused `Core::GPU::MetalAudioKernel` duplicate is deleted. The only
   live Metal spatial kernel is `DSP::Spatial::MetalAudioKernel`, which the
   bridge still initializes and processes through; the second declaration and

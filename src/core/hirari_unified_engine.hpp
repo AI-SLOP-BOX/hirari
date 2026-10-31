@@ -17,9 +17,7 @@
 #include "editing/audio_note_segment.hpp"
 #include "engine/track_freeze_manager.hpp"
 #include "engine/bus_track.hpp"
-#include "diagnostics/forensic_journaler.hpp"
 #include "io/audio_decoder.hpp"
-#include "plugins/plugin_compatibility_registry.hpp"
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>

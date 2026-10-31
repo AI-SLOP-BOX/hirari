@@ -8,7 +8,6 @@
 #include "engine/track.hpp"
 #include "concurrency/audio_task_manager.hpp"
 
-#include "diagnostics/forensic_journaler.hpp"
 #include <thread>
 #include "project_automation.hpp"
 #include <cstring>

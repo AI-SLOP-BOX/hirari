@@ -325,7 +325,7 @@ void HirariUnifiedEngine::installCommandHost() {
         },
         [](void* host, uint32_t type, uint32_t tid, float val, uint64_t ts) {
             if (auto* engine = static_cast<HirariUnifiedEngine*>(host))
-                engine->m_forensicJournaler.log(type, tid, val, ts);
+                hirari_forensic_journaler_log(engine->m_forensicJournal, type, tid, val, ts);
         },
         [](void*, uint32_t tid) {
             ::Hirari::Core::Diagnostics::LogBuffer::post(1, tid, "COMMAND_QUEUE_FULL");

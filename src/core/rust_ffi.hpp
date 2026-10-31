@@ -909,12 +909,6 @@ extern "C" bool hirari_master_meter_goniometer(
     const void* state, float* left, float* right, size_t frames,
     float* correlation, float* balance);
 
-extern "C" void* hirari_plugin_registry_create();
-extern "C" void hirari_plugin_registry_destroy(void* state);
-extern "C" bool hirari_plugin_registry_snapshot_json(
-    const void* state, uint8_t** output, size_t* output_size);
-extern "C" void hirari_plugin_registry_snapshot_json_free(uint8_t* bytes, size_t size);
-
 extern "C" void* hirari_wav_diagnostic_json_for_path(
     const uint8_t* path, size_t path_size, bool wave64);
 extern "C" const uint8_t* hirari_wav_diagnostic_json_data(const void* value);
@@ -1695,8 +1689,6 @@ extern "C" void* hirari_mpe_manager_create();
 extern "C" void hirari_mpe_manager_destroy(void* state);
 extern "C" void hirari_mpe_manager_reset(void* state);
 
-using HirariForensicJournalRecoveryCallback = void (*)(
-    void*, uint32_t, uint32_t, float, uint64_t);
 extern "C" void* hirari_forensic_journaler_create();
 extern "C" void hirari_forensic_journaler_destroy(void* state);
 extern "C" bool hirari_forensic_journaler_start(
@@ -1704,9 +1696,6 @@ extern "C" bool hirari_forensic_journaler_start(
 extern "C" bool hirari_forensic_journaler_log(
     const void* state, uint32_t type, uint32_t track_id, float value, uint64_t timestamp);
 extern "C" void hirari_forensic_journaler_stop(void* state);
-extern "C" bool hirari_forensic_journaler_recover(
-    const uint8_t* path, size_t path_size, void* context,
-    HirariForensicJournalRecoveryCallback callback);
 
 using HirariSnapshotComputeCallback = bool (*)(void*, void**);
 using HirariSnapshotReadCallback = bool (*)(void*, uint64_t*, uint64_t*, const uint8_t**, size_t*);

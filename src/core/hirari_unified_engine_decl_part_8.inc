@@ -27,7 +27,8 @@
     static constexpr size_t kMaxMacros = 128;
     void* m_macroControl = hirari_macro_mapping_create();
     void* m_midiLearnState = hirari_midi_learn_create();
-    ::Hirari::Core::Diagnostics::ForensicJournaler m_forensicJournaler;
+    // Rust (forensic_journaler.rs) owns the journal and writer thread.
+    void* m_forensicJournal = hirari_forensic_journaler_create();
     ::Hirari::Core::IO::AudioDecoderManager m_audioDecoderManager;
     std::atomic<bool> m_graphDirty{true};
 
@@ -38,7 +39,6 @@
     // callback renders with; C++ never interprets the state itself, so the
     // engine owns nothing but the lifetime.
     void* m_controlRoomState = hirari_control_room_state_create();
-    ::Hirari::Core::Plugins::PluginCompatibilityRegistry m_pluginCompatibility;
     // MIDI clock receive state lives in Rust (external_sync_runtime.rs).
     void* m_externalSync = hirari_external_sync_create();
     // Timeline markers and arranger parts are a Rust-owned document

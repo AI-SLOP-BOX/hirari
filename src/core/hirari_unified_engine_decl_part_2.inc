@@ -42,7 +42,6 @@
                    dynamic_cast<BusTrack*>(track.get()) != nullptr;
         }) != m_tracks.end();
     }
-    std::string plugin_compatibility_snapshot_json() const;
     float get_master_gain() const noexcept;
     float get_track_volume(uint32_t tid) const;
     // Offline render target selection is control-side state. When active,

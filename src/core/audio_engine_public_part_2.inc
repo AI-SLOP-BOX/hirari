@@ -190,7 +190,6 @@
     bool set_automation_record_mode(uint32_t mode) const {
         return m_engine && m_engine->set_automation_record_mode(mode);
     }
-    rust::String plugin_compatibility_snapshot_json() const { return m_engine ? rust::String(m_engine->plugin_compatibility_snapshot_json()) : rust::String("[]"); }
     // Compatibility API: stop only this wrapper's device.  The underlying
     // HirariUnifiedEngine is a process-wide singleton and must not be shut down
     // when one Rust/FFI handle is dropped.

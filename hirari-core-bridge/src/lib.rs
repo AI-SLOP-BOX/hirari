@@ -327,7 +327,6 @@ pub mod ffi {
         );
         fn set_track_input_monitor(self: &AudioEngine, tid: u32, enabled: bool) -> bool;
         fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
-        fn plugin_compatibility_snapshot_json(self: &AudioEngine) -> String;
         fn get_plugin_parameter(
             self: &HirariUnifiedEngine,
             tid: u32,

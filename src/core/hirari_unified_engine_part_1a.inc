@@ -98,6 +98,8 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_sidechain_engine_destroy(m_sidechainEngine);
     hirari_mpe_manager_destroy(m_mpeManager);
     hirari_bus_system_destroy(m_busSystem);
+    hirari_forensic_journaler_stop(m_forensicJournal);
+    hirari_forensic_journaler_destroy(m_forensicJournal);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -182,15 +184,16 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     startRecoveryOrchestrator();
 }
 
-#include "diagnostics/forensic_journaler.hpp"
-
 void HirariUnifiedEngine::startRecoveryOrchestrator() {
     const char* disabled = std::getenv("HIRARI_DISABLE_RECOVERY_THREAD");
     if (disabled && std::string_view(disabled) == "1") return;
     if (m_recoveryRunning.exchange(true, std::memory_order_acq_rel)) return;
     // Recovery and plugin health checks are control-thread maintenance. They
     // never enter processBlock() and never wait on the audio callback.
-    m_forensicJournaler.start("hirari_session_sovereign.journal");
+    static constexpr char kJournalPath[] = "hirari_session_sovereign.journal";
+    hirari_forensic_journaler_start(
+        m_forensicJournal, reinterpret_cast<const uint8_t*>(kJournalPath),
+        sizeof(kJournalPath) - 1);
     ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | RECOVERY | JOURNAL_STARTED");
 
     m_recoveryThread = std::thread([this]() {
