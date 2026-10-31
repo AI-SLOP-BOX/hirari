@@ -196,19 +196,6 @@ pub mod ffi {
         fn get_sample_rate(self: &AudioEngine) -> f64;
         fn list_audio_devices_json(self: &AudioEngine) -> String;
         fn audio_input_device_uid(self: &AudioEngine) -> String;
-        fn list_midi_devices_json(self: &AudioEngine) -> String;
-        fn send_midi_message(self: &AudioEngine, unique_id: u32, data: &[u8]) -> bool;
-        fn start_midi_input(self: &AudioEngine) -> bool;
-        fn stop_midi_input(self: &AudioEngine);
-        fn poll_midi_input_json(self: &AudioEngine) -> String;
-        fn midi_host_time_now(self: &AudioEngine) -> u64;
-        fn midi_dropped_input_events(self: &AudioEngine) -> u64;
-        fn midi_host_time_delta_samples(
-            self: &AudioEngine,
-            start: u64,
-            event: u64,
-            sample_rate: f64,
-        ) -> u64;
         fn select_audio_device(
             self: &AudioEngine,
             device_id: u32,

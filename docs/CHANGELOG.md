@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- CoreMIDI device access no longer crosses the C++ engine wrapper. The MIDI
+  monitor calls the Rust CoreMIDI host directly for device listing, packet
+  send, input start/stop/poll and host-time conversion, so the eight
+  `AudioEngine` pass-through methods and their platform `#if` branches are
+  deleted; non-Apple builds keep the same empty/false defaults in Rust.
 - Region undo capture now runs in Rust. The region edit host copies warp-marker
   and range-edit payloads, adopts the note-table and region-snapshot handles,
   and commits one entry into the engine's Rust history, so the C++

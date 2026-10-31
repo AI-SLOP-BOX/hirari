@@ -1,3 +1,94 @@
+#[cfg(target_os = "macos")]
+fn midi_host_take_string(raw: *mut std::ffi::c_char) -> String {
+    use crate::mac_midi_host as host;
+    if raw.is_null() {
+        return String::new();
+    }
+    let value = unsafe { std::ffi::CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { host::hirari_core_midi_string_free(raw) };
+    value
+}
+
+#[cfg(target_os = "macos")]
+fn midi_host_send_message(unique_id: u32, data: &[u8]) -> bool {
+    unsafe { crate::mac_midi_host::hirari_core_midi_send_message(unique_id, data.as_ptr(), data.len()) }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_send_message(_unique_id: u32, _data: &[u8]) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn midi_host_list_devices_json() -> String {
+    midi_host_take_string(crate::mac_midi_host::hirari_core_midi_list_devices_json())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_list_devices_json() -> String {
+    "[]".to_owned()
+}
+
+#[cfg(target_os = "macos")]
+fn midi_host_start_input() -> bool {
+    crate::mac_midi_host::hirari_core_midi_start_input()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_start_input() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn midi_host_stop_input() {
+    crate::mac_midi_host::hirari_core_midi_stop_input();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_stop_input() {}
+
+#[cfg(target_os = "macos")]
+fn midi_host_poll_input_json() -> String {
+    midi_host_take_string(crate::mac_midi_host::hirari_core_midi_poll_input_json())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_poll_input_json() -> String {
+    "[]".to_owned()
+}
+
+#[cfg(target_os = "macos")]
+fn midi_host_time_now() -> u64 {
+    crate::mac_midi_host::hirari_core_midi_host_time_now()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_time_now() -> u64 {
+    0
+}
+
+#[cfg(target_os = "macos")]
+fn midi_host_dropped_input_events() -> u64 {
+    crate::mac_midi_host::hirari_core_midi_dropped_input_events()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_dropped_input_events() -> u64 {
+    0
+}
+
+#[cfg(target_os = "macos")]
+fn midi_host_time_delta_samples(start: u64, event: u64, sample_rate: f64) -> u64 {
+    crate::mac_midi_host::hirari_core_midi_host_time_delta_samples(start, event, sample_rate)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn midi_host_time_delta_samples(_start: u64, _event: u64, _sample_rate: f64) -> u64 {
+    0
+}
+
 impl HirariCore {
     pub fn midi_monitor_filtered_json(
         &self,
@@ -336,10 +427,7 @@ impl HirariCore {
         if data.is_empty() || data.len() > 4096 {
             return false;
         }
-        let sent = self
-            .engine
-            .as_ref()
-            .is_some_and(|engine| engine.send_midi_message(unique_id, data));
+        let sent = !self.engine.is_null() && midi_host_send_message(unique_id, data);
         if sent && data.len() >= 3 {
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -351,47 +439,48 @@ impl HirariCore {
     }
 
     pub fn list_midi_devices_json(&self) -> String {
-        self.engine
-            .as_ref()
-            .map(|engine| engine.list_midi_devices_json().to_string())
-            .unwrap_or_else(|| "[]".to_owned())
+        if self.engine.is_null() {
+            return "[]".to_owned();
+        }
+        midi_host_list_devices_json()
     }
 
     pub fn start_midi_input(&self) -> bool {
-        self.engine
-            .as_ref()
-            .is_some_and(|engine| engine.start_midi_input())
+        !self.engine.is_null() && midi_host_start_input()
     }
 
     pub fn stop_midi_input(&self) {
-        if let Some(engine) = self.engine.as_ref() {
-            engine.stop_midi_input();
+        if !self.engine.is_null() {
+            midi_host_stop_input();
         }
     }
 
     pub fn poll_midi_input_json(&self) -> String {
-        self.engine
-            .as_ref()
-            .map(|engine| engine.poll_midi_input_json().to_string())
-            .unwrap_or_else(|| "[]".to_owned())
+        if self.engine.is_null() {
+            return "[]".to_owned();
+        }
+        midi_host_poll_input_json()
     }
 
     pub fn midi_host_time_now(&self) -> u64 {
-        self.engine
-            .as_ref()
-            .map_or(0, |engine| engine.midi_host_time_now())
+        if self.engine.is_null() {
+            return 0;
+        }
+        midi_host_time_now()
     }
 
     pub fn midi_dropped_input_events(&self) -> u64 {
-        self.engine
-            .as_ref()
-            .map_or(0, |engine| engine.midi_dropped_input_events())
+        if self.engine.is_null() {
+            return 0;
+        }
+        midi_host_dropped_input_events()
     }
 
     pub fn midi_host_time_delta_samples(&self, start: u64, event: u64, sample_rate: f64) -> u64 {
-        self.engine.as_ref().map_or(0, |engine| {
-            engine.midi_host_time_delta_samples(start, event, sample_rate)
-        })
+        if self.engine.is_null() {
+            return 0;
+        }
+        midi_host_time_delta_samples(start, event, sample_rate)
     }
 
     /// Invoke a project-local extension through the same bounded process
