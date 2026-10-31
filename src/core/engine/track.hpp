@@ -12,7 +12,6 @@
 #include <thread>
 #include <chrono>
 #include "../../dsp/mixing/channel_strip.hpp"
-#include "region_processor.hpp"
 #include "../rust_ffi.hpp"
 #include "../audio_buffer.hpp"
 #include "../project_automation.hpp"
@@ -150,7 +149,9 @@ struct Region {
     bool pitchPreserveWarp = false;
     // Derived by Rust when a region snapshot is published, off the audio thread.
     bool needsSpectralStretch = false;
-    std::shared_ptr<RegionTimeStretch> timeStretch;
+    // Rust owns the streaming stretcher; this shared handle is created with a
+    // destroy deleter so copies of the Region keep one stretcher instance.
+    std::shared_ptr<void> timeStretch;
     float pitchSemitones = 0.0f;
     // Non-destructive VariAudio-style note edits for this audio region. Rust
     // owns the authoritative table; C++ keeps the store handle plus the

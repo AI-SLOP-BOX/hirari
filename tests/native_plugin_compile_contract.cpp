@@ -6,7 +6,6 @@
 #include "src/core/plugins/au_sandbox_adapter.hpp"
 #include "src/core/effect_chain.hpp"
 #include "src/core/project_automation.hpp"
-#include "src/io/wav_loader_utils.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"
 #include "src/core/engine/undo_transaction_manager.hpp"
 #include "src/core/midi_buffer.hpp"
@@ -14,7 +13,6 @@
 #include "src/core/concurrency/audio_task_manager.hpp"
 #include "src/core/concurrency/thread_pool.hpp"
 #include "src/core/plugin_host.hpp"
-#include "src/core/database/project_db.hpp"
 #include "src/core/external/jack_bridge_deep.hpp"
 #include "src/core/HirariPluginSDK.hpp"
 #include <atomic>

@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The `RegionTimeStretch`, `ProjectDB` and `WavLoader` C++ adapter headers are
+  deleted. Regions hold the Rust stretcher handle directly with a destroy
+  deleter, and the bridge calls the Rust `hirari_region_stretch_*`,
+  `hirari_project_db_*` and `hirari_wav_diagnostic_json_*` entry points at the
+  engine and contract-test call sites.
+
 - The `MacMidiDeviceHost` and `PluginScanCache` C++ header adapters are
   deleted. The bridge now calls the Rust `hirari_core_midi_*` CoreMIDI and
   `hirari_plugin_scan_cache_*` entry points directly from the engine header,

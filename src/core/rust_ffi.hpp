@@ -277,6 +277,13 @@ extern "C" bool hirari_plugin_scan_cache_record_failure(const uint8_t* path, siz
                                                         uint32_t reason);
 extern "C" bool hirari_plugin_scan_cache_record_success(const uint8_t* path, size_t pathSize);
 
+// Streaming time-stretch state (region_time_stretch.rs); the region owns the
+// handle and destroys it through the shared_ptr deleter in track.hpp.
+extern "C" void* hirari_region_stretch_create();
+extern "C" void hirari_region_stretch_destroy(void* handle);
+extern "C" bool hirari_region_stretch_prepare(void* handle, double sampleRate,
+                                              uint32_t maxBlockSize);
+
 extern "C" bool hirari_processor_state_encode(
     bool bypassed, float mix, uint32_t sidechain_bus,
     uint8_t* output, size_t output_len);

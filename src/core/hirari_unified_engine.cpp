@@ -22,7 +22,6 @@
 #include <unistd.h>
 #include "concurrency/audio_task_manager.hpp"
 #include "log_buffer.hpp"
-#include "database/project_db.hpp"
 #include "rust_ffi.hpp"
 
 namespace Hirari::Core::Engine {

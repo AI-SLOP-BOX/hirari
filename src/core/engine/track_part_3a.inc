@@ -11,7 +11,7 @@
             std::lock_guard<std::mutex> regionLock(m_regionEditMutex);
             for (auto& region : m_regions) {
                 if (region.pitchPreserveWarp && region.timeStretch)
-                    (void)region.timeStretch->prepare(sr, blockSize);
+                    (void)hirari_region_stretch_prepare(region.timeStretch.get(), sr, blockSize);
             }
         }
         m_strip.setSampleRate(sr);

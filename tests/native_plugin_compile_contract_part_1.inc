@@ -149,13 +149,23 @@ int main() {
     // A failed DB publication must not remove the last destination. Using a
     // directory as the destination forces rename to fail while making the
     // preservation invariant directly observable.
-    auto& projectDb = Hirari::Core::Database::ProjectDB::i();
-    projectDb.recordForensic("contract", "publication", "preserve-last-good");
+    void* projectDb = hirari_project_db_create();
+    const auto* dbCategory = reinterpret_cast<const uint8_t*>("contract");
+    const auto* dbKey = reinterpret_cast<const uint8_t*>("publication");
+    const auto* dbValue = reinterpret_cast<const uint8_t*>("preserve-last-good");
+    (void)hirari_project_db_record(
+        projectDb, static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count()),
+        dbCategory, 8, dbKey, 11, dbValue, 18);
     const auto dbDestination = std::filesystem::temp_directory_path() / "hirari-project-db-contract-destination";
     std::error_code dbCleanup;
     std::filesystem::remove_all(dbDestination, dbCleanup);
     std::filesystem::create_directory(dbDestination, dbCleanup);
-    if (dbCleanup || projectDb.flushToDisk(dbDestination.string()) ||
+    const std::string dbDestinationText = dbDestination.string();
+    const bool dbFlushed = hirari_project_db_flush(
+        projectDb, reinterpret_cast<const uint8_t*>(dbDestinationText.data()),
+        dbDestinationText.size());
+    hirari_project_db_destroy(projectDb);
+    if (dbCleanup || dbFlushed ||
         !std::filesystem::is_directory(dbDestination)) return 65;
     std::filesystem::remove_all(dbDestination, dbCleanup);
 

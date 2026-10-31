@@ -97,9 +97,15 @@
     bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }
     bool bounce_project(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project(std::string_view(path.data(), path.size()), format); }
     rust::String read_wav_diagnostic_json(rust::Str path, uint32_t format) const {
-        // The supported-format gate and its diagnostic code are Rust-owned.
-        const std::string input(path.data(), path.size());
-        return rust::String(::Hirari::IO::WavLoader::loadDiagnosticJson(input, format == 1));
+        // The supported-format gate, decoding and diagnostic text are Rust-owned.
+        void* raw = hirari_wav_diagnostic_json_for_path(
+            reinterpret_cast<const uint8_t*>(path.data()), path.size(), format == 1);
+        if (!raw) return rust::String{};
+        std::unique_ptr<void, decltype(&hirari_wav_diagnostic_json_free)> json(
+            raw, &hirari_wav_diagnostic_json_free);
+        const auto* data = hirari_wav_diagnostic_json_data(json.get());
+        const size_t size = hirari_wav_diagnostic_json_size(json.get());
+        return data ? rust::String(reinterpret_cast<const char*>(data), size) : rust::String{};
     }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
 

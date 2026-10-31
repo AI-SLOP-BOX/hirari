@@ -40,9 +40,11 @@
                 region.pitchSemitones, region.noteEdits.curves(),
                 region.noteEdits.curveCount());
             if (!region.pitchPreserveWarp) continue;
-            region.timeStretch = std::make_shared<RegionTimeStretch>();
-            (void)region.timeStretch->prepare(m_sampleRate,
-                std::max<uint32_t>(m_blockSize, 512u));
+            region.timeStretch = std::shared_ptr<void>(
+                hirari_region_stretch_create(),
+                [](void* handle) { hirari_region_stretch_destroy(handle); });
+            (void)hirari_region_stretch_prepare(region.timeStretch.get(), m_sampleRate,
+                                                std::max<uint32_t>(m_blockSize, 512u));
         }
         auto snapshot = std::make_unique<RegionSnapshot>(m_regions);
         // The published note views address the shared Rust snapshot, so the
@@ -111,7 +113,7 @@
             input.warpMarkerCount = region.warpMarkers.size();
             input.resampleKernel = m_regionResampleKernel;
             input.wsolaWindow = kTrackWsolaWindow.data();
-            input.stretchHandle = region.timeStretch ? region.timeStretch->rustState() : nullptr;
+            input.stretchHandle = region.timeStretch.get();
             input.cacheOwner = reinterpret_cast<std::uintptr_t>(this);
             input.cacheSnapshot = reinterpret_cast<std::uintptr_t>(snapshot.get());
             input.cacheNoteSegments = reinterpret_cast<std::uintptr_t>(region.noteCacheKey);
