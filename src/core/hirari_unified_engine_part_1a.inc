@@ -136,9 +136,7 @@ void HirariUnifiedEngine::shutdown() {
         if (m_bounceThread.joinable()) m_bounceThread.join();
         m_bounceRunning.store(false, std::memory_order_release);
     }
-    m_recoveryRunning.store(false, std::memory_order_release);
-    m_recoveryWake.notify_all();
-    if (m_recoveryThread.joinable()) m_recoveryThread.join();
+    hirari_sandbox_recovery_stop();
 
     // Drain waveform-cache jobs while their captured engine state is still
     // valid, then release the worker threads before clearing tracks/cache.
@@ -177,36 +175,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     // back to a synchronous full-file decode on the event thread. The pool
     // is stopped before tracks/cache state is torn down in shutdown().
     m_threadPool.start(2);
-    startRecoveryOrchestrator();
-}
-
-void HirariUnifiedEngine::startRecoveryOrchestrator() {
-    const char* disabled = std::getenv("HIRARI_DISABLE_RECOVERY_THREAD");
-    if (disabled && std::string_view(disabled) == "1") return;
-    if (m_recoveryRunning.exchange(true, std::memory_order_acq_rel)) return;
-    // Recovery and plugin health checks are control-thread maintenance. They
-    // never enter processBlock() and never wait on the audio callback.
-    static constexpr char kJournalPath[] = "hirari_session_sovereign.journal";
-    hirari_forensic_journaler_start(
-        m_forensicJournal, reinterpret_cast<const uint8_t*>(kJournalPath),
-        sizeof(kJournalPath) - 1);
-    ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | RECOVERY | JOURNAL_STARTED");
-
-    m_recoveryThread = std::thread([this]() {
-        while (m_recoveryRunning.load(std::memory_order_acquire) &&
-               !m_isShutdown.load(std::memory_order_acquire)) {
-            const uint32_t recovered = maintain_sandboxed_plugins(true);
-            if (recovered > 0) {
-                ::Hirari::Core::Diagnostics::LogBuffer::post(
-                    0, recovered, "SYSTEM | PLUGIN_SANDBOX | PROCESS_RECOVERED");
-            }
-            std::unique_lock<std::mutex> lock(m_recoveryWakeMutex);
-            m_recoveryWake.wait_for(lock, std::chrono::milliseconds(100), [this] {
-                return !m_recoveryRunning.load(std::memory_order_acquire) ||
-                       m_isShutdown.load(std::memory_order_acquire);
-            });
-        }
-    });
+    hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 
     void HirariUnifiedEngine::processBlock(AudioBuffer& output, uint32_t off, uint32_t sz) {

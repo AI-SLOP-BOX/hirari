@@ -15,7 +15,6 @@
         const uint8_t* midiData, uint32_t midiSize);
     // Control-thread maintenance. Returns the number of sandbox processes
     // successfully recovered during this pass.
-    uint32_t maintain_sandboxed_plugins(bool autoRestart);
     bool retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     // Status enumeration for the UI lives in Rust; see

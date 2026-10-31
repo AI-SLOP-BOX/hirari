@@ -1328,6 +1328,10 @@ extern "C" void hirari_plugin_sandbox_maintenance_host_install(
     const HirariPluginSandboxHostOps* ops);
 extern "C" uint32_t hirari_plugin_sandbox_maintain(void* host, bool autoRestart);
 extern "C" void hirari_plugin_sandbox_maintenance_forget(void* host);
+// Periodic sandbox recovery loop and journal start are Rust-owned
+// (sandbox_recovery_runtime.rs); the engine only lends its host pointer.
+extern "C" void hirari_sandbox_recovery_start(void* host, void* journal);
+extern "C" void hirari_sandbox_recovery_stop();
 
 extern "C" void* hirari_native_pdc_create();
 extern "C" void hirari_native_pdc_destroy(void* state);

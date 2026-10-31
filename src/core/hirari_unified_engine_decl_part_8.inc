@@ -50,11 +50,6 @@
     // (arrangement_document.rs); the engine only owns the handle.
     void* m_arrangementDocument = hirari_arrangement_document_create();
     // Phase 10: Sovereign Recovery
-    void startRecoveryOrchestrator();
-    std::thread m_recoveryThread;
-    std::atomic<bool> m_recoveryRunning{false};
-    std::condition_variable m_recoveryWake;
-    std::mutex m_recoveryWakeMutex;
     // Manual health polling and the background recovery loop share the same
     // sandbox host objects. Rust serializes maintenance and keeps the
     // observed-health map (plugin_sandbox_maintenance.rs); the engine only

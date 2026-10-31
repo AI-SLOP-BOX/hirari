@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Sandbox recovery orchestration now runs in Rust
+  (`sandbox_recovery_runtime.rs`): the periodic maintenance loop, its
+  opt-out flag, the forensic-journal start and the recovery log line moved
+  out of the engine, so the C++ thread, condition variable, wake mutex and
+  the maintenance forwarder are gone. The engine hands over its host pointer
+  and journal handle once; shutdown joins the loop through the same handle.
 - Dead C++ engine state that only wrote itself is removed: the "adaptive CPU
   governor" loops and its eco-mode flag/log, the always-zero spatial mode word
   passed to the output stage, the CPU-load meter (its only reader was the

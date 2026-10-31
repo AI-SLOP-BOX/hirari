@@ -326,6 +326,7 @@ pub mod runtime_views;
 pub mod sampler;
 pub mod sampler_engine;
 pub mod sandbox;
+pub mod sandbox_recovery_runtime;
 pub mod scale_assistant;
 pub mod score_events;
 pub mod scripts;
