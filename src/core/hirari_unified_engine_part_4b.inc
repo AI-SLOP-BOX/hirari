@@ -70,24 +70,31 @@
                         converted.enabled = step.enabled;
                         if (!r.processingHistory.append(converted)) break;
                     }
-                    std::vector<::hirari::editing::AudioNoteSegment> noteSegments;
-                    noteSegments.reserve(rs.audioNoteSegments.size());
+                    // The persisted notes are handed to the Rust store in the
+                    // flat ABI layout it already uses; the bridge anchor type
+                    // has the same f64-only layout, so no per-anchor copy.
+                    std::vector<HirariAudioNoteSegment> loadedNotes;
+                    std::vector<HirariAudioNoteAnchor> loadedAnchors;
+                    std::vector<size_t> noteAnchorOffsets;
+                    std::vector<size_t> noteAnchorCounts;
+                    loadedNotes.reserve(rs.audioNoteSegments.size());
                     for (const auto& segment : rs.audioNoteSegments) {
-                        ::hirari::editing::AudioNoteSegment converted;
-                        converted.startSeconds = segment.startSeconds;
-                        converted.endSeconds = segment.endSeconds;
-                        converted.detectedPitchCents = segment.detectedPitchCents;
-                        converted.pitchOffsetCents = segment.pitchOffsetCents;
-                        converted.formantOffsetCents = segment.formantOffsetCents;
-                        converted.anchors.reserve(segment.anchors.size());
-                        for (const auto& anchor : segment.anchors) {
-                            converted.anchors.push_back({anchor.positionSeconds,
-                                                         anchor.pitchCents,
-                                                         anchor.formantCents});
-                        }
-                        noteSegments.push_back(std::move(converted));
+                        loadedNotes.push_back({segment.startSeconds, segment.endSeconds,
+                                               segment.detectedPitchCents,
+                                               segment.pitchOffsetCents,
+                                               segment.formantOffsetCents});
+                        noteAnchorOffsets.push_back(loadedAnchors.size());
+                        noteAnchorCounts.push_back(segment.anchors.size());
+                        static_assert(sizeof(::Hirari::Core::Bridge::NativeNoteAnchor) ==
+                                      sizeof(HirariAudioNoteAnchor));
+                        const auto* anchors = reinterpret_cast<const HirariAudioNoteAnchor*>(
+                            segment.anchors.data());
+                        loadedAnchors.insert(loadedAnchors.end(), anchors,
+                                             anchors + segment.anchors.size());
                     }
-                    if (!r.noteEdits.assignRepaired(noteSegments)) return false;
+                    if (!r.noteEdits.assignRepaired(
+                            loadedNotes.data(), loadedNotes.size(), loadedAnchors.data(),
+                            noteAnchorOffsets.data(), noteAnchorCounts.data())) return false;
                     r.rangeEdits.clear();
                     r.rangeEdits.reserve(std::min<size_t>(rs.rangeEdits.size(), 4096));
                     for (const auto& edit : rs.rangeEdits) {

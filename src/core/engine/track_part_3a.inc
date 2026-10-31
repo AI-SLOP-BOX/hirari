@@ -242,14 +242,15 @@
     // Rust mirror of the region table as of the last snapshot publish. Every
     // mutation of m_regions ends in publishRegionSnapshot(), which refreshes it.
     const HirariRegionTable* regionTableMirror() const noexcept { return m_regionTable; }
-    bool copyAudioNoteSegments(uint32_t regionId,
-                               std::vector<::hirari::editing::AudioNoteSegment>& output) const {
+    // Clones a region's Rust note table for an analysis worker. The worker
+    // owns the returned store and releases it through the note-store ABI.
+    HirariRegionVariAudioStore* cloneRegionNoteStore(uint32_t regionId) const {
         const auto* snapshot = getRegionSnapshot();
-        if (!snapshot) return false;
+        if (!snapshot) return nullptr;
         const auto it = std::find_if(snapshot->begin(), snapshot->end(),
             [regionId](const Region& region) { return region.id == regionId; });
-        if (it == snapshot->end()) return false;
-        return it->noteEdits.copy(output);
+        if (it == snapshot->end()) return nullptr;
+        return it->noteEdits.cloneHandle();
     }
 
     // Runs a Rust note-table mutation under the region lock and republishes.
@@ -278,20 +279,6 @@
     }
     bool audioPitchAnalysisRunning() const noexcept {
         return m_audioPitchAnalysisRunning.load(std::memory_order_acquire);
-    }
-
-    bool setAudioNoteSegments(uint32_t regionId,
-                              std::vector<::hirari::editing::AudioNoteSegment> segments) {
-        if (segments.size() > 4096 || audioPitchAnalysisRunning()) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::find_if(m_regions.begin(), m_regions.end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (it == m_regions.end()) return false;
-        // Rust validates the batch and returns the chronological order.
-        if (!it->noteEdits.assignValidated(segments)) return false;
-        publishRegionSnapshot();
-        return true;
     }
 
     // Offline VariAudio-style F0 detection. This is deliberately a control/

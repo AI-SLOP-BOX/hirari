@@ -317,16 +317,11 @@ typedef struct HirariVariAudioFrozen HirariVariAudioFrozen;
 // narrow, allocation-free handle.
 extern "C" {
 HirariRegionVariAudioStore* hirari_region_vari_audio_store_new();
+// Fresh deep copy, owned by the caller and released with store_clear.
+HirariRegionVariAudioStore* hirari_region_vari_audio_store_clone(
+    const HirariRegionVariAudioStore* store);
 void hirari_region_vari_audio_store_clear(HirariRegionVariAudioStore* store);
 bool hirari_region_vari_audio_store_clear_segments(HirariRegionVariAudioStore* store);
-// Replaces the whole table. `anchor_offsets` / `anchor_counts` describe the
-// flat `anchors` layout, one entry per segment.
-bool hirari_region_vari_audio_store_set(HirariRegionVariAudioStore* store,
-                                        const HirariAudioNoteSegment* segments,
-                                        size_t segment_count,
-                                        const HirariAudioNoteAnchor* anchors,
-                                        const size_t* anchor_offsets,
-                                        const size_t* anchor_counts);
 struct HirariAudioNoteSegmentRange;
 
 // Control-thread snapshot of the whole table. The views it hands out point
@@ -339,22 +334,6 @@ const HirariAudioNoteSegmentRange* hirari_region_vari_audio_frozen_ranges(
     const HirariVariAudioFrozen* frozen, size_t* out_count);
 const HirariAudioNoteCurveView* hirari_region_vari_audio_frozen_curves(
     const HirariVariAudioFrozen* frozen, size_t* out_count);
-
-// Materializes the table for serialization, split and undo. Anchors are
-// flattened in segment order; `anchor_offsets` / `anchor_counts` describe the
-// layout. Counts are only written once every capacity check has passed.
-bool hirari_region_vari_audio_store_materialize(
-    const HirariRegionVariAudioStore* store,
-    HirariAudioNoteSegment* out_segments, size_t segment_capacity,
-    HirariAudioNoteAnchor* out_anchors, size_t anchor_capacity,
-    size_t* out_anchor_offsets, size_t* out_anchor_counts,
-    size_t* out_segment_count, size_t* out_anchor_total);
-
-// Segment and anchor totals, so a caller can allocate exactly once before
-// materializing.
-bool hirari_region_vari_audio_store_sizes(
-    const HirariRegionVariAudioStore* store, size_t* out_segment_count,
-    size_t* out_anchor_total);
 
 // Replaces the table for project load / region split / pitch analysis:
 // malformed entries are repaired instead of rejecting the batch.

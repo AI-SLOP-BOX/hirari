@@ -436,6 +436,26 @@ pub unsafe extern "C" fn hirari_region_vari_audio_store_new() -> *mut HirariRegi
     Box::into_raw(Box::new(store))
 }
 
+/// Deep-copies a store into a fresh, uniquely-owned one. Analysis workers
+/// take snapshots through this so the engine's live table keeps being edited
+/// while the worker compares before/after states.
+///
+/// # Safety
+/// `store` must be null or a live store from
+/// `hirari_region_vari_audio_store_new`; it is only read.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_vari_audio_store_clone(
+    store: *const HirariRegionVariAudioStore,
+) -> *mut HirariRegionVariAudioStore {
+    if store.is_null() {
+        return std::ptr::null_mut();
+    }
+    let source = unsafe { &*store };
+    Box::into_raw(Box::new(HirariRegionVariAudioStore {
+        segments: source.segments.clone(),
+    }))
+}
+
 ///
 /// # Safety
 /// `store` must be null or come from `hirari_region_vari_audio_store_new`,
@@ -1379,6 +1399,23 @@ mod vari_audio_store_tests {
     fn insert_and_count() {
         let store = store();
         assert!(upsert(store, segment(1.0, 2.0, 0.0)));
+        assert_eq!(count(store), 1);
+        drop_store(store);
+    }
+
+    #[test]
+    fn clone_is_independent_and_null_safe() {
+        let store = store();
+        assert!(upsert(store, segment(1.0, 2.0, 0.0)));
+        let copy = unsafe { hirari_region_vari_audio_store_clone(store) };
+        assert!(!copy.is_null());
+        assert_eq!(count(copy), 1);
+        assert!(upsert(copy, segment(3.0, 4.0, 0.0)));
+        // Editing the copy must not touch the source table.
+        assert_eq!(count(copy), 2);
+        assert_eq!(count(store), 1);
+        assert!(unsafe { hirari_region_vari_audio_store_clone(std::ptr::null()) }.is_null());
+        drop_store(copy);
         assert_eq!(count(store), 1);
         drop_store(store);
     }

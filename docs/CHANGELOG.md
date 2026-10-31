@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Note-edit stores are cloned in Rust. The C++ `AudioNoteSegment` transfer
+  type and its marshal/unmarshal helpers are gone: analysis snapshots deep-copy
+  the store through `hirari_region_vari_audio_store_clone`, region-add detach
+  copies the live table the same way, and project load feeds persisted notes
+  straight into the flat note-store ABI. The unused `store_set`,
+  `store_normalize`, `store_materialize` and `store_sizes` declarations left the
+  C++ header; their Rust entry points remain for the bridge's own tests.
 - Project saving shares the layout gather. `saveProject` used to walk the whole
   model a second time, filling the same encoder records C++ already produced
   for the layout JSON. The model walk now runs once

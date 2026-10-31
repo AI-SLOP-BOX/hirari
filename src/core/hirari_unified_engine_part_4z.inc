@@ -25,39 +25,6 @@ struct OwnedRegionEdit {
     std::shared_ptr<std::vector<HirariRegionRangeEdit>> rangeEdits;
 };
 
-// Packs a region's note table into a fresh Rust-owned store, so an analysis
-// worker can keep the before/after states without the engine holding them.
-HirariRegionVariAudioStore* cloneNoteSegments(
-    const std::vector<::hirari::editing::AudioNoteSegment>& segments) {
-    std::vector<HirariAudioNoteSegment> values;
-    std::vector<HirariAudioNoteAnchor> anchors;
-    std::vector<size_t> offsets;
-    std::vector<size_t> counts;
-    values.reserve(segments.size());
-    offsets.reserve(segments.size());
-    counts.reserve(segments.size());
-    for (const auto& segment : segments) {
-        values.push_back({segment.startSeconds, segment.endSeconds,
-                          segment.detectedPitchCents, segment.pitchOffsetCents,
-                          segment.formantOffsetCents});
-        offsets.push_back(anchors.size());
-        counts.push_back(segment.anchors.size());
-        anchors.insert(anchors.end(), segment.anchors.begin(), segment.anchors.end());
-    }
-    auto* store = hirari_region_vari_audio_store_new();
-    if (!store) return nullptr;
-    // An empty table is already the loaded state; `store_load` reports false
-    // for clearing an already-empty store.
-    if (values.empty()) return store;
-    if (!hirari_region_vari_audio_store_load(
-            store, values.data(), values.size(), anchors.data(),
-            offsets.data(), counts.data())) {
-        hirari_region_vari_audio_store_clear(store);
-        return nullptr;
-    }
-    return store;
-}
-
 }  // namespace
 
 bool HirariUnifiedEngine::regionHostFind(void* host, uint32_t trackId, uint32_t regionId,
@@ -500,13 +467,7 @@ void* HirariUnifiedEngine::regionHostNoteSnapshot(void* trackHandle, uint32_t re
     if (!trackHandle) return nullptr;
     const auto track = *static_cast<const std::shared_ptr<Track>*>(trackHandle);
     if (!track) return nullptr;
-    try {
-        std::vector<::hirari::editing::AudioNoteSegment> segments;
-        if (!track->copyAudioNoteSegments(regionId, segments)) return nullptr;
-        return cloneNoteSegments(segments);
-    } catch (...) {
-        return nullptr;
-    }
+    return track->cloneRegionNoteStore(regionId);
 }
 
 uint32_t HirariUnifiedEngine::regionHostClone(void* host, uint32_t trackId,
