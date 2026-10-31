@@ -170,7 +170,7 @@
             validSendPre ? m_sendPreFaderBuffer.getNumChannels() : 0,
             validSendPost ? m_sendPostFaderBuffer.getArrayOfWritePointers() : nullptr,
             validSendPost ? m_sendPostFaderBuffer.getNumChannels() : 0,
-            m_spatialPanner, m_spatialMode.load(std::memory_order_relaxed),
+            m_spatialPanner, 0,
             m_spatialX.load(std::memory_order_relaxed),
             m_spatialY.load(std::memory_order_relaxed),
             m_spatialZ.load(std::memory_order_relaxed), m_lowGain, m_highGain,
@@ -226,7 +226,6 @@
         markProjectLayoutChanged();
     }
     bool isSolo() const { return m_solo.load(std::memory_order_relaxed); }
-    void setEcoMode(bool eco) { m_isEcoMode.store(eco, std::memory_order_relaxed); }
     const std::vector<Region>& getRegions() const noexcept {
         const auto* snapshot = getRegionSnapshot();
         if (snapshot != nullptr) return *snapshot;

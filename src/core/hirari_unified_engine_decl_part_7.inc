@@ -108,14 +108,10 @@
 
     void* m_midiSnapshotStore = nullptr;
 
-    std::atomic<float> m_dspLoad{0.0f};
-    std::atomic<uint32_t> m_diagnosticBlockCounter{0};
     // Zero is reserved as an invalid/unset region identity in serialized
     // projects and FFI calls. All runtime-created regions start at one.
     std::atomic<uint32_t> m_regionIdCounter{1};
     std::atomic<uint32_t> m_trackIdCounter{0};
-    std::atomic<bool> m_showVideo{false};
-    std::atomic<bool> m_isAscended{false};
     std::atomic<uint32_t> m_autoRecordMode{0};
     std::atomic<int32_t> m_rootNote{0}, m_scaleType{0};
     std::atomic<uint32_t> m_articulationMapHash{0};

@@ -168,7 +168,6 @@
     std::atomic<bool> m_phaseInvert{false};
     std::atomic<bool> m_solo{false};
     std::atomic<bool> m_recordArmed{false};
-    std::atomic<bool> m_isEcoMode{false};
     std::vector<Region> m_regions;
     HirariRegionTable* m_regionTable = hirari_region_table_new();
     mutable std::mutex m_regionEditMutex;
@@ -209,7 +208,6 @@
     float m_lowStateR = 0.0f;
     void* m_automationStore = hirari_track_automation_store_create();
     std::atomic<float> m_spatialX{0.0f}, m_spatialY{0.0f}, m_spatialZ{0.0f};
-    std::atomic<uint32_t> m_spatialMode{0};
     // The spatial processor is Rust-owned; the track keeps only its handle.
     void* m_spatialPanner = hirari_track_holographic_panner_create();
     static constexpr uint32_t kMaxHrtfTaps = 128;

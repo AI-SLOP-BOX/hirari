@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Dead C++ engine state that only wrote itself is removed: the "adaptive CPU
+  governor" loops and its eco-mode flag/log, the always-zero spatial mode word
+  passed to the output stage, the CPU-load meter (its only reader was the
+  governor), and the unused ascend/video-sync flags with their log branches.
+  Behaviour is unchanged; the audio callback no longer samples the OS clock.
 - The dead C++ MIDI-region surface is gone: composition MIDI has been
   Rust-owned for a while, so `Track`'s region list was never populated and only
   the duplicate-track path walked it. `midi_region.hpp`, the `Track` add/get

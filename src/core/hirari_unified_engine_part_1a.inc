@@ -233,15 +233,6 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
             output.clear(off, sz);
             return;
         }
-        // Clock reads are control telemetry, not part of the audio contract.
-        // Sample them sparsely so the callback does not pay an OS-clock cost
-        // on every block.  The last sampled load remains available to the
-        // governor between samples.
-        const uint32_t callbackIndex = m_diagnosticBlockCounter.fetch_add(
-            1, std::memory_order_relaxed);
-        const bool sampleCpu = (callbackIndex & 0xffu) == 0u;
-        const auto cpuStart = sampleCpu ? std::chrono::steady_clock::now()
-                                        : std::chrono::steady_clock::time_point{};
         ScopedDenormalGuard guard;
         if (m_isShutdown.load(std::memory_order_acquire)) {
             output.clear(off, sz);

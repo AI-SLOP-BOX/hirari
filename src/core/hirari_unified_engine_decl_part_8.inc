@@ -49,9 +49,6 @@
     // Timeline markers and arranger parts are a Rust-owned document
     // (arrangement_document.rs); the engine only owns the handle.
     void* m_arrangementDocument = hirari_arrangement_document_create();
-    mutable std::atomic<bool> m_ecoModeLogTriggered{false};
-    mutable std::atomic<bool> m_videoSyncLogTriggered{false};
-
     // Phase 10: Sovereign Recovery
     void startRecoveryOrchestrator();
     std::thread m_recoveryThread;

@@ -152,28 +152,6 @@
             }
         }
 
-        // 3. System Telemetry & Adaptive Sovereignty (CPU Governor)
-        float currentLoad = m_dspLoad.load(std::memory_order_relaxed);
-
-        // INDUSTRIAL: Adaptive CPU Governor
-        // If the system is nearing its limits (>95%), we forensic-ly throttle background tracks.
-        if (currentLoad > 0.95f) {
-            for (uint32_t i = 0; i < state.trackCount; ++i) {
-                Track* track = state.activeTracks[i];
-                if (track && (track->getType() == Track::Audio || track->getType() == Track::Instrument)) {
-                    track->setEcoMode(true);
-                }
-            }
-            m_ecoModeLogTriggered.store(true, std::memory_order_release);
-        } else if (currentLoad < 0.70f) {
-            for (uint32_t i = 0; i < state.trackCount; ++i) {
-                Track* track = state.activeTracks[i];
-                if (track) {
-                    track->setEcoMode(false);
-                }
-            }
-        }
-
         // --- AUTOMATION RECORDING ---
         if (m_isPlaying.load(std::memory_order_acquire) &&
             m_autoRecordMode.load(std::memory_order_relaxed) > 0) {
@@ -186,30 +164,11 @@
 
         // (NaN/Inf sanitizer has already run before the limiter above)
         if (m_isPlaying.load(std::memory_order_relaxed)) {
-            // INDUSTRIAL: Real-time Tonal Sync (Scale Quantize)
-            if (m_isAscended.load(std::memory_order_relaxed)) {
-                // ...
-            }
-
-            // INDUSTRIAL: Frame-Accurate Video Sync
-            if (m_showVideo.load(std::memory_order_relaxed)) {
-                // In a production bridge, we would call the Rust Orchestrator here.
-                m_videoSyncLogTriggered.store(true, std::memory_order_release);
-            }
-
             if (currentPlayhead <= std::numeric_limits<uint64_t>::max() - sz) {
                 m_playhead.fetch_add(sz, std::memory_order_relaxed);
             } else {
                 m_audioRangeOverflow.store(true, std::memory_order_release);
             }
-        }
-        if (sampleCpu) {
-            const auto elapsed = std::chrono::duration<float>(
-                std::chrono::steady_clock::now() - cpuStart).count();
-            const float blockSeconds = static_cast<float>(sz) /
-                static_cast<float>(std::max(1.0, m_sampleRate.load(std::memory_order_relaxed)));
-            const float load = blockSeconds > 0.0f ? elapsed / blockSeconds : 0.0f;
-            m_dspLoad.store(std::clamp(load, 0.0f, 4.0f), std::memory_order_relaxed);
         }
     }
 

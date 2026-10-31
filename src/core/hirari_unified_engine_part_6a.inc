@@ -250,13 +250,6 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
     // synchronous call. Every ordering, escaping and formatting rule lives in
     // hirari-core-bridge/src/project_layout.rs.
     if (cancellation && cancellation->load(std::memory_order_acquire)) return rust::String();
-    if (m_ecoModeLogTriggered.exchange(false, std::memory_order_acq_rel)) {
-        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | GOVERNOR | ECO_MODE_ACTIVE");
-    }
-    if (m_videoSyncLogTriggered.exchange(false, std::memory_order_acq_rel)) {
-        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | VIDEO | SYNC_LOCKED");
-    }
-
     ProjectLayoutData data;
     if (!collectProjectLayout(&data, false, cancellation)) return rust::String();
 
