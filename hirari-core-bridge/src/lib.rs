@@ -16,6 +16,7 @@ pub use analysis_views::{
     analysis_song_structure_json, analysis_spectral_clashes, analysis_spectral_display,
     analysis_structure_sections as build_analysis_structure_sections, analysis_synesthesia_colors,
 };
+pub use command_host::engine_last_command_error;
 pub use plugin_sandbox_maintenance::sandbox_statuses_packed;
 pub use runtime_views::{interleave_planar_audio_input, runtime_health_vector};
 pub use waveform_cache::{analysis_waveform_peak_envelope, resample_waveform_peak_envelope};
@@ -396,7 +397,6 @@ pub mod ffi {
         fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
         fn get_project_state_revision(self: &HirariUnifiedEngine) -> u64;
         fn mark_project_layout_changed(self: &AudioEngine);
-        fn get_last_command_error(self: &AudioEngine) -> u8;
         fn audio_range_overflowed(self: &HirariUnifiedEngine) -> bool;
 
         fn get_runtime_telemetry(bridge: &AudioEngine) -> Vec<f32>;
@@ -669,6 +669,8 @@ pub mod ffi {
         /// Packs every sandbox status of the engine at `host` into the UI wire
         /// format. The engine pointer must remain valid for the call.
         fn sandbox_statuses_packed(host: usize) -> Vec<u32>;
+        /// Admission error code of the most recent command on `host`.
+        fn engine_last_command_error(host: usize) -> u8;
         fn analysis_synesthesia_colors(spectrum: &[f32]) -> Vec<f32>;
         fn analysis_arrangement_advice(track_id: u32) -> String;
         fn analysis_mixing_advice(true_peak_l: f32, true_peak_r: f32, correlation: f32)

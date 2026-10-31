@@ -54,16 +54,11 @@ public:
         }
     }
 
-    void update(uint64_t audioSamplePos, double sampleRate) {
-        hirari_video_runtime_update(m_runtime, audioSamplePos, sampleRate);
-    }
-
     bool requestFrameAt(double seconds) {
         return hirari_video_runtime_request_frame(m_runtime, seconds);
     }
 
     bool hasVideo() const noexcept { return hirari_video_runtime_has_video(m_runtime); }
-    double duration() const noexcept { return hirari_video_runtime_duration(m_runtime); }
     uint64_t frameRevision() const noexcept { return hirari_video_runtime_revision(m_runtime); }
 
     bool copyCurrentFrame(std::vector<uint8_t>& out, uint32_t& width,

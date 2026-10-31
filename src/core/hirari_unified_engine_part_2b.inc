@@ -114,7 +114,6 @@ void HirariUnifiedEngine::syncStructuralChanges() {
     hirari_routing_engine_build(routing);
     
     publishTrackSnapshotLocked(true);
-    m_graphDirty.store(false);
 
     // Keep PDC on the same published routing graph as audio processing. Rust
     // owns the full rebuild: topology, send routes, solve and offset publish.
@@ -134,11 +133,6 @@ void HirariUnifiedEngine::syncStructuralChanges() {
             track->setPdcCompensationSamples(pdcOffsets[i]);
     }
 
-    // --- BLACK BOX SYNC ---
-    auto& bb = ::Hirari::Core::Diagnostics::LogBuffer::BlackBoxRegister::getInstance();
-    bb.lastTrackCount.store((uint32_t)m_tracks.size(), std::memory_order_relaxed);
-    bb.lastSyncTimestamp.store(::Hirari::Core::Diagnostics::LogBuffer::getTimestamp(), std::memory_order_relaxed);
-    
     ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0x1, "Structural Sync: Topology Rebuilt.");
 }
 

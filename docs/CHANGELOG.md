@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- Write-only C++ diagnostic state and unused accessors are removed:
+  `BlackBoxRegister`, the graph-dirty and articulation-hash writes,
+  track/effect-chain tail sampling, `VideoSystem::update/duration`, the
+  unread mac input-capture sink, and empty/zero-magnitude buffer queries.
+  Command rejection codes are now read through the Rust admission journal
+  (`engine_last_command_error`) instead of a C++ `AudioEngine` forwarder, so
+  the same per-engine error table serves both native callers and the bridge
+  tests.
 - The C++ fragment-reassembler handle is deleted. `MidiFragmentReassembler`
   and `MidiBuffer::addFragment` were a wrapper around the Rust reassembler
   with no production caller; the Rust implementation keeps its own unit

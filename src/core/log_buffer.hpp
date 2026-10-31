@@ -36,18 +36,6 @@ public:
         return hirari_log_buffer_pop(state(), &out);
     }
 
-    struct BlackBoxRegister {
-        std::atomic<uint32_t> lastTrackCount{0};
-        std::atomic<uint32_t> lastBlockSize{0};
-        std::atomic<float> lastCPULoad{0.0f};
-        std::atomic<uint64_t> lastSyncTimestamp{0};
-
-        static BlackBoxRegister& getInstance() {
-            static BlackBoxRegister instance;
-            return instance;
-        }
-    };
-
     /** Address of the process-wide ring Rust owns, for Rust-side callers that log. */
     static void* state() noexcept {
         return const_cast<void*>(hirari_log_buffer_default_state());

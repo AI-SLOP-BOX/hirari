@@ -73,10 +73,8 @@ bool HirariUnifiedEngine::set_project_scale(int32_t root, int32_t type) {
     return true;
 }
 
-bool HirariUnifiedEngine::set_articulation_map(uint32_t trackId, uint32_t mapHash) {
-    if (!findPublishedTrack(trackId)) return false;
-    m_articulationMapHash.store(mapHash, std::memory_order_relaxed);
-    return true;
+bool HirariUnifiedEngine::set_articulation_map(uint32_t trackId, uint32_t) {
+    return findPublishedTrack(trackId) != nullptr;
 }
 
 

@@ -23,9 +23,6 @@ public:
     virtual uint32_t getTotalLatencySamples() const noexcept {
         return m_effectChain.getTotalLatencySamples();
     }
-    uint32_t getTotalTailSamples() const noexcept {
-        return m_effectChain.getTotalTailSamples();
-    }
     uint32_t getPdcCompensationSamples() const noexcept {
         return m_pdcRequested.load(std::memory_order_acquire);
     }

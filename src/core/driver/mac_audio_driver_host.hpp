@@ -73,9 +73,6 @@ struct AudioTimeStamp;
 using HirariMacProcessCallback = void (*)(const float* const*, uint32_t,
                                           float* const*, uint32_t, uint32_t,
                                           void*) noexcept;
-using HirariMacInputCaptureCallback = void (*)(void*, const float* const*,
-                                               uint32_t, uint32_t,
-                                               const AudioTimeStamp*);
 using HirariMacLogCallback = void (*)(void*, uint32_t, const char*);
 
 extern "C" {
@@ -114,9 +111,6 @@ void hirari_mac_audio_host_discard_pending_input(void* host);
 void hirari_mac_audio_host_capture_input(void* host, const float* const* channels,
                                          uint32_t channelCount, uint32_t frameCount);
 uint64_t hirari_mac_audio_host_dropped_input_blocks(void* host);
-bool hirari_mac_audio_host_register_input_sink(void* host,
-                                               const void* sink);
-void hirari_mac_audio_host_unregister_input_sink(void* host);
 }
 
 namespace Hirari::Core::Driver {
@@ -133,12 +127,6 @@ public:
     using ProcessCallback = void (*)(const float* const*, uint32_t,
                                      float* const*, uint32_t, uint32_t,
                                      void*) noexcept;
-    using InputCaptureCallback = HirariMacInputCaptureCallback;
-
-    struct InputCaptureSink {
-        InputCaptureCallback callback = nullptr;
-        void* context = nullptr;
-    };
 
     MacAudioDriverHost()
         : m_handle(hirari_mac_audio_host_create(nullptr, nullptr,
@@ -235,14 +223,6 @@ public:
     }
     uint64_t dropped_input_blocks() const noexcept {
         return m_handle ? hirari_mac_audio_host_dropped_input_blocks(m_handle) : 0;
-    }
-
-    bool register_input_capture_sink(const InputCaptureSink* sink) noexcept {
-        return m_handle != nullptr &&
-               hirari_mac_audio_host_register_input_sink(m_handle, sink);
-    }
-    void unregister_input_capture_sink() noexcept {
-        if (m_handle) hirari_mac_audio_host_unregister_input_sink(m_handle);
     }
 
 private:

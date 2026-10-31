@@ -93,15 +93,6 @@ public:
     // overlay, so blocking here would contend directly with parameter edits on
     // the control thread; a `noexcept` signature must not be able to stall
     // behind a descheduled lock holder either.
-    uint32_t getTotalTailSamples() const noexcept {
-        uint64_t value = 0;
-        if (!hirari_effect_chain_metric_try(m_state, 2, &value))
-            return m_lastTailSamples.load(std::memory_order_relaxed);
-        const auto tail = static_cast<uint32_t>(value);
-        m_lastTailSamples.store(tail, std::memory_order_relaxed);
-        return tail;
-    }
-
     // Control-thread only: drains processor watchdog edges without touching
     // the immutable realtime list from the audio callback.
     uint32_t takeWatchdogTrips() {
@@ -110,7 +101,7 @@ public:
 
     // Non-finite output is a diagnostic counter, so returning the most recent
     // sample under contention is correct and keeps this polling path free of
-    // any blocking wait.  See getTotalTailSamples() for the rationale.
+    // any blocking wait.
     uint64_t nonFiniteSampleCount() const noexcept {
         uint64_t value = 0;
         if (!hirari_effect_chain_metric_try(m_state, 1, &value))
@@ -387,7 +378,6 @@ private:
     AudioBuffer m_parallelBuffer;
     // Last sampled values for the lock-free diagnostic readers above, so a
     // contended poll returns a real measurement instead of blocking.
-    mutable std::atomic<uint32_t> m_lastTailSamples{0};
     mutable std::atomic<uint64_t> m_lastNonFiniteSamples{0};
     void* m_state = nullptr;
 

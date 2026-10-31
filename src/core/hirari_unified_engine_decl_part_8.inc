@@ -35,7 +35,6 @@
     // interleaved decode result into the engine's AudioBuffer ownership.
     std::shared_ptr<AudioBuffer> importAudioFile(const std::string& path,
                                                  double* sampleRateOut = nullptr);
-    std::atomic<bool> m_graphDirty{true};
 
     // Engine Infrastructure
 

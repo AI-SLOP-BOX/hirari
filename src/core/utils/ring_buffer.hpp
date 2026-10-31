@@ -46,10 +46,6 @@ struct RingBuffer {
         return true;
     }
 
-    bool isEmpty() const {
-        return readPtr.load(std::memory_order_relaxed) == writePtr.load(std::memory_order_acquire);
-    }
-
     // Reset is only valid at an ownership boundary where the producer and
     // consumer are stopped (project load/new-project). Keeping it explicit
     // prevents stale commands from a previous document being applied to the

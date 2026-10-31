@@ -280,9 +280,6 @@
             m_engine.get(), static_cast<uint32_t>(type), tid, val, ts,
             expectedProjectGeneration, expectedAudioGeneration);
     }
-    uint8_t get_last_command_error() const noexcept {
-        return m_engine ? hirari_engine_last_command_error(m_engine.get()) : 1u;
-    }
     
     // Core Access for telemetry shims
     const ::Hirari::Core::Engine::HirariUnifiedEngine& get_core() const { return *m_engine; }

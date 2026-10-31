@@ -12,6 +12,12 @@ const ERROR_STALE_PROJECT: u8 = 2;
 const ERROR_STALE_AUDIO: u8 = 3;
 const ERROR_QUEUE_FULL: u8 = 4;
 
+fn last_command_error(engine: &ffi::AudioEngine) -> u8 {
+    hirari_core_bridge::engine_last_command_error(engine.get_core()
+        as *const ffi::HirariUnifiedEngine
+        as usize)
+}
+
 #[test]
 fn command_admission_reports_target_and_generation_failures_in_order() {
     let _guard = native_engine_test_guard();
@@ -31,7 +37,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
         project,
         audio
     ));
-    assert_eq!(engine.get_last_command_error(), ERROR_NONE);
+    assert_eq!(last_command_error(engine), ERROR_NONE);
 
     assert!(!ffi::push_command(
         engine,
@@ -42,7 +48,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
         project,
         audio
     ));
-    assert_eq!(engine.get_last_command_error(), ERROR_INVALID_TARGET);
+    assert_eq!(last_command_error(engine), ERROR_INVALID_TARGET);
 
     assert!(!ffi::push_command(
         engine,
@@ -53,7 +59,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
         project + 1,
         audio
     ));
-    assert_eq!(engine.get_last_command_error(), ERROR_STALE_PROJECT);
+    assert_eq!(last_command_error(engine), ERROR_STALE_PROJECT);
 
     assert!(!ffi::push_command(
         engine,
@@ -64,7 +70,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
         project,
         audio + 1
     ));
-    assert_eq!(engine.get_last_command_error(), ERROR_STALE_AUDIO);
+    assert_eq!(last_command_error(engine), ERROR_STALE_AUDIO);
 }
 
 #[test]
@@ -93,7 +99,7 @@ fn a_full_command_queue_is_reported_as_a_failure() {
         }
     }
     assert!(accepted > 0);
-    assert_eq!(engine.get_last_command_error(), ERROR_QUEUE_FULL);
+    assert_eq!(last_command_error(engine), ERROR_QUEUE_FULL);
 }
 
 #[test]

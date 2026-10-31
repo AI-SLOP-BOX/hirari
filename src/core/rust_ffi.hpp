@@ -187,7 +187,6 @@ extern "C" bool hirari_bus_system_reconcile(
     void* state, const bool* active, uint32_t count);
 extern "C" void hirari_bus_system_reset(void* state);
 extern "C" void hirari_bus_system_clear(const void* state, uint32_t frames);
-extern "C" float hirari_audio_buffer_magnitude(const float* samples, uint32_t sample_count);
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
 extern "C" float* hirari_audio_buffer_storage_data(const void* storage);
 extern "C" size_t hirari_audio_buffer_storage_capacity(const void* storage);
@@ -1288,7 +1287,6 @@ extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t t
                                            float value, uint64_t timestamp,
                                            uint64_t expectedProjectGeneration,
                                            uint64_t expectedAudioGeneration);
-extern "C" uint8_t hirari_engine_last_command_error(void* host);
 extern "C" uint32_t hirari_engine_audio_command(
     uint32_t commandType, float value, float* outValue);
 extern "C" uint64_t hirari_engine_chunk_plan(
@@ -1325,7 +1323,6 @@ struct HirariPluginSandboxHostOps {
 };
 extern "C" void hirari_plugin_sandbox_maintenance_host_install(
     const HirariPluginSandboxHostOps* ops);
-extern "C" uint32_t hirari_plugin_sandbox_maintain(void* host, bool autoRestart);
 extern "C" void hirari_plugin_sandbox_maintenance_forget(void* host);
 // Periodic sandbox recovery loop and journal start are Rust-owned
 // (sandbox_recovery_runtime.rs); the engine only lends its host pointer.
@@ -1618,7 +1615,6 @@ extern "C" bool hirari_midi_extended_ring_push(
 extern "C" bool hirari_midi_extended_ring_pop(
     void* state, void* destination_message, size_t destination_bytes);
 extern "C" size_t hirari_midi_extended_ring_size(const void* state);
-extern "C" void* hirari_realtime_memory_pool_default_allocate(size_t size_bytes);
 extern "C" void hirari_forensic_scratchpad_reset();
 extern "C" bool hirari_status_queue_push_default(
     uint32_t severity, const uint8_t* text, size_t text_size);
@@ -1716,8 +1712,6 @@ extern "C" void hirari_mpe_manager_reset(void* state);
 
 extern "C" void* hirari_forensic_journaler_create();
 extern "C" void hirari_forensic_journaler_destroy(void* state);
-extern "C" bool hirari_forensic_journaler_start(
-    void* state, const uint8_t* path, size_t path_size);
 extern "C" bool hirari_forensic_journaler_log(
     const void* state, uint32_t type, uint32_t track_id, float value, uint64_t timestamp);
 extern "C" void hirari_forensic_journaler_stop(void* state);
@@ -1756,10 +1750,8 @@ extern "C" void* hirari_video_runtime_create(
 extern "C" void hirari_video_runtime_destroy(void* runtime);
 extern "C" uint64_t hirari_video_runtime_clear(void* runtime);
 extern "C" bool hirari_video_runtime_set_metadata(void* runtime, double duration, double fps);
-extern "C" void hirari_video_runtime_update(const void* runtime, uint64_t sample, double sample_rate);
 extern "C" bool hirari_video_runtime_request_frame(void* runtime, double seconds);
 extern "C" bool hirari_video_runtime_has_video(const void* runtime);
-extern "C" double hirari_video_runtime_duration(const void* runtime);
 extern "C" uint64_t hirari_video_runtime_revision(const void* runtime);
 extern "C" bool hirari_video_runtime_copy_frame(
     const void* runtime, void* context, HirariVideoPixelsVisitor visit,

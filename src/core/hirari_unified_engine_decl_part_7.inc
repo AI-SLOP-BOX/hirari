@@ -113,4 +113,3 @@
     std::atomic<uint32_t> m_trackIdCounter{0};
     std::atomic<uint32_t> m_autoRecordMode{0};
     std::atomic<int32_t> m_rootNote{0}, m_scaleType{0};
-    std::atomic<uint32_t> m_articulationMapHash{0};

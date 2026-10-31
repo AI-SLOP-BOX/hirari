@@ -207,18 +207,6 @@ public:
 
     uint32_t getNumChannels() const { return m_numChannels; }
     uint32_t getNumSamples() const { return m_numSamples; }
-    bool isEmpty() const { return m_numSamples == 0 || m_numChannels == 0; }
-
-    float getMagnitude(uint32_t channel) const {
-        return getMagnitude(channel, 0, m_numSamples);
-    }
-
-    float getMagnitude(uint32_t channel, uint32_t start, uint32_t len) const {
-        if (isEmpty() || channel >= m_numChannels || start >= m_numSamples) return 0.0f;
-        uint32_t n = std::min(len, m_numSamples - start);
-        return hirari_audio_buffer_magnitude(getReadPointer(channel, start), n);
-    }
-
     const float* const* getArrayOfReadPointers() const {
         if (m_isExternal) return const_cast<const float* const*>(m_externalData);
         return const_cast<const float* const*>(

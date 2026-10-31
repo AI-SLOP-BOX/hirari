@@ -81,6 +81,16 @@ fn last_error(host: *mut c_void) -> u8 {
         .unwrap_or(COMMAND_ERROR_NONE)
 }
 
+#[no_mangle]
+pub extern "C" fn hirari_engine_last_command_error(host: *mut c_void) -> u8 {
+    last_error(host)
+}
+
+/// Reads the admission error recorded for `host` without a C++ accessor.
+pub fn engine_last_command_error(host: usize) -> u8 {
+    last_error(host as *mut c_void)
+}
+
 fn journal(ops: &HirariCommandHostOps, host: *mut c_void, entry: (u32, u32, f32, u64)) {
     if let Some(journal) = ops.journal {
         unsafe { journal(host, entry.0, entry.1, entry.2, entry.3) };
@@ -177,11 +187,6 @@ pub unsafe extern "C" fn hirari_engine_push_command(
         ),
         None => false,
     }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_engine_last_command_error(host: *mut c_void) -> u8 {
-    last_error(host)
 }
 
 /// Commands the audio callback applies to its published track directly.
