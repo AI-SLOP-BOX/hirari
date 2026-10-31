@@ -113,25 +113,7 @@ void HirariUnifiedEngine::syncStructuralChanges() {
     void* routing = m_routingEngine;
     hirari_routing_engine_build(routing);
     
-    // Publish the audio-thread track snapshot.
-    uint32_t nextIdx = 1 - m_activeStateIdx.load();
-    auto& state = m_audioStates[nextIdx];
-    state.audioConfigGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
-    state.trackCount = 0;
-    // INDUSTRIAL: Reset the O(1) track map.
-    std::memset(state.trackMap, 0, sizeof(state.trackMap));
-    
-    for (const auto& t : m_tracks) {
-        if (state.trackCount < 256) {
-            state.activeTracks[state.trackCount++] = t.get();
-            // Map track pointer by its ID for O(1) resolution.
-            if (t->getId() < 2048) {
-                state.trackMap[t->getId()] = t.get();
-            }
-        }
-    }
-    
-    m_activeStateIdx.store(nextIdx, std::memory_order_release);
+    publishTrackSnapshotLocked(true);
     m_graphDirty.store(false);
 
     // Keep PDC on the same published routing graph as audio processing. Rust
@@ -182,8 +164,12 @@ void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) 
     if (stampAudioGeneration)
         state.audioConfigGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
     state.trackCount = 0;
+    std::memset(state.trackMap, 0, sizeof(state.trackMap));
     for (const auto& track : m_tracks) {
-        if (state.trackCount < kMaxTracks) state.activeTracks[state.trackCount++] = track.get();
+        if (state.trackCount >= kMaxTracks) break;
+        state.activeTracks[state.trackCount++] = track.get();
+        if (track->getId() < kMaxTrackMap)
+            state.trackMap[track->getId()] = track.get();
     }
     m_activeStateIdx.store(nextIdx, std::memory_order_release);
 }

@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Structural sync carried its own copy of the double-buffered audio-thread
+  snapshot loop, so the track map and the 256-track cap had to be kept in sync
+  in two places. Both paths now publish through the single locked helper, which
+  also rebuilds the by-id map after track insert and removal.
 - Sidechain route bookkeeping lived in a C++ vector that the layout writer,
   track duplication and track removal each had to walk and re-key by hand. Rust
   owns the route list now behind an opaque handle, so upsert, removal, capture
