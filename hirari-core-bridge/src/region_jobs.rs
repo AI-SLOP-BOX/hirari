@@ -100,6 +100,10 @@ impl AudioHandle {
         std::mem::forget(self);
         handle
     }
+
+    fn raw(&self) -> *mut c_void {
+        self.handle
+    }
 }
 
 impl Drop for AudioHandle {
@@ -280,9 +284,10 @@ fn edit_payload(
     }
 }
 
-/// Validates the rates and asks the host to insert the region, then records
-/// exactly one "Add Region" undo step around it. The audio handle is always
-/// consumed by the host, whether or not the insert succeeds.
+/// Validates the rates, derives the region's timeline length from the decoded
+/// frame count, asks the host to insert the region, then records exactly one
+/// "Add Region" undo step around it. The audio handle is always consumed by the
+/// host, whether or not the insert succeeds.
 fn commit_import(
     ops: &HirariRegionHostOps,
     host: *mut c_void,
@@ -293,11 +298,12 @@ fn commit_import(
     audio: AudioHandle,
     source_rate: f64,
 ) -> bool {
-    let (Some(insert), Some(identity_fn), Some(sample_rate), Some(snapshot)) = (
+    let (Some(insert), Some(identity_fn), Some(sample_rate), Some(snapshot), Some(view)) = (
         ops.insert_region,
         ops.track_identity,
         ops.sample_rate,
         ops.snapshot_region,
+        ops.audio_view,
     ) else {
         return false;
     };
@@ -306,6 +312,16 @@ fn commit_import(
     }
     let timeline_rate = unsafe { sample_rate(host) };
     if !valid_sample_rate(source_rate) || !valid_sample_rate(timeline_rate) {
+        return false;
+    }
+    let mut samples = 0u64;
+    let channels = unsafe { view(audio.raw(), ptr::null_mut(), 0, &mut samples) };
+    if channels == 0 || samples == 0 {
+        return false;
+    }
+    // Round up so a trailing partial source frame is never dropped.
+    let length = ((samples as f64) * timeline_rate / source_rate).ceil();
+    if !length.is_finite() || length < 1.0 || length >= u64::MAX as f64 {
         return false;
     }
     let region_id = unsafe {
@@ -318,6 +334,7 @@ fn commit_import(
             start_sample,
             source_rate,
             timeline_rate,
+            length as u64,
             audio.into_raw(),
         )
     };

@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Media import derived a region's timeline length inside the native insert
+  call, re-validating the decode and rates on the way. Rust now reads the
+  decoded frame count, rounds the length up itself and passes it through, so
+  the native side only mutates storage.
 - Articulation, expression-map, vocal-remover and correlation calls each
   walked the published audio snapshot to find their track. They share one
   snapshot lookup now, so the track-count and pointer-validity rules live in a

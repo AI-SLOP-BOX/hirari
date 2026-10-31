@@ -376,17 +376,14 @@ bool HirariUnifiedEngine::regionHostDecodeAudio(void* host, const uint8_t* path,
 uint32_t HirariUnifiedEngine::regionHostInsertRegion(
     void* host, uint32_t trackId, size_t expectedTrack, const uint8_t* path,
     size_t pathLength, uint64_t startSample, double sourceSampleRate,
-    double timelineSampleRate, void* audioHandle) {
+    double timelineSampleRate, uint64_t length, void* audioHandle) {
     if (!host || !audioHandle || (!path && pathLength != 0)) return 0;
-    // The handle is consumed on every path, success or failure.
+    // The handle is consumed on every path, success or failure. The caller has
+    // already validated the decode and derived the timeline length.
     auto* ownedAudio = static_cast<std::shared_ptr<AudioBuffer>*>(audioHandle);
     auto audio = std::move(*ownedAudio);
     delete ownedAudio;
-    if (!audio || audio->getNumSamples() == 0 || audio->getNumChannels() == 0 ||
-        !std::isfinite(sourceSampleRate) || !std::isfinite(timelineSampleRate) ||
-        sourceSampleRate <= 0.0 || timelineSampleRate <= 0.0) {
-        return 0;
-    }
+    if (!audio) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     try {
         std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
@@ -403,14 +400,7 @@ uint32_t HirariUnifiedEngine::regionHostInsertRegion(
         region.start = startSample;
         region.sourceSampleRate = sourceSampleRate;
         region.timelineSampleRate = timelineSampleRate;
-        const long double timelineLength = std::ceil(
-            static_cast<long double>(audio->getNumSamples()) * timelineSampleRate /
-            sourceSampleRate);
-        if (!std::isfinite(static_cast<double>(timelineLength)) || timelineLength < 1.0L ||
-            timelineLength > static_cast<long double>(UINT64_MAX)) {
-            return 0;
-        }
-        region.len = static_cast<uint64_t>(timelineLength);
+        region.len = length;
         region.muted = false;
         region.name = region.path;
         region.audio = std::move(audio);

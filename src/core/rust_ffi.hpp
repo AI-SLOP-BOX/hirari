@@ -660,11 +660,12 @@ struct HirariRegionHostOps {
     // Decodes a media file and returns an owned audio handle plus its rate.
     bool (*decodeAudio)(void* host, const uint8_t* path, size_t length,
                         void** outHandle, double* outRate) = nullptr;
-    // Inserts a decoded region. The audio handle is consumed on every path.
+    // Inserts a decoded region with its already-computed timeline length. The
+    // audio handle is consumed on every path.
     uint32_t (*insertRegion)(void* host, uint32_t trackId, size_t expectedTrack,
                              const uint8_t* path, size_t pathLength, uint64_t startSample,
                              double sourceSampleRate, double timelineSampleRate,
-                             void* audioHandle) = nullptr;
+                             uint64_t length, void* audioHandle) = nullptr;
     // Live track identity, or 0 when the id is not in the project.
     size_t (*trackIdentity)(void* host, uint32_t trackId) = nullptr;
     // Retains a track for a worker thread.

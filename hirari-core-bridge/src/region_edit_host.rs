@@ -232,8 +232,9 @@ pub type HirariRegionDecodeAudioFn = unsafe extern "C" fn(
     *mut *mut c_void,
     *mut f64,
 ) -> bool;
-/// Inserts a freshly decoded region into the project. The audio handle is
-/// consumed on every path. Returns the new region id, or 0 on failure.
+/// Inserts a freshly decoded region into the project with its computed
+/// timeline length. The audio handle is consumed on every path. Returns the
+/// new region id, or 0 on failure.
 pub type HirariRegionInsertFn = unsafe extern "C" fn(
     *mut c_void,
     u32,
@@ -243,6 +244,7 @@ pub type HirariRegionInsertFn = unsafe extern "C" fn(
     u64,
     f64,
     f64,
+    u64,
     *mut c_void,
 ) -> u32;
 /// Reports the live track's identity, or 0 when the id is not in the project.

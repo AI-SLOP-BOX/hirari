@@ -102,7 +102,7 @@ public:
                                            size_t expectedTrack, const uint8_t* path,
                                            size_t pathLength, uint64_t startSample,
                                            double sourceSampleRate, double timelineSampleRate,
-                                           void* audioHandle);
+                                           uint64_t length, void* audioHandle);
     static size_t regionHostTrackIdentity(void* host, uint32_t trackId);
     static void* regionHostRetainTrack(void* host, uint32_t trackId);
     static void regionHostReleaseTrack(void* handle);
