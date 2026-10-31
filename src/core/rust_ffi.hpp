@@ -257,7 +257,6 @@ extern "C" uint64_t hirari_midi_buffer_take_dropped(const void* state);
 extern "C" uint64_t hirari_midi_buffer_dropped_count(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_oversize(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_extended(const void* state);
-extern "C" void hirari_midi_buffer_reject_extended(const void* state);
 
 extern "C" bool hirari_plugin_scan_cache_record_failure(const uint8_t* path, size_t pathSize,
                                                         uint32_t reason);
@@ -1612,18 +1611,6 @@ extern "C" bool hirari_track_freeze_write_float32(
 extern "C" bool hirari_track_freeze_read_float32(
     const uint8_t* path, size_t path_size, uint32_t sample_rate,
     uint64_t total_samples, float* left, float* right);
-extern "C" void* hirari_midi_fragment_reassembler_create();
-extern "C" void hirari_midi_fragment_reassembler_destroy(void* state);
-extern "C" void hirari_midi_fragment_reassembler_reset(void* state);
-extern "C" uint8_t hirari_midi_fragment_reassembler_push(
-    void* state, uint32_t message_id, uint16_t index, uint16_t total,
-    uint64_t sample_offset, uint8_t articulation_id, const uint8_t* bytes, uint16_t size);
-extern "C" bool hirari_midi_fragment_reassembler_complete(const void* state);
-extern "C" size_t hirari_midi_fragment_reassembler_size(const void* state);
-extern "C" uint32_t hirari_midi_fragment_reassembler_message_id(const void* state);
-extern "C" uint64_t hirari_midi_fragment_reassembler_sample_offset(const void* state);
-extern "C" uint8_t hirari_midi_fragment_reassembler_articulation_id(const void* state);
-extern "C" const uint8_t* hirari_midi_fragment_reassembler_data(const void* state);
 extern "C" bool hirari_midi_extended_ring_init(void* storage, size_t bytes);
 extern "C" bool hirari_midi_extended_ring_push(
     void* state, uint64_t sample_offset, uint8_t articulation_id,

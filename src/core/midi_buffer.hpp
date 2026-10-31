@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <cstddef>
 #include <algorithm>
-#include "plugins/midi_fragment_transport.hpp"
 #include "rust_ffi.hpp"
 
 namespace Hirari::Core {
@@ -105,29 +104,6 @@ public:
 
     bool tryAddEvent(const MidiEvent& event) {
         return hirari_midi_buffer_copy(m_state, &event);
-    }
-
-    /// Completes a fragmented SysEx/UMP message into the realtime mailbox
-    /// only when it fits the bounded event slot. Larger messages are rejected
-    /// and counted instead of being silently truncated.
-    Plugins::MidiFragmentReassembler::Result addFragment(
-        Plugins::MidiFragmentReassembler& reassembler,
-        const Plugins::MidiFragmentReassembler::Fragment& fragment,
-        Plugins::MidiExtendedMessageRing* extended = nullptr) {
-        const auto result = reassembler.push(fragment);
-        if (result != Plugins::MidiFragmentReassembler::Result::Complete) return result;
-        if (reassembler.size() > sizeof(MidiEvent::data)) {
-            if (extended != nullptr && extended->push(
-                    reassembler.sampleOffset(), reassembler.articulationId(),
-                    reassembler.data(), reassembler.size())) {
-                return result;
-            }
-            hirari_midi_buffer_reject_extended(m_state);
-            return Plugins::MidiFragmentReassembler::Result::Oversize;
-        }
-        addEvent(reassembler.sampleOffset(), reassembler.data(),
-                 static_cast<uint32_t>(reassembler.size()), reassembler.articulationId());
-        return result;
     }
 
     bool takeOverflowed() noexcept {

@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The C++ fragment-reassembler handle is deleted. `MidiFragmentReassembler`
+  and `MidiBuffer::addFragment` were a wrapper around the Rust reassembler
+  with no production caller; the Rust implementation keeps its own unit
+  coverage, and the compile contract now exercises the shared-memory
+  `MidiExtendedMessageRing` directly, which is the part the sandbox protocol
+  still uses. The now-unused FFI declarations went with it.
 - The abandoned Metal spatial kernel is deleted. Its only entry point,
   `initialize_gpu_with_status()`, built a device/queue/pipeline that nothing
   ever submitted work to: the async `processAsync` path had no caller, so the
