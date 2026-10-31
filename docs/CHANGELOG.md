@@ -76,6 +76,10 @@ production support.
   loads record their undo/redo closures against the engine's Rust history
   through a new `undoState` host callback, so the four C++ undo-capture lambdas
   are deleted; the state-apply callback only stores plugin state.
+- Automation curve edits now record their undo entry in Rust. The automation
+  edit host copies both point buffers and commits the entry into the engine's
+  Rust history through the shared `undoState` callback, deleting the C++
+  `automationHostRecordUndo` capture.
 - The `RegionNoteEdits` and `RegionProcessingHistory` C++ adapters are
   deleted. `Region` holds the Rust note-edit store, its published frozen
   projection and the processing-history store directly, and the engine,

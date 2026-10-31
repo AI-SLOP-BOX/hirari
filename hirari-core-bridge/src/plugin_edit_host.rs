@@ -142,7 +142,7 @@ unsafe extern "C" fn release_replay(context: *mut c_void) {
     drop(unsafe { Box::from_raw(context as *mut ReplayClosure) });
 }
 
-fn register_replay(state: *mut c_void, callback: Box<dyn Fn()>) -> u64 {
+pub(crate) fn register_replay(state: *mut c_void, callback: Box<dyn Fn()>) -> u64 {
     let context = Box::into_raw(Box::new(ReplayClosure(callback))).cast::<c_void>();
     let id = unsafe {
         hirari_undo_manager_register_native_callback(

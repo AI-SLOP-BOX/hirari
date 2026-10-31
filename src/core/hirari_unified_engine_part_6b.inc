@@ -97,46 +97,15 @@ bool HirariUnifiedEngine::automationHostApply(void* host,
     }
 }
 
-void HirariUnifiedEngine::automationHostRecordUndo(void* host, const char* name,
-                                                   const HirariAutomationEditPayload* undo,
-                                                   const HirariAutomationEditPayload* redo) {
-    if (!host || !name || !undo || !redo) return;
-    auto* engine = static_cast<HirariUnifiedEngine*>(host);
-    struct OwnedAutomationEdit {
-        HirariAutomationEditPayload payload;
-        std::shared_ptr<std::vector<Hirari::Core::ProjectAutomationPoint>> points;
-    };
-    auto capture = [](const HirariAutomationEditPayload& source) {
-        OwnedAutomationEdit entry;
-        entry.payload = source;
-        entry.points =
-            std::make_shared<std::vector<Hirari::Core::ProjectAutomationPoint>>();
-        if (source.pointCount != 0 && source.points != nullptr) {
-            entry.points->assign(source.points, source.points + source.pointCount);
-        }
-        entry.payload.pointCount = entry.points->size();
-        return entry;
-    };
-    const auto undoCopy = capture(*undo);
-    const auto redoCopy = capture(*redo);
-    auto applyOne = [host](const OwnedAutomationEdit& entry) {
-        HirariAutomationEditPayload payload = entry.payload;
-        payload.points = entry.points->data();
-        (void)HirariUnifiedEngine::automationHostApply(host, &payload);
-    };
-    // Rust already applied the edit, so record the entry without replaying the
-    // redo a second time.
-    engine->m_undoManager.recordAppliedAction(name, [applyOne, undoCopy] { applyOne(undoCopy); },
-                                              [applyOne, redoCopy] { applyOne(redoCopy); },
-                                              false);
-}
-
 namespace {
 
 const HirariAutomationHostOps kAutomationEditHostOps = {
     &HirariUnifiedEngine::automationHostRead,
     &HirariUnifiedEngine::automationHostApply,
-    &HirariUnifiedEngine::automationHostRecordUndo,
+    nullptr,  // undo capture lives in the Rust automation edit host.
+    [](void* host) -> void* {
+        return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
+    },
 };
 
 }  // namespace

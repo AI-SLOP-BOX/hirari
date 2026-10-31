@@ -122,9 +122,6 @@ public:
                                      Hirari::Core::ProjectAutomationPoint* out, size_t capacity,
                                      bool* targetFound);
     static bool automationHostApply(void* host, const HirariAutomationEditPayload* payload);
-    static void automationHostRecordUndo(void* host, const char* name,
-                                         const HirariAutomationEditPayload* undo,
-                                         const HirariAutomationEditPayload* redo);
 
 private:
 

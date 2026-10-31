@@ -782,6 +782,7 @@ struct HirariAutomationHostOps {
     void (*recordUndo)(void* host, const char* name,
                        const HirariAutomationEditPayload* undo,
                        const HirariAutomationEditPayload* redo) = nullptr;
+    void* (*undoState)(void* host) = nullptr;
 };
 
 extern "C" void hirari_automation_host_install(const HirariAutomationHostOps* ops);

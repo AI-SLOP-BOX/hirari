@@ -14,6 +14,8 @@ use std::os::raw::c_void;
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
+use crate::plugin_edit_host::{register_replay, UndoStateFn};
+
 /// Target kind: the track's volume curve.
 pub const HIRARI_AUTOMATION_VOLUME: i32 = 1;
 /// Target kind: the track's pan curve.
@@ -93,6 +95,7 @@ pub struct HirariAutomationHostOps {
     pub read_points: Option<HirariAutomationReadFn>,
     pub apply: Option<HirariAutomationApplyFn>,
     pub record_undo: Option<HirariAutomationRecordUndoFn>,
+    pub undo_state: Option<UndoStateFn>,
 }
 
 // The table only holds function pointers supplied by the native engine; it
@@ -246,6 +249,47 @@ fn read_points(
     Some(points)
 }
 
+struct OwnedAutomationEdit {
+    track_id: u32,
+    kind: i32,
+    plugin_index: u32,
+    parameter_id: u32,
+    points: Vec<HirariAutomationPoint>,
+}
+
+impl OwnedAutomationEdit {
+    fn capture(payload: &HirariAutomationEditPayload) -> Self {
+        let points = if payload.point_count == 0 || payload.points.is_null() {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(payload.points, payload.point_count) }.to_vec()
+        };
+        Self {
+            track_id: payload.track_id,
+            kind: payload.kind,
+            plugin_index: payload.plugin_index,
+            parameter_id: payload.parameter_id,
+            points,
+        }
+    }
+}
+
+unsafe fn replay_owned(
+    host: *mut c_void,
+    apply: HirariAutomationApplyFn,
+    entry: &OwnedAutomationEdit,
+) {
+    let payload = HirariAutomationEditPayload {
+        track_id: entry.track_id,
+        kind: entry.kind,
+        plugin_index: entry.plugin_index,
+        parameter_id: entry.parameter_id,
+        points: entry.points.as_ptr(),
+        point_count: entry.points.len(),
+    };
+    unsafe { apply(host, &payload) };
+}
+
 fn record(
     ops: &HirariAutomationHostOps,
     host: *mut c_void,
@@ -257,6 +301,46 @@ fn record(
         unsafe {
             record_undo(host, name.as_ptr().cast(), undo, redo);
         }
+        return;
+    }
+    let (Some(read_state), Some(apply)) = (ops.undo_state, ops.apply) else {
+        return;
+    };
+    let state = unsafe { read_state(host) };
+    if state.is_null() {
+        return;
+    }
+    let undo_copy = OwnedAutomationEdit::capture(undo);
+    let redo_copy = OwnedAutomationEdit::capture(redo);
+    let undo_id = register_replay(
+        state,
+        Box::new(move || unsafe { replay_owned(host, apply, &undo_copy) }),
+    );
+    if undo_id == 0 {
+        return;
+    }
+    let redo_id = register_replay(
+        state,
+        Box::new(move || unsafe { replay_owned(host, apply, &redo_copy) }),
+    );
+    if redo_id == 0 {
+        unsafe {
+            crate::undo_transaction::hirari_undo_manager_discard_native_callback(state, undo_id)
+        };
+        return;
+    }
+    let name = name.strip_suffix(&[0]).unwrap_or(name);
+    // The edit was already applied, so the entry is recorded without a replay.
+    unsafe {
+        crate::undo_transaction::hirari_undo_manager_commit(
+            state,
+            name.as_ptr(),
+            name.len(),
+            undo_id,
+            redo_id,
+            false,
+            false,
+        );
     }
 }
 
@@ -520,6 +604,7 @@ mod tests {
             read_points: Some(fake_read),
             apply: Some(fake_apply),
             record_undo: Some(fake_record_undo),
+            undo_state: None,
         }
     }
 
@@ -743,6 +828,7 @@ mod tests {
             read_points: None,
             apply: Some(fake_apply),
             record_undo: Some(fake_record_undo),
+            undo_state: None,
         };
         assert!(!unsafe {
             edit_with(
@@ -757,5 +843,46 @@ mod tests {
             )
         });
         assert!(fake.undo.is_none());
+    }
+
+    static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =
+        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+    unsafe extern "C" fn fake_undo_state(_host: *mut c_void) -> *mut c_void {
+        FAKE_UNDO.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn edit_without_native_recorder_uses_the_rust_history() {
+        let mut fake = host();
+        fake.tracks[0].volume = vec![point(10.0, 0.4)];
+        let input = packed(&[(20.0, 0.75, 0.5)]);
+        let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let mut ops = fake_ops();
+        ops.record_undo = None;
+        ops.undo_state = Some(fake_undo_state);
+        assert!(unsafe {
+            edit_with(
+                &ops,
+                host_ptr,
+                7,
+                HIRARI_AUTOMATION_VOLUME,
+                0,
+                0,
+                input.as_ptr(),
+                input.len(),
+            )
+        });
+        assert_eq!(fake.tracks[0].volume.len(), 1);
+        assert_eq!(
+            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
+            1
+        );
+        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
+        assert_eq!(fake.tracks[0].volume, vec![point(10.0, 0.4)]);
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }
 }
