@@ -209,18 +209,6 @@ void HirariUnifiedEngine::insertTrackLocked(const std::shared_ptr<Track>& track,
     publishTrackSnapshotLocked(stampGeneration);
 }
 
-void HirariUnifiedEngine::recordNativeReplay(void* host, const uint8_t* label, size_t labelLength,
-                                             void* edit, ReplayCallback undo,
-                                             ReplayCallback redo, ReplayCallback release) {
-    if (!host || !edit) return;
-    // Both history callbacks share the edit; it is released when the entry is
-    // dropped. Replay re-enters Rust, which owns what undo and redo do.
-    std::shared_ptr<void> owned(edit, [release](void* handle) { release(handle); });
-    const std::string name(reinterpret_cast<const char*>(label), labelLength);
-    static_cast<HirariUnifiedEngine*>(host)->m_undoManager.recordAppliedAction(
-        name, [owned, undo]() { undo(owned.get()); }, [owned, redo]() { redo(owned.get()); });
-}
-
 void HirariUnifiedEngine::syncNative(void* host) {
     if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
 }
@@ -451,8 +439,11 @@ void HirariUnifiedEngine::installTrackEditHost() {
             hirari_sidechain_routes_release(handle->sidechainRoutes);
             delete handle;
         },
-        &HirariUnifiedEngine::recordNativeReplay,
+        nullptr,  // undo capture lives in the Rust track edit host.
         &HirariUnifiedEngine::syncNative,
+        [](void* host) -> void* {
+            return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
+        },
     };
     hirari_track_edit_host_install(&ops);
 }

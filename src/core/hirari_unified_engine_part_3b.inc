@@ -422,7 +422,7 @@ void HirariUnifiedEngine::installPluginEditHost() {
                 pluginIndex, *static_cast<const Track::PluginSnapshot*>(snapshot));
         },
         [](void* snapshot) { delete static_cast<Track::PluginSnapshot*>(snapshot); },
-        &HirariUnifiedEngine::recordNativeReplay,
+        nullptr,  // undo capture lives in the Rust plugin edit host.
         &HirariUnifiedEngine::syncNative,
         [](void* host) -> void* {
             return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;

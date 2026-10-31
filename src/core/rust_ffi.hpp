@@ -1297,6 +1297,7 @@ struct HirariTrackEditHostOps {
     void (*recordReplay)(void*, const uint8_t*, size_t, void*, ReplayFn, ReplayFn,
                          ReplayFn) = nullptr;
     void (*syncStructuralChanges)(void*) = nullptr;
+    void* (*undoState)(void*) = nullptr;
 };
 
 extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops);

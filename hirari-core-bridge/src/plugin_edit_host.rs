@@ -8,7 +8,7 @@
 //! Every entry point runs on the control thread.
 
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::undo_transaction::{
     hirari_undo_manager_commit, hirari_undo_manager_discard_native_callback,
@@ -156,6 +156,78 @@ pub(crate) fn register_replay(state: *mut c_void, callback: Box<dyn Fn()>) -> u6
         unsafe { drop(Box::from_raw(context as *mut ReplayClosure)) };
     }
     id
+}
+
+/// Registers two replay closures as one entry in the engine's Rust history.
+/// The edit was already applied, so the redo is not replayed.
+pub(crate) fn commit_closures(
+    state: *mut c_void,
+    name: &[u8],
+    undo: Box<dyn Fn()>,
+    redo: Box<dyn Fn()>,
+) -> bool {
+    let undo_id = register_replay(state, undo);
+    if undo_id == 0 {
+        return false;
+    }
+    let redo_id = register_replay(state, redo);
+    if redo_id == 0 {
+        unsafe { hirari_undo_manager_discard_native_callback(state, undo_id) };
+        return false;
+    }
+    unsafe {
+        hirari_undo_manager_commit(
+            state,
+            name.as_ptr(),
+            name.len(),
+            undo_id,
+            redo_id,
+            false,
+            false,
+        )
+    }
+}
+
+struct OwnedPluginEdit {
+    raw: *mut c_void,
+    release: ReplayPluginEditFn,
+}
+
+impl Drop for OwnedPluginEdit {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { (self.release)(self.raw) };
+            self.raw = std::ptr::null_mut();
+        }
+    }
+}
+
+fn record_plugin_in_history(
+    ops: &HirariPluginEditHostOps,
+    host: *mut c_void,
+    label: &str,
+    edit: *mut c_void,
+) {
+    let Some(read_state) = ops.undo_state else {
+        unsafe { release_plugin_edit(edit) };
+        return;
+    };
+    let state = unsafe { read_state(host) };
+    if state.is_null() {
+        unsafe { release_plugin_edit(edit) };
+        return;
+    }
+    let owned = Arc::new(OwnedPluginEdit {
+        raw: edit,
+        release: release_plugin_edit,
+    });
+    let (undo_owned, redo_owned) = (owned.clone(), owned.clone());
+    commit_closures(
+        state,
+        label.as_bytes(),
+        Box::new(move || unsafe { replay_plugin_undo(undo_owned.raw) }),
+        Box::new(move || unsafe { replay_plugin_redo(redo_owned.raw) }),
+    );
 }
 
 /// Records an edit the caller already applied in the engine's own history.
@@ -783,7 +855,7 @@ fn record_plugin_edit(ops: &HirariPluginEditHostOps, host: *mut c_void, label: &
                 )
             };
         }
-        None => unsafe { release_plugin_edit(edit.cast()) },
+        None => record_plugin_in_history(ops, host, label, edit.cast()),
     }
 }
 
@@ -1327,6 +1399,39 @@ mod tests {
         assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
         assert_eq!(drain(), vec!["bypass=true"]);
 
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[test]
+    fn lifecycle_edit_without_native_recorder_uses_the_rust_history() {
+        let _guard = SERIAL.lock().unwrap();
+        drop(reset());
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let mut ops = fake_ops();
+        ops.record_plugin_replay = None;
+        ops.undo_state = Some(fake_undo_state);
+        record_plugin_edit(
+            &ops,
+            std::ptr::null_mut(),
+            "Add Plugin",
+            PluginEdit {
+                ops,
+                host: std::ptr::null_mut(),
+                track_id: 4,
+                plugin_index: 2,
+                state: Vec::new(),
+                bypassed: false,
+                kind: PluginEditKind::Added { plugin_type: 5 },
+            },
+        );
+        assert_eq!(
+            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
+            1
+        );
+        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
+        assert_eq!(drain(), vec!["remove 2"]);
         unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
         FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }

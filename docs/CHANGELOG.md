@@ -88,6 +88,10 @@ production support.
   payload lists and commits them into the engine's Rust history, replaying
   through the same payload applier with the requested coalesce/perform flags;
   the C++ capture lambda is deleted.
+- Track and plugin lifecycle undo entries are recorded in Rust. Both edit hosts
+  own the lifecycle entry through a shared handle that releases it when the
+  history drops the entry, so the C++ `recordNativeReplay` adapter and its
+  declaration are deleted.
 - The `RegionNoteEdits` and `RegionProcessingHistory` C++ adapters are
   deleted. `Region` holds the Rust note-edit store, its published frozen
   projection and the processing-history store directly, and the engine,

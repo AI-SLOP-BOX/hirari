@@ -56,10 +56,6 @@
     static void installTrackFreezeHost();
     static void installCommandHost();
     static void installTrackControlHost();
-    using ReplayCallback = void (*)(void*);
-    static void recordNativeReplay(void* host, const uint8_t* label, size_t labelLength, void* edit,
-                                   ReplayCallback undo, ReplayCallback redo,
-                                   ReplayCallback release);
     static void syncNative(void* host);
     std::shared_ptr<Track> makeTrack(uint32_t id, const std::string& name, Track::Type type);
     void publishTrackSnapshotLocked(bool stampAudioGeneration);

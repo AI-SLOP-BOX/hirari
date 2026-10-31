@@ -10,7 +10,9 @@
 //! Every entry point runs on the control thread.
 
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::plugin_edit_host::{commit_closures, UndoStateFn};
 
 /// `Track::Type::Bus`, mirrored from `track_part_1a.inc`.
 pub const TRACK_TYPE_BUS: u32 = 3;
@@ -71,6 +73,7 @@ pub struct HirariTrackEditHostOps {
     pub release_handle: Option<ReleaseTrackHandleFn>,
     pub record_replay: Option<RecordTrackReplayFn>,
     pub sync_structural_changes: Option<SyncStructuralChangesFn>,
+    pub undo_state: Option<UndoStateFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -175,8 +178,51 @@ unsafe extern "C" fn release_track_edit(edit: *mut c_void) {
     }
 }
 
-/// Hands one lifecycle edit to the history. A missing recorder drops the entry
-/// (freeing its handle) instead of leaking it.
+struct OwnedTrackEdit {
+    raw: *mut c_void,
+    release: ReplayTrackEditFn,
+}
+
+impl Drop for OwnedTrackEdit {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { (self.release)(self.raw) };
+            self.raw = std::ptr::null_mut();
+        }
+    }
+}
+
+fn record_track_in_history(
+    ops: &HirariTrackEditHostOps,
+    host: *mut c_void,
+    label: &str,
+    edit: *mut c_void,
+) {
+    let Some(read_state) = ops.undo_state else {
+        unsafe { release_track_edit(edit) };
+        return;
+    };
+    let state = unsafe { read_state(host) };
+    if state.is_null() {
+        unsafe { release_track_edit(edit) };
+        return;
+    }
+    let owned = Arc::new(OwnedTrackEdit {
+        raw: edit,
+        release: release_track_edit,
+    });
+    let (undo_owned, redo_owned) = (owned.clone(), owned.clone());
+    commit_closures(
+        state,
+        label.as_bytes(),
+        Box::new(move || unsafe { replay_track_undo(undo_owned.raw) }),
+        Box::new(move || unsafe { replay_track_redo(redo_owned.raw) }),
+    );
+}
+
+/// Hands one lifecycle edit to the history. Without a native recorder the
+/// entry goes into the engine's Rust history; with no history the handle is
+/// freed instead of leaked.
 fn record_track_edit(
     ops: &HirariTrackEditHostOps,
     host: *mut c_void,
@@ -198,7 +244,7 @@ fn record_track_edit(
                 )
             };
         }
-        None => unsafe { release_track_edit(edit.cast()) },
+        None => record_track_in_history(ops, host, label, edit.cast()),
     }
 }
 
@@ -501,6 +547,7 @@ mod tests {
             release_handle: Some(fake_release),
             record_replay: Some(fake_record),
             sync_structural_changes: Some(fake_sync),
+            undo_state: None,
         }
     }
 
@@ -616,5 +663,41 @@ mod tests {
     ) -> *mut c_void {
         call(&format!("take {track_id}"));
         std::ptr::null_mut()
+    }
+
+    static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =
+        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+    unsafe extern "C" fn fake_undo_state(_host: *mut c_void) -> *mut c_void {
+        FAKE_UNDO.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn add_track_without_native_recorder_uses_the_rust_history() {
+        let _guard = SERIAL.lock().unwrap();
+        reset();
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let mut ops = fake_ops();
+        ops.record_replay = None;
+        ops.undo_state = Some(fake_undo_state);
+        let host = 1usize as *mut c_void;
+        assert_eq!(add_track_impl(&ops, host, 0), 7);
+        assert_eq!(
+            drain(),
+            vec!["create type=0 id=7 name=Track 8", "sync"]
+        );
+        assert_eq!(
+            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
+            1
+        );
+        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
+        assert_eq!(
+            drain(),
+            vec!["remove 0xc0de links=true routing=false"]
+        );
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        assert_eq!(drain(), vec!["release 0xc0de"]);
+        FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }
 }
