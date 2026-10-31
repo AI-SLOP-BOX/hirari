@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- AudioUnit v2 hosting for the sandboxed plug-in worker now lives in the Rust
+  plug-in runtime: bundle discovery, component and stream-format negotiation,
+  render/MIDI/parameter callbacks, and the ClassInfo state envelope. The C++
+  `au_sandbox_adapter.hpp` and the worker's AU backend branches are deleted, so
+  AU, CLAP, and VST3 plug-ins share one isolated worker protocol.
 - Write-only C++ diagnostic state and unused accessors are removed:
   `BlackBoxRegister`, the graph-dirty and articulation-hash writes,
   track/effect-chain tail sampling, `VideoSystem::update/duration`, the

@@ -1,8 +1,8 @@
-#![no_std]
-
-#[cfg(feature = "worker-runtime")]
-extern crate std;
-
+// Every consumer of this crate (the C++ bridge and the isolated worker) is a
+// std binary, and the crate is also built as a static archive, so it must not
+// claim `no_std`: a no_std staticlib would force a workspace-wide panic=abort
+// strategy. The realtime contract is preserved by the code itself — the
+// protocol paths below use no allocation and no locking.
 #[cfg(feature = "worker-runtime")]
 mod worker_runtime;
 
@@ -11,6 +11,9 @@ mod clap_events;
 
 #[cfg(feature = "worker-runtime")]
 mod clap_loader;
+
+#[cfg(all(feature = "worker-runtime", target_os = "macos"))]
+mod au_host;
 
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
@@ -235,15 +238,4 @@ pub unsafe extern "C" fn hirari_midi_extended_ring_size(state: *const c_void) ->
         .value
         .load(Ordering::Acquire)
         .wrapping_sub(ring.tail.value.load(Ordering::Acquire)) as usize
-}
-
-#[cfg(all(feature = "standalone-static", not(feature = "worker-runtime")))]
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
-    unsafe extern "C" {
-        fn abort() -> !;
-    }
-    // SAFETY: A protocol kernel panic indicates corrupt internal state. Abort
-    // the isolated worker rather than returning with a possibly damaged ring.
-    unsafe { abort() }
 }

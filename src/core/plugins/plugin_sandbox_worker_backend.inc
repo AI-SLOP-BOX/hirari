@@ -9,8 +9,7 @@
         uint32_t& minFrames;
         uint32_t& maxFrames;
 #if defined(__APPLE__)
-        Hirari::Core::Plugins::SandboxAU::Runtime& auRuntime;
-        bool& auStarted;
+        void* auInstance;
 #endif
 #if defined(HIRARI_ENABLE_VST3_SDK)
         Hirari::Core::Plugins::SandboxVST3::Runtime& vst3Runtime;
@@ -19,7 +18,7 @@
     } context{shared, clapInstance, clapPlugin, clapState, clapStarted, clapInputContext,
         sampleRate, minFrames, maxFrames
 #if defined(__APPLE__)
-        , auRuntime, auStarted
+        , auInstance
 #endif
 #if defined(HIRARI_ENABLE_VST3_SDK)
         , vst3Runtime, vst3Started
@@ -40,7 +39,10 @@
             if (context.vst3Started) resetOk = context.vst3Runtime.reset() && resetOk;
 #endif
 #if defined(__APPLE__)
-            if (context.auStarted) resetOk = context.auRuntime.reset() && resetOk;
+            if (context.auInstance)
+                resetOk = hirari_au_instance_reset(
+                    context.auInstance, context.sampleRate,
+                    context.minFrames, context.maxFrames) && resetOk;
 #endif
             return resetOk;
         },
@@ -88,30 +90,10 @@
             }
 #endif
 #if defined(__APPLE__)
-            if (!backendStateHandled && context.auStarted) {
-                if (mode == 1) {
-                    uint32_t size = 0;
-                    stateOk = context.auRuntime.saveState(
-                        shared->state, Hirari::Core::Plugins::SandboxProtocol::kMaxStateBytes, size);
-                    if (stateOk) {
-                        shared->stateSize.store(size, std::memory_order_release);
-                        stateError = hirari_plugin_worker_publish_state(
-                            shared->state, size, &shared->stateSize, &shared->stateVersion,
-                            &shared->stateChecksum);
-                        if (stateError != Hirari::Core::Plugins::SandboxProtocol::kStateErrorNone)
-                            stateOk = false;
-                    }
-                } else if (mode == 2) {
-                    const uint32_t size = shared->stateSize.load(std::memory_order_acquire);
-                    stateError = hirari_plugin_worker_validate_state(
-                        shared->state, &shared->stateSize, &shared->stateVersion,
-                        &shared->stateChecksum);
-                    if (stateError == Hirari::Core::Plugins::SandboxProtocol::kStateErrorNone) {
-                        stateOk = context.auRuntime.loadState(shared->state, size);
-                        if (!stateOk)
-                            stateError = Hirari::Core::Plugins::SandboxProtocol::kStateErrorPlugin;
-                    }
-                }
+            if (!backendStateHandled && context.auInstance) {
+                return hirari_au_state_block(
+                    context.auInstance, mode, shared->state, &shared->stateSize,
+                    &shared->stateVersion, &shared->stateChecksum);
             }
 #endif
             return static_cast<uint16_t>((static_cast<uint16_t>(stateError) << 8) |
@@ -136,7 +118,12 @@
                     shared->midi, midiCount, &shared->extendedMidi,
                     shared->parameterChange, parameterCount);
 #if defined(__APPLE__)
-            } else if (context.auStarted && !context.auRuntime.process(*shared, channels, frames)) {
+            } else if (context.auInstance && !hirari_au_process_block(
+                    context.auInstance, &shared->input[0][0], &shared->output[0][0],
+                    channels, frames, shared->midi,
+                    shared->midiEvents.load(std::memory_order_acquire),
+                    shared->parameterChange,
+                    shared->parameterChanges.load(std::memory_order_acquire))) {
                 std::memset(shared->output, 0, sizeof(shared->output));
                 return false;
 #endif

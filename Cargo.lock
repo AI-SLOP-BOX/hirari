@@ -2422,6 +2422,9 @@ dependencies = [
 [[package]]
 name = "hirari-plugin-protocol"
 version = "0.1.0"
+dependencies = [
+ "coreaudio-sys",
+]
 
 [[package]]
 name = "hirari-ui"

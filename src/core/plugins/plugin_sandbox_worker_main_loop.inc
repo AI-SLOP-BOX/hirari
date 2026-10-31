@@ -5,6 +5,9 @@
     if (clapInstance) hirari_clap_instance_destroy(clapInstance);
     if (pluginHandle != reinterpret_cast<void*>(1)) ::dlclose(pluginHandle);
 #endif
+#if defined(__APPLE__)
+    if (auInstance) hirari_au_instance_destroy(auInstance);
+#endif
     hirari_plugin_worker_unmap_shared(shared, sizeof(*shared));
     return 0;
 }

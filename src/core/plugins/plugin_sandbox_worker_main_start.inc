@@ -63,8 +63,7 @@ int main(int argc, char** argv) {
     bool midiInstrument = false;
     bool clapStarted = false;
 #if defined(__APPLE__)
-    Hirari::Core::Plugins::SandboxAU::Runtime auRuntime;
-    bool auStarted = false;
+    void* auInstance = nullptr;
 #endif
 #if defined(HIRARI_ENABLE_VST3_SDK)
     Hirari::Core::Plugins::SandboxVST3::Runtime vst3Runtime;
@@ -107,14 +106,14 @@ int main(int argc, char** argv) {
     }
     if (isAudioUnit) {
 #if defined(__APPLE__)
-        if (!auRuntime.load(pluginPath, sampleRate, maxFrames, channels)) {
+        auInstance = hirari_au_instance_load(
+            pluginPath, sampleRate, maxFrames, channels, &midiInstrument);
+        if (!auInstance) {
             const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorInstance;
             (void)::write(statusFd, &error, sizeof(error));
             hirari_plugin_worker_unmap_shared(shared, sizeof(*shared));
             return 10;
         }
-        auStarted = true;
-        midiInstrument = auRuntime.isMidiInstrument();
 #else
         const uint8_t error = Hirari::Core::Plugins::SandboxProtocol::kErrorUnsupported;
         (void)::write(statusFd, &error, sizeof(error));
@@ -194,6 +193,9 @@ int main(int argc, char** argv) {
 #if !defined(_WIN32)
         if (clapInstance) hirari_clap_instance_destroy(clapInstance);
         if (pluginHandle != reinterpret_cast<void*>(1)) ::dlclose(pluginHandle);
+#endif
+#if defined(__APPLE__)
+        if (auInstance) hirari_au_instance_destroy(auInstance);
 #endif
         hirari_clap_input_context_destroy(clapInputContext);
         hirari_plugin_worker_unmap_shared(shared, sizeof(*shared));

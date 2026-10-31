@@ -7,7 +7,17 @@ description = "Allocation-free Rust ABI primitives shared with the isolated plug
 
 [lib]
 path = "src/lib.rs"
+# The worker links this crate as a standalone archive. Declaring the staticlib
+# here keeps cargo building dependencies (the macOS AudioUnit surface) as rlibs
+# instead of metadata-only artifacts when the archive is requested.
+crate-type = ["rlib", "staticlib"]
 
 [features]
 standalone-static = []
 worker-runtime = []
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# AudioUnit v2 hosting for sandboxed AU packages is owned by this crate's
+# worker runtime; the raw AudioToolbox/CoreFoundation surface comes from
+# coreaudio-sys so the worker links no C++ plugin adapter.
+coreaudio-sys = { version = "0.2.18", default-features = false, features = ["audio_unit"] }

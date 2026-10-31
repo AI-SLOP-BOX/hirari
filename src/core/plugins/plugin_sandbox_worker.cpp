@@ -1,7 +1,4 @@
 #include "plugin_sandbox_protocol.hpp"
-#if defined(__APPLE__)
-#include "au_sandbox_adapter.hpp"
-#endif
 #if defined(HIRARI_ENABLE_VST3_SDK)
 #include "vst3_sandbox_adapter.hpp"
 #endif
@@ -77,6 +74,22 @@ extern "C" bool hirari_clap_instance_reset(
     void* instance, double sampleRate, uint32_t minFrames, uint32_t maxFrames);
 extern "C" char* hirari_plugin_resolve_image_path(const char* path);
 extern "C" void hirari_plugin_resolved_image_free(char* path);
+// AudioUnit v2 hosting (bundles, component selection, render/MIDI/parameter
+// callbacks and the ClassInfo state envelope) lives in the Rust worker
+// runtime; the worker only marshals the shared mailbox into these calls.
+extern "C" void* hirari_au_instance_load(
+    const char* path, double sampleRate, uint32_t maxFrames, uint32_t channels,
+    bool* midiInstrument);
+extern "C" void hirari_au_instance_destroy(void* instance);
+extern "C" bool hirari_au_instance_reset(
+    void* instance, double sampleRate, uint32_t minFrames, uint32_t maxFrames);
+extern "C" bool hirari_au_process_block(
+    void* instance, const float* inputAudio, float* outputAudio,
+    uint32_t channels, uint32_t frames, const void* midiEvents,
+    uint32_t midiCount, const void* parameterChanges, uint32_t parameterCount);
+extern "C" uint16_t hirari_au_state_block(
+    void* instance, uint8_t mode, uint8_t* state, void* stateSize,
+    void* stateVersion, void* stateChecksum);
 extern "C" bool hirari_plugin_worker_apply_limits();
 extern "C" void* hirari_plugin_worker_map_shared(
     int32_t fd, const char* name, size_t size, uint32_t* errorKind);

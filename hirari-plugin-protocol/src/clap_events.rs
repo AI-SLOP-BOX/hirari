@@ -30,20 +30,20 @@ const STATE_MODE_LOAD: u8 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct MailboxMidiEvent {
-    sample_offset: u64,
-    size: u32,
-    data: [u8; 256],
-    articulation_id: u8,
-    _padding: [u8; 3],
+pub(crate) struct MailboxMidiEvent {
+    pub(crate) sample_offset: u64,
+    pub(crate) size: u32,
+    pub(crate) data: [u8; 256],
+    pub(crate) articulation_id: u8,
+    pub(crate) _padding: [u8; 3],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct MailboxParameterChange {
-    parameter_id: u32,
-    sample_offset: u32,
-    value: f64,
+pub(crate) struct MailboxParameterChange {
+    pub(crate) parameter_id: u32,
+    pub(crate) sample_offset: u32,
+    pub(crate) value: f64,
 }
 
 #[repr(C)]
