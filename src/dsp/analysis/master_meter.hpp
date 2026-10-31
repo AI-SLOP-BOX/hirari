@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
-#include <vector>
 
 #include "goniometer.hpp"
 #include "../../core/rust_ffi.hpp"
@@ -26,7 +25,6 @@ public:
         float lufsIntegrated;
         float correlation;
         float balance;
-        std::vector<float> spectrumData;
         Goniometer::Data gonioData;
     };
 
@@ -50,14 +48,6 @@ public:
         hirari_master_meter_process(m_core, left, right, samples);
     }
 
-    std::vector<float> getSpectrogramL() const {
-        std::vector<float> bands(64);
-        for (uint32_t band = 0; band < bands.size(); ++band) {
-            bands[band] = hirari_master_meter_spectrum_band(m_core, 0, band);
-        }
-        return bands;
-    }
-
     MeterData getLatestData() const {
         float stats[4] = {-70.0f, -70.0f, -70.0f, -100.0f};
         hirari_master_meter_analysis_stats(m_core, stats);
@@ -71,7 +61,7 @@ public:
             hirari_master_meter_get(m_core, 4), hirari_master_meter_get(m_core, 5),
             stats[0], stats[2],
             gonio.correlation, gonio.balance,
-            getSpectrogramL(), gonio
+            gonio
         };
     }
 

@@ -905,15 +905,9 @@ extern "C" void hirari_master_meter_process(
     void* state, const float* left, const float* right, size_t frames);
 extern "C" float hirari_master_meter_get(const void* state, uint32_t field);
 extern "C" void hirari_master_meter_analysis_stats(const void* state, float* output);
-extern "C" float hirari_master_meter_spectrum_band(
-    const void* state, uint32_t channel, uint32_t band);
 extern "C" bool hirari_master_meter_goniometer(
     const void* state, float* left, float* right, size_t frames,
     float* correlation, float* balance);
-extern "C" void* hirari_goniometer_create();
-extern "C" void hirari_goniometer_destroy(void* state);
-extern "C" void hirari_goniometer_process(
-    const void* state, const float* left, const float* right, size_t frames);
 
 extern "C" void* hirari_plugin_registry_create();
 extern "C" void hirari_plugin_registry_destroy(void* state);
@@ -1633,17 +1627,10 @@ extern "C" void hirari_metronome_process(
     void* state, float* left, float* right, uint32_t sample_count,
     uint64_t playhead, double sample_rate, double bpm);
 extern "C" void* hirari_undo_manager_create(size_t max_depth, uint64_t coalesce_window_ms);
-extern "C" uint64_t hirari_undo_manager_timestamp_ms();
 extern "C" uint64_t hirari_undo_manager_register_native_callback(
     void* state, void* context, void (*invoke)(void*), void (*destroy)(void*));
-extern "C" bool hirari_undo_manager_invoke_native_callback(void* state, uint64_t callback_id);
-extern "C" void hirari_undo_manager_discard_native_callback(void* state, uint64_t callback_id);
-extern "C" bool hirari_undo_manager_apply_and_invoke(void* state, bool redo);
 extern "C" bool hirari_undo_manager_abort_and_invoke(void* state);
 extern "C" void hirari_undo_manager_destroy(void* state);
-extern "C" bool hirari_undo_manager_record(
-    void* state, const uint8_t* name, size_t name_len,
-    uint64_t undo_callback, uint64_t redo_callback, uint64_t timestamp_ms, bool coalesce);
 extern "C" bool hirari_undo_manager_commit(
     void* state, const uint8_t* name, size_t name_len,
     uint64_t undo_callback, uint64_t redo_callback, bool coalesce, bool perform);
@@ -1654,8 +1641,6 @@ extern "C" bool hirari_undo_manager_end_transaction(void* state);
 extern "C" bool hirari_undo_manager_transaction_active(const void* state);
 extern "C" size_t hirari_undo_manager_undo_count(const void* state);
 extern "C" size_t hirari_undo_manager_redo_count(const void* state);
-extern "C" size_t hirari_undo_manager_top_name(
-    const void* state, bool redo, uint8_t* output, size_t capacity);
 extern "C" void hirari_undo_manager_clear(void* state);
 
 

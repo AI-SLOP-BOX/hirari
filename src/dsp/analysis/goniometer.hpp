@@ -2,13 +2,14 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
-
-#include "../../core/rust_ffi.hpp"
 
 namespace Hirari::DSP::Analysis {
 
-/** Public stereo-scope API backed by Rust correlation and history processing. */
+/**
+ * Transfer shape for the Rust-owned stereo scope. The engine reads correlation,
+ * balance and the history window through `hirari_master_meter_goniometer`;
+ * there is no C++-owned goniometer instance.
+ */
 class Goniometer {
 public:
     static constexpr size_t kHistorySize = 1024;
@@ -18,19 +19,6 @@ public:
         std::array<float, kHistorySize> xyHistoryL{};
         std::array<float, kHistorySize> xyHistoryR{};
     };
-
-    Goniometer() : m_state(hirari_goniometer_create()) {}
-    ~Goniometer() { hirari_goniometer_destroy(m_state); }
-
-    Goniometer(const Goniometer&) = delete;
-    Goniometer& operator=(const Goniometer&) = delete;
-
-    void process(const float* left, const float* right, uint32_t samples) {
-        hirari_goniometer_process(m_state, left, right, samples);
-    }
-
-private:
-    void* m_state = nullptr;
 };
 
 } // namespace Hirari::DSP::Analysis

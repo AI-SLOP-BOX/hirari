@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The master meter no longer recomputes an unused 64-band spectrogram on
+  every UI read, and C++ no longer declares the Rust-internal goniometer and
+  undo helper FFI that only Rust calls, nor the unused scheduler task
+  posting and sandbox failure accessor wrappers.
 - The in-process VST3 host scaffold is gone. VST3/AU/CLAP binaries are
   loaded only by the sandbox worker, so `VST3HostProcessor` had no caller
   left in the engine and its contract test now covers the native catalog and

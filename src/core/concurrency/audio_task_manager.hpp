@@ -101,15 +101,6 @@ public:
         return true;
     }
 
-    void postTask(uint32_t preferredThread, AudioTask task) {
-        if (!task.func) return;
-        if (!isRunning() || getNumThreads() == 0) {
-            task.execute();
-            return;
-        }
-        if (!enqueue(preferredThread % getNumThreads(), task)) task.execute();
-    }
-
     bool isRunning() const noexcept {
         return hirari_audio_scheduler_is_running(m_state);
     }
