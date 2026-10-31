@@ -70,8 +70,8 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         m_context->blockSize = bs;
         m_context->audioConfigGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
 
-        m_masterLimiter->prepareToPlay(sr, bs);
-        if (m_analyzer) m_analyzer->prepareToPlay(sr, bs);
+        hirari_master_limiter_prepare(m_masterLimiter, sr);
+        hirari_master_meter_prepare(m_meterCore, sr);
 
         for (auto& t : m_tracks) {
             // A frozen buffer is sample-rate dependent. Never continue using

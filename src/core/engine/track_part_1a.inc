@@ -25,6 +25,7 @@ public:
         hirari_track_automation_capture_destroy(m_trackAutomationCaptureState);
         hirari_track_pdc_delay_destroy(m_pdcDelayState);
         hirari_region_table_free(m_regionTable);
+        hirari_channel_strip_destroy(m_strip);
     }
 
     void addMidiRegion(std::shared_ptr<Hirari::Core::MidiRegion> region) {

@@ -14,12 +14,12 @@
                     (void)hirari_region_stretch_prepare(region.timeStretch.get(), sr, blockSize);
             }
         }
-        m_strip.setSampleRate(sr);
+        hirari_channel_strip_set_sample_rate(m_strip, sr);
         m_spatialPanner.setSampleRate(sr);
         // Preparing a track is also the boundary used by offline renders and
         // device reinitialisation. Snap smoothed channel-strip state to its
         // current targets so the first block is deterministic after reload.
-        m_strip.reset();
+        hirari_channel_strip_reset(m_strip);
         m_activeBuffer.resize(2, blockSize);
         m_preFaderBuffer.resize(2, blockSize);
         m_sendPreFaderBuffer.resize(2, blockSize);
@@ -36,7 +36,7 @@
         publishRegionSnapshot();
     }
     void resetForOfflineRender() noexcept {
-        m_strip.reset();
+        hirari_channel_strip_reset(m_strip);
         m_effectChain.reset();
         m_volumeAutomationHint = 0;
         m_panAutomationHint = 0;
@@ -161,7 +161,7 @@
             volumeAutomation ? volumeAutomation->size() : 0, &m_volumeAutomationHint,
             panAutomation && !panAutomation->empty() ? panAutomation->data() : nullptr,
             panAutomation ? panAutomation->size() : 0, &m_panAutomationHint,
-            m_strip.nativeState(), buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
+            m_strip, buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
             validPreInsert ? m_preInsertBuffer.getArrayOfWritePointers() : nullptr,
             validPreInsert ? m_preInsertBuffer.getNumChannels() : 0,
             validSendPre ? m_sendPreFaderBuffer.getArrayOfWritePointers() : nullptr,

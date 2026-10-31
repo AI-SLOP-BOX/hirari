@@ -394,22 +394,19 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
 }
 
 HirariUnifiedEngine::MeterData HirariUnifiedEngine::getMasterMeterData() const {
-    if (m_analyzer) {
-        auto d = m_analyzer->getLatestData();
-        MeterData out{};
-        out.peakL = d.peakL;
-        out.peakR = d.peakR;
-        out.truePeakL = d.truePeakL;
-        out.truePeakR = d.truePeakR;
-        out.rmsL = d.rmsL;
-        out.rmsR = d.rmsR;
-        out.lufsShortTerm = d.lufsShortTerm;
-        out.lufsIntegrated = d.lufsIntegrated;
-        out.correlation = d.correlation;
-        out.balance = d.balance;
-        return out;
-    }
-    return {};
+    if (!m_meterCore) return {};
+    float stats[4] = {-70.0f, -70.0f, -70.0f, -100.0f};
+    hirari_master_meter_analysis_stats(m_meterCore, stats);
+    MeterData out{};
+    out.peakL = hirari_master_meter_get(m_meterCore, 0);
+    out.peakR = hirari_master_meter_get(m_meterCore, 1);
+    out.truePeakL = hirari_master_meter_get(m_meterCore, 2);
+    out.truePeakR = hirari_master_meter_get(m_meterCore, 3);
+    out.rmsL = hirari_master_meter_get(m_meterCore, 4);
+    out.rmsR = hirari_master_meter_get(m_meterCore, 5);
+    out.lufsShortTerm = stats[0];
+    out.lufsIntegrated = stats[2];
+    return out;
 }
 
 double HirariUnifiedEngine::samples_to_beats(uint64_t samples) const {

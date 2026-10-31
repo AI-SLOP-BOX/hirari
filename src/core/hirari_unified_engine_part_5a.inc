@@ -119,7 +119,7 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
         // Clear stateful processor history so a bounce is reproducible.
         [](void* host) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            if (engine->m_masterLimiter) engine->m_masterLimiter->reset();
+            if (engine->m_masterLimiter) hirari_master_limiter_reset(engine->m_masterLimiter);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
             for (const auto& track : engine->m_tracks) {
                 if (track) track->resetForOfflineRender();
@@ -156,7 +156,8 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
             input.range_start = engine->m_offlineRenderStartSample.load(std::memory_order_acquire);
             input.range_end = engine->m_offlineRenderEndSample.load(std::memory_order_acquire);
             input.tail_millis = engine->m_offlineRenderTailMillis.load(std::memory_order_acquire);
-            input.limiter_tail = engine->m_masterLimiter ? engine->m_masterLimiter->getTailSamples() : 0;
+            input.limiter_tail = engine->m_masterLimiter
+                ? hirari_master_limiter_tail(engine->m_masterLimiter) : 0;
             const int32_t status = hirari_bounce_render_extent(&input, out);
             if (status != 0) {
                 // A rejected plan must publish a terminal state, not look

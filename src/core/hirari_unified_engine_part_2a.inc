@@ -107,7 +107,7 @@ uint32_t HirariUnifiedEngine::get_block_size() const noexcept {
 float HirariUnifiedEngine::get_latency_ms() const noexcept {
     uint32_t masterLatency = get_block_size();
     if (m_masterLimiter) {
-        masterLatency += m_masterLimiter->getLatencySamples();
+        masterLatency += hirari_master_limiter_latency(m_masterLimiter);
     }
     return hirari_samples_to_milliseconds(
         masterLatency, m_sampleRate.load(std::memory_order_relaxed));

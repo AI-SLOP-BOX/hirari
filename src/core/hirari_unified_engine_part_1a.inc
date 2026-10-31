@@ -100,6 +100,8 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_bus_system_destroy(m_busSystem);
     hirari_forensic_journaler_stop(m_forensicJournal);
     hirari_forensic_journaler_destroy(m_forensicJournal);
+    hirari_master_limiter_destroy(m_masterLimiter);
+    hirari_master_meter_destroy(m_meterCore);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
@@ -174,8 +176,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     // this instance prevents an audio callback from accidentally taking the
     // configuration mutex through a mutator.
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
-    m_analyzer = std::make_unique<::Hirari::DSP::Analysis::MasterMeter>();
-    m_masterLimiter = std::make_unique<::Hirari::DSP::Effects::MasterLimiter>();
+    m_masterLimiter = hirari_master_limiter_create(44'100.0);
     // Waveform peak generation is a control-plane workload. Keep a small
     // private worker pool alive for it so the first UI request does not fall
     // back to a synchronous full-file decode on the event thread. The pool

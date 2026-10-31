@@ -3,14 +3,14 @@
         const float next = std::isfinite(v) ? std::clamp(v, 0.0f, 2.0f) : 1.0f;
         m_volume.store(next,
                        std::memory_order_release);
-        m_strip.setGain(v);
+        hirari_channel_strip_set_gain(m_strip, v);
         markProjectLayoutChanged();
     }
     void setPan(float p) {
         invalidateFrozenForEdit();
         const float next = std::isfinite(p) ? std::clamp(p, -1.0f, 1.0f) : 0.0f;
         m_pan.store(next, std::memory_order_release);
-        m_strip.setPan(next);
+        hirari_channel_strip_set_pan(m_strip, next);
         markProjectLayoutChanged();
     }
     virtual bool addPlugin(uint32_t pluginType) {

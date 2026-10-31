@@ -11,7 +11,6 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
-#include "../../dsp/mixing/channel_strip.hpp"
 #include "../rust_ffi.hpp"
 #include "../audio_buffer.hpp"
 #include "../project_automation.hpp"

@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The `MasterMeter`, `Goniometer`, `MasterLimiter` and `ChannelStrip` C++
+  DSP header façades are deleted. The engine and tracks hold the Rust
+  `hirari_master_meter_*`, `hirari_master_limiter_*` and
+  `hirari_channel_strip_*` handles directly.
 - The `AudioDecoderManager` singleton adapter is deleted. The engine's import
   path is now a private `importAudioFile` helper that calls the Rust decode and
   import-cache entry points directly.

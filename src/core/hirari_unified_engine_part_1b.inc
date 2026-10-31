@@ -92,18 +92,15 @@
             // Limit only the active [offset, offset+size) window. Passing the
             // owning output buffer here would re-process stale samples when
             // processBlockDirect() renders into a non-zero offset.
-            float* masterChannels[2] = {dest_l, dest_r};
-            AudioBuffer masterView;
-            masterView.wrapChannels(masterChannels, 2, sz);
-            m_masterLimiter->process(masterView, m_blockMidi, callbackContext);
+            if (dest_l && dest_r) {
+                hirari_master_limiter_process(m_masterLimiter, dest_l, dest_r, sz, true);
+            }
         }
 
         // The public meter API measures the post-limiter master before
         // monitor-only speaker trim and DIM are applied.
-        if (m_analyzer) {
-            m_analyzer->process(output.getReadPointer(0, off),
-                                output.getReadPointer(1, off), sz);
-        }
+        hirari_master_meter_process(m_meterCore, output.getReadPointer(0, off),
+                                    output.getReadPointer(1, off), sz);
 
         // Control Room is strictly device-monitoring. Never bake speaker trim
         // or DIM into an offline master/stem render.

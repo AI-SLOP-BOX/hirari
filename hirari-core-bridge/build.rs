@@ -133,7 +133,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../src/core/engine/video_system_bridge.hpp");
     println!("cargo:rerun-if-changed=../src/core/engine/video_system_bridge.mm");
     println!("cargo:rerun-if-changed=../src/core/engine/video_system.hpp");
-    println!("cargo:rerun-if-changed=../src/dsp/mixing/channel_strip.hpp");
 
     if target_os == "macos" {
         println!("cargo:rustc-link-lib=framework=Metal");

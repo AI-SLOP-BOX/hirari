@@ -1,8 +1,9 @@
     // DSP State (moved to pointer to decouple header)
     std::unique_ptr<::Hirari::DSP::ProcessContext> m_context;
     ::Hirari::Core::Concurrency::AudioTaskStealingScheduler m_threadPool;
-    std::unique_ptr<::Hirari::DSP::Analysis::MasterMeter> m_analyzer;
-    std::unique_ptr<::Hirari::DSP::Effects::MasterLimiter> m_masterLimiter;
+    // Both DSP objects are Rust-owned; the engine keeps only their handles.
+    void* m_meterCore = hirari_master_meter_create(44'100.0);
+    void* m_masterLimiter = hirari_master_limiter_create(44'100.0);
 
     TelemetryData m_telemetryBuffers[2];
     // Per-engine Rust telemetry is allocated on the control thread and reused

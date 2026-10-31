@@ -152,7 +152,8 @@
     uint32_t m_id;
     std::string m_name;
     Type m_type;
-    DSP::Mixing::ChannelStrip m_strip;
+    // Channel-strip gain/pan/solo state is Rust-owned; this is its handle.
+    void* m_strip = hirari_channel_strip_create();
     Hirari::Core::EffectChain m_effectChain;
     MidiBuffer m_pluginMidi;
     void* m_articulationState = nullptr;

@@ -37,8 +37,6 @@
 
 // Forward declarations
 namespace Hirari::DSP { struct ProcessContext; }
-namespace Hirari::DSP::Analysis { class MasterMeter; }
-namespace Hirari::DSP::Effects { class MasterLimiter; }
 
 namespace Hirari::Core::Video { class VideoSync; }
 
