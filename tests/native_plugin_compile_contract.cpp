@@ -1,7 +1,6 @@
 // The ARUA project codec is Rust-owned; this generated header exposes the cxx
 // bridge types the contract uses to round-trip a project container.
 #include "hirari-core-bridge/src/lib.rs.h"
-#include "src/core/plugins/vst3_host_processor.hpp"
 #include "src/core/plugins/plugin_sandbox_host.hpp"
 #include "src/core/plugins/process_sandbox_processor.hpp"
 #include "src/core/plugins/au_sandbox_adapter.hpp"

@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The in-process VST3 host scaffold is gone. VST3/AU/CLAP binaries are
+  loaded only by the sandbox worker, so `VST3HostProcessor` had no caller
+  left in the engine and its contract test now covers the native catalog and
+  sandbox host instead.
 - The built-in processor host now carries only the path it can actually
   serve. External VST3/AU/CLAP binaries already go straight to the process
   sandbox, so the unreachable in-host VST3 branch, sandbox ownership,

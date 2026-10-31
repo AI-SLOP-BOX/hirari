@@ -60,10 +60,6 @@ int main() {
     auto& pool = Hirari::Core::Concurrency::ThreadPool::getInstance();
     auto poolResult = pool.enqueue([] { return 42; });
     if (poolResult.get() != 42) return 47;
-    // These hosts embed fixed-size realtime mailboxes. Keep them off the
-    // test's main stack so the contract remains runnable on macOS's default
-    // 8 MiB thread stack even when the sandbox protocol grows.
-    auto vst3 = std::make_unique<Hirari::Core::Plugins::VST3HostProcessor>();
     // The built-in compressor is part of the production plugin contract, not
     // merely a header-only type. Exercise prepare/process/parameter/state so
     // a future refactor cannot leave the browser-visible plugin unlinked.
@@ -110,7 +106,6 @@ int main() {
         Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(0u) ||
         Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
             Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
-    (void)vst3;
     (void)sandbox;
     (void)chain;
     (void)recovery;
