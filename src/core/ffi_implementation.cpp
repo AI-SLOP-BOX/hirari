@@ -1,7 +1,6 @@
 #include "bridge_shims.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
 #include "dsp/spatial/metal_audio_kernel.hpp"
-#include "io/audio_decoder.hpp"
 #include <cstring>
 
 using HirariAudioWeakHandle = std::weak_ptr<::Hirari::Core::AudioBuffer>;

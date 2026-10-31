@@ -29,7 +29,10 @@
     void* m_midiLearnState = hirari_midi_learn_create();
     // Rust (forensic_journaler.rs) owns the journal and writer thread.
     void* m_forensicJournal = hirari_forensic_journaler_create();
-    ::Hirari::Core::IO::AudioDecoderManager m_audioDecoderManager;
+    // Decoding and import-cache policy live in Rust; this only adapts the
+    // interleaved decode result into the engine's AudioBuffer ownership.
+    std::shared_ptr<AudioBuffer> importAudioFile(const std::string& path,
+                                                 double* sampleRateOut = nullptr);
     std::atomic<bool> m_graphDirty{true};
 
     // Engine Infrastructure

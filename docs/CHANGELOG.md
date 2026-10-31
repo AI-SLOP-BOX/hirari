@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The `AudioDecoderManager` singleton adapter is deleted. The engine's import
+  path is now a private `importAudioFile` helper that calls the Rust decode and
+  import-cache entry points directly.
 - The `NativeEditorHost` C++ wrapper is deleted. `AudioEngine` owns the Rust
   native-editor session handle directly and calls
   `hirari_native_editor_sessions_*` for adopt, forget, lookup and embedded

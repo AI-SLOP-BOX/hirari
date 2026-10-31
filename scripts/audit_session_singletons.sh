@@ -6,7 +6,7 @@ FILES="$ROOT/src/core/hirari_unified_engine_part_1.inc $ROOT/src/core/hirari_uni
 
 # These are deliberately process-wide, immutable/stateless or diagnostics-only.
 # Project/audio state must use the owning HirariUnifiedEngine member instead.
-ALLOW='HirariUnifiedEngine::getInstance|VideoEngine::getInstance|AudioDecoderManager::getInstance|ForensicJournaler::getInstance|EngineDiagnostics::getInstance|DiagnosticsKernel::getInstance|EngineOrchestrator::getInstance|TrigLUT512::getInstance|QualitativeMetricEngine::getInstance|LogBuffer::BlackBoxRegister::getInstance|AudioDecoderManager::getInstance'
+ALLOW='HirariUnifiedEngine::getInstance|VideoEngine::getInstance|ForensicJournaler::getInstance|EngineDiagnostics::getInstance|DiagnosticsKernel::getInstance|EngineOrchestrator::getInstance|TrigLUT512::getInstance|QualitativeMetricEngine::getInstance|LogBuffer::BlackBoxRegister::getInstance'
 
 violations=$(rg -n "(PDCManager|UndoTransactionManager|TempoMap|RoutingEngine|BusSystem|MacroControlManager)::getInstance" $FILES || true)
 if [ -n "$violations" ]; then

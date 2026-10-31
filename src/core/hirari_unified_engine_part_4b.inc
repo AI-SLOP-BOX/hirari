@@ -112,7 +112,7 @@
                     std::error_code fileError;
                     if (std::filesystem::is_regular_file(resolvedPath, fileError) && !fileError) {
                         double decodedSourceRate = 0.0;
-                        auto audio = m_audioDecoderManager.importFile(
+                        auto audio = importAudioFile(
                             resolvedFilePath, &decodedSourceRate);
                         if (audio && audio->getNumSamples() > 0 && audio->getNumChannels() > 0) {
                             r.audio = std::move(audio);

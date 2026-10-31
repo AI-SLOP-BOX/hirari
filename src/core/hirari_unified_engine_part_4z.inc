@@ -355,13 +355,65 @@ size_t HirariUnifiedEngine::regionHostRegionPath(void* host, uint32_t trackId,
     return region->path.size();
 }
 
+std::shared_ptr<AudioBuffer> HirariUnifiedEngine::importAudioFile(const std::string& path,
+                                                                 double* sampleRateOut) {
+    if (sampleRateOut) *sampleRateOut = 0.0;
+    const auto* pathBytes = reinterpret_cast<const uint8_t*>(path.data());
+    double cachedRate = 0.0;
+    void* cachedHandle = nullptr;
+    const int32_t outcome =
+        hirari_audio_import_cache_acquire(pathBytes, path.size(), &cachedRate, &cachedHandle);
+    if (outcome == 0) {
+        std::shared_ptr<AudioBuffer> cached;
+        if (auto* owned = static_cast<std::shared_ptr<AudioBuffer>*>(cachedHandle)) {
+            cached = std::move(*owned);
+            delete owned;
+        }
+        if (!cached || cached->getNumSamples() == 0 || cached->getNumChannels() == 0) {
+            return nullptr;
+        }
+        if (sampleRateOut) *sampleRateOut = cachedRate;
+        return cached;
+    }
+    // The cache only reports "needs decode" for a readable file; an empty or
+    // missing path is a terminal rejection.
+    if (outcome != 3) return nullptr;
+
+    const auto decoded = hirari_import_audio_file(pathBytes, path.size());
+    struct DecodedAudioGuard {
+        float* samples;
+        size_t count;
+        ~DecodedAudioGuard() { hirari_free_decoded_audio(samples, count); }
+    } decodedGuard{decoded.samples, decoded.sample_count};
+    if (decoded.status != 0 || !decoded.samples || decoded.channels == 0) return nullptr;
+
+    auto audio = std::make_shared<AudioBuffer>();
+    try {
+        const size_t frames = decoded.sample_count / decoded.channels;
+        if (!audio->resize(decoded.channels, static_cast<uint32_t>(frames)) ||
+            !hirari_audio_buffer_deinterleave_interleaved(
+                decoded.samples, decoded.sample_count, audio->getArrayOfWritePointers(),
+                decoded.channels, static_cast<uint32_t>(frames))) {
+            return nullptr;
+        }
+    } catch (...) {
+        return nullptr;
+    }
+    if (sampleRateOut) *sampleRateOut = decoded.sample_rate;
+    // The cache takes ownership of the weak handle and releases it when the
+    // entry is replaced, evicted, or refused.
+    hirari_audio_import_cache_store(pathBytes, path.size(), decoded.sample_rate,
+                                    new std::weak_ptr<AudioBuffer>(audio));
+    return audio;
+}
+
 bool HirariUnifiedEngine::regionHostDecodeAudio(void* host, const uint8_t* path,
                                                 size_t length, void** outHandle,
                                                 double* outRate) {
     if (!host || (!path && length != 0) || !outHandle) return false;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     double rate = 0.0;
-    auto audio = engine->m_audioDecoderManager.importFile(
+    auto audio = engine->importAudioFile(
         std::string(reinterpret_cast<const char*>(path), length), &rate);
     if (!audio || audio->getNumSamples() == 0 || audio->getNumChannels() == 0) {
         return false;

@@ -129,7 +129,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../src/core/audio_engine.hpp");
     println!("cargo:rerun-if-changed=../src/core/hirari_unified_engine.hpp");
     println!("cargo:rerun-if-changed=../src/core/engine/track.hpp");
-    println!("cargo:rerun-if-changed=../src/core/io/audio_decoder.hpp");
     println!("cargo:rerun-if-changed=../src/core/engine/undo_transaction_manager.hpp");
     println!("cargo:rerun-if-changed=../src/core/engine/video_system_bridge.hpp");
     println!("cargo:rerun-if-changed=../src/core/engine/video_system_bridge.mm");

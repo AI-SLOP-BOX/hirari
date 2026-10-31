@@ -15,7 +15,6 @@
 #include "../rust_ffi.hpp"
 #include "../audio_buffer.hpp"
 #include "../project_automation.hpp"
-#include "../io/audio_decoder.hpp"
 #include "../effect_chain.hpp"
 #include "../midi_region.hpp"
 #include "../plugin_host.hpp"
