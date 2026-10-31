@@ -85,10 +85,18 @@ extern "C" void hirari_midi_schedule_block(
     const size_t* indices_by_end, size_t end_count, uint64_t playhead,
     uint32_t frames, uint8_t playback_active, uint8_t reconcile,
     uint64_t pass, void* context, HirariScheduledMidiEventCallback callback);
-extern "C" bool hirari_preview_sample_render(
-    const float* samples, size_t sample_count, double source_rate,
-    double target_rate, float* left, float* right, uint32_t frames,
-    double* position);
+// Preview-sample playback (storage, trigger, cursor) lives in Rust
+// (preview_sampler.rs); the audio callback only renders through the handle.
+extern "C" void* hirari_preview_sampler_create();
+extern "C" void hirari_preview_sampler_destroy(void* state);
+extern "C" void hirari_preview_sampler_set(
+    void* state, const float* samples, size_t count, double source_rate);
+extern "C" void hirari_preview_sampler_clear(void* state);
+extern "C" void hirari_preview_sampler_trigger(void* state);
+extern "C" void hirari_preview_sampler_reclaim(void* state);
+extern "C" bool hirari_preview_sampler_is_active(const void* state);
+extern "C" void hirari_preview_sampler_render(
+    const void* state, double target_rate, float* left, float* right, uint32_t frames);
 extern "C" void hirari_mixer_track_peaks(
     const void* telemetry_state, const uint32_t* track_ids,
     const float* const* left_channels, const float* const* right_channels,

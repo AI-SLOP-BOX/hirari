@@ -91,18 +91,7 @@ private:
     uint32_t m_previewFallbackActiveNotes[16][128]{};
     std::atomic<bool> m_previewVoicesNeedReset{false};
 
-    struct PreviewSample {
-        std::vector<float> samples;
-        double sourceRate = 44100.0;
-    };
-    // Append-only generations are owned by the control side. The audio
-    // callback reads only this pointer and never touches a shared_ptr refcount.
-    std::vector<std::unique_ptr<const PreviewSample>> m_previewSampleStorage;
-    std::atomic<const PreviewSample*> m_previewSample{nullptr};
-    std::atomic<bool> m_previewSampleTrigger{false};
-    // A loaded preview asset is not the same thing as an actively playing
-    // preview. Keeping this state separate lets a stopped project take the
-    // cheap silence path instead of traversing the entire audio graph.
-    std::atomic<bool> m_previewSamplePlaying{false};
-    double m_previewSamplePosition = 0.0;
+    // Preview-sample storage, trigger/playing flags and the playback cursor
+    // live in Rust (preview_sampler.rs); the callback only renders the handle.
+    void* m_previewSampler = hirari_preview_sampler_create();
     

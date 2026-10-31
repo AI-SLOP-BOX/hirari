@@ -91,6 +91,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_macro_mapping_destroy(m_macroControl);
     hirari_midi_learn_destroy(m_midiLearnState);
     hirari_preview_synth_destroy(m_previewSynthState);
+    hirari_preview_sampler_destroy(m_previewSampler);
     hirari_mpe_state_free(m_mpeState);
     hirari_routing_engine_destroy(m_routingEngine);
     hirari_sidechain_routes_destroy(m_sidechainRoutes);
@@ -309,9 +310,7 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         // the full graph when no preview or offline render owns the path.
         // Command mutations are deliberately drained first so fader, pan,
         // mute, and solo edits remain visible immediately while stopped.
-        const bool previewActive =
-            m_previewSampleTrigger.load(std::memory_order_acquire) ||
-            m_previewSamplePlaying.load(std::memory_order_acquire);
+        const bool previewActive = hirari_preview_sampler_is_active(m_previewSampler);
         const bool midiPanicPending = m_midiPanicRequested.load(std::memory_order_acquire);
         if (!hirari_offline_render_thread &&
             !m_offlineRenderActive.load(std::memory_order_acquire) &&
@@ -434,29 +433,10 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
         hirari_preview_synth_process(m_previewSynthState, m_blockMidi.getEvents(),
             m_blockMidi.size(), output.getWritePointer(0, off),
             output.getWritePointer(1, off), sz, currentPlayhead, sr, m_macroControl);
-        float* previewL = output.getWritePointer(0, off);
-        float* previewR = output.getWritePointer(1, off);
-
-        // One-shot preview sampler. The immutable snapshot is published by
-        // the control thread; only the cursor is mutated on the audio thread.
-        const PreviewSample* previewSample =
-            m_previewSample.load(std::memory_order_acquire);
-        if (m_previewSampleTrigger.exchange(false, std::memory_order_acq_rel)) {
-            m_previewSamplePosition = 0.0;
-            m_previewSamplePlaying.store(true, std::memory_order_release);
-        }
-
-        if (previewSample && m_previewSamplePlaying.load(std::memory_order_acquire) &&
-            !previewSample->samples.empty()) {
-            const bool stillPlaying = hirari_preview_sample_render(
-                previewSample->samples.data(), previewSample->samples.size(),
-                previewSample->sourceRate, sr, previewL, previewR, sz,
-                &m_previewSamplePosition);
-            m_previewSamplePlaying.store(stillPlaying, std::memory_order_release);
-        } else {
-            m_previewSamplePosition = 0.0;
-            m_previewSamplePlaying.store(false, std::memory_order_release);
-        }
+        // One-shot preview sampler. Rust owns the published buffer, the
+        // trigger/playing flags and the cursor; the callback only renders.
+        hirari_preview_sampler_render(m_previewSampler, sr, output.getWritePointer(0, off),
+                                      output.getWritePointer(1, off), sz);
 
         if (m_testTone.load(std::memory_order_relaxed)) {
             const double sr = m_sampleRate.load(std::memory_order_relaxed);

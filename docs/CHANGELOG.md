@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- One-shot preview-sample playback kept its buffers, trigger/playing flags and
+  cursor in C++ atomics, and the audio callback walked the published snapshot
+  itself. Rust now owns the sampler behind an opaque handle: control code
+  publishes and reclaims generations, and the callback only advances the
+  cursor through one render call.
 - Structural sync carried its own copy of the double-buffered audio-thread
   snapshot loop, so the track map and the 256-track cap had to be kept in sync
   in two places. Both paths now publish through the single locked helper, which

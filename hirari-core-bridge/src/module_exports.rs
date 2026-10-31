@@ -256,6 +256,7 @@ pub mod poly_sampler;
 pub mod presets;
 pub mod preview_audio_runtime;
 pub mod preview_sample;
+pub mod preview_sampler;
 pub mod preview_synth;
 pub mod process_graph;
 pub mod processor_state;

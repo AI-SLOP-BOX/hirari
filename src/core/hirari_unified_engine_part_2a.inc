@@ -12,35 +12,26 @@ void HirariUnifiedEngine::set_preview_sample(const float* samples, size_t count,
         clear_preview_sample();
         return;
     }
-
-    // Reclaim superseded snapshots only while the callback is quiescent. While
-    // playing, old snapshots remain alive so the RT thread never dereferences
-    // freed sample memory.
+    // Retired generations are reclaimed only while the callback is quiescent,
+    // so a running preview never has its buffer freed underneath it.
     if (!m_isPlaying.load(std::memory_order_acquire)) {
-        m_previewSample.store(nullptr, std::memory_order_release);
+        hirari_preview_sampler_clear(m_previewSampler);
         waitForAudioCallbacks();
-        m_previewSampleStorage.clear();
+        hirari_preview_sampler_reclaim(m_previewSampler);
     }
-    auto snapshot = std::make_unique<PreviewSample>();
-    snapshot->samples.assign(samples, samples + count);
-    snapshot->sourceRate = sourceRate;
-    const PreviewSample* published = snapshot.get();
-    m_previewSampleStorage.push_back(std::move(snapshot));
-    m_previewSample.store(published, std::memory_order_release);
+    hirari_preview_sampler_set(m_previewSampler, samples, count, sourceRate);
 }
 
 void HirariUnifiedEngine::trigger_preview_sample() {
-    m_previewSampleTrigger.store(true, std::memory_order_release);
+    hirari_preview_sampler_trigger(m_previewSampler);
 }
 
 void HirariUnifiedEngine::clear_preview_sample() {
-    m_previewSample.store(nullptr, std::memory_order_release);
+    hirari_preview_sampler_clear(m_previewSampler);
     if (!m_isPlaying.load(std::memory_order_acquire)) {
         waitForAudioCallbacks();
-        m_previewSampleStorage.clear();
+        hirari_preview_sampler_reclaim(m_previewSampler);
     }
-    m_previewSampleTrigger.store(false, std::memory_order_release);
-    m_previewSamplePlaying.store(false, std::memory_order_release);
 }
 
 void HirariUnifiedEngine::clear_midi_notes() {
