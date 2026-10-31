@@ -92,6 +92,9 @@ production support.
   own the lifecycle entry through a shared handle that releases it when the
   history drops the entry, so the C++ `recordNativeReplay` adapter and its
   declaration are deleted.
+- The C++ undo transaction façade is deleted. The engine now keeps the Rust
+  history handle directly and clears it through the FFI, and the native
+  compile contract drives the transaction API without a C++ wrapper.
 - The `RegionNoteEdits` and `RegionProcessingHistory` C++ adapters are
   deleted. `Region` holds the Rust note-edit store, its published frozen
   projection and the processing-history store directly, and the engine,

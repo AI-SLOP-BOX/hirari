@@ -30,7 +30,7 @@
     // objects this engine's render path and history read, instead of crossing
     // into C++ only to be sent straight back.
     void* tempo_state() const noexcept { return m_tempoState; }
-    void* undo_state() const noexcept { return m_undoManager.rustState(); }
+    void* undo_state() const noexcept { return m_undoState; }
     void* log_state() const noexcept {
         return ::Hirari::Core::Diagnostics::LogBuffer::state();
     }

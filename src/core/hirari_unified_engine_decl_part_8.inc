@@ -10,7 +10,9 @@
     // authoritative copies (native_pdc.rs: MAX_TRACKS, MASTER_ID); these hold
     // here so an out-of-range ID never reaches the FFI in the first place.
     static constexpr uint32_t kPdcMaxTracks = 512;
-    UndoTransactionManager m_undoManager;
+    // Rust owns history, callback IDs, grouping, coalescing and eviction.
+    // This is the single handle the engine keeps and hands to Rust callers.
+    void* m_undoState = hirari_undo_manager_create(128, 300);
     void* m_tempoState = hirari_tempo_map_create();
     // MPE channel/voice ownership lives in Rust (mpe.rs); the engine keeps the
     // singleton handle so project reset can clear it without a C++ adapter.

@@ -7,7 +7,6 @@
 #include "src/core/effect_chain.hpp"
 #include "src/core/project_automation.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"
-#include "src/core/engine/undo_transaction_manager.hpp"
 #include "src/core/midi_buffer.hpp"
 #include "src/core/plugins/midi_fragment_transport.hpp"
 #include "src/core/concurrency/audio_task_manager.hpp"

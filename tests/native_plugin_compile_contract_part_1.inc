@@ -111,11 +111,32 @@ int main() {
     (void)recovery;
 
 
-    // Transactional undo is covered by hirari-core-bridge/src/undo_transaction.rs
-    // (native-callback routing and abort rollback). The engine-side facade is
-    // still exercised here because it owns the C++ closures.
-    auto& engineUndo = Hirari::Core::Engine::UndoTransactionManager::getInstance();
-    engineUndo.clear();
+    // Transactional undo is Rust-owned (hirari-core-bridge/src/undo_transaction.rs).
+    // The contract drives the raw FFI so native callbacks and abort rollback
+    // stay covered without any C++ history wrapper.
+    void* engineUndo = hirari_undo_manager_create(128, 300);
+    if (!engineUndo) return 18;
+    int engineTransactionValue = 0;
+    struct UndoDelta {
+        int* value;
+        int delta;
+    };
+    const auto registerDelta = [](void* state, int* value, int delta) -> uint64_t {
+        auto* context = new UndoDelta{value, delta};
+        const uint64_t id = hirari_undo_manager_register_native_callback(
+            state, context,
+            [](void* raw) { auto* d = static_cast<UndoDelta*>(raw); *d->value += d->delta; },
+            [](void* raw) { delete static_cast<UndoDelta*>(raw); });
+        if (!id) delete context;
+        return id;
+    };
+    const auto perform = [&](const char* name, int delta) {
+        const std::string label(name);
+        return hirari_undo_manager_commit(
+            engineUndo, reinterpret_cast<const uint8_t*>(label.data()), label.size(),
+            registerDelta(engineUndo, &engineTransactionValue, -delta),
+            registerDelta(engineUndo, &engineTransactionValue, delta), true, true);
+    };
 
     Hirari::Core::AudioBuffer finiteContract(1, 3);
     finiteContract.getWritePointer(0)[0] = 1.0f;
@@ -125,26 +146,30 @@ int main() {
         !std::isfinite(finiteContract.getReadPointer(0)[1]) ||
         !std::isfinite(finiteContract.getReadPointer(0)[2])) return 24;
 
-    int engineTransactionValue = 0;
-    engineUndo.beginTransaction("engine-partial-operation");
-    engineUndo.performAction("first", [&] { engineTransactionValue -= 2; },
-                             [&] { engineTransactionValue += 2; });
-    engineUndo.performAction("second", [&] { engineTransactionValue -= 3; },
-                             [&] { engineTransactionValue += 3; });
-    if (engineTransactionValue != 5 || !engineUndo.transactionActive()) return 18;
-    if (!engineUndo.abortTransaction() || engineTransactionValue != 0 ||
-        engineUndo.transactionActive() || engineUndo.getUndoCount() != 0) return 19;
-    engineUndo.beginTransaction("engine-commit");
-    engineUndo.performAction("first", [&] { engineTransactionValue -= 2; },
-                             [&] { engineTransactionValue += 2; });
-    engineUndo.performAction("second", [&] { engineTransactionValue -= 3; },
-                             [&] { engineTransactionValue += 3; });
-    if (!engineUndo.endTransaction() || engineUndo.getUndoCount() != 1) return 20;
-    engineUndo.undo();
-    if (engineTransactionValue != 0 || engineUndo.getRedoCount() != 1) return 21;
-    engineUndo.redo();
+    const char* partial = "engine-partial-operation";
+    (void)hirari_undo_manager_begin_transaction(
+        engineUndo, reinterpret_cast<const uint8_t*>(partial), std::string(partial).size());
+    (void)perform("first", 2);
+    (void)perform("second", 3);
+    if (engineTransactionValue != 5 || !hirari_undo_manager_transaction_active(engineUndo))
+        return 18;
+    if (!hirari_undo_manager_abort_and_invoke(engineUndo) || engineTransactionValue != 0 ||
+        hirari_undo_manager_transaction_active(engineUndo) ||
+        hirari_undo_manager_undo_count(engineUndo) != 0) return 19;
+    const char* commit = "engine-commit";
+    (void)hirari_undo_manager_begin_transaction(
+        engineUndo, reinterpret_cast<const uint8_t*>(commit), std::string(commit).size());
+    (void)perform("first", 2);
+    (void)perform("second", 3);
+    if (!hirari_undo_manager_end_transaction(engineUndo) ||
+        hirari_undo_manager_undo_count(engineUndo) != 1) return 20;
+    (void)hirari_undo_manager_apply(engineUndo, false);
+    if (engineTransactionValue != 0 || hirari_undo_manager_redo_count(engineUndo) != 1)
+        return 21;
+    (void)hirari_undo_manager_apply(engineUndo, true);
     if (engineTransactionValue != 5) return 22;
-    engineUndo.clear();
+    hirari_undo_manager_clear(engineUndo);
+    hirari_undo_manager_destroy(engineUndo);
 
     // A failed DB publication must not remove the last destination. Using a
     // directory as the destination forces rename to fail while making the

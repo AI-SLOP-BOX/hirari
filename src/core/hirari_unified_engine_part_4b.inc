@@ -269,7 +269,7 @@
         }
         // A loaded project starts a fresh editing history. Keeping commands
         // from the previous document would let Undo mutate the wrong graph.
-        m_undoManager.clear();
+        hirari_undo_manager_clear(m_undoState);
         return true;
     }
     return false;

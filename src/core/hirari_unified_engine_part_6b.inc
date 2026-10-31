@@ -8,7 +8,7 @@ bool HirariUnifiedEngine::set_tempo(float bpm) {
     // the engine singleton. Every other tempo edit reaches Rust without
     // entering C++ at all.
     return hirari_tempo_edit_set_tempo(
-        m_tempoState, m_undoManager.rustState(),
+        m_tempoState, m_undoState,
         ::Hirari::Core::Diagnostics::LogBuffer::state(),
         m_playhead.load(std::memory_order_relaxed),
         m_sampleRate.load(std::memory_order_relaxed), bpm);

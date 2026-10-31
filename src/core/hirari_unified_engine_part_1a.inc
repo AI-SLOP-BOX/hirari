@@ -102,6 +102,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_forensic_journaler_destroy(m_forensicJournal);
     hirari_master_limiter_destroy(m_masterLimiter);
     hirari_master_meter_destroy(m_meterCore);
+    hirari_undo_manager_destroy(m_undoState);
 }
 
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,

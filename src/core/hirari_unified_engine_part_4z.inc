@@ -319,7 +319,7 @@ void* HirariUnifiedEngine::regionHostTempoState(void* host) {
 
 void* HirariUnifiedEngine::regionHostUndoState(void* host) {
     if (!host) return nullptr;
-    return static_cast<HirariUnifiedEngine*>(host)->m_undoManager.rustState();
+    return static_cast<HirariUnifiedEngine*>(host)->m_undoState;
 }
 
 double HirariUnifiedEngine::regionHostSampleRate(void* host) {

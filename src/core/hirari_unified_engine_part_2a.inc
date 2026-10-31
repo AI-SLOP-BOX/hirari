@@ -220,7 +220,7 @@ void HirariUnifiedEngine::new_project() {
     set_playhead(0);
     hirari_mpe_state_reset(m_mpeState);
     hirari_mpe_manager_reset(m_mpeManager);
-    m_undoManager.clear();
+    hirari_undo_manager_clear(m_undoState);
     hirari_native_pdc_reset_for_project(m_pdcState);
     hirari_sidechain_engine_reset(m_sidechainEngine);
     hirari_routing_engine_reset(m_routingEngine);
