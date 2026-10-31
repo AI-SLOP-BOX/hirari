@@ -177,6 +177,13 @@ pub struct HirariLayoutTrack {
     pub sandbox_plugin_state_count: usize,
     pub regions: *const HirariLayoutRegion,
     pub region_count: usize,
+    // Save-only fields. The JSON writer ignores them, so the layout gather
+    // only fills them when a project save asked for the snapshot.
+    pub spatial_x: f32,
+    pub spatial_y: f32,
+    pub spatial_z: f32,
+    pub plugin_gui_states: *const HirariLayoutByteBlock,
+    pub plugin_gui_state_count: usize,
 }
 
 #[repr(C)]
@@ -1353,6 +1360,7 @@ mod tests {
             sandbox_plugin_state_count: 0,
             regions: regions.as_ptr(),
             region_count: regions.len(),
+            ..Default::default()
         }];
         let snapshot = HirariProjectLayoutSnapshot {
             tracks: tracks.as_ptr(),

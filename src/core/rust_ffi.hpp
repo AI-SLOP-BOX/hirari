@@ -1895,6 +1895,13 @@ struct HirariLayoutTrack {
     size_t sandboxPluginStateCount = 0;
     const HirariLayoutRegion* regions = nullptr;
     size_t regionCount = 0;
+    // Save-only fields. The JSON writer ignores them, so the gather only fills
+    // them when a project save asked for the snapshot.
+    float spatialX = 0.0f;
+    float spatialY = 0.0f;
+    float spatialZ = 0.0f;
+    const HirariLayoutByteBlock* pluginGuiStates = nullptr;
+    size_t pluginGuiStateCount = 0;
 };
 struct HirariProjectLayoutSnapshot {
     const HirariLayoutTrack* tracks = nullptr;
@@ -1911,6 +1918,14 @@ extern "C" bool hirari_project_layout_write_json(
     HirariLayoutIsCancelledCallback is_cancelled, const void* cancel_context,
     const uint8_t** json_data, size_t* json_size);
 extern "C" void hirari_project_layout_json_free(const uint8_t* json_data, size_t json_size);
+// Encodes the same snapshot as the native project container. C++ only gathers
+// the model; field mapping, bounds and plug-in id encoding live in
+// hirari-core-bridge/src/project_save_layout.rs.
+extern "C" bool hirari_project_save_from_layout(
+    const uint8_t* path, size_t path_length,
+    const HirariProjectLayoutSnapshot* snapshot,
+    const void* tempo_state, const void* routing_state, size_t arrangement_document,
+    double bpm, int32_t root_note, int32_t scale_type);
 
 // Rust-owned harmonic context shared by structure analysis and auto-arrangement.
 extern "C" void hirari_harmonic_context_get(

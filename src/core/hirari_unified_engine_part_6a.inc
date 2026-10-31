@@ -21,61 +21,25 @@ rust::String HirariUnifiedEngine::get_project_layout_json() const {
     return get_project_layout_json_cancellable(nullptr);
 }
 
-rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
-    const std::atomic<bool>* cancellation) const {
-    // The serializer is Rust-owned. This function only gathers the current
-    // model into a borrowed snapshot and keeps it alive (and stable) for the
-    // synchronous call. Every ordering, escaping and formatting rule lives in
-    // hirari-core-bridge/src/project_layout.rs.
-    const auto cancelled = [cancellation]() noexcept {
-        return cancellation && cancellation->load(std::memory_order_acquire);
-    };
-    if (cancelled()) return rust::String();
-    if (m_ecoModeLogTriggered.exchange(false, std::memory_order_acq_rel)) {
-        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | GOVERNOR | ECO_MODE_ACTIVE");
-    }
-    if (m_videoSyncLogTriggered.exchange(false, std::memory_order_acq_rel)) {
-        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | VIDEO | SYNC_LOCKED");
-    }
-
+bool HirariUnifiedEngine::collectProjectLayout(ProjectLayoutData* out, bool includeSaveOnlyFields,
+                                               const std::atomic<bool>* cancellation) const {
     static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) ==
                   sizeof(HirariLayoutAutomationPoint));
     static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
 
-    // Serialization borrows data owned by each track. Heap-allocate every
-    // per-track block: moving it would invalidate the pointers to short-string
-    // buffers that the snapshot already holds.
-    struct TrackLayoutStorage {
-        HirariLayoutTrack view{};
-        std::string name;
-        std::string frozenPath;
-        std::string expressionMap;
-        std::string expressionMapPro;
-        std::vector<HirariLayoutAutomationPoint> volumeAutomation;
-        std::vector<HirariLayoutAutomationPoint> panAutomation;
-        std::vector<HirariLayoutAutomationPoint> trackDelayAutomation;
-        std::vector<HirariLayoutPluginLane> pluginAutomation;
-        std::vector<std::vector<Hirari::Core::ProjectAutomationPoint>> pluginAutomationPoints;
-        std::vector<uint8_t> pluginBypass;
-        std::vector<std::vector<float>> pluginParameters;
-        std::vector<HirariLayoutParameterBlock> pluginParameterBlocks;
-        std::vector<std::vector<uint8_t>> pluginStates;
-        std::vector<HirariLayoutByteBlock> pluginStateBlocks;
-        std::vector<HirariLayoutString> sandboxPaths;
-        std::vector<std::vector<uint8_t>> sandboxStates;
-        std::vector<HirariLayoutByteBlock> sandboxStateBlocks;
-        std::vector<HirariLayoutRegion> regions;
+    const auto cancelled = [cancellation]() noexcept {
+        return cancellation && cancellation->load(std::memory_order_acquire);
     };
+    if (!out || cancelled()) return false;
 
     size_t feedbackCount = 0;
     void* rawFeedback = hirari_routing_engine_copy_feedback(m_routingEngine, &feedbackCount);
     std::vector<Hirari::Core::Engine::RoutingEngine::FeedbackConnection> feedbackConnections =
         takeRoutingFeedback(rawFeedback, feedbackCount);
-
     const double timelineSampleRate = m_sampleRate.load(std::memory_order_relaxed);
+
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {
-        if (cancelled()) return rust::String();
         if (!track) continue;
         // A callback may have queued write-automation points since the
         // previous snapshot. Drain them on this control-side boundary so UI,
@@ -86,29 +50,25 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
     }
 
     const auto layoutString = [](const std::string& value) {
-        HirariLayoutString out;
-        out.data = reinterpret_cast<const uint8_t*>(value.data());
-        out.len = value.size();
-        return out;
+        HirariLayoutString result;
+        result.data = reinterpret_cast<const uint8_t*>(value.data());
+        result.len = value.size();
+        return result;
     };
     const auto layoutPoints = [](const std::vector<Hirari::Core::ProjectAutomationPoint>& input) {
-        std::vector<HirariLayoutAutomationPoint> out(input.size());
+        std::vector<HirariLayoutAutomationPoint> points(input.size());
         for (size_t index = 0; index < input.size(); ++index) {
-            out[index] = {input[index].time, input[index].value, input[index].curve};
+            points[index] = {input[index].time, input[index].value, input[index].curve};
         }
-        return out;
+        return points;
     };
 
-    std::vector<std::unique_ptr<TrackLayoutStorage>> storages;
-    std::vector<HirariLayoutTrack> trackViews;
-    std::vector<HirariLayoutSidechainRoute> sidechainRoutes;
-    std::vector<HirariLayoutFeedbackRoute> feedbackRoutes;
-    storages.reserve(m_tracks.size());
-    trackViews.reserve(m_tracks.size());
+    out->storages.reserve(m_tracks.size());
+    out->trackViews.reserve(m_tracks.size());
     for (const auto& track : m_tracks) {
-        if (cancelled()) return rust::String();
+        if (cancelled()) return false;
         if (!track) continue;
-        auto storage = std::make_unique<TrackLayoutStorage>();
+        auto storage = std::make_unique<ProjectLayoutStorage>();
         storage->name = track->getName();
         storage->frozenPath = track->frozenPath();
         storage->expressionMap = track->getExpressionMapJson();
@@ -137,30 +97,39 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
             storage->pluginBypass[index] =
                 track->getPluginBypass(static_cast<uint32_t>(index)) ? 1 : 0;
         }
-        storage->pluginParameters.reserve(pluginTypes.size());
-        for (size_t index = 0; index < pluginTypes.size(); ++index) {
-            if (cancelled()) return rust::String();
-            const uint32_t parameterCount =
-                track->getPluginParameterCount(static_cast<uint32_t>(index));
-            std::vector<float> values(parameterCount);
-            for (uint32_t parameter = 0; parameter < parameterCount; ++parameter) {
-                values[parameter] =
-                    track->getPluginParameter(static_cast<uint32_t>(index), parameter);
-            }
-            storage->pluginParameters.push_back(std::move(values));
-        }
-        storage->pluginParameterBlocks.resize(storage->pluginParameters.size());
-        for (size_t index = 0; index < storage->pluginParameters.size(); ++index) {
-            storage->pluginParameterBlocks[index] = {
-                storage->pluginParameters[index].data(),
-                storage->pluginParameters[index].size()};
-        }
-
         storage->pluginStates = track->getPluginStates();
         storage->pluginStateBlocks.resize(storage->pluginStates.size());
         for (size_t index = 0; index < storage->pluginStates.size(); ++index) {
             storage->pluginStateBlocks[index] = {
                 storage->pluginStates[index].data(), storage->pluginStates[index].size()};
+        }
+        if (includeSaveOnlyFields) {
+            storage->pluginGuiStates = track->getPluginGuiStates();
+            storage->pluginGuiStateBlocks.resize(storage->pluginGuiStates.size());
+            for (size_t index = 0; index < storage->pluginGuiStates.size(); ++index) {
+                storage->pluginGuiStateBlocks[index] = {
+                    storage->pluginGuiStates[index].data(),
+                    storage->pluginGuiStates[index].size()};
+            }
+        } else {
+            storage->pluginParameters.reserve(pluginTypes.size());
+            for (size_t index = 0; index < pluginTypes.size(); ++index) {
+                if (cancelled()) return false;
+                const uint32_t parameterCount =
+                    track->getPluginParameterCount(static_cast<uint32_t>(index));
+                std::vector<float> values(parameterCount);
+                for (uint32_t parameter = 0; parameter < parameterCount; ++parameter) {
+                    values[parameter] =
+                        track->getPluginParameter(static_cast<uint32_t>(index), parameter);
+                }
+                storage->pluginParameters.push_back(std::move(values));
+            }
+            storage->pluginParameterBlocks.resize(storage->pluginParameters.size());
+            for (size_t index = 0; index < storage->pluginParameters.size(); ++index) {
+                storage->pluginParameterBlocks[index] = {
+                    storage->pluginParameters[index].data(),
+                    storage->pluginParameters[index].size()};
+            }
         }
 
         const auto& sandboxPaths = track->getSandboxedPluginPaths();
@@ -178,31 +147,31 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
         const auto& regions = track->getRegions();
         storage->regions.resize(regions.size());
         for (size_t index = 0; index < regions.size(); ++index) {
-            if (cancelled()) return rust::String();
+            if (cancelled()) return false;
             const auto& region = regions[index];
-            auto& out = storage->regions[index];
-            out.id = region.id;
-            out.name = layoutString(region.name);
-            out.state = region.editableState();
-            out.sourceSampleRate = static_cast<uint32_t>(std::clamp(
+            auto& regionView = storage->regions[index];
+            regionView.id = region.id;
+            regionView.name = layoutString(region.name);
+            regionView.state = region.editableState();
+            regionView.sourceSampleRate = static_cast<uint32_t>(std::clamp(
                 std::llround(region.sourceSampleRate > 0.0
                     ? region.sourceSampleRate : timelineSampleRate), 8000LL, 384000LL));
-            out.path = layoutString(region.path);
+            regionView.path = layoutString(region.path);
             std::error_code pathError;
-            out.missing = region.path.empty() ||
+            regionView.missing = region.path.empty() ||
                 !std::filesystem::exists(std::filesystem::path(region.path), pathError);
             // Distinguish a missing file from a file that exists but was not
             // decoded during project hydration; clients can surface a relink
             // or decoder error instead of silently showing an empty region.
-            out.audioLoaded = region.audio != nullptr;
-            out.warpMarkers = region.warpMarkers.data();
-            out.warpMarkerCount = region.warpMarkers.size();
-            out.rangeEdits =
+            regionView.audioLoaded = region.audio != nullptr;
+            regionView.warpMarkers = region.warpMarkers.data();
+            regionView.warpMarkerCount = region.warpMarkers.size();
+            regionView.rangeEdits =
                 reinterpret_cast<const HirariRegionRangeEdit*>(region.rangeEdits.data());
-            out.rangeEditCount = region.rangeEdits.size();
-            out.noteStore = region.noteEdits.storeHandle();
-            out.noteFrozen = region.noteEdits.frozenHandle();
-            out.processingStore = region.processingHistory.storeHandle();
+            regionView.rangeEditCount = region.rangeEdits.size();
+            regionView.noteStore = region.noteEdits.storeHandle();
+            regionView.noteFrozen = region.noteEdits.frozenHandle();
+            regionView.processingStore = region.processingHistory.storeHandle();
         }
 
         auto& view = storage->view;
@@ -242,33 +211,57 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
         view.sandboxPluginStateCount = storage->sandboxStateBlocks.size();
         view.regions = storage->regions.data();
         view.regionCount = storage->regions.size();
+        view.spatialX = track->getSpatialX();
+        view.spatialY = track->getSpatialY();
+        view.spatialZ = track->getSpatialZ();
+        view.pluginGuiStates = storage->pluginGuiStateBlocks.data();
+        view.pluginGuiStateCount = storage->pluginGuiStateBlocks.size();
 
-        trackViews.push_back(view);
-        storages.push_back(std::move(storage));
+        out->trackViews.push_back(view);
+        out->storages.push_back(std::move(storage));
     }
 
-    sidechainRoutes.reserve(m_sidechainRoutes.size());
+    out->sidechainRoutes.reserve(m_sidechainRoutes.size());
     for (const auto& route : m_sidechainRoutes) {
-        HirariLayoutSidechainRoute out;
-        out.sourceId = route.sourceId;
-        out.destinationId = route.destinationId;
-        out.pluginIndex = route.pluginIndex;
-        out.tapPoint = route.tapPoint;
-        sidechainRoutes.push_back(out);
+        HirariLayoutSidechainRoute view;
+        view.sourceId = route.sourceId;
+        view.destinationId = route.destinationId;
+        view.pluginIndex = route.pluginIndex;
+        view.tapPoint = route.tapPoint;
+        out->sidechainRoutes.push_back(view);
     }
-    feedbackRoutes.reserve(feedbackConnections.size());
+    out->feedbackRoutes.reserve(feedbackConnections.size());
     for (const auto& route : feedbackConnections) {
-        feedbackRoutes.push_back({route.sourceId, route.destId, route.gain});
+        out->feedbackRoutes.push_back({route.sourceId, route.destId, route.gain});
     }
 
-    HirariProjectLayoutSnapshot snapshot{};
-    snapshot.tracks = trackViews.data();
-    snapshot.trackCount = trackViews.size();
-    snapshot.sidechainRoutes = sidechainRoutes.data();
-    snapshot.sidechainRouteCount = sidechainRoutes.size();
-    snapshot.feedbackRoutes = feedbackRoutes.data();
-    snapshot.feedbackRouteCount = feedbackRoutes.size();
+    auto& snapshot = out->snapshot;
+    snapshot.tracks = out->trackViews.data();
+    snapshot.trackCount = out->trackViews.size();
+    snapshot.sidechainRoutes = out->sidechainRoutes.data();
+    snapshot.sidechainRouteCount = out->sidechainRoutes.size();
+    snapshot.feedbackRoutes = out->feedbackRoutes.data();
+    snapshot.feedbackRouteCount = out->feedbackRoutes.size();
     snapshot.timelineSampleRate = timelineSampleRate;
+    return true;
+}
+
+rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
+    const std::atomic<bool>* cancellation) const {
+    // The serializer is Rust-owned. This function only gathers the current
+    // model into a borrowed snapshot and keeps it alive (and stable) for the
+    // synchronous call. Every ordering, escaping and formatting rule lives in
+    // hirari-core-bridge/src/project_layout.rs.
+    if (cancellation && cancellation->load(std::memory_order_acquire)) return rust::String();
+    if (m_ecoModeLogTriggered.exchange(false, std::memory_order_acq_rel)) {
+        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | GOVERNOR | ECO_MODE_ACTIVE");
+    }
+    if (m_videoSyncLogTriggered.exchange(false, std::memory_order_acq_rel)) {
+        ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "SYSTEM | VIDEO | SYNC_LOCKED");
+    }
+
+    ProjectLayoutData data;
+    if (!collectProjectLayout(&data, false, cancellation)) return rust::String();
 
     const auto isCancelled = [](const void* context) -> bool {
         const auto* flag = static_cast<const std::atomic<bool>*>(context);
@@ -276,7 +269,7 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
     };
     const uint8_t* jsonData = nullptr;
     size_t jsonSize = 0;
-    if (!hirari_project_layout_write_json(&snapshot, cancellation ? isCancelled : nullptr,
+    if (!hirari_project_layout_write_json(&data.snapshot, cancellation ? isCancelled : nullptr,
                                           cancellation, &jsonData, &jsonSize)) {
         return rust::String();
     }

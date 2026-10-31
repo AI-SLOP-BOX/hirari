@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- Project saving shares the layout gather. `saveProject` used to walk the whole
+  model a second time, filling the same encoder records C++ already produced
+  for the layout JSON. The model walk now runs once
+  (`collectProjectLayout`, which also keeps the save-only plug-in GUI blobs out
+  of the polling JSON path) and Rust maps that snapshot onto the native
+  container in `project_save_layout.rs`, including little-endian plug-in ids,
+  store materialisation and catalogue bounds.
+
 - The C++ dither façade is gone. `src/dsp/utils/dither.hpp` only wrapped the
   Rust `hirari_tpdf_dither_*`/`hirari_noise_shaping_dither_*` handles and had no
   callers, so the header and its include are removed along with C-ABI

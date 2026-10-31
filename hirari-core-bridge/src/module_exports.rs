@@ -261,6 +261,7 @@ pub mod processor_state;
 pub mod professional_suite;
 pub mod project;
 pub mod project_layout;
+pub mod project_save_layout;
 pub mod project_archive;
 pub mod project_asset_orchestrator;
 pub mod project_contracts;

@@ -61,6 +61,45 @@
     // Removes a track's sidechain routes; captures them when `removed` is set.
     void eraseSidechainRoutesLocked(uint32_t tid, std::vector<SidechainRoute>* removed);
 
+    // Borrowed layout snapshot shared by the JSON writer and the project saver.
+    // Serialization borrows data owned by each track, so every per-track block
+    // is heap-allocated: moving it would invalidate the pointers to
+    // short-string buffers the snapshot holds.
+    struct ProjectLayoutStorage {
+        HirariLayoutTrack view{};
+        std::string name;
+        std::string frozenPath;
+        std::string expressionMap;
+        std::string expressionMapPro;
+        std::vector<HirariLayoutAutomationPoint> volumeAutomation;
+        std::vector<HirariLayoutAutomationPoint> panAutomation;
+        std::vector<HirariLayoutAutomationPoint> trackDelayAutomation;
+        std::vector<HirariLayoutPluginLane> pluginAutomation;
+        std::vector<std::vector<Hirari::Core::ProjectAutomationPoint>> pluginAutomationPoints;
+        std::vector<uint8_t> pluginBypass;
+        std::vector<std::vector<float>> pluginParameters;
+        std::vector<HirariLayoutParameterBlock> pluginParameterBlocks;
+        std::vector<std::vector<uint8_t>> pluginStates;
+        std::vector<HirariLayoutByteBlock> pluginStateBlocks;
+        std::vector<std::vector<uint8_t>> pluginGuiStates;
+        std::vector<HirariLayoutByteBlock> pluginGuiStateBlocks;
+        std::vector<HirariLayoutString> sandboxPaths;
+        std::vector<std::vector<uint8_t>> sandboxStates;
+        std::vector<HirariLayoutByteBlock> sandboxStateBlocks;
+        std::vector<HirariLayoutRegion> regions;
+    };
+    struct ProjectLayoutData {
+        std::vector<std::unique_ptr<ProjectLayoutStorage>> storages;
+        std::vector<HirariLayoutTrack> trackViews;
+        std::vector<HirariLayoutSidechainRoute> sidechainRoutes;
+        std::vector<HirariLayoutFeedbackRoute> feedbackRoutes;
+        HirariProjectLayoutSnapshot snapshot{};
+    };
+    // `includeSaveOnlyFields` additionally collects the plug-in GUI blobs, which
+    // the polling JSON path must not copy.
+    bool collectProjectLayout(ProjectLayoutData* out, bool includeSaveOnlyFields,
+                              const std::atomic<bool>* cancellation) const;
+
     void* m_midiSnapshotStore = nullptr;
 
     std::atomic<float> m_dspLoad{0.0f};

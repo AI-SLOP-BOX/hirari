@@ -354,6 +354,20 @@ pub unsafe extern "C" fn hirari_tempo_map_get_event_count(state: *const std::ffi
     unsafe { tempo_map_from_ptr(state) }.map_or(0, |map| map.events.load().len())
 }
 
+/// Copies the tempo events in the order the project encoder expects.
+pub(crate) unsafe fn project_tempo_events(
+    state: *const std::ffi::c_void,
+) -> Vec<(u64, f64, bool)> {
+    let Some(map) = (unsafe { tempo_map_from_ptr(state) }) else {
+        return Vec::new();
+    };
+    map.events
+        .load()
+        .iter()
+        .map(|event| (event.sample_pos, event.bpm, event.ramp))
+        .collect()
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_tempo_map_copy_events(
     state: *const std::ffi::c_void,
