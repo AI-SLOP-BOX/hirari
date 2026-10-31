@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The built-in processor host now carries only the path it can actually
+  serve. External VST3/AU/CLAP binaries already go straight to the process
+  sandbox, so the unreachable in-host VST3 branch, sandbox ownership,
+  health polling, native-editor forwarding and failure atomics were removed
+  from `ExternalPluginHost`, along with a dead tempo-snapshot mirror in the
+  FFI header.
 - Undo commit and traversal now run in Rust. Registering both sides of an
   edit, replaying the redo on perform, recording with coalescing, discarding a
   failed pair, and the `UNDO | PERFORMED/RECORDED/UNDONE/REDONE` diagnostics

@@ -947,20 +947,6 @@ extern "C" bool hirari_audio_input_queue_poll(
 extern "C" uint64_t hirari_audio_input_queue_dropped(const void* queue);
 extern "C" void hirari_audio_input_queue_discard(const void* queue);
 extern "C" void hirari_audio_input_queue_reset(const void* queue);
-// C++ mirror of Rust's NativeTempoEvent / NativeTimeSignatureEvent. These two
-// plain shapes are the only form a tempo snapshot takes across the boundary,
-// so the layout contract is asserted here where the offset is consumed.
-struct HirariTempoEvent {
-    uint64_t samplePos;
-    double bpm;
-    bool ramp;
-    double worldBeats;
-};
-static_assert(std::is_standard_layout_v<HirariTempoEvent>);
-static_assert(offsetof(HirariTempoEvent, samplePos) == 0 && offsetof(HirariTempoEvent, bpm) == 8 &&
-              offsetof(HirariTempoEvent, ramp) == 16 &&
-              offsetof(HirariTempoEvent, worldBeats) == 24 && sizeof(HirariTempoEvent) == 32);
-
 extern "C" void* hirari_tempo_map_create();
 extern "C" void hirari_tempo_map_destroy(void* state);
 extern "C" bool hirari_tempo_map_add_tempo(

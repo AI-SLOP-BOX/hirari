@@ -7,11 +7,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
-#include <mutex>
+#include <cstring>
 #include "../dsp/iprocessor.hpp"
-#include "plugins/process_sandbox_processor.hpp"
-#include "plugins/vst3_host_processor.hpp"
 
 namespace Hirari::Core::Plugin {
 #include "plugin_host_part_1.inc"
