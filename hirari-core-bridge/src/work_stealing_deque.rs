@@ -565,11 +565,6 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    unsafe extern "C" {
-        fn hirari_audio_task_scheduler_cpp_smoke() -> bool;
-        fn hirari_rust_thread_pool_cpp_smoke() -> bool;
-    }
-
     #[test]
     fn owner_pops_lifo_and_stealers_take_oldest_first() {
         let queue = WorkQueue::new(4).unwrap();
@@ -616,10 +611,40 @@ mod tests {
         }));
     }
 
+    const PARALLEL_COUNT: usize = 256;
+
+    unsafe extern "C" fn count_per_index(index: u32, data: *mut c_void) {
+        if !data.is_null() {
+            let hits = &*(data as *const [AtomicUsize; PARALLEL_COUNT]);
+            hits[index as usize].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// The parallel-for fan-out must run every index exactly once and return
+    /// only after all pool-side callbacks have finished.
     #[test]
-    fn cpp_scheduler_executes_parallel_for_through_rust_queues() {
-        // SAFETY: The helper starts, drains, and joins its local singleton worker set.
-        assert!(unsafe { hirari_audio_task_scheduler_cpp_smoke() });
+    fn parallel_for_runs_every_index_exactly_once() {
+        use super::AudioTaskScheduler;
+        let scheduler = AudioTaskScheduler::new();
+        assert!(scheduler.start(
+            2,
+            64,
+            counting_dispatch,
+            Some(test_enter),
+            Some(test_leave)
+        ));
+        let hits: Box<[AtomicUsize; PARALLEL_COUNT]> =
+            Box::new(std::array::from_fn(|_| AtomicUsize::new(0)));
+        scheduler.parallel_for(
+            0,
+            PARALLEL_COUNT as u32,
+            std::ptr::from_ref(&*hits).cast_mut().cast(),
+            count_per_index,
+        );
+        for (index, hit) in hits.iter().enumerate() {
+            assert_eq!(hit.load(Ordering::Relaxed), 1, "index {index}");
+        }
+        scheduler.stop();
     }
 
     unsafe extern "C" fn test_enter(_: u32) -> u64 {
@@ -692,11 +717,5 @@ mod tests {
         }
         assert_eq!(counter.load(Ordering::Relaxed), 2);
         scheduler.stop();
-    }
-
-    #[test]
-    fn cpp_future_thread_pool_runs_and_propagates_exceptions_via_rust_workers() {
-        // SAFETY: The smoke owns all submitted work and waits for each future.
-        assert!(unsafe { hirari_rust_thread_pool_cpp_smoke() });
     }
 }

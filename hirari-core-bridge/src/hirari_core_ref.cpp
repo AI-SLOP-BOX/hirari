@@ -15,8 +15,6 @@ void HIRARI_LOG(uint32_t level, const std::string& msg) {
 #include "dsp/spatial/metal_audio_kernel.hpp"
 #include "core/midi_buffer.hpp"
 #include "core/status_queue.hpp"
-#include "core/concurrency/audio_task_manager.hpp"
-#include "core/concurrency/thread_pool.hpp"
 
 namespace Hirari::Core::Bridge {
 
@@ -96,49 +94,3 @@ extern "C" bool hirari_status_queue_cpp_wrapper_smoke() {
     return counted;
 }
 
-extern "C" bool hirari_audio_task_scheduler_cpp_smoke() {
-    auto& scheduler = Hirari::Core::Concurrency::AudioTaskStealingScheduler::getInstance();
-    scheduler.start(2);
-    std::atomic<uint64_t> sum{0};
-    scheduler.parallel_for(0, 128, [&sum](uint32_t value) {
-        sum.fetch_add(value, std::memory_order_relaxed);
-    });
-    std::atomic<uint64_t> rawSum{0};
-    scheduler.parallel_for(0, 16, [](uint32_t value, void* data) {
-        static_cast<std::atomic<uint64_t>*>(data)->fetch_add(value, std::memory_order_relaxed);
-    }, &rawSum);
-    std::atomic<uint64_t> dataSum{0};
-    scheduler.parallel_for_with_data<int>(
-        0, 8,
-        [&dataSum](uint32_t value, void*, int**, uint32_t, uint32_t) {
-            dataSum.fetch_add(value, std::memory_order_relaxed);
-        },
-        nullptr, static_cast<int**>(nullptr), 0, 0);
-    scheduler.stop();
-    return sum.load(std::memory_order_relaxed) == (127ull * 128ull) / 2ull &&
-        rawSum.load(std::memory_order_relaxed) == (15ull * 16ull) / 2ull &&
-        dataSum.load(std::memory_order_relaxed) == (7ull * 8ull) / 2ull;
-}
-
-extern "C" bool hirari_rust_thread_pool_cpp_smoke() {
-    try {
-        std::atomic<uint64_t> drained{0};
-        bool valuesCorrect = false;
-        {
-            Hirari::Core::Concurrency::ThreadPool pool(2);
-            auto value = pool.enqueue([](int left, int right) { return left + right; }, 19, 23);
-            auto failure = pool.enqueue([]() -> int { throw std::runtime_error("future exception contract"); });
-            for (uint32_t index = 0; index < 256; ++index) {
-                (void)pool.enqueue([&drained] { drained.fetch_add(1, std::memory_order_relaxed); });
-            }
-            bool exceptionPropagated = false;
-            try { (void)failure.get(); }
-            catch (const std::runtime_error&) { exceptionPropagated = true; }
-            valuesCorrect = value.get() == 42 && exceptionPropagated;
-        }
-        // The local pool drains accepted work before its Rust workers join.
-        return valuesCorrect && drained.load(std::memory_order_relaxed) == 256;
-    } catch (...) {
-        return false;
-    }
-}

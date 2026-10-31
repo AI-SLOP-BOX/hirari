@@ -138,10 +138,6 @@ void HirariUnifiedEngine::shutdown() {
     }
     hirari_sandbox_recovery_stop();
 
-    // Drain waveform-cache jobs while their captured engine state is still
-    // valid, then release the worker threads before clearing tracks/cache.
-    m_threadPool.stop();
-
     if (wasShutdown) return;
 
     std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -170,11 +166,6 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     // configuration mutex through a mutator.
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_masterLimiter = hirari_master_limiter_create(44'100.0);
-    // Waveform peak generation is a control-plane workload. Keep a small
-    // private worker pool alive for it so the first UI request does not fall
-    // back to a synchronous full-file decode on the event thread. The pool
-    // is stopped before tracks/cache state is torn down in shutdown().
-    m_threadPool.start(2);
     hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 

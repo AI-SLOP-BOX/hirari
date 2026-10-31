@@ -1637,18 +1637,6 @@ extern "C" bool hirari_status_queue_push_default(
     uint32_t severity, const uint8_t* text, size_t text_size);
 extern "C" bool hirari_status_queue_pop_default(void* output_message);
 extern "C" uint64_t hirari_status_queue_take_dropped_default();
-extern "C" void* hirari_audio_scheduler_create();
-extern "C" void hirari_audio_scheduler_destroy(void* state);
-extern "C" bool hirari_audio_scheduler_start(
-    const void* state, size_t workers, size_t queue_capacity,
-    void (*dispatch)(void*), uint64_t (*enter)(uint32_t), void (*leave)(uint64_t));
-extern "C" void hirari_audio_scheduler_stop(const void* state);
-extern "C" bool hirari_audio_scheduler_is_running(const void* state);
-extern "C" bool hirari_audio_scheduler_push(const void* state, size_t worker, void* data);
-extern "C" bool hirari_audio_scheduler_steal(const void* state, size_t worker, void** data);
-extern "C" void hirari_audio_scheduler_parallel_for(
-    const void* state, uint32_t start, uint32_t end, void* context,
-    void (*callback)(uint32_t, void*));
 extern "C" void* hirari_metronome_create(double sample_rate);
 extern "C" void hirari_metronome_destroy(void* state);
 extern "C" void hirari_metronome_set_enabled(void* state, bool enabled);

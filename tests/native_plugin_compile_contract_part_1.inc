@@ -55,11 +55,6 @@ int main() {
             !processor->loadGuiState(processor->saveGuiState())) return 67;
         factory.destroy(std::move(processor));
     }
-    // This translation unit intentionally exercises the production native
-    // plugin boundary without loading a third-party binary.
-    auto& pool = Hirari::Core::Concurrency::ThreadPool::getInstance();
-    auto poolResult = pool.enqueue([] { return 42; });
-    if (poolResult.get() != 42) return 47;
     // The built-in compressor is part of the production plugin contract, not
     // merely a header-only type. Exercise prepare/process/parameter/state so
     // a future refactor cannot leave the browser-visible plugin unlinked.

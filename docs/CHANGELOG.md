@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- The C++ task-scheduler/thread-pool adapters are deleted. The Rust-owned
+  worker queues were already the only implementation, and the C++ wrappers
+  had no production caller left: the engine's private scheduler was started
+  and stopped without ever accepting work. `thread_pool.hpp` and the
+  `AudioTask`/`AudioTaskJob`/`AudioTaskStealingScheduler` types go, leaving
+  `audio_task_manager.hpp` as the denormal guard it still hosts. The wrapper
+  smoke tests are replaced by a native Rust `parallel_for` test that checks
+  every index runs exactly once, and the compile contract drops its pool probe.
 - Sandbox recovery orchestration now runs in Rust
   (`sandbox_recovery_runtime.rs`): the periodic maintenance loop, its
   opt-out flag, the forensic-journal start and the recovery log line moved
