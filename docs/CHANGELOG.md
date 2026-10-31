@@ -84,6 +84,10 @@ production support.
   the previous and requested names, replays the apply callback for undo/redo,
   and commits one entry into the engine's Rust history; the C++ `Rename Track`
   capture lambda is deleted.
+- Routing undo entries are recorded in Rust. The routing edit host copies both
+  payload lists and commits them into the engine's Rust history, replaying
+  through the same payload applier with the requested coalesce/perform flags;
+  the C++ capture lambda is deleted.
 - The `RegionNoteEdits` and `RegionProcessingHistory` C++ adapters are
   deleted. `Region` holds the Rust note-edit store, its published frozen
   projection and the processing-history store directly, and the engine,

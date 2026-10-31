@@ -14,6 +14,8 @@ use std::ffi::{c_char, c_void};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
+use crate::plugin_edit_host::{register_replay, UndoStateFn};
+
 /// Matches `RoutingEngine::kMaxNodes`; ids at or above it are not routable.
 const MAX_ROUTING_NODES: u32 = 128;
 /// Maximum sidechain routes mirrored for one policy decision. Rejecting the
@@ -167,6 +169,7 @@ pub struct HirariRoutingHostOps {
     pub publish_routes: Option<HostFn>,
     pub record_undo: Option<RecordUndoFn>,
     pub apply_track_mix: Option<ApplyTrackMixFn>,
+    pub undo_state: Option<UndoStateFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -359,6 +362,67 @@ fn record_undo(
                 coalesce,
             );
         }
+        return;
+    }
+    record_in_history(ops, host, name, undo, redo, perform, coalesce);
+}
+
+unsafe fn replay_payloads(
+    ops: &HirariRoutingHostOps,
+    host: *mut c_void,
+    entries: &[HirariRoutingEditPayload],
+) {
+    apply_payloads_with(ops, host, entries);
+}
+
+fn record_in_history(
+    ops: &HirariRoutingHostOps,
+    host: *mut c_void,
+    name: &[u8],
+    undo: &[HirariRoutingEditPayload],
+    redo: &[HirariRoutingEditPayload],
+    perform: bool,
+    coalesce: bool,
+) {
+    let Some(read_state) = ops.undo_state else {
+        return;
+    };
+    let state = unsafe { read_state(host) };
+    if state.is_null() {
+        return;
+    }
+    let ops_copy = *ops;
+    let undo_copy = undo.to_vec();
+    let redo_copy = redo.to_vec();
+    let undo_id = register_replay(
+        state,
+        Box::new(move || unsafe { replay_payloads(&ops_copy, host, &undo_copy) }),
+    );
+    if undo_id == 0 {
+        return;
+    }
+    let ops_copy = *ops;
+    let redo_id = register_replay(
+        state,
+        Box::new(move || unsafe { replay_payloads(&ops_copy, host, &redo_copy) }),
+    );
+    if redo_id == 0 {
+        unsafe {
+            crate::undo_transaction::hirari_undo_manager_discard_native_callback(state, undo_id)
+        };
+        return;
+    }
+    let name = name.strip_suffix(&[0]).unwrap_or(name);
+    unsafe {
+        crate::undo_transaction::hirari_undo_manager_commit(
+            state,
+            name.as_ptr(),
+            name.len(),
+            undo_id,
+            redo_id,
+            coalesce,
+            perform,
+        );
     }
 }
 
@@ -1709,6 +1773,7 @@ mod tests {
             publish_routes: Some(test_publish_routes),
             record_undo: Some(test_record_undo),
             apply_track_mix: Some(test_apply_track_mix),
+            undo_state: None,
         }
     }
 
@@ -1939,5 +2004,33 @@ mod tests {
         let undo = host.undo[1].undo.clone();
         apply_payloads_with(&ops, host_ptr, &undo);
         assert!(!host.tracks[0].1.solo);
+    }
+
+    static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =
+        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+    unsafe extern "C" fn fake_undo_state(_host: *mut c_void) -> *mut c_void {
+        FAKE_UNDO.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn route_edit_without_native_recorder_uses_the_rust_history() {
+        let mut host = TestHost::default();
+        let host_ptr = host_ptr(&mut host);
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let mut ops = test_ops();
+        ops.record_undo = None;
+        ops.undo_state = Some(fake_undo_state);
+        assert!(set_route_with(&ops, host_ptr, 0, 1, true));
+        assert_eq!(host.connections.len(), 1);
+        assert_eq!(
+            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
+            1
+        );
+        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
+        assert!(host.connections.is_empty());
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }
 }

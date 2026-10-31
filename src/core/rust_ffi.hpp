@@ -1217,6 +1217,7 @@ struct HirariRoutingHostOps {
     void (*recordUndo)(void*, const char*, const HirariRoutingEditPayload*, size_t,
                        const HirariRoutingEditPayload*, size_t, bool, bool) = nullptr;
     bool (*applyTrackMix)(void*, uint32_t, int32_t, float) = nullptr;
+    void* (*undoState)(void*) = nullptr;
 };
 
 extern "C" void hirari_routing_edit_host_install(const HirariRoutingHostOps* ops);

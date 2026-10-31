@@ -205,28 +205,7 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             // only after every mutation callback has released its lock.
             engine->syncStructuralChanges();
         },
-        [](void* host, const char* name, const HirariRoutingEditPayload* undo, size_t undoCount,
-           const HirariRoutingEditPayload* redo, size_t redoCount, bool perform, bool coalesce) {
-            if (!host || !name) return;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::vector<HirariRoutingEditPayload> undoCopy;
-            if (undo && undoCount) undoCopy.assign(undo, undo + undoCount);
-            std::vector<HirariRoutingEditPayload> redoCopy;
-            if (redo && redoCount) redoCopy.assign(redo, redo + redoCount);
-            const auto applyAll = [host](const std::vector<HirariRoutingEditPayload>& entries) {
-                hirari_routing_edit_apply_payloads(host, entries.data(), entries.size());
-            };
-            if (perform) {
-                // performAction replays the redo through the Rust policy.
-                engine->m_undoManager.performAction(
-                    name, [applyAll, undoCopy] { applyAll(undoCopy); },
-                    [applyAll, redoCopy] { applyAll(redoCopy); });
-                return;
-            }
-            engine->m_undoManager.recordAppliedAction(
-                name, [applyAll, undoCopy] { applyAll(undoCopy); },
-                [applyAll, redoCopy] { applyAll(redoCopy); }, coalesce);
-        },
+        nullptr,  // undo capture lives in the Rust routing edit host.
         [](void* host, uint32_t trackId, int32_t op, float value) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
@@ -236,6 +215,9 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             else if (op == kHirariRoutingEditPan) track->setPan(value);
             else return false;
             return true;
+        },
+        [](void* host) -> void* {
+            return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
         },
     };
     hirari_routing_edit_host_install(&ops);
