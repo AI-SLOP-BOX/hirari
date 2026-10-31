@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Project hydration policy now lives in the Rust bridge: plug-in type ids are
+  decoded from the container codec, region paths/defaults are resolved on load,
+  decoded regions are clamped and legacy pre-v42 geometry is migrated in Rust,
+  and persisted VariAudio notes load through the Rust store. The C++ loader
+  keeps only the audio decode and direct field copies, and the now-unused
+  `hirari_region_vari_audio_store_load` C declaration and
+  `Track::loadNoteSegments` wrapper are deleted.
 - AudioUnit v2 hosting for the sandboxed plug-in worker now lives in the Rust
   plug-in runtime: bundle discovery, component and stream-format negotiation,
   render/MIDI/parameter callbacks, and the ClassInfo state envelope. The C++

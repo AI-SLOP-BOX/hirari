@@ -335,13 +335,6 @@ const HirariAudioNoteSegmentRange* hirari_region_vari_audio_frozen_ranges(
 const HirariAudioNoteCurveView* hirari_region_vari_audio_frozen_curves(
     const HirariVariAudioFrozen* frozen, size_t* out_count);
 
-// Replaces the table for project load / region split / pitch analysis:
-// malformed entries are repaired instead of rejecting the batch.
-bool hirari_region_vari_audio_store_load(
-    HirariRegionVariAudioStore* store, const HirariAudioNoteSegment* segments,
-    size_t segment_count, const HirariAudioNoteAnchor* anchors,
-    const size_t* anchor_offsets, const size_t* anchor_counts);
-
 // Applies the region-add policy in place (cap, drop malformed, normalize
 // anchor windows, sort, rebuild phases).
 bool hirari_region_vari_audio_store_normalize(HirariRegionVariAudioStore* store);

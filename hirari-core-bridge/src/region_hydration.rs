@@ -6,6 +6,12 @@
 //! from the real-time renderer. Both are pure numeric policy over the decoded
 //! region, so they live here and the loader only applies the result.
 
+use crate::audio_note_curve::HirariAudioNoteAnchor;
+use crate::ffi::{NativeNoteSegment, NativeRegionState};
+use crate::vari_audio::{
+    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_load,
+    HirariAudioNoteSegment, HirariRegionVariAudioStore,
+};
 use std::slice;
 
 /// Mirrors the engine's warp-marker layout; only `timeline_sample` is rewritten.
@@ -173,6 +179,184 @@ pub unsafe extern "C" fn hirari_region_range_edits_sanitize(
         kept += 1;
     }
     kept
+}
+
+/// Result codes for [`hirari_region_hydrate_decoded`].
+pub const HYDRATION_OK: u8 = 0;
+pub const HYDRATION_DROP_REGION: u8 = 1;
+pub const HYDRATION_FAILED: u8 = 2;
+
+/// Filters the region's persisted range edits in place against its current
+/// playable length, keeping at most the renderer's bound.
+fn sanitize_native_range_edits(region: &mut NativeRegionState) {
+    const MAX_EDITS: usize = 4096;
+    let playable = region.sampleLength;
+    let mut kept = 0_usize;
+    for index in 0..region.rangeEdits.len() {
+        if kept >= MAX_EDITS {
+            break;
+        }
+        let edit = region.rangeEdits[index];
+        let legacy = HirariLegacyRangeEdit {
+            start: edit.start,
+            end: edit.end,
+            gain: edit.gain,
+            fade_in: edit.fadeIn,
+            fade_out: edit.fadeOut,
+        };
+        if !range_edit_is_valid(&legacy, playable) {
+            continue;
+        }
+        region.rangeEdits[kept] = edit;
+        kept += 1;
+    }
+    region.rangeEdits.truncate(kept);
+}
+
+/// Completes region hydration once the media is decoded (or known absent).
+///
+/// The loader used to inline these rules: trim the source length to the
+/// available frames, migrate pre-v42 source-frame geometry, and drop range
+/// edits that no longer fit. Keeping them here means the loader only copies
+/// the decoded record into engine storage.
+pub fn hirari_region_hydrate_decoded(
+    region: &mut NativeRegionState,
+    decoded_samples: u64,
+    decoded_source_rate: f64,
+    project_sample_rate: f64,
+    document_version: u32,
+) -> u8 {
+    if decoded_samples != 0 {
+        if region.sourceOffset >= decoded_samples {
+            return HYDRATION_DROP_REGION;
+        }
+        let available = decoded_samples - region.sourceOffset;
+        region.sourceLength = if region.sourceLength == 0 {
+            region.sampleLength.min(available)
+        } else {
+            region.sourceLength.min(available)
+        };
+        if document_version < 42
+            && decoded_source_rate.is_finite()
+            && (8_000.0..=384_000.0).contains(&decoded_source_rate)
+        {
+            // The pre-migration pass mirrors the loader's former first
+            // sanitize: edits are filtered against the source-frame length
+            // before the migration rescales them.
+            sanitize_native_range_edits(region);
+            let mut markers: Vec<HirariLegacyWarpMarker> = region
+                .warpMarkers
+                .iter()
+                .map(|marker| HirariLegacyWarpMarker {
+                    source_sample: marker.sourceSample,
+                    timeline_sample: marker.timelineSample,
+                    transient: marker.transient,
+                })
+                .collect();
+            let mut edits: Vec<HirariLegacyRangeEdit> = region
+                .rangeEdits
+                .iter()
+                .map(|edit| HirariLegacyRangeEdit {
+                    start: edit.start,
+                    end: edit.end,
+                    gain: edit.gain,
+                    fade_in: edit.fadeIn,
+                    fade_out: edit.fadeOut,
+                })
+                .collect();
+            let mut migration = HirariRegionLegacyMigration {
+                source_offset: region.sourceOffset,
+                base_source_offset: region.baseSourceOffset,
+                source_length: region.sourceLength,
+                base_start: region.baseStart,
+                warp_ratio: region.warpRatio,
+                loop_count: region.loopCount,
+                fade_in: region.fadeInSamples,
+                fade_out: region.fadeOutSamples,
+                decoded_source_rate,
+                project_sample_rate,
+                markers: markers.as_mut_ptr(),
+                marker_count: markers.len(),
+                range_edits: edits.as_mut_ptr(),
+                range_edit_count: edits.len(),
+                start: 0,
+                len: 0,
+                out_fade_in: 0,
+                out_fade_out: 0,
+                source_sample_rate: 0.0,
+            };
+            if !unsafe { migrate(&mut migration) } {
+                return HYDRATION_FAILED;
+            }
+            for (marker, migrated) in region.warpMarkers.iter_mut().zip(markers) {
+                marker.timelineSample = migrated.timeline_sample;
+            }
+            for (edit, migrated) in region.rangeEdits.iter_mut().zip(edits) {
+                edit.start = migrated.start;
+                edit.end = migrated.end;
+                edit.gain = migrated.gain;
+                edit.fadeIn = migrated.fade_in;
+                edit.fadeOut = migrated.fade_out;
+            }
+            region.samplePosition = migration.start;
+            region.sampleLength = migration.len;
+            region.fadeInSamples = migration.out_fade_in;
+            region.fadeOutSamples = migration.out_fade_out;
+            region.sourceSampleRate = migration.source_sample_rate as u32;
+        }
+    }
+    sanitize_native_range_edits(region);
+    HYDRATION_OK
+}
+
+/// Loads persisted note segments into the Rust-owned VariAudio store,
+/// building the flat anchor index the store ABI requires.
+pub fn hirari_region_note_store_load_native(
+    store: usize,
+    segments: &Vec<NativeNoteSegment>,
+) -> bool {
+    if store == 0 || segments.len() > 4096 {
+        return false;
+    }
+    // An empty persisted table is a successful load, not a clear failure:
+    // `clear_segments` reports whether it removed anything.
+    let store_ptr = store as *mut HirariRegionVariAudioStore;
+    if segments.is_empty() {
+        unsafe { hirari_region_vari_audio_store_clear_segments(store_ptr) };
+        return true;
+    }
+    let mut flat_segments: Vec<HirariAudioNoteSegment> = Vec::with_capacity(segments.len());
+    let mut flat_anchors: Vec<HirariAudioNoteAnchor> = Vec::new();
+    let mut offsets: Vec<usize> = Vec::with_capacity(segments.len());
+    let mut counts: Vec<usize> = Vec::with_capacity(segments.len());
+    for segment in segments {
+        flat_segments.push(HirariAudioNoteSegment {
+            start_seconds: segment.startSeconds,
+            end_seconds: segment.endSeconds,
+            detected_pitch_cents: segment.detectedPitchCents,
+            pitch_offset_cents: segment.pitchOffsetCents,
+            formant_offset_cents: segment.formantOffsetCents,
+        });
+        offsets.push(flat_anchors.len());
+        counts.push(segment.anchors.len());
+        for anchor in &segment.anchors {
+            flat_anchors.push(HirariAudioNoteAnchor {
+                position_seconds: anchor.positionSeconds,
+                pitch_cents: anchor.pitchCents,
+                formant_cents: anchor.formantCents,
+            });
+        }
+    }
+    unsafe {
+        hirari_region_vari_audio_store_load(
+            store_ptr,
+            flat_segments.as_ptr(),
+            flat_segments.len(),
+            flat_anchors.as_ptr(),
+            offsets.as_ptr(),
+            counts.as_ptr(),
+        )
+    }
 }
 
 #[cfg(test)]

@@ -17,170 +17,81 @@
         
         // 2. Hydrate Regions
         uint32_t nextRegionId = 1;
-        for (const auto& rs : state.regions) {
+        for (auto& rs : state.regions) {
             for (auto& t : loadedTracks) {
-                if (t->getId() == rs.trackId) {
-                    const std::filesystem::path storedPath(std::string(rs.filePath));
-                    const std::filesystem::path resolvedPath = storedPath.is_absolute()
-                        ? storedPath
-                        : projectDir / storedPath;
-                    const std::string resolvedFilePath = resolvedPath.lexically_normal().string();
-                    Region r;
-                    if (state.version >= 28) {
-                        r.id = rs.id;
-                        nextRegionId = std::max(nextRegionId, r.id + 1u);
-                    } else {
-                        r.id = nextRegionId++;
-                    }
-                    r.path = resolvedFilePath;
-                    r.start = rs.samplePosition;
-                    r.len = rs.sampleLength;
-                    r.sourceLength = rs.sourceLength;
-                    r.sourceSampleRate = rs.sourceSampleRate > 0
-                        ? rs.sourceSampleRate : projectSampleRate;
-                    r.timelineSampleRate = projectSampleRate;
-                    r.sourceOffset = rs.sourceOffset;
-                    r.baseStart = rs.baseStart == 0 ? r.start : rs.baseStart;
-                    r.baseSourceOffset = rs.baseSourceOffset;
-                    r.baseLength = rs.baseLength == 0 ? r.len : rs.baseLength;
-                    r.muted = rs.isMuted;
-                    const std::string regionName(rs.name);
-                    r.name = regionName.empty() ? resolvedFilePath : regionName;
-                    r.clipGain = std::clamp(rs.clipGain, 0.0f, 2.0f);
-                    r.fadeInSamples = std::min(rs.fadeInSamples, r.len);
-                    r.fadeOutSamples = std::min(rs.fadeOutSamples, r.len);
-                    r.reverse = rs.reverse;
-                    r.warpRatio = rs.warpRatio;
-                    r.pitchPreserveWarp = rs.pitchPreserveWarp;
-                    r.pitchSemitones = rs.pitchSemitones;
-                    r.loopCount = rs.loopCount;
-                    r.locked = rs.locked;
-                    r.syncGroup = rs.syncGroup;
-                    r.warpMarkers.clear();
-                    r.warpMarkers.reserve(rs.warpMarkers.size());
-                    for (const auto& marker : rs.warpMarkers) {
-                        r.warpMarkers.push_back({marker.sourceSample, marker.timelineSample,
-                                                 marker.transient});
-                    }
-                    for (const auto& step : rs.processingHistory) {
-                        if (!r.appendProcessingStep(step.id, std::string(step.operation),
-                                                    step.parameter, step.enabled)) break;
-                    }
-                    // The persisted notes are handed to the Rust store in the
-                    // flat ABI layout it already uses; the bridge anchor type
-                    // has the same f64-only layout, so no per-anchor copy.
-                    std::vector<HirariAudioNoteSegment> loadedNotes;
-                    std::vector<HirariAudioNoteAnchor> loadedAnchors;
-                    std::vector<size_t> noteAnchorOffsets;
-                    std::vector<size_t> noteAnchorCounts;
-                    loadedNotes.reserve(rs.audioNoteSegments.size());
-                    for (const auto& segment : rs.audioNoteSegments) {
-                        loadedNotes.push_back({segment.startSeconds, segment.endSeconds,
-                                               segment.detectedPitchCents,
-                                               segment.pitchOffsetCents,
-                                               segment.formantOffsetCents});
-                        noteAnchorOffsets.push_back(loadedAnchors.size());
-                        noteAnchorCounts.push_back(segment.anchors.size());
-                        static_assert(sizeof(::Hirari::Core::Bridge::NativeNoteAnchor) ==
-                                      sizeof(HirariAudioNoteAnchor));
-                        const auto* anchors = reinterpret_cast<const HirariAudioNoteAnchor*>(
-                            segment.anchors.data());
-                        loadedAnchors.insert(loadedAnchors.end(), anchors,
-                                             anchors + segment.anchors.size());
-                    }
-                    if (!r.loadNoteSegments(
-                            loadedNotes.data(), loadedNotes.size(), loadedAnchors.data(),
-                            noteAnchorOffsets.data(), noteAnchorCounts.data())) return false;
-                    r.rangeEdits.clear();
-                    r.rangeEdits.reserve(std::min<size_t>(rs.rangeEdits.size(), 4096));
-                    for (const auto& edit : rs.rangeEdits) {
-                        if (r.rangeEdits.size() >= 4096) break;
-                        r.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
-                    }
-                    // Rust rejects malformed persisted edits before they reach
-                    // the real-time renderer.
-                    r.rangeEdits.resize(hirari_region_range_edits_sanitize(
-                        reinterpret_cast<HirariLegacyRangeEdit*>(r.rangeEdits.data()),
-                        r.rangeEdits.size(), r.len));
-                    // Hydrate audio during project load so an opened project
-                    // is immediately playable. Missing files remain visible
-                    // as unloaded regions and can be repaired via Relink.
-                    std::error_code fileError;
-                    if (std::filesystem::is_regular_file(resolvedPath, fileError) && !fileError) {
-                        double decodedSourceRate = 0.0;
-                        auto audio = importAudioFile(
-                            resolvedFilePath, &decodedSourceRate);
-                        if (audio && audio->getNumSamples() > 0 && audio->getNumChannels() > 0) {
-                            r.audio = std::move(audio);
-                            r.timelineSampleRate = projectSampleRate;
-                            if (r.sourceOffset >= r.audio->getNumSamples()) continue;
-                            const uint64_t availableSource = r.audio->getNumSamples() - r.sourceOffset;
-                            r.sourceLength = r.sourceLength == 0
-                                ? std::min(r.len, availableSource)
-                                : std::min(r.sourceLength, availableSource);
-                            if (state.version < 42 && std::isfinite(decodedSourceRate) &&
-                                decodedSourceRate >= 8000.0 && decodedSourceRate <= 384000.0) {
-                                // Older projects stored native source-frame
-                                // counts as timeline-frame counts. Rust migrates
-                                // the duration, trim origin, fades, warp markers
-                                // and range windows while preserving the
-                                // musical start; an unrepresentable geometry
-                                // fails hydration.
-                                static_assert(sizeof(Region::WarpMarker) ==
-                                              sizeof(HirariLegacyWarpMarker));
-                                static_assert(sizeof(Region::RangeEdit) ==
-                                              sizeof(HirariLegacyRangeEdit));
-                                HirariRegionLegacyMigration migration{};
-                                migration.source_offset = r.sourceOffset;
-                                migration.base_source_offset = r.baseSourceOffset;
-                                migration.source_length = r.sourceLength;
-                                migration.base_start = r.baseStart;
-                                migration.warp_ratio = r.warpRatio;
-                                migration.loop_count = r.loopCount;
-                                migration.fade_in = r.fadeInSamples;
-                                migration.fade_out = r.fadeOutSamples;
-                                migration.decoded_source_rate = decodedSourceRate;
-                                migration.project_sample_rate = projectSampleRate;
-                                migration.markers = reinterpret_cast<HirariLegacyWarpMarker*>(
-                                    r.warpMarkers.data());
-                                migration.marker_count = r.warpMarkers.size();
-                                migration.range_edits = reinterpret_cast<HirariLegacyRangeEdit*>(
-                                    r.rangeEdits.data());
-                                migration.range_edit_count = r.rangeEdits.size();
-                                if (!hirari_region_legacy_source_rate_migrate(&migration))
-                                    return false;
-                                r.sourceSampleRate = migration.source_sample_rate;
-                                r.start = migration.start;
-                                r.len = migration.len;
-                                r.fadeInSamples = migration.out_fade_in;
-                                r.fadeOutSamples = migration.out_fade_out;
-                            }
-                        }
-                    }
-                    // The persisted region length may have been larger than
-                    // the decoded media (for example after an external file
-                    // was replaced). Rust filters the range edits against the
-                    // final playable length so the renderer never evaluates
-                    // stale offsets beyond the audio buffer.
-                    if (!r.rangeEdits.empty()) {
-                        r.rangeEdits.resize(hirari_region_range_edits_sanitize(
-                            reinterpret_cast<HirariLegacyRangeEdit*>(r.rangeEdits.data()),
-                            r.rangeEdits.size(), r.len));
-                    }
-                    t->addRegion(r);
-                    break;
+                if (t->getId() != rs.trackId) continue;
+                Region r;
+                if (state.version >= 28) {
+                    r.id = rs.id;
+                    nextRegionId = std::max(nextRegionId, r.id + 1u);
+                } else {
+                    r.id = nextRegionId++;
                 }
+                // Decode before hydration so Rust can clamp the region to the
+                // media that actually exists and migrate legacy geometry.
+                std::shared_ptr<AudioBuffer> audio;
+                double decodedSourceRate = 0.0;
+                std::error_code fileError;
+                const std::string regionPath(rs.filePath);
+                const std::filesystem::path resolvedPath(regionPath);
+                if (std::filesystem::is_regular_file(resolvedPath, fileError) && !fileError) {
+                    audio = importAudioFile(regionPath, &decodedSourceRate);
+                    if (audio && (audio->getNumSamples() == 0 || audio->getNumChannels() == 0)) {
+                        audio.reset();
+                    }
+                }
+                const uint8_t hydration = hirari_region_hydrate_decoded(
+                    rs, audio ? audio->getNumSamples() : 0u, decodedSourceRate,
+                    projectSampleRate, state.version);
+                if (hydration == 1) continue;
+                if (hydration == 2) return false;
+                r.path = regionPath;
+                r.start = rs.samplePosition;
+                r.len = rs.sampleLength;
+                r.sourceLength = rs.sourceLength;
+                r.sourceSampleRate = rs.sourceSampleRate;
+                r.timelineSampleRate = projectSampleRate;
+                r.sourceOffset = rs.sourceOffset;
+                r.baseStart = rs.baseStart;
+                r.baseSourceOffset = rs.baseSourceOffset;
+                r.baseLength = rs.baseLength;
+                r.muted = rs.isMuted;
+                r.name = std::string(rs.name);
+                r.clipGain = rs.clipGain;
+                r.fadeInSamples = rs.fadeInSamples;
+                r.fadeOutSamples = rs.fadeOutSamples;
+                r.reverse = rs.reverse;
+                r.warpRatio = rs.warpRatio;
+                r.pitchPreserveWarp = rs.pitchPreserveWarp;
+                r.pitchSemitones = rs.pitchSemitones;
+                r.loopCount = rs.loopCount;
+                r.locked = rs.locked;
+                r.syncGroup = rs.syncGroup;
+                r.warpMarkers.clear();
+                r.warpMarkers.reserve(rs.warpMarkers.size());
+                for (const auto& marker : rs.warpMarkers) {
+                    r.warpMarkers.push_back({marker.sourceSample, marker.timelineSample,
+                                             marker.transient});
+                }
+                for (const auto& step : rs.processingHistory) {
+                    if (!r.appendProcessingStep(step.id, std::string(step.operation),
+                                                step.parameter, step.enabled)) return false;
+                }
+                if (!hirari_region_note_store_load_native(
+                        reinterpret_cast<size_t>(r.noteStore.get()), rs.audioNoteSegments)) {
+                    return false;
+                }
+                r.rangeEdits.reserve(rs.rangeEdits.size());
+                for (const auto& edit : rs.rangeEdits) {
+                    r.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
+                }
+                // Hydrate audio during project load so an opened project is
+                // immediately playable. Missing files remain visible as
+                // unloaded regions and can be repaired via Relink.
+                if (audio) r.audio = std::move(audio);
+                t->addRegion(r);
+                break;
             }
-        }
-        // Sidechain plugin indices are checked against the hydrated chain:
-        // sandbox admission can drop a stored path, which the document codec
-        // cannot predict. Track references, tap points and link cycles were
-        // rejected before the state became valid.
-        for (const auto& sidechain : state.sidechains) {
-            const auto destination = std::find_if(loadedTracks.begin(), loadedTracks.end(),
-                [&sidechain](const auto& track) { return track->getId() == sidechain.destinationId; });
-            if (destination == loadedTracks.end() ||
-                sidechain.pluginIndex >= (*destination)->getPluginTypes().size()) return false;
         }
 
         // Prepare the detached replacement tracks before the commit point.

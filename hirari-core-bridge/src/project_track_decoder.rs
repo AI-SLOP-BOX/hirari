@@ -307,6 +307,11 @@ fn owned_track(track: TrackRecord<'_>) -> NativeTrackState {
         trackDelaySamples: track.track_delay_samples,
         pluginName: text(track.plugin_name),
         pluginData: track.plugin_data.to_vec(),
+        pluginTypes: track
+            .plugin_data
+            .chunks_exact(4)
+            .map(|word| u32::from_le_bytes([word[0], word[1], word[2], word[3]]))
+            .collect(),
         pluginStates: track
             .plugin_states
             .iter()

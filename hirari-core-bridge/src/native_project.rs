@@ -12,9 +12,9 @@ use crate::ffi::{
 };
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 pub(crate) const MAGIC: u32 = 0x4155_5241;
 const MAX_PROJECT_BYTES: usize = 256 * 1024 * 1024;
@@ -115,20 +115,79 @@ fn plugin_data_is_consistent(track: &NativeTrackState) -> bool {
     if track.pluginData.len() % 4 != 0 {
         return false;
     }
-    let slots = track.pluginData.len() / 4;
+    let slots = track.pluginTypes.len();
+    if track.pluginData.len() / 4 != slots {
+        return false;
+    }
     if track.pluginStates.len() > slots || track.pluginBypass.len() > slots {
         return false;
     }
     let sandbox_markers = track
-        .pluginData
-        .chunks_exact(4)
-        .filter(|word| {
-            let mut bytes = [0u8; 4];
-            bytes.copy_from_slice(word);
-            u32::from_le_bytes(bytes) == u32::MAX
-        })
+        .pluginTypes
+        .iter()
+        .filter(|kind| **kind == u32::MAX)
         .count();
     sandbox_markers <= track.sandboxedPluginPaths.len()
+}
+
+/// Plugin slots a hydrated track will expose: the serialized chain plus any
+/// legacy trailing sandbox paths that predate the marker.
+fn effective_plugin_count(track: &NativeTrackState) -> usize {
+    let sandbox_markers = track
+        .pluginTypes
+        .iter()
+        .filter(|kind| **kind == u32::MAX)
+        .count();
+    track.pluginTypes.len() + track.sandboxedPluginPaths.len().saturating_sub(sandbox_markers)
+}
+
+/// Resolves a stored media path against the project directory and removes
+/// `.`/`..` segments without touching the filesystem, mirroring the loader's
+/// former `std::filesystem::path` normalization.
+fn resolve_region_path(project_dir: &Path, stored: &str) -> String {
+    let stored_path = Path::new(stored);
+    let joined = if stored_path.is_absolute() {
+        stored_path.to_path_buf()
+    } else {
+        project_dir.join(stored_path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized.to_string_lossy().into_owned()
+}
+
+/// Applies the defaults the engine used to fill in while copying a decoded
+/// region, so the loader's hydration is a direct field copy.
+fn normalize_region(
+    region: &mut crate::ffi::NativeRegionState,
+    project_dir: &Path,
+    project_rate: u32,
+) {
+    region.filePath = resolve_region_path(project_dir, &region.filePath);
+    if region.name.is_empty() {
+        region.name = region.filePath.clone();
+    }
+    if region.sourceSampleRate == 0 {
+        region.sourceSampleRate = project_rate;
+    }
+    if region.baseStart == 0 {
+        region.baseStart = region.samplePosition;
+    }
+    if region.baseLength == 0 {
+        region.baseLength = region.sampleLength;
+    }
+    region.clipGain = region.clipGain.clamp(0.0, 2.0);
+    region.fadeInSamples = region.fadeInSamples.min(region.sampleLength);
+    region.fadeOutSamples = region.fadeOutSamples.min(region.sampleLength);
 }
 
 /// Cross-document invariants that the per-section decoders cannot see:
@@ -144,10 +203,21 @@ fn validate_decoded(
 
     let mut track_ids = HashSet::with_capacity(tracks.len());
     let mut bus_ids = HashSet::new();
+    let mut plugin_counts = HashMap::with_capacity(tracks.len());
     for track in tracks {
         if !plugin_data_is_consistent(track) {
             return false;
         }
+        let plugin_count = effective_plugin_count(track);
+        // Automation targets a plugin slot in the chain the loader rebuilds.
+        if track
+            .pluginAutomation
+            .iter()
+            .any(|lane| lane.pluginIndex as usize >= plugin_count)
+        {
+            return false;
+        }
+        plugin_counts.insert(track.id, plugin_count);
         track_ids.insert(track.id);
         if track.trackType == BUS_TRACK_TYPE {
             bus_ids.insert(track.id);
@@ -157,6 +227,14 @@ fn validate_decoded(
     for sidechain in sidechains {
         if !track_ids.contains(&sidechain.sourceId)
             || !track_ids.contains(&sidechain.destinationId)
+        {
+            return false;
+        }
+        // Sandbox admission can drop a stored path at hydration, so this index
+        // is checked against the chain the engine will actually expose.
+        if plugin_counts
+            .get(&sidechain.destinationId)
+            .map_or(true, |count| sidechain.pluginIndex as usize >= *count)
         {
             return false;
         }
@@ -242,6 +320,14 @@ pub(crate) fn load_state(path: &str) -> NativeProjectState {
     state.markers = markers;
     state.arrangerParts = arranger_parts;
     state.tempoEvents = tempo_events;
+    let project_dir = Path::new(path)
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    for region in &mut state.regions {
+        normalize_region(region, &project_dir, header.sample_rate);
+    }
     state.valid = true;
     state
 }

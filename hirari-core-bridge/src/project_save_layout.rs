@@ -307,6 +307,7 @@ fn track_state(track: &HirariLayoutTrack) -> Option<NativeTrackState> {
         trackDelaySamples: track.track_delay_samples.min(u64::from(u32::MAX)) as u32,
         pluginName: layout_string(track.name)?,
         pluginData: plugin_data,
+        pluginTypes: plugin_types.to_vec(),
         pluginStates: blobs(plugin_states)?,
         pluginGuiStates: blobs(gui_states)?,
         pluginBypass: plugin_bypass.to_vec(),

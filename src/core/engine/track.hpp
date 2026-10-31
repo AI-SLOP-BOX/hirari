@@ -191,17 +191,6 @@ struct Region {
     }
     // Repairing replace (project load): the Rust store drops malformed entries
     // and orders the survivors.
-    bool loadNoteSegments(const HirariAudioNoteSegment* segments, std::size_t segmentCount,
-                          const HirariAudioNoteAnchor* anchors,
-                          const std::size_t* anchorOffsets, const std::size_t* anchorCounts) {
-        if (!noteStore || (segmentCount != 0 && !segments)) return false;
-        if (segmentCount == 0) {
-            (void)hirari_region_vari_audio_store_clear_segments(noteStore.get());
-            return true;
-        }
-        return hirari_region_vari_audio_store_load(noteStore.get(), segments, segmentCount,
-                                                   anchors, anchorOffsets, anchorCounts);
-    }
     uint32_t loopCount = 1;
     std::vector<RangeEdit> rangeEdits;
     bool compManaged = false;

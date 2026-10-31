@@ -111,13 +111,6 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
                 }
                 return converted;
             };
-        const auto readPluginType = [](const rust::Vec<uint8_t>& bytes, size_t offset) {
-            return static_cast<uint32_t>(bytes[offset]) |
-                   (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
-                   (static_cast<uint32_t>(bytes[offset + 2]) << 16) |
-                   (static_cast<uint32_t>(bytes[offset + 3]) << 24);
-        };
-
         // 1. Hydrate Tracks
         for (const auto& ts : state.tracks) {
             const auto trackType = static_cast<Track::Type>(ts.trackType);
@@ -151,15 +144,13 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             if (!ts.volumeAutomation.empty()) t->setVolumeAutomation(toAutomation(ts.volumeAutomation));
             if (!ts.panAutomation.empty()) t->setPanAutomation(toAutomation(ts.panAutomation));
             if (!ts.trackDelayAutomation.empty()) t->setTrackDelayAutomation(toAutomation(ts.trackDelayAutomation));
-            // pluginData stores plugin type IDs as little-endian u32 values.
-            // 0xffffffff is the serialized marker for a sandbox plugin. Build
-            // the processor chain in the same order in which it was saved;
-            // restoring states before creating sandbox processors makes a
-            // valid project fail when the first state targets that processor.
+            // pluginTypes is the container codec's decoded view of
+            // pluginData: 0xffffffff marks a sandbox slot. Build the
+            // processor chain in the saved order; restoring states before
+            // creating sandbox processors makes a valid project fail when the
+            // first state targets that processor.
             size_t sandboxPathIndex = 0;
-            for (size_t offset = 0; offset + sizeof(uint32_t) <= ts.pluginData.size();
-                 offset += sizeof(uint32_t)) {
-                const uint32_t pluginType = readPluginType(ts.pluginData, offset);
+            for (const uint32_t pluginType : ts.pluginTypes) {
                 if (pluginType == 0xFFFFFFFFu) {
                     // The codec guarantees one sandbox path per marker. An
                     // unavailable binary is quarantined; the path is still
@@ -174,9 +165,6 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             // pluginData. Preserve compatibility by appending those entries.
             while (sandboxPathIndex < ts.sandboxedPluginPaths.size()) {
                 (void)t->addSandboxedPlugin(std::string(ts.sandboxedPluginPaths[sandboxPathIndex++]));
-            }
-            for (const auto& lane : ts.pluginAutomation) {
-                if (lane.pluginIndex >= t->getPluginTypes().size()) return false;
             }
             if (!ts.pluginAutomation.empty()) t->setPluginAutomation(toPluginAutomation(ts.pluginAutomation));
             for (size_t stateIndex = 0; stateIndex < ts.pluginStates.size(); ++stateIndex) {
