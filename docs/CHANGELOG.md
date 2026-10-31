@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- Two unreachable engine entry points left the C++ boundary.
+  `HirariUnifiedEngine::quantizeAudioGroup` (a 32-channel marshalling wrapper
+  around `hirari_audio_quantize_group`) and the inline `get_dsp_load()` getter
+  had no callers — group quantization is driven through the Rust
+  `region_time_jobs`/`audio_quantizer` paths and DSP load reaches Rust through
+  the telemetry snapshot. The now-unused `hirari_audio_quantize_group`
+  declaration was dropped from the C++ header; the Rust entry point and its
+  tests remain.
 - The dead per-track C++ analysis wrapper is gone. `Track::AnalysisEngine`,
   its `getAnalysisEngine()` accessor, the `m_analysis` member and the
   `hirari_track_analysis_spectrogram` declaration had no callers; the Rust

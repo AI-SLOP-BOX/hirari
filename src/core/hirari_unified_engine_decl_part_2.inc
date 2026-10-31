@@ -1,6 +1,5 @@
     // Transport
     bool is_playing() const;
-    float get_dsp_load() const noexcept { return m_dspLoad.load(std::memory_order_relaxed); }
     bool audio_range_overflowed() const noexcept {
         return m_audioRangeOverflow.load(std::memory_order_acquire);
     }
