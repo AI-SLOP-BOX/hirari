@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Region, routing, control, plugin, automation and sandbox callbacks each
+  walked the track list to resolve an id, with the same guard clause copied
+  around. They now share one locked lookup on the engine, so a missing track is
+  reported the same way everywhere and the traversal exists once.
 - Ten region host callbacks repeated the same track/region lookup loop, so the
   matching rule lived in ten places. One locked-find helper now serves them all,
   which keeps every callback resolving the same region under the same lock and

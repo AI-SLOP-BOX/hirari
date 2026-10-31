@@ -33,31 +33,29 @@ size_t HirariUnifiedEngine::automationHostRead(void* host, uint32_t trackId, int
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        std::vector<Hirari::Core::ProjectAutomationPoint> points;
-        if (kind == kHirariAutomationPlugin) {
-            if (pluginIndex >= track->getPluginTypes().size()) return 0;
-            for (const auto& lane : track->getPluginAutomation()) {
-                if (lane.pluginIndex == pluginIndex && lane.parameterId == parameterId) {
-                    points = lane.points;
-                    break;
-                }
+    const Track* track = engine->findTrackLocked(trackId);
+    if (!track) return 0;
+    std::vector<Hirari::Core::ProjectAutomationPoint> points;
+    if (kind == kHirariAutomationPlugin) {
+        if (pluginIndex >= track->getPluginTypes().size()) return 0;
+        for (const auto& lane : track->getPluginAutomation()) {
+            if (lane.pluginIndex == pluginIndex && lane.parameterId == parameterId) {
+                points = lane.points;
+                break;
             }
-        } else if (kind == kHirariAutomationTrackDelay) {
-            points = track->getTrackDelayAutomationPoints();
-        } else if (kind == kHirariAutomationPan) {
-            points = track->getPanAutomationPoints();
-        } else {
-            points = track->getVolumeAutomationPoints();
         }
-        if (targetFound) *targetFound = true;
-        if (out && capacity >= points.size()) {
-            std::copy(points.begin(), points.end(), out);
-        }
-        return points.size();
+    } else if (kind == kHirariAutomationTrackDelay) {
+        points = track->getTrackDelayAutomationPoints();
+    } else if (kind == kHirariAutomationPan) {
+        points = track->getPanAutomationPoints();
+    } else {
+        points = track->getVolumeAutomationPoints();
     }
-    return 0;
+    if (targetFound) *targetFound = true;
+    if (out && capacity >= points.size()) {
+        std::copy(points.begin(), points.end(), out);
+    }
+    return points.size();
 }
 
 bool HirariUnifiedEngine::automationHostApply(void* host,
@@ -68,37 +66,35 @@ bool HirariUnifiedEngine::automationHostApply(void* host,
         payload->points, payload->points + payload->pointCount);
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != payload->trackId) continue;
-        switch (payload->kind) {
-            case kHirariAutomationVolume:
-                track->setVolumeAutomation(points);
-                return true;
-            case kHirariAutomationPan:
-                track->setPanAutomation(points);
-                return true;
-            case kHirariAutomationTrackDelay:
-                track->setTrackDelayAutomation(points);
-                return true;
-            case kHirariAutomationPlugin: {
-                auto lanes = track->getPluginAutomation();
-                lanes.erase(std::remove_if(lanes.begin(), lanes.end(),
-                                           [payload](const auto& lane) {
-                                               return lane.pluginIndex == payload->pluginIndex &&
-                                                      lane.parameterId == payload->parameterId;
-                                           }),
-                            lanes.end());
-                if (!points.empty()) {
-                    lanes.push_back({payload->pluginIndex, payload->parameterId, points});
-                }
-                track->setPluginAutomation(lanes);
-                return true;
+    Track* track = engine->findTrackLocked(payload->trackId);
+    if (!track) return false;
+    switch (payload->kind) {
+        case kHirariAutomationVolume:
+            track->setVolumeAutomation(points);
+            return true;
+        case kHirariAutomationPan:
+            track->setPanAutomation(points);
+            return true;
+        case kHirariAutomationTrackDelay:
+            track->setTrackDelayAutomation(points);
+            return true;
+        case kHirariAutomationPlugin: {
+            auto lanes = track->getPluginAutomation();
+            lanes.erase(std::remove_if(lanes.begin(), lanes.end(),
+                                       [payload](const auto& lane) {
+                                           return lane.pluginIndex == payload->pluginIndex &&
+                                                  lane.parameterId == payload->parameterId;
+                                       }),
+                        lanes.end());
+            if (!points.empty()) {
+                lanes.push_back({payload->pluginIndex, payload->parameterId, points});
             }
-            default:
-                return false;
+            track->setPluginAutomation(lanes);
+            return true;
         }
+        default:
+            return false;
     }
-    return false;
 }
 
 void HirariUnifiedEngine::automationHostRecordUndo(void* host, const char* name,

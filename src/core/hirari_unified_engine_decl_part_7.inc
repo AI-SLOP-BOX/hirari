@@ -51,6 +51,14 @@
     std::vector<std::shared_ptr<Track>> m_deferredDestructionTracks;
     mutable std::mutex m_tracksMutex;
 
+    // Id resolution shared by the region, routing, control and plugin host
+    // callbacks. Callers must already hold m_tracksMutex.
+    Track* findTrackLocked(uint32_t tid);
+    const Track* findTrackLocked(uint32_t tid) const;
+    std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid);
+    std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid) const;
+    const Region* findRegionLocked(uint32_t tid, uint32_t rid) const;
+
     struct SidechainRoute {
         uint32_t sourceId = 0;
         uint32_t destinationId = 0;
