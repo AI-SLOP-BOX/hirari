@@ -63,29 +63,18 @@ public:
                                      uint32_t sampleRate) {
         if (!track || path.empty() || totalSamples == 0 || sampleRate == 0 ||
             totalSamples > kMaxFreezeSamples) return false;
-        Hirari::Core::IO::WavDecoder decoder;
-        if (!decoder.open(path.string()) ||
-            std::abs(decoder.getSampleRate() - static_cast<double>(sampleRate)) > 0.5) {
+        auto restored = std::make_shared<AudioBuffer>(2, static_cast<uint32_t>(totalSamples));
+        const std::string pathText = path.string();
+        // Decode, rate agreement, and length admission are enforced by the
+        // Rust freeze reader; a mono artifact is widened to stereo there.
+        if (!hirari_track_freeze_read_float32(
+                reinterpret_cast<const uint8_t*>(pathText.data()), pathText.size(),
+                sampleRate, totalSamples, restored->getWritePointer(0),
+                restored->getWritePointer(1))) {
             return false;
         }
-        auto decoded = std::make_shared<AudioBuffer>();
-        decoder.decodeFull(*decoded);
-        if (decoded->getNumSamples() < totalSamples || decoded->getNumChannels() == 0) {
-            return false;
-        }
-        if (decoded->getNumChannels() >= 2) {
-            return track->publishFrozenAudio(std::move(decoded), totalSamples,
-                                             sampleRate, 0, 0, path.string());
-        }
-        auto stereo = std::make_shared<AudioBuffer>(2, decoded->getNumSamples());
-        const float* mono = decoded->getReadPointer(0);
-        if (!mono) return false;
-        std::memcpy(stereo->getWritePointer(0), mono,
-                    static_cast<size_t>(decoded->getNumSamples()) * sizeof(float));
-        std::memcpy(stereo->getWritePointer(1), mono,
-                    static_cast<size_t>(decoded->getNumSamples()) * sizeof(float));
-        return track->publishFrozenAudio(std::move(stereo), totalSamples,
-                                         sampleRate, 0, 0, path.string());
+        return track->publishFrozenAudio(std::move(restored), totalSamples,
+                                         sampleRate, 0, 0, pathText);
     }
 
     static void unfreezeTrack(std::shared_ptr<Track> track) noexcept {

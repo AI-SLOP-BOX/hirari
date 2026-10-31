@@ -1,17 +1,10 @@
-//! Source-compatible WAV decoder state for the native AudioBuffer facade.
+//! Shared WAV decode boundary for the diagnostic, import, and freeze restore
+//! paths.
 
 use crate::preview_audio_runtime::{
     hirari_decode_audio_file, hirari_free_decoded_audio, NativeDecodedAudio,
 };
-use std::ffi::{c_void, CString};
-
-struct WavDecoderState {
-    samples: *mut f32,
-    sample_count: usize,
-    channels: u32,
-    sample_rate: f64,
-    bits_per_sample: u32,
-}
+use std::ffi::CString;
 
 pub(crate) struct DecodedWav {
     pub samples: *mut f32,
@@ -51,40 +44,6 @@ pub(crate) fn decode_wav_file(path_bytes: &[u8]) -> Option<DecodedWav> {
     })
 }
 
-impl WavDecoderState {
-    fn new() -> Self {
-        Self { samples: std::ptr::null_mut(), sample_count: 0, channels: 0,
-            sample_rate: 0.0, bits_per_sample: 0 }
-    }
-
-    fn clear(&mut self) {
-        if !self.samples.is_null() {
-            unsafe { hirari_free_decoded_audio(self.samples, self.sample_count) };
-            self.samples = std::ptr::null_mut();
-        }
-        self.sample_count = 0;
-        self.channels = 0;
-        self.sample_rate = 0.0;
-        self.bits_per_sample = 0;
-    }
-}
-
-impl Drop for WavDecoderState {
-    fn drop(&mut self) { self.clear(); }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_wav_decoder_create() -> *mut c_void {
-    Box::into_raw(Box::new(WavDecoderState::new())).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_wav_decoder_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        drop(unsafe { Box::from_raw(state.cast::<WavDecoderState>()) });
-    }
-}
-
 fn supported_wav_path(path: &[u8]) -> bool {
     let Some(dot) = path.iter().rposition(|byte| *byte == b'.') else { return false };
     if path.iter().rposition(|byte| *byte == b'/' || *byte == b'\\')
@@ -97,74 +56,62 @@ fn supported_wav_path(path: &[u8]) -> bool {
         || extension.eq_ignore_ascii_case(b"rf64")
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_wav_decoder_frames(state: *const c_void) -> u32 {
-    unsafe { state.cast::<WavDecoderState>().as_ref() }.map_or(0, |state| {
-        if state.channels == 0 { 0 } else { (state.sample_count / state.channels as usize) as u32 }
-    })
+struct DecodedGuard {
+    samples: *mut f32,
+    sample_count: usize,
 }
 
+impl Drop for DecodedGuard {
+    fn drop(&mut self) {
+        if !self.samples.is_null() {
+            unsafe { hirari_free_decoded_audio(self.samples, self.sample_count) };
+        }
+    }
+}
+
+/// Restores a frozen stereo artifact straight into caller-owned planes.
+/// The rate and length contract lives here so the freeze cache is audited
+/// once, on the same decoder used for preview and import.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_wav_decoder_open(
-    state: *mut c_void,
+pub unsafe extern "C" fn hirari_track_freeze_read_float32(
     path: *const u8,
     path_size: usize,
+    sample_rate: u32,
+    total_samples: u64,
+    left: *mut f32,
+    right: *mut f32,
 ) -> bool {
-    let Some(state) = (unsafe { state.cast::<WavDecoderState>().as_mut() }) else { return false };
-    state.clear();
-    if path.is_null() || path_size == 0 {
-        return false;
-    }
-    let Some(decoded) = decode_wav_file(unsafe { std::slice::from_raw_parts(path, path_size) })
-    else {
-        return false;
-    };
-    state.samples = decoded.samples;
-    state.sample_count = decoded.sample_count;
-    state.channels = decoded.channels;
-    state.sample_rate = decoded.sample_rate;
-    state.bits_per_sample = decoded.bits_per_sample;
-    true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_wav_decoder_copy_to_channels(
-    state: *const c_void,
-    output: *const *mut f32,
-    channels: u32,
-    frames: u32,
-) -> bool {
-    let Some(state) = (unsafe { state.cast::<WavDecoderState>().as_ref() }) else { return false };
-    if state.samples.is_null() || output.is_null() || channels != state.channels
-        || frames as usize != state.sample_count / state.channels as usize
+    if path.is_null() || path_size == 0 || path_size > 1024 * 1024 || sample_rate == 0
+        || total_samples == 0 || total_samples > 64 * 1024 * 1024 || left.is_null()
+        || right.is_null()
     {
         return false;
     }
-    for channel in 0..channels as usize {
-        let destination = unsafe { *output.add(channel) };
-        if destination.is_null() { return false; }
-        for frame in 0..frames as usize {
-            unsafe {
-                destination.add(frame).write(*state.samples.add(frame * channels as usize + channel));
-            }
-        }
+    let Ok(total_samples) = usize::try_from(total_samples) else { return false };
+    let Some(decoded) =
+        decode_wav_file(unsafe { std::slice::from_raw_parts(path, path_size) })
+    else {
+        return false;
+    };
+    let _guard = DecodedGuard { samples: decoded.samples, sample_count: decoded.sample_count };
+    if (decoded.sample_rate - f64::from(sample_rate)).abs() > 0.5 {
+        return false;
+    }
+    let channels = decoded.channels as usize;
+    let frames = decoded.sample_count / channels;
+    if frames < total_samples {
+        return false;
+    }
+    let output_left = unsafe { std::slice::from_raw_parts_mut(left, total_samples) };
+    let output_right = unsafe { std::slice::from_raw_parts_mut(right, total_samples) };
+    let samples = unsafe { std::slice::from_raw_parts(decoded.samples, decoded.sample_count) };
+    for frame in 0..total_samples {
+        let first = samples[frame * channels];
+        let second = if channels >= 2 { samples[frame * channels + 1] } else { first };
+        output_left[frame] = first;
+        output_right[frame] = second;
     }
     true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_wav_decoder_sample_rate(state: *const c_void) -> f64 {
-    unsafe { state.cast::<WavDecoderState>().as_ref() }.map_or(0.0, |state| state.sample_rate)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_wav_decoder_channels(state: *const c_void) -> u32 {
-    unsafe { state.cast::<WavDecoderState>().as_ref() }.map_or(0, |state| state.channels)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_wav_decoder_bits_per_sample(state: *const c_void) -> u32 {
-    unsafe { state.cast::<WavDecoderState>().as_ref() }.map_or(0, |state| state.bits_per_sample)
 }
 
 // WAV write/decode contract: both sides are Rust-owned, so the assertions
@@ -216,6 +163,27 @@ mod tests {
         let sample_rate = decoded.sample_rate as u32;
         unsafe { hirari_free_decoded_audio(decoded.samples, decoded.sample_count) };
         Some((samples, channels, sample_rate))
+    }
+
+    fn read_freeze(
+        path: &std::path::Path,
+        rate: u32,
+        frames: usize,
+    ) -> Option<(Vec<f32>, Vec<f32>)> {
+        let bytes = path_bytes(path);
+        let mut left = vec![0.0f32; frames];
+        let mut right = vec![0.0f32; frames];
+        let restored = unsafe {
+            hirari_track_freeze_read_float32(
+                bytes.as_ptr(),
+                bytes.len(),
+                rate,
+                frames as u64,
+                left.as_mut_ptr(),
+                right.as_mut_ptr(),
+            )
+        };
+        restored.then_some((left, right))
     }
 
     fn read_u16(bytes: &[u8], offset: usize) -> u16 {
@@ -338,6 +306,34 @@ mod tests {
         assert_eq!(samples.len(), 8);
         assert!(samples.iter().all(|sample| sample.is_finite()));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn freeze_restore_widens_mono_and_enforces_rate_and_length() {
+        let path = temp_path("freeze-mono");
+        let mono = vec![0.0f32, 0.25, -0.5, 1.0];
+        assert_eq!(write_planes(&path, &[mono.clone()], 48_000, 0), 0);
+        let (left, right) = read_freeze(&path, 48_000, 4).expect("mono freeze must restore");
+        assert_eq!(left, mono);
+        assert_eq!(right, mono);
+        // A cache produced at another rate, or shorter than the frozen range,
+        // must not be published.
+        assert!(read_freeze(&path, 44_100, 4).is_none());
+        assert!(read_freeze(&path, 48_000, 5).is_none());
+        let _ = std::fs::remove_file(&path);
+
+        let stereo_path = temp_path("freeze-stereo");
+        let left_in = vec![0.5f32, -0.5, 0.125];
+        let right_in = vec![-0.25f32, 0.75, -0.125];
+        assert_eq!(
+            write_planes(&stereo_path, &[left_in.clone(), right_in.clone()], 44_100, 0),
+            0
+        );
+        let (left, right) =
+            read_freeze(&stereo_path, 44_100, 3).expect("stereo freeze must restore");
+        assert_eq!(left, left_in);
+        assert_eq!(right, right_in);
+        let _ = std::fs::remove_file(&stereo_path);
     }
 
     #[test]

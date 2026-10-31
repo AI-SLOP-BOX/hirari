@@ -24,6 +24,7 @@ pub mod atomic_parameter;
 pub mod auto_arrangement;
 pub mod audio_buffer_ops;
 pub mod audio_config_rules;
+pub mod audio_import_cache;
 pub mod audio_device_mode;
 pub mod async_snapshots;
 pub mod audio_graph;

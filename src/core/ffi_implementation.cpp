@@ -1,7 +1,25 @@
 #include "bridge_shims.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
 #include "dsp/spatial/metal_audio_kernel.hpp"
+#include "io/audio_decoder.hpp"
 #include <cstring>
+
+using HirariAudioWeakHandle = std::weak_ptr<::Hirari::Core::AudioBuffer>;
+
+// Import-cache weak handles. Rust stores the opaque pointer and asks for a
+// strong lock, liveness, or release; the buffer never crosses the FFI.
+extern "C" void* hirari_audio_import_weak_lock(void* weak_audio) {
+    auto* weak = static_cast<HirariAudioWeakHandle*>(weak_audio);
+    auto locked = weak ? weak->lock() : nullptr;
+    return locked ? new std::shared_ptr<::Hirari::Core::AudioBuffer>(std::move(locked)) : nullptr;
+}
+extern "C" bool hirari_audio_import_weak_alive(void* weak_audio) {
+    auto* weak = static_cast<HirariAudioWeakHandle*>(weak_audio);
+    return weak && !weak->expired();
+}
+extern "C" void hirari_audio_import_weak_release(void* weak_audio) {
+    delete static_cast<HirariAudioWeakHandle*>(weak_audio);
+}
 
 namespace Hirari::Core::Bridge {
 

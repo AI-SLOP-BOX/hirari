@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Media import caching and freeze-cache restore moved to Rust. Path and file
+  identity checks, hit/miss, eviction, and dead-buffer purge now run in
+  `audio_import_cache.rs` behind opaque weak handles, and freeze restore
+  decodes, enforces the rate/length contract, and widens mono artifacts in a
+  Rust reader instead of the native `WavDecoder` facade.
 - Media import derived a region's timeline length inside the native insert
   call, re-validating the decode and rates on the way. Rust now reads the
   decoded frame count, rounds the length up itself and passes it through, so

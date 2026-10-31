@@ -1599,6 +1599,9 @@ extern "C" bool hirari_track_freeze_render(
 extern "C" bool hirari_track_freeze_write_float32(
     const uint8_t* path, size_t path_size, uint32_t sample_rate,
     const float* left, const float* right, uint64_t total_samples);
+extern "C" bool hirari_track_freeze_read_float32(
+    const uint8_t* path, size_t path_size, uint32_t sample_rate,
+    uint64_t total_samples, float* left, float* right);
 extern "C" void* hirari_midi_region_state_create(const void* notes, size_t count);
 extern "C" void hirari_midi_region_state_destroy(void* state);
 extern "C" size_t hirari_midi_region_state_count(const void* state);
