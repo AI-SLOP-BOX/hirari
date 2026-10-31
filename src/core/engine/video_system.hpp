@@ -63,7 +63,6 @@ public:
     }
 
     bool hasVideo() const noexcept { return hirari_video_runtime_has_video(m_runtime); }
-    double frameRate() const noexcept { return hirari_video_runtime_fps(m_runtime); }
     double duration() const noexcept { return hirari_video_runtime_duration(m_runtime); }
     uint64_t frameRevision() const noexcept { return hirari_video_runtime_revision(m_runtime); }
 

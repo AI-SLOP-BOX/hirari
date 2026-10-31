@@ -171,9 +171,6 @@ extern "C" bool hirari_bus_audio_read(
 extern "C" void* hirari_bus_track_create();
 extern "C" void hirari_bus_track_destroy(void* state);
 extern "C" void hirari_bus_track_set_phase_inverted(void* state, bool inverted);
-extern "C" bool hirari_bus_track_fetch_audio(
-    const void* track_state, void* bus_audio_state,
-    float* left, float* right, uint32_t frames);
 extern "C" void* hirari_plugin_parameter_snapshot_create();
 extern "C" void hirari_plugin_parameter_snapshot_destroy(void* handle);
 extern "C" bool hirari_plugin_parameter_snapshot_set(const void* handle, uint32_t parameter_id, double value);

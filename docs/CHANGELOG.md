@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Dead engine members are gone. `HirariUnifiedEngine::get_track` (whose
+  fallback returned a function-local static `Track`), `Track::commitRegionEdits`,
+  `BusTrack::fetchAudio`, `VideoSystem::frameRate` and the orphan
+  `hirari_bus_track_fetch_audio` declaration had no remaining callers, so the
+  engine surface now matches what the bridge actually uses.
 - `AudioEngine` stopped duplicating engine getters that had no remaining
   callers. Five layout/generation readers now cross the cxx bridge bound to the
   engine itself, so Rust reads them without a forwarding hop, and the unused

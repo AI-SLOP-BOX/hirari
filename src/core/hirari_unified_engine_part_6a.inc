@@ -338,19 +338,6 @@ void HirariUnifiedEngine::installCommandHost() {
     hirari_command_host_install(&ops);
 }
 
-Track& HirariUnifiedEngine::get_track(uint32_t id) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& t : m_tracks) {
-        if (t->getId() == id) return *t;
-    }
-    // Never redirect an unknown/stale identifier to the first live track.
-    // Callers that need mutation must validate the ID before reaching this
-    // compatibility reference; returning a real track here would silently
-    // edit the wrong project object after reload.
-    static Track fallbackTrack{0, "Fallback Track", Track::Audio};
-    return fallbackTrack;
-}
-
 std::vector<std::shared_ptr<Track>> HirariUnifiedEngine::get_tracks_snapshot() const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     return m_tracks;

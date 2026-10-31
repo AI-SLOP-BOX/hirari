@@ -2,7 +2,6 @@
     bool assign_track_to_vca(uint32_t track_id, uint32_t group_id);
     void new_project();
     std::vector<std::shared_ptr<Track>> get_tracks_snapshot() const;
-    Track& get_track(uint32_t id);
 
     // Regions & Plugins
     bool add_region(uint32_t trackId, std::string_view path, double start_beat);

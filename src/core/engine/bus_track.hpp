@@ -115,15 +115,6 @@ public:
         hirari_bus_track_set_phase_inverted(m_trackState.get(), inverted);
     }
 
-    // Copies the selected bus stage into the caller's output. This method is
-    // allocation-free and is intended for the audio thread.
-    void fetchAudio(float* l, float* r, uint64_t /*start*/, uint32_t len,
-                    const ::Hirari::DSP::ProcessContext& /*context*/) {
-        if (!l || !r || len == 0 || !m_busState) return;
-        (void)hirari_bus_track_fetch_audio(
-            m_trackState.get(), m_busState, l, r, len);
-    }
-
     // BusTrack processing boundary: pre-FX bus input is placed in the Track
     // work buffer, then the inherited Track chain processes it and the result
     // is published as the bus post-FX stage. No allocation is performed here.

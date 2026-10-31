@@ -382,13 +382,6 @@
         }
         return false;
     }
-    // Legacy escape hatch: callers that mutate the returned vector must call
-    // commitRegionEdits() before the next audio block. Engine code uses the
-    // typed setters below so normal edits publish automatically.
-    void commitRegionEdits() {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        publishRegionSnapshot();
-    }
     uint64_t regionGeneration() const {
         return m_regionGeneration.load(std::memory_order_acquire);
     }
