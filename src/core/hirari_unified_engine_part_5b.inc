@@ -74,15 +74,7 @@ bool HirariUnifiedEngine::set_project_scale(int32_t root, int32_t type) {
 }
 
 bool HirariUnifiedEngine::set_articulation_map(uint32_t trackId, uint32_t mapHash) {
-    const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
-    bool found = false;
-    for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
-        if (state.activeTracks[i] && state.activeTracks[i]->getId() == trackId) {
-            found = true;
-            break;
-        }
-    }
-    if (!found) return false;
+    if (!findPublishedTrack(trackId)) return false;
     m_articulationMapHash.store(mapHash, std::memory_order_relaxed);
     return true;
 }
@@ -94,29 +86,19 @@ void HirariUnifiedEngine::installExpressionMapEditHost() {
         [](void* host, uint32_t trackId) -> void* {
             if (!host) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            const auto& state = engine->m_audioStates[
-                engine->m_activeStateIdx.load(std::memory_order_acquire)];
-            for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
-                auto* track = state.activeTracks[i];
-                if (track && track->getId() == trackId) return track->articulationStateHandle();
-            }
-            return nullptr;
+            Track* track = engine->findPublishedTrack(trackId);
+            return track ? track->articulationStateHandle() : nullptr;
         },
         [](void* host, uint32_t trackId, uint8_t kind, const uint8_t* data,
            size_t length) -> bool {
             if (!host || (length != 0 && !data)) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            const auto& state = engine->m_audioStates[
-                engine->m_activeStateIdx.load(std::memory_order_acquire)];
-            for (uint32_t i = 0; i < state.trackCount && i < 256; ++i) {
-                auto* track = state.activeTracks[i];
-                if (!track || track->getId() != trackId) continue;
-                std::string json(reinterpret_cast<const char*>(data), length);
-                if (kind == 0) track->setExpressionMapJson(std::move(json));
-                else track->setExpressionMapProJson(std::move(json));
-                return true;
-            }
-            return false;
+            Track* track = engine->findPublishedTrack(trackId);
+            if (!track) return false;
+            std::string json(reinterpret_cast<const char*>(data), length);
+            if (kind == 0) track->setExpressionMapJson(std::move(json));
+            else track->setExpressionMapProJson(std::move(json));
+            return true;
         },
     };
     hirari_expression_map_edit_host_install(&ops);

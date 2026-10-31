@@ -12,35 +12,21 @@ std::string HirariUnifiedEngine::plugin_compatibility_snapshot_json() const {
 }
 
 bool HirariUnifiedEngine::execute_vocal_remover(uint32_t tid) {
-    const auto& s = m_audioStates[m_activeStateIdx.load()];
-    for (uint32_t i = 0; i < s.trackCount && i < 256; ++i) {
-        Track* t = s.activeTracks[i];
-        if (t->getId() == tid) {
-            auto& buffer = t->getWorkBuffer(1024);
-            if (buffer.getNumChannels() >= 2) {
-                return hirari_vocal_remove_stereo(
-                    buffer.getWritePointer(0), buffer.getWritePointer(1), buffer.getNumSamples());
-            }
-            return false;
-        }
-    }
-    return false;
+    Track* track = findPublishedTrack(tid);
+    if (!track) return false;
+    auto& buffer = track->getWorkBuffer(1024);
+    if (buffer.getNumChannels() < 2) return false;
+    return hirari_vocal_remove_stereo(
+        buffer.getWritePointer(0), buffer.getWritePointer(1), buffer.getNumSamples());
 }
 
 float HirariUnifiedEngine::get_track_correlation(uint32_t tid) const {
-    const auto& s = m_audioStates[m_activeStateIdx.load()];
-    for (uint32_t i = 0; i < s.trackCount && i < 256; ++i) {
-        Track* t = s.activeTracks[i];
-        if (t->getId() == tid) {
-            auto& buffer = t->getWorkBuffer(1024);
-            if (buffer.getNumChannels() < 2) return 1.0f;
-
-            const float* pL = buffer.getReadPointer(0);
-            const float* pR = buffer.getReadPointer(1);
-            return hirari_stereo_correlation(pL, pR, buffer.getNumSamples());
-        }
-    }
-    return 1.0f;
+    Track* track = findPublishedTrack(tid);
+    if (!track) return 1.0f;
+    auto& buffer = track->getWorkBuffer(1024);
+    if (buffer.getNumChannels() < 2) return 1.0f;
+    return hirari_stereo_correlation(
+        buffer.getReadPointer(0), buffer.getReadPointer(1), buffer.getNumSamples());
 }
 
 void HirariUnifiedEngine::push_event(const ::Hirari::Core::EngineEvent& e) { m_eventQueue.push(e); }

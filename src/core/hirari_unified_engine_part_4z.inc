@@ -57,6 +57,15 @@ std::shared_ptr<Track> HirariUnifiedEngine::findTrackSharedLocked(uint32_t tid) 
     return nullptr;
 }
 
+Track* HirariUnifiedEngine::findPublishedTrack(uint32_t tid) const {
+    const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
+    for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
+        if (state.activeTracks[i] && state.activeTracks[i]->getId() == tid)
+            return state.activeTracks[i];
+    }
+    return nullptr;
+}
+
 const Region* HirariUnifiedEngine::findRegionLocked(uint32_t tid, uint32_t rid) const {
     for (const auto& track : m_tracks) {
         if (!track || track->getId() != tid) continue;

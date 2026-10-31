@@ -58,6 +58,9 @@
     std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid);
     std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid) const;
     const Region* findRegionLocked(uint32_t tid, uint32_t rid) const;
+    // Track lookup in the published audio snapshot. Used by control callbacks
+    // that do not hold m_tracksMutex.
+    Track* findPublishedTrack(uint32_t tid) const;
 
     // Sidechain route bookkeeping is project state owned by Rust
     // (sidechain_route_store.rs); the engine keeps only the opaque handle.

@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Articulation, expression-map, vocal-remover and correlation calls each
+  walked the published audio snapshot to find their track. They share one
+  snapshot lookup now, so the track-count and pointer-validity rules live in a
+  single place.
 - One-shot preview-sample playback kept its buffers, trigger/playing flags and
   cursor in C++ atomics, and the audio callback walked the published snapshot
   itself. Rust now owns the sampler behind an opaque handle: control code
