@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The engine's eleven host tables are installed from one initializer instead of
+  eleven per-table lazy statics. Installation still happens at image load before
+  any caller can reach the engine, but the order is now explicit rather than
+  left to cross-file static-initialization order.
 - Duplicated and unreferenced declarations are gone. The JACK driver no longer
   defines `input_channel_count` twice (a latent build break for every JACK
   configuration), `Mixing::AestheticFeatures` and its `TelemetryData` field had

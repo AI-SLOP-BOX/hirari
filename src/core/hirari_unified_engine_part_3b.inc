@@ -280,13 +280,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
     hirari_routing_edit_host_install(&ops);
 }
 
-namespace {
-[[maybe_unused]] const bool kRoutingEditHostInstalled = [] {
-    HirariUnifiedEngine::installRoutingEditHost();
-    return true;
-}();
-}  // namespace
-
 // Control edit host callbacks. Rust validates every naming/monitor/macro edit
 // and decides the undo entry; these handlers only read or apply the mutation.
 void HirariUnifiedEngine::installControlEditHost() {
@@ -399,13 +392,6 @@ void HirariUnifiedEngine::installControlEditHost() {
     };
     hirari_control_edit_host_install(&ops);
 }
-
-namespace {
-[[maybe_unused]] const bool kControlEditHostInstalled = [] {
-    HirariUnifiedEngine::installControlEditHost();
-    return true;
-}();
-}  // namespace
 
 // Plugin-chain edit host callbacks. Rust decides whether an edit is admitted
 // and which undo entry is recorded; these handlers only read or apply.
@@ -643,13 +629,6 @@ void HirariUnifiedEngine::installPluginEditHost() {
     };
     hirari_plugin_edit_host_install(&ops);
 }
-
-namespace {
-[[maybe_unused]] const bool kPluginEditHostInstalled = [] {
-    HirariUnifiedEngine::installPluginEditHost();
-    return true;
-}();
-}  // namespace
 
 
 bool HirariUnifiedEngine::has_sidechain_link(uint32_t sourceId, uint32_t destId,

@@ -527,10 +527,3 @@ void HirariUnifiedEngine::installTrackEditHost() {
     };
     hirari_track_edit_host_install(&ops);
 }
-
-namespace {
-[[maybe_unused]] const bool kTrackEditHostInstalled = [] {
-    HirariUnifiedEngine::installTrackEditHost();
-    return true;
-}();
-}  // namespace

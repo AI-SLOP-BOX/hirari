@@ -399,13 +399,6 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
     hirari_track_freeze_host_install(&ops);
 }
 
-namespace {
-[[maybe_unused]] const bool kTrackFreezeHostInstalled = [] {
-    HirariUnifiedEngine::installTrackFreezeHost();
-    return true;
-}();
-}  // namespace
-
 HirariUnifiedEngine::MeterData HirariUnifiedEngine::getMasterMeterData() const {
     if (m_analyzer) {
         auto d = m_analyzer->getLatestData();

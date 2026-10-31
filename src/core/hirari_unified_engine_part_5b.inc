@@ -121,10 +121,3 @@ void HirariUnifiedEngine::installExpressionMapEditHost() {
     };
     hirari_expression_map_edit_host_install(&ops);
 }
-
-namespace {
-[[maybe_unused]] const bool kExpressionMapEditHostInstalled = [] {
-    HirariUnifiedEngine::installExpressionMapEditHost();
-    return true;
-}();
-}  // namespace

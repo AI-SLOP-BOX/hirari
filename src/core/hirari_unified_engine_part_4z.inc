@@ -675,11 +675,6 @@ const HirariRegionHostOps kRegionEditHostOps = {
     &HirariUnifiedEngine::regionHostCompRanges,
 };
 
-[[maybe_unused]] const bool kRegionEditHostInstalled = [] {
-    hirari_region_host_install(&kRegionEditHostOps);
-    return true;
-}();
-
 }  // namespace
 
 // Differential check for the Rust region-table mirror: true when the mirror

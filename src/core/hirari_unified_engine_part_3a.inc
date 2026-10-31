@@ -72,13 +72,6 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
     hirari_plugin_sandbox_maintenance_host_install(&ops);
 }
 
-namespace {
-[[maybe_unused]] const bool kSandboxMaintenanceHostInstalled = [] {
-    HirariUnifiedEngine::installSandboxMaintenanceHost();
-    return true;
-}();
-}
-
 bool HirariUnifiedEngine::retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     for (const auto& track : m_tracks) {

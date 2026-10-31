@@ -143,11 +143,6 @@ const HirariAutomationHostOps kAutomationEditHostOps = {
     &HirariUnifiedEngine::automationHostRecordUndo,
 };
 
-[[maybe_unused]] const bool kAutomationEditHostInstalled = [] {
-    hirari_automation_host_install(&kAutomationEditHostOps);
-    return true;
-}();
-
 }  // namespace
 void HirariUnifiedEngine::installTrackControlHost() {
     static const HirariTrackControlHostOps ops = {
@@ -173,14 +168,6 @@ void HirariUnifiedEngine::installTrackControlHost() {
     hirari_track_control_host_install(&ops);
 }
 
-namespace {
-[[maybe_unused]] const bool kTrackControlHostsInstalled = [] {
-    HirariUnifiedEngine::installCommandHost();
-    HirariUnifiedEngine::installTrackControlHost();
-    return true;
-}();
-}  // namespace
-
 bool HirariUnifiedEngine::execute_auto_arrangement() {
     // Project extent, section boundaries and marker lengths are Rust-owned.
     // The engine keeps the region storage and the event queue behind the
@@ -201,3 +188,24 @@ bool HirariUnifiedEngine::execute_auto_arrangement() {
             ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "AI | ARRANGEMENT | SECTION_DETECTED");
         });
 }
+
+namespace {
+// Every host table is installed once, at image load and before any Rust caller
+// can reach the engine. One owner replaces the per-table lazy initializers, so
+// the install order is deterministic instead of depending on a linker's
+// cross-file static order.
+[[maybe_unused]] const bool kEngineHostTablesInstalled = [] {
+    HirariUnifiedEngine::installTrackEditHost();
+    HirariUnifiedEngine::installSandboxMaintenanceHost();
+    HirariUnifiedEngine::installRoutingEditHost();
+    HirariUnifiedEngine::installControlEditHost();
+    HirariUnifiedEngine::installPluginEditHost();
+    HirariUnifiedEngine::installExpressionMapEditHost();
+    HirariUnifiedEngine::installTrackFreezeHost();
+    HirariUnifiedEngine::installCommandHost();
+    HirariUnifiedEngine::installTrackControlHost();
+    hirari_region_host_install(&kRegionEditHostOps);
+    hirari_automation_host_install(&kAutomationEditHostOps);
+    return true;
+}();
+}  // namespace
