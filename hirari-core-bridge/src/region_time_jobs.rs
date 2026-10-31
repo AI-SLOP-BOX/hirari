@@ -490,7 +490,7 @@ fn spawn_job(job: &Arc<Job>) -> bool {
 fn regions_alignment_available(ops: &HirariRegionHostOps) -> bool {
     ops.find_region.is_some()
         && ops.apply_edit.is_some()
-        && ops.record_undo.is_some()
+        && crate::region_edit_host::can_record(ops)
         && ops.warp_markers.is_some()
         && ops.retain_audio.is_some()
         && ops.audio_view.is_some()

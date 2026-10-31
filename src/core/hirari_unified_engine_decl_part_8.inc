@@ -81,10 +81,6 @@ public:
                                           HirariRegionGroupMember* out, size_t capacity);
     static bool regionHostNoteEdit(void* host, uint32_t trackId, uint32_t regionId,
                                    void* context, HirariRegionNoteMutateFn mutate);
-    static bool regionHostRecordUndo(void* host, const char* name,
-                                     const HirariRegionEditPayload* undo, size_t undoCount,
-                                     const HirariRegionEditPayload* redo, size_t redoCount,
-                                     bool coalesce, bool perform);
     static void* regionHostRetainAudio(void* host, uint32_t trackId, uint32_t regionId);
     static uint32_t regionHostAudioView(void* handle, const float** out, size_t capacity,
                                         uint64_t* samples);

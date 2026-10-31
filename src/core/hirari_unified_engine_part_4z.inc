@@ -11,20 +11,6 @@ void fillRegionHostState(const Region& region, HirariRegionState& out) {
     out = region.editableState();
 }
 
-// The undo registry keeps its callbacks alive for the life of the process, so
-// a note-table snapshot handed over by Rust is owned here and freed with the
-// undo entry.
-struct OwnedRegionEdit {
-    HirariRegionEditPayload payload;
-    std::shared_ptr<HirariRegionVariAudioStore> noteStore;
-    // Whole-region copy owned by a Restore undo entry.
-    std::shared_ptr<Region> regionSnapshot;
-    // Warp markers owned by a Geometry or Markers undo entry.
-    std::shared_ptr<std::vector<HirariWarpMarker>> warpMarkers;
-    // Range edits owned by a RangeEdits undo entry.
-    std::shared_ptr<std::vector<HirariRegionRangeEdit>> rangeEdits;
-};
-
 }  // namespace
 
 // Every host callback resolves ids through the same traversal while holding
@@ -583,100 +569,13 @@ bool HirariUnifiedEngine::regionHostNoteEdit(void* host, uint32_t trackId, uint3
     return track && track->editRegionNoteStore(regionId, context, mutate);
 }
 
-bool HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,
-                                               const HirariRegionEditPayload* undo,
-                                               size_t undoCount,
-                                               const HirariRegionEditPayload* redo,
-                                               size_t redoCount, bool coalesce, bool perform) {
-    if (!host || !name) return false;
-    auto* engine = static_cast<HirariUnifiedEngine*>(host);
-    auto capture = [](const HirariRegionEditPayload* source, size_t count) {
-        std::vector<OwnedRegionEdit> entries;
-        entries.reserve(count);
-        for (size_t index = 0; index < count; ++index) {
-            OwnedRegionEdit entry;
-            entry.payload = source[index];
-            if (source[index].op == kHirariRegionEditNoteStore && source[index].blob) {
-                auto* handle = reinterpret_cast<HirariRegionVariAudioStore*>(
-                    const_cast<uint8_t*>(source[index].blob));
-                entry.noteStore = std::shared_ptr<HirariRegionVariAudioStore>(
-                    handle, [](HirariRegionVariAudioStore* store) {
-                        hirari_region_vari_audio_store_clear(store);
-                    });
-            }
-            if (source[index].op == kHirariRegionEditRestore && source[index].blob) {
-                entry.regionSnapshot = std::shared_ptr<Region>(
-                    reinterpret_cast<Region*>(const_cast<uint8_t*>(source[index].blob)));
-            }
-            if ((source[index].op == kHirariRegionEditGeometry ||
-                 source[index].op == kHirariRegionEditMarkers) && source[index].blob) {
-                const auto count = source[index].blobLen / sizeof(HirariWarpMarker);
-                const auto* markers =
-                    reinterpret_cast<const HirariWarpMarker*>(source[index].blob);
-                entry.warpMarkers = std::make_shared<std::vector<HirariWarpMarker>>(
-                    markers, markers + count);
-                entry.payload.blobLen = count * sizeof(HirariWarpMarker);
-            }
-            if (source[index].op == kHirariRegionEditRangeEdits && source[index].blob) {
-                const auto count = source[index].blobLen / sizeof(HirariRegionRangeEdit);
-                const auto* edits =
-                    reinterpret_cast<const HirariRegionRangeEdit*>(source[index].blob);
-                entry.rangeEdits = std::make_shared<std::vector<HirariRegionRangeEdit>>(
-                    edits, edits + count);
-                entry.payload.blobLen = count * sizeof(HirariRegionRangeEdit);
-            }
-            entries.push_back(std::move(entry));
-        }
-        return entries;
-    };
-    const auto undoCopy = capture(undo, undoCount);
-    const auto redoCopy = capture(redo, redoCount);
-    auto applyAll = [host](const std::vector<OwnedRegionEdit>& entries) {
-        for (const auto& entry : entries) {
-            HirariRegionEditPayload payload = entry.payload;
-            if (entry.regionSnapshot) {
-                payload.blob = reinterpret_cast<const uint8_t*>(entry.regionSnapshot.get());
-                payload.blobLen = 0;
-            }
-            if (entry.noteStore) {
-                payload.blob = reinterpret_cast<const uint8_t*>(entry.noteStore.get());
-                payload.blobLen = 0;
-            }
-            if (entry.warpMarkers) {
-                payload.blob =
-                    reinterpret_cast<const uint8_t*>(entry.warpMarkers->data());
-            }
-            if (entry.rangeEdits) {
-                payload.blob =
-                    reinterpret_cast<const uint8_t*>(entry.rangeEdits->data());
-            }
-            (void)HirariUnifiedEngine::regionHostApply(host, &payload);
-        }
-    };
-    if (perform) {
-        // The legacy perform path applied the edit through the redo callback,
-        // so replaying it here is the same contract, not an extra mutation.
-        engine->m_undoManager.performAction(
-            name, [applyAll, undoCopy] { applyAll(undoCopy); },
-            [applyAll, redoCopy] { applyAll(redoCopy); });
-        return true;
-    }
-    // Rust already applied the edit, so record the entry without replaying the
-    // redo a second time.
-    return engine->m_undoManager.recordAppliedAction(
-        name,
-        [applyAll, undoCopy] { applyAll(undoCopy); },
-        [applyAll, redoCopy] { applyAll(redoCopy); },
-        coalesce);
-}
-
 namespace {
 
 const HirariRegionHostOps kRegionEditHostOps = {
     &HirariUnifiedEngine::regionHostFind,
     &HirariUnifiedEngine::regionHostApply,
     &HirariUnifiedEngine::regionHostListSyncGroup,
-    &HirariUnifiedEngine::regionHostRecordUndo,
+    nullptr,  // undo capture lives in the Rust region edit host.
     &HirariUnifiedEngine::regionHostNoteEdit,
     &HirariUnifiedEngine::regionHostSnapshot,
     &HirariUnifiedEngine::regionHostReleaseSnapshot,

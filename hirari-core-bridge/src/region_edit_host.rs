@@ -42,6 +42,10 @@ use crate::region_split::{
 use crate::region_warp::{
     hirari_free_warp_markers, hirari_region_normalize_warp_markers, HirariWarpMarker,
 };
+use crate::undo_transaction::{
+    hirari_undo_manager_commit, hirari_undo_manager_discard_native_callback,
+    hirari_undo_manager_register_native_callback,
+};
 
 /// Payload op: write the policy-controlled scalar fields in place.
 pub const HIRARI_REGION_EDIT_INPLACE: i32 = 2;
@@ -422,6 +426,196 @@ fn record_performed(
     record_with(ops, host, name, undo, redo, true, true)
 }
 
+/// Whether the host can take an undo entry. The engine exposes its Rust
+/// history through `undo_state`; `record_undo` is the test seam that captures
+/// payloads instead.
+pub(crate) fn can_record(ops: &HirariRegionHostOps) -> bool {
+    ops.record_undo.is_some() || (ops.undo_state.is_some() && ops.apply_edit.is_some())
+}
+
+/// Copied or adopted storage a payload needs at replay time, because the
+/// caller's buffer and ownership handover expire once the edit returns.
+enum OwnedBlob {
+    Markers(Vec<HirariWarpMarker>),
+    RangeEdits(Vec<NativeRangeEdit>),
+}
+
+struct OwnedEdit {
+    payload: HirariRegionEditPayload,
+    blob: Option<OwnedBlob>,
+    // Note-table snapshot the caller handed over with a NoteStore payload.
+    note_store: *mut HirariRegionVariAudioStore,
+    // Whole-region snapshot the caller handed over with a Restore payload.
+    snapshot: *mut c_void,
+}
+
+impl OwnedEdit {
+    fn capture(source: HirariRegionEditPayload) -> Self {
+        let mut edit = Self {
+            payload: source,
+            blob: None,
+            note_store: ptr::null_mut(),
+            snapshot: ptr::null_mut(),
+        };
+        if source.blob.is_null() {
+            return edit;
+        }
+        match source.op {
+            HIRARI_REGION_EDIT_NOTE_STORE => {
+                edit.note_store = source.blob as *mut HirariRegionVariAudioStore;
+            }
+            HIRARI_REGION_EDIT_RESTORE => {
+                edit.snapshot = source.blob as *mut c_void;
+            }
+            HIRARI_REGION_EDIT_GEOMETRY | HIRARI_REGION_EDIT_MARKERS => {
+                let count = source.blob_len / std::mem::size_of::<HirariWarpMarker>();
+                let markers =
+                    unsafe { slice::from_raw_parts(source.blob.cast::<HirariWarpMarker>(), count) };
+                edit.blob = Some(OwnedBlob::Markers(markers.to_vec()));
+                edit.payload.blob_len = std::mem::size_of_val(markers);
+            }
+            HIRARI_REGION_EDIT_RANGE_EDITS => {
+                let count = source.blob_len / std::mem::size_of::<NativeRangeEdit>();
+                let edits =
+                    unsafe { slice::from_raw_parts(source.blob.cast::<NativeRangeEdit>(), count) };
+                edit.blob = Some(OwnedBlob::RangeEdits(edits.to_vec()));
+                edit.payload.blob_len = std::mem::size_of_val(edits);
+            }
+            _ => {}
+        }
+        edit
+    }
+
+    fn replay(&self, ops: &HirariRegionHostOps, host: *mut c_void) {
+        let Some(apply) = ops.apply_edit else { return; };
+        let mut payload = self.payload;
+        if !self.note_store.is_null() {
+            payload.blob = self.note_store.cast();
+            payload.blob_len = 0;
+        }
+        if !self.snapshot.is_null() {
+            payload.blob = self.snapshot.cast();
+            payload.blob_len = 0;
+        }
+        match &self.blob {
+            Some(OwnedBlob::Markers(markers)) => {
+                payload.blob = markers.as_ptr().cast();
+                payload.blob_len = std::mem::size_of_val(markers.as_slice());
+            }
+            Some(OwnedBlob::RangeEdits(edits)) => {
+                payload.blob = edits.as_ptr().cast();
+                payload.blob_len = std::mem::size_of_val(edits.as_slice());
+            }
+            None => {}
+        }
+        unsafe { apply(host, &payload) };
+    }
+}
+
+/// One history side. The history owns it until the entry is evicted, then
+/// `destroy_entry` drops the adopted note tables and region snapshots.
+struct ReplayEntry {
+    ops: HirariRegionHostOps,
+    host: *mut c_void,
+    edits: Vec<OwnedEdit>,
+}
+
+impl Drop for ReplayEntry {
+    fn drop(&mut self) {
+        for edit in &self.edits {
+            unsafe { vari_store_release(edit.note_store) };
+            if !edit.snapshot.is_null() {
+                if let Some(release) = self.ops.release_snapshot {
+                    unsafe { release(self.host, edit.snapshot) };
+                }
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn replay_entry(context: *mut c_void) {
+    if context.is_null() {
+        return;
+    }
+    let entry = unsafe { &*(context as *const ReplayEntry) };
+    for edit in &entry.edits {
+        edit.replay(&entry.ops, entry.host);
+    }
+}
+
+unsafe extern "C" fn destroy_entry(context: *mut c_void) {
+    if context.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(context as *mut ReplayEntry) });
+}
+
+fn register_entry(state: *mut c_void, entry: Box<ReplayEntry>) -> u64 {
+    let context = Box::into_raw(entry).cast::<c_void>();
+    let id = unsafe {
+        hirari_undo_manager_register_native_callback(
+            state,
+            context,
+            Some(replay_entry),
+            Some(destroy_entry),
+        )
+    };
+    if id == 0 {
+        unsafe { drop(Box::from_raw(context as *mut ReplayEntry)) };
+    }
+    id
+}
+
+/// Records one history entry in the engine's own history, taking ownership of
+/// the handles the caller attached to the payloads and copying the temporary
+/// marker/range-edit buffers the payloads point at.
+fn record_owned(
+    ops: &HirariRegionHostOps,
+    host: *mut c_void,
+    name: &[u8],
+    undo: &[HirariRegionEditPayload],
+    redo: &[HirariRegionEditPayload],
+    coalesce: bool,
+    perform: bool,
+) -> bool {
+    let Some(read_state) = ops.undo_state else { return false; };
+    let state = unsafe { read_state(host) };
+    if state.is_null() {
+        return false;
+    }
+    let undo_entry = Box::new(ReplayEntry {
+        ops: *ops,
+        host,
+        edits: undo.iter().copied().map(OwnedEdit::capture).collect(),
+    });
+    let undo_id = register_entry(state, undo_entry);
+    if undo_id == 0 {
+        return false;
+    }
+    let redo_entry = Box::new(ReplayEntry {
+        ops: *ops,
+        host,
+        edits: redo.iter().copied().map(OwnedEdit::capture).collect(),
+    });
+    let redo_id = register_entry(state, redo_entry);
+    if redo_id == 0 {
+        unsafe { hirari_undo_manager_discard_native_callback(state, undo_id) };
+        return false;
+    }
+    let name = name.strip_suffix(&[0u8][..]).unwrap_or(name);
+    unsafe {
+        hirari_undo_manager_commit(
+            state,
+            name.as_ptr(),
+            name.len(),
+            undo_id,
+            redo_id,
+            coalesce,
+            perform,
+        )
+    }
+}
+
 fn record_with(
     ops: &HirariRegionHostOps,
     host: *mut c_void,
@@ -431,8 +625,8 @@ fn record_with(
     coalesce: bool,
     perform: bool,
 ) -> bool {
-    match ops.record_undo {
-        Some(record_undo) => unsafe {
+    if let Some(record_undo) = ops.record_undo {
+        return unsafe {
             record_undo(
                 host,
                 name.as_ptr() as *const c_char,
@@ -443,9 +637,9 @@ fn record_with(
                 coalesce,
                 perform,
             )
-        },
-        None => false,
+        };
     }
+    record_owned(ops, host, name, undo, redo, coalesce, perform)
 }
 
 /// Applies one scalar field edit through an explicit host table.
@@ -1332,7 +1526,7 @@ fn edit_remove_with(
     }
     let mut restore = state_payload(track_id, region_id, HIRARI_REGION_EDIT_RESTORE, state);
     restore.blob = handle as *const u8;
-    if ops.record_undo.is_some() {
+    if can_record(ops) {
         // The host takes ownership of the handle with the undo entry.
         record(ops, host, b"Remove Region\0", &[restore], &[remove], false);
     } else {
@@ -1470,7 +1664,7 @@ fn replace_audio_with(
         release_snapshot(before);
         return false;
     }
-    if ops.record_undo.is_some() {
+    if can_record(ops) {
         // Both handles move to the undo entry.
         record(
             ops,
@@ -1815,7 +2009,7 @@ fn split_region_with(
         }
         return 0;
     }
-    if ops.record_undo.is_some() {
+    if can_record(ops) {
         let undo = [
             restore_payload(track_id, region_id, before),
             state_payload(
@@ -1866,7 +2060,7 @@ fn duplicate_region_with(
         return 0;
     }
     let duplicate_id = unsafe { clone(host, track_id, region_id, &duplicate) };
-    if duplicate_id == 0 || ops.record_undo.is_none() {
+    if duplicate_id == 0 || !can_record(ops) {
         return duplicate_id;
     }
     // A duplicated clip is a new timeline instance that keeps one stable
@@ -2052,7 +2246,7 @@ fn note_edit_with(
             note_edit_trampoline,
         )
     };
-    if !applied || ops.record_undo.is_none() {
+    if !applied || !can_record(ops) {
         unsafe {
             vari_store_release(context.before);
             vari_store_release(context.after);
@@ -2800,6 +2994,13 @@ use crate::audio_note_curve::{
 
     unsafe extern "C" fn fake_release(_host: *mut c_void, _handle: *mut c_void) {
         RELEASED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =
+        std::sync::atomic::AtomicPtr::new(ptr::null_mut());
+
+    unsafe extern "C" fn fake_undo_state(_host: *mut c_void) -> *mut c_void {
+        FAKE_UNDO.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     unsafe extern "C" fn fake_list(
@@ -4095,5 +4296,103 @@ use crate::audio_note_curve::{
             assert!(guard.undo.is_empty());
             drop(guard);
         }
+    }
+
+    #[test]
+    fn owned_history_copies_marker_payloads_before_replay() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(HirariRegionState::default());
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let mut ops = fake_ops();
+        ops.record_undo = None;
+        ops.undo_state = Some(fake_undo_state);
+        let host = 1usize as *mut c_void;
+
+        let mut undo_markers = vec![HirariWarpMarker {
+            source_sample: 10,
+            timeline_sample: 20,
+            transient: 1,
+        }];
+        let redo_markers = vec![HirariWarpMarker {
+            source_sample: 30,
+            timeline_sample: 40,
+            transient: 0,
+        }];
+        let payload = |markers: &[HirariWarpMarker]| HirariRegionEditPayload {
+            track_id: 1,
+            region_id: 2,
+            op: HIRARI_REGION_EDIT_MARKERS,
+            blob: markers.as_ptr().cast(),
+            blob_len: std::mem::size_of_val(markers),
+            ..Default::default()
+        };
+        assert!(record_with(
+            &ops,
+            host,
+            b"Markers\0",
+            &[payload(&undo_markers)],
+            &[payload(&redo_markers)],
+            false,
+            false,
+        ));
+        // The caller's buffer is released after the edit returns.
+        undo_markers[0].source_sample = 999;
+        assert_eq!(
+            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
+            1
+        );
+        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
+        let guard = fake().lock().unwrap();
+        assert_eq!(guard.applied.len(), 1);
+        assert_eq!(guard.applied[0].op, HIRARI_REGION_EDIT_MARKERS);
+        let replayed =
+            unsafe { ptr::read_unaligned(guard.applied_blobs[0].as_ptr().cast::<HirariWarpMarker>()) };
+        assert_eq!(replayed.source_sample, 10);
+        assert_eq!(replayed.timeline_sample, 20);
+        drop(guard);
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        FAKE_UNDO.store(ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[test]
+    fn evicted_history_entries_release_region_snapshots() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(HirariRegionState::default());
+        RELEASED.store(0, std::sync::atomic::Ordering::SeqCst);
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(1, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let mut ops = fake_ops();
+        ops.record_undo = None;
+        ops.undo_state = Some(fake_undo_state);
+        let host = 1usize as *mut c_void;
+        let handle = unsafe { fake_snapshot(host, 1, 2) };
+
+        let restore = restore_payload(1, 2, handle);
+        let remove = state_payload(1, 2, HIRARI_REGION_EDIT_REMOVE, HirariRegionState::default());
+        assert!(record_with(
+            &ops,
+            host,
+            b"Remove Region\0",
+            &[restore],
+            &[remove],
+            false,
+            false,
+        ));
+        assert_eq!(RELEASED.load(std::sync::atomic::Ordering::SeqCst), 0);
+        // A second entry pushes the first past the depth cap, so its snapshot
+        // handle must be handed back to the host.
+        assert!(record_with(
+            &ops,
+            host,
+            b"Remove Region\0",
+            &[restore],
+            &[remove],
+            false,
+            false,
+        ));
+        assert_eq!(RELEASED.load(std::sync::atomic::Ordering::SeqCst), 1);
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        FAKE_UNDO.store(ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }
 }

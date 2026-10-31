@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Region undo capture now runs in Rust. The region edit host copies warp-marker
+  and range-edit payloads, adopts the note-table and region-snapshot handles,
+  and commits one entry into the engine's Rust history, so the C++
+  `OwnedRegionEdit` registry and `regionHostRecordUndo` callback are deleted.
+  Region-alignment and quantize jobs gate on the same history availability.
 - The `RegionNoteEdits` and `RegionProcessingHistory` C++ adapters are
   deleted. `Region` holds the Rust note-edit store, its published frozen
   projection and the processing-history store directly, and the engine,
