@@ -44,12 +44,6 @@ enum class CommandType : uint32_t {
     SetAutomationRecordMode = 12
 };
 
-struct MarkerInfo {
-    uint64_t sample_position;
-    rust::String name;
-    uint32_t color;
-};
-
 struct EngineEvent {
     uint64_t timestamp;
     uint32_t type;
@@ -60,7 +54,6 @@ struct EngineEvent {
 
 // Re-export or forward declare BridgeFFI items if needed
 namespace BridgeFFI {
-    using ::Hirari::Core::MarkerInfo;
     using ::Hirari::Core::EngineEvent;
 }
 

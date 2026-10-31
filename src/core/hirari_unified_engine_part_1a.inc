@@ -42,6 +42,26 @@ std::vector<RoutingEngine::FeedbackConnection> takeRoutingFeedback(void* records
     hirari_routing_feedback_array_free(records, count);
     return out;
 }
+
+// Emits one articulation's timed key-switch events as scheduled note-offs.
+// `transition` selects the pre-note-on transition set; the tempo mapping stays
+// here because the Rust side has no access to the owned tempo state.
+void scheduleTimedKeySwitchOutputs(void* tempoState, Track* target, uint8_t articulationId,
+                                   bool transition, double startBeat, double sampleRate,
+                                   uint64_t offset) {
+    const auto emit = [tempoState, target, startBeat, sampleRate, offset](
+                          uint8_t outputChannel, uint8_t outputPitch,
+                          uint32_t lengthTicks) {
+        const double endBeat = startBeat + static_cast<double>(lengthTicks) / 960.0;
+        const uint64_t endSample = hirari_tempo_map_beats_to_samples(
+            tempoState, endBeat, sampleRate);
+        (void)target->scheduleExpressionNoteOff(outputChannel, outputPitch, endSample, offset);
+    };
+    if (transition)
+        target->forEachTimedTransitionKeySwitchOutput(articulationId, emit);
+    else
+        target->forEachTimedKeySwitchOutput(articulationId, emit);
+}
 }  // namespace
 
 // Singleton Implementation
@@ -376,32 +396,14 @@ void HirariUnifiedEngine::startRecoveryOrchestrator() {
                                 1.0, engine.m_sampleRate.load(std::memory_order_relaxed));
                             const double startBeat = hirari_tempo_map_samples_to_beats(
                                 engine.m_tempoState, note.startSample, sampleRate);
-                            target->forEachTimedTransitionKeySwitchOutput(
-                                note.articulationId,
-                                [&engine, target, startBeat, sampleRate, offset](
-                                    uint8_t outputChannel, uint8_t outputPitch,
-                                    uint32_t lengthTicks) {
-                                    const double endBeat = startBeat +
-                                        static_cast<double>(lengthTicks) / 960.0;
-                                    const uint64_t endSample = hirari_tempo_map_beats_to_samples(
-                                        engine.m_tempoState, endBeat, sampleRate);
-                                    (void)target->scheduleExpressionNoteOff(
-                                        outputChannel, outputPitch, endSample, offset);
-                                });
+                            scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
+                                                          note.articulationId, true, startBeat,
+                                                          sampleRate, offset);
                             target->addMidiInputNoteOn(channel, note.pitch, note.velocity,
                                                        offset, note.articulationId);
-                            target->forEachTimedKeySwitchOutput(
-                                note.articulationId,
-                                [&engine, target, startBeat, sampleRate, offset](
-                                    uint8_t outputChannel, uint8_t outputPitch,
-                                    uint32_t lengthTicks) {
-                                    const double endBeat = startBeat +
-                                        static_cast<double>(lengthTicks) / 960.0;
-                                    const uint64_t endSample = hirari_tempo_map_beats_to_samples(
-                                        engine.m_tempoState, endBeat, sampleRate);
-                                    (void)target->scheduleExpressionNoteOff(
-                                        outputChannel, outputPitch, endSample, offset);
-                                });
+                            scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
+                                                          note.articulationId, false, startBeat,
+                                                          sampleRate, offset);
                         } else if (engine.m_blockMidi.remainingCapacity() > 0) {
                             engine.m_blockMidi.addNoteOn(channel, note.pitch, note.velocity, offset);
                             ++engine.m_previewFallbackActiveNotes[note.midiChannel][note.pitch];

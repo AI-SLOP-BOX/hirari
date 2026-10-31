@@ -58,13 +58,6 @@ namespace Hirari::Core::Engine {
 
 class Track;
 
-namespace Mixing {
-struct AestheticFeatures {
-    float transientClarity = 1.0f;
-    float dynamicComplexity = 0.0f;
-};
-} // namespace Mixing
-
 struct EngineConfig {
     float tempo;
     uint32_t timeSigNum;

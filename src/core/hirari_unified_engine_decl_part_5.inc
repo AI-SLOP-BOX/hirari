@@ -55,7 +55,6 @@
         float correlation;
         float dspLoad = 0.0f;
         uint32_t activeVoices = 0;
-        Mixing::AestheticFeatures aesthetic; 
         uint64_t forensicAuditHash; // --- PHASE 50: CRYPTOGRAPHIC SOVEREIGNTY ---
         uint64_t version = 0; 
     };

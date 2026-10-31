@@ -107,7 +107,6 @@ public:
     uint64_t callback_count() const noexcept { return m_callbackCount.load(std::memory_order_acquire); }
     uint64_t dropped_input_blocks() const noexcept { return m_inputQueue.dropped_blocks(); }
     void discard_pending_input_blocks() noexcept { m_inputQueue.discard_pending(); }
-    uint32_t input_channel_count() const noexcept { return 0; }
     bool poll_input_block(float* const* destination,
                           uint32_t destinationChannelCapacity,
                           uint32_t destinationFrameCapacity,

@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Duplicated and unreferenced declarations are gone. The JACK driver no longer
+  defines `input_channel_count` twice (a latent build break for every JACK
+  configuration), `Mixing::AestheticFeatures` and its `TelemetryData` field had
+  no readers, and `MarkerInfo` was an unused bridge type. The articulation
+  key-switch scheduler also moved out of `processBlock` into one shared helper,
+  so the pre- and post-note-on transitions come from the same code path.
 - Dead engine members are gone. `HirariUnifiedEngine::get_track` (whose
   fallback returned a function-local static `Track`), `Track::commitRegionEdits`,
   `BusTrack::fetchAudio`, `VideoSystem::frameRate` and the orphan
