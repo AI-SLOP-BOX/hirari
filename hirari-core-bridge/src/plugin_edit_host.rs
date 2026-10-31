@@ -10,6 +10,11 @@
 use std::ffi::c_void;
 use std::sync::{Mutex, OnceLock};
 
+use crate::undo_transaction::{
+    hirari_undo_manager_commit, hirari_undo_manager_discard_native_callback,
+    hirari_undo_manager_register_native_callback,
+};
+
 /// Returns `-1` when the track is missing, otherwise the plugin's bypass
 /// state (`0`/`1`). An out-of-range plugin index on an existing track reads as
 /// `0`, matching `Track::getPluginBypass`.
@@ -67,6 +72,8 @@ pub type RecordPluginReplayFn = unsafe extern "C" fn(
 );
 /// Re-publishes the track snapshot after the chain changed.
 pub type SyncStructuralChangesFn = unsafe extern "C" fn(*mut c_void);
+/// Returns the engine's Rust undo history handle.
+pub type UndoStateFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -87,6 +94,7 @@ pub struct HirariPluginEditHostOps {
     pub release_plugin_snapshot: Option<ReleasePluginSnapshotFn>,
     pub record_plugin_replay: Option<RecordPluginReplayFn>,
     pub sync_structural_changes: Option<SyncStructuralChangesFn>,
+    pub undo_state: Option<UndoStateFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -115,6 +123,79 @@ pub unsafe extern "C" fn hirari_plugin_edit_host_install(
     }
 }
 
+/// A history callback body. The history owns the box and drops it when the
+/// entry leaves the undo/redo stacks.
+struct ReplayClosure(Box<dyn Fn()>);
+
+unsafe extern "C" fn invoke_replay(context: *mut c_void) {
+    if context.is_null() {
+        return;
+    }
+    let closure = unsafe { &*(context as *const ReplayClosure) };
+    (closure.0)();
+}
+
+unsafe extern "C" fn release_replay(context: *mut c_void) {
+    if context.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(context as *mut ReplayClosure) });
+}
+
+fn register_replay(state: *mut c_void, callback: Box<dyn Fn()>) -> u64 {
+    let context = Box::into_raw(Box::new(ReplayClosure(callback))).cast::<c_void>();
+    let id = unsafe {
+        hirari_undo_manager_register_native_callback(
+            state,
+            context,
+            Some(invoke_replay),
+            Some(release_replay),
+        )
+    };
+    if id == 0 {
+        unsafe { drop(Box::from_raw(context as *mut ReplayClosure)) };
+    }
+    id
+}
+
+/// Records an edit the caller already applied in the engine's own history.
+/// `recordAppliedAction` semantics: no replay, one diagnostics line.
+fn record_applied(
+    ops: &HirariPluginEditHostOps,
+    host: *mut c_void,
+    name: &str,
+    undo: impl Fn() + 'static,
+    redo: impl Fn() + 'static,
+) -> bool {
+    let Some(read_state) = ops.undo_state else {
+        return false;
+    };
+    let state = unsafe { read_state(host) };
+    if state.is_null() {
+        return false;
+    }
+    let undo_id = register_replay(state, Box::new(undo));
+    if undo_id == 0 {
+        return false;
+    }
+    let redo_id = register_replay(state, Box::new(redo));
+    if redo_id == 0 {
+        unsafe { hirari_undo_manager_discard_native_callback(state, undo_id) };
+        return false;
+    }
+    unsafe {
+        hirari_undo_manager_commit(
+            state,
+            name.as_ptr(),
+            name.len(),
+            undo_id,
+            redo_id,
+            false,
+            false,
+        )
+    }
+}
+
 /// Sets a plugin's bypass flag. The engine rejected an out-of-range plugin
 /// index before anything was recorded; a same-value set still records one
 /// entry, as it did before the policy moved here.
@@ -128,12 +209,20 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_bypass(
     plugin_index: u32,
     bypassed: bool,
 ) -> bool {
-    let Some(ops) = host_ops() else { return false };
-    let (Some(query), Some(apply), Some(record)) = (
-        ops.query_bypass,
-        ops.apply_bypass,
-        ops.record_bypass_undo,
-    ) else {
+    match host_ops() {
+        Some(ops) => set_bypass_with(&ops, host, track_id, plugin_index, bypassed),
+        None => false,
+    }
+}
+
+fn set_bypass_with(
+    ops: &HirariPluginEditHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    plugin_index: u32,
+    bypassed: bool,
+) -> bool {
+    let (Some(query), Some(apply)) = (ops.query_bypass, ops.apply_bypass) else {
         return false;
     };
     let current = unsafe { query(host, track_id, plugin_index) };
@@ -143,7 +232,22 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_bypass(
     if !unsafe { apply(host, track_id, plugin_index, bypassed) } {
         return false;
     }
-    unsafe { record(host, track_id, plugin_index, current != 0, bypassed) };
+    if let Some(record) = ops.record_bypass_undo {
+        unsafe { record(host, track_id, plugin_index, current != 0, bypassed) };
+        return true;
+    }
+    let before = current != 0;
+    record_applied(
+        ops,
+        host,
+        "Set Plugin Bypass",
+        move || {
+            unsafe { apply(host, track_id, plugin_index, before) };
+        },
+        move || {
+            unsafe { apply(host, track_id, plugin_index, bypassed) };
+        },
+    );
     true
 }
 
@@ -164,13 +268,27 @@ pub unsafe extern "C" fn hirari_plugin_edit_move(
         return false;
     }
     let Some(ops) = host_ops() else { return false };
-    let (Some(move_plugin), Some(record)) = (ops.move_plugin, ops.record_move_undo) else {
+    let Some(move_plugin) = ops.move_plugin else {
         return false;
     };
     if !unsafe { move_plugin(host, track_id, from_index, to_index) } {
         return false;
     }
-    unsafe { record(host, track_id, from_index, to_index) };
+    if let Some(record) = ops.record_move_undo {
+        unsafe { record(host, track_id, from_index, to_index) };
+        return true;
+    }
+    record_applied(
+        &ops,
+        host,
+        "Move Plugin",
+        move || {
+            unsafe { move_plugin(host, track_id, to_index, from_index) };
+        },
+        move || {
+            unsafe { move_plugin(host, track_id, from_index, to_index) };
+        },
+    );
     true
 }
 
@@ -193,11 +311,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_parameter(
         return false;
     }
     let Some(ops) = host_ops() else { return false };
-    let (Some(query), Some(apply), Some(record)) = (
-        ops.query_parameter,
-        ops.apply_parameter,
-        ops.record_parameter_undo,
-    ) else {
+    let (Some(query), Some(apply)) = (ops.query_parameter, ops.apply_parameter) else {
         return false;
     };
     let mut before = 0.0_f32;
@@ -207,16 +321,30 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_parameter(
     if !unsafe { apply(host, track_id, plugin_index, parameter_id, value) } {
         return false;
     }
-    unsafe {
-        record(
-            host,
-            track_id,
-            plugin_index,
-            parameter_id,
-            before,
-            value,
-        )
-    };
+    if let Some(record) = ops.record_parameter_undo {
+        unsafe {
+            record(
+                host,
+                track_id,
+                plugin_index,
+                parameter_id,
+                before,
+                value,
+            )
+        };
+        return true;
+    }
+    record_applied(
+        &ops,
+        host,
+        "Set Plugin Parameter",
+        move || {
+            unsafe { apply(host, track_id, plugin_index, parameter_id, before) };
+        },
+        move || {
+            unsafe { apply(host, track_id, plugin_index, parameter_id, value) };
+        },
+    );
     true
 }
 
@@ -329,18 +457,68 @@ pub unsafe extern "C" fn hirari_plugin_edit_load_preset(
     if plugin_type != preset_type {
         return false;
     }
-    unsafe {
+    if ops.undo_state.is_none() {
+        return unsafe {
+            apply(
+                host,
+                track_id,
+                plugin_index,
+                after.as_ptr(),
+                after.len(),
+                before.as_ptr(),
+                before.len(),
+                true,
+            )
+        };
+    }
+    if !unsafe {
         apply(
             host,
             track_id,
             plugin_index,
             after.as_ptr(),
             after.len(),
-            before.as_ptr(),
-            before.len(),
-            true,
+            std::ptr::null(),
+            0,
+            false,
         )
+    } {
+        return false;
     }
+    // The history keeps both snapshots; replay stores them without recording
+    // another entry.
+    let undo_copy = before.clone();
+    let redo_copy = after.to_vec();
+    record_applied(
+        &ops,
+        host,
+        "Load Plugin Preset",
+        move || unsafe {
+            apply(
+                host,
+                track_id,
+                plugin_index,
+                undo_copy.as_ptr(),
+                undo_copy.len(),
+                std::ptr::null(),
+                0,
+                false,
+            );
+        },
+        move || unsafe {
+            apply(
+                host,
+                track_id,
+                plugin_index,
+                redo_copy.as_ptr(),
+                redo_copy.len(),
+                std::ptr::null(),
+                0,
+                false,
+            );
+        },
+    );
+    true
 }
 
 /// Writes a plugin's current state as a preset file.
@@ -1115,5 +1293,41 @@ mod tests {
 
         unsafe { release(edit as *mut c_void) };
         assert_eq!(drain(), vec!["release 0xbeef"]);
+    }
+
+    static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =
+        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+    unsafe extern "C" fn fake_undo_state(_host: *mut c_void) -> *mut c_void {
+        FAKE_UNDO.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn bypass_without_native_recorder_uses_the_rust_history() {
+        let _guard = SERIAL.lock().unwrap();
+        drop(reset());
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let mut ops = fake_ops();
+        ops.record_bypass_undo = None;
+        ops.undo_state = Some(fake_undo_state);
+
+        assert!(set_bypass_with(
+            &ops,
+            std::ptr::null_mut(),
+            4,
+            2,
+            false
+        ));
+        assert_eq!(drain(), vec!["bypass=false"]);
+        assert_eq!(
+            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
+            1
+        );
+        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
+        assert_eq!(drain(), vec!["bypass=true"]);
+
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }
 }

@@ -365,42 +365,8 @@ void HirariUnifiedEngine::installPluginEditHost() {
             Track* track = engine->findTrackLocked(trackId);
             return track && track->movePlugin(fromIndex, toIndex);
         },
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, bool before, bool after) {
-            if (!host) return;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::shared_ptr<Track> target;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                target = engine->findTrackSharedLocked(trackId);
-            }
-            if (!target) return;
-            // Undo replays the stored values without re-entering the policy,
-            // exactly as the previous engine-owned lambdas did.
-            const auto undo = [target, pluginIndex, before]() {
-                (void)target->setPluginBypass(pluginIndex, before);
-            };
-            const auto redo = [target, pluginIndex, after]() {
-                (void)target->setPluginBypass(pluginIndex, after);
-            };
-            engine->m_undoManager.recordAppliedAction("Set Plugin Bypass", undo, redo);
-        },
-        [](void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex) {
-            if (!host) return;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::shared_ptr<Track> target;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                target = engine->findTrackSharedLocked(trackId);
-            }
-            if (!target) return;
-            const auto undo = [target, fromIndex, toIndex]() {
-                (void)target->movePlugin(toIndex, fromIndex);
-            };
-            const auto redo = [target, fromIndex, toIndex]() {
-                (void)target->movePlugin(fromIndex, toIndex);
-            };
-            engine->m_undoManager.recordAppliedAction("Move Plugin", undo, redo);
-        },
+        nullptr,  // undo capture lives in the Rust plugin edit host.
+        nullptr,  // undo capture lives in the Rust plugin edit host.
         [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
            float* out) -> bool {
             if (!host || !out) return false;
@@ -419,24 +385,7 @@ void HirariUnifiedEngine::installPluginEditHost() {
             Track* track = engine->findTrackLocked(trackId);
             return track && track->setPluginParameter(pluginIndex, parameterId, value);
         },
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
-           float before, float after) {
-            if (!host) return;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::shared_ptr<Track> target;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                target = engine->findTrackSharedLocked(trackId);
-            }
-            if (!target) return;
-            const auto undo = [target, pluginIndex, parameterId, before]() {
-                (void)target->setPluginParameter(pluginIndex, parameterId, before);
-            };
-            const auto redo = [target, pluginIndex, parameterId, after]() {
-                (void)target->setPluginParameter(pluginIndex, parameterId, after);
-            };
-            engine->m_undoManager.recordAppliedAction("Set Plugin Parameter", undo, redo);
-        },
+        nullptr,  // undo capture lives in the Rust plugin edit host.
         [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t* type,
            uint8_t* out, size_t capacity) -> size_t {
             if (!host) return std::numeric_limits<size_t>::max();
@@ -456,33 +405,15 @@ void HirariUnifiedEngine::installPluginEditHost() {
             return state.size();
         },
         [](void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* state,
-           size_t size, const uint8_t* before, size_t beforeSize, bool record) -> bool {
+           size_t size, const uint8_t*, size_t, bool) -> bool {
             if (!host || (size != 0 && !state)) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::shared_ptr<Track> target;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                target = engine->findTrackSharedLocked(trackId);
-                if (!target) return false;
-                std::vector<uint8_t> replacement;
-                if (size != 0) replacement.assign(state, state + size);
-                if (!target->setPluginState(pluginIndex, replacement)) return false;
-            }
-            if (!record) return true;
-            // The state is already stored; the entry only replays the two
-            // snapshots, exactly as the engine-owned lambdas did.
-            std::vector<uint8_t> beforeState;
-            std::vector<uint8_t> afterState;
-            if (beforeSize != 0) beforeState.assign(before, before + beforeSize);
-            if (size != 0) afterState.assign(state, state + size);
-            const auto undo = [target, pluginIndex, beforeState]() {
-                (void)target->setPluginState(pluginIndex, beforeState);
-            };
-            const auto redo = [target, pluginIndex, afterState]() {
-                (void)target->setPluginState(pluginIndex, afterState);
-            };
-            engine->m_undoManager.recordAppliedAction("Load Plugin Preset", undo, redo);
-            return true;
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            Track* track = engine->findTrackLocked(trackId);
+            if (!track) return false;
+            std::vector<uint8_t> replacement;
+            if (size != 0) replacement.assign(state, state + size);
+            return track->setPluginState(pluginIndex, replacement);
         },
         [](void* host, uint32_t trackId, uint32_t pluginType, const uint8_t* path, size_t pathLength,
            bool prepare, uint32_t* outIndex) -> bool {
@@ -529,6 +460,9 @@ void HirariUnifiedEngine::installPluginEditHost() {
         [](void* snapshot) { delete static_cast<Track::PluginSnapshot*>(snapshot); },
         &HirariUnifiedEngine::recordNativeReplay,
         &HirariUnifiedEngine::syncNative,
+        [](void* host) -> void* {
+            return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
+        },
     };
     hirari_plugin_edit_host_install(&ops);
 }

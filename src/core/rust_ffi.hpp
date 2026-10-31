@@ -1273,6 +1273,8 @@ struct HirariPluginEditHostOps {
     void (*recordPluginReplay)(void*, const uint8_t*, size_t, void*, ReplayFn, ReplayFn,
                                ReplayFn) = nullptr;
     void (*syncStructuralChanges)(void*) = nullptr;
+    // Returns the engine's Rust undo history handle.
+    void* (*undoState)(void*) = nullptr;
 };
 
 extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* ops);
