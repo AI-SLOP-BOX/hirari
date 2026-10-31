@@ -67,8 +67,6 @@ public:
                 continue;
             }
             m_componentType = description.componentType;
-            m_componentSubType = description.componentSubType;
-            m_componentManufacturer = description.componentManufacturer;
             if (configureAndInitialize(channels)) break;
             shutdownUnitOnly();
         }
@@ -188,9 +186,6 @@ public:
     bool isMidiInstrument() const noexcept {
         return m_componentType == kAudioUnitType_MusicDevice;
     }
-    OSType componentType() const noexcept { return m_componentType; }
-    OSType componentSubType() const noexcept { return m_componentSubType; }
-    OSType componentManufacturer() const noexcept { return m_componentManufacturer; }
 
     bool saveState(uint8_t* destination, size_t capacity, uint32_t& size) noexcept {
         size = 0;
@@ -346,15 +341,11 @@ private:
         }
         m_component = nullptr;
         m_componentType = 0;
-        m_componentSubType = 0;
-        m_componentManufacturer = 0;
     }
 
     CFBundleRef m_bundle = nullptr;
     AudioComponent m_component = nullptr;
     OSType m_componentType = 0;
-    OSType m_componentSubType = 0;
-    OSType m_componentManufacturer = 0;
     AudioUnit m_unit = nullptr;
     SandboxProtocol::SharedAudioBlock* m_input = nullptr;
     double m_sampleRate = 44100.0;

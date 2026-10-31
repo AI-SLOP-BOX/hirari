@@ -82,7 +82,6 @@ fn main() {
     }
 
     if target_os == "macos" {
-        build.file("src/metal_audio_kernel.mm");
         build.file("../src/dsp/spatial/metal_audio_kernel.mm");
         build.file("../src/core/engine/video_system_bridge.mm");
     }
@@ -119,11 +118,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/plugin_sandbox_host.rs");
     println!("cargo:rerun-if-changed=src/hirari_core_ref.cpp");
-    println!("cargo:rerun-if-changed=src/metal_audio_kernel.mm");
-    // The spatial Metal kernel is a separate translation unit from the bridge
-    // copy above. It was missing here, so editing it (or its header) silently
-    // linked the previous object and left the process racing on the singleton
-    // with no rebuild to pick up the fix.
     println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.mm");
     println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.hpp");
     println!("cargo:rerun-if-changed=../src/core/driver/mac_audio_driver_host.hpp");

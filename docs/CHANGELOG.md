@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The unused `Core::GPU::MetalAudioKernel` duplicate is deleted. The only
+  live Metal spatial kernel is `DSP::Spatial::MetalAudioKernel`, which the
+  bridge still initializes and processes through; the second declaration and
+  its bridge translation unit had no caller.
 - Unreferenced C++ helpers are gone: the engine's unused `renderBlock`
   convenience overload and its musical-time structs, the worker VST3
   runtime's editor and unload entry points, the limiter's direct
