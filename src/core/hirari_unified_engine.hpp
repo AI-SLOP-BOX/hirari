@@ -23,7 +23,6 @@
 #include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
 #include "io/audio_decoder.hpp"
-#include "../dsp/utils/dither.hpp"
 #include "plugins/plugin_compatibility_registry.hpp"
 #include <unordered_map>
 #include <unordered_set>

@@ -550,21 +550,8 @@ struct HirariBouncePlan {
 // range. The engine maps each code to its existing failure path.
 extern "C" int32_t hirari_bounce_render_extent(
     const HirariBouncePlanInput* input, HirariBouncePlan* out);
-extern "C" bool hirari_bounce_output_path_supported(
-    const uint8_t* path, size_t length, uint32_t format);
 // Lifecycle admission sets (bounce_plan.rs): terminal, cancellable, pausable, resumable.
 extern "C" bool hirari_bounce_state_terminal(uint32_t state), hirari_bounce_state_cancellable(uint32_t state), hirari_bounce_state_pausable(uint32_t state), hirari_bounce_state_resumable(uint32_t state);
-
-// Formats: 0 float32 RIFF/RF64, 1 PCM16, 2 PCM24, 3 WAVE64 float. The stream
-// rejects writes past the declared frame count and only publishes a complete
-// file from finish(), so callers cannot emit a truncated container.
-extern "C" void* hirari_bounce_stream_create(
-    const uint8_t* path, size_t length, uint64_t frames, uint32_t sample_rate,
-    uint8_t format);
-extern "C" uint8_t hirari_bounce_stream_write(
-    void* stream, const float* const* channels, uint32_t frames);
-extern "C" uint8_t hirari_bounce_stream_finish(void* stream);
-extern "C" void hirari_bounce_stream_free(void* stream);
 
 // Host operations for the Rust bounce render driver. The engine owns the
 // graph, transport atomics and streaming writers; the driver owns chunking,
@@ -588,6 +575,9 @@ struct HirariBounceHostOps {
 extern "C" bool hirari_bounce_render_driver(
     void* host, const HirariBounceHostOps* ops, const uint8_t* path,
     size_t path_length, uint32_t format);
+// The host only finalises streams the driver opened; creation and writes stay
+// behind the driver's own host callbacks.
+extern "C" uint8_t hirari_bounce_stream_finish(void* stream);
 
 enum HirariRegionEditOp : int32_t {
     // Replace the editable state and republish it (normalising add path).
@@ -938,16 +928,6 @@ extern "C" size_t hirari_native_processor_state_save(
 extern "C" bool hirari_native_processor_state_restore(
     int32_t kind, void* state, const uint8_t* bytes, size_t size,
     uint8_t* bypassed, float* mix, uint32_t* sidechain_bus_id);
-extern "C" void* hirari_tpdf_dither_create();
-extern "C" void* hirari_tpdf_dither_create_with_seed(uint32_t seed);
-extern "C" void hirari_tpdf_dither_destroy(void* state);
-extern "C" float hirari_tpdf_dither_next(void* state);
-extern "C" void hirari_tpdf_dither_process(void* state, float* samples, size_t frames);
-extern "C" void* hirari_noise_shaping_dither_create();
-extern "C" void hirari_noise_shaping_dither_destroy(void* state);
-extern "C" float hirari_noise_shaping_dither_process_sample(void* state, float sample, int32_t bits);
-extern "C" void hirari_noise_shaping_dither_process(
-    void* state, float* samples, size_t frames, int32_t bits);
 extern "C" void* hirari_master_meter_create(double sample_rate);
 extern "C" void hirari_master_meter_destroy(void* state);
 extern "C" void hirari_master_meter_prepare(void* state, double sample_rate);
@@ -1076,9 +1056,6 @@ extern "C" void hirari_sidechain_engine_publish_source(
 extern "C" void* hirari_sidechain_engine_capture_links(const void* state, uint32_t track);
 extern "C" bool hirari_sidechain_engine_restore_links(const void* state, const void* handle);
 extern "C" void hirari_sidechain_engine_free_captured_links(void* handle);
-extern "C" bool hirari_sidechain_engine_resolve_links(const void* state);
-extern "C" bool hirari_sidechain_engine_take_legacy_misuse(const void* state);
-
 // Routing engine composition root (hirari-core-bridge/src/routing_engine_core.rs).
 // One opaque handle owns the graph/gain/feedback/send-PDC/topology stores.
 extern "C" void* hirari_routing_engine_create();

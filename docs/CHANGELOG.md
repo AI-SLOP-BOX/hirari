@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- The C++ dither façade is gone. `src/dsp/utils/dither.hpp` only wrapped the
+  Rust `hirari_tpdf_dither_*`/`hirari_noise_shaping_dither_*` handles and had no
+  callers, so the header and its include are removed along with C-ABI
+  declarations that the engine never linked against
+  (`hirari_bounce_output_path_supported`, the bounce-stream
+  create/write/free trio, and the sidechain resolve/legacy-misuse probes).
+  Streaming bounces still finalise through `hirari_bounce_stream_finish`.
+
 - The plug-in fingerprint and undo-manager C++ contract blocks are gone.
   Native plug-in admission hashes paths inside Rust (`plugin_blacklist`), so
   the `hirari_plugin_fingerprint` C ABI, its `PluginScanCache::fingerprintForPath`
