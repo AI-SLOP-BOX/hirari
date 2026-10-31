@@ -22,8 +22,6 @@ SANITIZER_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 COMMON_FLAGS="-std=c++20 -Wall -Wextra -I. -Isrc"
 
 "$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
-    tests/effect_chain_watchdog_contract.cpp -o "$OUT_DIR/effect-chain-watchdog" "$BRIDGE_LIB"
-"$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
     tests/rt_dsp_contract.cpp -o "$OUT_DIR/rt-dsp" "$BRIDGE_LIB"
 
 if [ "$(uname -s)" = "Darwin" ]; then

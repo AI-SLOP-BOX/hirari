@@ -1,15 +1,12 @@
 #pragma once
 
-#include <vector>
-#include <memory>
-#include <atomic>
-#include <mutex>
-#include <thread>
 #include <algorithm>
-#include <cmath>
 #include <array>
-#include <chrono>
-#include <limits>
+#include <atomic>
+#include <cmath>
+#include <cstring>
+#include <memory>
+#include <vector>
 #include "../dsp/iprocessor.hpp"
 #include "rust_ffi.hpp"
 
@@ -17,13 +14,13 @@ namespace Hirari::Core {
 
 /**
  * @class EffectChain
- * @brief Thread-safe DSP Signal Orchestrator: Manages ordered plugin chains per track.
+ * @brief Per-track plugin invocation over the Rust-owned chain list.
  *
- * Thread Safety Design (Lock-Free RT Processing):
- * - C++ owns IProcessor objects and serializes processor edits under m_mutex.
- * - Rust owns immutable realtime snapshots, traverses them without locks or
- *   allocation, and gates readers against control mutations. C++ retains shared
- *   processor ownership until Rust reports that callback readers have exited.
+ * Rust owns entry order, bypass/parallel state, snapshot publication, latency
+ * and diagnostic aggregation, state markers, automation dispatch and reader
+ * admission (hirari-core-bridge/src/effect_chain_host.rs). C++ keeps the
+ * DSP::IProcessor instances because processing is virtual, and it keeps the
+ * parallel scratch buffer and sidechain view that the realtime callback fills.
  */
 class EffectChain {
 public:
@@ -39,73 +36,51 @@ public:
     explicit EffectChain(void* sidechainEngine = nullptr)
         : m_sidechainEngine(sidechainEngine ? sidechainEngine
                                             : hirari_sidechain_engine_default()),
-          m_rustState(hirari_effect_chain_runtime_create()) {}
+          m_state(hirari_effect_chain_create(&kOps)) {
+        // Preallocated so no control-thread resize can race an audio callback
+        // that is reading the parallel channel pointers.
+        m_parallelBuffer.resize(2, kMaxSidechainBlockSize);
+    }
 
     ~EffectChain() {
-        // Track destruction is a control-thread operation. Wait only here,
-        // never in process(), so the final generation cannot leak or be freed
-        // while a callback still traverses it.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (hirari_effect_chain_runtime_audio_reader_count(m_rustState) != 0 &&
-               std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::yield();
-        }
-        // A device callback that failed to quiesce must not deadlock process
-        // shutdown forever. Do not reclaim retired snapshots after a timeout:
-        // leaking the detached generation is safer than freeing it while an
-        // audio thread may still be traversing it.
-        if (hirari_effect_chain_runtime_audio_reader_count(m_rustState) != 0) {
-            // Runtime snapshots contain raw processor addresses. Keep both
-            // those objects and the Rust snapshot storage alive if shutdown
-            // could not quiesce the callback within the bounded wait.
-            auto* retained = new std::vector<Entry>();
-            retained->reserve(m_pendingProcessors.size() + m_retiredProcessorOwners.size());
-            for (auto& entry : m_pendingProcessors) retained->push_back(std::move(entry));
-            for (auto& entry : m_retiredProcessorOwners) retained->push_back(std::move(entry));
-            m_pendingProcessors.clear();
-            m_retiredProcessorOwners.clear();
-            m_rustState = nullptr;
-            return;
-        }
-        reclaimRetired();
-        hirari_effect_chain_runtime_destroy(m_rustState);
-        m_rustState = nullptr;
+        // Rust latches audio readers and, if a callback fails to quiesce
+        // within its bounded wait, deliberately leaks the generation instead
+        // of freeing memory a realtime thread may still traverse.
+        hirari_effect_chain_destroy(m_state);
+        m_state = nullptr;
     }
+
+    EffectChain(const EffectChain&) = delete;
+    EffectChain& operator=(const EffectChain&) = delete;
 
     /**
      * @brief Add a processor. UI/Message thread only.
      */
     void addProcessor(std::shared_ptr<DSP::IProcessor> proc, bool parallel = false) {
         if (!proc) return;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_pendingProcessors.push_back({proc, false, parallel});
-        if (m_sampleRate > 0.0 && m_maxBlockSize > 0) {
-            proc->prepareToPlay(m_sampleRate, m_maxBlockSize);
-        }
-        publishNewList();
+        auto* owner = new std::shared_ptr<DSP::IProcessor>(std::move(proc));
+        if (!hirari_effect_chain_add(m_state, owner, owner->get(), parallel)) delete owner;
     }
 
     /**
      * @brief Safe no-op interface mapping. Replaced try_lock with lock-free atomic pointer load.
      */
-    void syncToAudioThread() noexcept {
-        // No-op. The Rust-owned immutable snapshot is already published.
-    }
+    void syncToAudioThread() noexcept {}
 
     /**
      * @brief Process the Rust-published processor snapshot on the audio thread.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const DSP::ProcessContext& context) {
-        processThroughRust(buffer, midi, context, false, 0);
+        process(buffer, midi, context, false, 0);
     }
 
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi,
                  const DSP::ProcessContext& context, uint32_t trackId) {
-        processThroughRust(buffer, midi, context, true, trackId);
+        process(buffer, midi, context, true, trackId);
     }
 
     uint32_t getTotalLatencySamples() const {
-        return hirari_effect_chain_runtime_total_latency_samples(m_rustState);
+        return hirari_effect_chain_total_latency_samples(m_state);
     }
 
     // Maximum post-input duration needed for an offline bounce.  Serial
@@ -113,36 +88,33 @@ public:
     // longest branch.  This is intentionally a control-thread query so the
     // renderer can append enough silence without touching the RT list.
     //
-    // The lock is acquired with try_to_lock and the last sampled value is
-    // returned on contention.  These metrics are polled on a timer by the
-    // engine-health overlay, so blocking here would contend directly with
-    // parameter edits on the control thread; a `noexcept` signature must not
-    // be able to stall behind a descheduled lock holder either.
+    // The Rust chain is sampled with a try-lock and the last value is returned
+    // on contention.  These metrics are polled on a timer by the engine-health
+    // overlay, so blocking here would contend directly with parameter edits on
+    // the control thread; a `noexcept` signature must not be able to stall
+    // behind a descheduled lock holder either.
     uint32_t getTotalTailSamples() const noexcept {
-        std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
-        if (!lock.owns_lock()) return m_lastTailSamples.load(std::memory_order_relaxed);
-        const auto value = static_cast<uint32_t>(hirari_effect_chain_runtime_metric(
-            m_rustState, 2, &EffectChain::readProcessorMetric));
-        m_lastTailSamples.store(value, std::memory_order_relaxed);
-        return value;
+        uint64_t value = 0;
+        if (!hirari_effect_chain_metric_try(m_state, 2, &value))
+            return m_lastTailSamples.load(std::memory_order_relaxed);
+        const auto tail = static_cast<uint32_t>(value);
+        m_lastTailSamples.store(tail, std::memory_order_relaxed);
+        return tail;
     }
 
     // Control-thread only: drains processor watchdog edges without touching
     // the immutable realtime list from the audio callback.
     uint32_t takeWatchdogTrips() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return static_cast<uint32_t>(hirari_effect_chain_runtime_metric(
-            m_rustState, 0, &EffectChain::readProcessorMetric));
+        return static_cast<uint32_t>(hirari_effect_chain_metric(m_state, 0));
     }
 
     // Non-finite output is a diagnostic counter, so returning the most recent
     // sample under contention is correct and keeps this polling path free of
     // any blocking wait.  See getTotalTailSamples() for the rationale.
     uint64_t nonFiniteSampleCount() const noexcept {
-        std::unique_lock<std::mutex> lock(m_mutex, std::try_to_lock);
-        if (!lock.owns_lock()) return m_lastNonFiniteSamples.load(std::memory_order_relaxed);
-        const auto value = hirari_effect_chain_runtime_metric(
-            m_rustState, 1, &EffectChain::readProcessorMetric);
+        uint64_t value = 0;
+        if (!hirari_effect_chain_metric_try(m_state, 1, &value))
+            return m_lastNonFiniteSamples.load(std::memory_order_relaxed);
         m_lastNonFiniteSamples.store(value, std::memory_order_relaxed);
         return value;
     }
@@ -151,162 +123,94 @@ public:
      * @brief Set sample rate on all processors. UI/Message thread only.
      */
     void setSampleRate(double sr, uint32_t blockSize) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (!std::isfinite(sr) || sr <= 0.0 || blockSize == 0) return;
-        beginAudioMutation();
-        m_sampleRate = sr;
-        m_maxBlockSize = blockSize;
-        m_parallelBuffer.resize(2, blockSize);
-        for (auto& entry : m_pendingProcessors) {
-            if (entry.processor) entry.processor->prepareToPlay(sr, blockSize);
-        }
-        endAudioMutation();
-        publishNewList();
+        (void)hirari_effect_chain_set_sample_rate(m_state, sr, blockSize);
     }
 
-    void reset() noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        beginAudioMutation();
-        for (auto& entry : m_pendingProcessors) {
-            if (entry.processor) entry.processor->reset();
-        }
-        endAudioMutation();
-    }
+    void reset() noexcept { hirari_effect_chain_reset(m_state); }
 
     /**
      * @brief Set bypass state for a processor by index. UI/Message thread only.
      */
     void setBypass(uint32_t index, bool bypassed) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (index < m_pendingProcessors.size()) {
-            m_pendingProcessors[index].bypassed = bypassed;
-            publishNewList();
-        }
+        (void)hirari_effect_chain_set_bypass(m_state, index, bypassed);
     }
 
     bool getBypass(uint32_t index) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return index < m_pendingProcessors.size() && m_pendingProcessors[index].bypassed;
+        return hirari_effect_chain_bypass(m_state, index);
     }
 
     void setParameterAutomationRealtime(
         const DSP::TimedParameterEvent* events, size_t eventCount) noexcept {
-        if (!events || eventCount == 0) return;
-        ReaderGuard reader(m_rustState);
-        if (!reader.active()) return;
-        for (size_t index = 0; index < eventCount; ++index) {
-            const auto& event = events[index];
-            if (!std::isfinite(event.normalizedValue)) continue;
-            auto* processor = static_cast<DSP::IProcessor*>(
-                hirari_effect_chain_runtime_processor_at(m_rustState, event.processorIndex));
-            if (processor) {
-                processor->setParameterAtSample(
-                    event.parameterId, event.normalizedValue, event.sampleOffset);
-            }
-        }
+        static_assert(sizeof(DSP::TimedParameterEvent) == sizeof(HirariTimedParameterEvent));
+        hirari_effect_chain_parameter_automation(
+            m_state, reinterpret_cast<const HirariTimedParameterEvent*>(events), eventCount);
     }
 
     bool setParameter(uint32_t processorIndex, uint32_t parameterId, float value) {
-        if (!std::isfinite(value)) return false;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (processorIndex >= m_pendingProcessors.size()) return false;
-        auto& processor = m_pendingProcessors[processorIndex].processor;
-        if (!processor) return false;
-        beginAudioMutation();
-        processor->setParameter(parameterId, std::clamp(value, 0.0f, 1.0f));
-        endAudioMutation();
-        return true;
+        return hirari_effect_chain_set_parameter(m_state, processorIndex, parameterId, value);
     }
 
-    // State access is control-thread only. Keeping it here avoids exposing the
-    // immutable RT processor list to project/UI code.
+    // State access is control-thread only. The legacy marker for processors
+    // without a serializer is added by the Rust host.
     std::vector<uint8_t> getProcessorState(uint32_t processorIndex) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (processorIndex >= m_pendingProcessors.size() || !m_pendingProcessors[processorIndex].processor)
-            return {};
-        auto state = m_pendingProcessors[processorIndex].processor->getState();
-        if (state.empty() && m_pendingProcessors[processorIndex].processor->getNumParameters() > 0) {
-            // Keep project snapshots structurally complete for legacy
-            // processors without a serializer. Parameter values are restored
-            // separately, so this deterministic marker is only a non-empty
-            // cache/state identity, never an audio-thread payload.
-            state.resize(sizeof(float));
-            const float value = m_pendingProcessors[processorIndex].processor->getParameter(0);
-            std::memcpy(state.data(), &value, sizeof(float));
-        }
+        size_t length = 0;
+        uint8_t* data = hirari_effect_chain_processor_state(m_state, processorIndex, &length);
+        if (!data) return {};
+        std::vector<uint8_t> state(data, data + length);
+        hirari_effect_chain_buffer_free(data, length);
         return state;
     }
 
     bool setProcessorState(uint32_t processorIndex, const std::vector<uint8_t>& state) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (processorIndex >= m_pendingProcessors.size() || !m_pendingProcessors[processorIndex].processor)
-            return false;
-        beginAudioMutation();
-        bool restored = false;
-        try {
-            restored = m_pendingProcessors[processorIndex].processor->restoreStateChecked(state);
-        } catch (...) {
-            // State blobs come from project/plug-in boundaries. Never leave
-            // the audio mutation gate latched if a legacy processor throws.
-            restored = false;
-        }
-        endAudioMutation();
-        return restored;
+        return hirari_effect_chain_processor_state_restore(
+            m_state, processorIndex, state.data(), state.size());
     }
 
     std::vector<uint8_t> getProcessorGuiState(uint32_t processorIndex) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (processorIndex >= m_pendingProcessors.size() || !m_pendingProcessors[processorIndex].processor) return {};
-        return m_pendingProcessors[processorIndex].processor->saveGuiState();
+        size_t length = 0;
+        uint8_t* data = hirari_effect_chain_processor_gui_state(m_state, processorIndex, &length);
+        if (!data) return {};
+        std::vector<uint8_t> state(data, data + length);
+        hirari_effect_chain_buffer_free(data, length);
+        return state;
     }
 
     bool setProcessorGuiState(uint32_t processorIndex, const std::vector<uint8_t>& state) {
-        if (state.size() > 1024u * 1024u) return false;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (processorIndex >= m_pendingProcessors.size() || !m_pendingProcessors[processorIndex].processor) return false;
-        return m_pendingProcessors[processorIndex].processor->loadGuiState(state);
+        return hirari_effect_chain_processor_gui_state_restore(
+            m_state, processorIndex, state.data(), state.size());
     }
 
     std::shared_ptr<DSP::IProcessor> getProcessor(uint32_t processorIndex) const {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (processorIndex >= m_pendingProcessors.size()) return {};
-        return m_pendingProcessors[processorIndex].processor;
+        auto* owner = static_cast<std::shared_ptr<DSP::IProcessor>*>(
+            hirari_effect_chain_owner_clone(m_state, processorIndex));
+        if (!owner) return {};
+        auto processor = *owner;
+        delete owner;
+        return processor;
     }
 
     /**
-     * @brief Reclaim retired Rust snapshots and their C++ processor owners.
+     * @brief Reclaim retired snapshots and their C++ processor owners.
      */
-    void reclaimRetired() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        reclaimRetiredLocked();
-    }
+    void reclaimRetired() { hirari_effect_chain_reclaim(m_state); }
 
-private:
-    void reclaimRetiredLocked() {
-        if (hirari_effect_chain_runtime_audio_reader_count(m_rustState) != 0) return;
-        hirari_effect_chain_runtime_reclaim(m_rustState);
-        m_retiredProcessorOwners.clear();
-    }
-
-public:
     /**
      * @brief Clear all processors. UI/Message thread only.
      */
-    void clear() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_retiredProcessorOwners.insert(
-            m_retiredProcessorOwners.end(), m_pendingProcessors.begin(), m_pendingProcessors.end());
-        m_pendingProcessors.clear();
-        publishNewList();
-    }
+    void clear() { hirari_effect_chain_clear(m_state); }
 
     bool removeProcessor(uint32_t index, Entry* removed = nullptr) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (index >= m_pendingProcessors.size()) return false;
-        if (removed) *removed = m_pendingProcessors[index];
-        m_retiredProcessorOwners.push_back(m_pendingProcessors[index]);
-        m_pendingProcessors.erase(m_pendingProcessors.begin() + index);
-        publishNewList();
+        bool bypassed = false;
+        bool parallel = false;
+        auto* owner = static_cast<std::shared_ptr<DSP::IProcessor>*>(
+            hirari_effect_chain_remove(m_state, index, &bypassed, &parallel));
+        if (!owner) return false;
+        if (removed) {
+            removed->processor = *owner;
+            removed->bypassed = bypassed;
+            removed->parallel = parallel;
+        }
+        delete owner;
         return true;
     }
 
@@ -314,41 +218,22 @@ public:
     // removeProcessor(), preserving external-plugin state and sandbox identity.
     bool insertProcessor(uint32_t index, Entry entry) {
         if (!entry.processor) return false;
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (index > m_pendingProcessors.size()) return false;
-        m_pendingProcessors.insert(m_pendingProcessors.begin() + index, std::move(entry));
-        auto& inserted = m_pendingProcessors[index].processor;
-        if (inserted && m_sampleRate > 0.0 && m_maxBlockSize > 0)
-            inserted->prepareToPlay(m_sampleRate, m_maxBlockSize);
-        publishNewList();
+        auto* owner = new std::shared_ptr<DSP::IProcessor>(std::move(entry.processor));
+        if (!hirari_effect_chain_insert(m_state, index, owner, owner->get(),
+                                        entry.bypassed, entry.parallel)) {
+            delete owner;
+            return false;
+        }
         return true;
     }
 
     // Control-thread only. Preserve the processor instance and publish one
     // coherent replacement list to the realtime reader.
     bool moveProcessor(uint32_t from, uint32_t to) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        if (from >= m_pendingProcessors.size() || to >= m_pendingProcessors.size() ||
-            from == to) return false;
-        Entry entry = std::move(m_pendingProcessors[from]);
-        m_pendingProcessors.erase(m_pendingProcessors.begin() + from);
-        m_pendingProcessors.insert(m_pendingProcessors.begin() + to, std::move(entry));
-        publishNewList();
-        return true;
+        return hirari_effect_chain_move(m_state, from, to);
     }
 
 private:
-    static uint64_t readProcessorMetric(void* handle, uint32_t metric) noexcept {
-        auto* processor = static_cast<DSP::IProcessor*>(handle);
-        if (!processor) return 0;
-        switch (metric) {
-            case 0: return processor->takeWatchdogTrip() ? 1u : 0u;
-            case 1: return processor->nonFiniteSampleCount();
-            case 2: return processor->getTailSamples();
-            default: return 0;
-        }
-    }
-
     struct ProcessCallbackContext {
         EffectChain* owner;
         Core::AudioBuffer* buffer;
@@ -357,6 +242,17 @@ private:
         uint32_t trackId;
         bool withSidechain;
     };
+
+    void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi,
+                 const DSP::ProcessContext& context, bool withSidechain, uint32_t trackId) {
+        ProcessCallbackContext callback{this, &buffer, &midi, &context, trackId, withSidechain};
+        hirari_effect_chain_process(
+            m_state, &callback,
+            buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
+            m_parallelBuffer.getArrayOfWritePointers(), m_parallelBuffer.getNumChannels(),
+            m_parallelBuffer.getNumSamples(), buffer.getNumSamples(),
+            &EffectChain::processRealtimeNode);
+    }
 
     static bool processRealtimeNode(void* opaque, uint32_t index, void* processorHandle,
                                     bool parallel, float* mix) {
@@ -412,77 +308,107 @@ private:
         return true;
     }
 
-    void processThroughRust(Core::AudioBuffer& buffer, Core::MidiBuffer& midi,
-                            const DSP::ProcessContext& context,
-                            bool withSidechain, uint32_t trackId) {
-        ReaderGuard reader(m_rustState);
-        if (!reader.active()) {
-            buffer.clear(buffer.getNumSamples());
-            return;
+    // Per-entry adapters: the Rust host stores opaque DSP::IProcessor handles
+    // and calls back through this table for control-thread work.
+    static void prepareOp(void* p, double sr, uint32_t bs) {
+        static_cast<DSP::IProcessor*>(p)->prepareToPlay(sr, bs);
+    }
+    static void resetOp(void* p) { static_cast<DSP::IProcessor*>(p)->reset(); }
+    static void setParameterOp(void* p, uint32_t id, float value) {
+        static_cast<DSP::IProcessor*>(p)->setParameter(id, value);
+    }
+    static void setParameterAtSampleOp(void* p, uint32_t id, float value, uint32_t offset) {
+        static_cast<DSP::IProcessor*>(p)->setParameterAtSample(id, value, offset);
+    }
+    static uint32_t latencyOp(void* p) {
+        return static_cast<DSP::IProcessor*>(p)->getLatencySamples();
+    }
+    static size_t stateSizeOp(void* p) {
+        return static_cast<DSP::IProcessor*>(p)->getState().size();
+    }
+    static size_t stateCopyOp(void* p, uint8_t* out, size_t capacity) {
+        return copyBytes(static_cast<DSP::IProcessor*>(p)->getState(), out, capacity);
+    }
+    static bool stateRestoreOp(void* p, const uint8_t* data, size_t length) {
+        try {
+            return static_cast<DSP::IProcessor*>(p)->restoreStateChecked(restoreInput(data, length));
+        } catch (...) {
+            return false;
         }
-        ProcessCallbackContext callback{this, &buffer, &midi,
-                                        &context, trackId, withSidechain};
-        hirari_effect_chain_runtime_process_block(
-            m_rustState, &callback,
-            buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
-            m_parallelBuffer.getArrayOfWritePointers(), m_parallelBuffer.getNumChannels(),
-            m_parallelBuffer.getNumSamples(), buffer.getNumSamples(),
-            &EffectChain::processRealtimeNode);
+    }
+    static size_t guiStateSizeOp(void* p) {
+        return static_cast<DSP::IProcessor*>(p)->saveGuiState().size();
+    }
+    static size_t guiStateCopyOp(void* p, uint8_t* out, size_t capacity) {
+        return copyBytes(static_cast<DSP::IProcessor*>(p)->saveGuiState(), out, capacity);
+    }
+    static bool guiStateRestoreOp(void* p, const uint8_t* data, size_t length) {
+        try {
+            return static_cast<DSP::IProcessor*>(p)->loadGuiState(restoreInput(data, length));
+        } catch (...) {
+            return false;
+        }
+    }
+    static uint32_t numParametersOp(void* p) {
+        return static_cast<DSP::IProcessor*>(p)->getNumParameters();
+    }
+    static float parameterOp(void* p, uint32_t id) {
+        return static_cast<DSP::IProcessor*>(p)->getParameter(id);
+    }
+    static void* cloneOwnerOp(void* owner) {
+        return new std::shared_ptr<DSP::IProcessor>(
+            *static_cast<std::shared_ptr<DSP::IProcessor>*>(owner));
+    }
+    static void destroyOwnerOp(void* owner) {
+        delete static_cast<std::shared_ptr<DSP::IProcessor>*>(owner);
+    }
+    static uint64_t readMetricOp(void* p, uint32_t metric) {
+        auto* processor = static_cast<DSP::IProcessor*>(p);
+        switch (metric) {
+            case 0: return processor->takeWatchdogTrip() ? 1u : 0u;
+            case 1: return processor->nonFiniteSampleCount();
+            case 2: return processor->getTailSamples();
+            default: return 0;
+        }
     }
 
-    struct ReaderGuard {
-        explicit ReaderGuard(void* state)
-            : m_state(state), m_active(hirari_effect_chain_runtime_enter_audio(state)) {}
-        ~ReaderGuard() {
-            if (m_active) hirari_effect_chain_runtime_leave_audio(m_state);
-        }
-        bool active() const noexcept { return m_active; }
-        void* m_state;
-        bool m_active;
-    };
-
-    // Control-thread mutations of a processor instance must not overlap an
-    // audio callback. Rust snapshots hold raw handles; C++ retains shared
-    // owners across generations until every callback reader has left.
-    void beginAudioMutation() const noexcept {
-        hirari_effect_chain_runtime_begin_mutation(m_rustState);
+    static size_t copyBytes(const std::vector<uint8_t>& source, uint8_t* out, size_t capacity) {
+        const size_t length = std::min(source.size(), capacity);
+        if (length != 0) std::memcpy(out, source.data(), length);
+        return length;
     }
-
-    void endAudioMutation() const noexcept {
-        hirari_effect_chain_runtime_end_mutation(m_rustState);
+    static std::vector<uint8_t> restoreInput(const uint8_t* data, size_t length) {
+        return length != 0 ? std::vector<uint8_t>(data, data + length) : std::vector<uint8_t>();
     }
 
     // Session-owned when injected; Rust's process-wide default handle is only
     // the source-compatible fallback for legacy callers.
     void* m_sidechainEngine = nullptr;
-    double m_sampleRate = 0.0;
-    uint32_t m_maxBlockSize = 0;
     AudioBuffer m_parallelBuffer;
-    mutable std::mutex m_mutex;
     // Last sampled values for the lock-free diagnostic readers above, so a
     // contended poll returns a real measurement instead of blocking.
     mutable std::atomic<uint32_t> m_lastTailSamples{0};
     mutable std::atomic<uint64_t> m_lastNonFiniteSamples{0};
-    std::vector<Entry> m_pendingProcessors;  // Owned by UI thread (under mutex)
-    std::vector<Entry> m_retiredProcessorOwners; // Keep removed processors alive for old RT snapshots
-    void* m_rustState = nullptr;
-    // Reader admission and mutation exclusion live with the Rust runtime
-    // snapshots they protect.
+    void* m_state = nullptr;
 
-    // Publish immutable raw-processor metadata to Rust. C++ retains shared
-    // ownership separately so no shared_ptr operation occurs on the callback.
-    void publishNewList() {
-        std::vector<HirariEffectChainNodeView> nodes;
-        nodes.reserve(m_pendingProcessors.size());
-        for (const auto& entry : m_pendingProcessors) {
-            nodes.push_back({entry.processor.get(),
-                             static_cast<uint8_t>(entry.bypassed),
-                             static_cast<uint8_t>(entry.parallel),
-                             entry.processor ? entry.processor->getLatencySamples() : 0});
-        }
-        (void)hirari_effect_chain_runtime_publish(m_rustState, nodes.data(), nodes.size());
-        reclaimRetiredLocked();
-    }
+    static constexpr HirariEffectNodeOps kOps = {
+        &EffectChain::prepareOp,
+        &EffectChain::resetOp,
+        &EffectChain::setParameterOp,
+        &EffectChain::setParameterAtSampleOp,
+        &EffectChain::latencyOp,
+        &EffectChain::stateSizeOp,
+        &EffectChain::stateCopyOp,
+        &EffectChain::stateRestoreOp,
+        &EffectChain::guiStateSizeOp,
+        &EffectChain::guiStateCopyOp,
+        &EffectChain::guiStateRestoreOp,
+        &EffectChain::numParametersOp,
+        &EffectChain::parameterOp,
+        &EffectChain::cloneOwnerOp,
+        &EffectChain::destroyOwnerOp,
+        &EffectChain::readMetricOp,
+    };
 };
 
 } // namespace Hirari::Core

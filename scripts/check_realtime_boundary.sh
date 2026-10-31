@@ -88,22 +88,17 @@ if ! printf '%s\n' "$direct_callback_body" | search_quiet 'validInput' ||
     exit 1
 fi
 
-# The reader/mutation barrier now lives behind the Rust-owned runtime state:
-# ReaderGuard takes the opaque state and calls hirari_effect_chain_runtime_enter_audio.
-# Matching the old C++ member names here would fail against a correct
-# implementation, so assert on the runtime contract that still has to hold.
-if ! search_quiet 'hirari_effect_chain_runtime_enter_audio' "$chain_file"; then
-    echo "realtime boundary violation: EffectChain reader guard does not enter the runtime" >&2
+# The reader/mutation barrier now lives in the Rust-owned chain host:
+# EffectChain::process is one call into hirari_effect_chain_process, which
+# admits the callback as a reader, and every control-thread edit goes through a
+# Rust entry point that latches readers out before touching a processor.
+if ! search_quiet 'hirari_effect_chain_process' "$chain_file"; then
+    echo "realtime boundary violation: EffectChain realtime entry does not gate readers" >&2
     exit 1
 fi
 
-if ! search_quiet 'hirari_effect_chain_runtime_leave_audio' "$chain_file"; then
-    echo "realtime boundary violation: EffectChain reader guard does not leave the runtime" >&2
-    exit 1
-fi
-
-if ! search_quiet 'beginAudioMutation\(\)' "$chain_file"; then
-    echo "realtime boundary violation: control-thread mutation barrier is missing" >&2
+if ! search_quiet 'hirari_effect_chain_set_sample_rate' "$chain_file"; then
+    echo "realtime boundary violation: control-thread mutation entry is missing" >&2
     exit 1
 fi
 

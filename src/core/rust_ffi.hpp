@@ -1472,31 +1472,69 @@ extern "C" bool hirari_track_holographic_panner_set_kernel(
 extern "C" void hirari_track_holographic_panner_clear_kernel(const void* state);
 using HirariEffectNodeProcessWithHandle = bool (*)(
     void*, uint32_t, void*, bool, float*);
-struct HirariEffectChainNodeView {
-    void* processor;
-    uint8_t bypassed;
-    uint8_t parallel;
-    uint32_t latency_samples;
+struct HirariEffectNodeOps {
+    void (*prepare)(void*, double, uint32_t);
+    void (*reset)(void*);
+    void (*set_parameter)(void*, uint32_t, float);
+    void (*set_parameter_at_sample)(void*, uint32_t, float, uint32_t);
+    uint32_t (*latency_samples)(void*);
+    size_t (*state_size)(void*);
+    size_t (*state_copy)(void*, uint8_t*, size_t);
+    bool (*state_restore)(void*, const uint8_t*, size_t);
+    size_t (*gui_state_size)(void*);
+    size_t (*gui_state_copy)(void*, uint8_t*, size_t);
+    bool (*gui_state_restore)(void*, const uint8_t*, size_t);
+    uint32_t (*num_parameters)(void*);
+    float (*parameter)(void*, uint32_t);
+    void* (*clone_owner)(void*);
+    void (*destroy_owner)(void*);
+    uint64_t (*read_metric)(void*, uint32_t);
 };
-static_assert(sizeof(HirariEffectChainNodeView) == 16);
-extern "C" void* hirari_effect_chain_runtime_create();
-extern "C" bool hirari_effect_chain_runtime_enter_audio(const void* state);
-extern "C" void hirari_effect_chain_runtime_leave_audio(const void* state);
-extern "C" void hirari_effect_chain_runtime_begin_mutation(const void* state);
-extern "C" void hirari_effect_chain_runtime_end_mutation(const void* state);
-extern "C" uint32_t hirari_effect_chain_runtime_audio_reader_count(const void* state);
-extern "C" void hirari_effect_chain_runtime_destroy(void* state);
-extern "C" bool hirari_effect_chain_runtime_publish(
-    void* state, const HirariEffectChainNodeView* nodes, size_t count);
-extern "C" void hirari_effect_chain_runtime_reclaim(const void* state);
-extern "C" void* hirari_effect_chain_runtime_processor_at(
-    const void* state, uint32_t index);
-using HirariEffectChainMetricValue = uint64_t (*)(void*, uint32_t);
-extern "C" uint32_t hirari_effect_chain_runtime_total_latency_samples(const void* state);
-extern "C" uint64_t hirari_effect_chain_runtime_metric(
-    const void* state, uint32_t metric, HirariEffectChainMetricValue read_value);
-extern "C" void hirari_effect_chain_runtime_process_block(
-    const void* state, void* user_data,
+static_assert(sizeof(HirariEffectNodeOps) == 16 * sizeof(void*));
+struct HirariTimedParameterEvent {
+    uint32_t processor_index;
+    uint32_t parameter_id;
+    uint32_t sample_offset;
+    float normalized_value;
+};
+static_assert(sizeof(HirariTimedParameterEvent) == 16);
+extern "C" void* hirari_effect_chain_create(const HirariEffectNodeOps* ops);
+extern "C" void hirari_effect_chain_destroy(void* state);
+extern "C" bool hirari_effect_chain_add(
+    void* state, void* owner, void* processor, bool parallel);
+extern "C" bool hirari_effect_chain_insert(
+    void* state, uint32_t index, void* owner, void* processor,
+    bool bypassed, bool parallel);
+extern "C" void* hirari_effect_chain_remove(
+    void* state, uint32_t index, bool* bypassed, bool* parallel);
+extern "C" bool hirari_effect_chain_move(void* state, uint32_t from, uint32_t to);
+extern "C" void hirari_effect_chain_clear(void* state);
+extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
+extern "C" void* hirari_effect_chain_owner_clone(const void* state, uint32_t index);
+extern "C" bool hirari_effect_chain_set_bypass(void* state, uint32_t index, bool bypassed);
+extern "C" bool hirari_effect_chain_set_sample_rate(
+    void* state, double sample_rate, uint32_t block_size);
+extern "C" void hirari_effect_chain_reset(void* state);
+extern "C" bool hirari_effect_chain_set_parameter(
+    void* state, uint32_t index, uint32_t parameter_id, float value);
+extern "C" void hirari_effect_chain_parameter_automation(
+    void* state, const HirariTimedParameterEvent* events, size_t event_count);
+extern "C" uint8_t* hirari_effect_chain_processor_state(
+    void* state, uint32_t index, size_t* out_len);
+extern "C" uint8_t* hirari_effect_chain_processor_gui_state(
+    void* state, uint32_t index, size_t* out_len);
+extern "C" bool hirari_effect_chain_processor_state_restore(
+    void* state, uint32_t index, const uint8_t* data, size_t length);
+extern "C" bool hirari_effect_chain_processor_gui_state_restore(
+    void* state, uint32_t index, const uint8_t* data, size_t length);
+extern "C" void hirari_effect_chain_buffer_free(uint8_t* pointer, size_t length);
+extern "C" uint32_t hirari_effect_chain_total_latency_samples(const void* state);
+extern "C" uint64_t hirari_effect_chain_metric(const void* state, uint32_t metric);
+extern "C" bool hirari_effect_chain_metric_try(
+    const void* state, uint32_t metric, uint64_t* out_value);
+extern "C" void hirari_effect_chain_reclaim(void* state);
+extern "C" void hirari_effect_chain_process(
+    void* state, void* user_data,
     float* const* channels, uint32_t channel_count,
     float* const* parallel_channels, uint32_t parallel_channel_count,
     uint32_t parallel_capacity, uint32_t frames,

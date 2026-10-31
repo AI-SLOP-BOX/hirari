@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Effect-chain ownership, ordering and control-side mutation now live in Rust
+  (`effect_chain_host.rs`): entry order, bypass/parallel state, snapshot
+  publication, latency/diagnostic aggregation, legacy state markers,
+  sample-accurate automation dispatch and reader admission are Rust-owned.
+  C++ keeps only the `DSP::IProcessor` instances, the parallel scratch buffer
+  and the sidechain view; the watchdog contract moved to Rust tests.
 - Dead C++ surfaces that only duplicated Rust ownership are gone:
   `AudioEngine::shutdown_process` and `HirariUnifiedEngine::getInstance` (the
   engine is owned per bridge handle), plus 26 `rust_ffi.hpp` declarations of

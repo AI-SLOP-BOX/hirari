@@ -103,6 +103,7 @@ pub mod drummer;
 pub mod dynamics;
 pub mod dynamics_suite;
 pub mod effect_chain;
+pub mod effect_chain_host;
 pub mod elastic_audio;
 pub mod elastic_warp_engine;
 pub mod engine_analyzer;
