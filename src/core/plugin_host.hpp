@@ -16,5 +16,4 @@
 namespace Hirari::Core::Plugin {
 #include "plugin_host_part_1.inc"
 #include "plugin_host_part_2.inc"
-#include "plugin_host_part_3.inc"
 } // namespace Hirari::Core::Plugin

@@ -32,7 +32,6 @@ bool hirari_wav_decoder_copy_to_channels(
 uint32_t hirari_wav_decoder_frames(const void* state);
 double hirari_wav_decoder_sample_rate(const void* state);
 uint32_t hirari_wav_decoder_channels(const void* state);
-uint32_t hirari_wav_decoder_bits_per_sample(const void* state);
 }
 
 namespace Hirari::Core::IO {
@@ -67,10 +66,8 @@ public:
         (void)hirari_wav_decoder_copy_to_channels(
             m_state, out.getArrayOfWritePointers(), channels, frames);
     }
-    std::string getFormatName() const { return "WAV"; }
     double getSampleRate() const { return hirari_wav_decoder_sample_rate(m_state); }
     uint32_t getNumChannels() const { return hirari_wav_decoder_channels(m_state); }
-    uint32_t getBitsPerSample() const { return hirari_wav_decoder_bits_per_sample(m_state); }
 
 private:
     void* m_state = nullptr;

@@ -20,7 +20,6 @@
 #include "editing/audio_note_segment.hpp"
 #include "engine/track_freeze_manager.hpp"
 #include "engine/bus_track.hpp"
-#include "diagnostics/engine_diagnostics.hpp"
 #include "diagnostics/forensic_journaler.hpp"
 #include "io/audio_decoder.hpp"
 #include "plugins/plugin_compatibility_registry.hpp"
@@ -50,7 +49,6 @@ namespace Hirari::DSP::Effects { class MasterLimiter; }
 namespace Hirari::Core::Video { class VideoSync; }
 
 #include "log_buffer.hpp"
-#include "diagnostics/engine_diagnostics.hpp"
 #include "engine/routing_engine.hpp"
 #include "rust_ffi.hpp"
 #include <thread>

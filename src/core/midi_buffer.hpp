@@ -56,7 +56,6 @@ public:
         hirari_midi_buffer_add_note_on(m_state, channel, pitch, velocity, sampleOffset, articulationId);
     }
     void addNoteOff(uint8_t channel, uint8_t pitch, uint64_t sampleOffset) { hirari_midi_buffer_add_note_off(m_state, channel, pitch, sampleOffset); }
-    void addAllNotesOff(uint8_t channel, uint64_t sampleOffset) { hirari_midi_buffer_add_all_notes_off(m_state, channel, sampleOffset); }
 
     /**
      * @brief Stable, in-place timestamp sort with safe same-sample note order.

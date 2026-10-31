@@ -81,9 +81,6 @@ public:
         }
         return restarted && !m_failed.load(std::memory_order_acquire);
     }
-    bool resetPluginControlPlane() noexcept {
-        return m_host.requestPluginReset();
-    }
     bool setGenerationContext(PluginSandboxHost::GenerationContext context) noexcept {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
         return m_host.setGenerationContext(context);

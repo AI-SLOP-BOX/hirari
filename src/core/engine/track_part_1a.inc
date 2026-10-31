@@ -361,16 +361,6 @@ private:
         region.pitchSemitones = metadata.pitch_semitones;
     }
 
-    static HirariNativeRegionGeometry regionGeometryForRust(const Region& region) {
-        static_assert(std::is_standard_layout_v<HirariNativeRegionGeometry>);
-        static_assert(offsetof(HirariNativeRegionGeometry, warp_ratio) == 80);
-        static_assert(offsetof(HirariNativeRegionGeometry, source_sample_rate) == 88);
-        return {region.start, region.len, region.sourceLength, region.sourceOffset,
-                region.baseStart, region.baseSourceOffset, region.baseLength,
-                region.loopCount, region.fadeInSamples, region.fadeOutSamples,
-                region.warpRatio, region.sourceSampleRate, region.timelineSampleRate};
-    }
-
     std::string copyExpressionMapJson(uint8_t mapKind) const {
         size_t size = 0;
         auto* json = hirari_track_midi_expression_map_take(m_articulationState, mapKind, &size);

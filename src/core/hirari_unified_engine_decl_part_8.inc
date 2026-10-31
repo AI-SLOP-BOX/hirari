@@ -28,7 +28,6 @@
     static constexpr size_t kMaxMacros = 128;
     void* m_macroControl = hirari_macro_mapping_create();
     void* m_midiLearnState = hirari_midi_learn_create();
-    ::Hirari::Core::Diagnostics::EngineDiagnostics m_engineDiagnostics;
     ::Hirari::Core::Diagnostics::ForensicJournaler m_forensicJournaler;
     ::Hirari::Core::IO::AudioDecoderManager m_audioDecoderManager;
     std::atomic<bool> m_graphDirty{true};

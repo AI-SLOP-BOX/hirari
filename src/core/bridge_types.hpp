@@ -50,27 +50,6 @@ struct MarkerInfo {
     uint32_t color;
 };
 
-namespace Bridge {
-    struct StructureNode {
-        rust::String label;
-        double timestamp;
-    };
-
-    struct PlainClash {
-        uint32_t bin;
-        float intensity;
-        uint32_t track_b;
-    };
-
-    struct PlainLoudness {
-        float integrated;
-        float short_term;
-        float true_peak_l;
-        float true_peak_r;
-        float correlation;
-    };
-}
-
 struct EngineEvent {
     uint64_t timestamp;
     uint32_t type;

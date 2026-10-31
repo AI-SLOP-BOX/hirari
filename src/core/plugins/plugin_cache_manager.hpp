@@ -6,7 +6,6 @@
 
 #include "../rust_ffi.hpp"
 
-extern "C" bool hirari_plugin_scan_cache_should_scan(const uint8_t* path, size_t pathSize);
 extern "C" bool hirari_plugin_scan_cache_record_failure(const uint8_t* path, size_t pathSize,
                                                         uint32_t reason);
 extern "C" bool hirari_plugin_scan_cache_record_success(const uint8_t* path, size_t pathSize);
@@ -22,11 +21,6 @@ namespace Hirari::Core::Plugins {
  * matches the current fingerprint") is applied there.
  */
 namespace PluginScanCache {
-
-inline bool shouldScan(std::string_view path) {
-    return hirari_plugin_scan_cache_should_scan(
-        reinterpret_cast<const uint8_t*>(path.data()), path.size());
-}
 
 inline void recordScanFailure(std::string_view path, uint32_t reason = 1) {
     (void)hirari_plugin_scan_cache_record_failure(

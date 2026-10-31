@@ -112,31 +112,6 @@ public:
         if (!enqueue(preferredThread % getNumThreads(), task)) task.execute();
     }
 
-    // Queue a control/background task without ever executing it inline. This
-    // is intentionally separate from postTask(): callers that use it for
-    // cache work must be able to fall back to the synchronous direct result
-    // when the scheduler is not running, rather than blocking the caller.
-    bool postTaskAsync(uint32_t preferredThread, std::function<void()> task) {
-        if (!task || !isRunning() || getNumThreads() == 0) {
-            return false;
-        }
-        struct AsyncJob final : AudioTaskJob {
-            explicit AsyncJob(std::function<void()> fn) : work(std::move(fn)) {}
-            void run() noexcept override {
-                std::unique_ptr<AsyncJob> owner(this);
-                work();
-            }
-            std::function<void()> work;
-        };
-        auto* work = new (std::nothrow) AsyncJob(std::move(task));
-        if (!work) return false;
-        if (!enqueue(preferredThread % getNumThreads(), work)) {
-            delete work;
-            return false;
-        }
-        return true;
-    }
-
     bool isRunning() const noexcept {
         return hirari_audio_scheduler_is_running(m_state);
     }

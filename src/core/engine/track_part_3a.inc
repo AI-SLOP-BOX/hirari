@@ -136,7 +136,6 @@
     // on the audio side. They let the render graph select a real pre-fader or
     // pre-insert signal without changing the interactive mix state.
     const AudioBuffer& offlinePreFaderBuffer() const noexcept { return m_preFaderBuffer; }
-    const AudioBuffer& preFaderBuffer() const noexcept { return m_preFaderBuffer; }
     const AudioBuffer& sendPreFaderBuffer() const noexcept { return m_sendPreFaderBuffer; }
     const AudioBuffer& sendPostFaderBuffer() const noexcept { return m_sendPostFaderBuffer; }
     const AudioBuffer& offlinePreInsertBuffer() const noexcept { return m_preInsertBuffer; }

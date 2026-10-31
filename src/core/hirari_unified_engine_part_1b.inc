@@ -157,12 +157,6 @@
 
         // 3. System Telemetry & Adaptive Sovereignty (CPU Governor)
         float currentLoad = m_dspLoad.load(std::memory_order_relaxed);
-        // Diagnostics are useful, but formatting/publishing on every block
-        // needlessly competes with the audio callback. Keep a coarse heartbeat
-        // and leave the detailed telemetry to the control-side poller.
-        if (sampleCpu) {
-            m_engineDiagnostics.recordRealtimeBlock();
-        }
 
         // INDUSTRIAL: Adaptive CPU Governor
         // If the system is nearing its limits (>95%), we forensic-ly throttle background tracks.

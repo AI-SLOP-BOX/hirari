@@ -10,8 +10,6 @@
 namespace Hirari::Core::Bridge {
 
     struct BridgeEvent;
-    struct StructureNode;
-    struct BridgeClash;
     struct BridgeLoudness;
     enum class HirariCommand : uint32_t;
 

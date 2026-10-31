@@ -10,13 +10,6 @@
 
 namespace Hirari::Core::Database {
 
-struct DBRecord {
-    uint64_t timestamp;
-    std::string category;
-    std::string key;
-    std::string value;
-};
-
 class ProjectDB {
 public:
     static constexpr size_t kMaxInMemRecords = 10000;

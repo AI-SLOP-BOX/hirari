@@ -237,7 +237,6 @@ extern "C" void hirari_midi_buffer_add(
 // Channel validation and status-byte construction are Rust-owned.
 extern "C" void hirari_midi_buffer_add_note_on(void* state, uint8_t channel, uint8_t pitch, uint8_t velocity, uint64_t sampleOffset, uint8_t articulationId);
 extern "C" void hirari_midi_buffer_add_note_off(void* state, uint8_t channel, uint8_t pitch, uint64_t sampleOffset);
-extern "C" void hirari_midi_buffer_add_all_notes_off(void* state, uint8_t channel, uint64_t sampleOffset);
 extern "C" void* hirari_mixer_telemetry_create();
 extern "C" void hirari_mixer_telemetry_destroy(void* state);
 extern "C" bool hirari_midi_buffer_copy(void* state, const void* event);
@@ -976,8 +975,6 @@ extern "C" void hirari_tempo_map_destroy(void* state);
 extern "C" bool hirari_tempo_map_add_tempo(
     void* state, uint64_t sample_pos, double bpm, double sample_rate, bool ramp);
 extern "C" bool hirari_tempo_map_clear(void* state, double sample_rate, double initial_bpm);
-extern "C" size_t hirari_tempo_map_get_event_count(const void* state);
-extern "C" size_t hirari_tempo_map_copy_events(const void* state, void* output, size_t capacity);
 extern "C" double hirari_tempo_map_samples_to_beats(
     const void* state, uint64_t samples, double sample_rate);
 extern "C" uint64_t hirari_tempo_map_beats_to_samples(
@@ -1675,7 +1672,6 @@ struct HirariExpressionMapEditHostOps {
 extern "C" void hirari_expression_map_edit_host_install(
     const HirariExpressionMapEditHostOps* ops);
 extern "C" uint8_t hirari_plugin_admission_error(const char* path);
-extern "C" const char* hirari_plugin_scan_rejection(const char* path);
 extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bus);
 extern "C" size_t hirari_plugin_sandbox_find(const uint32_t*, size_t, uint32_t);
 extern "C" size_t hirari_plugin_sandbox_remove(uint32_t*, uint32_t*, size_t, uint32_t);

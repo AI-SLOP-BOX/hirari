@@ -65,7 +65,6 @@ public:
 
     bool start() { return m_host->start(); }
     void stop() noexcept { m_host->stop(); }
-    bool requestPluginReset() noexcept { return m_host->request_plugin_reset(); }
     bool isAlive() const noexcept { return m_host->is_alive(); }
     bool pollHealth() noexcept { return m_host->poll_health(); }
     bool restart(bool force = true) { return m_host->restart(force); }
@@ -159,7 +158,6 @@ public:
         return false;
     }
 
-    uint64_t getHeartbeat() const { return m_host->heartbeat(); }
     uint32_t takeDroppedOutputMidi() noexcept { return m_host->take_dropped_output_midi(); }
     uint32_t takeMailboxOverruns() noexcept { return m_host->take_mailbox_overruns(); }
     uint32_t takeInputMidiTruncations() noexcept { return m_host->take_input_midi_truncations(); }
@@ -171,7 +169,6 @@ public:
     uint32_t activeSampleRate() const noexcept { return m_host->active_sample_rate(); }
     uint32_t activeChannels() const noexcept { return m_host->active_channels(); }
     bool isMidiInstrument() const noexcept { return m_host->is_midi_instrument(); }
-    uint32_t takeProcessErrors() noexcept { return m_host->take_process_errors(); }
 
     bool setState(const uint8_t* data, size_t size) noexcept {
         if (data == nullptr && size != 0) return false;

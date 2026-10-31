@@ -32,9 +32,6 @@ public:
     }
     void processFXChain(::Hirari::Core::AudioBuffer* buffer, uint32_t len);
 
-    void setEnabled(bool e) { m_enabled = e; }
-    bool isEnabled() const { return m_enabled; }
-
 private:
     bool m_enabled = true;
     struct MetalSummingContext; 

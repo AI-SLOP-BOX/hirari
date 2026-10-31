@@ -112,8 +112,6 @@ pub mod ffi {
         #[namespace = "Hirari::Core::BridgeFFI"]
         type AudioEngine;
 
-        #[namespace = "Hirari::Core::Bridge"]
-        type StructureNode;
         #[namespace = "Hirari::Core::Engine"]
         type HirariUnifiedEngine;
 

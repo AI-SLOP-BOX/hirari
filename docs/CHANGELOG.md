@@ -67,6 +67,18 @@ production support.
 
 ### Changed
 
+- Dead C++ scaffolding left the engine boundary. The unused
+  `PluginScanner` translation-unit fragment (its only entry point,
+  `scanInSandbox`, had no callers — admission is decided by
+  `hirari_plugin_scan_rejection` from Rust), `EngineOrchestrator`,
+  `EngineDiagnostics` (its block counter was never read), the
+  `readTempoSnapshot`/`readTempoEvents` helpers, and a batch of accessors with
+  no remaining callers (`regionGeometryForRust`, `resetPluginControlPlane`,
+  `getHeartbeat`, `takeProcessErrors`, `shouldScan`, `preFaderBuffer`,
+  `postTaskAsync`, `DBRecord`, `WavDecoder::getFormatName`/`getBitsPerSample`,
+  `MidiBuffer::addAllNotesOff`, `MetalAudioKernel::setEnabled`/`isEnabled`,
+  and the bridge `StructureNode`/`PlainClash`/`PlainLoudness` types) were
+  removed, along with the FFI declarations that only they referenced.
 - Two unreachable engine entry points left the C++ boundary.
   `HirariUnifiedEngine::quantizeAudioGroup` (a 32-channel marshalling wrapper
   around `hirari_audio_quantize_group`) and the inline `get_dsp_load()` getter
