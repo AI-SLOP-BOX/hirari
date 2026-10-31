@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Dead C++ surfaces that only duplicated Rust ownership are gone:
+  `AudioEngine::shutdown_process` and `HirariUnifiedEngine::getInstance` (the
+  engine is owned per bridge handle), plus 26 `rust_ffi.hpp` declarations of
+  Rust exports that no C++ translation unit calls any more, including the
+  CoreMIDI block the MIDI monitor bypasses.
 - The silent fallback audio-device contract now lives in Rust
   (`fallback_audio_device.rs`). The C++ `Hirari::Platform` device abstraction
   had no production caller — the live engine opens CoreAudio through

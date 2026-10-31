@@ -64,12 +64,6 @@ void scheduleTimedKeySwitchOutputs(void* tempoState, Track* target, uint8_t arti
 }
 }  // namespace
 
-// Singleton Implementation
-HirariUnifiedEngine& HirariUnifiedEngine::getInstance() {
-    static HirariUnifiedEngine instance;
-    return instance;
-}
-
 HirariUnifiedEngine::~HirariUnifiedEngine() {
     // Async region jobs hold the engine host pointer; join them before any
     // member (decoder, tracks) is destroyed.

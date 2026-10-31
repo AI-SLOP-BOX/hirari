@@ -199,10 +199,6 @@
     // when one Rust/FFI handle is dropped.
     void shutdown() const;
 
-    // Explicit process-lifetime operation.  Call this only from the host's
-    // final shutdown path, after all AudioEngine handles are gone.
-    static void shutdown_process() noexcept;
-
 
     rust::Vec<uint8_t> get_video_frame() const;
 

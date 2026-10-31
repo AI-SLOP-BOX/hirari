@@ -15,7 +15,6 @@ public:
         Paused = 6,
     };
 
-    static HirariUnifiedEngine& getInstance();
     HirariUnifiedEngine();
     ~HirariUnifiedEngine();
 

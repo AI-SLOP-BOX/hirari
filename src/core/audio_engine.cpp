@@ -78,13 +78,6 @@ AudioEngine::AudioEngine(bool startDevice)
         if (m_engine) m_engine->shutdown();
     }
 
-    void AudioEngine::shutdown_process() noexcept {
-        // This is intentionally explicit and is not called by AudioEngine's
-        // destructor.  The host must invoke it once, at process shutdown,
-        // after all bridge handles and dependent services have stopped.
-        ::Hirari::Core::Engine::HirariUnifiedEngine::getInstance().shutdown();
-    }
-
     rust::Vec<uint8_t> AudioEngine::get_video_frame() const {
         return m_engine ? m_engine->get_video_frame() : rust::Vec<uint8_t>();
     }
