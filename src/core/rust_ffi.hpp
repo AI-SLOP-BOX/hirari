@@ -257,6 +257,26 @@ extern "C" uint64_t hirari_midi_buffer_dropped_count(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_oversize(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_extended(const void* state);
 extern "C" void hirari_midi_buffer_reject_extended(const void* state);
+
+// CoreMIDI host (mac_midi_host.rs). Only Apple builds link these.
+#if defined(__APPLE__)
+extern "C" char* hirari_core_midi_list_devices_json();
+extern "C" bool hirari_core_midi_send_message(uint32_t uniqueId, const uint8_t* data,
+                                              size_t size);
+extern "C" bool hirari_core_midi_start_input();
+extern "C" void hirari_core_midi_stop_input();
+extern "C" char* hirari_core_midi_poll_input_json();
+extern "C" uint64_t hirari_core_midi_host_time_now();
+extern "C" uint64_t hirari_core_midi_host_time_delta_samples(uint64_t start, uint64_t event,
+                                                             double sampleRate);
+extern "C" uint64_t hirari_core_midi_dropped_input_events();
+extern "C" void hirari_core_midi_string_free(char* value);
+#endif
+
+extern "C" bool hirari_plugin_scan_cache_record_failure(const uint8_t* path, size_t pathSize,
+                                                        uint32_t reason);
+extern "C" bool hirari_plugin_scan_cache_record_success(const uint8_t* path, size_t pathSize);
+
 extern "C" bool hirari_processor_state_encode(
     bool bypassed, float mix, uint32_t sidechain_bus,
     uint8_t* output, size_t output_len);

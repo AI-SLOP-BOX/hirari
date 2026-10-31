@@ -4,7 +4,6 @@
 #include "src/core/plugins/plugin_sandbox_host.hpp"
 #include "src/core/plugins/process_sandbox_processor.hpp"
 #include "src/core/plugins/au_sandbox_adapter.hpp"
-#include "src/core/plugins/plugin_cache_manager.hpp"
 #include "src/core/effect_chain.hpp"
 #include "src/core/project_automation.hpp"
 #include "src/io/wav_loader_utils.hpp"

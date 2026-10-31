@@ -18,9 +18,7 @@
 #include "../io/wav_loader_utils.hpp"
 
 #include "driver/mac_audio_driver_host.hpp" // also provides the bounded input queue
-#if defined(__APPLE__)
-#include "driver/mac_midi_device_host.hpp"
-#elif defined(HIRARI_ENABLE_JACK)
+#if defined(HIRARI_ENABLE_JACK) && !defined(__APPLE__)
 #include "external/jack_bridge_deep.hpp"
 #endif
 

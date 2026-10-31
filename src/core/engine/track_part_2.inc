@@ -161,11 +161,13 @@
             m_lastSandboxFailureText = processor->failureCode() == 0
                 ? "sandbox-start-failed"
                 : processor->failureText();
-            Hirari::Core::Plugins::PluginScanCache::recordScanFailure(
-                pluginPath, processor->failureCode());
+            (void)hirari_plugin_scan_cache_record_failure(
+                reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size(),
+                processor->failureCode());
             return false;
         }
-        Hirari::Core::Plugins::PluginScanCache::recordScanSuccess(pluginPath);
+        (void)hirari_plugin_scan_cache_record_success(
+            reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size());
         m_lastSandboxFailure.store(0, std::memory_order_release);
         m_lastSandboxFailureText = "none";
         const bool midiInstrument = processor->isMidiInstrument();
@@ -320,8 +322,9 @@
         const bool restarted = sandbox && sandbox->restart(true);
         if (restarted) markProjectLayoutChanged();
         if (restarted && sandboxIndex < m_sandboxedPluginPaths.size()) {
-            Hirari::Core::Plugins::PluginScanCache::recordScanSuccess(
-                m_sandboxedPluginPaths[sandboxIndex]);
+            const auto& path = m_sandboxedPluginPaths[sandboxIndex];
+            (void)hirari_plugin_scan_cache_record_success(
+                reinterpret_cast<const uint8_t*>(path.data()), path.size());
         }
         return restarted;
     }
@@ -335,8 +338,9 @@
             if (sandbox->pollHealth()) continue;
             if (autoRestart && sandbox->canAutoRetry() && sandbox->autoRestart()) {
                 if (sandboxIndex < m_sandboxedPluginPaths.size()) {
-                    Hirari::Core::Plugins::PluginScanCache::recordScanSuccess(
-                        m_sandboxedPluginPaths[sandboxIndex]);
+                    const auto& path = m_sandboxedPluginPaths[sandboxIndex];
+                    (void)hirari_plugin_scan_cache_record_success(
+                        reinterpret_cast<const uint8_t*>(path.data()), path.size());
                 }
                 ++recovered;
             }

@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The `MacMidiDeviceHost` and `PluginScanCache` C++ header adapters are
+  deleted. The bridge now calls the Rust `hirari_core_midi_*` CoreMIDI and
+  `hirari_plugin_scan_cache_*` entry points directly from the engine header,
+  so MIDI device enumeration/input and plug-in scan-cache recording have a
+  single, Rust-owned implementation path.
+
 - The `ForensicJournaler` and `PluginCompatibilityRegistry` C++ adapter
   classes are deleted; the engine now calls the Rust `hirari_forensic_journaler_*`
   ABI directly for journal lifecycle and command logging. The unused

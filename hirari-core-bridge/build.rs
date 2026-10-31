@@ -121,7 +121,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.mm");
     println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.hpp");
     println!("cargo:rerun-if-changed=../src/core/driver/mac_audio_driver_host.hpp");
-    println!("cargo:rerun-if-changed=../src/core/driver/mac_midi_device_host.hpp");
     println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_audio_driver.rs");
     println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_midi_host.rs");
     println!("cargo:rerun-if-changed=../src/platform/audio_device.hpp");

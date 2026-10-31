@@ -160,20 +160,66 @@ public:
 #endif
     }
     rust::String list_midi_devices_json() const {
-        return rust::String(::Hirari::Core::Driver::list_core_midi_devices_json());
+#if defined(__APPLE__)
+        char* raw = hirari_core_midi_list_devices_json();
+        rust::String result = raw ? rust::String(raw) : rust::String();
+        hirari_core_midi_string_free(raw);
+        return result;
+#else
+        return rust::String("[]");
+#endif
     }
     bool send_midi_message(uint32_t uniqueId, rust::Slice<const uint8_t> data) const {
-        return ::Hirari::Core::Driver::send_core_midi_message(uniqueId, data.data(), data.size());
+#if defined(__APPLE__)
+        return hirari_core_midi_send_message(uniqueId, data.data(), data.size());
+#else
+        (void)uniqueId; (void)data;
+        return false;
+#endif
     }
-    bool start_midi_input() const { return ::Hirari::Core::Driver::start_core_midi_input(); }
-    void stop_midi_input() const { ::Hirari::Core::Driver::stop_core_midi_input(); }
-    rust::String poll_midi_input_json() const { return rust::String(::Hirari::Core::Driver::poll_core_midi_input_json()); }
-    uint64_t midi_host_time_now() const { return ::Hirari::Core::Driver::core_midi_host_time_now(); }
+    bool start_midi_input() const {
+#if defined(__APPLE__)
+        return hirari_core_midi_start_input();
+#else
+        return false;
+#endif
+    }
+    void stop_midi_input() const {
+#if defined(__APPLE__)
+        hirari_core_midi_stop_input();
+#endif
+    }
+    rust::String poll_midi_input_json() const {
+#if defined(__APPLE__)
+        char* raw = hirari_core_midi_poll_input_json();
+        rust::String result = raw ? rust::String(raw) : rust::String();
+        hirari_core_midi_string_free(raw);
+        return result;
+#else
+        return rust::String("[]");
+#endif
+    }
+    uint64_t midi_host_time_now() const {
+#if defined(__APPLE__)
+        return hirari_core_midi_host_time_now();
+#else
+        return 0;
+#endif
+    }
     uint64_t midi_host_time_delta_samples(uint64_t start, uint64_t event, double sampleRate) const {
-        return ::Hirari::Core::Driver::core_midi_host_time_delta_samples(start, event, sampleRate);
+#if defined(__APPLE__)
+        return hirari_core_midi_host_time_delta_samples(start, event, sampleRate);
+#else
+        (void)start; (void)event; (void)sampleRate;
+        return 0;
+#endif
     }
     uint64_t midi_dropped_input_events() const {
-        return ::Hirari::Core::Driver::core_midi_dropped_input_events();
+#if defined(__APPLE__)
+        return hirari_core_midi_dropped_input_events();
+#else
+        return 0;
+#endif
     }
     bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
 #if defined(__APPLE__) || defined(HIRARI_ENABLE_JACK)
