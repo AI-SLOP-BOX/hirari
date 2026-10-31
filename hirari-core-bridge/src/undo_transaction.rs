@@ -506,6 +506,90 @@ pub unsafe extern "C" fn hirari_undo_manager_top_name(
     name.len()
 }
 
+/// Diagnostics line for a completed history operation, clipped to the ring's
+/// 95-byte text field exactly as the native facade clipped it.
+fn post_undo_log(level: u32, prefix: &str, name: &str) {
+    let mut message = String::with_capacity(prefix.len() + name.len());
+    message.push_str(prefix);
+    message.push_str(name);
+    let length = message.len().min(95);
+    let log = crate::log_buffer::hirari_log_buffer_default_state();
+    unsafe { crate::log_buffer::hirari_log_buffer_post(log, level, 0xA001, message.as_ptr(), length) };
+}
+
+fn undo_top_name(state: *const std::ffi::c_void, redo: bool) -> String {
+    let Some(state) = (unsafe { undo_state(state) }) else { return String::new(); };
+    let state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let stack = if redo { &state.redo } else { &state.undo };
+    stack.back().map(|entry| entry.name().to_string()).unwrap_or_default()
+}
+
+/// Commit an edit the caller already applied (`perform == false`) or wants
+/// replayed now (`perform == true`): invoke the redo side when asked, record
+/// the pair, and then log it. Any failure leaves neither side registered nor
+/// recorded, matching the native facade.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_undo_manager_commit(
+    state: *mut c_void,
+    name: *const u8,
+    name_len: usize,
+    undo_callback: u64,
+    redo_callback: u64,
+    coalesce: bool,
+    perform: bool,
+) -> bool {
+    if undo_callback == 0 || redo_callback == 0 {
+        return false;
+    }
+    let Some(name) = read_name(name, name_len) else { return false; };
+    let recorded = (!perform
+        || unsafe { hirari_undo_manager_invoke_native_callback(state, redo_callback) })
+        && unsafe {
+            hirari_undo_manager_record(
+                state,
+                name.as_ptr(),
+                name.len(),
+                undo_callback,
+                redo_callback,
+                hirari_undo_manager_timestamp_ms(),
+                coalesce,
+            )
+        };
+    if !recorded {
+        unsafe {
+            hirari_undo_manager_discard_native_callback(state, undo_callback);
+            hirari_undo_manager_discard_native_callback(state, redo_callback);
+        }
+        return false;
+    }
+    post_undo_log(
+        0,
+        if perform { "UNDO | PERFORMED | " } else { "UNDO | RECORDED | " },
+        &name,
+    );
+    true
+}
+
+/// Move one step through history, invoking the recorded callbacks. An empty
+/// stack is an observable diagnostic, not a silent no-op.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_undo_manager_apply(
+    state: *mut c_void,
+    redo: bool,
+) -> bool {
+    let name = undo_top_name(state, redo);
+    if !unsafe { hirari_undo_manager_apply_and_invoke(state, redo) } {
+        post_undo_log(
+            1,
+            "",
+            if redo { "UNDO | REDO_STACK_EMPTY" } else { "UNDO | STACK_EMPTY" },
+        );
+        return false;
+    }
+    post_undo_log(0, if redo { "UNDO | REDONE | " } else { "UNDO | UNDONE | " }, &name);
+    true
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_undo_manager_live_callback_count(
     state: *const std::ffi::c_void,
@@ -544,12 +628,44 @@ pub unsafe extern "C" fn hirari_undo_manager_clear(state: *mut std::ffi::c_void)
 mod tests {
     use crate::engine_edit_ext::TrackEditExt;
     use super::{
-        hirari_undo_manager_abort_transaction, hirari_undo_manager_apply_history,
-        hirari_undo_manager_begin_transaction, hirari_undo_manager_create,
+        hirari_undo_manager_abort_transaction, hirari_undo_manager_apply,
+        hirari_undo_manager_apply_history, hirari_undo_manager_begin_transaction,
+        hirari_undo_manager_commit, hirari_undo_manager_create,
         hirari_undo_manager_destroy, hirari_undo_manager_end_transaction,
         hirari_undo_manager_live_callback_count, hirari_undo_manager_record,
-        hirari_undo_manager_undo_count,
+        hirari_undo_manager_register_native_callback, hirari_undo_manager_undo_count,
     };
+
+    unsafe extern "C" fn count_callback(context: *mut std::ffi::c_void) {
+        unsafe { *(context as *mut i32) += 1 };
+    }
+
+    unsafe extern "C" fn drop_callback(_: *mut std::ffi::c_void) {}
+
+    #[test]
+    fn commit_and_apply_run_redo_then_undo_and_report_empty_stacks() {
+        unsafe {
+            let state = hirari_undo_manager_create(8, 0);
+            let mut invocations = 0i32;
+            let context = &mut invocations as *mut i32 as *mut std::ffi::c_void;
+            let undo_id = hirari_undo_manager_register_native_callback(
+                state, context, Some(count_callback), Some(drop_callback));
+            let redo_id = hirari_undo_manager_register_native_callback(
+                state, context, Some(count_callback), Some(drop_callback));
+            assert!(undo_id != 0 && redo_id != 0);
+            assert!(hirari_undo_manager_commit(
+                state, b"gain".as_ptr(), 4, undo_id, redo_id, false, true));
+            assert_eq!(invocations, 1);
+            assert_eq!(hirari_undo_manager_undo_count(state), 1);
+            assert!(hirari_undo_manager_apply(state, false));
+            assert_eq!(invocations, 2);
+            assert!(hirari_undo_manager_apply(state, true));
+            assert_eq!(invocations, 3);
+            assert!(!hirari_undo_manager_apply(state, true));
+            assert_eq!(invocations, 3);
+            hirari_undo_manager_destroy(state);
+        }
+    }
 
     unsafe fn record(state: *mut std::ffi::c_void, name: &str, undo: u64, redo: u64, time: u64, coalesce: bool) {
         assert!(unsafe {

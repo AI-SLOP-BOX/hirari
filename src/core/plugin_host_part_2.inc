@@ -217,7 +217,6 @@ public:
         // The control-side atomic is authoritative between audio blocks. The
         // internal DSP instance is updated at the next block boundary, so
         // reading it here makes UI/CLI callers observe a stale value.
-        if (m_internal) return (id < 128) ? m_paramValues[id].load(std::memory_order_relaxed) : 0.0f;
         return (id < 128) ? m_paramValues[id].load(std::memory_order_relaxed) : 0.0f;
     }
 

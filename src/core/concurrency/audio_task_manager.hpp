@@ -10,8 +10,6 @@
 
 extern "C" uint64_t hirari_denormal_control_enter();
 extern "C" void hirari_denormal_control_leave(uint64_t state);
-extern "C" void hirari_realtime_thread_set(bool active);
-extern "C" bool hirari_realtime_thread_is_active();
 
 namespace Hirari::Core::Concurrency {
 
@@ -162,24 +160,8 @@ public:
             });
     }
 
-    struct ScopedRTGuard {
-        ScopedRTGuard() { hirari_realtime_thread_set(true); }
-        ~ScopedRTGuard() { hirari_realtime_thread_set(false); }
-    };
-
-    /**
-     * @brief ENSURES RT-SAFETY: Aborts or logs if called in a non-safe context.
-     */
-    #define HIRARI_ASSERT_RT_SAFE() \
-        if (hirari_realtime_thread_is_active()) { \
-            /* Implementation: In a debug build, this could check for thread-local 'unsafe' flags */ \
-        }
-
 private:
     void* m_state = nullptr;
-
-public:
-    using AudioTaskManager = AudioTaskStealingScheduler;
 };
 
 } // namespace Hirari::Core::Concurrency

@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Undo commit and traversal now run in Rust. Registering both sides of an
+  edit, replaying the redo on perform, recording with coalescing, discarding a
+  failed pair, and the `UNDO | PERFORMED/RECORDED/UNDONE/REDONE` diagnostics
+  line all happen in `undo_transaction.rs`, so the native manager only keeps
+  the `std::function` closures it owns. Dead realtime-guard helpers and
+  unreferenced FFI type aliases were removed with the same pass.
 - Media import caching and freeze-cache restore moved to Rust. Path and file
   identity checks, hit/miss, eviction, and dead-buffer purge now run in
   `audio_import_cache.rs` behind opaque weak handles, and freeze restore

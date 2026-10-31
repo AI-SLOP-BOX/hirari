@@ -270,21 +270,6 @@ struct HirariRegionRangeEdit {
     uint64_t fade_in;
     uint64_t fade_out;
 };
-struct HirariNativeRegionGeometry {
-    uint64_t start;
-    uint64_t length;
-    uint64_t source_length;
-    uint64_t source_offset;
-    uint64_t base_start;
-    uint64_t base_source_offset;
-    uint64_t base_length;
-    uint32_t loop_count;
-    uint64_t fade_in;
-    uint64_t fade_out;
-    double warp_ratio;
-    double source_sample_rate;
-    double timeline_sample_rate;
-};
 struct HirariNativeRegionAddMetadata {
     uint64_t start;
     uint64_t length;
@@ -1508,8 +1493,6 @@ extern "C" bool hirari_track_holographic_panner_set_kernel(
 extern "C" void hirari_track_holographic_panner_clear_kernel(const void* state);
 extern "C" void hirari_track_holographic_panner_process(
     const void* state, float* left, float* right, uint32_t frames, float x, float y, float z);
-using HirariEffectNodeInfo = bool (*)(void*, uint32_t, bool*, bool*);
-using HirariEffectNodeProcess = bool (*)(void*, uint32_t, bool, float*);
 using HirariEffectNodeProcessWithHandle = bool (*)(
     void*, uint32_t, void*, bool, float*);
 struct HirariEffectChainNodeView {
@@ -1675,6 +1658,10 @@ extern "C" void hirari_undo_manager_destroy(void* state);
 extern "C" bool hirari_undo_manager_record(
     void* state, const uint8_t* name, size_t name_len,
     uint64_t undo_callback, uint64_t redo_callback, uint64_t timestamp_ms, bool coalesce);
+extern "C" bool hirari_undo_manager_commit(
+    void* state, const uint8_t* name, size_t name_len,
+    uint64_t undo_callback, uint64_t redo_callback, bool coalesce, bool perform);
+extern "C" bool hirari_undo_manager_apply(void* state, bool redo);
 extern "C" bool hirari_undo_manager_begin_transaction(
     void* state, const uint8_t* name, size_t name_len);
 extern "C" bool hirari_undo_manager_end_transaction(void* state);
@@ -1731,9 +1718,6 @@ extern "C" bool hirari_project_db_record(
     const uint8_t* category, size_t category_size,
     const uint8_t* key, size_t key_size,
     const uint8_t* value, size_t value_size);
-using HirariProjectDbCallback = void (*)(
-    void*, uint64_t, const uint8_t*, size_t,
-    const uint8_t*, size_t, const uint8_t*, size_t);
 extern "C" bool hirari_project_db_flush(
     const void* state, const uint8_t* path, size_t path_size);
 extern "C" void* hirari_mpe_manager_create();
