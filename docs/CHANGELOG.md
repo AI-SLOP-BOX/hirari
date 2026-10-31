@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Structural sync rebuilt the delay-compensation graph from C++: it cleared the
+  Rust store, replayed destination, send and latency setters, walked the
+  connection snapshot twice and copied offsets back per track. Rust now performs
+  the whole rebuild in one call from the published routing graph, so only the
+  per-track latency snapshot and the resulting offsets still cross the boundary.
 - Region, routing, control, plugin, automation and sandbox callbacks each
   walked the track list to resolve an id, with the same guard clause copied
   around. They now share one locked lookup on the engine, so a missing track is

@@ -1354,6 +1354,15 @@ extern "C" void hirari_native_pdc_recalculate(const void* state);
 extern "C" uint32_t hirari_native_pdc_get_track_offset(const void* state, uint32_t track);
 extern "C" uint32_t hirari_native_pdc_get_send_offset(
     const void* state, uint32_t source, uint32_t destination);
+struct HirariPdcTrackConfig {
+    uint32_t id;
+    uint32_t latencySamples;
+};
+// Rebuilds the PDC graph from the published routing engine. Fills
+// trackOffsets with one entry per config, in input order.
+extern "C" size_t hirari_native_pdc_sync_graph(
+    const void* pdc, const void* routing, const HirariPdcTrackConfig* tracks,
+    size_t trackCount, uint32_t* trackOffsets);
 extern "C" bool hirari_native_pdc_low_latency_mode(const void* state);
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);

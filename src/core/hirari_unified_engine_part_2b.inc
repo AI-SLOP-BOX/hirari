@@ -2,10 +2,8 @@
 
 float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() == tid) return track->getVolume();
-    }
-    return -1.0f;
+    const Track* track = findTrackLocked(tid);
+    return track ? track->getVolume() : -1.0f;
 }
 
 bool HirariUnifiedEngine::set_offline_render_target(uint32_t tid) {
@@ -136,53 +134,22 @@ void HirariUnifiedEngine::syncStructuralChanges() {
     m_activeStateIdx.store(nextIdx, std::memory_order_release);
     m_graphDirty.store(false);
 
-    // Keep PDC on the same published routing graph as audio processing. The
-    // solver runs here on the control thread; Track applies the resulting
-    // bounded offset with a preallocated delay line at block boundaries.
-    const void* pdc = m_pdcState;
-    // This is a full graph rebuild. Clear stale entries for deleted tracks
-    // and buses before applying the current snapshot, while retaining the
-    // previous active offsets until recalculate() publishes the new graph.
-    hirari_native_pdc_clear_configuration(pdc);
+    // Keep PDC on the same published routing graph as audio processing. Rust
+    // owns the full rebuild: topology, send routes, solve and offset publish.
+    // Track applies the resulting bounded offset with a preallocated delay
+    // line at block boundaries.
+    std::vector<HirariPdcTrackConfig> pdcTracks;
+    pdcTracks.reserve(m_tracks.size());
     for (const auto& track : m_tracks) {
-        if (!track || track->getId() >= kPdcMaxTracks) continue;
-        hirari_native_pdc_set_track_destination(pdc, track->getId(), kPdcMasterDestination);
-        hirari_native_pdc_set_track_latency(pdc, track->getId(), track->getTotalLatencySamples());
+        if (track && track->getId() < kPdcMaxTracks)
+            pdcTracks.push_back({track->getId(), track->getTotalLatencySamples()});
     }
-    std::vector<Hirari::Core::Engine::RoutingEngine::Connection> connections;
-    {
-        size_t connectionCount = 0;
-        void* rawConnections =
-            hirari_routing_engine_copy_connections(routing, &connectionCount);
-        connections = takeRoutingConnections(rawConnections, connectionCount);
-    }
-    for (const auto& connection : connections) {
-        if (connection.send) {
-            if (connection.sourceId < kPdcMaxTracks &&
-                connection.destId < kPdcMaxTracks) {
-                hirari_native_pdc_set_send_route(pdc, connection.sourceId, connection.destId, true);
-            }
-            continue;
-        }
-        if (connection.sourceId < kPdcMaxTracks &&
-            connection.destId < kPdcMaxTracks) {
-            hirari_native_pdc_set_track_destination(pdc, connection.sourceId, connection.destId);
-        }
-    }
-    hirari_native_pdc_recalculate(pdc);
-    for (const auto& connection : connections) {
-        if (!connection.send ||
-            connection.sourceId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes ||
-            connection.destId >= Hirari::Core::Engine::RoutingEngine::kMaxNodes) continue;
-        hirari_routing_engine_set_send_pdc(
-            routing, connection.sourceId, connection.destId,
-            hirari_native_pdc_get_send_offset(pdc, connection.sourceId, connection.destId));
-    }
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() < kPdcMaxTracks) {
-            track->setPdcCompensationSamples(
-                hirari_native_pdc_get_track_offset(pdc, track->getId()));
-        }
+    std::vector<uint32_t> pdcOffsets(pdcTracks.size());
+    hirari_native_pdc_sync_graph(m_pdcState, routing, pdcTracks.data(),
+                                 pdcTracks.size(), pdcOffsets.data());
+    for (size_t i = 0; i < pdcTracks.size(); ++i) {
+        if (Track* track = findTrackLocked(pdcTracks[i].id))
+            track->setPdcCompensationSamples(pdcOffsets[i]);
     }
 
     // --- BLACK BOX SYNC ---

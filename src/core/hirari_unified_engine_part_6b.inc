@@ -146,9 +146,8 @@ void HirariUnifiedEngine::installTrackControlHost() {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!engine) return nullptr;
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            for (const auto& track : engine->m_tracks)
-                if (track && track->getId() == tid) return new std::shared_ptr<Track>(track);
-            return nullptr;
+            auto track = engine->findTrackSharedLocked(tid);
+            return track ? new std::shared_ptr<Track>(std::move(track)) : nullptr;
         },
         [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
         [](void* handle, float x, float y, float z) {

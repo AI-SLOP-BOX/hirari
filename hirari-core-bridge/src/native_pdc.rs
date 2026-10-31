@@ -457,6 +457,23 @@ impl NativePdcManager {
         self.dirty.store(false, Ordering::Release);
     }
 
+    fn track_offset(&self, track: u32) -> u32 {
+        if track as usize >= MAX_TRACKS {
+            return 0;
+        }
+        let active = self.published.active_buffer.load(Ordering::Acquire) as usize;
+        self.published.track_offsets[active][track as usize].load(Ordering::Acquire)
+    }
+
+    fn send_offset(&self, source: u32, destination: u32) -> u32 {
+        if source as usize >= MAX_TRACKS || destination as usize >= MAX_TRACKS {
+            return 0;
+        }
+        let active = self.published.active_buffer.load(Ordering::Acquire) as usize;
+        self.published.send_offsets[active][source as usize * MAX_TRACKS + destination as usize]
+            .load(Ordering::Acquire)
+    }
+
     fn audit(&self) -> bool {
         if !self.control_thread_allowed() {
             return false;
@@ -590,14 +607,7 @@ pub unsafe extern "C" fn hirari_native_pdc_get_track_offset(
     handle: *const c_void,
     track: u32,
 ) -> u32 {
-    let Some(state) = (unsafe { state(handle) }) else {
-        return 0;
-    };
-    if track as usize >= MAX_TRACKS {
-        return 0;
-    }
-    let active = state.published.active_buffer.load(Ordering::Acquire) as usize;
-    state.published.track_offsets[active][track as usize].load(Ordering::Acquire)
+    unsafe { state(handle) }.map_or(0, |state| state.track_offset(track))
 }
 
 #[no_mangle]
@@ -606,15 +616,7 @@ pub unsafe extern "C" fn hirari_native_pdc_get_send_offset(
     source: u32,
     destination: u32,
 ) -> u32 {
-    let Some(state) = (unsafe { state(handle) }) else {
-        return 0;
-    };
-    if source as usize >= MAX_TRACKS || destination as usize >= MAX_TRACKS {
-        return 0;
-    }
-    let active = state.published.active_buffer.load(Ordering::Acquire) as usize;
-    state.published.send_offsets[active][source as usize * MAX_TRACKS + destination as usize]
-        .load(Ordering::Acquire)
+    unsafe { state(handle) }.map_or(0, |state| state.send_offset(source, destination))
 }
 
 #[no_mangle]
@@ -640,6 +642,95 @@ pub unsafe extern "C" fn hirari_native_pdc_configuration_generation(handle: *con
     unsafe { state(handle) }
         .map(|state| state.configuration_generation.load(Ordering::Acquire))
         .unwrap_or(0)
+}
+
+/// Per-track graph input supplied by the engine: the latency is the only
+/// value the C++ side still owns.
+#[repr(C)]
+pub struct HirariPdcTrackConfig {
+    pub id: u32,
+    pub latency_samples: u32,
+}
+
+/// Rebuild the control-side PDC graph from the published routing engine and
+/// publish the resulting offsets. `track_offsets` receives one offset per
+/// entry of `tracks`, in the same order; the return value is that count.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_native_pdc_sync_graph(
+    pdc: *const c_void,
+    routing: *const c_void,
+    tracks: *const HirariPdcTrackConfig,
+    track_count: usize,
+    track_offsets: *mut u32,
+) -> usize {
+    let Some(state) = (unsafe { state(pdc) }) else {
+        return 0;
+    };
+    if !state.clear_configuration() {
+        return 0;
+    }
+    let tracks = if tracks.is_null() || track_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(tracks, track_count) }
+    };
+    for track in tracks {
+        if track.id as usize >= MAX_TRACKS {
+            continue;
+        }
+        state.set_track_destination(track.id, MASTER_ID);
+        state.set_latency(false, track.id, track.latency_samples);
+    }
+    let mut connection_count = 0usize;
+    let records = unsafe {
+        crate::routing_engine_core::hirari_routing_engine_copy_connections(
+            routing,
+            &mut connection_count,
+        )
+    };
+    let connections = if records.is_null() || connection_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(records, connection_count) }
+    };
+    for connection in connections {
+        if connection.source_id as usize >= MAX_TRACKS
+            || connection.destination_id as usize >= MAX_TRACKS
+        {
+            continue;
+        }
+        if connection.send {
+            state.set_send_route(connection.source_id, connection.destination_id, true);
+        } else {
+            state.set_track_destination(connection.source_id, connection.destination_id);
+        }
+    }
+    state.recalculate();
+    for connection in connections {
+        if !connection.send {
+            continue;
+        }
+        unsafe {
+            crate::routing_engine_core::hirari_routing_engine_set_send_pdc(
+                routing as *mut c_void,
+                connection.source_id,
+                connection.destination_id,
+                state.send_offset(connection.source_id, connection.destination_id),
+            )
+        };
+    }
+    unsafe {
+        crate::routing_engine_core::hirari_routing_connection_array_free(
+            records,
+            connection_count,
+        );
+    }
+    if !track_offsets.is_null() {
+        for (index, track) in tracks.iter().enumerate() {
+            unsafe { *track_offsets.add(index) = state.track_offset(track.id) };
+        }
+    }
+    track_count
 }
 
 #[cfg(test)]

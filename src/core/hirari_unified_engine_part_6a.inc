@@ -310,9 +310,8 @@ void HirariUnifiedEngine::installCommandHost() {
         [](void* host, uint32_t tid) -> bool {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!engine) return false;
-            const auto tracks = engine->get_tracks_snapshot();
-            return std::any_of(tracks.begin(), tracks.end(),
-                               [tid](const auto& t) { return t && t->getId() == tid; });
+            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            return engine->findTrackLocked(tid) != nullptr;
         },
         [](void* host, uint64_t* project, uint64_t* audio) -> bool {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
@@ -350,10 +349,8 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
             if (!engine) return nullptr;
             if (wait) engine->waitForAudioCallbacks();
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const auto it = std::find_if(engine->m_tracks.begin(), engine->m_tracks.end(),
-                [tid](const auto& track) { return track && track->getId() == tid; });
-            return it == engine->m_tracks.end() ? nullptr
-                                                : new std::shared_ptr<Track>(*it);
+            auto track = engine->findTrackSharedLocked(tid);
+            return track ? new std::shared_ptr<Track>(std::move(track)) : nullptr;
         },
         [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
         [](void* handle, uint64_t totalSamples, uint32_t sampleRate) {

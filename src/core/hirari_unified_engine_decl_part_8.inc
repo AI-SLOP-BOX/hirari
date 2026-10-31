@@ -10,7 +10,6 @@
     // authoritative copies (native_pdc.rs: MAX_TRACKS, MASTER_ID); these hold
     // here so an out-of-range ID never reaches the FFI in the first place.
     static constexpr uint32_t kPdcMaxTracks = 512;
-    static constexpr uint32_t kPdcMasterDestination = 0xFFFFFFFFu;
     UndoTransactionManager m_undoManager;
     void* m_tempoState = hirari_tempo_map_create();
     // MPE channel/voice ownership lives in Rust (mpe.rs); the engine keeps the
