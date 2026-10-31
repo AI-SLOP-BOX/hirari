@@ -13,6 +13,8 @@ use std::ffi::c_void;
 use std::slice;
 use std::sync::{Mutex, OnceLock};
 
+use crate::plugin_edit_host::{register_replay, UndoStateFn};
+
 /// Mirrors `HirariUnifiedEngine::kMaxTrackNameBytes`; names are persisted and
 /// compared byte for byte.
 const MAX_TRACK_NAME_BYTES: usize = 256;
@@ -54,6 +56,7 @@ pub struct HirariControlEditHostOps {
     pub update_monitor_focus: Option<UpdateMonitorFocusFn>,
     pub set_macro_value: Option<SetMacroValueFn>,
     pub bind_macro: Option<BindMacroFn>,
+    pub undo_state: Option<UndoStateFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -157,11 +160,22 @@ pub unsafe extern "C" fn hirari_control_edit_rename_track(
     if !valid_track_name(requested) {
         return false;
     }
-    let Some(ops) = host_ops() else { return false };
-    let (Some(apply), Some(record)) = (ops.apply_track_name, ops.record_name_undo) else {
+    match host_ops() {
+        Some(ops) => rename_with(&ops, host, track_id, requested),
+        None => false,
+    }
+}
+
+fn rename_with(
+    ops: &HirariControlEditHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    requested: &[u8],
+) -> bool {
+    let Some(apply) = ops.apply_track_name else {
         return false;
     };
-    let Some(current) = query_track_name(&ops, host, track_id) else {
+    let Some(current) = query_track_name(ops, host, track_id) else {
         return false;
     };
     if current == requested {
@@ -170,17 +184,77 @@ pub unsafe extern "C" fn hirari_control_edit_rename_track(
     if !unsafe { apply(host, track_id, requested.as_ptr(), requested.len()) } {
         return false;
     }
-    unsafe {
-        record(
-            host,
-            track_id,
-            current.as_ptr(),
-            current.len(),
-            requested.as_ptr(),
-            requested.len(),
-        )
-    };
+    if let Some(record) = ops.record_name_undo {
+        unsafe {
+            record(
+                host,
+                track_id,
+                current.as_ptr(),
+                current.len(),
+                requested.as_ptr(),
+                requested.len(),
+            )
+        };
+    } else {
+        record_rename(ops, apply, host, track_id, current, requested.to_vec());
+    }
     true
+}
+
+unsafe fn replay_name(
+    host: *mut c_void,
+    apply: ApplyTrackNameFn,
+    track_id: u32,
+    name: &[u8],
+) {
+    unsafe { apply(host, track_id, name.as_ptr(), name.len()) };
+}
+
+/// Records one `Rename Track` entry in the engine's Rust history.
+fn record_rename(
+    ops: &HirariControlEditHostOps,
+    apply: ApplyTrackNameFn,
+    host: *mut c_void,
+    track_id: u32,
+    before: Vec<u8>,
+    after: Vec<u8>,
+) {
+    let Some(read_state) = ops.undo_state else {
+        return;
+    };
+    let state = unsafe { read_state(host) };
+    if state.is_null() {
+        return;
+    }
+    let undo_id = register_replay(
+        state,
+        Box::new(move || unsafe { replay_name(host, apply, track_id, &before) }),
+    );
+    if undo_id == 0 {
+        return;
+    }
+    let redo_id = register_replay(
+        state,
+        Box::new(move || unsafe { replay_name(host, apply, track_id, &after) }),
+    );
+    if redo_id == 0 {
+        unsafe {
+            crate::undo_transaction::hirari_undo_manager_discard_native_callback(state, undo_id)
+        };
+        return;
+    }
+    let name = b"Rename Track";
+    unsafe {
+        crate::undo_transaction::hirari_undo_manager_commit(
+            state,
+            name.as_ptr(),
+            name.len(),
+            undo_id,
+            redo_id,
+            false,
+            false,
+        );
+    }
 }
 
 /// Moves the single-input-monitor focus. Enabling requires the track to exist;
@@ -338,5 +412,69 @@ mod tests {
         // the 14-bit range, while the 14-bit path keeps it intact.
         assert!(valid_macro_binding(1, 2, true, 1000, 0.0, 1.0, 0.0));
         assert!(!valid_macro_binding(1, 2, false, 1000, 0.0, 1.0, 0.0));
+    }
+
+    #[derive(Default)]
+    struct FakeHost {
+        name: Vec<u8>,
+    }
+
+    unsafe extern "C" fn fake_query(
+        host: *mut c_void,
+        _track: u32,
+        out: *mut u8,
+        capacity: usize,
+    ) -> isize {
+        let fake = unsafe { &*(host as *const FakeHost) };
+        if out.is_null() || capacity == 0 {
+            return fake.name.len() as isize;
+        }
+        let written = capacity.min(fake.name.len());
+        unsafe { std::ptr::copy_nonoverlapping(fake.name.as_ptr(), out, written) };
+        written as isize
+    }
+
+    unsafe extern "C" fn fake_apply(
+        host: *mut c_void,
+        _track: u32,
+        name: *const u8,
+        len: usize,
+    ) -> bool {
+        let fake = unsafe { &mut *(host as *mut FakeHost) };
+        fake.name = unsafe { slice::from_raw_parts(name, len) }.to_vec();
+        true
+    }
+
+    static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =
+        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+    unsafe extern "C" fn fake_undo_state(_host: *mut c_void) -> *mut c_void {
+        FAKE_UNDO.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn rename_without_native_recorder_uses_the_rust_history() {
+        let mut fake = FakeHost {
+            name: b"Old".to_vec(),
+        };
+        let host = &mut fake as *mut FakeHost as *mut c_void;
+        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
+        let ops = HirariControlEditHostOps {
+            query_track_name: Some(fake_query),
+            apply_track_name: Some(fake_apply),
+            undo_state: Some(fake_undo_state),
+            ..Default::default()
+        };
+        assert!(rename_with(&ops, host, 4, b"New"));
+        assert_eq!(fake.name, b"New");
+        assert_eq!(
+            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
+            1
+        );
+        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
+        assert_eq!(fake.name, b"Old");
+        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
+        FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }
 }

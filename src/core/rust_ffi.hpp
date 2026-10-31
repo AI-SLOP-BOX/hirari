@@ -1237,6 +1237,7 @@ struct HirariControlEditHostOps {
     void (*setMacroValue)(void*, uint32_t, float) = nullptr;
     bool (*bindMacro)(void*, uint32_t, uint8_t, bool, uint16_t,
                       float, float, float, bool) = nullptr;
+    void* (*undoState)(void*) = nullptr;
 };
 
 extern "C" void hirari_control_edit_host_install(const HirariControlEditHostOps* ops);

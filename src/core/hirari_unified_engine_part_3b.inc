@@ -269,28 +269,7 @@ void HirariUnifiedEngine::installControlEditHost() {
             track->setName(value);
             return true;
         },
-        [](void* host, uint32_t trackId, const uint8_t* before, size_t beforeLen,
-           const uint8_t* after, size_t afterLen) {
-            if (!host) return;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::shared_ptr<Track> target;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                target = engine->findTrackSharedLocked(trackId);
-            }
-            if (!target) return;
-            const std::string beforeValue(
-                before ? reinterpret_cast<const char*>(before) : "", before ? beforeLen : 0);
-            const std::string afterValue(
-                after ? reinterpret_cast<const char*>(after) : "", after ? afterLen : 0);
-            const auto apply = [engine, target](const std::string& value) {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                target->setName(value);
-            };
-            engine->m_undoManager.recordAppliedAction(
-                "Rename Track", [apply, beforeValue] { apply(beforeValue); },
-                [apply, afterValue] { apply(afterValue); });
-        },
+        nullptr,  // undo capture lives in the Rust control edit host.
         [](void* host, uint32_t trackId, bool enabled, uint32_t leftChannel,
            uint32_t rightChannel) -> bool {
             if (!host) return false;
@@ -335,6 +314,9 @@ void HirariUnifiedEngine::installControlEditHost() {
                     targetState, macroIndex, minimum, maximum, curve, pickup);
             }
             return true;
+        },
+        [](void* host) -> void* {
+            return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
         },
     };
     hirari_control_edit_host_install(&ops);
