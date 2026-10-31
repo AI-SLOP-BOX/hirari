@@ -82,7 +82,6 @@ fn main() {
     }
 
     if target_os == "macos" {
-        build.file("../src/dsp/spatial/metal_audio_kernel.mm");
         build.file("../src/core/engine/video_system_bridge.mm");
     }
 
@@ -118,8 +117,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/plugin_sandbox_host.rs");
     println!("cargo:rerun-if-changed=src/hirari_core_ref.cpp");
-    println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.mm");
-    println!("cargo:rerun-if-changed=../src/dsp/spatial/metal_audio_kernel.hpp");
     println!("cargo:rerun-if-changed=../src/core/driver/mac_audio_driver_host.hpp");
     println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_audio_driver.rs");
     println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_midi_host.rs");
@@ -134,7 +131,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../src/core/engine/video_system.hpp");
 
     if target_os == "macos" {
-        println!("cargo:rustc-link-lib=framework=Metal");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=CoreAudio");
         println!("cargo:rustc-link-lib=framework=CoreMIDI");

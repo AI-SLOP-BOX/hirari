@@ -1,6 +1,5 @@
 #include "bridge_shims.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
-#include "dsp/spatial/metal_audio_kernel.hpp"
 #include <cstring>
 
 using HirariAudioWeakHandle = std::weak_ptr<::Hirari::Core::AudioBuffer>;
@@ -82,10 +81,6 @@ namespace Hirari::Core::Bridge {
         if (!mask) return false;
         return engine.push_command(static_cast<::Hirari::Core::CommandType>(cmd), tid, val, ts,
                                    expected_project_generation, expected_audio_generation);
-    }
-
-    bool initialize_gpu_with_status() {
-        return ::Hirari::DSP::Spatial::MetalAudioKernel::getInstance().initialize();
     }
 
 } // namespace Hirari::Core::Bridge

@@ -122,7 +122,6 @@ pub struct HirariCore {
     tempo_state: usize,
     undo_state: usize,
     log_state: usize,
-    gpu_initialized: bool,
     preview_audio: std::sync::Mutex<preview_audio_runtime::PreviewAudioRuntime>,
     recording_session: std::sync::Mutex<Option<recording_session::RecordingSession>>,
     comping: RevisionedMutex<comping::CompingOrchestrator>,

@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- The abandoned Metal spatial kernel is deleted. Its only entry point,
+  `initialize_gpu_with_status()`, built a device/queue/pipeline that nothing
+  ever submitted work to: the async `processAsync` path had no caller, so the
+  engine logged a GPU-fallback warning for a fallback that was the only path.
+  `metal_audio_kernel.{hpp,mm}`, the orphaned `spatial_kernels.metal` shader,
+  the cxx probe, its `HirariCore::gpu_initialized` field and the Metal
+  framework link are gone; startup no longer probes a dead GPU pipeline.
 - The C++ task-scheduler/thread-pool adapters are deleted. The Rust-owned
   worker queues were already the only implementation, and the C++ wrappers
   had no production caller left: the engine's private scheduler was started

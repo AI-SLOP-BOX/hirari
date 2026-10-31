@@ -436,9 +436,6 @@ pub mod ffi {
         fn get_master_meter_data(engine: &HirariUnifiedEngine) -> BridgeLoudness;
         fn get_intelligence_dashboard_json(engine: &HirariUnifiedEngine) -> String;
         fn get_song_structure_json(engine: &HirariUnifiedEngine) -> String;
-
-        // --- GPU: Explicit deterministic initialization ---
-        fn initialize_gpu_with_status() -> bool;
     }
 
     // ---------------------------------------------------------------------

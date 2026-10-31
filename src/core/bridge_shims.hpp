@@ -39,7 +39,6 @@ namespace Hirari::Core::Bridge {
                       uint64_t expected_audio_generation);
 
     void report_hirari_log(uint32_t level, rust::Str msg) noexcept;
-    bool initialize_gpu_with_status();
 }
 
 namespace Hirari::Core::BridgeFFI {

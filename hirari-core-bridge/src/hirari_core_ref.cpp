@@ -12,7 +12,6 @@ void HIRARI_LOG(uint32_t level, const std::string& msg) {
 
 } // namespace Hirari::Core::BridgeFFI
 
-#include "dsp/spatial/metal_audio_kernel.hpp"
 #include "core/midi_buffer.hpp"
 #include "core/status_queue.hpp"
 
