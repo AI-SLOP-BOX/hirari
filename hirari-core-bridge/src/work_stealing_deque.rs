@@ -6,6 +6,84 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 type TaskDispatch = unsafe extern "C" fn(*mut c_void);
+type WorkerEnter = unsafe extern "C" fn(u32) -> u64;
+type WorkerLeave = unsafe extern "C" fn(u64);
+
+// Worker thread policy for the audio graph: denormal flush, the realtime
+// marker, and (on macOS) QoS plus time-constraint policy. Hosts that need a
+// different policy still pass their own enter/leave pair.
+#[cfg(target_os = "macos")]
+fn apply_worker_thread_policy(index: u32) {
+    use std::ffi::c_int;
+    #[repr(C)]
+    struct ThreadAffinityPolicyData {
+        affinity_tag: c_int,
+    }
+    #[repr(C)]
+    struct ThreadTimeConstraintPolicyData {
+        period: u32,
+        computation: u32,
+        constraint: u32,
+        preemptible: c_int,
+    }
+    const QOS_CLASS_USER_INTERACTIVE: c_int = 0x21;
+    const THREAD_AFFINITY_POLICY: c_int = 4;
+    const THREAD_AFFINITY_POLICY_COUNT: u32 = 1;
+    const THREAD_TIME_CONSTRAINT_POLICY: c_int = 2;
+    const THREAD_TIME_CONSTRAINT_POLICY_COUNT: u32 = 4;
+    extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: c_int, relative_priority: c_int) -> c_int;
+        fn mach_thread_self() -> u32;
+        fn thread_policy_set(
+            thread: u32,
+            flavor: c_int,
+            policy_info: *mut c_int,
+            count: u32,
+        ) -> c_int;
+    }
+    let mut affinity = ThreadAffinityPolicyData {
+        affinity_tag: index as c_int,
+    };
+    let mut constraint = ThreadTimeConstraintPolicyData {
+        period: 125_000,
+        computation: 50_000,
+        constraint: 100_000,
+        preemptible: 1,
+    };
+    // These calls only set policy on the calling worker thread; a rejected
+    // policy leaves the thread running with the default scheduler class.
+    unsafe {
+        let _ = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+        let thread = mach_thread_self();
+        let _ = thread_policy_set(
+            thread,
+            THREAD_AFFINITY_POLICY,
+            (&mut affinity as *mut ThreadAffinityPolicyData).cast(),
+            THREAD_AFFINITY_POLICY_COUNT,
+        );
+        let _ = thread_policy_set(
+            thread,
+            THREAD_TIME_CONSTRAINT_POLICY,
+            (&mut constraint as *mut ThreadTimeConstraintPolicyData).cast(),
+            THREAD_TIME_CONSTRAINT_POLICY_COUNT,
+        );
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_worker_thread_policy(_index: u32) {}
+
+unsafe extern "C" fn default_worker_enter(index: u32) -> u64 {
+    let state = crate::realtime_thread::hirari_denormal_control_enter();
+    crate::realtime_thread::hirari_realtime_thread_set(true);
+    apply_worker_thread_policy(index);
+    state
+}
+
+unsafe extern "C" fn default_worker_leave(state: u64) {
+    crate::realtime_thread::hirari_realtime_thread_set(false);
+    crate::realtime_thread::hirari_denormal_control_leave(state);
+}
 
 #[derive(Clone, Copy)]
 struct QueuedTask {
@@ -99,10 +177,12 @@ impl AudioTaskScheduler {
         worker_count: usize,
         queue_capacity: usize,
         dispatch: unsafe extern "C" fn(*mut c_void),
-        enter: unsafe extern "C" fn(u32) -> u64,
-        leave: unsafe extern "C" fn(u64),
+        enter: Option<WorkerEnter>,
+        leave: Option<WorkerLeave>,
     ) -> bool {
         self.stop();
+        let enter = enter.unwrap_or(default_worker_enter);
+        let leave = leave.unwrap_or(default_worker_leave);
         let worker_count = worker_count.max(1);
         let mut queues = Vec::new();
         if queues.try_reserve_exact(worker_count).is_err() {
@@ -308,15 +388,11 @@ pub unsafe extern "C" fn hirari_audio_scheduler_start(
     workers: usize,
     queue_capacity: usize,
     dispatch: Option<unsafe extern "C" fn(*mut c_void)>,
-    enter: Option<unsafe extern "C" fn(u32) -> u64>,
-    leave: Option<unsafe extern "C" fn(u64)>,
+    enter: Option<WorkerEnter>,
+    leave: Option<WorkerLeave>,
 ) -> bool {
-    let (Some(scheduler), Some(dispatch), Some(enter), Some(leave)) = (
-        state.cast::<AudioTaskScheduler>().as_ref(),
-        dispatch,
-        enter,
-        leave,
-    ) else {
+    let (Some(scheduler), Some(dispatch)) = (state.cast::<AudioTaskScheduler>().as_ref(), dispatch)
+    else {
         return false;
     };
     scheduler.start(workers, queue_capacity, dispatch, enter, leave)
@@ -566,7 +642,13 @@ mod tests {
     fn idle_pool_wakes_promptly_and_stops_while_parked() {
         use super::AudioTaskScheduler;
         let scheduler = AudioTaskScheduler::new();
-        assert!(scheduler.start(2, 64, counting_dispatch, test_enter, test_leave));
+        assert!(scheduler.start(
+            2,
+            64,
+            counting_dispatch,
+            Some(test_enter),
+            Some(test_leave)
+        ));
         // Let both workers reach their parked state.
         thread::sleep(std::time::Duration::from_millis(50));
         let counter = Arc::new(AtomicUsize::new(0));
@@ -594,6 +676,22 @@ mod tests {
             stopwatch.elapsed() < std::time::Duration::from_secs(2),
             "stop must join parked workers promptly"
         );
+    }
+
+    #[test]
+    fn worker_policy_defaults_apply_when_the_host_passes_none() {
+        use super::AudioTaskScheduler;
+        let scheduler = AudioTaskScheduler::new();
+        assert!(scheduler.start(1, 16, counting_dispatch, None, None));
+        let counter = Arc::new(AtomicUsize::new(1));
+        let data = Arc::as_ptr(&counter) as *mut c_void;
+        assert!(scheduler.push_with_dispatch(0, data, counting_dispatch));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while counter.load(Ordering::Relaxed) < 2 && std::time::Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 2);
+        scheduler.stop();
     }
 
     #[test]

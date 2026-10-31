@@ -1,10 +1,4 @@
 #pragma once
-#if defined(__APPLE__)
-#include <mach/mach.h>
-#include <mach/thread_policy.h>
-#include <pthread.h>
-#endif
-
 #include "../rust_ffi.hpp"
 
 #include <thread>
@@ -48,30 +42,6 @@ extern "C" inline void hirari_audio_task_dispatch_ffi(void* data) {
     hirari_audio_task_dispatch(data);
 }
 
-extern "C" inline uint64_t hirari_audio_worker_enter(uint32_t index) {
-    const uint64_t state = hirari_denormal_control_enter();
-    hirari_realtime_thread_set(true);
-#if defined(__APPLE__)
-    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
-    thread_affinity_policy_data_t affinity = { static_cast<integer_t>(index) };
-    thread_policy_set(mach_thread_self(), THREAD_AFFINITY_POLICY,
-        reinterpret_cast<thread_policy_t>(&affinity), THREAD_AFFINITY_POLICY_COUNT);
-    thread_time_constraint_policy_data_t constraint{};
-    constraint.period = 125000;
-    constraint.computation = 50000;
-    constraint.constraint = 100000;
-    constraint.preemptible = 1;
-    thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY,
-        reinterpret_cast<thread_policy_t>(&constraint), THREAD_TIME_CONSTRAINT_POLICY_COUNT);
-#endif
-    return state;
-}
-
-extern "C" inline void hirari_audio_worker_leave(uint64_t state) {
-    hirari_realtime_thread_set(false);
-    hirari_denormal_control_leave(state);
-}
-
 extern "C" inline uint64_t hirari_audio_background_worker_enter(uint32_t) { return 0; }
 extern "C" inline void hirari_audio_background_worker_leave(uint64_t) {}
 
@@ -99,8 +69,10 @@ public:
     void start(
         uint32_t numThreads = std::thread::hardware_concurrency(),
         size_t queueCapacity = 1024,
-        uint64_t (*enter)(uint32_t) = hirari_audio_worker_enter,
-        void (*leave)(uint64_t) = hirari_audio_worker_leave) {
+        uint64_t (*enter)(uint32_t) = nullptr,
+        void (*leave)(uint64_t) = nullptr) {
+        // Rust applies the audio worker policy (denormal flush, realtime
+        // marker, macOS QoS/time constraints) when no custom pair is given.
         if (isRunning()) return;
         hirari_audio_scheduler_start(m_state, std::max(1U, numThreads), queueCapacity,
             hirari_audio_task_dispatch_ffi, enter, leave);
