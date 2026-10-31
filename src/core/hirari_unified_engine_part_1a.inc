@@ -93,6 +93,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_preview_synth_destroy(m_previewSynthState);
     hirari_mpe_state_free(m_mpeState);
     hirari_routing_engine_destroy(m_routingEngine);
+    hirari_sidechain_routes_destroy(m_sidechainRoutes);
     hirari_sidechain_engine_destroy(m_sidechainEngine);
     hirari_mpe_manager_destroy(m_mpeManager);
     hirari_bus_system_destroy(m_busSystem);

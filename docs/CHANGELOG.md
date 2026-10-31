@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Sidechain route bookkeeping lived in a C++ vector that the layout writer,
+  track duplication and track removal each had to walk and re-key by hand. Rust
+  owns the route list now behind an opaque handle, so upsert, removal, capture
+  and restore share one implementation and the engine only copies routes out
+  when serializing.
 - Structural sync rebuilt the delay-compensation graph from C++: it cleared the
   Rust store, replayed destination, send and latency setters, walked the
   connection snapshot twice and copied offsets back per track. Rust now performs

@@ -1016,6 +1016,29 @@ extern "C" bool hirari_sidechain_engine_has_link(
     const void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track);
 extern "C" void hirari_sidechain_engine_remove_track(void* state, uint32_t track);
 extern "C" void hirari_sidechain_engine_reset(void* state);
+// Route metadata shared by the layout writer and track edits. Rust owns the
+// list (sidechain_route_store.rs); these calls copy or mutate it in place.
+struct HirariSidechainRoute {
+    uint32_t sourceId = 0;
+    uint32_t destinationId = 0;
+    uint32_t pluginIndex = 0;
+    uint32_t tapPoint = 0;
+};
+extern "C" void* hirari_sidechain_routes_create();
+extern "C" void hirari_sidechain_routes_destroy(void* state);
+extern "C" void hirari_sidechain_routes_clear(const void* state);
+extern "C" size_t hirari_sidechain_routes_count(const void* state);
+extern "C" size_t hirari_sidechain_routes_copy(
+    const void* state, HirariSidechainRoute* out, size_t capacity);
+extern "C" bool hirari_sidechain_routes_set(
+    const void* state, uint32_t source, uint32_t destination, uint32_t plugin, uint32_t tap);
+extern "C" bool hirari_sidechain_routes_remove_link(
+    const void* state, uint32_t destination, uint32_t plugin);
+extern "C" bool hirari_sidechain_routes_erase_track(const void* state, uint32_t track);
+extern "C" void* hirari_sidechain_routes_capture_track(const void* state, uint32_t track);
+extern "C" void hirari_sidechain_routes_release(void* captured);
+extern "C" void hirari_sidechain_routes_restore(
+    const void* state, void* routing, void* captured);
 extern "C" uint32_t hirari_sidechain_engine_copy_link(
     const void* state, uint32_t destination_track, uint32_t plugin_index, float* output_left,
     float* output_right, uint32_t capacity, uint64_t* metadata);
@@ -1047,7 +1070,6 @@ extern "C" void hirari_routing_engine_remove_dependency(
 extern "C" void hirari_routing_engine_remove_dependencies_for_node(void* state, uint32_t node);
 extern "C" void* hirari_routing_engine_remove_connections_for_node(
     void* state, uint32_t node, size_t* count);
-extern "C" void* hirari_routing_engine_copy_connections(const void* state, size_t* count);
 extern "C" void hirari_routing_connection_array_free(void* records, size_t count);
 extern "C" void* hirari_routing_engine_remove_feedback_for_node(
     void* state, uint32_t node, size_t* count);
@@ -1077,8 +1099,6 @@ extern "C" void hirari_routing_engine_capture_feedback(
     void* state, uint32_t source, const float* left, const float* right, uint32_t frames);
 extern "C" char* hirari_routing_engine_connections_json(const void* state);
 extern "C" void hirari_routing_engine_connections_json_free(char* json);
-extern "C" bool hirari_routing_engine_set_send_pdc(
-    void* state, uint32_t source, uint32_t destination, uint32_t samples);
 extern "C" void hirari_routing_engine_enter_send_pdc_read(void* state);
 extern "C" void hirari_routing_engine_leave_send_pdc_read(void* state);
 extern "C" bool hirari_routing_engine_resolve_process_order(
@@ -1341,19 +1361,9 @@ extern "C" void hirari_plugin_sandbox_maintenance_forget(void* host);
 extern "C" void* hirari_native_pdc_create();
 extern "C" void hirari_native_pdc_destroy(void* state);
 extern "C" bool hirari_native_pdc_bind_control_thread(const void* state);
-extern "C" bool hirari_native_pdc_set_track_destination(
-    const void* state, uint32_t track, uint32_t destination);
-extern "C" bool hirari_native_pdc_set_send_route(
-    const void* state, uint32_t source, uint32_t destination, bool enabled);
-extern "C" bool hirari_native_pdc_set_track_latency(
-    const void* state, uint32_t track, uint32_t samples);
 extern "C" bool hirari_native_pdc_set_low_latency_mode(const void* state, bool active);
-extern "C" bool hirari_native_pdc_clear_configuration(const void* state);
 extern "C" void hirari_native_pdc_reset_for_project(const void* state);
-extern "C" void hirari_native_pdc_recalculate(const void* state);
-extern "C" uint32_t hirari_native_pdc_get_track_offset(const void* state, uint32_t track);
-extern "C" uint32_t hirari_native_pdc_get_send_offset(
-    const void* state, uint32_t source, uint32_t destination);
+extern "C" bool hirari_native_pdc_low_latency_mode(const void* state);
 struct HirariPdcTrackConfig {
     uint32_t id;
     uint32_t latencySamples;
@@ -1363,7 +1373,6 @@ struct HirariPdcTrackConfig {
 extern "C" size_t hirari_native_pdc_sync_graph(
     const void* pdc, const void* routing, const HirariPdcTrackConfig* tracks,
     size_t trackCount, uint32_t* trackOffsets);
-extern "C" bool hirari_native_pdc_low_latency_mode(const void* state);
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
@@ -1769,7 +1778,6 @@ extern "C" bool hirari_video_runtime_set_metadata(void* runtime, double duration
 extern "C" void hirari_video_runtime_update(const void* runtime, uint64_t sample, double sample_rate);
 extern "C" bool hirari_video_runtime_request_frame(void* runtime, double seconds);
 extern "C" bool hirari_video_runtime_has_video(const void* runtime);
-extern "C" double hirari_video_runtime_fps(const void* runtime);
 extern "C" double hirari_video_runtime_duration(const void* runtime);
 extern "C" uint64_t hirari_video_runtime_revision(const void* runtime);
 extern "C" bool hirari_video_runtime_copy_frame(

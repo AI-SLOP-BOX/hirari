@@ -59,15 +59,9 @@
     std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid) const;
     const Region* findRegionLocked(uint32_t tid, uint32_t rid) const;
 
-    struct SidechainRoute {
-        uint32_t sourceId = 0;
-        uint32_t destinationId = 0;
-        uint32_t pluginIndex = 0;
-        uint32_t tapPoint = 2;
-    };
-    std::vector<SidechainRoute> m_sidechainRoutes;
-    // Removes a track's sidechain routes; captures them when `removed` is set.
-    void eraseSidechainRoutesLocked(uint32_t tid, std::vector<SidechainRoute>* removed);
+    // Sidechain route bookkeeping is project state owned by Rust
+    // (sidechain_route_store.rs); the engine keeps only the opaque handle.
+    void* m_sidechainRoutes = hirari_sidechain_routes_create();
 
     // Borrowed layout snapshot shared by the JSON writer and the project saver.
     // Serialization borrows data owned by each track, so every per-track block

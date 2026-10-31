@@ -221,15 +221,12 @@ bool HirariUnifiedEngine::collectProjectLayout(ProjectLayoutData* out, bool incl
         out->storages.push_back(std::move(storage));
     }
 
-    out->sidechainRoutes.reserve(m_sidechainRoutes.size());
-    for (const auto& route : m_sidechainRoutes) {
-        HirariLayoutSidechainRoute view;
-        view.sourceId = route.sourceId;
-        view.destinationId = route.destinationId;
-        view.pluginIndex = route.pluginIndex;
-        view.tapPoint = route.tapPoint;
-        out->sidechainRoutes.push_back(view);
-    }
+    static_assert(sizeof(HirariLayoutSidechainRoute) == sizeof(HirariSidechainRoute));
+    out->sidechainRoutes.resize(hirari_sidechain_routes_count(m_sidechainRoutes));
+    (void)hirari_sidechain_routes_copy(
+        m_sidechainRoutes,
+        reinterpret_cast<HirariSidechainRoute*>(out->sidechainRoutes.data()),
+        out->sidechainRoutes.size());
     out->feedbackRoutes.reserve(feedbackConnections.size());
     for (const auto& route : feedbackConnections) {
         out->feedbackRoutes.push_back({route.sourceId, route.destId, route.gain});

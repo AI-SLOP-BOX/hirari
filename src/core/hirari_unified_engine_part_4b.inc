@@ -220,7 +220,7 @@
         hirari_routing_engine_reset(m_routingEngine);
         hirari_bus_system_reset(m_busSystem);
         hirari_control_room_reset(m_controlRoomState);
-        m_sidechainRoutes.clear();
+        hirari_sidechain_routes_clear(m_sidechainRoutes);
         m_regionIdCounter.store(nextRegionId, std::memory_order_release);
         m_trackIdCounter.store(nextTrackId, std::memory_order_release);
         m_tracks = std::move(loadedTracks);

@@ -75,17 +75,11 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             return true;
         },
         [](void* host, HirariRoutingSidechainEntry* out, size_t capacity) {
+            static_assert(sizeof(HirariRoutingSidechainEntry) == sizeof(HirariSidechainRoute));
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            size_t count = 0;
-            for (const auto& route : engine->m_sidechainRoutes) {
-                if (out && count < capacity) {
-                    out[count] = {route.sourceId, route.destinationId, route.pluginIndex,
-                                  route.tapPoint};
-                }
-                ++count;
-            }
-            return count;
+            return hirari_sidechain_routes_copy(
+                engine->m_sidechainRoutes,
+                reinterpret_cast<HirariSidechainRoute*>(out), capacity);
         },
         [](void* host, uint32_t sourceId, uint32_t destId,
            HirariRoutingSidechainContext* out) {
@@ -154,16 +148,8 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
             const bool removed = hirari_sidechain_engine_remove_link(
                 engine->m_sidechainEngine, destId, pluginIndex);
-            auto& routes = engine->m_sidechainRoutes;
-            const size_t before = routes.size();
-            routes.erase(
-                std::remove_if(routes.begin(), routes.end(),
-                               [destId, pluginIndex](const SidechainRoute& route) {
-                                   return route.destinationId == destId &&
-                                          route.pluginIndex == pluginIndex;
-                               }),
-                routes.end());
-            return removed || routes.size() != before;
+            return hirari_sidechain_routes_remove_link(
+                       engine->m_sidechainRoutes, destId, pluginIndex) || removed;
         },
         [](void* host, uint32_t destId, uint32_t pluginIndex, uint32_t sourceId,
            const HirariRoutingSidechainContext* context, uint32_t tapPoint, bool silent) {
@@ -193,15 +179,8 @@ void HirariUnifiedEngine::installRoutingEditHost() {
            uint32_t tapPoint) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            for (auto& route : engine->m_sidechainRoutes) {
-                if (route.destinationId == destId && route.pluginIndex == pluginIndex) {
-                    route.sourceId = sourceId;
-                    route.tapPoint = tapPoint;
-                    return true;
-                }
-            }
-            engine->m_sidechainRoutes.push_back({sourceId, destId, pluginIndex, tapPoint});
-            return true;
+            return hirari_sidechain_routes_set(engine->m_sidechainRoutes, sourceId, destId,
+                                               pluginIndex, tapPoint);
         },
         [](void* host, uint32_t sourceId, uint32_t destId) {
             return hirari_routing_engine_add_dependency(

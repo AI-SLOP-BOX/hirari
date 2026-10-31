@@ -243,7 +243,7 @@ void HirariUnifiedEngine::new_project() {
     // Region ids restart with the project, so cached peaks must not survive.
     hirari_region_waveform_clear(this);
     std::lock_guard<std::mutex> lock(m_tracksMutex);
-    m_sidechainRoutes.clear();
+    hirari_sidechain_routes_clear(m_sidechainRoutes);
     // Keep old Track objects alive while a CoreAudio callback may still hold
     // the previous active-state pointers; destruction is deferred safely.
     m_deferredDestructionTracks.insert(m_deferredDestructionTracks.end(),

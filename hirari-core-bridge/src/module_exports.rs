@@ -211,6 +211,7 @@ pub mod musical_clock;
 pub mod musicxml;
 pub mod native_builtin_dsp;
 pub mod native_pdc;
+pub mod sidechain_route_store;
 pub mod native_project;
 pub mod neural_advice;
 pub mod neural_synth;
