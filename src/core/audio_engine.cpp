@@ -55,13 +55,16 @@ AudioEngine::AudioEngine(bool startDevice)
 
     AudioEngine::~AudioEngine() {
         hirari_layout_snapshot_owner_release(m_layoutSnapshotOwnerId);
-        std::lock_guard<std::mutex> lock(m_configMutex);
-        if (m_driver) {
-            m_driver->stop();
+        {
+            std::lock_guard<std::mutex> lock(m_configMutex);
+            if (m_driver) {
+                m_driver->stop();
+            }
+            // AudioEngine owns its session engine, so teardown of the shared graph
+            // cannot tear down another project's graph.
+            if (m_engine) m_engine->shutdown();
         }
-        // AudioEngine owns its session engine, so teardown of the shared graph
-        // cannot tear down another project's graph.
-        if (m_engine) m_engine->shutdown();
+        hirari_native_editor_sessions_destroy(m_nativeEditorSessions);
     }
 
     void AudioEngine::shutdown() const {

@@ -117,5 +117,6 @@ private:
     mutable std::mutex m_configMutex;
     mutable std::mutex m_inputPollMutex;
     mutable std::vector<float> m_inputPollScratch;
-    mutable ::Hirari::Core::Plugins::NativeEditorHost m_nativeEditorHost;
+    // (track, plug-in) native editor sessions; the table lives in Rust.
+    void* m_nativeEditorSessions = hirari_native_editor_sessions_create();
 };

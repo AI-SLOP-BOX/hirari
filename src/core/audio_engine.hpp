@@ -13,7 +13,6 @@
 #include <unordered_set>
 #include "rust/cxx.h"
 #include "hirari_unified_engine.hpp"
-#include "plugins/native_editor_host.hpp"
 #include "bridge_types.hpp"
 
 #include "driver/mac_audio_driver_host.hpp" // also provides the bounded input queue

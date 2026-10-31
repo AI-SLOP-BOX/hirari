@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The `NativeEditorHost` C++ wrapper is deleted. `AudioEngine` owns the Rust
+  native-editor session handle directly and calls
+  `hirari_native_editor_sessions_*` for adopt, forget, lookup and embedded
+  queries, dropping the unused platform-callback binding path.
 - The `RegionTimeStretch`, `ProjectDB` and `WavLoader` C++ adapter headers are
   deleted. Regions hold the Rust stretcher handle directly with a destroy
   deleter, and the bridge calls the Rust `hirari_region_stretch_*`,

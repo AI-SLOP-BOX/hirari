@@ -116,28 +116,26 @@
     uint64_t open_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex,
                                        uint64_t parent) const {
         if (!m_engine || !m_engine->has_plugin_native_editor(trackId, pluginIndex)) return 0;
-        uint64_t session = 0;
-        if (m_nativeEditorHost.open(trackId, pluginIndex, static_cast<uintptr_t>(parent), session))
-            return session;
-        // When no platform wrapper is bound, let a direct VST3/AU processor
-        // attach its native view to the supplied parent surface. This keeps
-        // the SDK-enabled path usable from the same bridge instead of
-        // silently falling back to parameter controls.
-        session = m_engine->open_plugin_native_editor(
+        uint64_t session = m_engine->open_plugin_native_editor(
             trackId, pluginIndex, static_cast<uintptr_t>(parent));
-        if (session != 0) m_nativeEditorHost.adopt(trackId, pluginIndex, session);
+        if (session != 0)
+            hirari_native_editor_sessions_adopt(m_nativeEditorSessions, trackId, pluginIndex,
+                                               session);
         return session;
     }
     bool close_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const {
-        const uint64_t session = m_nativeEditorHost.session(trackId, pluginIndex);
+        const uint64_t session =
+            hirari_native_editor_sessions_session(m_nativeEditorSessions, trackId, pluginIndex);
         const bool processorClosed = session != 0 && m_engine &&
             m_engine->close_plugin_native_editor(trackId, pluginIndex, session);
-        const bool wrapperClosed = m_nativeEditorHost.close(trackId, pluginIndex);
-        if (processorClosed && !wrapperClosed) m_nativeEditorHost.forget(trackId, pluginIndex);
+        const bool wrapperClosed = session != 0 &&
+            hirari_native_editor_sessions_forget(m_nativeEditorSessions, trackId, pluginIndex);
+        if (processorClosed && !wrapperClosed)
+            hirari_native_editor_sessions_forget(m_nativeEditorSessions, trackId, pluginIndex);
         return wrapperClosed || processorClosed;
     }
     bool plugin_native_editor_embedded(uint32_t trackId, uint32_t pluginIndex) const {
-        return m_nativeEditorHost.embedded(trackId, pluginIndex);
+        return hirari_native_editor_sessions_embedded(m_nativeEditorSessions, trackId, pluginIndex);
     }
     bool cancel_bounce() const noexcept { return m_engine && m_engine->cancel_bounce(); }
     bool pause_bounce() const noexcept { return m_engine && m_engine->pause_bounce(); }
