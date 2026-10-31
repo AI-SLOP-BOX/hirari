@@ -11,6 +11,31 @@ void fillRegionHostState(const Region& region, HirariRegionState& out) {
     out = region.editableState();
 }
 
+// Every region host callback resolves the same track/region pair while
+// holding m_tracksMutex; keeping the traversal here means the lookup cannot
+// drift between callbacks.
+template <typename Tracks>
+Track* findTrackLocked(Tracks& tracks, uint32_t trackId) {
+    for (auto& track : tracks) {
+        if (track && track->getId() == trackId) return track.get();
+    }
+    return nullptr;
+}
+
+template <typename TrackT>
+const Region* findRegionIn(const TrackT& track, uint32_t regionId) {
+    for (const auto& region : track.getRegions()) {
+        if (region.id == regionId) return &region;
+    }
+    return nullptr;
+}
+
+template <typename Tracks>
+const Region* findRegionLocked(Tracks& tracks, uint32_t trackId, uint32_t regionId) {
+    Track* track = findTrackLocked(tracks, trackId);
+    return track ? findRegionIn(*track, regionId) : nullptr;
+}
+
 // The undo registry keeps its callbacks alive for the life of the process, so
 // a note-table snapshot handed over by Rust is owned here and freed with the
 // undo entry.
@@ -32,16 +57,10 @@ bool HirariUnifiedEngine::regionHostFind(void* host, uint32_t trackId, uint32_t 
     if (!host || !out) return false;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id != regionId) continue;
-            fillRegionHostState(region, *out);
-            return true;
-        }
-        return false;
-    }
-    return false;
+    const Region* region = findRegionLocked(engine->m_tracks, trackId, regionId);
+    if (!region) return false;
+    fillRegionHostState(*region, *out);
+    return true;
 }
 
 bool HirariUnifiedEngine::regionHostApply(void* host,
@@ -171,14 +190,8 @@ void* HirariUnifiedEngine::regionHostSnapshot(void* host, uint32_t trackId,
     if (!host) return nullptr;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id == regionId) return new Region(region);
-        }
-        return nullptr;
-    }
-    return nullptr;
+    const Region* region = findRegionLocked(engine->m_tracks, trackId, regionId);
+    return region ? new Region(*region) : nullptr;
 }
 
 void HirariUnifiedEngine::regionHostReleaseSnapshot(void*, void* handle) {
@@ -191,18 +204,12 @@ size_t HirariUnifiedEngine::regionHostWarpMarkers(void* host, uint32_t trackId,
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id != regionId) continue;
-            if (out && capacity >= region.warpMarkers.size()) {
-                std::copy(region.warpMarkers.begin(), region.warpMarkers.end(), out);
-            }
-            return region.warpMarkers.size();
-        }
-        return 0;
+    const Region* region = findRegionLocked(engine->m_tracks, trackId, regionId);
+    if (!region) return 0;
+    if (out && capacity >= region->warpMarkers.size()) {
+        std::copy(region->warpMarkers.begin(), region->warpMarkers.end(), out);
     }
-    return 0;
+    return region->warpMarkers.size();
 }
 
 size_t HirariUnifiedEngine::regionHostRangeEdits(void* host, uint32_t trackId,
@@ -212,39 +219,27 @@ size_t HirariUnifiedEngine::regionHostRangeEdits(void* host, uint32_t trackId,
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id != regionId) continue;
-            if (out && capacity >= region.rangeEdits.size()) {
-                for (size_t index = 0; index < region.rangeEdits.size(); ++index) {
-                    const auto& edit = region.rangeEdits[index];
-                    out[index] = {edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut};
-                }
-            }
-            return region.rangeEdits.size();
+    const Region* region = findRegionLocked(engine->m_tracks, trackId, regionId);
+    if (!region) return 0;
+    if (out && capacity >= region->rangeEdits.size()) {
+        for (size_t index = 0; index < region->rangeEdits.size(); ++index) {
+            const auto& edit = region->rangeEdits[index];
+            out[index] = {edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut};
         }
-        return 0;
     }
-    return 0;
+    return region->rangeEdits.size();
 }
 
 void* HirariUnifiedEngine::regionHostRetainAudio(void* host, uint32_t trackId,
-                                                 uint32_t regionId) {    if (!host) return nullptr;
+                                                 uint32_t regionId) {
+    if (!host) return nullptr;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id != regionId) continue;
-            if (!region.audio) return nullptr;
-            // The shared_ptr keeps the decoded buffer alive for the job even
-            // after the region itself moves on; the worker only reads it.
-            return new std::shared_ptr<AudioBuffer>(region.audio);
-        }
-        return nullptr;
-    }
-    return nullptr;
+    const Region* region = findRegionLocked(engine->m_tracks, trackId, regionId);
+    if (!region || !region->audio) return nullptr;
+    // The shared_ptr keeps the decoded buffer alive for the job even after the
+    // region itself moves on; the worker only reads it.
+    return new std::shared_ptr<AudioBuffer>(region->audio);
 }
 
 uint32_t HirariUnifiedEngine::regionHostAudioView(void* handle, const float** out,
@@ -271,13 +266,11 @@ bool HirariUnifiedEngine::regionHostTrackToken(void* host, uint32_t trackId,
     if (!host) return false;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        if (generation) *generation = track->regionGeneration();
-        if (snapshot) *snapshot = reinterpret_cast<size_t>(track->getRegionSnapshot());
-        return true;
-    }
-    return false;
+    const Track* track = findTrackLocked(engine->m_tracks, trackId);
+    if (!track) return false;
+    if (generation) *generation = track->regionGeneration();
+    if (snapshot) *snapshot = reinterpret_cast<size_t>(track->getRegionSnapshot());
+    return true;
 }
 
 size_t HirariUnifiedEngine::regionHostListTracks(void* host, uint32_t* out,
@@ -299,16 +292,14 @@ size_t HirariUnifiedEngine::regionHostListRegions(void* host, uint32_t trackId,
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        size_t count = 0;
-        for (const auto& region : track->getRegions()) {
-            if (out && count < capacity) out[count] = region.id;
-            ++count;
-        }
-        return count;
+    const Track* track = findTrackLocked(engine->m_tracks, trackId);
+    if (!track) return 0;
+    size_t count = 0;
+    for (const auto& region : track->getRegions()) {
+        if (out && count < capacity) out[count] = region.id;
+        ++count;
     }
-    return 0;
+    return count;
 }
 
 void* HirariUnifiedEngine::regionHostTempoState(void* host) {
@@ -331,18 +322,12 @@ size_t HirariUnifiedEngine::regionHostRegionPath(void* host, uint32_t trackId,
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id != regionId) continue;
-            if (out && capacity >= region.path.size()) {
-                std::copy(region.path.begin(), region.path.end(), out);
-            }
-            return region.path.size();
-        }
-        return 0;
+    const Region* region = findRegionLocked(engine->m_tracks, trackId, regionId);
+    if (!region) return 0;
+    if (out && capacity >= region->path.size()) {
+        std::copy(region->path.begin(), region->path.end(), out);
     }
-    return 0;
+    return region->path.size();
 }
 
 bool HirariUnifiedEngine::regionHostDecodeAudio(void* host, const uint8_t* path,
@@ -415,12 +400,7 @@ size_t HirariUnifiedEngine::regionHostTrackIdentity(void* host, uint32_t trackId
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (track && track->getId() == trackId) {
-            return reinterpret_cast<size_t>(track.get());
-        }
-    }
-    return 0;
+    return reinterpret_cast<size_t>(findTrackLocked(engine->m_tracks, trackId));
 }
 
 void* HirariUnifiedEngine::regionHostRetainTrack(void* host, uint32_t trackId) {
@@ -476,20 +456,15 @@ uint32_t HirariUnifiedEngine::regionHostClone(void* host, uint32_t trackId,
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id != regionId) continue;
-            Region copy = region;
-            if (state) copy.applyEditableState(*state);
-            copy.id = engine->allocateRegionIdLocked();
-            if (copy.id == 0) return 0;
-            track->addRegion(copy);
-            return copy.id;
-        }
-        return 0;
-    }
-    return 0;
+    Track* track = findTrackLocked(engine->m_tracks, trackId);
+    const Region* region = track ? findRegionIn(*track, regionId) : nullptr;
+    if (!region) return 0;
+    Region copy = *region;
+    if (state) copy.applyEditableState(*state);
+    copy.id = engine->allocateRegionIdLocked();
+    if (copy.id == 0) return 0;
+    track->addRegion(copy);
+    return copy.id;
 }
 
 size_t HirariUnifiedEngine::regionHostCompRanges(void* host, uint32_t trackId,
@@ -499,22 +474,16 @@ size_t HirariUnifiedEngine::regionHostCompRanges(void* host, uint32_t trackId,
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (const auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        for (const auto& region : track->getRegions()) {
-            if (region.id != regionId) continue;
-            if (managed) *managed = region.compManaged;
-            if (out && capacity >= region.compRanges.size()) {
-                for (size_t index = 0; index < region.compRanges.size(); ++index) {
-                    const auto& range = region.compRanges[index];
-                    out[index] = {range.start, range.end, range.fadeIn, range.fadeOut};
-                }
-            }
-            return region.compRanges.size();
+    const Region* region = findRegionLocked(engine->m_tracks, trackId, regionId);
+    if (!region) return 0;
+    if (managed) *managed = region->compManaged;
+    if (out && capacity >= region->compRanges.size()) {
+        for (size_t index = 0; index < region->compRanges.size(); ++index) {
+            const auto& range = region->compRanges[index];
+            out[index] = {range.start, range.end, range.fadeIn, range.fadeOut};
         }
-        return 0;
     }
-    return 0;
+    return region->compRanges.size();
 }
 
 size_t HirariUnifiedEngine::regionHostListSyncGroup(void* host, uint32_t group,
@@ -546,11 +515,8 @@ bool HirariUnifiedEngine::regionHostNoteEdit(void* host, uint32_t trackId, uint3
     if (!host || !mutate) return false;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-    for (auto& track : engine->m_tracks) {
-        if (!track || track->getId() != trackId) continue;
-        return track->editRegionNoteStore(regionId, context, mutate);
-    }
-    return false;
+    Track* track = findTrackLocked(engine->m_tracks, trackId);
+    return track && track->editRegionNoteStore(regionId, context, mutate);
 }
 
 bool HirariUnifiedEngine::regionHostRecordUndo(void* host, const char* name,

@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Ten region host callbacks repeated the same track/region lookup loop, so the
+  matching rule lived in ten places. One locked-find helper now serves them all,
+  which keeps every callback resolving the same region under the same lock and
+  removes the chance of the traversal drifting apart.
 - Device selection applied the negotiated format with two copies of the same
   quiesce-then-reconfigure transaction, one for CoreAudio and one for JACK.
   Both now call one helper, and the JACK graph sync uses it too, so a future
