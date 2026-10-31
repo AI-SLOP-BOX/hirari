@@ -71,8 +71,8 @@ public:
         // A failed normalization only drops notes, so keep the region and let
         // the caller observe it in the published snapshot rather than silently
         // discarding the whole edit.
-        normalized.noteEdits.detach();
-        (void)normalized.noteEdits.normalize();
+        normalized.detachNoteEdits();
+        (void)hirari_region_vari_audio_store_normalize(normalized.noteStore.get());
         if (normalized.warpMarkers.size() > 100'000) {
             normalized.warpMarkers.resize(100'000);
         }

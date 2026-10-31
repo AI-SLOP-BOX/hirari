@@ -248,7 +248,7 @@
         const auto it = std::find_if(snapshot->begin(), snapshot->end(),
             [regionId](const Region& region) { return region.id == regionId; });
         if (it == snapshot->end()) return nullptr;
-        return it->noteEdits.cloneHandle();
+        return it->noteStore ? hirari_region_vari_audio_store_clone(it->noteStore.get()) : nullptr;
     }
 
     // Runs a Rust note-table mutation under the region lock and republishes.
@@ -260,7 +260,7 @@
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != regionId) continue;
-            if (!mutate(context, region.noteEdits.storeHandle())) return false;
+            if (!mutate(context, region.noteStore.get())) return false;
             publishRegionSnapshot();
             return true;
         }
@@ -355,17 +355,16 @@
                 it->warpMarkers[index].timelineSample != analysisRegion.warpMarkers[index].timelineSample) return false;
         }
         if (!hirari_audio_pitch_commit_region_result(
-                analysis.get(), it->noteEdits.storeHandle())) return false;
+                analysis.get(), it->noteStore.get())) return false;
         publishRegionSnapshot();
         return true;
     }
 
-    bool appendProcessingStep(uint32_t regionId, ::hirari::editing::EventProcessingStep step) {
+    bool appendProcessingStep(uint32_t regionId, uint32_t stepId, const std::string& operation,
+                              float parameter, bool enabled) {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) if (region.id == regionId) {
-            // The store owns the policy: zero id, empty/oversized operation,
-            // parameter finiteness and the step cap.
-            if (!region.processingHistory.append(step)) return false;
+            if (!region.appendProcessingStep(stepId, operation, parameter, enabled)) return false;
             publishRegionSnapshot();
             return true;
         }
@@ -374,8 +373,11 @@
     bool clearProcessingHistory(uint32_t regionId) {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) if (region.id == regionId) {
-            if (region.processingHistory.empty()) return false;
-            region.processingHistory.clear();
+            if (!region.processingStore ||
+                hirari_region_processing_history_count(region.processingStore.get()) == 0) {
+                return false;
+            }
+            hirari_region_processing_history_reset(region.processingStore.get());
             publishRegionSnapshot();
             return true;
         }

@@ -14,7 +14,6 @@
 #include <optional>
 #include "engine/routing_engine.hpp"
 #include "engine/undo_transaction_manager.hpp"
-#include "editing/audio_note_segment.hpp"
 #include "engine/track_freeze_manager.hpp"
 #include "engine/bus_track.hpp"
 #include <unordered_map>

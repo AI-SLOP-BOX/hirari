@@ -18,9 +18,7 @@
 #include "../midi_region.hpp"
 #include "../plugin_host.hpp"
 #include "../plugins/process_sandbox_processor.hpp"
-#include "../editing/audio_note_segment.hpp"
 #include "../editing/audio_pitch_analysis.hpp"
-#include "../editing/event_processing_history.hpp"
 
 namespace Hirari::Core::Engine {
 
@@ -150,13 +148,61 @@ struct Region {
     // destroy deleter so copies of the Region keep one stretcher instance.
     std::shared_ptr<void> timeStretch;
     float pitchSemitones = 0.0f;
-    // Non-destructive VariAudio-style note edits for this audio region. Rust
-    // owns the authoritative table; C++ keeps the store handle plus the
-    // immutable projection the audio callback reads (see editing/
-    // audio_note_segment.hpp).
-    ::hirari::editing::RegionNoteEdits noteEdits;
+    // Non-destructive VariAudio-style note edits. Rust owns the authoritative
+    // table; the region keeps the store handle plus the immutable projection
+    // the audio callback reads without a lock.
+    std::shared_ptr<HirariRegionVariAudioStore> noteStore{
+        hirari_region_vari_audio_store_new(),
+        [](HirariRegionVariAudioStore* store) { hirari_region_vari_audio_store_clear(store); }};
+    std::shared_ptr<HirariVariAudioFrozen> noteSnapshot;
+    const HirariAudioNoteSegmentRange* noteRanges = nullptr;
+    const HirariAudioNoteCurveView* noteCurves = nullptr;
+    std::size_t noteRangeCount = 0;
+    std::size_t noteCurveCount = 0;
     // Cache identity of the published note projection.
     std::uintptr_t noteCacheKey = 0;
+    void publishNoteEdits() noexcept {
+        noteSnapshot.reset(
+            noteStore ? hirari_region_vari_audio_freeze(noteStore.get()) : nullptr,
+            [](HirariVariAudioFrozen* frozen) { hirari_region_vari_audio_frozen_free(frozen); });
+        noteRanges = noteSnapshot
+            ? hirari_region_vari_audio_frozen_ranges(noteSnapshot.get(), &noteRangeCount) : nullptr;
+        noteCurves = noteSnapshot
+            ? hirari_region_vari_audio_frozen_curves(noteSnapshot.get(), &noteCurveCount) : nullptr;
+        noteCacheKey = reinterpret_cast<std::uintptr_t>(noteSnapshot.get());
+        if (!noteSnapshot) {
+            noteRangeCount = 0;
+            noteCurveCount = 0;
+        }
+    }
+    // Region-add gives the region its own table; the copy shares the caller's
+    // store handle until this detach.
+    void detachNoteEdits() {
+        auto* copy = noteStore ? hirari_region_vari_audio_store_clone(noteStore.get()) : nullptr;
+        if (!copy) return;
+        noteStore.reset(copy, [](HirariRegionVariAudioStore* store) {
+            hirari_region_vari_audio_store_clear(store);
+        });
+        noteSnapshot.reset();
+        noteRanges = nullptr;
+        noteCurves = nullptr;
+        noteRangeCount = 0;
+        noteCurveCount = 0;
+        noteCacheKey = 0;
+    }
+    // Repairing replace (project load): the Rust store drops malformed entries
+    // and orders the survivors.
+    bool loadNoteSegments(const HirariAudioNoteSegment* segments, std::size_t segmentCount,
+                          const HirariAudioNoteAnchor* anchors,
+                          const std::size_t* anchorOffsets, const std::size_t* anchorCounts) {
+        if (!noteStore || (segmentCount != 0 && !segments)) return false;
+        if (segmentCount == 0) {
+            (void)hirari_region_vari_audio_store_clear_segments(noteStore.get());
+            return true;
+        }
+        return hirari_region_vari_audio_store_load(noteStore.get(), segments, segmentCount,
+                                                   anchors, anchorOffsets, anchorCounts);
+    }
     uint32_t loopCount = 1;
     std::vector<RangeEdit> rangeEdits;
     bool compManaged = false;
@@ -166,9 +212,25 @@ struct Region {
     // Region-local, source-to-timeline anchors for non-destructive timing edits.
     std::vector<WarpMarker> warpMarkers;
     // Non-destructive processing-step history. Rust owns the authoritative
-    // table; C++ hands steps in and materializes them for serialization (see
-    // editing/event_processing_history.hpp).
-    ::hirari::editing::RegionProcessingHistory processingHistory;
+    // table; C++ hands steps in and the layout serializer reads it directly.
+    std::shared_ptr<HirariRegionProcessingHistoryStore> processingStore{
+        hirari_region_processing_history_new(),
+        [](HirariRegionProcessingHistoryStore* store) {
+            hirari_region_processing_history_clear(store);
+        }};
+    // The store owns the admissibility policy (id, operation size, parameter
+    // finiteness, 4096-step cap).
+    bool appendProcessingStep(uint32_t stepId, const std::string& operation, float parameter,
+                              bool enabled) {
+        if (!processingStore || stepId == 0 || operation.empty()) return false;
+        HirariEventStep step{};
+        step.id = stepId;
+        step.operation = reinterpret_cast<const uint8_t*>(operation.data());
+        step.operation_len = operation.size();
+        step.parameter = parameter;
+        step.enabled = enabled;
+        return hirari_region_processing_history_append(processingStore.get(), step);
+    }
     // Derived on the control thread when a region snapshot is published.
     uint64_t crossfadeInSamples = 0;
     uint64_t crossfadeOutSamples = 0;

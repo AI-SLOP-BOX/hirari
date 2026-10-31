@@ -63,12 +63,8 @@
                                                  marker.transient});
                     }
                     for (const auto& step : rs.processingHistory) {
-                        ::hirari::editing::EventProcessingStep converted;
-                        converted.id = step.id;
-                        converted.operation = std::string(step.operation);
-                        converted.parameter = step.parameter;
-                        converted.enabled = step.enabled;
-                        if (!r.processingHistory.append(converted)) break;
+                        if (!r.appendProcessingStep(step.id, std::string(step.operation),
+                                                    step.parameter, step.enabled)) break;
                     }
                     // The persisted notes are handed to the Rust store in the
                     // flat ABI layout it already uses; the bridge anchor type
@@ -92,7 +88,7 @@
                         loadedAnchors.insert(loadedAnchors.end(), anchors,
                                              anchors + segment.anchors.size());
                     }
-                    if (!r.noteEdits.assignRepaired(
+                    if (!r.loadNoteSegments(
                             loadedNotes.data(), loadedNotes.size(), loadedAnchors.data(),
                             noteAnchorOffsets.data(), noteAnchorCounts.data())) return false;
                     r.rangeEdits.clear();

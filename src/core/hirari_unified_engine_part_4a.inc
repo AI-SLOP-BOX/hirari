@@ -36,7 +36,8 @@
 bool HirariUnifiedEngine::append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled) {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     Track* track = findTrackLocked(tid);
-    return track && track->appendProcessingStep(rid, {stepId, std::string(operation), parameter, enabled});
+    return track && track->appendProcessingStep(rid, stepId, std::string(operation), parameter,
+                                                enabled);
 }
 bool HirariUnifiedEngine::clear_region_processing(uint32_t tid, uint32_t rid) {
     std::lock_guard<std::mutex> lock(m_tracksMutex);

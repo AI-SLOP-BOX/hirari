@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- The `RegionNoteEdits` and `RegionProcessingHistory` C++ adapters are
+  deleted. `Region` holds the Rust note-edit store, its published frozen
+  projection and the processing-history store directly, and the engine,
+  audio-analysis and project-load paths call
+  `hirari_region_vari_audio_*` / `hirari_region_processing_history_*` itself.
 - The `HolographicPanner` C++ wrapper is deleted. `Track` holds the Rust
   spatial-processor handle directly and calls
   `hirari_track_holographic_panner_*` for kernel, rate and state queries.

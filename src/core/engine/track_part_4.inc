@@ -33,12 +33,10 @@
             static_assert(offsetof(HirariAudioNoteSegmentRange, detectedPitchCents) == 16);
             // The note-edit table is Rust-owned: republish its immutable
             // projection here and let the callback read it lock-free.
-            region.noteEdits.publish();
-            region.noteCacheKey = region.noteEdits.cacheKey();
+            region.publishNoteEdits();
             region.needsSpectralStretch = hirari_region_needs_spectral_stretch(
                 region.sourceFramesPerTimelineFrame(), region.warpMarkers.size(),
-                region.pitchSemitones, region.noteEdits.curves(),
-                region.noteEdits.curveCount());
+                region.pitchSemitones, region.noteCurves, region.noteCurveCount);
             if (!region.pitchPreserveWarp) continue;
             region.timeStretch = std::shared_ptr<void>(
                 hirari_region_stretch_create(),
@@ -105,10 +103,10 @@
             input.compRangeCount = region.compRanges.size();
             input.rangeEdits = reinterpret_cast<const HirariRegionRangeEdit*>(region.rangeEdits.data());
             input.rangeEditCount = region.rangeEdits.size();
-            input.noteRanges = region.noteEdits.ranges();
-            input.noteRangeCount = region.noteEdits.rangeCount();
-            input.noteCurves = region.noteEdits.curves();
-            input.noteCurveCount = region.noteEdits.curveCount();
+            input.noteRanges = region.noteRanges;
+            input.noteRangeCount = region.noteRangeCount;
+            input.noteCurves = region.noteCurves;
+            input.noteCurveCount = region.noteCurveCount;
             input.warpMarkers = region.warpMarkers.data();
             input.warpMarkerCount = region.warpMarkers.size();
             input.resampleKernel = m_regionResampleKernel;

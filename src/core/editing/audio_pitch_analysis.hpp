@@ -1,6 +1,5 @@
 #pragma once
 
-#include "audio_note_segment.hpp"
 #include "../rust_ffi.hpp"
 
 #include <algorithm>

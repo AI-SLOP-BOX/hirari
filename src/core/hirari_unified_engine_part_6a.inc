@@ -169,9 +169,9 @@ bool HirariUnifiedEngine::collectProjectLayout(ProjectLayoutData* out, bool incl
             regionView.rangeEdits =
                 reinterpret_cast<const HirariRegionRangeEdit*>(region.rangeEdits.data());
             regionView.rangeEditCount = region.rangeEdits.size();
-            regionView.noteStore = region.noteEdits.storeHandle();
-            regionView.noteFrozen = region.noteEdits.frozenHandle();
-            regionView.processingStore = region.processingHistory.storeHandle();
+            regionView.noteStore = region.noteStore.get();
+            regionView.noteFrozen = region.noteSnapshot.get();
+            regionView.processingStore = region.processingStore.get();
         }
 
         auto& view = storage->view;
