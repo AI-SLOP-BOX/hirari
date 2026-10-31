@@ -3,7 +3,6 @@
 #include "../src/core/audio_buffer.hpp"
 #include "../src/core/midi_buffer.hpp"
 #include "../src/core/status_queue.hpp"
-#include "../src/platform/audio_device.hpp"
 
 int main() {
     using namespace Hirari::Core;
@@ -30,16 +29,6 @@ int main() {
     assert(emptyPayload.tryAddEvent(emptyEvent));
     assert(emptyPayload.size() == 1);
     assert(emptyPayload.getEvents()[0].data[0] == 0);
-
-    Hirari::Platform::SilentAudioDevice device;
-    Hirari::Platform::AudioDevice::Config config;
-    config.sampleRate = 48000.0;
-    config.bufferSize = 128;
-    assert(device.initialize(config, nullptr, nullptr));
-    assert(device.config().sampleRate == 48000.0);
-    assert(!device.start());
-    assert(device.hasError());
-    assert(device.isSilentFallback());
 
     AudioBuffer buffer(1, 16);
     const auto attemptsBefore = AudioBuffer::realtimeResizeAttempts();

@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- The silent fallback audio-device contract now lives in Rust
+  (`fallback_audio_device.rs`). The C++ `Hirari::Platform` device abstraction
+  had no production caller — the live engine opens CoreAudio through
+  `mac_audio_driver` — so the header, its dedicated transition contract, and
+  the fallback section of the realtime-safety contract are gone; the
+  transition/generation matrix runs as Rust unit tests through the same
+  CMake test target.
 - CoreMIDI device access no longer crosses the C++ engine wrapper. The MIDI
   monitor calls the Rust CoreMIDI host directly for device listing, packet
   send, input start/stop/poll and host-time conversion, so the eight

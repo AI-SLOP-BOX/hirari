@@ -2,13 +2,12 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-OUT_DIR=${TMPDIR:-/tmp}/hirari-device-transition-contract
-mkdir -p "$OUT_DIR"
 
-${CXX:-c++} -std=c++20 -Wall -Wextra -I"$ROOT_DIR" -I"$ROOT_DIR/src" \
-    "$ROOT_DIR/tests/audio_device_transition_contract.cpp" \
-    -o "$OUT_DIR/audio-device-transition"
-"$OUT_DIR/audio-device-transition"
+# The fallback/generation matrix is Rust-owned
+# (hirari-core-bridge/src/fallback_audio_device.rs). It replaced the C++
+# `Hirari::Platform` device contract, which only this script and its test used.
+cargo test --manifest-path "$ROOT_DIR/Cargo.toml" -p hirari-core-bridge --lib \
+    fallback_audio_device
 
 if [ "${HIRARI_REQUIRE_HARDWARE_DEVICE:-0}" = "1" ]; then
     if [ "$(uname -s)" != "Darwin" ]; then

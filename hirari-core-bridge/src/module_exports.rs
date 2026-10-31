@@ -115,6 +115,7 @@ pub mod expression_map_edit_host;
 pub mod extensions;
 pub mod external_sync_runtime;
 pub mod fade_enveloper;
+pub mod fallback_audio_device;
 pub mod fet_compressor;
 pub mod fft;
 pub mod forensic;
