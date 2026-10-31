@@ -29,21 +29,6 @@ public:
         hirari_track_holographic_panner_destroy(m_spatialPanner);
     }
 
-    void addMidiRegion(std::shared_ptr<Hirari::Core::MidiRegion> region) {
-        if (!region || !std::isfinite(region->getStartBeat()) ||
-            !std::isfinite(region->getLengthBeats()) || region->getLengthBeats() <= 0.0) return;
-        // MIDI regions are part of the rendered signal just like audio
-        // regions. A frozen track must never keep serving the pre-edit audio
-        // after a new note region is attached.
-        invalidateFrozenForEdit();
-        m_midiRegions.push_back(std::move(region));
-        markProjectLayoutChanged();
-    }
-
-    const std::vector<std::shared_ptr<Hirari::Core::MidiRegion>>& getMidiRegions() const noexcept {
-        return m_midiRegions;
-    }
-
     /**
      * @brief Adds a region with industrial-grade management and temporal sovereignty.
      * INDUSTRIAL: Delegating region management and sorting to the Rust 'TrackOrchestrator'.

@@ -1608,22 +1608,6 @@ extern "C" bool hirari_track_freeze_write_float32(
 extern "C" bool hirari_track_freeze_read_float32(
     const uint8_t* path, size_t path_size, uint32_t sample_rate,
     uint64_t total_samples, float* left, float* right);
-extern "C" void* hirari_midi_region_state_create(const void* notes, size_t count);
-extern "C" void hirari_midi_region_state_destroy(void* state);
-extern "C" size_t hirari_midi_region_state_count(const void* state);
-extern "C" size_t hirari_midi_region_state_copy(
-    const void* state, void* output, size_t capacity);
-extern "C" bool hirari_midi_region_state_add(void* state, const void* note);
-extern "C" bool hirari_midi_region_state_update(void* state, size_t index, const void* note);
-extern "C" bool hirari_midi_region_state_replace(void* state, const void* notes, size_t count);
-extern "C" void hirari_midi_region_state_transpose(
-    void* state, int32_t semitones, double selection_start, double selection_end);
-extern "C" bool hirari_midi_region_state_quantize(
-    void* state, double grid, double strength, double selection_start, double selection_end);
-extern "C" void hirari_midi_region_state_remove_notes_at(
-    void* state, double beat, int32_t pitch, double tolerance);
-extern "C" void hirari_midi_region_state_set_muted_at(
-    void* state, double beat, int32_t pitch, bool muted);
 extern "C" void* hirari_midi_fragment_reassembler_create();
 extern "C" void hirari_midi_fragment_reassembler_destroy(void* state);
 extern "C" void hirari_midi_fragment_reassembler_reset(void* state);

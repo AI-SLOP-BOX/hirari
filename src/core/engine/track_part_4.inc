@@ -182,7 +182,6 @@
     // Updated on the control thread from sandbox-reported plugin metadata;
     // the callback reads it to choose the built-in MIDI fallback.
     std::atomic<uint32_t> m_midiInstrumentPluginCount{0};
-    std::vector<std::shared_ptr<Hirari::Core::MidiRegion>> m_midiRegions;
     // Rust-owned slot registry: chain index and path per sandboxed plugin.
     void* m_sandboxSlots = hirari_sandbox_slots_create();
     std::atomic<uint8_t> m_lastSandboxFailure{0};

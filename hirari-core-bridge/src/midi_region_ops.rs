@@ -370,10 +370,24 @@ pub unsafe extern "C" fn hirari_midi_region_set_muted_at(
 
 #[cfg(test)]
 mod tests {
-    use super::{hirari_midi_region_quantize, HirariMidiBeatNote};
+    use super::{
+        hirari_midi_region_quantize, hirari_midi_region_state_add,
+        hirari_midi_region_state_copy, hirari_midi_region_state_count,
+        hirari_midi_region_state_create, hirari_midi_region_state_destroy,
+        hirari_midi_region_state_remove_notes_at, hirari_midi_region_state_replace,
+        hirari_midi_region_state_set_muted_at, hirari_midi_region_state_transpose,
+        hirari_midi_region_state_update, HirariMidiBeatNote,
+    };
+    use std::ffi::c_void;
 
-    unsafe extern "C" {
-        fn hirari_midi_region_cpp_wrapper_smoke() -> bool;
+    unsafe fn read_notes(state: *const c_void) -> Vec<HirariMidiBeatNote> {
+        let count = unsafe { hirari_midi_region_state_count(state) };
+        let mut notes = vec![HirariMidiBeatNote::default(); count];
+        let copied = unsafe {
+            hirari_midi_region_state_copy(state, notes.as_mut_ptr().cast(), notes.len())
+        };
+        assert_eq!(copied, count);
+        notes
     }
 
     #[test]
@@ -492,7 +506,78 @@ mod tests {
     }
 
     #[test]
-    fn cpp_midi_region_adapter_uses_rust_owned_note_storage() {
-        assert!(unsafe { hirari_midi_region_cpp_wrapper_smoke() });
+    fn note_store_sequence_matches_the_editor_abi_contract() {
+        let notes = [
+            HirariMidiBeatNote {
+                pitch: 60,
+                velocity: 80,
+                start_beat: 0.2,
+                length_beats: 0.5,
+            },
+            HirariMidiBeatNote {
+                pitch: 60,
+                velocity: 90,
+                start_beat: 1.24,
+                length_beats: 0.5,
+            },
+            HirariMidiBeatNote {
+                pitch: 72,
+                velocity: 100,
+                start_beat: 2.0,
+                length_beats: 0.25,
+            },
+        ];
+        unsafe {
+            let state = hirari_midi_region_state_create(notes.as_ptr().cast(), notes.len());
+            assert!(!state.is_null());
+            hirari_midi_region_state_transpose(state, 12, 1.0, 1.5);
+            hirari_midi_region_state_set_muted_at(state, 1.24, 72, true);
+            let processed = read_notes(state);
+            assert_eq!(processed.len(), 3);
+            assert_eq!((processed[1].pitch, processed[1].velocity), (72, 0));
+
+            hirari_midi_region_state_remove_notes_at(state, 1.24, 72, 0.01);
+            assert_eq!(read_notes(state).len(), 2);
+
+            let invalid = [HirariMidiBeatNote {
+                pitch: 64,
+                velocity: 90,
+                start_beat: 0.5,
+                length_beats: 0.0,
+            }];
+            assert!(!hirari_midi_region_state_replace(
+                state,
+                invalid.as_ptr().cast(),
+                invalid.len()
+            ));
+            assert_eq!(read_notes(state).len(), 2);
+
+            let updated = HirariMidiBeatNote {
+                pitch: 61,
+                velocity: 88,
+                start_beat: 0.25,
+                length_beats: 0.75,
+            };
+            assert!(hirari_midi_region_state_update(
+                state,
+                0,
+                (&updated as *const HirariMidiBeatNote).cast()
+            ));
+            let processed = read_notes(state);
+            assert_eq!((processed.len(), processed[0].pitch), (2, 61));
+
+            let added = HirariMidiBeatNote {
+                pitch: 48,
+                velocity: 70,
+                start_beat: 3.0,
+                length_beats: 1.0,
+            };
+            assert!(hirari_midi_region_state_add(
+                state,
+                (&added as *const HirariMidiBeatNote).cast()
+            ));
+            assert_eq!(read_notes(state).len(), 3);
+            hirari_midi_region_state_destroy(state);
+        }
     }
 }

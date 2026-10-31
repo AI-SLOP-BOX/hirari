@@ -317,21 +317,6 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     if (cloned.id == 0) return nullptr;
                     copy->addRegion(cloned);
                 }
-                // MIDI regions are independent objects and cannot be shallow-copied
-                // because their note vectors are mutex-protected. Clone the notes
-                // through the safe control-plane accessor and allocate fresh IDs.
-                for (const auto& midiRegion : original->getMidiRegions()) {
-                    if (!midiRegion) continue;
-                    std::vector<MIDINote> notes;
-                    if (!midiRegion->copyProcessedNotes(notes)) return nullptr;
-                    const uint32_t midiId = engine->allocateRegionIdLocked();
-                    if (midiId == 0) return nullptr;
-                    auto midiCopy = std::make_shared<Hirari::Core::MidiRegion>(
-                        midiId, midiRegion->getName(), midiRegion->getStartBeat(),
-                        midiRegion->getLengthBeats());
-                    if (!midiCopy->replaceNotes(notes)) return nullptr;
-                    copy->addMidiRegion(std::move(midiCopy));
-                }
                 insertIndex = engine->m_tracks.size();
                 engine->m_tracks.push_back(copy);
                 engine->mark_project_layout_changed();

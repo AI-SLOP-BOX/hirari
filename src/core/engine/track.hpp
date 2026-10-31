@@ -15,7 +15,6 @@
 #include "../audio_buffer.hpp"
 #include "../project_automation.hpp"
 #include "../effect_chain.hpp"
-#include "../midi_region.hpp"
 #include "../plugin_host.hpp"
 #include "../plugins/process_sandbox_processor.hpp"
 #include "../editing/audio_pitch_analysis.hpp"

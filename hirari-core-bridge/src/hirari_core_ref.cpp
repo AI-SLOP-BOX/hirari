@@ -14,7 +14,6 @@ void HIRARI_LOG(uint32_t level, const std::string& msg) {
 
 #include "dsp/spatial/metal_audio_kernel.hpp"
 #include "core/midi_buffer.hpp"
-#include "core/midi_region.hpp"
 #include "core/status_queue.hpp"
 #include "core/concurrency/audio_task_manager.hpp"
 #include "core/concurrency/thread_pool.hpp"
@@ -142,23 +141,4 @@ extern "C" bool hirari_rust_thread_pool_cpp_smoke() {
     } catch (...) {
         return false;
     }
-}
-
-extern "C" bool hirari_midi_region_cpp_wrapper_smoke() {
-    Hirari::Core::MidiRegion region(1, "Rust-owned notes");
-    region.addNote(Hirari::Core::MIDINote{60, 80, 0.2, 0.5});
-    region.addNote(Hirari::Core::MIDINote{60, 90, 1.24, 0.5});
-    region.addNote(Hirari::Core::MIDINote{72, 100, 2.0, 0.25});
-    region.transpose(12, 1.0, 1.5);
-    region.setMutedAt(1.24, 72, true);
-    std::vector<Hirari::Core::MIDINote> notes;
-    if (!region.copyProcessedNotes(notes) || notes.size() != 3 ||
-        notes[1].pitch != 72 || notes[1].velocity != 0) return false;
-    region.removeNotesAt(1.24, 72, 0.01);
-    if (!region.copyProcessedNotes(notes) || notes.size() != 2) return false;
-    const std::vector<Hirari::Core::MIDINote> invalid{{64, 90, 0.5, 0.0}};
-    if (region.replaceNotes(invalid) || !region.copyProcessedNotes(notes) || notes.size() != 2)
-        return false;
-    return region.updateNote(0, Hirari::Core::MIDINote{61, 88, 0.25, 0.75}) &&
-        region.copyProcessedNotes(notes) && notes.size() == 2 && notes[0].pitch == 61;
 }

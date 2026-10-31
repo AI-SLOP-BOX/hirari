@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- The dead C++ MIDI-region surface is gone: composition MIDI has been
+  Rust-owned for a while, so `Track`'s region list was never populated and only
+  the duplicate-track path walked it. `midi_region.hpp`, the `Track` add/get
+  accessors, the duplicate clone loop, and the orphaned note-store C
+  declarations are removed; the wrapper smoke test is ported to the Rust
+  note-store ABI.
 - Sandboxed-plugin slot bookkeeping now lives in a Rust-owned registry
   (`plugin_sandbox_map.rs`): a track's chain index and plugin path are stored
   as one slot list, and add/duplicate/remove/restore/reorder all go through it,
