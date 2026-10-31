@@ -34,20 +34,5 @@ public:
                                       uint32_t numChannels,
                                       uint32_t numSamples) noexcept;
     void waitForAudioCallbacks() const noexcept;
-    void renderBlock(float* outL, float* outR, uint32_t numSamples,
-                     const EngineContext& context) {
-        (void)context;
-        if (outL == nullptr || outR == nullptr || numSamples == 0 ||
-            numSamples > kMaxAudioBlockSize) {
-            if (outL != nullptr && outR != nullptr && numSamples > 0 &&
-                numSamples <= kMaxAudioBlockSize) {
-                std::fill_n(outL, numSamples, 0.0f);
-                std::fill_n(outR, numSamples, 0.0f);
-            }
-            return;
-        }
-        float* channels[2] = {outL, outR};
-        processBlockDirect(channels, 2, numSamples);
-    }
     void prepareToPlay(double sr, uint32_t sz);
     void syncStructuralChanges();

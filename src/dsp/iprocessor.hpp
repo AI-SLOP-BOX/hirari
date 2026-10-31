@@ -134,9 +134,6 @@ public:
     virtual void getParameterName(uint32_t /*id*/, char* outName, uint32_t maxSize) const noexcept {
         if (outName && maxSize > 0) outName[0] = '\0';
     }
-    // Unsupported parameters are not automated. Concrete processors must
-    // opt in explicitly once they expose a real automation lane.
-    virtual bool isParameterAutomated(uint32_t /*id*/) const noexcept { return false; }
 
     // Native editor availability is separate from audio processing readiness.
     virtual bool hasNativeEditor() const noexcept { return false; }
@@ -153,18 +150,10 @@ public:
     // This is a control/diagnostic read and must never allocate or block.
     virtual uint64_t nonFiniteSampleCount() const noexcept { return 0; }
 
-    // Telemetry: RAM vs Disk streaming health (true = Streaming, false = RAM)
-    virtual std::vector<bool> getStreamingHealth() const { return {}; }
-
     // Mix and Bypass
-    void setMix(float mix) noexcept { m_mix = std::clamp(mix, 0.0f, 1.0f); }
     float getMix() const noexcept { return m_mix; }
     void setBypassed(bool b) noexcept { m_bypassed = b; }
     bool isBypassed() const noexcept { return m_bypassed; }
-
-    // Sidechain
-    void setSidechainBus(uint32_t busId) noexcept { m_sidechainBusId = busId; }
-    uint32_t getSidechainBus() const noexcept { return m_sidechainBusId; }
 
 protected:
     bool m_bypassed = false;

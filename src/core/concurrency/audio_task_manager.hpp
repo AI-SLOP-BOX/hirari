@@ -78,10 +78,6 @@ public:
 
     void stop() { hirari_audio_scheduler_stop(m_state); }
 
-    uint32_t getNumThreads() const noexcept {
-        return static_cast<uint32_t>(hirari_audio_scheduler_thread_count(m_state));
-    }
-
     bool enqueue(uint32_t worker, AudioTaskJob* job) {
         return job && hirari_audio_scheduler_push(m_state, worker, job);
     }

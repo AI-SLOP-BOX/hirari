@@ -47,11 +47,6 @@ public:
         hirari_master_limiter_process(m_state, l, r, numSamples, r != nullptr);
     }
 
-    void setThreshold(float db) { hirari_master_limiter_set_control(m_state, 0, db); }
-    void setCeiling(float db) { hirari_master_limiter_set_control(m_state, 1, db); }
-    void setRelease(float ms) { hirari_master_limiter_set_control(m_state, 2, ms); }
-    void setLookaheadMs(float ms) { hirari_master_limiter_set_control(m_state, 3, ms); }
-
     uint32_t getNumParameters() const noexcept override { return 4; }
     void setParameter(uint32_t id, float value) noexcept override {
         hirari_master_limiter_set_parameter(m_state, id, value);

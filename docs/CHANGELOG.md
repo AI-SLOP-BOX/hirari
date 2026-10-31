@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Unreferenced C++ helpers are gone: the engine's unused `renderBlock`
+  convenience overload and its musical-time structs, the worker VST3
+  runtime's editor and unload entry points, the limiter's direct
+  threshold/ceiling/release/lookahead setters (parameters already flow
+  through `setParameter`), plus dead scheduler, MIDI-buffer and processor
+  accessors.
 - The master meter no longer recomputes an unused 64-band spectrogram on
   every UI read, and C++ no longer declares the Rust-internal goniometer and
   undo helper FFI that only Rust calls, nor the unused scheduler task

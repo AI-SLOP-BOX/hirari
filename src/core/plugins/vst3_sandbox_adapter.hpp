@@ -92,50 +92,11 @@ public:
         return true;
     }
 
-    bool hasEditorView() const noexcept {
-        if (!m_controller) return false;
-        auto* view = m_controller->createView(Steinberg::Vst::ViewType::kEditor);
-        if (!view) return false;
-        view->release();
-        return true;
-    }
-
     bool isMidiInstrument() const noexcept {
         return m_component &&
             m_component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput) == 0 &&
             m_component->getBusCount(Steinberg::Vst::kEvent, Steinberg::Vst::kInput) > 0 &&
             m_component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kOutput) > 0;
-    }
-
-    // Creates and attaches the vendor editor on the UI thread. The returned
-    // view pointer is an opaque session token owned by this runtime; callers
-    // must pass it back to closeEditor before destroying the plugin instance.
-    uint64_t openEditor(uintptr_t parent) noexcept {
-        if (!m_controller || !parent || m_editorView) return 0;
-        auto* view = m_controller->createView(Steinberg::Vst::ViewType::kEditor);
-        if (!view) return 0;
-#if defined(_WIN32)
-        constexpr const char* kPlatform = "HWND";
-#elif defined(__APPLE__)
-        constexpr const char* kPlatform = "NSView";
-#else
-        constexpr const char* kPlatform = "X11EmbedWindowID";
-#endif
-        if (view->attached(reinterpret_cast<void*>(parent), kPlatform) != Steinberg::kResultOk) {
-            view->release();
-            return 0;
-        }
-        m_editorView = view;
-        return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(view));
-    }
-
-    bool closeEditor(uint64_t session) noexcept {
-        if (!m_editorView || session == 0 ||
-            session != static_cast<uint64_t>(reinterpret_cast<uintptr_t>(m_editorView))) return false;
-        m_editorView->removed();
-        m_editorView->release();
-        m_editorView = nullptr;
-        return true;
     }
 
     // VST3 has no universal reset() entry point.  Toggling processing at the
@@ -458,15 +419,9 @@ public:
 
     bool ready() const noexcept { return m_ready; }
     const char* error() const noexcept { return m_error.c_str(); }
-    void unload() noexcept { shutdown(); }
 
 private:
     void shutdown() noexcept {
-        if (m_editorView) {
-            m_editorView->removed();
-            m_editorView->release();
-            m_editorView = nullptr;
-        }
         if (m_processor && m_ready) {
             m_processor->setProcessing(false);
             m_component->setActive(false);
@@ -499,7 +454,6 @@ private:
     Steinberg::IPtr<Steinberg::Vst::IComponent> m_component;
     Steinberg::FUnknownPtr<Steinberg::Vst::IAudioProcessor> m_processor;
     Steinberg::FUnknownPtr<Steinberg::Vst::IEditController> m_controller;
-    Steinberg::Vst::IPlugView* m_editorView = nullptr;
     Steinberg::Vst::HostProcessData m_processData;
 #if HIRARI_HAS_VST3_PARAMETER_CHANGES
     Steinberg::Vst::ParameterChanges m_parameterChanges{SandboxProtocol::kMaxParameterChanges};

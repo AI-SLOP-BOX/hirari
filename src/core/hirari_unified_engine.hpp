@@ -8,13 +8,10 @@
 #include <array>
 #include "audio_buffer.hpp"
 #include "midi_buffer.hpp"
-#include "engine_types.hpp"
 #include "bridge_types.hpp"
-#include "engine_types.hpp"
 #include "utils/ring_buffer.hpp"
 #include "concurrency/audio_task_manager.hpp"
 #include <optional>
-#include <vector>
 #include "engine/routing_engine.hpp"
 #include "engine/undo_transaction_manager.hpp"
 #include "editing/audio_note_segment.hpp"

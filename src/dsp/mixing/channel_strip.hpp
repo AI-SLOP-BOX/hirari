@@ -28,7 +28,6 @@ public:
     void reset() { hirari_channel_strip_reset(m_state); }
     void setGain(float gain) { hirari_channel_strip_set_gain(m_state, gain); }
     void setPan(float pan) { hirari_channel_strip_set_pan(m_state, pan); }
-    void setMute(bool mute) { hirari_channel_strip_set_mute(m_state, mute); }
     void setSolo(bool solo) { hirari_channel_strip_set_solo(m_state, solo); }
 
     void process(Core::AudioBuffer& buffer) {

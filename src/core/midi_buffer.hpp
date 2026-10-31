@@ -141,8 +141,6 @@ public:
         return static_cast<MidiEvent*>(hirari_midi_buffer_event_data(m_state));
     }
     size_t size() const { return hirari_midi_buffer_event_count(m_state); }
-    void* rustStateHandle() noexcept { return m_state; }
-    const void* rustStateHandle() const noexcept { return m_state; }
     const MidiEvent* begin() const { return getEvents(); }
     const MidiEvent* end() const { return getEvents() + size(); }
 
