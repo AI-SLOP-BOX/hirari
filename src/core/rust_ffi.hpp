@@ -878,32 +878,9 @@ struct HirariTrackRegionRenderInput {
 extern "C" bool hirari_region_needs_spectral_stretch(
     double source_rate, size_t warp_marker_count, float pitch_semitones,
     const HirariAudioNoteCurveView* note_curves, size_t note_curve_count);
-// Native built-in DSP processors share one dispatch surface; the kind index
-// selects the effect inside Rust.
-extern "C" int32_t hirari_native_processor_kind_for_path(const uint8_t* path, size_t path_size);
-extern "C" void* hirari_native_processor_create(int32_t kind);
-extern "C" void hirari_native_processor_destroy(int32_t kind, void* state);
-extern "C" void hirari_native_processor_prepare(int32_t kind, const void* state, double sample_rate);
-extern "C" void hirari_native_processor_reset(int32_t kind, const void* state);
-extern "C" void hirari_native_processor_process(
-    int32_t kind, const void* state, float* const* channels, uint32_t channel_count,
-    uint32_t frames, double bpm);
-extern "C" void hirari_native_processor_set_parameter(
-    int32_t kind, const void* state, uint32_t id, float value);
-extern "C" float hirari_native_processor_get_parameter(int32_t kind, const void* state, uint32_t id);
-extern "C" uint32_t hirari_native_processor_parameter_count(int32_t kind);
-extern "C" uint32_t hirari_native_processor_tail_samples(int32_t kind, const void* state);
-extern "C" uint32_t hirari_native_processor_latency_samples(int32_t kind, const void* state);
-extern "C" const char* hirari_native_processor_name(int32_t kind);
-extern "C" const char* hirari_native_processor_parameter_name(int32_t kind, uint32_t id);
-// A zero return means this kind has no serializer of its own and the host
-// envelope is authoritative; the four formats that do exist stay byte-exact.
-extern "C" size_t hirari_native_processor_state_save(
-    int32_t kind, const void* state, uint8_t bypassed, float mix,
-    uint32_t sidechain_bus_id, uint8_t* output, size_t capacity);
-extern "C" bool hirari_native_processor_state_restore(
-    int32_t kind, void* state, const uint8_t* bytes, size_t size,
-    uint8_t* bypassed, float* mix, uint32_t* sidechain_bus_id);
+// Native built-in DSP processors share one dispatch surface; the host below
+// owns the processor handles, so the per-processor entry points stay inside
+// Rust instead of appearing as a C++ ABI.
 // Host-side policy for the built-in catalog: parameter mirror, dirty dispatch
 // and state markers. Every entry is null-safe so a failed load stays inert.
 extern "C" void* hirari_native_plugin_host_create(const uint8_t* path, size_t path_size);
@@ -1723,14 +1700,29 @@ extern "C" void hirari_expression_map_edit_host_install(
     const HirariExpressionMapEditHostOps* ops);
 extern "C" uint8_t hirari_plugin_admission_error(const char* path);
 extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bus);
-extern "C" size_t hirari_plugin_sandbox_find(const uint32_t*, size_t, uint32_t);
-extern "C" size_t hirari_plugin_sandbox_remove(uint32_t*, uint32_t*, size_t, uint32_t);
+// Rust-owned sandboxed-plugin slot registry: chain index and plugin path are
+// stored together so removal/reordering keeps them aligned.
+extern "C" void* hirari_sandbox_slots_create();
+extern "C" void hirari_sandbox_slots_destroy(void* store);
+extern "C" size_t hirari_sandbox_slots_len(const void* store);
+extern "C" uint32_t hirari_sandbox_slots_index(const void* store, size_t slot);
+extern "C" size_t hirari_sandbox_slots_find(const void* store, uint32_t plugin_index);
+extern "C" size_t hirari_sandbox_slots_path_size(const void* store, size_t slot);
+extern "C" size_t hirari_sandbox_slots_path_copy(const void* store, size_t slot, uint8_t* out,
+                                                 size_t capacity);
+extern "C" bool hirari_sandbox_slots_contains_path(const void* store, const uint8_t* path,
+                                                   size_t length);
+extern "C" bool hirari_sandbox_slots_push(void* store, uint32_t plugin_index,
+                                          const uint8_t* path, size_t length);
+extern "C" size_t hirari_sandbox_slots_remove(void* store, uint32_t plugin_index);
+extern "C" bool hirari_sandbox_slots_insert(void* store, uint32_t plugin_index,
+                                            const uint8_t* path, size_t length);
+extern "C" void hirari_sandbox_slots_move(void* store, uint32_t from, uint32_t to);
 extern "C" const char* hirari_plugin_sandbox_failure_name(uint8_t code), *hirari_plugin_sandbox_state_error_name(uint8_t code);
 // Built-in effect parameter names; kind matches the Rust-builtin effect table.
 extern "C" uint32_t hirari_plugin_sandbox_block_outcome(
     bool produced, uint32_t overruns, uint8_t failure_code, bool failed);
 extern "C" uint32_t hirari_plugin_sandbox_transport_retry_delay(uint32_t attempt, uint8_t failure);
-extern "C" size_t hirari_plugin_sandbox_move(uint32_t*, uint32_t*, size_t, size_t, uint32_t, uint32_t);
 extern "C" void* hirari_midi_learn_create();
 extern "C" void hirari_midi_learn_destroy(void* state);
 extern "C" void hirari_midi_learn_add_mapping(

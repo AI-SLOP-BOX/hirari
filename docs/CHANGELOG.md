@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Sandboxed-plugin slot bookkeeping now lives in a Rust-owned registry
+  (`plugin_sandbox_map.rs`): a track's chain index and plugin path are stored
+  as one slot list, and add/duplicate/remove/restore/reorder all go through it,
+  so the two C++ vectors that had to be permuted in lockstep are gone. The
+  dead per-processor generation/quarantine wrappers and the native-processor
+  C ABI declarations they left behind are removed as well.
 - The C++ `PluginSandboxHost` forwarding facade is gone: the sandboxed plugin
   processor holds the Rust-owned `SandboxHost` box directly and marshals
   audio/MIDI, so nothing outside Rust renames or relays the lifecycle, state

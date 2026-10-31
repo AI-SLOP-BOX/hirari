@@ -1,3 +1,16 @@
+    size_t sandboxSlotCount() const noexcept { return hirari_sandbox_slots_len(m_sandboxSlots); }
+    uint32_t sandboxSlotIndex(size_t slot) const noexcept {
+        return hirari_sandbox_slots_index(m_sandboxSlots, slot);
+    }
+    std::string sandboxSlotPath(size_t slot) const {
+        const size_t length = hirari_sandbox_slots_path_size(m_sandboxSlots, slot);
+        std::string path(length, '\0');
+        if (length == 0) return path;
+        if (hirari_sandbox_slots_path_copy(m_sandboxSlots, slot,
+                reinterpret_cast<uint8_t*>(path.data()), length) != length) return {};
+        return path;
+    }
+
     void setVolume(float v) {
         invalidateFrozenForEdit();
         const float next = std::isfinite(v) ? std::clamp(v, 0.0f, 2.0f) : 1.0f;
@@ -56,10 +69,8 @@
             snapshot->parallel = removed.parallel;
             snapshot->midiInstrument = removedMidiInstrument;
             if (snapshot->type == 0xFFFFFFFFu) {
-                const size_t slot = hirari_plugin_sandbox_find(
-                    m_sandboxedPluginIndices.data(), m_sandboxedPluginIndices.size(), pluginIndex);
-                if (slot < m_sandboxedPluginPaths.size())
-                    snapshot->sandboxPath = m_sandboxedPluginPaths[slot];
+                const size_t slot = hirari_sandbox_slots_find(m_sandboxSlots, pluginIndex);
+                if (slot != SIZE_MAX) snapshot->sandboxPath = sandboxSlotPath(slot);
             }
         }
         m_pluginTypes.erase(m_pluginTypes.begin() + pluginIndex);
@@ -68,18 +79,7 @@
         invalidateFrozenForEdit();
         // The slot shift and its path permutation are Rust-owned so removal and
         // reordering cannot disagree about the chain order.
-        std::vector<uint32_t> survivors(m_sandboxedPluginIndices.size());
-        const size_t kept = hirari_plugin_sandbox_remove(
-            m_sandboxedPluginIndices.data(), survivors.data(),
-            m_sandboxedPluginIndices.size(), pluginIndex);
-        std::vector<std::string> paths;
-        paths.reserve(kept);
-        for (size_t i = 0; i < kept; ++i) {
-            if (survivors[i] < m_sandboxedPluginPaths.size())
-                paths.push_back(std::move(m_sandboxedPluginPaths[survivors[i]]));
-        }
-        m_sandboxedPluginIndices.resize(kept);
-        m_sandboxedPluginPaths = std::move(paths);
+        (void)hirari_sandbox_slots_remove(m_sandboxSlots, pluginIndex);
         markProjectLayoutChanged();
         return true;
     }
@@ -88,17 +88,14 @@
         if (!snapshot.processor || pluginIndex > m_pluginTypes.size()) return false;
         EffectChain::Entry entry{snapshot.processor, snapshot.bypassed, snapshot.parallel};
         if (!m_effectChain.insertProcessor(pluginIndex, std::move(entry))) return false;
-        for (auto& sandboxIndex : m_sandboxedPluginIndices)
-            if (sandboxIndex >= pluginIndex) ++sandboxIndex;
         m_pluginTypes.insert(m_pluginTypes.begin() + pluginIndex, snapshot.type);
         if (snapshot.midiInstrument)
             m_midiInstrumentPluginCount.fetch_add(1, std::memory_order_release);
         if (snapshot.type == 0xFFFFFFFFu) {
-            size_t offset = 0;
-            while (offset < m_sandboxedPluginIndices.size() &&
-                   m_sandboxedPluginIndices[offset] < pluginIndex) ++offset;
-            m_sandboxedPluginIndices.insert(m_sandboxedPluginIndices.begin() + offset, pluginIndex);
-            m_sandboxedPluginPaths.insert(m_sandboxedPluginPaths.begin() + offset, snapshot.sandboxPath);
+            (void)hirari_sandbox_slots_insert(
+                m_sandboxSlots, pluginIndex,
+                reinterpret_cast<const uint8_t*>(snapshot.sandboxPath.data()),
+                snapshot.sandboxPath.size());
         }
         invalidateFrozenForEdit();
         markProjectLayoutChanged();
@@ -114,16 +111,7 @@
         m_pluginTypes.insert(m_pluginTypes.begin() + to, type);
 
         // Same Rust-owned permutation as removal, now with the from/to remap.
-        std::vector<uint32_t> order(m_sandboxedPluginIndices.size());
-        const size_t kept = hirari_plugin_sandbox_move(
-            m_sandboxedPluginIndices.data(), order.data(),
-            m_sandboxedPluginIndices.size(), m_sandboxedPluginPaths.size(), from, to);
-        std::vector<std::string> paths;
-        paths.reserve(kept);
-        for (size_t i = 0; i < kept; ++i)
-            paths.push_back(std::move(m_sandboxedPluginPaths[order[i]]));
-        m_sandboxedPluginIndices.resize(kept);
-        m_sandboxedPluginPaths = std::move(paths);
+        hirari_sandbox_slots_move(m_sandboxSlots, from, to);
         invalidateFrozenForEdit();
         markProjectLayoutChanged();
         return true;
@@ -136,8 +124,9 @@
             case 3: m_lastSandboxFailureText = "plugin-format-unsupported"; return false;
             default: break;
         }
-        if (std::find(m_sandboxedPluginPaths.begin(), m_sandboxedPluginPaths.end(), pluginPath) !=
-            m_sandboxedPluginPaths.end()) {
+        if (hirari_sandbox_slots_contains_path(
+                m_sandboxSlots, reinterpret_cast<const uint8_t*>(pluginPath.data()),
+                pluginPath.size())) {
             m_lastSandboxFailureText = "duplicate-plugin-path";
             return false;
         }
@@ -177,8 +166,9 @@
         m_pluginTypes.push_back(0xFFFFFFFFu);
         if (midiInstrument)
             m_midiInstrumentPluginCount.fetch_add(1, std::memory_order_release);
-        m_sandboxedPluginPaths.push_back(pluginPath);
-        m_sandboxedPluginIndices.push_back(processorIndex);
+        (void)hirari_sandbox_slots_push(
+            m_sandboxSlots, processorIndex,
+            reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size());
         if (m_isPrepared) m_effectChain.setSampleRate(m_sampleRate, m_blockSize);
         invalidateFrozenForEdit();
         markProjectLayoutChanged();
@@ -192,8 +182,8 @@
     bool processSandboxedPluginBlock(size_t sandboxIndex, float* left, float* right,
                                      uint32_t frames) {
         if (!left || !right || frames == 0 || frames > Hirari::Core::Plugins::SandboxProtocol::kMaxFrames ||
-            sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
-        const uint32_t pluginIndex = m_sandboxedPluginIndices[sandboxIndex];
+            sandboxIndex >= sandboxSlotCount()) return false;
+        const uint32_t pluginIndex = sandboxSlotIndex(sandboxIndex);
         auto processor = m_effectChain.getProcessor(pluginIndex);
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         if (!sandbox) return false;
@@ -209,8 +199,8 @@
                                                          uint32_t midiSize) {
         if (!midiData || midiSize == 0 || frames == 0 ||
             frames > Hirari::Core::Plugins::SandboxProtocol::kMaxFrames ||
-            sandboxIndex >= m_sandboxedPluginIndices.size()) return {};
-        const uint32_t pluginIndex = m_sandboxedPluginIndices[sandboxIndex];
+            sandboxIndex >= sandboxSlotCount()) return {};
+        const uint32_t pluginIndex = sandboxSlotIndex(sandboxIndex);
         auto processor = m_effectChain.getProcessor(pluginIndex);
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         if (!sandbox) return {};
@@ -267,22 +257,27 @@
         if (changed) markProjectLayoutChanged();
         return changed;
     }
-    const std::vector<std::string>& getSandboxedPluginPaths() const { return m_sandboxedPluginPaths; }
+    std::vector<std::string> getSandboxedPluginPaths() const {
+        std::vector<std::string> paths;
+        paths.reserve(sandboxSlotCount());
+        for (size_t slot = 0; slot < sandboxSlotCount(); ++slot) paths.push_back(sandboxSlotPath(slot));
+        return paths;
+    }
     std::vector<std::vector<uint8_t>> getSandboxedPluginStates() const {
         std::vector<std::vector<uint8_t>> states;
-        states.reserve(m_sandboxedPluginIndices.size());
-        for (const uint32_t index : m_sandboxedPluginIndices)
-            states.push_back(m_effectChain.getProcessorState(index));
+        states.reserve(sandboxSlotCount());
+        for (size_t slot = 0; slot < sandboxSlotCount(); ++slot)
+            states.push_back(m_effectChain.getProcessorState(sandboxSlotIndex(slot)));
         return states;
     }
     std::vector<uint8_t> getSandboxedPluginState(size_t sandboxIndex) const {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return {};
-        return m_effectChain.getProcessorState(m_sandboxedPluginIndices[sandboxIndex]);
+        if (sandboxIndex >= sandboxSlotCount()) return {};
+        return m_effectChain.getProcessorState(sandboxSlotIndex(sandboxIndex));
     }
     bool setSandboxedPluginState(size_t sandboxIndex, const std::vector<uint8_t>& state) {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
+        if (sandboxIndex >= sandboxSlotCount()) return false;
         const bool changed = m_effectChain.setProcessorState(
-            m_sandboxedPluginIndices[sandboxIndex], state);
+            sandboxSlotIndex(sandboxIndex), state);
         if (changed) {
             invalidateFrozenForEdit();
             markProjectLayoutChanged();
@@ -290,21 +285,21 @@
         return changed;
     }
     uint8_t sandboxedPluginStateError(size_t sandboxIndex) const noexcept {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size())
+        if (sandboxIndex >= sandboxSlotCount())
             return Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
-        auto processor = m_effectChain.getProcessor(m_sandboxedPluginIndices[sandboxIndex]);
+        auto processor = m_effectChain.getProcessor(sandboxSlotIndex(sandboxIndex));
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         return sandbox ? sandbox->stateErrorCode() : Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
     }
     const char* sandboxedPluginStateErrorText(size_t sandboxIndex) const noexcept {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return "state-unavailable";
-        auto processor = m_effectChain.getProcessor(m_sandboxedPluginIndices[sandboxIndex]);
+        if (sandboxIndex >= sandboxSlotCount()) return "state-unavailable";
+        auto processor = m_effectChain.getProcessor(sandboxSlotIndex(sandboxIndex));
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         return sandbox ? sandbox->stateErrorText() : "state-unavailable";
     }
     bool restartSandboxedPlugin(size_t sandboxIndex) {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
-        const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
+        if (sandboxIndex >= sandboxSlotCount()) return false;
+        const uint32_t index = sandboxSlotIndex(sandboxIndex);
         auto processor = m_effectChain.getProcessor(index);
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         // This entry point is an explicit user/control action, not the
@@ -315,14 +310,14 @@
         return restarted;
     }
     bool retrySandboxedPlugin(size_t sandboxIndex) {
-        if (sandboxIndex >= m_sandboxedPluginIndices.size()) return false;
-        const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
+        if (sandboxIndex >= sandboxSlotCount()) return false;
+        const uint32_t index = sandboxSlotIndex(sandboxIndex);
         auto processor = m_effectChain.getProcessor(index);
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         const bool restarted = sandbox && sandbox->restart(true);
         if (restarted) markProjectLayoutChanged();
-        if (restarted && sandboxIndex < m_sandboxedPluginPaths.size()) {
-            const auto& path = m_sandboxedPluginPaths[sandboxIndex];
+        if (restarted && sandboxIndex < sandboxSlotCount()) {
+            const std::string path = sandboxSlotPath(sandboxIndex);
             (void)hirari_plugin_scan_cache_record_success(
                 reinterpret_cast<const uint8_t*>(path.data()), path.size());
         }
@@ -330,15 +325,15 @@
     }
     uint32_t maintainSandboxedPlugins(bool autoRestart) {
         uint32_t recovered = 0;
-        for (size_t sandboxIndex = 0; sandboxIndex < m_sandboxedPluginIndices.size(); ++sandboxIndex) {
-            const uint32_t index = m_sandboxedPluginIndices[sandboxIndex];
+        for (size_t sandboxIndex = 0; sandboxIndex < sandboxSlotCount(); ++sandboxIndex) {
+            const uint32_t index = sandboxSlotIndex(sandboxIndex);
             auto processor = m_effectChain.getProcessor(index);
             auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
             if (!sandbox) continue;
             if (sandbox->pollHealth()) continue;
             if (autoRestart && sandbox->canAutoRetry() && sandbox->autoRestart()) {
-                if (sandboxIndex < m_sandboxedPluginPaths.size()) {
-                    const auto& path = m_sandboxedPluginPaths[sandboxIndex];
+                if (sandboxIndex < sandboxSlotCount()) {
+                    const std::string path = sandboxSlotPath(sandboxIndex);
                     (void)hirari_plugin_scan_cache_record_success(
                         reinterpret_cast<const uint8_t*>(path.data()), path.size());
                 }
@@ -362,8 +357,8 @@
         return m_lastSandboxFailure.load(std::memory_order_acquire);
     }
     const char* lastSandboxFailureText() const noexcept {
-        for (const uint32_t index : m_sandboxedPluginIndices) {
-            auto processor = m_effectChain.getProcessor(index);
+        for (size_t slot = 0; slot < sandboxSlotCount(); ++slot) {
+            auto processor = m_effectChain.getProcessor(sandboxSlotIndex(slot));
             auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
             if (sandbox && sandbox->failureCode() != 0) return sandbox->failureText();
         }
@@ -371,8 +366,9 @@
     }
     std::vector<SandboxStatus> getSandboxStatuses() {
         std::vector<SandboxStatus> result;
-        result.reserve(m_sandboxedPluginIndices.size());
-        for (const uint32_t index : m_sandboxedPluginIndices) {
+        result.reserve(sandboxSlotCount());
+        for (size_t slot = 0; slot < sandboxSlotCount(); ++slot) {
+            const uint32_t index = sandboxSlotIndex(slot);
             auto processor = m_effectChain.getProcessor(index);
             auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
             if (!sandbox) continue;

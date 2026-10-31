@@ -23,15 +23,6 @@ namespace Hirari::Core::Plugins {
 // directly and marshals audio/MIDI around it.
 class ProcessSandboxProcessor final : public DSP::IProcessor {
 public:
-    struct GenerationContext {
-        uint64_t project = 0;
-        uint64_t plugin = 0;
-        uint64_t audio = 0;
-        uint64_t state = 0;
-        bool valid() const noexcept {
-            return project != 0 && plugin != 0 && audio != 0 && state != 0;
-        }
-    };
     enum class RecoveryMode : uint8_t {
         ClearBlock = SandboxProtocol::kRecoveryClearBlock,
         Quarantined = SandboxProtocol::kRecoveryQuarantined
@@ -100,16 +91,6 @@ public:
         }
         return restarted && !m_failed.load(std::memory_order_acquire);
     }
-    bool setGenerationContext(GenerationContext context) noexcept {
-        if (!context.valid()) return false;
-        std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        return m_host->set_generation_context(context.project, context.plugin,
-                                              context.audio, context.state);
-    }
-    GenerationContext generationContext() const noexcept {
-        const auto context = m_host->generation_context();
-        return {context.project, context.plugin, context.audio, context.state};
-    }
     bool autoRestart() {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
         const bool restarted = m_host->auto_restart();
@@ -126,18 +107,6 @@ public:
     }
     bool canRetry() const noexcept { return m_host->can_retry(); }
     bool canAutoRetry() const noexcept { return m_host->can_auto_retry(); }
-    bool isQuarantined() const noexcept { return m_host->is_quarantined(); }
-    uint32_t restartAttempts() const noexcept { return m_host->restart_attempts(); }
-    void clearQuarantine() noexcept {
-        std::lock_guard<std::mutex> lock(m_lifecycleMutex);
-        m_host->clear_quarantine();
-        // Clearing the host quarantine is an explicit user/control action.
-        // Reset the processor-side recovery latch as well, otherwise the
-        // processor would remain permanently silent after a successful host
-        // recovery.
-        m_failed.store(false, std::memory_order_release);
-        m_consecutiveOverruns.store(0, std::memory_order_release);
-    }
 
     void prepareToPlay(double sampleRate, uint32_t blockSize) noexcept override {
         std::lock_guard<std::mutex> lock(m_lifecycleMutex);
