@@ -13,7 +13,6 @@ public:
             m_builtInMidiState = hirari_builtin_midi_instrument_create();
         }
         m_articulationState = hirari_track_midi_articulation_create();
-        m_trackAutomationCaptureState = hirari_track_automation_capture_create();
         m_pdcDelayState = hirari_track_pdc_delay_create();
         m_regionResampleKernel = hirari_region_resampler_prepare();
         publishRegionSnapshot();
@@ -22,8 +21,8 @@ public:
     virtual ~Track() {
         hirari_builtin_midi_instrument_destroy(m_builtInMidiState);
         hirari_track_midi_articulation_destroy(m_articulationState);
-        hirari_track_automation_capture_destroy(m_trackAutomationCaptureState);
         hirari_track_pdc_delay_destroy(m_pdcDelayState);
+        hirari_track_automation_store_destroy(m_automationStore);
         hirari_region_table_free(m_regionTable);
         hirari_channel_strip_destroy(m_strip);
         hirari_track_holographic_panner_destroy(m_spatialPanner);
@@ -383,8 +382,12 @@ private:
             pluginAutomationEvents{};
         size_t pluginAutomationEventCount = 0;
         const auto* regions = m_regionSnapshot.load(std::memory_order_acquire);
-        const auto* trackDelayAutomation = m_trackDelayAutomation.load(std::memory_order_acquire);
-        const auto* pluginAutomation = m_pluginAutomation.load(std::memory_order_acquire);
+        size_t trackDelayCount = 0;
+        const auto* trackDelayAutomation = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
+            hirari_track_automation_store_points(m_automationStore, 2, &trackDelayCount));
+        size_t pluginLaneCount = 0;
+        const auto* pluginLanes = hirari_track_automation_store_plugin_lane_views(
+            m_automationStore, &pluginLaneCount);
         const AudioBuffer* frozen = m_frozenAudio.load(std::memory_order_acquire);
         uint32_t trackDelaySamples = m_trackDelaySamples.load(std::memory_order_relaxed);
         struct MidiPreparationContext {
@@ -404,12 +407,10 @@ private:
             regions ? regions->renderInputs.size() : 0,
             static_cast<uint8_t>(regions != nullptr),
             static_cast<uint8_t>(m_phaseInvert.load(std::memory_order_relaxed)),
-            trackDelayAutomation && !trackDelayAutomation->empty()
-                ? trackDelayAutomation->data() : nullptr,
-            trackDelayAutomation ? trackDelayAutomation->size() : 0,
-            &m_trackDelayAutomationHint, &trackDelaySamples, kMaxPdcDelaySamples,
-            pluginAutomation ? pluginAutomation->views.data() : nullptr,
-            pluginAutomation ? pluginAutomation->views.size() : 0,
+            trackDelayAutomation && trackDelayCount != 0 ? trackDelayAutomation : nullptr,
+            trackDelayCount, hirari_track_automation_store_hint(m_automationStore, 2),
+            &trackDelaySamples, kMaxPdcDelaySamples,
+            pluginLanes, pluginLaneCount,
             static_cast<uint8_t>(m_transportPlaying.load(std::memory_order_relaxed)),
             pluginAutomationEvents.data(), pluginAutomationEvents.size(),
             &pluginAutomationEventCount,

@@ -78,20 +78,10 @@ bool HirariUnifiedEngine::automationHostApply(void* host,
         case kHirariAutomationTrackDelay:
             track->setTrackDelayAutomation(points);
             return true;
-        case kHirariAutomationPlugin: {
-            auto lanes = track->getPluginAutomation();
-            lanes.erase(std::remove_if(lanes.begin(), lanes.end(),
-                                       [payload](const auto& lane) {
-                                           return lane.pluginIndex == payload->pluginIndex &&
-                                                  lane.parameterId == payload->parameterId;
-                                       }),
-                        lanes.end());
-            if (!points.empty()) {
-                lanes.push_back({payload->pluginIndex, payload->parameterId, points});
-            }
-            track->setPluginAutomation(lanes);
+        case kHirariAutomationPlugin:
+            track->replacePluginAutomationLane(payload->pluginIndex,
+                                               payload->parameterId, points);
             return true;
-        }
         default:
             return false;
     }

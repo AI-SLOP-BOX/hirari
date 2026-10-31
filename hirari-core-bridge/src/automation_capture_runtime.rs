@@ -101,7 +101,7 @@ impl RecorderSlot {
     }
 }
 
-struct AutomationRecorderState {
+pub(crate) struct AutomationRecorderState {
     mode: AtomicU32,
     punch_start: AtomicU64,
     punch_end: AtomicU64,
@@ -178,7 +178,7 @@ pub struct TrackAutomationCapturePoint {
     pub pan: f32,
 }
 
-struct TrackCaptureInner {
+pub(crate) struct TrackCaptureInner {
     points: Box<[UnsafeCell<TrackAutomationCapturePoint>]>,
     write: AtomicU64,
     read: AtomicU64,
@@ -189,7 +189,7 @@ struct TrackCaptureInner {
 unsafe impl Sync for TrackCaptureInner {}
 
 impl TrackCaptureInner {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let points = (0..TRACK_CAPTURE_CAPACITY)
             .map(|_| UnsafeCell::new(TrackAutomationCapturePoint::default()))
             .collect();
@@ -201,7 +201,15 @@ impl TrackCaptureInner {
         }
     }
 
-    fn record(
+    pub(crate) fn pending(&self) -> usize {
+        let write = self.write.load(Ordering::Acquire);
+        let read = self.read.load(Ordering::Relaxed);
+        write
+            .saturating_sub(read)
+            .min(TRACK_CAPTURE_CAPACITY as u64) as usize
+    }
+
+    pub(crate) fn record(
         &self,
         track_id: u32,
         sample_position: u64,
@@ -229,7 +237,7 @@ impl TrackCaptureInner {
         true
     }
 
-    fn flush_into(&self, output: &mut [TrackAutomationCapturePoint]) -> Option<usize> {
+    pub(crate) fn flush_into(&self, output: &mut [TrackAutomationCapturePoint]) -> Option<usize> {
         let write = self.write.load(Ordering::Acquire);
         let read = self.read.load(Ordering::Relaxed);
         let count = write

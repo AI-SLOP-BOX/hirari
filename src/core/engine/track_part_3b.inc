@@ -1,7 +1,8 @@
+    // Audio-thread capture. Rust gates the write on the recorder mode and the
+    // punch range, so the callback only publishes the current fader values.
     void recordCurrentState(uint64_t samplePosition) noexcept {
-        const bool recorded = hirari_track_automation_capture_record(
-            m_trackAutomationCaptureState,
-            hirari_automation_recorder_instance(),
+        const bool recorded = hirari_track_automation_store_record(
+            m_automationStore, hirari_automation_recorder_instance(),
             m_id, samplePosition,
             m_volume.load(std::memory_order_relaxed),
             m_pan.load(std::memory_order_relaxed));
@@ -10,83 +11,69 @@
         }
     }
 
-    // Control-thread consumer. It publishes immutable automation lists only
-    // after draining the callback queue, keeping serialization and UI reads
-    // consistent with what was actually recorded.
+    // Control-thread consumer. Rust drains the callback queue and appends the
+    // captured points to the published volume/pan lists.
     uint32_t flushRecordedAutomation() {
-        size_t drained = 0;
-        auto* captured = hirari_track_automation_capture_drain(
-            m_trackAutomationCaptureState, &drained);
-        if (!captured) return 0;
-        auto volume = getVolumeAutomationPoints();
-        auto pan = getPanAutomationPoints();
-        for (size_t index = 0; index < drained; ++index) {
-            volume.push_back({captured[index].time, captured[index].volume, 0.0f});
-            pan.push_back({captured[index].time, captured[index].pan, 0.0f});
-        }
-        hirari_track_automation_capture_points_free(captured, drained);
-        setVolumeAutomation(volume);
-        setPanAutomation(pan);
-        return static_cast<uint32_t>(std::min<size_t>(drained, UINT32_MAX));
+        const uint32_t drained =
+            hirari_track_automation_store_flush_recorded(m_automationStore);
+        if (drained != 0) markProjectLayoutChanged();
+        return drained;
     }
-    void setVolumeAutomation(const std::vector<Hirari::Core::ProjectAutomationPoint>& points) {
+    void setAutomationPoints(uint32_t kind, const AutomationList& points) {
         invalidateFrozenForEdit();
-        auto copy = std::make_unique<AutomationList>(points);
-        std::sort(copy->begin(), copy->end(), [](const auto& a, const auto& b) { return a.time < b.time; });
-        const auto* rawPtr = copy.get();
-        m_volumeAutomationHistory.push_back(std::move(copy));
-        m_volumeAutomation.store(rawPtr, std::memory_order_release);
+        hirari_track_automation_store_set_points(
+            m_automationStore, kind, points.data(), points.size());
         markProjectLayoutChanged();
     }
-    void setPanAutomation(const std::vector<Hirari::Core::ProjectAutomationPoint>& points) {
-        // Pan automation is stored in the live -1..1 fader domain.
-        invalidateFrozenForEdit();
-        auto copy = std::make_unique<AutomationList>(points);
-        std::sort(copy->begin(), copy->end(), [](const auto& a, const auto& b) { return a.time < b.time; });
-        const auto* rawPtr = copy.get();
-        m_panAutomationHistory.push_back(std::move(copy));
-        m_panAutomation.store(rawPtr, std::memory_order_release);
-        markProjectLayoutChanged();
+    void setVolumeAutomation(const AutomationList& points) { setAutomationPoints(0, points); }
+    void setPanAutomation(const AutomationList& points) { setAutomationPoints(1, points); }
+    void setTrackDelayAutomation(const AutomationList& points) { setAutomationPoints(2, points); }
+    AutomationList automationPoints(uint32_t kind) const {
+        size_t count = 0;
+        const auto* points = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
+            hirari_track_automation_store_points(m_automationStore, kind, &count));
+        return points && count != 0 ? AutomationList(points, points + count) : AutomationList{};
     }
-    void setTrackDelayAutomation(const std::vector<Hirari::Core::ProjectAutomationPoint>& points) {
-        invalidateFrozenForEdit();
-        auto copy = std::make_unique<AutomationList>(points);
-        std::sort(copy->begin(), copy->end(), [](const auto& a, const auto& b) { return a.time < b.time; });
-        const auto* rawPtr = copy.get();
-        m_trackDelayAutomationHistory.push_back(std::move(copy));
-        m_trackDelayAutomation.store(rawPtr, std::memory_order_release);
-        markProjectLayoutChanged();
-    }
-    std::vector<Hirari::Core::ProjectAutomationPoint> getVolumeAutomationPoints() const {
-        const auto* points = m_volumeAutomation.load(std::memory_order_acquire);
-        return points ? *points : std::vector<Hirari::Core::ProjectAutomationPoint>{};
-    }
-    std::vector<Hirari::Core::ProjectAutomationPoint> getPanAutomationPoints() const {
-        const auto* points = m_panAutomation.load(std::memory_order_acquire);
-        return points ? *points : std::vector<Hirari::Core::ProjectAutomationPoint>{};
-    }
-    std::vector<Hirari::Core::ProjectAutomationPoint> getTrackDelayAutomationPoints() const {
-        const auto* points = m_trackDelayAutomation.load(std::memory_order_acquire);
-        return points ? *points : std::vector<Hirari::Core::ProjectAutomationPoint>{};
-    }
+    AutomationList getVolumeAutomationPoints() const { return automationPoints(0); }
+    AutomationList getPanAutomationPoints() const { return automationPoints(1); }
+    AutomationList getTrackDelayAutomationPoints() const { return automationPoints(2); }
     void setPluginAutomation(const PluginAutomationList& lanes) {
         invalidateFrozenForEdit();
-        auto copy = std::make_unique<PluginAutomationSnapshot>();
-        copy->lanes = lanes;
-        copy->views.reserve(copy->lanes.size());
-        for (const auto& lane : copy->lanes) {
-            copy->views.push_back({
-                lane.pluginIndex, lane.parameterId,
-                lane.points.data(), lane.points.size()});
+        std::vector<HirariPluginAutomationLaneView> views;
+        views.reserve(lanes.size());
+        for (const auto& lane : lanes) {
+            views.push_back({lane.pluginIndex, lane.parameterId,
+                             lane.points.data(), lane.points.size()});
         }
-        const auto* rawPtr = copy.get();
-        m_pluginAutomationHistory.push_back(std::move(copy));
-        m_pluginAutomation.store(rawPtr, std::memory_order_release);
+        hirari_track_automation_store_set_plugin_lanes(
+            m_automationStore, views.data(), views.size());
+        markProjectLayoutChanged();
+    }
+    // Replaces (or removes, for an empty list) the lane for one plugin
+    // parameter; Rust owns the merge.
+    void replacePluginAutomationLane(uint32_t pluginIndex, uint32_t parameterId,
+                                     const AutomationList& points) {
+        invalidateFrozenForEdit();
+        hirari_track_automation_store_replace_plugin_lane(
+            m_automationStore, pluginIndex, parameterId, points.data(), points.size());
         markProjectLayoutChanged();
     }
     PluginAutomationList getPluginAutomation() const {
-        const auto* lanes = m_pluginAutomation.load(std::memory_order_acquire);
-        return lanes ? lanes->lanes : PluginAutomationList{};
+        PluginAutomationList lanes;
+        const size_t laneCount =
+            hirari_track_automation_store_plugin_lane_count(m_automationStore);
+        for (size_t index = 0; index < laneCount; ++index) {
+            uint32_t pluginIndex = 0;
+            uint32_t parameterId = 0;
+            size_t pointCount = 0;
+            const auto* points = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
+                hirari_track_automation_store_plugin_lane(
+                    m_automationStore, index, &pluginIndex, &parameterId, &pointCount));
+            lanes.push_back({pluginIndex, parameterId,
+                             pointCount != 0 ? AutomationList(points, points + pointCount)
+                                             : AutomationList{}});
+        }
+        return lanes;
     }
     bool canProcess(uint32_t sz) const { return m_activeBuffer.getNumSamples() >= sz; }
 

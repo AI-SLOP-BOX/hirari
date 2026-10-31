@@ -164,7 +164,6 @@
     bool m_isPrepared = false;
     std::atomic<float> m_volume{1.0f};
     std::atomic<float> m_pan{0.0f};
-    void* m_trackAutomationCaptureState = nullptr;
     std::atomic<bool> m_muted{false};
     std::atomic<bool> m_phaseInvert{false};
     std::atomic<bool> m_solo{false};
@@ -209,21 +208,7 @@
     float m_highGain = 1.0f;
     float m_lowStateL = 0.0f;
     float m_lowStateR = 0.0f;
-    std::vector<std::unique_ptr<AutomationList>> m_volumeAutomationHistory;
-    std::atomic<const AutomationList*> m_volumeAutomation{nullptr};
-    size_t m_volumeAutomationHint = 0;
-    std::vector<std::unique_ptr<AutomationList>> m_panAutomationHistory;
-    std::atomic<const AutomationList*> m_panAutomation{nullptr};
-    size_t m_panAutomationHint = 0;
-    std::vector<std::unique_ptr<AutomationList>> m_trackDelayAutomationHistory;
-    std::atomic<const AutomationList*> m_trackDelayAutomation{nullptr};
-    size_t m_trackDelayAutomationHint = 0;
-    struct PluginAutomationSnapshot {
-        PluginAutomationList lanes;
-        std::vector<HirariPluginAutomationLaneView> views;
-    };
-    std::vector<std::unique_ptr<PluginAutomationSnapshot>> m_pluginAutomationHistory;
-    std::atomic<const PluginAutomationSnapshot*> m_pluginAutomation{nullptr};
+    void* m_automationStore = hirari_track_automation_store_create();
     std::atomic<float> m_spatialX{0.0f}, m_spatialY{0.0f}, m_spatialZ{0.0f};
     std::atomic<uint32_t> m_spatialMode{0};
     // The spatial processor is Rust-owned; the track keeps only its handle.

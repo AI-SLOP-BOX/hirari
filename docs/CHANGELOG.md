@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Track automation list storage now lives in Rust
+  (`track_automation_store.rs`): volume, pan and track-delay lists, plugin
+  automation lanes and the captured-take merge are published as immutable
+  Rust generations, the recorder drain appends and sorts them, plugin-lane
+  replacement owns the erase-then-append merge, and the evaluator hint slots
+  are Rust memory. C++ keeps only the opaque handle and its freeze/layout
+  invalidation calls.
 - Built-in plugin hosting is Rust-owned (`native_plugin_host.rs`): the
   128-slot parameter mirror, the dirty-bitmask block-boundary flush, kind state
   serialization/restoration with mirror resync, and the null-safe inert load

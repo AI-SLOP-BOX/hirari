@@ -392,6 +392,7 @@ pub mod track_pdc_delay;
 pub mod track_region_render;
 pub mod track_process;
 pub mod track_transfer;
+pub mod track_automation_store;
 pub mod versioning;
 pub mod video_timeline;
 pub mod virtuoso_drum_synth;

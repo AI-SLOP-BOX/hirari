@@ -38,9 +38,7 @@
     void resetForOfflineRender() noexcept {
         hirari_channel_strip_reset(m_strip);
         m_effectChain.reset();
-        m_volumeAutomationHint = 0;
-        m_panAutomationHint = 0;
-        m_trackDelayAutomationHint = 0;
+        hirari_track_automation_store_reset_hints(m_automationStore);
         const uint32_t pdc = m_pdcRequested.load(std::memory_order_acquire);
         const uint32_t manual = m_trackDelaySamples.load(std::memory_order_acquire);
         const uint32_t requested = std::min(kMaxPdcDelaySamples,
@@ -145,8 +143,12 @@
     // realtime stage, including the pre-fader taps and linked output DSP.
     void finalizeTrackOutput(uint32_t frames, uint64_t playhead) noexcept {
         auto& buffer = getWorkBuffer(frames);
-        const auto* volumeAutomation = m_volumeAutomation.load(std::memory_order_acquire);
-        const auto* panAutomation = m_panAutomation.load(std::memory_order_acquire);
+        size_t volumeCount = 0;
+        size_t panCount = 0;
+        const auto* volumeAutomation = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
+            hirari_track_automation_store_points(m_automationStore, 0, &volumeCount));
+        const auto* panAutomation = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
+            hirari_track_automation_store_points(m_automationStore, 1, &panCount));
         const bool validPreInsert = m_preInsertBuffer.getNumChannels() >= buffer.getNumChannels() &&
             m_preInsertBuffer.getNumSamples() >= frames;
         const bool validPreFader = m_preFaderBuffer.getNumChannels() >= 2 &&
@@ -157,10 +159,10 @@
             m_sendPostFaderBuffer.getNumSamples() >= frames;
         hirari_track_finalize_output(
             m_id, frames, static_cast<double>(playhead),
-            volumeAutomation && !volumeAutomation->empty() ? volumeAutomation->data() : nullptr,
-            volumeAutomation ? volumeAutomation->size() : 0, &m_volumeAutomationHint,
-            panAutomation && !panAutomation->empty() ? panAutomation->data() : nullptr,
-            panAutomation ? panAutomation->size() : 0, &m_panAutomationHint,
+            volumeAutomation && volumeCount != 0 ? volumeAutomation : nullptr,
+            volumeCount, hirari_track_automation_store_hint(m_automationStore, 0),
+            panAutomation && panCount != 0 ? panAutomation : nullptr,
+            panCount, hirari_track_automation_store_hint(m_automationStore, 1),
             m_strip, buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
             validPreInsert ? m_preInsertBuffer.getArrayOfWritePointers() : nullptr,
             validPreInsert ? m_preInsertBuffer.getNumChannels() : 0,

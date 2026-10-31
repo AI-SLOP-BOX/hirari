@@ -1450,22 +1450,8 @@ extern "C" size_t hirari_track_midi_all_notes_off(
 extern "C" size_t hirari_track_midi_flush_scheduled_note_offs(
     const void* state, uint64_t playhead, uint32_t block_size,
     HirariGeneratedMidiEvent* output, size_t capacity);
-struct HirariTrackAutomationCapturePoint {
-    double time;
-    float volume;
-    float pan;
-};
 extern "C" void* hirari_automation_recorder_instance();
 extern "C" uint32_t hirari_automation_record_mode_apply(uint32_t mode);
-extern "C" void* hirari_track_automation_capture_create();
-extern "C" void hirari_track_automation_capture_destroy(void* state);
-extern "C" bool hirari_track_automation_capture_record(
-    const void* state, const void* recorder, uint32_t track_id,
-    uint64_t sample_position, float volume, float pan);
-extern "C" HirariTrackAutomationCapturePoint* hirari_track_automation_capture_drain(
-    const void* state, size_t* drained);
-extern "C" void hirari_track_automation_capture_points_free(
-    HirariTrackAutomationCapturePoint* points, size_t count);
 extern "C" float hirari_track_eq_gain(float boost_db, float cut_db);
 extern "C" void* hirari_track_pdc_delay_create();
 extern "C" void hirari_track_pdc_delay_destroy(void* state);
@@ -1567,6 +1553,31 @@ struct HirariPluginAutomationLaneView {
 };
 static_assert(sizeof(HirariPluginAutomationLaneView) == 24,
     "plugin automation lane view must match Rust's repr(C) layout");
+// Per-track automation list storage. Rust owns every published generation and
+// its sort order; C++ keeps only the opaque handle.
+extern "C" void* hirari_track_automation_store_create();
+extern "C" void hirari_track_automation_store_destroy(void* store);
+extern "C" bool hirari_track_automation_store_record(
+    void* store, const void* recorder, uint32_t track_id,
+    uint64_t sample_position, float volume, float pan);
+extern "C" uint32_t hirari_track_automation_store_flush_recorded(void* store);
+extern "C" void hirari_track_automation_store_set_points(
+    void* store, uint32_t kind, const void* points, size_t count);
+extern "C" const void* hirari_track_automation_store_points(
+    const void* store, uint32_t kind, size_t* count);
+extern "C" size_t* hirari_track_automation_store_hint(const void* store, uint32_t kind);
+extern "C" void hirari_track_automation_store_reset_hints(const void* store);
+extern "C" void hirari_track_automation_store_set_plugin_lanes(
+    void* store, const HirariPluginAutomationLaneView* lanes, size_t count);
+extern "C" void hirari_track_automation_store_replace_plugin_lane(
+    void* store, uint32_t plugin_index, uint32_t parameter_id,
+    const void* points, size_t count);
+extern "C" const HirariPluginAutomationLaneView*
+hirari_track_automation_store_plugin_lane_views(const void* store, size_t* count);
+extern "C" size_t hirari_track_automation_store_plugin_lane_count(const void* store);
+extern "C" const void* hirari_track_automation_store_plugin_lane(
+    const void* store, size_t index, uint32_t* plugin_index,
+    uint32_t* parameter_id, size_t* count);
 using HirariTrackMidiPrepare = void (*)(void*, uint64_t, uint32_t);
 struct HirariTrackProcessRequest {
     float* const* channels;
