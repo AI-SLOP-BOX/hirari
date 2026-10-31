@@ -904,6 +904,26 @@ extern "C" size_t hirari_native_processor_state_save(
 extern "C" bool hirari_native_processor_state_restore(
     int32_t kind, void* state, const uint8_t* bytes, size_t size,
     uint8_t* bypassed, float* mix, uint32_t* sidechain_bus_id);
+// Host-side policy for the built-in catalog: parameter mirror, dirty dispatch
+// and state markers. Every entry is null-safe so a failed load stays inert.
+extern "C" void* hirari_native_plugin_host_create(const uint8_t* path, size_t path_size);
+extern "C" void hirari_native_plugin_host_destroy(void* host);
+extern "C" void hirari_native_plugin_host_prepare(void* host, double sample_rate,
+                                                  uint32_t block_size);
+extern "C" void hirari_native_plugin_host_reset(void* host);
+extern "C" void hirari_native_plugin_host_process(
+    void* host, float* const* channels, uint32_t channel_count, uint32_t frames, double bpm);
+extern "C" uint32_t hirari_native_plugin_host_latency_samples(const void* host);
+extern "C" uint32_t hirari_native_plugin_host_tail_samples(const void* host);
+extern "C" uint32_t hirari_native_plugin_host_parameter_count(const void* host);
+extern "C" void hirari_native_plugin_host_set_parameter(void* host, uint32_t id, float value);
+extern "C" float hirari_native_plugin_host_parameter(const void* host, uint32_t id);
+extern "C" size_t hirari_native_plugin_host_state_save(
+    const void* host, uint8_t bypassed, float mix, uint32_t sidechain_bus_id,
+    uint8_t* output, size_t capacity);
+extern "C" bool hirari_native_plugin_host_state_restore(
+    void* host, const uint8_t* bytes, size_t size, uint8_t* bypassed, float* mix,
+    uint32_t* sidechain_bus_id);
 extern "C" void* hirari_master_meter_create(double sample_rate);
 extern "C" void hirari_master_meter_destroy(void* state);
 extern "C" void hirari_master_meter_prepare(void* state, double sample_rate);

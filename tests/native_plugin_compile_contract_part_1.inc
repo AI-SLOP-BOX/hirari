@@ -65,10 +65,9 @@ int main() {
     // a future refactor cannot leave the browser-visible plugin unlinked.
     {
         const std::string compressorPath = "Hirari/Compressor";
-        const int32_t compressorKind = hirari_native_processor_kind_for_path(
-            reinterpret_cast<const uint8_t*>(compressorPath.data()), compressorPath.size());
-        if (compressorKind < 0) return 69;
-        Hirari::Core::Plugin::NativeProcessor compressor(compressorKind);
+        Hirari::Core::Plugin::ExternalPluginHost compressor(
+            compressorPath, Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);
+        if (!compressor.isOperational()) return 69;
         compressor.prepareToPlay(48'000.0, 128);
         compressor.setParameter(0, 0.7f);
         compressor.setParameter(1, 0.25f);
@@ -84,7 +83,8 @@ int main() {
         compressor.process(block, midi, context);
         if (block.sanitizeNonFinite() != 0 || compressor.getNumParameters() != 7) return 67;
         const auto state = compressor.getState();
-        Hirari::Core::Plugin::NativeProcessor restored(compressorKind);
+        Hirari::Core::Plugin::ExternalPluginHost restored(
+            compressorPath, Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);
         if (!restored.restoreStateChecked(state) ||
             restored.getParameter(0) != compressor.getParameter(0)) return 68;
     }

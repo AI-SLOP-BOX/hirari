@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Built-in plugin hosting is Rust-owned (`native_plugin_host.rs`): the
+  128-slot parameter mirror, the dirty-bitmask block-boundary flush, kind state
+  serialization/restoration with mirror resync, and the null-safe inert load
+  path all live in Rust. `NativeProcessor` and the two `plugin_host_part_*.inc`
+  files are gone; C++ keeps a thin `ExternalPluginHost` adapter that forwards
+  the `DSP::IProcessor` virtuals, and the host contracts run as Rust tests.
 - Effect-chain ownership, ordering and control-side mutation now live in Rust
   (`effect_chain_host.rs`): entry order, bypass/parallel state, snapshot
   publication, latency/diagnostic aggregation, legacy state markers,

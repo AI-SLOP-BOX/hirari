@@ -213,6 +213,7 @@ pub mod multiband_exciter;
 pub mod musical_clock;
 pub mod musicxml;
 pub mod native_builtin_dsp;
+pub mod native_plugin_host;
 pub mod native_pdc;
 pub mod sidechain_route_store;
 pub mod native_project;
