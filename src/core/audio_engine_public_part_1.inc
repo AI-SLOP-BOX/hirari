@@ -124,8 +124,6 @@ public:
         return 0;
 #endif
     }
-#if !defined(__APPLE__)
-#endif
     float get_audio_output_peak() const {
         return m_driver ? m_driver->output_peak() : 0.0f;
     }
@@ -178,28 +176,13 @@ public:
         return ::Hirari::Core::Driver::core_midi_dropped_input_events();
     }
     bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
-#if defined(__APPLE__)
-        if (!m_driver || !m_driver->select_device(deviceId, sampleRate, bufferSize) ||
-            !m_driver->is_running() || !m_engine) return false;
-        m_engine->waitForAudioCallbacks();
-        ::Hirari::Core::Engine::EngineConfig cfg;
-        cfg.tempo = m_engine->get_tempo();
-        cfg.sampleRate = m_driver->sample_rate();
-        cfg.blockSize = m_driver->buffer_size();
-        m_engine->apply_config(cfg);
-        return std::abs(m_engine->get_sample_rate() - cfg.sampleRate) < 0.5 &&
-               m_engine->get_block_size() == cfg.blockSize;
-#elif defined(HIRARI_ENABLE_JACK)
-        if (!m_driver || !m_driver->select_device(deviceId, sampleRate, bufferSize)) return false;
-        if (!m_engine || !m_driver->is_running()) return false;
-        m_engine->waitForAudioCallbacks();
-        ::Hirari::Core::Engine::EngineConfig cfg;
-        cfg.tempo = m_engine->get_tempo();
-        cfg.sampleRate = m_driver->sample_rate();
-        cfg.blockSize = m_driver->buffer_size();
-        m_engine->apply_config(cfg);
-        return std::abs(m_engine->get_sample_rate() - cfg.sampleRate) < 0.5 &&
-               m_engine->get_block_size() == cfg.blockSize;
+#if defined(__APPLE__) || defined(HIRARI_ENABLE_JACK)
+        if (!m_driver || !m_engine ||
+            !m_driver->select_device(deviceId, sampleRate, bufferSize) ||
+            !m_driver->is_running()) return false;
+        applyNegotiatedDriverConfig();
+        return std::abs(m_engine->get_sample_rate() - m_driver->sample_rate()) < 0.5 &&
+               m_engine->get_block_size() == m_driver->buffer_size();
 #else
         (void)deviceId; (void)sampleRate; (void)bufferSize; return false;
 #endif

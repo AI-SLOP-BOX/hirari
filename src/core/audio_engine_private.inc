@@ -59,16 +59,26 @@ private:
         return !context || context->cancelled.load(std::memory_order_acquire);
     }
 
-#if !defined(__APPLE__)
-    void sync_jack_graph_config() const {
-#if defined(HIRARI_ENABLE_JACK) && !defined(__APPLE__)
-        if (!m_driver || !m_driver->is_running() || !m_engine) return;
+    // Mirrors the format the device negotiated into the graph. Device selection
+    // and JACK graph reconfiguration must apply the same transaction, so the
+    // quiesce/apply sequence lives here instead of once per driver branch.
+    void applyNegotiatedDriverConfig() const {
+#if defined(__APPLE__) || defined(HIRARI_ENABLE_JACK)
+        if (!m_driver || !m_engine) return;
         m_engine->waitForAudioCallbacks();
         ::Hirari::Core::Engine::EngineConfig cfg;
         cfg.tempo = m_engine->get_tempo();
         cfg.sampleRate = m_driver->sample_rate();
         cfg.blockSize = m_driver->buffer_size();
         m_engine->apply_config(cfg);
+#endif
+    }
+
+#if !defined(__APPLE__)
+    void sync_jack_graph_config() const {
+#if defined(HIRARI_ENABLE_JACK)
+        if (!m_driver || !m_driver->is_running() || !m_engine) return;
+        applyNegotiatedDriverConfig();
 #endif
     }
 #endif

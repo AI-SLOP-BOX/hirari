@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Device selection applied the negotiated format with two copies of the same
+  quiesce-then-reconfigure transaction, one for CoreAudio and one for JACK.
+  Both now call one helper, and the JACK graph sync uses it too, so a future
+  change to that transaction cannot leave one driver path behind.
 - The engine's eleven host tables are installed from one initializer instead of
   eleven per-table lazy statics. Installation still happens at image load before
   any caller can reach the engine, but the order is now explicit rather than
