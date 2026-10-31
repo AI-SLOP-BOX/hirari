@@ -985,6 +985,22 @@ pub unsafe extern "C" fn hirari_wav_write_planar(
     0
 }
 
+/// Channel-layout admission for planar exports. Every plane must hold exactly
+/// `frames` samples and the channel count must fit the WAVE field width, so a
+/// caller never has to re-derive the rule before building its pointer array.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_wav_planar_shapes_valid(
+    sizes: *const usize,
+    channel_count: usize,
+    frames: u64,
+) -> bool {
+    if sizes.is_null() || channel_count == 0 || channel_count > u16::MAX as usize || frames == 0 {
+        return false;
+    }
+    let sizes = unsafe { std::slice::from_raw_parts(sizes, channel_count) };
+    sizes.iter().all(|size| *size as u64 == frames)
+}
+
 enum StreamHandle {
     Float32(*mut std::ffi::c_void),
     Pcm(*mut std::ffi::c_void),

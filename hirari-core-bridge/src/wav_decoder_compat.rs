@@ -166,3 +166,273 @@ pub unsafe extern "C" fn hirari_wav_decoder_channels(state: *const c_void) -> u3
 pub unsafe extern "C" fn hirari_wav_decoder_bits_per_sample(state: *const c_void) -> u32 {
     unsafe { state.cast::<WavDecoderState>().as_ref() }.map_or(0, |state| state.bits_per_sample)
 }
+
+// WAV write/decode contract: both sides are Rust-owned, so the assertions
+// live next to the implementation instead of behind a C++ facade.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::export::{hirari_wav_planar_shapes_valid, hirari_wav_write_planar};
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "hirari-wav-contract-{name}-{}.wav",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    fn path_bytes(path: &std::path::Path) -> Vec<u8> {
+        path.to_string_lossy().into_owned().into_bytes()
+    }
+
+    fn write_planes(path: &std::path::Path, channels: &[Vec<f32>], rate: u32, format: u8) -> u8 {
+        let sizes: Vec<usize> = channels.iter().map(Vec::len).collect();
+        let frames = channels.first().map_or(0, Vec::len) as u64;
+        let planes: Vec<*const f32> = channels.iter().map(|channel| channel.as_ptr()).collect();
+        let bytes = path_bytes(path);
+        unsafe {
+            hirari_wav_write_planar(
+                bytes.as_ptr(),
+                bytes.len(),
+                planes.as_ptr(),
+                planes.len(),
+                frames,
+                rate,
+                format,
+            )
+        }
+    }
+
+    /// Decoded interleaved samples, channel count and sample rate.
+    fn decode(path: &std::path::Path) -> Option<(Vec<f32>, u32, u32)> {
+        let bytes = path_bytes(path);
+        let decoded = decode_wav_file(&bytes)?;
+        let samples = unsafe {
+            std::slice::from_raw_parts(decoded.samples, decoded.sample_count).to_vec()
+        };
+        let channels = decoded.channels;
+        let sample_rate = decoded.sample_rate as u32;
+        unsafe { hirari_free_decoded_audio(decoded.samples, decoded.sample_count) };
+        Some((samples, channels, sample_rate))
+    }
+
+    fn read_u16(bytes: &[u8], offset: usize) -> u16 {
+        u16::from(bytes[offset]) | (u16::from(bytes[offset + 1]) << 8)
+    }
+
+    fn read_u32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from(bytes[offset])
+            | (u32::from(bytes[offset + 1]) << 8)
+            | (u32::from(bytes[offset + 2]) << 16)
+            | (u32::from(bytes[offset + 3]) << 24)
+    }
+
+    /// Locates the data chunk without assuming it is the second chunk; the
+    /// writer emits a padding JUNK chunk before fmt.
+    fn find_data_chunk(bytes: &[u8]) -> Option<(u32, u16, u16, u32)> {
+        if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+            return None;
+        }
+        let mut offset = 12;
+        let mut format = (0u16, 0u16, 0u32);
+        while offset + 8 <= bytes.len() {
+            let tag = &bytes[offset..offset + 4];
+            let chunk_size = read_u32(bytes, offset + 4);
+            if tag == b"fmt " {
+                format = (
+                    read_u16(bytes, offset + 10),
+                    read_u16(bytes, offset + 20),
+                    read_u32(bytes, offset + 12),
+                );
+            } else if tag == b"data" {
+                return Some((chunk_size, format.0, format.1, format.2));
+            }
+            offset += 8 + chunk_size as usize + (chunk_size as usize & 1);
+        }
+        None
+    }
+
+    fn check_stereo_round_trip(frames: usize, sample_rate: u32) {
+        let left: Vec<f32> = (0..frames).map(|i| i as f32 * 0.25 - 1.0).collect();
+        let right: Vec<f32> = left.iter().map(|value| -value).collect();
+        let path = temp_path(&format!("roundtrip-{frames}-{sample_rate}"));
+        assert_eq!(
+            write_planes(&path, &[left.clone(), right.clone()], sample_rate, 0),
+            0
+        );
+
+        let (samples, channels, rate) = decode(&path).expect("round trip must decode");
+        assert_eq!(channels, 2);
+        assert_eq!(rate, sample_rate);
+        assert_eq!(samples.len(), frames * 2);
+        for index in 0..frames {
+            assert_eq!(samples[index * 2], left[index]);
+            assert_eq!(samples[index * 2 + 1], right[index]);
+        }
+
+        // Independently confirm the container so a writer that agreed with its
+        // own loader but wrote a malformed header would still be caught.
+        let bytes = std::fs::read(&path).expect("written file must exist");
+        let (data_size, channels, block_align, rate) =
+            find_data_chunk(&bytes).expect("data chunk must exist");
+        assert_eq!(channels, 2);
+        assert_eq!(block_align, 8); // 2 channels * 4 bytes (IEEE float)
+        assert_eq!(rate, sample_rate);
+        assert_eq!(data_size as usize, frames * 2 * 4);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn float32_round_trip_preserves_short_buffer_frames() {
+        // Short buffers are where a frame-count bug would hide.
+        for frames in [1usize, 2, 4, 6, 64, 512] {
+            check_stereo_round_trip(frames, 48_000);
+        }
+        check_stereo_round_trip(64, 44_100);
+        check_stereo_round_trip(512, 48_000);
+    }
+
+    #[test]
+    fn multichannel_pcm16_round_trip_accepts_a_single_frame() {
+        let channels = vec![vec![0.25f32], vec![-0.25], vec![0.5], vec![-0.5]];
+        let path = temp_path("pcm16");
+        assert_eq!(write_planes(&path, &channels, 44_100, 1), 0);
+        let (samples, decoded_channels, rate) = decode(&path).expect("pcm16 must decode");
+        assert_eq!(decoded_channels, channels.len() as u32);
+        assert_eq!(rate, 44_100);
+        assert_eq!(samples.len(), channels.len());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn planar_shape_admission_rejects_empty_and_mismatched_buffers() {
+        let empty: [usize; 0] = [];
+        assert!(!unsafe { hirari_wav_planar_shapes_valid(empty.as_ptr(), 0, 0) });
+        let zero_frames = [0usize];
+        assert!(!unsafe { hirari_wav_planar_shapes_valid(zero_frames.as_ptr(), 1, 0) });
+        let mismatched = [1usize, 2];
+        assert!(!unsafe { hirari_wav_planar_shapes_valid(mismatched.as_ptr(), 2, 1) });
+        let matched = [4usize, 4];
+        assert!(unsafe { hirari_wav_planar_shapes_valid(matched.as_ptr(), 2, 4) });
+        let too_many = vec![1usize; usize::from(u16::MAX) + 1];
+        assert!(!unsafe { hirari_wav_planar_shapes_valid(too_many.as_ptr(), too_many.len(), 1) });
+
+        // The writer itself rejects the empty layout before touching disk.
+        let path = temp_path("empty");
+        assert_ne!(write_planes(&path, &[], 48_000, 0), 0);
+        assert_ne!(write_planes(&path, &[Vec::new()], 48_000, 0), 0);
+    }
+
+    #[test]
+    fn float_writer_sanitizes_non_finite_samples() {
+        let path = temp_path("non-finite");
+        let channels = vec![
+            vec![0.0f32, 0.5, f32::NAN, -1.2],
+            vec![0.0f32, -0.5, f32::INFINITY, 1.2],
+        ];
+        assert_eq!(write_planes(&path, &channels, 48_000, 0), 0);
+        let (samples, decoded_channels, _) = decode(&path).expect("decode must succeed");
+        assert_eq!(decoded_channels, 2);
+        assert_eq!(samples.len(), 8);
+        assert!(samples.iter().all(|sample| sample.is_finite()));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn decoder_skips_odd_junk_chunks() {
+        let path = temp_path("odd-chunk");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&52u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"JUNK");
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(b"abc\0");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
+        bytes.extend_from_slice(&48_000u32.to_le_bytes());
+        bytes.extend_from_slice(&96_000u32.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&16_384i16.to_le_bytes());
+        std::fs::write(&path, &bytes).expect("probe file must be writable");
+
+        let (samples, channels, _) = decode(&path).expect("odd chunk must decode");
+        assert_eq!(channels, 1);
+        assert_eq!(samples.len(), 1);
+        assert!((samples[0] - 0.5).abs() < 1.0e-5);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn decoder_reads_rf64_data_chunk_sizes() {
+        let path = temp_path("rf64");
+        let mut bytes = Vec::new();
+        let riff_size: u64 = 8 + 28 + 8 + 16 + 8 + 4;
+        bytes.extend_from_slice(b"RF64");
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"ds64");
+        bytes.extend_from_slice(&28u32.to_le_bytes());
+        bytes.extend_from_slice(&riff_size.to_le_bytes());
+        bytes.extend_from_slice(&4u64.to_le_bytes()); // data size
+        bytes.extend_from_slice(&2u64.to_le_bytes()); // sample count
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // table length
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&48_000u32.to_le_bytes());
+        bytes.extend_from_slice(&96_000u32.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        bytes.extend_from_slice(&16_384i16.to_le_bytes());
+        bytes.extend_from_slice(&(-16_384i16).to_le_bytes());
+        std::fs::write(&path, &bytes).expect("probe file must be writable");
+
+        let (samples, channels, _) = decode(&path).expect("rf64 must decode");
+        assert_eq!(channels, 1);
+        assert_eq!(samples.len(), 2);
+        assert!((samples[0] - 0.5).abs() < 1.0e-5);
+        assert!((samples[1] + 0.5).abs() < 1.0e-5);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn decoder_rejects_truncated_and_corrupt_headers() {
+        let truncated = temp_path("truncated-riff");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&20u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"JUNK");
+        bytes.extend_from_slice(&32u32.to_le_bytes());
+        std::fs::write(&truncated, &bytes).expect("probe file must be writable");
+        assert!(decode(&truncated).is_none());
+        let _ = std::fs::remove_file(&truncated);
+
+        let corrupt = temp_path("corrupt");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36u32 + 6).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&2u16.to_le_bytes()); // stereo
+        bytes.extend_from_slice(&48_000u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // bogus byte rate
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // bogus block align
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        std::fs::write(&corrupt, &bytes).expect("probe file must be writable");
+        assert!(decode(&corrupt).is_none());
+        let _ = std::fs::remove_file(&corrupt);
+    }
+}

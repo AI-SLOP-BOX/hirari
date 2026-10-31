@@ -25,8 +25,6 @@ COMMON_FLAGS="-std=c++20 -Wall -Wextra -I. -Isrc"
     tests/effect_chain_watchdog_contract.cpp -o "$OUT_DIR/effect-chain-watchdog" "$BRIDGE_LIB"
 "$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
     tests/rt_dsp_contract.cpp -o "$OUT_DIR/rt-dsp" "$BRIDGE_LIB"
-"$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
-    tests/wav_roundtrip_contract.cpp -o "$OUT_DIR/wav-roundtrip" "$BRIDGE_LIB"
 
 if [ "$(uname -s)" = "Darwin" ]; then
     DEFAULT_ASAN_OPTIONS='detect_leaks=0:halt_on_error=1'
@@ -39,5 +37,4 @@ export ASAN_OPTIONS UBSAN_OPTIONS
 
 "$OUT_DIR/effect-chain-watchdog"
 "$OUT_DIR/rt-dsp"
-"$OUT_DIR/wav-roundtrip"
 echo "C++ ASan/UBSan contract tests passed"

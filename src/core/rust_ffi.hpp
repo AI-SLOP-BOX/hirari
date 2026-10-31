@@ -1823,6 +1823,8 @@ extern "C" bool hirari_waveform_snapshot_pending(uint64_t id);
 extern "C" uint8_t hirari_wav_write_planar(
     const uint8_t* path, size_t path_size, const float* const* channels,
     size_t channel_count, uint64_t frames, uint32_t sample_rate, uint8_t format);
+extern "C" bool hirari_wav_planar_shapes_valid(
+    const size_t* sizes, size_t channel_count, uint64_t frames);
 using HirariVideoDecodeCallback = bool (*)(void*, double, uint64_t, void**);
 using HirariVideoReadFrameCallback = bool (*)(
     void*, uint32_t*, uint32_t*, double*, const uint8_t**, size_t*);

@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- The WAV write/decode contract now lives in Rust. Planar shape admission is a
+  Rust predicate (`hirari_wav_planar_shapes_valid`) so `WavSaver::writePlanar`
+  no longer re-derives the frame rule, and the decode/round-trip assertions
+  (float and PCM round trips, on-disk RIFF sizes, NaN/Inf sanitising, odd JUNK
+  chunks, RF64 sizes, truncated/corrupt headers) run against the Rust decoder.
+  The two C++ contract translation units are gone.
+
 - The sidechain snapshot contract now lives in Rust. Its assertions
   (registration admission, generation bump on refresh, level clamping,
   capture/restore, owned publication and the single-writer seqlock race) run

@@ -154,7 +154,6 @@ else
     fi
 fi
 
-build_link_run wav-io-contract tests/wav_io_contract.cpp "$BRIDGE_LIB"
 build_link_run audio-buffer-contract tests/audio_buffer_contract.cpp "$BRIDGE_LIB"
 build_link_run range-edit-contract tests/range_edit_contract.cpp "$BRIDGE_LIB"
 

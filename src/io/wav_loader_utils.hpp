@@ -136,15 +136,15 @@ private:
     static bool writePlanar(const std::string& path,
                             const std::vector<std::vector<float>>& buffer,
                             uint32_t sampleRate, uint8_t format) {
-        if (path.empty() || buffer.empty() || buffer.size() > std::numeric_limits<uint16_t>::max() ||
-            buffer.front().empty()) return false;
+        if (path.empty() || buffer.empty()) return false;
         const size_t frames = buffer.front().size();
         std::vector<const float*> planes;
         planes.reserve(buffer.size());
-        for (const auto& channel : buffer) {
-            if (channel.size() != frames) return false;
-            planes.push_back(channel.data());
-        }
+        for (const auto& channel : buffer) planes.push_back(channel.data());
+        std::vector<size_t> sizes;
+        sizes.reserve(buffer.size());
+        for (const auto& channel : buffer) sizes.push_back(channel.size());
+        if (!hirari_wav_planar_shapes_valid(sizes.data(), sizes.size(), frames)) return false;
         return hirari_wav_write_planar(
             reinterpret_cast<const uint8_t*>(path.data()), path.size(), planes.data(),
             planes.size(), frames, sampleRate, format) == 0;
