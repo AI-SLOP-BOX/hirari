@@ -15,7 +15,7 @@
             }
         }
         hirari_channel_strip_set_sample_rate(m_strip, sr);
-        m_spatialPanner.setSampleRate(sr);
+        hirari_track_holographic_panner_set_sample_rate(m_spatialPanner, sr);
         // Preparing a track is also the boundary used by offline renders and
         // device reinitialisation. Snap smoothed channel-strip state to its
         // current targets so the first block is deterministic after reload.
@@ -168,7 +168,7 @@
             validSendPre ? m_sendPreFaderBuffer.getNumChannels() : 0,
             validSendPost ? m_sendPostFaderBuffer.getArrayOfWritePointers() : nullptr,
             validSendPost ? m_sendPostFaderBuffer.getNumChannels() : 0,
-            m_spatialPanner.nativeState(), m_spatialMode.load(std::memory_order_relaxed),
+            m_spatialPanner, m_spatialMode.load(std::memory_order_relaxed),
             m_spatialX.load(std::memory_order_relaxed),
             m_spatialY.load(std::memory_order_relaxed),
             m_spatialZ.load(std::memory_order_relaxed), m_lowGain, m_highGain,
@@ -194,17 +194,16 @@
     float getSpatialY() const { return m_spatialY.load(std::memory_order_relaxed); }
     float getSpatialZ() const { return m_spatialZ.load(std::memory_order_relaxed); }
     bool setHrtfKernel(const float* left, const float* right, uint32_t taps) {
-        if (!left || !right || taps == 0 || taps > ::Hirari::DSP::Spatial::HolographicPanner::kMaxHrtfTaps) {
-            return false;
-        }
+        if (!left || !right || taps == 0 || taps > kMaxHrtfTaps) return false;
         invalidateFrozenForEdit();
-        const bool changed = m_spatialPanner.setHrtfKernel(left, right, taps);
+        const bool changed =
+            hirari_track_holographic_panner_set_kernel(m_spatialPanner, left, right, taps);
         if (changed) markProjectLayoutChanged();
         return changed;
     }
     void clearHrtfKernel() {
         invalidateFrozenForEdit();
-        m_spatialPanner.clearHrtfKernel();
+        hirari_track_holographic_panner_clear_kernel(m_spatialPanner);
         markProjectLayoutChanged();
     }
     bool isMuted() const { return m_muted.load(std::memory_order_relaxed); }

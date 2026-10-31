@@ -18,7 +18,6 @@
 #include "../midi_region.hpp"
 #include "../plugin_host.hpp"
 #include "../plugins/process_sandbox_processor.hpp"
-#include "../../core/dsp/spatial/holographic_panner.hpp"
 #include "../editing/audio_note_segment.hpp"
 #include "../editing/audio_pitch_analysis.hpp"
 #include "../editing/event_processing_history.hpp"

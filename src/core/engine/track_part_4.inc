@@ -228,7 +228,9 @@
     std::atomic<const PluginAutomationSnapshot*> m_pluginAutomation{nullptr};
     std::atomic<float> m_spatialX{0.0f}, m_spatialY{0.0f}, m_spatialZ{0.0f};
     std::atomic<uint32_t> m_spatialMode{0};
-    ::Hirari::DSP::Spatial::HolographicPanner m_spatialPanner;
+    // The spatial processor is Rust-owned; the track keeps only its handle.
+    void* m_spatialPanner = hirari_track_holographic_panner_create();
+    static constexpr uint32_t kMaxHrtfTaps = 128;
     static constexpr uint32_t kMaxPdcDelaySamples = 8192;
     std::atomic<uint32_t> m_pdcRequested{0};
     std::atomic<uint32_t> m_trackDelaySamples{0};

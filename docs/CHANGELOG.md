@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The `HolographicPanner` C++ wrapper is deleted. `Track` holds the Rust
+  spatial-processor handle directly and calls
+  `hirari_track_holographic_panner_*` for kernel, rate and state queries.
 - The `MasterMeter`, `Goniometer`, `MasterLimiter` and `ChannelStrip` C++
   DSP header façades are deleted. The engine and tracks hold the Rust
   `hirari_master_meter_*`, `hirari_master_limiter_*` and
