@@ -109,6 +109,17 @@ extern "C" void hirari_midi_schedule_block(
     const size_t* indices_by_end, size_t end_count, uint64_t playhead,
     uint32_t frames, uint8_t playback_active, uint8_t reconcile,
     uint64_t pass, void* context, HirariScheduledMidiEventCallback callback);
+// Playback reconciliation state (discontinuity, snapshot revision, panic
+// request) lives in Rust; the callback supplies the voices it must reset.
+using HirariMidiPanicCallback = void (*)(void* context);
+extern "C" void* hirari_midi_playback_clock_create();
+extern "C" void hirari_midi_playback_clock_destroy(void* clock);
+extern "C" void hirari_midi_playback_request_panic(void* clock);
+extern "C" bool hirari_midi_playback_panic_pending(const void* clock);
+extern "C" uint8_t hirari_midi_playback_prepare_block(
+    void* clock, const void* store, uint64_t playhead, uint32_t frames,
+    uint8_t playback_active, void* context, HirariMidiPanicCallback panic_callback,
+    HirariScheduledMidiEventCallback callback);
 // Preview-sample playback (storage, trigger, cursor) lives in Rust
 // (preview_sampler.rs); the audio callback only renders through the handle.
 extern "C" void* hirari_preview_sampler_create();

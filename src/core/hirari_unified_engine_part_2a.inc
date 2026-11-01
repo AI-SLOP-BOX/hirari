@@ -36,7 +36,7 @@ void HirariUnifiedEngine::set_playing(bool p) {
         // Voice state is owned by the callback. Ask that thread to release
         // preview/fallback voices on its next block instead of racing it here.
         m_previewVoicesNeedReset.store(true, std::memory_order_release);
-        m_midiPanicRequested.store(true, std::memory_order_release);
+        hirari_midi_playback_request_panic(m_midiPlaybackClock);
         // The callback is quiescent once transport is stopped. Reclaim old
         // immutable region generations on the control thread only.
         waitForAudioCallbacks();

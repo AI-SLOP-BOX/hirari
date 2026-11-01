@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- MIDI playback reconciliation now lives in Rust: the per-engine clock tracks
+  the previous block end, published snapshot revision, playback pass and the
+  transport-stop panic request, decides when voices must be reconciled, and
+  drives the note scheduler, so the C++ callback keeps only the voice reset
+  and note dispatch callbacks. The five continuity members and the panic
+  atomic are gone from the engine.
 - Dropped the C++ declarations for FFI entry points nothing on the native side
   calls any more (scheduled-note pack/unpack/upsert, preview engine binding,
   routing connection JSON, metronome enable, MIDI-learn CC and plugin/control

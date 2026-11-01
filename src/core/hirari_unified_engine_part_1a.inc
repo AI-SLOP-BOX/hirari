@@ -76,6 +76,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_plugin_sandbox_maintenance_forget(this);
     hirari_engine_rings_destroy(m_engineRings);
     hirari_midi_snapshot_store_destroy(m_midiSnapshotStore);
+    hirari_midi_playback_clock_destroy(m_midiPlaybackClock);
     hirari_control_room_state_destroy(m_controlRoomState);
     hirari_native_pdc_destroy(m_pdcState);
     hirari_tempo_map_destroy(m_tempoState);
@@ -154,6 +155,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     : m_playhead(0)
     , m_loopEnabled(false) {
     m_midiSnapshotStore = hirari_midi_snapshot_store_create();
+    m_midiPlaybackClock = hirari_midi_playback_clock_create();
     m_engineRings = hirari_engine_rings_create();
     m_masterBuffer.setSize(2, 4096);
     m_context = std::make_unique<::Hirari::DSP::ProcessContext>();
@@ -263,7 +265,8 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         // Command mutations are deliberately drained first so fader, pan,
         // mute, and solo edits remain visible immediately while stopped.
         const bool previewActive = hirari_preview_sampler_is_active(m_previewSampler);
-        const bool midiPanicPending = m_midiPanicRequested.load(std::memory_order_acquire);
+        const bool midiPanicPending =
+            hirari_midi_playback_panic_pending(m_midiPlaybackClock);
         if (!hirari_offline_render_thread &&
             !m_offlineRenderActive.load(std::memory_order_acquire) &&
             !m_isPlaying.load(std::memory_order_acquire) &&
@@ -283,97 +286,65 @@ HirariUnifiedEngine::HirariUnifiedEngine()
                 m_audioRangeOverflow.store(true, std::memory_order_release);
                 return;
             }
-            HirariMidiSnapshotView midiSnapshot{};
-            const bool midiSnapshotPinned = hirari_midi_snapshot_store_pin(
-                m_midiSnapshotStore, &midiSnapshot);
-            const uint64_t midiSnapshotRevision = midiSnapshot.revision;
-            const bool discontinuity = midiPlaybackActive &&
-                (!m_hasPreviousMidiBlock || !m_previousMidiPlaybackActive ||
-                 currentPlayhead != m_previousMidiBlockEnd);
-            if (discontinuity) ++m_midiPlaybackPass;
-            const bool snapshotChanged = midiSnapshotPinned && m_hasPreviousMidiBlock &&
-                midiSnapshotRevision != m_previousMidiSnapshotRevision;
-            const bool requestedMidiPanic =
-                m_midiPanicRequested.exchange(false, std::memory_order_acq_rel);
-            const bool reconcileMidiState =
-                discontinuity || snapshotChanged || requestedMidiPanic ||
-                !midiSnapshotPinned;
-            const bool panicMidi = reconcileMidiState;
-            if (panicMidi) {
-                hirari_preview_synth_reset(m_previewSynthState);
-                for (auto& channel : m_previewFallbackActiveNotes)
-                    std::fill(std::begin(channel), std::end(channel), 0u);
-                for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-                    Track* track = state.activeTracks[i];
-                    if (track && (track->getType() == Track::Midi ||
-                                  track->getType() == Track::Instrument))
-                        track->addMidiInputAllNotesOff(0);
-                }
-            }
-            const uint64_t blockEnd = currentPlayhead + sz;
-            if (midiSnapshotPinned) {
-                using AudioState = std::remove_reference_t<decltype(state)>;
-                struct MidiDispatchContext {
-                    HirariUnifiedEngine* engine;
-                    AudioState* state;
-                    uint64_t playhead;
-                } dispatch{this, &state, currentPlayhead};
-                hirari_midi_schedule_block(
-                    midiSnapshot.notes, midiSnapshot.note_count, midiSnapshot.indices_by_end,
-                    midiSnapshot.end_count, currentPlayhead, sz,
-                    midiPlaybackActive ? 1 : 0, reconcileMidiState ? 1 : 0,
-                    m_midiPlaybackPass, &dispatch,
-                    +[](void* opaque, const HirariScheduledMidiNote* rawNote,
-                        uint64_t offset, uint8_t noteOff) {
-                        auto& context = *static_cast<MidiDispatchContext*>(opaque);
-                        auto& engine = *context.engine;
-                        const auto& note = *reinterpret_cast<const ScheduledMidiNote*>(rawNote);
-                        const auto channel = static_cast<uint8_t>(note.midiChannel + 1);
-                        Track* target = note.trackId < kMaxTrackMap
-                            ? context.state->trackMap[note.trackId] : nullptr;
-                        if (noteOff != 0) {
-                            if (target)
-                                target->addMidiInputNoteOff(channel, note.pitch, offset,
-                                                            note.articulationId);
-                            auto& fallback = engine.m_previewFallbackActiveNotes
-                                [note.midiChannel][note.pitch];
-                            if (fallback > 0 && engine.m_blockMidi.remainingCapacity() > 0) {
-                                engine.m_blockMidi.addNoteOff(channel, note.pitch, offset);
-                                --fallback;
-                            }
-                            return;
+            using AudioState = std::remove_reference_t<decltype(state)>;
+            struct MidiBlockContext {
+                HirariUnifiedEngine* engine;
+                AudioState* state;
+            } midiContext{this, &state};
+            (void)hirari_midi_playback_prepare_block(
+                m_midiPlaybackClock, m_midiSnapshotStore, currentPlayhead, sz,
+                midiPlaybackActive ? 1 : 0, &midiContext,
+                +[](void* opaque) {
+                    auto& context = *static_cast<MidiBlockContext*>(opaque);
+                    hirari_preview_synth_reset(context.engine->m_previewSynthState);
+                    for (auto& channel : context.engine->m_previewFallbackActiveNotes)
+                        std::fill(std::begin(channel), std::end(channel), 0u);
+                    for (uint32_t i = 0; i < context.state->trackCount && i < kMaxTracks; ++i) {
+                        Track* track = context.state->activeTracks[i];
+                        if (track && (track->getType() == Track::Midi ||
+                                      track->getType() == Track::Instrument))
+                            track->addMidiInputAllNotesOff(0);
+                    }
+                },
+                +[](void* opaque, const HirariScheduledMidiNote* rawNote,
+                    uint64_t offset, uint8_t noteOff) {
+                    auto& context = *static_cast<MidiBlockContext*>(opaque);
+                    auto& engine = *context.engine;
+                    const auto& note = *reinterpret_cast<const ScheduledMidiNote*>(rawNote);
+                    const auto channel = static_cast<uint8_t>(note.midiChannel + 1);
+                    Track* target = note.trackId < kMaxTrackMap
+                        ? context.state->trackMap[note.trackId] : nullptr;
+                    if (noteOff != 0) {
+                        if (target)
+                            target->addMidiInputNoteOff(channel, note.pitch, offset,
+                                                        note.articulationId);
+                        auto& fallback = engine.m_previewFallbackActiveNotes
+                            [note.midiChannel][note.pitch];
+                        if (fallback > 0 && engine.m_blockMidi.remainingCapacity() > 0) {
+                            engine.m_blockMidi.addNoteOff(channel, note.pitch, offset);
+                            --fallback;
                         }
-                        if (target) {
-                            const double sampleRate = std::max(
-                                1.0, engine.m_sampleRate.load(std::memory_order_relaxed));
-                            const double startBeat = hirari_tempo_map_samples_to_beats(
-                                engine.m_tempoState, note.startSample, sampleRate);
-                            scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
-                                                          note.articulationId, true, startBeat,
-                                                          sampleRate, offset);
-                            target->addMidiInputNoteOn(channel, note.pitch, note.velocity,
-                                                       offset, note.articulationId);
-                            scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
-                                                          note.articulationId, false, startBeat,
-                                                          sampleRate, offset);
-                        } else if (engine.m_blockMidi.remainingCapacity() > 0) {
-                            engine.m_blockMidi.addNoteOn(channel, note.pitch, note.velocity, offset);
-                            ++engine.m_previewFallbackActiveNotes[note.midiChannel][note.pitch];
-                        }
-                    });
-                hirari_midi_snapshot_store_release(m_midiSnapshotStore, midiSnapshot.slot);
-            } else {
-                // Under sustained concurrent edits, never risk traversing a
-                // mutable snapshot. Panic this block and reconcile on the
-                // next callback after a stable slot can be pinned.
-                m_midiPanicRequested.store(true, std::memory_order_release);
-            }
+                        return;
+                    }
+                    if (target) {
+                        const double sampleRate = std::max(
+                            1.0, engine.m_sampleRate.load(std::memory_order_relaxed));
+                        const double startBeat = hirari_tempo_map_samples_to_beats(
+                            engine.m_tempoState, note.startSample, sampleRate);
+                        scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
+                                                      note.articulationId, true, startBeat,
+                                                      sampleRate, offset);
+                        target->addMidiInputNoteOn(channel, note.pitch, note.velocity,
+                                                   offset, note.articulationId);
+                        scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
+                                                      note.articulationId, false, startBeat,
+                                                      sampleRate, offset);
+                    } else if (engine.m_blockMidi.remainingCapacity() > 0) {
+                        engine.m_blockMidi.addNoteOn(channel, note.pitch, note.velocity, offset);
+                        ++engine.m_previewFallbackActiveNotes[note.midiChannel][note.pitch];
+                    }
+                });
             m_blockMidi.sort();
-            m_previousMidiPlaybackActive = midiSnapshotPinned && midiPlaybackActive;
-            m_previousMidiBlockEnd = blockEnd;
-            if (midiSnapshotPinned)
-                m_previousMidiSnapshotRevision = midiSnapshotRevision;
-            m_hasPreviousMidiBlock = true;
         }
         hirari_midi_process_mpe(m_mpeState, m_blockMidi.getEvents(), m_blockMidi.size());
         hirari_midi_apply_articulations_from_state(

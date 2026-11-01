@@ -61,15 +61,11 @@ private:
     // Internal components (using PIMPL principles where possible)
     ::Hirari::Core::AudioBuffer m_masterBuffer;
     ::Hirari::Core::MidiBuffer m_blockMidi;
-    // Callback-owned transport continuity used to reconcile held MIDI notes
-    // after a seek, loop wrap, or transport restart without retriggering notes
-    // on ordinary adjacent blocks.
-    uint64_t m_previousMidiBlockEnd = 0;
-    uint64_t m_previousMidiSnapshotRevision = 0;
-    uint64_t m_midiPlaybackPass = 0;
-    bool m_hasPreviousMidiBlock = false;
-    bool m_previousMidiPlaybackActive = false;
-    std::atomic<bool> m_midiPanicRequested{false};
+    // Callback-owned transport continuity (block end, snapshot revision,
+    // playback pass, panic request) is Rust-owned; it reconciles held MIDI
+    // notes after a seek, loop wrap, or transport restart without retriggering
+    // notes on ordinary adjacent blocks.
+    void* m_midiPlaybackClock = nullptr;
     // The native MIDI policy layer runs after timeline scheduling and before
     // preview/plugin dispatch, so articulation and MPE transformations affect
     // every downstream instrument consistently.
