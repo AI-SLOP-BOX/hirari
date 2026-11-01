@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Sandbox status enumeration, WAV diagnostic text, and waveform result polling
+  now call the Rust routines directly from the bridge; the C++ `AudioEngine`
+  relays, the local sandbox-status shim declaration, and the unused FFI
+  declarations they needed are gone.
+
 - Low-latency mode, preview triggering, metronome control, tempo reads,
   sample/beat conversion and the routing snapshot now run as Rust extension
   methods on the engine bridge, reaching the PDC, preview sampler, metronome,

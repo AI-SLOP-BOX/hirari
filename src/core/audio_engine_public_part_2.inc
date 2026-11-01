@@ -32,13 +32,6 @@
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
         return m_engine && m_engine->restart_sandboxed_plugin(trackId, sandboxIndex);
     }
-    rust::Vec<uint32_t> get_sandbox_statuses() const {
-        if (!m_engine) return {};
-        // Rust enumerates the tracks through the maintenance host and owns the
-        // packed status protocol.
-        return ::Hirari::Core::Bridge::sandbox_statuses_packed(
-            reinterpret_cast<size_t>(m_engine.get()));
-    }
     rust::String get_last_sandbox_failure_text(uint32_t trackId) const {
         return rust::String(m_engine ? m_engine->get_last_sandbox_failure_text(trackId)
                                      : "engine-unavailable");
@@ -86,17 +79,6 @@
     bool save_project(rust::Str path) const { return m_engine && m_engine->saveProject(std::string_view(path.data(), path.size())); }
     bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }
     bool bounce_project(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project(std::string_view(path.data(), path.size()), format); }
-    rust::String read_wav_diagnostic_json(rust::Str path, uint32_t format) const {
-        // The supported-format gate, decoding and diagnostic text are Rust-owned.
-        void* raw = hirari_wav_diagnostic_json_for_path(
-            reinterpret_cast<const uint8_t*>(path.data()), path.size(), format == 1);
-        if (!raw) return rust::String{};
-        std::unique_ptr<void, decltype(&hirari_wav_diagnostic_json_free)> json(
-            raw, &hirari_wav_diagnostic_json_free);
-        const auto* data = hirari_wav_diagnostic_json_data(json.get());
-        const size_t size = hirari_wav_diagnostic_json_size(json.get());
-        return data ? rust::String(reinterpret_cast<const char*>(data), size) : rust::String{};
-    }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
 
 
@@ -182,21 +164,6 @@
             +[](void* opaque) noexcept {
                 delete static_cast<std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>*>(opaque);
             });
-    }
-    rust::Vec<float> poll_region_waveform(uint64_t request) const {
-        rust::Vec<float> result;
-        if (request == 0) return result;
-        (void)hirari_waveform_snapshot_poll(
-            request, &result,
-            +[](void* opaque, const float* samples, size_t count) noexcept {
-                auto* output = static_cast<rust::Vec<float>*>(opaque);
-                if (!output || (!samples && count != 0)) return;
-                for (size_t i = 0; i < count; ++i) output->push_back(samples[i]);
-            });
-        return result;
-    }
-    bool region_waveform_pending(uint64_t request) const noexcept {
-        return request != 0 && hirari_waveform_snapshot_pending(request);
     }
     void mark_project_layout_changed() const {
         if (m_engine) m_engine->mark_project_layout_changed();

@@ -232,7 +232,6 @@ pub mod ffi {
         fn non_finite_plugin_samples(self: &HirariUnifiedEngine) -> u64;
         fn retry_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
         fn restart_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
-        fn get_sandbox_statuses(self: &AudioEngine) -> Vec<u32>;
         fn get_last_sandbox_failure(self: &HirariUnifiedEngine, track_id: u32) -> u8;
         fn get_last_sandbox_failure_text(self: &AudioEngine, track_id: u32) -> String;
         fn get_sandbox_plugin_paths(self: &AudioEngine) -> Vec<String>;
@@ -313,7 +312,6 @@ pub mod ffi {
         fn save_project(self: &AudioEngine, path: &str) -> bool;
         fn load_project(self: &AudioEngine, path: &str) -> bool;
         fn bounce_project(self: &AudioEngine, path: &str, format: u32) -> bool;
-        fn read_wav_diagnostic_json(self: &AudioEngine, path: &str, format: u32) -> String;
         fn bounce_project_async(self: &AudioEngine, path: &str, format: u32) -> bool;
         fn get_bounce_progress(self: &HirariUnifiedEngine) -> f32;
         fn get_bounce_state(self: &HirariUnifiedEngine) -> u32;
@@ -389,8 +387,6 @@ pub mod ffi {
         ) -> bool;
 
         fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
-        fn poll_region_waveform(self: &AudioEngine, request: u64) -> Vec<f32>;
-        fn region_waveform_pending(self: &AudioEngine, request: u64) -> bool;
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
         fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
         fn get_track_peaks_l_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;

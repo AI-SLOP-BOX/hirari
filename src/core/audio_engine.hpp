@@ -20,12 +20,6 @@
 #include "external/jack_bridge_deep.hpp"
 #endif
 
-namespace Hirari::Core::Bridge {
-// Generated cxx shim from hirari-core-bridge/src/lib.rs. The single-TU bridge
-// build includes this header before the generated declarations, so repeat it.
-::rust::Vec<::std::uint32_t> sandbox_statuses_packed(::std::size_t host) noexcept;
-} // namespace Hirari::Core::Bridge
-
 namespace Hirari::Core::BridgeFFI {
 
 #if defined(__APPLE__)

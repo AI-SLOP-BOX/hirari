@@ -925,12 +925,6 @@ extern "C" void hirari_master_meter_process(
 extern "C" float hirari_master_meter_get(const void* state, uint32_t field);
 extern "C" void hirari_master_meter_analysis_stats(const void* state, float* output);
 
-extern "C" void* hirari_wav_diagnostic_json_for_path(
-    const uint8_t* path, size_t path_size, bool wave64);
-extern "C" const uint8_t* hirari_wav_diagnostic_json_data(const void* value);
-extern "C" size_t hirari_wav_diagnostic_json_size(const void* value);
-extern "C" void hirari_wav_diagnostic_json_free(void* value);
-
 struct HirariMpeState;
 extern "C" HirariMpeState* hirari_mpe_state_create();
 extern "C" void hirari_mpe_state_free(HirariMpeState* state);
@@ -1760,7 +1754,6 @@ using HirariSnapshotCancelCallback = void (*)(void*);
 using HirariSnapshotIsCancelledCallback = bool (*)(const void*);
 using HirariSnapshotBytesVisitor = void (*)(void*, const uint8_t*, size_t);
 using HirariWaveformComputeCallback = size_t (*)(void*, uint32_t, uint32_t, float*, size_t);
-using HirariWaveformVisitor = void (*)(void*, const float*, size_t);
 extern "C" uint64_t hirari_layout_snapshot_request(
     uint64_t owner, void* context, HirariSnapshotComputeCallback compute, HirariSnapshotReadCallback read,
     HirariSnapshotDestroyCallback destroy_result, HirariSnapshotDestroyCallback destroy_context,
@@ -1773,9 +1766,6 @@ extern "C" void hirari_layout_snapshot_owner_release(uint64_t owner);
 extern "C" uint64_t hirari_waveform_snapshot_request(
     void* context, uint32_t track_id, uint32_t region_id,
     HirariWaveformComputeCallback compute, HirariSnapshotDestroyCallback destroy_context);
-extern "C" bool hirari_waveform_snapshot_poll(
-    uint64_t id, void* context, HirariWaveformVisitor visit);
-extern "C" bool hirari_waveform_snapshot_pending(uint64_t id);
 using HirariVideoDecodeCallback = bool (*)(void*, double, uint64_t, void**);
 using HirariVideoReadFrameCallback = bool (*)(
     void*, uint32_t*, uint32_t*, double*, const uint8_t**, size_t*);

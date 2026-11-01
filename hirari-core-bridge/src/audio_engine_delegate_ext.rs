@@ -825,4 +825,54 @@ impl ffi::AudioEngine {
     pub fn get_project_layout_revision(&self) -> u64 {
         self.get_core().get_project_layout_revision()
     }
+    pub fn get_sandbox_statuses(&self) -> Vec<u32> {
+        plugin_sandbox_maintenance::sandbox_statuses_packed(host(self) as usize)
+    }
+    pub fn read_wav_diagnostic_json(&self, path: &str, format: u32) -> String {
+        unsafe {
+            let raw = crate::wav_diagnostic::hirari_wav_diagnostic_json_for_path(
+                path.as_ptr(),
+                path.len(),
+                format == 1,
+            );
+            if raw.is_null() {
+                return String::new();
+            }
+            let data = crate::wav_diagnostic::hirari_wav_diagnostic_json_data(raw);
+            let size = crate::wav_diagnostic::hirari_wav_diagnostic_json_size(raw);
+            let text = if data.is_null() {
+                String::new()
+            } else {
+                String::from_utf8_lossy(std::slice::from_raw_parts(data, size)).into_owned()
+            };
+            crate::wav_diagnostic::hirari_wav_diagnostic_json_free(raw);
+            text
+        }
+    }
+    pub fn poll_region_waveform(&self, request: u64) -> Vec<f32> {
+        unsafe extern "C" fn collect(context: *mut c_void, samples: *const f32, count: usize) {
+            if samples.is_null() || count == 0 {
+                return;
+            }
+            // SAFETY: the poll visitor only runs for the duration of the call
+            // and the context is the local vector below.
+            let output = unsafe { &mut *(context as *mut Vec<f32>) };
+            output.extend_from_slice(unsafe { std::slice::from_raw_parts(samples, count) });
+        }
+        let mut result = Vec::new();
+        if request == 0 {
+            return result;
+        }
+        unsafe {
+            crate::async_snapshots::hirari_waveform_snapshot_poll(
+                request,
+                &mut result as *mut Vec<f32> as *mut c_void,
+                Some(collect),
+            );
+        }
+        result
+    }
+    pub fn region_waveform_pending(&self, request: u64) -> bool {
+        request != 0 && unsafe { crate::async_snapshots::hirari_waveform_snapshot_pending(request) }
+    }
 }
