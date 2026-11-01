@@ -129,7 +129,6 @@ extern "C" void hirari_preview_sampler_destroy(void* state);
 extern "C" void hirari_preview_sampler_set(
     void* state, const float* samples, size_t count, double source_rate);
 extern "C" void hirari_preview_sampler_clear(void* state);
-extern "C" void hirari_preview_sampler_trigger(void* state);
 extern "C" void hirari_preview_sampler_reclaim(void* state);
 extern "C" bool hirari_preview_sampler_is_active(const void* state);
 extern "C" void hirari_preview_sampler_render(
@@ -1350,9 +1349,7 @@ extern "C" void hirari_sandbox_recovery_stop();
 extern "C" void* hirari_native_pdc_create();
 extern "C" void hirari_native_pdc_destroy(void* state);
 extern "C" bool hirari_native_pdc_bind_control_thread(const void* state);
-extern "C" bool hirari_native_pdc_set_low_latency_mode(const void* state, bool active);
 extern "C" void hirari_native_pdc_reset_for_project(const void* state);
-extern "C" bool hirari_native_pdc_low_latency_mode(const void* state);
 struct HirariPdcTrackConfig {
     uint32_t id;
     uint32_t latencySamples;

@@ -1,6 +1,5 @@
     bool assign_track_to_vca(uint32_t trackId, uint32_t groupId) const { return m_engine && m_engine->assign_track_to_vca(trackId, groupId); }
     void new_project() const { if (m_engine) m_engine->new_project(); }
-    bool set_low_latency_mode(bool active) const { return m_engine && m_engine->set_low_latency_mode(active); }
 
 
     bool add_region(uint32_t tid, rust::Str path, double startBeat) const {

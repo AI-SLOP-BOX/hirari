@@ -22,10 +22,6 @@ void HirariUnifiedEngine::set_preview_sample(const float* samples, size_t count,
     hirari_preview_sampler_set(m_previewSampler, samples, count, sourceRate);
 }
 
-void HirariUnifiedEngine::trigger_preview_sample() {
-    hirari_preview_sampler_trigger(m_previewSampler);
-}
-
 void HirariUnifiedEngine::clear_preview_sample() {
     hirari_preview_sampler_clear(m_previewSampler);
     if (!m_isPlaying.load(std::memory_order_acquire)) {
@@ -79,14 +75,6 @@ float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noe
                  : 0.0f;
 }
 
-bool HirariUnifiedEngine::set_low_latency_mode(bool active) noexcept {
-    return hirari_native_pdc_set_low_latency_mode(m_pdcState, active);
-}
-
-bool HirariUnifiedEngine::low_latency_mode() const noexcept {
-    return hirari_native_pdc_low_latency_mode(m_pdcState);
-}
-
 void HirariUnifiedEngine::set_playhead(uint64_t p) { m_playhead.store(p); }
 uint64_t HirariUnifiedEngine::get_playhead() const { return m_playhead.load(); }
 void HirariUnifiedEngine::set_loop(bool enabled) { m_loopEnabled.store(enabled); }
@@ -102,12 +90,6 @@ bool HirariUnifiedEngine::is_loop_enabled() const noexcept {
 }
 uint64_t HirariUnifiedEngine::cycle_start() const noexcept { return m_cycleStart.load(std::memory_order_acquire); }
 uint64_t HirariUnifiedEngine::cycle_end() const noexcept { return m_cycleEnd.load(std::memory_order_acquire); }
-void HirariUnifiedEngine::set_metronome_enabled(bool enabled) noexcept {
-    hirari_metronome_set_enabled(m_metronome, enabled);
-}
-bool HirariUnifiedEngine::is_metronome_enabled() const noexcept {
-    return hirari_metronome_is_enabled(m_metronome);
-}
 void HirariUnifiedEngine::set_test_tone(bool enabled) { m_testTone.store(enabled, std::memory_order_release); }
 
 uint32_t HirariUnifiedEngine::allocateTrackIdLocked() noexcept {

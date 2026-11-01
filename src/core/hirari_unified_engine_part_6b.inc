@@ -1,7 +1,3 @@
-float HirariUnifiedEngine::get_tempo() const {
-    return hirari_tempo_map_get_current_bpm(m_tempoState);
-}
-
 bool HirariUnifiedEngine::set_tempo(float bpm) {
     // Thin entry point onto the Rust implementation, kept only because
     // tests/timeline_bpm_ghost_contract.cpp drives this method straight off

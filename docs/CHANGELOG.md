@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Low-latency mode, preview triggering, metronome control, tempo reads,
+  sample/beat conversion and the routing snapshot now run as Rust extension
+  methods on the engine bridge, reaching the PDC, preview sampler, metronome,
+  tempo map and routing objects through handle accessors; the matching C++
+  engine relays and `AudioEngine` forwarders are gone.
 - Track input monitoring, plugin reordering, MIDI CC learn dispatch, the
   preview-synth selector and sidechain links now reach the Rust policy layer
   directly, so the C++ engine relays and their `AudioEngine` forwarders are

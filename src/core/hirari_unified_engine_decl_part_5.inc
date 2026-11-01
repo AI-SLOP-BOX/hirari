@@ -16,7 +16,6 @@
     rust::String get_project_layout_json() const;
     rust::String get_project_layout_json_cancellable(
         const std::atomic<bool>* cancellation) const;
-    rust::String get_routing_snapshot_json() const;
     // Stable generation token for UI/CLI snapshots. Commands must echo this
     // value back through push_command; a changed layout makes the token stale.
     uint64_t get_project_generation() const;

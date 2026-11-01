@@ -16,10 +16,6 @@ public:
     bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { if (!m_engine || !m_engine->set_cycle_range(start_sample, end_sample, enabled)) return false; m_engine->mark_project_state_changed(); return true; }
 
 
-    void set_metronome_enabled(bool enabled) const {
-        if (m_engine) { m_engine->set_metronome_enabled(enabled); m_engine->mark_project_state_changed(); }
-    }
-
     bool is_playing() const { return m_engine && m_engine->is_playing(); }
     void set_playhead(uint64_t pos) const { if (m_engine) m_engine->set_playhead(pos); }
 
@@ -28,10 +24,9 @@ public:
     // Tempo and time-signature editing moved to Rust with the objects it
     // touches (hirari_core_engine_tempo.rs), which reach them through the
     // three handles above; nothing about it is relayed through here now. The
-    // two entry points below still cross C++ on purpose: the native contract
-    // tests drive exactly this path, and the driver config reads BPM through
-    // it. Both land in the same Rust implementation.
-    float get_tempo() const { return m_engine ? m_engine->get_tempo() : 120.0f; }
+    // write below stays on the C++ path because the native contract tests
+    // drive the engine singleton through it; it lands in the same Rust
+    // implementation.
     bool set_tempo(float bpm) const { if (!m_engine || !m_engine->set_tempo(bpm)) return false; m_engine->mark_project_state_changed(); return true; }
     void midi_clock_tick(uint64_t timestamp) const { if (m_engine) m_engine->midi_clock_tick(timestamp); }
 
@@ -213,7 +208,6 @@ public:
             transient_flags.data(), transient_flags.size());
     }
 
-    void trigger_preview_sample() const { if (m_engine) m_engine->trigger_preview_sample(); }
     void apply_config(float tempo, uint32_t sr, uint32_t bs) const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         (void)apply_config_locked(tempo, sr, bs);

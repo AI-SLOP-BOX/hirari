@@ -217,7 +217,7 @@ impl HirariCore {
             )?,
         };
         document.audio_routes =
-            serde_json::from_str(engine.get_core().get_routing_snapshot_json().as_str())
+            serde_json::from_str(engine.get_routing_snapshot_json().as_str())
                 .map_err(|_| anyhow::anyhow!("native routing snapshot is malformed"))?;
         document.cycle_start_sample = engine.cycle_start();
         document.cycle_end_sample = engine.cycle_end();

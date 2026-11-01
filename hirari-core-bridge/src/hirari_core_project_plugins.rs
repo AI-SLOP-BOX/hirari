@@ -235,7 +235,7 @@ impl HirariCore {
     pub fn audio_routes_json(&self) -> String {
         self.engine
             .as_ref()
-            .map(|engine| engine.get_core().get_routing_snapshot_json().to_string())
+            .map(|engine| engine.get_routing_snapshot_json())
             .unwrap_or_else(|| "[]".to_owned())
     }
 

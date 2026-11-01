@@ -55,6 +55,26 @@ fn preview_state(engine: &ffi::AudioEngine) -> *mut c_void {
     unsafe { (*core).preview_synth_state() as *mut c_void }
 }
 
+fn pdc_state(engine: &ffi::AudioEngine) -> *const c_void {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    unsafe { (*core).pdc_state() as *const c_void }
+}
+
+fn preview_sampler(engine: &ffi::AudioEngine) -> *const c_void {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    unsafe { (*core).preview_sampler() as *const c_void }
+}
+
+fn metronome(engine: &ffi::AudioEngine) -> *mut c_void {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    unsafe { (*core).metronome_state() as *mut c_void }
+}
+
+fn routing_engine(engine: &ffi::AudioEngine) -> *const c_void {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    unsafe { (*core).routing_engine_state() as *const c_void }
+}
+
 fn bytes(text: &str) -> *const u8 {
     text.as_ptr()
 }
@@ -688,16 +708,45 @@ impl ffi::AudioEngine {
         self.get_core().cycle_end()
     }
     pub fn is_metronome_enabled(&self) -> bool {
-        self.get_core().is_metronome_enabled()
+        unsafe { crate::metronome_renderer::hirari_metronome_is_enabled(metronome(self)) }
+    }
+    pub fn set_metronome_enabled(&self, enabled: bool) {
+        unsafe { crate::metronome_renderer::hirari_metronome_set_enabled(metronome(self), enabled) };
+        self.mark_project_state_changed();
     }
     pub fn get_playhead(&self) -> u64 {
         self.get_core().get_playhead()
     }
     pub fn samples_to_beats(&self, samples: u64) -> f64 {
-        self.get_core().samples_to_beats(samples)
+        unsafe {
+            crate::tempo::hirari_tempo_map_samples_to_beats(
+                self.tempo_state() as *const c_void,
+                samples,
+                self.get_core().get_sample_rate(),
+            )
+        }
     }
     pub fn beats_to_samples(&self, beats: f64) -> u64 {
-        self.get_core().beats_to_samples(beats)
+        unsafe {
+            crate::tempo::hirari_tempo_map_beats_to_samples(
+                self.tempo_state() as *const c_void,
+                beats,
+                self.get_core().get_sample_rate(),
+            )
+        }
+    }
+    pub fn get_routing_snapshot_json(&self) -> String {
+        unsafe {
+            let json = crate::routing_engine_core::hirari_routing_engine_connections_json(
+                routing_engine(self),
+            );
+            if json.is_null() {
+                return "[]".to_owned();
+            }
+            let text = std::ffi::CStr::from_ptr(json).to_string_lossy().into_owned();
+            crate::routing_engine_core::hirari_routing_engine_connections_json_free(json);
+            text
+        }
     }
     pub fn midi_clock_ticks(&self) -> u64 {
         self.get_core().midi_clock_ticks()
@@ -718,7 +767,16 @@ impl ffi::AudioEngine {
         self.get_core().get_latency_ms()
     }
     pub fn low_latency_mode(&self) -> bool {
-        self.get_core().low_latency_mode()
+        unsafe { crate::native_pdc::hirari_native_pdc_low_latency_mode(pdc_state(self)) }
+    }
+    pub fn set_low_latency_mode(&self, active: bool) -> bool {
+        unsafe { crate::native_pdc::hirari_native_pdc_set_low_latency_mode(pdc_state(self), active) }
+    }
+    pub fn get_tempo(&self) -> f32 {
+        unsafe { crate::tempo::hirari_tempo_map_get_current_bpm(self.tempo_state() as *const c_void) }
+    }
+    pub fn trigger_preview_sample(&self) {
+        unsafe { crate::preview_sampler::hirari_preview_sampler_trigger(preview_sampler(self)) }
     }
     pub fn region_table_mirror_matches(&self, tid: u32) -> bool {
         self.get_core().region_table_mirror_matches(tid)

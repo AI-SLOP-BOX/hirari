@@ -7,16 +7,11 @@
     float get_latency_ms() const noexcept;
     float get_track_latency_ms(uint32_t tid) const noexcept;
     float get_track_pdc_compensation_ms(uint32_t tid) const noexcept;
-    bool set_low_latency_mode(bool active) noexcept;
-    bool low_latency_mode() const noexcept;
     void set_playing(bool playing);
     uint64_t get_playhead() const;
     void set_playhead(uint64_t pos);
-    double samples_to_beats(uint64_t samples) const;
-    uint64_t beats_to_samples(double beats) const;
-    // Tempo and time-signature editing moved to Rust; only these two reads
-    // survive here, for the driver config and the native contract test.
-    float get_tempo() const;
+    // Tempo editing moved to Rust; this write survives for the native contract
+    // test that drives the engine singleton directly.
     bool set_tempo(float bpm);
     void midi_clock_tick(uint64_t timestamp) noexcept { hirari_external_sync_tick(m_externalSync, timestamp); }
     uint64_t midi_clock_ticks() const noexcept { return hirari_external_sync_ticks(m_externalSync); }
@@ -37,6 +32,10 @@
     size_t midi_snapshot_store() const noexcept { return reinterpret_cast<size_t>(m_midiSnapshotStore); }
     size_t midi_learn_state() const noexcept { return reinterpret_cast<size_t>(m_midiLearnState); }
     size_t preview_synth_state() const noexcept { return reinterpret_cast<size_t>(m_previewSynthState); }
+    size_t pdc_state() const noexcept { return reinterpret_cast<size_t>(m_pdcState); }
+    size_t preview_sampler() const noexcept { return reinterpret_cast<size_t>(m_previewSampler); }
+    size_t metronome_state() const noexcept { return reinterpret_cast<size_t>(m_metronome); }
+    size_t routing_engine_state() const noexcept { return reinterpret_cast<size_t>(m_routingEngine); }
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;
         std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -64,11 +63,8 @@
     bool is_loop_enabled() const noexcept;
     uint64_t cycle_start() const noexcept;
     uint64_t cycle_end() const noexcept;
-    void set_metronome_enabled(bool enabled) noexcept;
-    bool is_metronome_enabled() const noexcept;
     void set_test_tone(bool enabled);
     // Preview sampler bridge. The sample is replaced off the audio thread;
     // the callback only reads an immutable shared snapshot.
     void set_preview_sample(const float* samples, size_t count, double sourceRate);
-    void trigger_preview_sample();
     void clear_preview_sample();

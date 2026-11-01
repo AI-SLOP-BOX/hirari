@@ -267,14 +267,6 @@ rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
     return result;
 }
 
-rust::String HirariUnifiedEngine::get_routing_snapshot_json() const {
-    char* json = hirari_routing_engine_connections_json(m_routingEngine);
-    if (!json) return rust::String("[]");
-    rust::String result(json);
-    hirari_routing_engine_connections_json_free(json);
-    return result;
-}
-
 uint64_t HirariUnifiedEngine::get_project_generation() const {
     const auto layout = get_project_layout_json();
     uint64_t hash = 0xcbf29ce484222325ull;
@@ -403,13 +395,4 @@ HirariUnifiedEngine::MeterData HirariUnifiedEngine::getMasterMeterData() const {
     return out;
 }
 
-double HirariUnifiedEngine::samples_to_beats(uint64_t samples) const {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return hirari_tempo_map_samples_to_beats(m_tempoState, samples, sampleRate);
-}
-
-uint64_t HirariUnifiedEngine::beats_to_samples(double beats) const {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return hirari_tempo_map_beats_to_samples(m_tempoState, beats, sampleRate);
-}
 

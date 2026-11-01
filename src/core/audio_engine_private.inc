@@ -67,7 +67,8 @@ private:
         if (!m_driver || !m_engine) return;
         m_engine->waitForAudioCallbacks();
         ::Hirari::Core::Engine::EngineConfig cfg;
-        cfg.tempo = m_engine->get_tempo();
+        cfg.tempo = hirari_tempo_map_get_current_bpm(
+            reinterpret_cast<const void*>(m_engine->tempo_state()));
         cfg.sampleRate = m_driver->sample_rate();
         cfg.blockSize = m_driver->buffer_size();
         m_engine->apply_config(cfg);
