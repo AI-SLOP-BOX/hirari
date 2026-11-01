@@ -23,7 +23,7 @@
     // continues to use get_project_generation().
     uint64_t get_project_layout_revision() const noexcept;
     uint64_t get_project_state_revision() const noexcept;
-    void mark_project_state_changed() noexcept {
+    void mark_project_state_changed() {
         m_projectControlRevision.fetch_add(1, std::memory_order_acq_rel);
     }
     void mark_project_layout_changed() const {

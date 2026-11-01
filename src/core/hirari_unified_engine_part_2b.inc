@@ -21,7 +21,7 @@ bool HirariUnifiedEngine::set_offline_render_target(uint32_t tid) {
     return true;
 }
 
-void HirariUnifiedEngine::clear_offline_render_target() noexcept {
+void HirariUnifiedEngine::clear_offline_render_target() {
     m_offlineTargetActive.store(false, std::memory_order_release);
     m_offlineTargetId.store(0, std::memory_order_release);
     m_offlineRenderTailMillis.store(0, std::memory_order_release);
@@ -29,14 +29,14 @@ void HirariUnifiedEngine::clear_offline_render_target() noexcept {
     m_offlineRenderIncludeInserts.store(true, std::memory_order_release);
 }
 
-void HirariUnifiedEngine::set_offline_render_tail_seconds(float seconds) noexcept {
+void HirariUnifiedEngine::set_offline_render_tail_seconds(float seconds) {
     // Bounds and non-finite rejection are enforced by the bridge; this only
     // stores the value the render loop consumes.
     m_offlineRenderTailMillis.store(
         static_cast<uint32_t>(seconds * 1000.0f), std::memory_order_release);
 }
 
-void HirariUnifiedEngine::set_offline_render_options(bool preFader, bool includeInserts) noexcept {
+void HirariUnifiedEngine::set_offline_render_options(bool preFader, bool includeInserts) {
     m_offlineRenderPreFader.store(preFader, std::memory_order_release);
     m_offlineRenderIncludeInserts.store(includeInserts, std::memory_order_release);
 }

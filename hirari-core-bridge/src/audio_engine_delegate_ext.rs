@@ -902,6 +902,45 @@ impl ffi::AudioEngine {
     pub fn mark_project_layout_changed(&self) {
         self.get_core().mark_project_layout_changed()
     }
+    pub fn mark_project_state_changed(&self) {
+        pinned(self).mark_project_state_changed()
+    }
+    pub fn set_loop(&self, enabled: bool) {
+        pinned(self).set_loop(enabled);
+        self.mark_project_state_changed();
+    }
+    pub fn set_cycle_range(&self, start_sample: u64, end_sample: u64, enabled: bool) -> bool {
+        if !pinned(self).set_cycle_range(start_sample, end_sample, enabled) {
+            return false;
+        }
+        self.mark_project_state_changed();
+        true
+    }
+    pub fn set_playhead(&self, pos: u64) {
+        pinned(self).set_playhead(pos)
+    }
+    pub fn set_test_tone(&self, enabled: bool) {
+        pinned(self).set_test_tone(enabled)
+    }
+    pub fn set_master_gain(&self, value: f32) -> bool {
+        if !pinned(self).set_master_gain(value) {
+            return false;
+        }
+        self.mark_project_state_changed();
+        true
+    }
+    pub fn set_offline_render_target(&self, tid: u32) -> bool {
+        pinned(self).set_offline_render_target(tid)
+    }
+    pub fn clear_offline_render_target(&self) {
+        pinned(self).clear_offline_render_target()
+    }
+    pub fn set_offline_render_tail_seconds(&self, seconds: f32) {
+        pinned(self).set_offline_render_tail_seconds(seconds)
+    }
+    pub fn set_offline_render_options(&self, pre_fader: bool, include_inserts: bool) {
+        pinned(self).set_offline_render_options(pre_fader, include_inserts)
+    }
     pub fn get_project_layout_revision(&self) -> u64 {
         self.get_core().get_project_layout_revision()
     }

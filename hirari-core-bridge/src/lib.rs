@@ -130,9 +130,9 @@ pub mod ffi {
 
         fn set_playing(self: &AudioEngine, p: bool);
         fn try_set_playing(self: &AudioEngine, p: bool) -> bool;
-        fn set_loop(self: &AudioEngine, enabled: bool);
+        fn set_loop(self: Pin<&mut HirariUnifiedEngine>, enabled: bool);
         fn set_cycle_range(
-            self: &AudioEngine,
+            self: Pin<&mut HirariUnifiedEngine>,
             start_sample: u64,
             end_sample: u64,
             enabled: bool,
@@ -143,7 +143,7 @@ pub mod ffi {
         fn is_playing(self: &HirariUnifiedEngine) -> bool;
         fn get_playhead(self: &HirariUnifiedEngine) -> u64;
         fn set_tempo(self: &HirariUnifiedEngine, bpm: f32) -> bool;
-        fn set_master_gain(self: &AudioEngine, value: f32) -> bool;
+        fn set_master_gain(self: Pin<&mut HirariUnifiedEngine>, value: f32) -> bool;
         fn control_room_state(self: &AudioEngine) -> usize;
         fn tempo_state(self: &AudioEngine) -> usize;
         fn undo_state(self: &AudioEngine) -> usize;
@@ -153,15 +153,19 @@ pub mod ffi {
         fn midi_snapshot_store(self: &HirariUnifiedEngine) -> usize;
         fn midi_learn_state(self: &HirariUnifiedEngine) -> usize;
         fn preview_synth_state(self: &HirariUnifiedEngine) -> usize;
-        fn mark_project_state_changed(self: &AudioEngine);
+        fn mark_project_state_changed(self: Pin<&mut HirariUnifiedEngine>);
         fn bus_track_exists(self: &HirariUnifiedEngine, bus_track_id: u32) -> bool;
         fn get_master_gain(self: &HirariUnifiedEngine) -> f32;
         fn get_track_volume(self: &HirariUnifiedEngine, tid: u32) -> f32;
         fn get_track_delay_samples(self: &HirariUnifiedEngine, tid: u32) -> u32;
-        fn set_offline_render_target(self: &AudioEngine, tid: u32) -> bool;
-        fn clear_offline_render_target(self: &AudioEngine);
-        fn set_offline_render_tail_seconds(self: &AudioEngine, seconds: f32);
-        fn set_offline_render_options(self: &AudioEngine, pre_fader: bool, include_inserts: bool);
+        fn set_offline_render_target(self: Pin<&mut HirariUnifiedEngine>, tid: u32) -> bool;
+        fn clear_offline_render_target(self: Pin<&mut HirariUnifiedEngine>);
+        fn set_offline_render_tail_seconds(self: Pin<&mut HirariUnifiedEngine>, seconds: f32);
+        fn set_offline_render_options(
+            self: Pin<&mut HirariUnifiedEngine>,
+            pre_fader: bool,
+            include_inserts: bool,
+        );
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
         fn is_silent_fallback(self: &AudioEngine) -> bool;
         fn audio_driver_status(self: &AudioEngine) -> String;
@@ -189,8 +193,8 @@ pub mod ffi {
         fn get_audio_config_generation(self: &AudioEngine) -> u64;
         fn apply_config(self: &AudioEngine, tempo: f32, sr: u32, bs: u32);
         fn try_apply_config(self: &AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool;
-        fn set_playhead(self: &AudioEngine, pos: u64);
-        fn set_test_tone(self: &AudioEngine, enabled: bool);
+        fn set_playhead(self: Pin<&mut HirariUnifiedEngine>, pos: u64);
+        fn set_test_tone(self: Pin<&mut HirariUnifiedEngine>, enabled: bool);
         fn set_preview_sample(self: &AudioEngine, samples: &[f32], source_rate: f64);
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn shutdown(self: &AudioEngine);

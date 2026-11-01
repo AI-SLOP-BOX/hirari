@@ -6,33 +6,11 @@ public:
     void set_playing(bool playing) const {
         (void)try_set_playing(playing);
     }
-    void set_loop(bool enabled) const { if (m_engine) { m_engine->set_loop(enabled); m_engine->mark_project_state_changed(); } }
-    bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { if (!m_engine || !m_engine->set_cycle_range(start_sample, end_sample, enabled)) return false; m_engine->mark_project_state_changed(); return true; }
     bool try_set_playing(bool playing) const {
         if (!m_engine) return false;
         if (playing && (!m_driver || !m_driver->is_running())) return false;
         m_engine->set_playing(playing);
         return true;
-    }
-    void set_playhead(uint64_t pos) const { if (m_engine) m_engine->set_playhead(pos); }
-    bool set_master_gain(float value) const {
-        if (!m_engine || !m_engine->set_master_gain(value)) return false;
-        m_engine->mark_project_state_changed(); return true;
-    }
-    void mark_project_state_changed() const {
-        if (m_engine) m_engine->mark_project_state_changed();
-    }
-    bool set_offline_render_target(uint32_t tid) const {
-        return m_engine && m_engine->set_offline_render_target(tid);
-    }
-    void clear_offline_render_target() const noexcept {
-        if (m_engine) m_engine->clear_offline_render_target();
-    }
-    void set_offline_render_tail_seconds(float seconds) const noexcept {
-        if (m_engine) m_engine->set_offline_render_tail_seconds(seconds);
-    }
-    void set_offline_render_options(bool preFader, bool includeInserts) const noexcept {
-        if (m_engine) m_engine->set_offline_render_options(preFader, includeInserts);
     }
     uintptr_t control_room_state() const {
         return m_engine ? reinterpret_cast<uintptr_t>(m_engine->control_room_state()) : 0;
@@ -46,7 +24,6 @@ public:
     uintptr_t log_state() const {
         return m_engine ? reinterpret_cast<uintptr_t>(m_engine->log_state()) : 0;
     }
-    void set_test_tone(bool enabled) const { if (m_engine) m_engine->set_test_tone(enabled); }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = m_driver && m_driver->is_running();

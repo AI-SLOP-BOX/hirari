@@ -85,6 +85,11 @@ production support.
   record mode, video-frame requests and VCA assignment now run as Rust
   extension methods on the engine bridge; their C++ `AudioEngine` relays are
   gone.
+- Loop/cycle/playhead and test-tone transport writes, master-gain writes with
+  the project-state bump, and the offline-render target/tail/option setters now
+  run as Rust extension methods on the engine bridge too, so the remaining
+  `AudioEngine` relays and the C++ `noexcept` qualifiers that blocked the
+  matching member pointers are gone.
 
 - Low-latency mode, preview triggering, metronome control, tempo reads,
   sample/beat conversion and the routing snapshot now run as Rust extension
