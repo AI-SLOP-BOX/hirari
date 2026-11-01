@@ -1765,32 +1765,14 @@ extern "C" bool hirari_video_runtime_copy_frame(
     const void* runtime, void* context, HirariVideoPixelsVisitor visit,
     uint32_t* width, uint32_t* height, double* seconds);
 
-// Project-layout snapshot consumed by the Rust serializer. Every pointer is
-// borrowed only for the duration of the synchronous write call; Rust never
-// stores or frees any of it. The returned JSON buffer is Rust-owned and must
-// be released with hirari_project_layout_json_free.
-struct HirariLayoutString {
-    const uint8_t* data = nullptr;
-    size_t len = 0;
-};
+// Project-layout gathering. Rust walks the live engine model through this
+// table (layout_gather.rs), owns the snapshot and its backing blocks, and
+// serializes or saves it in the same call. `begin` takes the tracks lock and
+// drains recorded automation; `end` releases it on every path.
 struct HirariLayoutAutomationPoint {
     double time = 0.0;
     float value = 0.0f;
     float curve = 0.0f;
-};
-struct HirariLayoutPluginLane {
-    uint32_t pluginIndex = 0;
-    uint32_t parameterId = 0;
-    const HirariLayoutAutomationPoint* points = nullptr;
-    size_t pointCount = 0;
-};
-struct HirariLayoutParameterBlock {
-    const float* values = nullptr;
-    size_t count = 0;
-};
-struct HirariLayoutByteBlock {
-    const uint8_t* bytes = nullptr;
-    size_t count = 0;
 };
 struct HirariLayoutSidechainRoute {
     uint32_t sourceId = 0;
@@ -1803,27 +1785,8 @@ struct HirariLayoutFeedbackRoute {
     uint32_t destinationId = 0;
     float gain = 0.0f;
 };
-struct HirariLayoutRegion {
+struct HirariLayoutTrackScalars {
     uint32_t id = 0;
-    HirariLayoutString name;
-    HirariRegionState state;
-    uint32_t sourceSampleRate = 0;
-    HirariLayoutString path;
-    bool missing = false;
-    bool audioLoaded = false;
-    const HirariWarpMarker* warpMarkers = nullptr;
-    size_t warpMarkerCount = 0;
-    const HirariRegionRangeEdit* rangeEdits = nullptr;
-    size_t rangeEditCount = 0;
-    const HirariRegionVariAudioStore* noteStore = nullptr;
-    // Immutable projection preferred by the serializer when the region has
-    // been published; the live store may be mutated by a concurrent edit.
-    const HirariVariAudioFrozen* noteFrozen = nullptr;
-    const HirariRegionProcessingHistoryStore* processingStore = nullptr;
-};
-struct HirariLayoutTrack {
-    uint32_t id = 0;
-    HirariLayoutString name;
     uint32_t type = 0;
     float volume = 0.0f;
     float pan = 0.0f;
@@ -1835,58 +1798,79 @@ struct HirariLayoutTrack {
     bool frozen = false;
     uint64_t frozenTotalSamples = 0;
     uint32_t frozenSampleRate = 0;
-    HirariLayoutString frozenPath;
-    const HirariLayoutAutomationPoint* volumeAutomation = nullptr;
-    size_t volumeAutomationCount = 0;
-    const HirariLayoutAutomationPoint* panAutomation = nullptr;
-    size_t panAutomationCount = 0;
-    const HirariLayoutAutomationPoint* trackDelayAutomation = nullptr;
-    size_t trackDelayAutomationCount = 0;
-    HirariLayoutString expressionMapJson;
-    HirariLayoutString expressionMapProJson;
-    const HirariLayoutPluginLane* pluginAutomation = nullptr;
-    size_t pluginAutomationCount = 0;
-    const uint32_t* pluginTypes = nullptr;
-    size_t pluginTypeCount = 0;
-    const uint8_t* pluginBypass = nullptr;  // one byte per plugin
-    const HirariLayoutParameterBlock* pluginParameters = nullptr;  // one per plugin
-    const HirariLayoutByteBlock* pluginStates = nullptr;
-    size_t pluginStateCount = 0;
-    const HirariLayoutString* sandboxPluginPaths = nullptr;
-    size_t sandboxPluginPathCount = 0;
-    const HirariLayoutByteBlock* sandboxPluginStates = nullptr;
-    size_t sandboxPluginStateCount = 0;
-    const HirariLayoutRegion* regions = nullptr;
-    size_t regionCount = 0;
-    // Save-only fields. The JSON writer ignores them, so the gather only fills
-    // them when a project save asked for the snapshot.
     float spatialX = 0.0f;
     float spatialY = 0.0f;
     float spatialZ = 0.0f;
-    const HirariLayoutByteBlock* pluginGuiStates = nullptr;
-    size_t pluginGuiStateCount = 0;
 };
-struct HirariProjectLayoutSnapshot {
-    const HirariLayoutTrack* tracks = nullptr;
-    size_t trackCount = 0;
-    const HirariLayoutSidechainRoute* sidechainRoutes = nullptr;
-    size_t sidechainRouteCount = 0;
-    const HirariLayoutFeedbackRoute* feedbackRoutes = nullptr;
-    size_t feedbackRouteCount = 0;
-    double timelineSampleRate = 0.0;
+struct HirariLayoutPluginLaneHeader {
+    uint32_t pluginIndex = 0;
+    uint32_t parameterId = 0;
+    size_t pointCount = 0;
+};
+struct HirariLayoutRegionHeader {
+    uint32_t id = 0;
+    HirariRegionState state;
+    double sourceSampleRate = 0.0;
+    bool audioLoaded = false;
+    const HirariWarpMarker* warpMarkers = nullptr;
+    size_t warpMarkerCount = 0;
+    const HirariRegionRangeEdit* rangeEdits = nullptr;
+    size_t rangeEditCount = 0;
+    const HirariRegionVariAudioStore* noteStore = nullptr;
+    const HirariVariAudioFrozen* noteFrozen = nullptr;
+    const HirariRegionProcessingHistoryStore* processingStore = nullptr;
 };
 using HirariLayoutIsCancelledCallback = bool (*)(const void*);
-extern "C" bool hirari_project_layout_write_json(
-    const HirariProjectLayoutSnapshot* snapshot,
+struct HirariLayoutHostOps {
+    void (*begin)(void* host) = nullptr;
+    void (*end)(void* host) = nullptr;
+    size_t (*trackCount)(void* host) = nullptr;
+    bool (*trackAt)(void* host, size_t index, HirariLayoutTrackScalars* out) = nullptr;
+    size_t (*trackString)(void* host, size_t index, uint32_t kind, uint8_t* out,
+                          size_t capacity) = nullptr;
+    size_t (*automation)(void* host, size_t index, uint32_t kind,
+                         HirariLayoutAutomationPoint* out, size_t capacity) = nullptr;
+    size_t (*pluginLaneCount)(void* host, size_t index) = nullptr;
+    bool (*pluginLaneAt)(void* host, size_t index, size_t lane,
+                         HirariLayoutPluginLaneHeader* out) = nullptr;
+    size_t (*pluginLanePoints)(void* host, size_t index, size_t lane,
+                               HirariLayoutAutomationPoint* out, size_t capacity) = nullptr;
+    size_t (*pluginCount)(void* host, size_t index) = nullptr;
+    uint32_t (*pluginType)(void* host, size_t index, size_t plugin) = nullptr;
+    bool (*pluginBypass)(void* host, size_t index, size_t plugin) = nullptr;
+    size_t (*pluginState)(void* host, size_t index, size_t plugin, uint8_t* out,
+                          size_t capacity) = nullptr;
+    size_t (*pluginGuiState)(void* host, size_t index, size_t plugin, uint8_t* out,
+                             size_t capacity) = nullptr;
+    size_t (*pluginParameterCount)(void* host, size_t index, size_t plugin) = nullptr;
+    size_t (*pluginParameters)(void* host, size_t index, size_t plugin, float* out,
+                               size_t capacity) = nullptr;
+    size_t (*sandboxCount)(void* host, size_t index) = nullptr;
+    size_t (*sandboxPath)(void* host, size_t index, size_t slot, uint8_t* out,
+                          size_t capacity) = nullptr;
+    size_t (*sandboxState)(void* host, size_t index, size_t slot, uint8_t* out,
+                           size_t capacity) = nullptr;
+    size_t (*regionCount)(void* host, size_t index) = nullptr;
+    bool (*regionAt)(void* host, size_t index, size_t region,
+                     HirariLayoutRegionHeader* out) = nullptr;
+    size_t (*regionString)(void* host, size_t index, size_t region, uint32_t kind,
+                           uint8_t* out, size_t capacity) = nullptr;
+    size_t (*sidechainRoutes)(void* host, HirariLayoutSidechainRoute* out,
+                              size_t capacity) = nullptr;
+    size_t (*feedbackRoutes)(void* host, HirariLayoutFeedbackRoute* out,
+                             size_t capacity) = nullptr;
+    double (*sampleRate)(void* host) = nullptr;
+};
+// Both calls gather, serialize and release inside Rust. The JSON buffer is
+// Rust-owned and must be released with hirari_project_layout_json_free.
+extern "C" bool hirari_layout_json_from_host(
+    void* host, const HirariLayoutHostOps* ops,
     HirariLayoutIsCancelledCallback is_cancelled, const void* cancel_context,
-    const uint8_t** json_data, size_t* json_size);
+    uint8_t** json_data, size_t* json_size);
 extern "C" void hirari_project_layout_json_free(const uint8_t* json_data, size_t json_size);
-// Encodes the same snapshot as the native project container. C++ only gathers
-// the model; field mapping, bounds and plug-in id encoding live in
-// hirari-core-bridge/src/project_save_layout.rs.
-extern "C" bool hirari_project_save_from_layout(
+extern "C" bool hirari_project_save_from_host(
+    void* host, const HirariLayoutHostOps* ops,
     const uint8_t* path, size_t path_length,
-    const HirariProjectLayoutSnapshot* snapshot,
     const void* tempo_state, const void* routing_state, size_t arrangement_document,
     double bpm, int32_t root_note, int32_t scale_type);
 

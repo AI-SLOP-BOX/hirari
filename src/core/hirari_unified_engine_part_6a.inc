@@ -21,248 +21,260 @@ rust::String HirariUnifiedEngine::get_project_layout_json() const {
     return get_project_layout_json_cancellable(nullptr);
 }
 
-bool HirariUnifiedEngine::collectProjectLayout(ProjectLayoutData* out, bool includeSaveOnlyFields,
-                                               const std::atomic<bool>* cancellation) const {
-    static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) ==
-                  sizeof(HirariLayoutAutomationPoint));
+namespace {
+size_t layoutCopyString(const std::string& value, uint8_t* out, size_t capacity) {
+    if (out && capacity > 0) std::memcpy(out, value.data(), std::min(capacity, value.size()));
+    return value.size();
+}
+size_t layoutCopyBytes(const std::vector<uint8_t>& value, uint8_t* out, size_t capacity) {
+    if (out && capacity > 0) std::memcpy(out, value.data(), std::min(capacity, value.size()));
+    return value.size();
+}
+}  // namespace
 
-    const auto cancelled = [cancellation]() noexcept {
-        return cancellation && cancellation->load(std::memory_order_acquire);
-    };
-    if (!out || cancelled()) return false;
+Track* HirariUnifiedEngine::layoutTrackAt(size_t index) const {
+    return index < m_tracks.size() ? m_tracks[index].get() : nullptr;
+}
 
-    size_t feedbackCount = 0;
-    void* rawFeedback = hirari_routing_engine_copy_feedback(m_routingEngine, &feedbackCount);
-    std::vector<Hirari::Core::Engine::RoutingEngine::FeedbackConnection> feedbackConnections =
-        takeRoutingFeedback(rawFeedback, feedbackCount);
-    const double timelineSampleRate = m_sampleRate.load(std::memory_order_relaxed);
-
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (const auto& track : m_tracks) {
-        if (!track) continue;
-        // A callback may have queued write-automation points since the
-        // previous snapshot. Drain them on this control-side boundary so UI,
-        // CLI generation checks, history diffs, and project saves all observe
-        // the same automation state.
-        track->flushRecordedAutomation();
-        track->reclaimEffectChainRetiredMemory();
-    }
-
-    const auto layoutString = [](const std::string& value) {
-        HirariLayoutString result;
-        result.data = reinterpret_cast<const uint8_t*>(value.data());
-        result.len = value.size();
-        return result;
-    };
-    const auto layoutPoints = [](const std::vector<Hirari::Core::ProjectAutomationPoint>& input) {
-        std::vector<HirariLayoutAutomationPoint> points(input.size());
-        for (size_t index = 0; index < input.size(); ++index) {
-            points[index] = {input[index].time, input[index].value, input[index].curve};
-        }
-        return points;
-    };
-
-    out->storages.reserve(m_tracks.size());
-    out->trackViews.reserve(m_tracks.size());
-    for (const auto& track : m_tracks) {
-        if (cancelled()) return false;
-        if (!track) continue;
-        auto storage = std::make_unique<ProjectLayoutStorage>();
-        storage->name = track->getName();
-        storage->frozenPath = track->frozenPath();
-        storage->expressionMap = track->getExpressionMapJson();
-        storage->expressionMapPro = track->getExpressionMapProJson();
-        storage->volumeAutomation = layoutPoints(track->getVolumeAutomationPoints());
-        storage->panAutomation = layoutPoints(track->getPanAutomationPoints());
-        storage->trackDelayAutomation = layoutPoints(track->getTrackDelayAutomationPoints());
-
-        const auto pluginAutomation = track->getPluginAutomation();
-        storage->pluginAutomationPoints.reserve(pluginAutomation.size());
-        for (const auto& lane : pluginAutomation)
-            storage->pluginAutomationPoints.push_back(lane.points);
-        storage->pluginAutomation.resize(pluginAutomation.size());
-        for (size_t index = 0; index < pluginAutomation.size(); ++index) {
-            auto& lane = storage->pluginAutomation[index];
-            lane.pluginIndex = pluginAutomation[index].pluginIndex;
-            lane.parameterId = pluginAutomation[index].parameterId;
-            lane.points = reinterpret_cast<const HirariLayoutAutomationPoint*>(
-                storage->pluginAutomationPoints[index].data());
-            lane.pointCount = storage->pluginAutomationPoints[index].size();
-        }
-
-        storage->pluginTypes = track->getPluginTypes();
-        const auto& pluginTypes = storage->pluginTypes;
-        storage->pluginBypass.resize(pluginTypes.size());
-        for (size_t index = 0; index < pluginTypes.size(); ++index) {
-            storage->pluginBypass[index] =
-                track->getPluginBypass(static_cast<uint32_t>(index)) ? 1 : 0;
-        }
-        storage->pluginStates = track->getPluginStates();
-        storage->pluginStateBlocks.resize(storage->pluginStates.size());
-        for (size_t index = 0; index < storage->pluginStates.size(); ++index) {
-            storage->pluginStateBlocks[index] = {
-                storage->pluginStates[index].data(), storage->pluginStates[index].size()};
-        }
-        if (includeSaveOnlyFields) {
-            storage->pluginGuiStates = track->getPluginGuiStates();
-            storage->pluginGuiStateBlocks.resize(storage->pluginGuiStates.size());
-            for (size_t index = 0; index < storage->pluginGuiStates.size(); ++index) {
-                storage->pluginGuiStateBlocks[index] = {
-                    storage->pluginGuiStates[index].data(),
-                    storage->pluginGuiStates[index].size()};
+// Exposes the live tracks to the Rust layout gather (layout_gather.rs). The
+// per-track rules — owned string copies, plug-in ordering, region rate
+// clamping, missing-file detection — all live there; these callbacks only read
+// the model under the tracks lock that begin()/end() hold.
+const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
+    static const HirariLayoutHostOps ops = {
+        // Drain queued write-automation before taking the lock, so UI, CLI
+        // generation checks, history diffs and saves observe one state.
+        [](void* host) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            engine->m_tracksMutex.lock();
+            for (const auto& track : engine->m_tracks) {
+                if (!track) continue;
+                track->flushRecordedAutomation();
+                track->reclaimEffectChainRetiredMemory();
             }
-        } else {
-            storage->pluginParameters.reserve(pluginTypes.size());
-            for (size_t index = 0; index < pluginTypes.size(); ++index) {
-                if (cancelled()) return false;
-                const uint32_t parameterCount =
-                    track->getPluginParameterCount(static_cast<uint32_t>(index));
-                std::vector<float> values(parameterCount);
-                for (uint32_t parameter = 0; parameter < parameterCount; ++parameter) {
-                    values[parameter] =
-                        track->getPluginParameter(static_cast<uint32_t>(index), parameter);
+        },
+        [](void* host) {
+            static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.unlock();
+        },
+        [](void* host) {
+            return static_cast<HirariUnifiedEngine*>(host)->m_tracks.size();
+        },
+        [](void* host, size_t index, HirariLayoutTrackScalars* out) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return false;
+            out->id = track->getId();
+            out->type = static_cast<uint32_t>(track->getType());
+            out->volume = track->getVolume();
+            out->pan = track->getPan();
+            out->muted = track->isMuted();
+            out->solo = track->isSolo();
+            out->recordArmed = track->isRecordArmed();
+            out->phaseInverted = track->isPhaseInverted();
+            out->trackDelaySamples = track->getTrackDelaySamples();
+            out->frozen = track->isFrozen();
+            out->frozenTotalSamples = track->frozenTotalSamples();
+            out->frozenSampleRate = track->frozenSampleRate();
+            out->spatialX = track->getSpatialX();
+            out->spatialY = track->getSpatialY();
+            out->spatialZ = track->getSpatialZ();
+            return true;
+        },
+        [](void* host, size_t index, uint32_t kind, uint8_t* out, size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return size_t{0};
+            switch (kind) {
+                case 0: return layoutCopyString(track->getName(), out, capacity);
+                case 1: return layoutCopyString(track->frozenPath(), out, capacity);
+                case 2: return layoutCopyString(track->getExpressionMapJson(), out, capacity);
+                default: return layoutCopyString(track->getExpressionMapProJson(), out, capacity);
+            }
+        },
+        [](void* host, size_t index, uint32_t kind, HirariLayoutAutomationPoint* out,
+           size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return size_t{0};
+            const std::vector<::Hirari::Core::ProjectAutomationPoint> points =
+                kind == 0 ? track->getVolumeAutomationPoints()
+                : kind == 1 ? track->getPanAutomationPoints()
+                            : track->getTrackDelayAutomationPoints();
+            static_assert(sizeof(HirariLayoutAutomationPoint) ==
+                          sizeof(::Hirari::Core::ProjectAutomationPoint));
+            if (out && capacity > 0) {
+                const size_t count = std::min(capacity, points.size());
+                std::memcpy(out, points.data(), count * sizeof(HirariLayoutAutomationPoint));
+            }
+            return points.size();
+        },
+        [](void* host, size_t index) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            return track ? track->getPluginAutomation().size() : size_t{0};
+        },
+        [](void* host, size_t index, size_t lane, HirariLayoutPluginLaneHeader* out) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return false;
+            const auto lanes = track->getPluginAutomation();
+            if (lane >= lanes.size()) return false;
+            out->pluginIndex = lanes[lane].pluginIndex;
+            out->parameterId = lanes[lane].parameterId;
+            out->pointCount = lanes[lane].points.size();
+            return true;
+        },
+        [](void* host, size_t index, size_t lane, HirariLayoutAutomationPoint* out,
+           size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return size_t{0};
+            const auto lanes = track->getPluginAutomation();
+            if (lane >= lanes.size()) return size_t{0};
+            const auto& points = lanes[lane].points;
+            static_assert(sizeof(HirariLayoutAutomationPoint) ==
+                          sizeof(::Hirari::Core::ProjectAutomationPoint));
+            if (out && capacity > 0) {
+                std::memcpy(out, points.data(),
+                            std::min(capacity, points.size()) * sizeof(HirariLayoutAutomationPoint));
+            }
+            return points.size();
+        },
+        [](void* host, size_t index) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            return track ? track->getPluginTypes().size() : size_t{0};
+        },
+        [](void* host, size_t index, size_t plugin) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const auto types = track ? track->getPluginTypes() : std::vector<uint32_t>{};
+            return plugin < types.size() ? types[plugin] : 0u;
+        },
+        [](void* host, size_t index, size_t plugin) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            return track && track->getPluginBypass(static_cast<uint32_t>(plugin));
+        },
+        [](void* host, size_t index, size_t plugin, uint8_t* out, size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const auto states = track ? track->getPluginStates()
+                                      : std::vector<std::vector<uint8_t>>{};
+            if (plugin >= states.size()) return size_t{0};
+            return layoutCopyBytes(states[plugin], out, capacity);
+        },
+        [](void* host, size_t index, size_t plugin, uint8_t* out, size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const auto states = track ? track->getPluginGuiStates()
+                                      : std::vector<std::vector<uint8_t>>{};
+            if (plugin >= states.size()) return size_t{0};
+            return layoutCopyBytes(states[plugin], out, capacity);
+        },
+        [](void* host, size_t index, size_t plugin) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            return track ? track->getPluginParameterCount(static_cast<uint32_t>(plugin))
+                         : size_t{0};
+        },
+        [](void* host, size_t index, size_t plugin, float* out, size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return size_t{0};
+            const uint32_t count =
+                track->getPluginParameterCount(static_cast<uint32_t>(plugin));
+            const size_t written = std::min<size_t>(capacity, count);
+            for (size_t parameter = 0; parameter < written; ++parameter) {
+                out[parameter] = track->getPluginParameter(
+                    static_cast<uint32_t>(plugin), static_cast<uint32_t>(parameter));
+            }
+            return static_cast<size_t>(count);
+        },
+        [](void* host, size_t index) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            return track ? track->getSandboxedPluginPaths().size() : size_t{0};
+        },
+        [](void* host, size_t index, size_t slot, uint8_t* out, size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const auto paths = track ? track->getSandboxedPluginPaths()
+                                     : std::vector<std::string>{};
+            return slot < paths.size() ? layoutCopyString(paths[slot], out, capacity) : size_t{0};
+        },
+        [](void* host, size_t index, size_t slot, uint8_t* out, size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const auto states = track ? track->getSandboxedPluginStates()
+                                      : std::vector<std::vector<uint8_t>>{};
+            return slot < states.size() ? layoutCopyBytes(states[slot], out, capacity) : size_t{0};
+        },
+        [](void* host, size_t index) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            return track ? track->getRegions().size() : size_t{0};
+        },
+        [](void* host, size_t index, size_t regionIndex, HirariLayoutRegionHeader* out) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return false;
+            const auto& regions = track->getRegions();
+            if (regionIndex >= regions.size()) return false;
+            const auto& region = regions[regionIndex];
+            out->id = region.id;
+            out->state = region.editableState();
+            out->sourceSampleRate = region.sourceSampleRate;
+            out->audioLoaded = region.audio != nullptr;
+            out->warpMarkers = region.clip()->warpMarkers;
+            out->warpMarkerCount = region.clip()->warpMarkerCount;
+            out->rangeEdits = region.clip()->rangeEdits;
+            out->rangeEditCount = region.clip()->rangeEditCount;
+            out->noteStore = region.noteStore.get();
+            out->noteFrozen = region.noteSnapshot.get();
+            out->processingStore = region.processingStore.get();
+            return true;
+        },
+        [](void* host, size_t index, size_t regionIndex, uint32_t kind, uint8_t* out,
+           size_t capacity) {
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            if (!track) return size_t{0};
+            const auto& regions = track->getRegions();
+            if (regionIndex >= regions.size()) return size_t{0};
+            return layoutCopyString(kind == 0 ? regions[regionIndex].name
+                                        : regions[regionIndex].path,
+                              out, capacity);
+        },
+        [](void* host, HirariLayoutSidechainRoute* out, size_t capacity) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            static_assert(sizeof(HirariLayoutSidechainRoute) == sizeof(HirariSidechainRoute));
+            const size_t count = hirari_sidechain_routes_count(engine->m_sidechainRoutes);
+            if (out && capacity > 0) {
+                (void)hirari_sidechain_routes_copy(
+                    engine->m_sidechainRoutes,
+                    reinterpret_cast<HirariSidechainRoute*>(out), capacity);
+            }
+            return count;
+        },
+        [](void* host, HirariLayoutFeedbackRoute* out, size_t capacity) {
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            size_t count = 0;
+            void* raw = hirari_routing_engine_copy_feedback(engine->m_routingEngine, &count);
+            const auto routes = takeRoutingFeedback(raw, count);
+            if (out && capacity > 0) {
+                const size_t written = std::min(capacity, routes.size());
+                for (size_t i = 0; i < written; ++i) {
+                    out[i] = {routes[i].sourceId, routes[i].destId, routes[i].gain};
                 }
-                storage->pluginParameters.push_back(std::move(values));
             }
-            storage->pluginParameterBlocks.resize(storage->pluginParameters.size());
-            for (size_t index = 0; index < storage->pluginParameters.size(); ++index) {
-                storage->pluginParameterBlocks[index] = {
-                    storage->pluginParameters[index].data(),
-                    storage->pluginParameters[index].size()};
-            }
-        }
-
-        const auto& sandboxPaths = track->getSandboxedPluginPaths();
-        storage->sandboxPaths.resize(sandboxPaths.size());
-        for (size_t index = 0; index < sandboxPaths.size(); ++index) {
-            storage->sandboxPaths[index] = layoutString(sandboxPaths[index]);
-        }
-        storage->sandboxStates = track->getSandboxedPluginStates();
-        storage->sandboxStateBlocks.resize(storage->sandboxStates.size());
-        for (size_t index = 0; index < storage->sandboxStates.size(); ++index) {
-            storage->sandboxStateBlocks[index] = {
-                storage->sandboxStates[index].data(), storage->sandboxStates[index].size()};
-        }
-
-        const auto& regions = track->getRegions();
-        storage->regions.resize(regions.size());
-        for (size_t index = 0; index < regions.size(); ++index) {
-            if (cancelled()) return false;
-            const auto& region = regions[index];
-            auto& regionView = storage->regions[index];
-            regionView.id = region.id;
-            regionView.name = layoutString(region.name);
-            regionView.state = region.editableState();
-            regionView.sourceSampleRate = static_cast<uint32_t>(std::clamp(
-                std::llround(region.sourceSampleRate > 0.0
-                    ? region.sourceSampleRate : timelineSampleRate), 8000LL, 384000LL));
-            regionView.path = layoutString(region.path);
-            std::error_code pathError;
-            regionView.missing = region.path.empty() ||
-                !std::filesystem::exists(std::filesystem::path(region.path), pathError);
-            // Distinguish a missing file from a file that exists but was not
-            // decoded during project hydration; clients can surface a relink
-            // or decoder error instead of silently showing an empty region.
-            regionView.audioLoaded = region.audio != nullptr;
-            regionView.warpMarkers = region.clip()->warpMarkers;
-            regionView.warpMarkerCount = region.clip()->warpMarkerCount;
-            regionView.rangeEdits = region.clip()->rangeEdits;
-            regionView.rangeEditCount = region.clip()->rangeEditCount;
-            regionView.noteStore = region.noteStore.get();
-            regionView.noteFrozen = region.noteSnapshot.get();
-            regionView.processingStore = region.processingStore.get();
-        }
-
-        auto& view = storage->view;
-        view.id = track->getId();
-        view.name = layoutString(storage->name);
-        view.type = static_cast<uint32_t>(track->getType());
-        view.volume = track->getVolume();
-        view.pan = track->getPan();
-        view.muted = track->isMuted();
-        view.solo = track->isSolo();
-        view.recordArmed = track->isRecordArmed();
-        view.phaseInverted = track->isPhaseInverted();
-        view.trackDelaySamples = track->getTrackDelaySamples();
-        view.frozen = track->isFrozen();
-        view.frozenTotalSamples = track->frozenTotalSamples();
-        view.frozenSampleRate = track->frozenSampleRate();
-        view.frozenPath = layoutString(storage->frozenPath);
-        view.volumeAutomation = storage->volumeAutomation.data();
-        view.volumeAutomationCount = storage->volumeAutomation.size();
-        view.panAutomation = storage->panAutomation.data();
-        view.panAutomationCount = storage->panAutomation.size();
-        view.trackDelayAutomation = storage->trackDelayAutomation.data();
-        view.trackDelayAutomationCount = storage->trackDelayAutomation.size();
-        view.expressionMapJson = layoutString(storage->expressionMap);
-        view.expressionMapProJson = layoutString(storage->expressionMapPro);
-        view.pluginAutomation = storage->pluginAutomation.data();
-        view.pluginAutomationCount = storage->pluginAutomation.size();
-        view.pluginTypes = pluginTypes.data();
-        view.pluginTypeCount = pluginTypes.size();
-        view.pluginBypass = storage->pluginBypass.data();
-        view.pluginParameters = storage->pluginParameterBlocks.data();
-        view.pluginStates = storage->pluginStateBlocks.data();
-        view.pluginStateCount = storage->pluginStateBlocks.size();
-        view.sandboxPluginPaths = storage->sandboxPaths.data();
-        view.sandboxPluginPathCount = storage->sandboxPaths.size();
-        view.sandboxPluginStates = storage->sandboxStateBlocks.data();
-        view.sandboxPluginStateCount = storage->sandboxStateBlocks.size();
-        view.regions = storage->regions.data();
-        view.regionCount = storage->regions.size();
-        view.spatialX = track->getSpatialX();
-        view.spatialY = track->getSpatialY();
-        view.spatialZ = track->getSpatialZ();
-        view.pluginGuiStates = storage->pluginGuiStateBlocks.data();
-        view.pluginGuiStateCount = storage->pluginGuiStateBlocks.size();
-
-        out->trackViews.push_back(view);
-        out->storages.push_back(std::move(storage));
-    }
-
-    static_assert(sizeof(HirariLayoutSidechainRoute) == sizeof(HirariSidechainRoute));
-    out->sidechainRoutes.resize(hirari_sidechain_routes_count(m_sidechainRoutes));
-    (void)hirari_sidechain_routes_copy(
-        m_sidechainRoutes,
-        reinterpret_cast<HirariSidechainRoute*>(out->sidechainRoutes.data()),
-        out->sidechainRoutes.size());
-    out->feedbackRoutes.reserve(feedbackConnections.size());
-    for (const auto& route : feedbackConnections) {
-        out->feedbackRoutes.push_back({route.sourceId, route.destId, route.gain});
-    }
-
-    auto& snapshot = out->snapshot;
-    snapshot.tracks = out->trackViews.data();
-    snapshot.trackCount = out->trackViews.size();
-    snapshot.sidechainRoutes = out->sidechainRoutes.data();
-    snapshot.sidechainRouteCount = out->sidechainRoutes.size();
-    snapshot.feedbackRoutes = out->feedbackRoutes.data();
-    snapshot.feedbackRouteCount = out->feedbackRoutes.size();
-    snapshot.timelineSampleRate = timelineSampleRate;
-    return true;
+            return routes.size();
+        },
+        [](void* host) {
+            return static_cast<HirariUnifiedEngine*>(host)
+                ->m_sampleRate.load(std::memory_order_relaxed);
+        },
+    };
+    return &ops;
 }
 
 rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
     const std::atomic<bool>* cancellation) const {
-    // The serializer is Rust-owned. This function only gathers the current
-    // model into a borrowed snapshot and keeps it alive (and stable) for the
-    // synchronous call. Every ordering, escaping and formatting rule lives in
-    // hirari-core-bridge/src/project_layout.rs.
+    // The gather, snapshot and serializer are all Rust-owned; this only holds
+    // the returned JSON buffer for the length of the copy below.
     if (cancellation && cancellation->load(std::memory_order_acquire)) return rust::String();
-    ProjectLayoutData data;
-    if (!collectProjectLayout(&data, false, cancellation)) return rust::String();
-
     const auto isCancelled = [](const void* context) -> bool {
         const auto* flag = static_cast<const std::atomic<bool>*>(context);
         return flag && flag->load(std::memory_order_acquire);
     };
-    const uint8_t* jsonData = nullptr;
+    uint8_t* jsonData = nullptr;
     size_t jsonSize = 0;
-    if (!hirari_project_layout_write_json(&data.snapshot, cancellation ? isCancelled : nullptr,
-                                          cancellation, &jsonData, &jsonSize)) {
-        return rust::String();
-    }
-    rust::String result(jsonData ? reinterpret_cast<const char*>(jsonData) : "", jsonSize);
+    const bool written = hirari_layout_json_from_host(
+        const_cast<HirariUnifiedEngine*>(this), layoutHostOps(),
+        cancellation ? isCancelled : nullptr, cancellation, &jsonData, &jsonSize);
+    rust::String result(written && jsonData ? reinterpret_cast<const char*>(jsonData) : "",
+                        written ? jsonSize : 0);
     hirari_project_layout_json_free(jsonData, jsonSize);
     return result;
 }

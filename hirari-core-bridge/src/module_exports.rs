@@ -151,6 +151,7 @@ pub mod interpolation;
 pub mod k_weighting_filter;
 pub mod latency;
 pub mod latency_manager;
+pub mod layout_gather;
 pub mod lfo;
 pub mod library;
 pub mod linear_phase_eq;

@@ -66,47 +66,10 @@
     // (sidechain_route_store.rs); the engine keeps only the opaque handle.
     void* m_sidechainRoutes = hirari_sidechain_routes_create();
 
-    // Borrowed layout snapshot shared by the JSON writer and the project saver.
-    // Serialization borrows data owned by each track, so every per-track block
-    // is heap-allocated: moving it would invalidate the pointers to
-    // short-string buffers the snapshot holds.
-    struct ProjectLayoutStorage {
-        HirariLayoutTrack view{};
-        std::string name;
-        std::string frozenPath;
-        std::string expressionMap;
-        std::string expressionMapPro;
-        std::vector<HirariLayoutAutomationPoint> volumeAutomation;
-        std::vector<HirariLayoutAutomationPoint> panAutomation;
-        std::vector<HirariLayoutAutomationPoint> trackDelayAutomation;
-        std::vector<HirariLayoutPluginLane> pluginAutomation;
-        std::vector<std::vector<Hirari::Core::ProjectAutomationPoint>> pluginAutomationPoints;
-        // Owned copy: the layout view points into this block, so it must live
-        // as long as the snapshot rather than the collection loop.
-        std::vector<uint32_t> pluginTypes;
-        std::vector<uint8_t> pluginBypass;
-        std::vector<std::vector<float>> pluginParameters;
-        std::vector<HirariLayoutParameterBlock> pluginParameterBlocks;
-        std::vector<std::vector<uint8_t>> pluginStates;
-        std::vector<HirariLayoutByteBlock> pluginStateBlocks;
-        std::vector<std::vector<uint8_t>> pluginGuiStates;
-        std::vector<HirariLayoutByteBlock> pluginGuiStateBlocks;
-        std::vector<HirariLayoutString> sandboxPaths;
-        std::vector<std::vector<uint8_t>> sandboxStates;
-        std::vector<HirariLayoutByteBlock> sandboxStateBlocks;
-        std::vector<HirariLayoutRegion> regions;
-    };
-    struct ProjectLayoutData {
-        std::vector<std::unique_ptr<ProjectLayoutStorage>> storages;
-        std::vector<HirariLayoutTrack> trackViews;
-        std::vector<HirariLayoutSidechainRoute> sidechainRoutes;
-        std::vector<HirariLayoutFeedbackRoute> feedbackRoutes;
-        HirariProjectLayoutSnapshot snapshot{};
-    };
-    // `includeSaveOnlyFields` additionally collects the plug-in GUI blobs, which
-    // the polling JSON path must not copy.
-    bool collectProjectLayout(ProjectLayoutData* out, bool includeSaveOnlyFields,
-                              const std::atomic<bool>* cancellation) const;
+    // Rust owns the layout snapshot (layout_gather.rs); this only exposes the
+    // live-track accessors it reads through.
+    const HirariLayoutHostOps* layoutHostOps() const;
+    Track* layoutTrackAt(size_t index) const;
 
     void* m_midiSnapshotStore = nullptr;
 

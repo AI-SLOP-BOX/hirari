@@ -171,15 +171,11 @@
 }
 
 bool HirariUnifiedEngine::saveProject(std::string_view path) {
-    // The saver consumes the same borrowed snapshot as the layout JSON writer.
-    // This function only gathers the model; record mapping, field bounds and
-    // plug-in id encoding live in project_save_layout.rs.
-    ProjectLayoutData data;
-    if (!collectProjectLayout(&data, true, nullptr)) return false;
-    // The gather releases the tracks lock before returning, and the snapshot
-    // owns its storage, so encoding does not block concurrent control edits.
-    return hirari_project_save_from_layout(
-        reinterpret_cast<const uint8_t*>(path.data()), path.size(), &data.snapshot,
+    // Rust gathers the same model as the layout JSON writer and encodes the
+    // container itself; field mapping, bounds and plug-in id encoding live in
+    // hirari-core-bridge/src/project_save_layout.rs.
+    return hirari_project_save_from_host(
+        this, layoutHostOps(), reinterpret_cast<const uint8_t*>(path.data()), path.size(),
         m_tempoState, m_routingEngine, reinterpret_cast<size_t>(m_arrangementDocument),
         hirari_tempo_map_get_current_bpm(m_tempoState),
         m_rootNote.load(std::memory_order_relaxed),

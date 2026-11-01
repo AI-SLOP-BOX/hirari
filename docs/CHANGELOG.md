@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Project-layout gathering now lives in Rust: the engine exposes its live
+  tracks through an accessor table and `layout_gather.rs` owns the snapshot,
+  its backing string/automation/plug-in blocks, region rate clamping and
+  missing-file detection, then serializes or saves in the same call. The C++
+  snapshot structs and the gather loop are gone from the engine.
 - MIDI playback reconciliation now lives in Rust: the per-engine clock tracks
   the previous block end, published snapshot revision, playback pass and the
   transport-stop panic request, decides when voices must be reconciled, and
