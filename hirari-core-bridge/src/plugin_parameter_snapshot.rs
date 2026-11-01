@@ -21,12 +21,12 @@ impl Slot {
     }
 }
 
-struct Snapshot {
+pub(crate) struct Snapshot {
     slots: Box<[Slot]>,
 }
 
 impl Snapshot {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             slots: (0..CAPACITY)
                 .map(|_| Slot::new())
@@ -39,7 +39,7 @@ impl Snapshot {
         (u64::from(parameter_id).wrapping_mul(2_654_435_761) as usize) & (CAPACITY - 1)
     }
 
-    fn set(&self, parameter_id: u32, value: f64) -> bool {
+    pub(crate) fn set(&self, parameter_id: u32, value: f64) -> bool {
         if !value.is_finite() {
             return false;
         }
@@ -83,7 +83,7 @@ impl Snapshot {
         false
     }
 
-    fn get(&self, parameter_id: u32) -> Option<f64> {
+    pub(crate) fn get(&self, parameter_id: u32) -> Option<f64> {
         let start = Self::start(parameter_id);
         for probe in 0..CAPACITY {
             let slot = &self.slots[(start + probe) & (CAPACITY - 1)];
@@ -95,6 +95,20 @@ impl Snapshot {
             }
         }
         None
+    }
+
+    pub(crate) fn visit(&self, mut visit: impl FnMut(u32, f64) -> bool) -> bool {
+        for slot in self.slots.iter() {
+            if slot.state.load(Ordering::Acquire) != 2 {
+                continue;
+            }
+            let parameter_id = slot.parameter_id.load(Ordering::Relaxed);
+            let value = f64::from_bits(slot.value_bits.load(Ordering::Acquire));
+            if !value.is_finite() || !visit(parameter_id, value) {
+                return false;
+            }
+        }
+        true
     }
 }
 

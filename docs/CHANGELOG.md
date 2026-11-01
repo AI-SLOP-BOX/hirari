@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Sandboxed plug-in lifecycle state now lives in the Rust sandbox host: the
+  prepared device format, the late-block streak, the recovery latch, the
+  quarantine clear and the parameter replay cache are decided there, so the
+  C++ processor only forwards blocks and lifecycle requests.
 - Project-layout gathering now lives in Rust: the engine exposes its live
   tracks through an accessor table and `layout_gather.rs` owns the snapshot,
   its backing string/automation/plug-in blocks, region rate clamping and

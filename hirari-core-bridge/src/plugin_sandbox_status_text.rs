@@ -51,12 +51,12 @@ const FAILURE_PROCESS_HUNG: u8 = 12;
 const FAILURE_PROCESS_FAILED: u8 = 13;
 
 /// Late blocks in a row after which the processor is quarantined.
-const CONSECUTIVE_OVERRUN_LIMIT: u32 = 8;
+pub(crate) const CONSECUTIVE_OVERRUN_LIMIT: u32 = 8;
 
 /// Bit 0: latch the processor failure state.
-const OUTCOME_LATCH_FAILURE: u32 = 1;
+pub(crate) const OUTCOME_LATCH_FAILURE: u32 = 1;
 /// Bit 1: drop the input MIDI because no mailbox can deliver its output.
-const OUTCOME_CLEAR_MIDI: u32 = 2;
+pub(crate) const OUTCOME_CLEAR_MIDI: u32 = 2;
 
 /// Realtime classification for `ProcessSandboxProcessor::processBlock`.
 ///

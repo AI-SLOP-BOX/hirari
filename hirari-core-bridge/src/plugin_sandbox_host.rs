@@ -81,6 +81,14 @@ mod ffi {
         fn restart(&self, force: bool) -> bool;
         fn auto_restart(&self) -> bool;
         fn reconfigure(&self, sample_rate: f64, max_block_size: u32) -> bool;
+        fn prepare(&self, sample_rate: f64, max_block_size: u32) -> bool;
+        fn reset_recovery(&self);
+        fn observe_block(&self, deadline_missed: bool, completed_late: bool, produced: bool) -> u32;
+        fn recovery_failed(&self) -> bool;
+        fn clear_recovery_failure(&self);
+        fn latch_recovery_failure(&self);
+        fn remember_parameter(&self, parameter_id: u32, value: f64) -> bool;
+        fn parameter_value(&self, parameter_id: u32, value: &mut f64) -> bool;
         fn failure(&self) -> u8;
         fn is_quarantined(&self) -> bool;
         fn restart_attempts(&self) -> u32;
@@ -340,6 +348,14 @@ pub struct SandboxHost {
     configured_channels: AtomicU32,
     audio: UnsafeCell<AudioState>,
     parameters: ParameterQueue,
+    // Lifecycle recovery state. The processor object in C++ only forwards the
+    // facts (late block, missing output); the streak, the latch and the
+    // prepared configuration are decided here.
+    recovery_failed: AtomicBool,
+    consecutive_overruns: AtomicU32,
+    prepared_rate_bits: AtomicU64,
+    prepared_block: AtomicU32,
+    parameter_cache: crate::plugin_parameter_snapshot::Snapshot,
 }
 
 // SAFETY: The audio-thread-owned `audio` cell is only touched by `process`,
@@ -425,6 +441,11 @@ impl SandboxHost {
                 write: AtomicU64::new(0),
                 read: AtomicU64::new(0),
             },
+            recovery_failed: AtomicBool::new(false),
+            consecutive_overruns: AtomicU32::new(0),
+            prepared_rate_bits: AtomicU64::new(normalized_rate.to_bits()),
+            prepared_block: AtomicU32::new(max_block_size.clamp(1, MAX_FRAMES as u32)),
+            parameter_cache: crate::plugin_parameter_snapshot::Snapshot::new(),
         })
     }
 
@@ -492,7 +513,19 @@ impl SandboxHost {
 
     fn start(&self) -> bool {
         let mut control = lock_control(&self.control);
-        self.start_locked(&mut control)
+        if !self.start_locked(&mut control) {
+            return false;
+        }
+        // Lifecycle replay: a restarted worker starts silent, so the cached
+        // control values are pushed back before audio resumes.
+        self.recovery_failed.store(false, Ordering::Release);
+        self.consecutive_overruns.store(0, Ordering::Release);
+        if self.replay_parameters() {
+            return true;
+        }
+        self.recovery_failed.store(true, Ordering::Release);
+        self.stop_locked(&mut control);
+        false
     }
 
     #[cfg(not(unix))]
@@ -980,7 +1013,23 @@ impl SandboxHost {
 
     fn restart(&self, force: bool) -> bool {
         let mut control = lock_control(&self.control);
-        self.restart_locked(&mut control, force)
+        if !self.restart_locked(&mut control, force) {
+            return false;
+        }
+        // A successful explicit restart is the recovery boundary: the
+        // quarantine edge and the overrun streak that raced with the old
+        // worker's shutdown are cleared here, not by the caller.
+        self.clear_recovery_failure();
+        if self.failure() == FAILURE_PLUGIN_QUARANTINED {
+            control.restart_attempts = 0;
+            self.failure.store(FAILURE_NONE, Ordering::Release);
+        }
+        if self.replay_parameters() {
+            return true;
+        }
+        self.recovery_failed.store(true, Ordering::Release);
+        self.stop_locked(&mut control);
+        false
     }
 
     fn restart_locked(&self, control: &mut Control, force: bool) -> bool {
@@ -1028,7 +1077,16 @@ impl SandboxHost {
                 .store(FAILURE_PLUGIN_QUARANTINED, Ordering::Release);
             return false;
         }
-        self.restart_locked(&mut control, false)
+        if !self.restart_locked(&mut control, false) {
+            return false;
+        }
+        self.clear_recovery_failure();
+        if self.replay_parameters() {
+            return true;
+        }
+        self.recovery_failed.store(true, Ordering::Release);
+        self.stop_locked(&mut control);
+        false
     }
 
     fn reconfigure(&self, sample_rate: f64, max_block_size: u32) -> bool {
@@ -1089,6 +1147,109 @@ impl SandboxHost {
             return false;
         }
         true
+    }
+
+    /// Device-format change for the DSP wrapper. Argument validation, the
+    /// unchanged fast path, the parameter replay and the failure latch are all
+    /// lifecycle policy and stay on this side of the boundary.
+    fn prepare(&self, sample_rate: f64, max_block_size: u32) -> bool {
+        if !sample_rate.is_finite() || sample_rate <= 0.0 || max_block_size == 0 {
+            self.recovery_failed.store(true, Ordering::Release);
+            return false;
+        }
+        let block_size = max_block_size.min(MAX_FRAMES as u32);
+        if f64::from_bits(self.prepared_rate_bits.load(Ordering::Acquire)) == sample_rate
+            && self.prepared_block.load(Ordering::Acquire) == block_size
+        {
+            return true;
+        }
+        if !self.reconfigure(sample_rate, block_size) {
+            self.recovery_failed.store(true, Ordering::Release);
+            return false;
+        }
+        self.prepared_rate_bits
+            .store(sample_rate.to_bits(), Ordering::Release);
+        self.prepared_block.store(block_size, Ordering::Release);
+        if self.is_alive() && !self.replay_parameters() {
+            self.recovery_failed.store(true, Ordering::Release);
+            self.stop();
+            return false;
+        }
+        self.recovery_failed.store(false, Ordering::Release);
+        self.consecutive_overruns.store(0, Ordering::Release);
+        true
+    }
+
+    fn replay_parameters(&self) -> bool {
+        self.parameter_cache
+            .visit(|parameter_id, value| self.enqueue_parameter_change(parameter_id, value, 0))
+    }
+
+    fn reset_recovery(&self) {
+        self.recovery_failed.store(false, Ordering::Release);
+        self.consecutive_overruns.store(0, Ordering::Release);
+        self.clear_quarantine();
+    }
+
+    fn recovery_failed(&self) -> bool {
+        self.recovery_failed.load(Ordering::Acquire)
+    }
+
+    fn clear_recovery_failure(&self) {
+        self.recovery_failed.store(false, Ordering::Release);
+        self.consecutive_overruns.store(0, Ordering::Release);
+    }
+
+    fn latch_recovery_failure(&self) {
+        self.recovery_failed.store(true, Ordering::Release);
+    }
+
+    /// Realtime classification of one processed block. Returns the same flag
+    /// bits as `hirari_plugin_sandbox_block_outcome`: a run of late blocks or a
+    /// failed worker latches the processor, and a dead mailbox invalidates the
+    /// input MIDI so it cannot leak into the recovery block.
+    fn observe_block(&self, deadline_missed: bool, completed_late: bool, produced: bool) -> u32 {
+        if deadline_missed || completed_late {
+            self.consecutive_overruns.fetch_add(1, Ordering::AcqRel);
+        } else if produced {
+            self.consecutive_overruns.store(0, Ordering::Release);
+        }
+        let mut outcome = 0;
+        if !self.recovery_failed() {
+            if self.consecutive_overruns.load(Ordering::Acquire)
+                >= crate::plugin_sandbox_status_text::CONSECUTIVE_OVERRUN_LIMIT
+                || (!produced && self.failure() == FAILURE_PROCESS_FAILED)
+            {
+                outcome |= crate::plugin_sandbox_status_text::OUTCOME_LATCH_FAILURE;
+                self.recovery_failed.store(true, Ordering::Release);
+            }
+        }
+        if !produced
+            && matches!(
+                self.failure(),
+                FAILURE_PLUGIN_QUARANTINED
+                    | FAILURE_PROCESS_EXITED
+                    | FAILURE_PROCESS_HUNG
+                    | FAILURE_PROCESS_FAILED
+            )
+        {
+            outcome |= crate::plugin_sandbox_status_text::OUTCOME_CLEAR_MIDI;
+        }
+        outcome
+    }
+
+    fn remember_parameter(&self, parameter_id: u32, value: f64) -> bool {
+        self.parameter_cache.set(parameter_id, value)
+    }
+
+    fn parameter_value(&self, parameter_id: u32, value: &mut f64) -> bool {
+        match self.parameter_cache.get(parameter_id) {
+            Some(found) => {
+                *value = found;
+                true
+            }
+            None => false,
+        }
     }
 
     fn set_generation_context(
