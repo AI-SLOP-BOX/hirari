@@ -147,13 +147,6 @@ extern "C" double hirari_external_sync_rate(const void* state);
 extern "C" void hirari_external_sync_tick(void* state, uint64_t timestamp);
 extern "C" uint64_t hirari_external_sync_ticks(const void* state);
 extern "C" uint64_t hirari_external_sync_last_tick(const void* state);
-extern "C" void hirari_audio_buffer_clear(
-    float* const* channels, uint32_t channel_count, uint32_t offset, uint32_t sample_count);
-extern "C" uint32_t hirari_audio_buffer_sanitize_non_finite(
-    float* const* channels, uint32_t channel_count, uint32_t sample_count);
-extern "C" void hirari_audio_buffer_add_channels(
-    float* const* destinations, const float* const* sources,
-    uint32_t channel_count, uint32_t sample_count);
 extern "C" void hirari_audio_add_sanitized_stereo(
     float* destination_left, float* destination_right,
     const float* source_left, const float* source_right, uint32_t frames);
@@ -162,8 +155,6 @@ extern "C" void hirari_project_layout_fingerprint_update(
 extern "C" uint64_t hirari_project_state_revision_mix(
     uint64_t layout, uint64_t midi, uint64_t control);
 extern "C" float hirari_samples_to_milliseconds(uint64_t samples, double sample_rate);
-extern "C" void hirari_audio_buffer_apply_gain(
-    float* const* channels, uint32_t channel_count, uint32_t sample_count, float gain);
 extern "C" void* hirari_preview_synth_create();
 extern "C" void hirari_preview_synth_destroy(void* state);
 extern "C" void hirari_preview_synth_set_engine(void* state, uint32_t engine);
@@ -226,8 +217,6 @@ extern "C" void hirari_bus_system_reset(void* state);
 extern "C" void hirari_bus_system_clear(const void* state, uint32_t frames);
 extern "C" void* hirari_audio_buffer_storage_create();
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
-extern "C" bool hirari_audio_buffer_storage_update_channel_pointers(
-    void* storage, float* data, uint32_t channels, uint32_t samples);
 extern "C" uint8_t hirari_audio_buffer_storage_reserve_buffer(
     void* storage, uint32_t channels, uint32_t samples);
 extern "C" bool hirari_audio_buffer_storage_resize(
@@ -507,6 +496,12 @@ struct HirariRegionState {
     bool locked = false;
     bool pitchPreserveWarp = false;
 };
+
+// Completes decoded-media hydration and writes the resulting editable state;
+// the loader installs `state` instead of re-mapping each persisted field.
+extern "C" uint8_t hirari_region_hydrate_decoded(
+    void* region, uint64_t decoded_samples, double decoded_source_rate,
+    double project_sample_rate, uint32_t document_version, HirariRegionState* state);
 
 // Split/duplicate policy is Rust-owned, including the note-table split and
 // the undo capture. C++ keeps the payload (buffers, cache, note-store handle)

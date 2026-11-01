@@ -40,33 +40,15 @@
                         audio.reset();
                     }
                 }
+                HirariRegionState hydrated{};
                 const uint8_t hydration = hirari_region_hydrate_decoded(
-                    rs, audio ? audio->getNumSamples() : 0u, decodedSourceRate,
-                    projectSampleRate, state.version);
+                    &rs, audio ? audio->getNumSamples() : 0u, decodedSourceRate,
+                    projectSampleRate, state.version, &hydrated);
                 if (hydration == 1) continue;
                 if (hydration == 2) return false;
                 r.path = regionPath;
-                r.start = rs.samplePosition;
-                r.len = rs.sampleLength;
-                r.sourceLength = rs.sourceLength;
-                r.sourceSampleRate = rs.sourceSampleRate;
-                r.timelineSampleRate = projectSampleRate;
-                r.sourceOffset = rs.sourceOffset;
-                r.baseStart = rs.baseStart;
-                r.baseSourceOffset = rs.baseSourceOffset;
-                r.baseLength = rs.baseLength;
-                r.muted = rs.isMuted;
+                r.applyEditableState(hydrated);
                 r.name = std::string(rs.name);
-                r.clipGain = rs.clipGain;
-                r.fadeInSamples = rs.fadeInSamples;
-                r.fadeOutSamples = rs.fadeOutSamples;
-                r.reverse = rs.reverse;
-                r.warpRatio = rs.warpRatio;
-                r.pitchPreserveWarp = rs.pitchPreserveWarp;
-                r.pitchSemitones = rs.pitchSemitones;
-                r.loopCount = rs.loopCount;
-                r.locked = rs.locked;
-                r.syncGroup = rs.syncGroup;
                 // Saved tables are installed verbatim; addRegion re-normalizes.
                 static_assert(sizeof(rs.warpMarkers[0]) == sizeof(HirariWarpMarker));
                 static_assert(sizeof(rs.rangeEdits[0]) == sizeof(HirariRegionRangeEdit));

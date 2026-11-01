@@ -8,6 +8,7 @@
 
 use crate::audio_note_curve::HirariAudioNoteAnchor;
 use crate::ffi::{NativeNoteSegment, NativeRegionState};
+use crate::region_edit_host::HirariRegionState;
 use crate::vari_audio::{
     hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_load,
     HirariAudioNoteSegment, HirariRegionVariAudioStore,
@@ -219,7 +220,59 @@ fn sanitize_native_range_edits(region: &mut NativeRegionState) {
 /// available frames, migrate pre-v42 source-frame geometry, and drop range
 /// edits that no longer fit. Keeping them here means the loader only copies
 /// the decoded record into engine storage.
-pub fn hirari_region_hydrate_decoded(
+/// Writes the hydrated region's editable state so the loader installs the
+/// record Rust just validated instead of re-mapping every persisted field.
+///
+/// `state` receives the same field set `HirariRegionState` carries on the C++
+/// side; the loader only applies it to the engine's region storage.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_hydrate_decoded(
+    region: *mut NativeRegionState,
+    decoded_samples: u64,
+    decoded_source_rate: f64,
+    project_sample_rate: f64,
+    document_version: u32,
+    state: *mut HirariRegionState,
+) -> u8 {
+    if region.is_null() || state.is_null() {
+        return HYDRATION_FAILED;
+    }
+    let region = &mut *region;
+    let code = hydrate_decoded(
+        region,
+        decoded_samples,
+        decoded_source_rate,
+        project_sample_rate,
+        document_version,
+    );
+    if code == HYDRATION_OK {
+        *state = HirariRegionState {
+            start: region.samplePosition,
+            len: region.sampleLength,
+            base_start: region.baseStart,
+            base_length: region.baseLength,
+            source_offset: region.sourceOffset,
+            base_source_offset: region.baseSourceOffset,
+            source_length: region.sourceLength,
+            fade_in_samples: region.fadeInSamples,
+            fade_out_samples: region.fadeOutSamples,
+            warp_ratio: region.warpRatio,
+            source_sample_rate: f64::from(region.sourceSampleRate),
+            timeline_sample_rate: project_sample_rate,
+            clip_gain: region.clipGain,
+            pitch_semitones: region.pitchSemitones,
+            loop_count: region.loopCount,
+            sync_group: region.syncGroup,
+            muted: region.isMuted,
+            reverse: region.reverse,
+            locked: region.locked,
+            pitch_preserve_warp: region.pitchPreserveWarp,
+        };
+    }
+    code
+}
+
+fn hydrate_decoded(
     region: &mut NativeRegionState,
     decoded_samples: u64,
     decoded_source_rate: f64,

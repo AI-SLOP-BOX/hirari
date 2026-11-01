@@ -18,7 +18,7 @@ pub use analysis_views::{
 };
 pub use command_host::engine_last_command_error;
 pub use plugin_sandbox_maintenance::sandbox_statuses_packed;
-pub use region_hydration::{hirari_region_hydrate_decoded, hirari_region_note_store_load_native};
+pub use region_hydration::hirari_region_note_store_load_native;
 pub use runtime_views::{interleave_planar_audio_input, runtime_health_vector};
 pub use waveform_cache::{analysis_waveform_peak_envelope, resample_waveform_peak_envelope};
 pub mod ara2_protocol;
@@ -676,19 +676,6 @@ pub mod ffi {
         fn sandbox_statuses_packed(host: usize) -> Vec<u32>;
         /// Admission error code of the most recent command on `host`.
         fn engine_last_command_error(host: usize) -> u8;
-        /// Applies decoded-media hydration to one region in place: clamps the
-        /// source length to the available frames, migrates pre-v42 geometry,
-        /// and filters range edits against the final playable length.
-        /// Returns 0 when hydrated, 1 when the region must be dropped because
-        /// its trim origin is beyond the decoded media, and 2 when the
-        /// document cannot be represented.
-        fn hirari_region_hydrate_decoded(
-            region: &mut NativeRegionState,
-            decoded_samples: u64,
-            decoded_source_rate: f64,
-            project_sample_rate: f64,
-            document_version: u32,
-        ) -> u8;
         /// Loads persisted note segments into the Rust-owned VariAudio store
         /// held by `store`, including the flat anchor indexing the store ABI
         /// requires.

@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Project loading now installs the region's editable state as returned by the
+  Rust hydration pass (`hirari_region_hydrate_decoded`), so the persisted
+  field mapping lives beside the state layout instead of being re-assigned
+  field by field in C++; five C++-unused AudioBuffer declarations were removed.
 - `AudioBuffer` dimensions, the channel view and externally wrapped planes are
   now owned by the Rust storage (`hirari_audio_buffer_storage_*`); the C++
   class keeps only one opaque handle and its pointer/resize/clear/gain
