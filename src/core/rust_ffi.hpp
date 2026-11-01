@@ -871,10 +871,30 @@ struct HirariTrackRegionRenderInput {
     uint8_t pitchPreserveWarp = 0;
     uint8_t needsSpectralStretch = 0;
 };
-extern "C" bool hirari_region_needs_spectral_stretch(
-    double source_sample_rate, double timeline_sample_rate, double warp_ratio,
-    size_t warp_marker_count, float pitch_semitones,
-    const HirariAudioNoteCurveView* note_curves, size_t note_curve_count);
+// Snapshot publication: C++ keeps the Region copies that own the decoded audio
+// and the edit projections, Rust derives the overlap crossfades, the
+// spectral-stretch decision and the render input the callback reads.
+struct HirariRegionRenderSource {
+    HirariRegionState state{};
+    uint32_t id = 0;
+    uint8_t muted = 0;
+    const float* audioLeft = nullptr;
+    const float* audioRight = nullptr;
+    uint64_t audioSamples = 0;
+    const HirariRegionClipEditsView* clip = nullptr;
+    const HirariAudioNoteSegmentRange* noteRanges = nullptr;
+    size_t noteRangeCount = 0;
+    const HirariAudioNoteCurveView* noteCurves = nullptr;
+    size_t noteCurveCount = 0;
+    uintptr_t noteCacheSegments = 0;
+    void* stretchHandle = nullptr;
+    uint64_t crossfadeIn = 0;
+    uint64_t crossfadeOut = 0;
+};
+extern "C" size_t hirari_track_build_region_render_inputs(
+    const HirariRegionRenderSource* sources, size_t count, double sample_rate,
+    const float* resample_kernel, const float* wsola_window, uintptr_t cache_owner,
+    uintptr_t cache_snapshot, HirariTrackRegionRenderInput* out, size_t capacity);
 // Native built-in DSP processors share one dispatch surface; the host below
 // owns the processor handles, so the per-processor entry points stay inside
 // Rust instead of appearing as a C++ ABI.
@@ -1357,16 +1377,6 @@ extern "C" bool hirari_arrangement_document_upsert_marker(
     void* state, uint64_t sample, const uint8_t* name, size_t name_len, uint32_t color);
 extern "C" bool hirari_arrangement_document_set_parts(
     void* state, const HirariArrangementPartInput* parts, size_t count);
-struct HirariRegionOverlapView {
-    uint64_t start;
-    uint64_t length;
-    uint64_t loop_count;
-    uint8_t muted;
-    uint64_t crossfade_in;
-    uint64_t crossfade_out;
-};
-extern "C" bool hirari_regions_apply_overlap_crossfades(
-    HirariRegionOverlapView* regions, size_t region_count);
 struct HirariGeneratedMidiEvent {
     uint64_t sample_offset;
     uint8_t articulation_id;

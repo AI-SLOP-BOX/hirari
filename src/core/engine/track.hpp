@@ -131,8 +131,6 @@ struct Region {
     // pitch and applying the region's non-destructive pitch/formant curves.
     // Off preserves legacy varispeed behavior.
     bool pitchPreserveWarp = false;
-    // Derived by Rust when a region snapshot is published, off the audio thread.
-    bool needsSpectralStretch = false;
     // Rust owns the streaming stretcher; this shared handle is created with a
     // destroy deleter so copies of the Region keep one stretcher instance.
     std::shared_ptr<void> timeStretch;
@@ -237,9 +235,6 @@ struct Region {
         step.enabled = enabled;
         return hirari_region_processing_history_append(processingStore.get(), step);
     }
-    // Derived on the control thread when a region snapshot is published.
-    uint64_t crossfadeInSamples = 0;
-    uint64_t crossfadeOutSamples = 0;
 };
 
 /**

@@ -90,6 +90,11 @@ production support.
   run as Rust extension methods on the engine bridge too, so the remaining
   `AudioEngine` relays and the C++ `noexcept` qualifiers that blocked the
   matching member pointers are gone.
+- Building a track's published render inputs moved to Rust: the overlap
+  crossfades, the spectral-stretch decision and the per-region field mapping
+  are derived from a trimmed source struct, so the C++ publication path no
+  longer carries the `Region` crossfade/spectral members, the overlap-view
+  FFI declarations or the 39-field assignment block.
 
 - Low-latency mode, preview triggering, metronome control, tempo reads,
   sample/beat conversion and the routing snapshot now run as Rust extension

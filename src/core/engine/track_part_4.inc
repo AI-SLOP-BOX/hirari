@@ -25,20 +25,11 @@
         // own instances so an older callback/render can never advance state
         // that a newer snapshot is using. Allocation and configuration stay
         // on this control-side publication path.
-        for (size_t index = 0; index < m_regions.size(); ++index) {
-            auto& region = m_regions[index];
-            static_assert(sizeof(HirariAudioNoteSegmentRange) == 24);
-            static_assert(offsetof(HirariAudioNoteSegmentRange, startSeconds) == 0);
-            static_assert(offsetof(HirariAudioNoteSegmentRange, endSeconds) == 8);
-            static_assert(offsetof(HirariAudioNoteSegmentRange, detectedPitchCents) == 16);
+        for (auto& region : m_regions) {
             // The note-edit table is Rust-owned: republish its immutable
             // projection here and let the callback read it lock-free.
             region.publishNoteEdits();
             region.publishClipEdits();
-            region.needsSpectralStretch = hirari_region_needs_spectral_stretch(
-                region.sourceSampleRate, region.timelineSampleRate, region.warpRatio,
-                region.clip()->warpMarkerCount, region.pitchSemitones, region.noteCurves,
-                region.noteCurveCount);
             if (!region.pitchPreserveWarp) continue;
             region.timeStretch = std::shared_ptr<void>(
                 hirari_region_stretch_create(),
@@ -49,24 +40,6 @@
         auto snapshot = std::make_unique<RegionSnapshot>(m_regions);
         // The published note views address the shared Rust snapshot, so the
         // snapshot copy needs no second rebuild pass.
-        static_assert(sizeof(HirariRegionOverlapView) == 48);
-        static_assert(offsetof(HirariRegionOverlapView, muted) == 24);
-        static_assert(offsetof(HirariRegionOverlapView, crossfade_in) == 32);
-        std::vector<HirariRegionOverlapView> overlapViews;
-        overlapViews.reserve(snapshot->size());
-        for (const auto& region : *snapshot) {
-            overlapViews.push_back({region.start, region.len, region.loopCount,
-                static_cast<uint8_t>(region.muted ? 1 : 0),
-                region.crossfadeInSamples, region.crossfadeOutSamples});
-        }
-        if (!hirari_regions_apply_overlap_crossfades(
-                overlapViews.data(), overlapViews.size())) {
-            return;
-        }
-        for (size_t index = 0; index < snapshot->size(); ++index) {
-            (*snapshot)[index].crossfadeInSamples = overlapViews[index].crossfade_in;
-            (*snapshot)[index].crossfadeOutSamples = overlapViews[index].crossfade_out;
-        }
         static_assert(sizeof(HirariWarpMarker) == 24);
         static_assert(offsetof(HirariWarpMarker, sourceSample) == 0);
         static_assert(offsetof(HirariWarpMarker, timelineSample) == 8);
@@ -80,56 +53,35 @@
         static_assert(offsetof(HirariTrackRegionRenderInput, playhead) == 160);
         static_assert(offsetof(HirariTrackRegionRenderInput, warpRatio) == 248);
         static_assert(offsetof(HirariTrackRegionRenderInput, muted) == 300);
-        snapshot->renderInputs.resize(snapshot->size());
+        std::vector<HirariRegionRenderSource> sources(snapshot->size());
         for (size_t index = 0; index < snapshot->size(); ++index) {
             const auto& region = (*snapshot)[index];
             const uint32_t sourceChannels = region.audio ? region.audio->getNumChannels() : 0;
-            const uint64_t sourceSamples = region.audio ? region.audio->getNumSamples() : 0;
-            const float* sourceLeft = sourceChannels > 0 ? region.audio->getReadPointer(0) : nullptr;
-            const float* sourceRight = sourceChannels > 1 ? region.audio->getReadPointer(1) : sourceLeft;
-            auto& input = snapshot->renderInputs[index];
-            const auto* clip = region.clip();
-            input.sourceLeft = sourceLeft;
-            input.sourceRight = sourceRight;
-            input.compRanges = clip->compRanges;
-            input.compRangeCount = clip->compRangeCount;
-            input.rangeEdits = clip->rangeEdits;
-            input.rangeEditCount = clip->rangeEditCount;
-            input.noteRanges = region.noteRanges;
-            input.noteRangeCount = region.noteRangeCount;
-            input.noteCurves = region.noteCurves;
-            input.noteCurveCount = region.noteCurveCount;
-            input.warpMarkers = clip->warpMarkers;
-            input.warpMarkerCount = clip->warpMarkerCount;
-            input.resampleKernel = m_regionResampleKernel;
-            input.wsolaWindow = kTrackWsolaWindow.data();
-            input.stretchHandle = region.timeStretch.get();
-            input.cacheOwner = reinterpret_cast<std::uintptr_t>(this);
-            input.cacheSnapshot = reinterpret_cast<std::uintptr_t>(snapshot.get());
-            input.cacheNoteSegments = reinterpret_cast<std::uintptr_t>(region.noteCacheKey);
-            input.regionStart = region.start;
-            input.regionLength = region.len;
-            input.loopCount = region.loopCount;
-            input.sourceSamples = sourceSamples;
-            input.sourceOffset = region.sourceOffset;
-            input.sourceLength = region.sourceLength;
-            input.fadeIn = region.fadeInSamples;
-            input.fadeOut = region.fadeOutSamples;
-            input.crossfadeIn = region.crossfadeInSamples;
-            input.crossfadeOut = region.crossfadeOutSamples;
-            input.warpRatio = region.warpRatio;
-            input.sourceSampleRate = region.sourceSampleRate;
-            input.timelineSampleRate = region.timelineSampleRate;
-            input.sampleRate = m_sampleRate;
-            input.clipGain = region.clipGain;
-            input.pitchSemitones = region.pitchSemitones;
-            input.regionId = region.id;
-            input.syncGroup = region.syncGroup;
-            input.muted = static_cast<uint8_t>(region.muted ? 1 : 0);
-            input.compManaged = clip->compManaged;
-            input.reverse = static_cast<uint8_t>(region.reverse ? 1 : 0);
-            input.pitchPreserveWarp = static_cast<uint8_t>(region.pitchPreserveWarp ? 1 : 0);
-            input.needsSpectralStretch = static_cast<uint8_t>(region.needsSpectralStretch ? 1 : 0);
+            const float* sourceLeft =
+                sourceChannels > 0 ? region.audio->getReadPointer(0) : nullptr;
+            auto& source = sources[index];
+            source.state = region.editableState();
+            source.id = region.id;
+            source.muted = static_cast<uint8_t>(region.muted ? 1 : 0);
+            source.audioLeft = sourceLeft;
+            source.audioRight =
+                sourceChannels > 1 ? region.audio->getReadPointer(1) : sourceLeft;
+            source.audioSamples = region.audio ? region.audio->getNumSamples() : 0;
+            source.clip = region.clip();
+            source.noteRanges = region.noteRanges;
+            source.noteRangeCount = region.noteRangeCount;
+            source.noteCurves = region.noteCurves;
+            source.noteCurveCount = region.noteCurveCount;
+            source.noteCacheSegments = region.noteCacheKey;
+            source.stretchHandle = region.timeStretch.get();
+        }
+        snapshot->renderInputs.resize(snapshot->size());
+        if (hirari_track_build_region_render_inputs(
+                sources.data(), sources.size(), m_sampleRate, m_regionResampleKernel,
+                kTrackWsolaWindow.data(), reinterpret_cast<std::uintptr_t>(this),
+                reinterpret_cast<std::uintptr_t>(snapshot.get()),
+                snapshot->renderInputs.data(), snapshot->renderInputs.size()) != sources.size()) {
+            return;
         }
         const RegionSnapshot* published = snapshot.get();
         m_regionSnapshots.push_back(std::move(snapshot));
