@@ -192,6 +192,7 @@ pub mod midi_logical_editor;
 pub mod midi_mapping_manager;
 pub mod midi_monitor;
 pub mod midi_note_edit;
+pub mod midi_note_engine_ext;
 pub mod midi_orchestration;
 pub mod midi_quantizer;
 pub mod midi_region_ops;

@@ -139,12 +139,13 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
             }
             // MIDI-only projects define their extent through scheduled notes.
             std::vector<uint64_t> midiNoteEnds;
-            const auto notes = engine->midi_notes_snapshot();
-            midiNoteEnds.reserve(notes.size());
-            for (const auto& note : notes) {
-                midiNoteEnds.push_back(hirari_midi_scheduled_note_end(
-                    reinterpret_cast<const HirariScheduledMidiNote*>(&note)));
-            }
+            size_t midiNoteCount = 0;
+            auto* midiNotes = hirari_midi_notes_snapshot_take(
+                reinterpret_cast<const void*>(engine->midi_snapshot_store()), &midiNoteCount);
+            midiNoteEnds.reserve(midiNoteCount);
+            for (size_t i = 0; i < midiNoteCount; ++i)
+                midiNoteEnds.push_back(hirari_midi_scheduled_note_end(midiNotes + i));
+            hirari_midi_notes_snapshot_take_free(midiNotes, midiNoteCount);
             HirariBouncePlanInput input{};
             input.regions = regionSpans.data();
             input.region_count = regionSpans.size();

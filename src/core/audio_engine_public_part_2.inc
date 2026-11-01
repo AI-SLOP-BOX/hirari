@@ -157,40 +157,6 @@
         return m_engine && m_engine->append_region_processing(tid, rid, stepId, std::string_view(operation.data(), operation.size()), parameter, enabled);
     }
     bool clear_region_processing(uint32_t tid, uint32_t rid) const { return m_engine && m_engine->clear_region_processing(tid, rid); }
-    void clear_midi_notes() const { if (m_engine) m_engine->clear_midi_notes(); }
-    bool remove_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample) const { return m_engine && m_engine->remove_midi_notes_range(trackId, startSample, endSample); }
-    bool transpose_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample, int32_t semitones) const { return m_engine && m_engine->transpose_midi_notes_range(trackId, startSample, endSample, semitones); }
-    bool move_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample, int64_t deltaSamples) const { return m_engine && m_engine->move_midi_notes_range(trackId, startSample, endSample, deltaSamples); }
-    void set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity, uint64_t startSample, uint64_t lengthSamples) const {
-        if (m_engine) m_engine->set_midi_note(trackId, pitch, velocity, startSample, lengthSamples);
-    }
-    bool replace_midi_notes(rust::Vec<uint64_t> packed, bool recordUndo) const {
-        // Field ranges, the note cap and the start/length overflow check are
-        // Rust-owned (hirari_midi_notes_unpack); a rejected vector writes nothing.
-        if (!m_engine) return false;
-        const size_t count = hirari_midi_notes_unpack(
-            packed.data(), packed.size(), nullptr, 0);
-        if (count == SIZE_MAX) return false;
-        std::vector<::Hirari::Core::Engine::HirariUnifiedEngine::ScheduledMidiNote> notes(count);
-        if (hirari_midi_notes_unpack(
-                packed.data(), packed.size(),
-                reinterpret_cast<HirariScheduledMidiNote*>(notes.data()), count) != count) {
-            return false;
-        }
-        return m_engine->replace_midi_notes(notes, recordUndo);
-    }
-    rust::Vec<uint64_t> midi_notes_snapshot() const {
-        rust::Vec<uint64_t> packed;
-        if (!m_engine) return packed;
-        const auto notes = m_engine->midi_notes_snapshot();
-        const auto* raw = reinterpret_cast<const HirariScheduledMidiNote*>(notes.data());
-        const size_t required = hirari_midi_notes_pack(raw, notes.size(), nullptr, 0);
-        if (required == SIZE_MAX) return packed;
-        packed.reserve(required);
-        for (size_t i = 0; i < required; ++i) packed.push_back(0);
-        (void)hirari_midi_notes_pack(raw, notes.size(), packed.data(), packed.size());
-        return packed;
-    }
     bool set_automation_record_mode(uint32_t mode) const {
         return m_engine && m_engine->set_automation_record_mode(mode);
     }

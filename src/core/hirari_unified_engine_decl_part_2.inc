@@ -34,6 +34,7 @@
     void* log_state() const noexcept {
         return hirari_log_state();
     }
+    size_t midi_snapshot_store() const noexcept { return reinterpret_cast<size_t>(m_midiSnapshotStore); }
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;
         std::lock_guard<std::mutex> lock(m_tracksMutex);

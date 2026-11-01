@@ -34,56 +34,6 @@ void HirariUnifiedEngine::clear_preview_sample() {
     }
 }
 
-void HirariUnifiedEngine::clear_midi_notes() {
-    replace_midi_notes({}, true);
-}
-
-bool HirariUnifiedEngine::replace_midi_notes(const std::vector<ScheduledMidiNote>& notes, bool recordUndo) {
-    static_assert(sizeof(ScheduledMidiNote) == sizeof(HirariScheduledMidiNote));
-    static_assert(offsetof(ScheduledMidiNote, startSample) ==
-                  offsetof(HirariScheduledMidiNote, start_sample));
-    static_assert(offsetof(ScheduledMidiNote, regionId) ==
-                  offsetof(HirariScheduledMidiNote, region_id));
-    return hirari_midi_notes_replace(
-        m_midiSnapshotStore, reinterpret_cast<const HirariScheduledMidiNote*>(notes.data()),
-        notes.size(), recordUndo, undo_state(), log_state());
-}
-
-std::vector<HirariUnifiedEngine::ScheduledMidiNote> HirariUnifiedEngine::midi_notes_snapshot() const {
-    size_t count = 0;
-    auto* notes = hirari_midi_notes_snapshot_take(m_midiSnapshotStore, &count);
-    if (!notes) return {};
-    std::vector<ScheduledMidiNote> copy(
-        reinterpret_cast<const ScheduledMidiNote*>(notes),
-        reinterpret_cast<const ScheduledMidiNote*>(notes) + count);
-    hirari_midi_notes_snapshot_take_free(notes, count);
-    return copy;
-}
-
-bool HirariUnifiedEngine::remove_midi_notes_range(uint32_t trackId, uint64_t startSample,
-                                                uint64_t endSample) {
-    return hirari_midi_notes_edit_range(m_midiSnapshotStore, trackId, startSample, endSample,
-                                        0, 0, undo_state(), log_state());
-}
-
-bool HirariUnifiedEngine::transpose_midi_notes_range(uint32_t trackId, uint64_t startSample,
-                                                   uint64_t endSample, int32_t semitones) {
-    return hirari_midi_notes_edit_range(m_midiSnapshotStore, trackId, startSample, endSample,
-                                        1, semitones, undo_state(), log_state());
-}
-
-bool HirariUnifiedEngine::move_midi_notes_range(uint32_t trackId, uint64_t startSample,
-                                              uint64_t endSample, int64_t deltaSamples) {
-    return hirari_midi_notes_edit_range(m_midiSnapshotStore, trackId, startSample, endSample,
-                                        2, deltaSamples, undo_state(), log_state());
-}
-
-void HirariUnifiedEngine::set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
-                                      uint64_t startSample, uint64_t lengthSamples) {
-    hirari_midi_notes_upsert(m_midiSnapshotStore, trackId, pitch, velocity, startSample,
-                             lengthSamples, undo_state(), log_state());
-}
-
 void HirariUnifiedEngine::set_playing(bool p) {
     m_isPlaying.store(p, std::memory_order_release);
     if (!p) {

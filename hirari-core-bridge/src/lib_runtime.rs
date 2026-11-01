@@ -1,3 +1,4 @@
+use crate::midi_note_engine_ext::MidiNoteEngineExt;
 use crate::project_contracts::{
     MacroMappingContract, MarkerContract, MidiLearnMappingContract, MidiNoteContract,
     OpenUtauTuningContract, OpenUtauVocalContract, TrackStackContract,

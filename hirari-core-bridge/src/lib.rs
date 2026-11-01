@@ -168,6 +168,9 @@ pub mod ffi {
         fn tempo_state(self: &AudioEngine) -> usize;
         fn undo_state(self: &AudioEngine) -> usize;
         fn log_state(self: &AudioEngine) -> usize;
+        // The MIDI snapshot store is native to Rust already; the engine keeps
+        // the handle its render callback pins, so hand that address back.
+        fn midi_snapshot_store(self: &HirariUnifiedEngine) -> usize;
         // "The project changed" revision the UI polls. The shims that used to
         // bump it after an edit moved into Rust along with the edit itself.
         fn mark_project_state_changed(self: &AudioEngine);
@@ -283,37 +286,6 @@ pub mod ffi {
             transient_flags: &[u8],
         ) -> bool;
 
-        fn clear_midi_notes(self: &AudioEngine);
-        fn replace_midi_notes(self: &AudioEngine, packed: Vec<u64>, record_undo: bool) -> bool;
-        fn midi_notes_snapshot(self: &AudioEngine) -> Vec<u64>;
-        fn remove_midi_notes_range(
-            self: &AudioEngine,
-            track_id: u32,
-            start_sample: u64,
-            end_sample: u64,
-        ) -> bool;
-        fn transpose_midi_notes_range(
-            self: &AudioEngine,
-            track_id: u32,
-            start_sample: u64,
-            end_sample: u64,
-            semitones: i32,
-        ) -> bool;
-        fn move_midi_notes_range(
-            self: &AudioEngine,
-            track_id: u32,
-            start_sample: u64,
-            end_sample: u64,
-            delta_samples: i64,
-        ) -> bool;
-        fn set_midi_note(
-            self: &AudioEngine,
-            track_id: u32,
-            pitch: u8,
-            velocity: u8,
-            start_sample: u64,
-            length_samples: u64,
-        );
         fn set_track_input_monitor(self: &AudioEngine, tid: u32, enabled: bool) -> bool;
         fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
         fn get_plugin_parameter(

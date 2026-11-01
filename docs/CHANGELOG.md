@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- MIDI-note editing now runs as a Rust extension trait on the engine bridge:
+  clearing, replacing, snapshotting and the range remove/transpose/move edits
+  repack and call the Rust note store directly, so the C++ engine methods and
+  their `AudioEngine` forwarding wrappers are gone.
 - The spectral-stretch decision now receives a region's raw sample rates and
   warp ratio and derives the source-per-timeline mapping in Rust, so the
   duplicated C++ ratio helper is gone.

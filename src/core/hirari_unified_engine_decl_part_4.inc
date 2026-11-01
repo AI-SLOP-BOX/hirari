@@ -1,5 +1,4 @@
 public:
-    void clear_midi_notes();
     struct ScheduledMidiNote {
         uint32_t trackId = 0;
         uint8_t pitch = 60;
@@ -11,13 +10,6 @@ public:
         uint8_t probability = 100; // Chance in percent for each transport pass.
         uint32_t regionId = 0; // Zero denotes a legacy track-scoped note.
     };
-    bool replace_midi_notes(const std::vector<ScheduledMidiNote>& notes, bool recordUndo = true);
-    std::vector<ScheduledMidiNote> midi_notes_snapshot() const;
-    bool remove_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample);
-    bool transpose_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample, int32_t semitones);
-    bool move_midi_notes_range(uint32_t trackId, uint64_t startSample, uint64_t endSample, int64_t deltaSamples);
-    void set_midi_note(uint32_t trackId, uint8_t pitch, uint8_t velocity,
-                       uint64_t startSample, uint64_t lengthSamples);
 
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled);
     bool clear_region_processing(uint32_t tid, uint32_t rid);
