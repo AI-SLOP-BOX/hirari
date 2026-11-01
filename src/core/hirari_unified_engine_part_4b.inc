@@ -67,12 +67,17 @@
                 r.loopCount = rs.loopCount;
                 r.locked = rs.locked;
                 r.syncGroup = rs.syncGroup;
-                r.warpMarkers.clear();
-                r.warpMarkers.reserve(rs.warpMarkers.size());
-                for (const auto& marker : rs.warpMarkers) {
-                    r.warpMarkers.push_back({marker.sourceSample, marker.timelineSample,
-                                             marker.transient});
-                }
+                // Saved tables are installed verbatim; addRegion re-normalizes.
+                static_assert(sizeof(rs.warpMarkers[0]) == sizeof(HirariWarpMarker));
+                static_assert(sizeof(rs.rangeEdits[0]) == sizeof(HirariRegionRangeEdit));
+                (void)hirari_region_clip_edits_set_warp_markers(
+                    r.clipEdits.get(),
+                    reinterpret_cast<const HirariWarpMarker*>(rs.warpMarkers.data()),
+                    rs.warpMarkers.size(), 0, 0, false);
+                (void)hirari_region_clip_edits_replace_range_edits(
+                    r.clipEdits.get(),
+                    reinterpret_cast<const HirariRegionRangeEdit*>(rs.rangeEdits.data()),
+                    rs.rangeEdits.size(), r.len, false);
                 for (const auto& step : rs.processingHistory) {
                     if (!r.appendProcessingStep(step.id, std::string(step.operation),
                                                 step.parameter, step.enabled)) return false;
@@ -80,10 +85,6 @@
                 if (!hirari_region_note_store_load_native(
                         reinterpret_cast<size_t>(r.noteStore.get()), rs.audioNoteSegments)) {
                     return false;
-                }
-                r.rangeEdits.reserve(rs.rangeEdits.size());
-                for (const auto& edit : rs.rangeEdits) {
-                    r.rangeEdits.push_back({edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut});
                 }
                 // Hydrate audio during project load so an opened project is
                 // immediately playable. Missing files remain visible as

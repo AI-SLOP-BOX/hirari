@@ -121,42 +121,26 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
             if (markerCount != 0 && payload->blob == nullptr) break;
             const auto* markers =
                 reinterpret_cast<const HirariWarpMarker*>(payload->blob);
-            std::vector<HirariWarpMarker> replacement;
-            if (markerCount != 0) replacement.assign(markers, markers + markerCount);
-            applied = track->setRegionWarpMarkers(payload->regionId, std::move(replacement));
+            applied = track->setRegionWarpMarkers(payload->regionId, markers, markerCount);
             break;
         }
         case kHirariRegionEditRangeEdits: {
             if (payload->blobLen % sizeof(HirariRegionRangeEdit) != 0) break;
             const auto count = payload->blobLen / sizeof(HirariRegionRangeEdit);
             if (count != 0 && payload->blob == nullptr) break;
-            const auto* edits = reinterpret_cast<const HirariRegionRangeEdit*>(payload->blob);
-            std::vector<Region::RangeEdit> replacement;
-            replacement.reserve(count);
-            for (size_t index = 0; index < count; ++index) {
-                replacement.push_back({edits[index].start, edits[index].end,
-                                       edits[index].gain, edits[index].fade_in,
-                                       edits[index].fade_out});
-            }
-            applied = track->replaceRegionRangeEdits(payload->regionId,
-                                                     std::move(replacement), false);
+            applied = track->replaceRegionRangeEdits(
+                payload->regionId,
+                reinterpret_cast<const HirariRegionRangeEdit*>(payload->blob), count, false);
             break;
         }
         case kHirariRegionEditCompRanges: {
             if (payload->blobLen % sizeof(HirariRegionCompRange) != 0) break;
             const auto count = payload->blobLen / sizeof(HirariRegionCompRange);
             if (count != 0 && payload->blob == nullptr) break;
-            const auto* source =
-                reinterpret_cast<const HirariRegionCompRange*>(payload->blob);
-            std::vector<Region::CompRange> replacement;
-            replacement.reserve(count);
-            for (size_t index = 0; index < count; ++index) {
-                replacement.push_back({source[index].start, source[index].end,
-                                       source[index].fade_in, source[index].fade_out});
-            }
-            applied = track->replaceRegionCompRanges(payload->regionId,
-                                                     std::move(replacement),
-                                                     payload->managed);
+            applied = track->replaceRegionCompRanges(
+                payload->regionId,
+                reinterpret_cast<const HirariRegionCompRange*>(payload->blob),
+                count, payload->managed);
             break;
         }
         case kHirariRegionEditPitchCommit: {
@@ -212,7 +196,12 @@ void* HirariUnifiedEngine::regionHostSnapshot(void* host, uint32_t trackId,
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     const Region* region = engine->findRegionLocked(trackId, regionId);
-    return region ? new Region(*region) : nullptr;
+    if (!region) return nullptr;
+    auto* snapshot = new Region(*region);
+    // The copy must not share the live edit table: it outlives the region and
+    // is handed back through addRegion, which detaches again.
+    snapshot->detachClipEdits();
+    return snapshot;
 }
 
 void HirariUnifiedEngine::regionHostReleaseSnapshot(void*, void* handle) {
@@ -227,10 +216,11 @@ size_t HirariUnifiedEngine::regionHostWarpMarkers(void* host, uint32_t trackId,
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     const Region* region = engine->findRegionLocked(trackId, regionId);
     if (!region) return 0;
-    if (out && capacity >= region->warpMarkers.size()) {
-        std::copy(region->warpMarkers.begin(), region->warpMarkers.end(), out);
+    const auto* view = region->clip();
+    if (out && capacity >= view->warpMarkerCount) {
+        std::copy(view->warpMarkers, view->warpMarkers + view->warpMarkerCount, out);
     }
-    return region->warpMarkers.size();
+    return view->warpMarkerCount;
 }
 
 size_t HirariUnifiedEngine::regionHostRangeEdits(void* host, uint32_t trackId,
@@ -242,13 +232,11 @@ size_t HirariUnifiedEngine::regionHostRangeEdits(void* host, uint32_t trackId,
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     const Region* region = engine->findRegionLocked(trackId, regionId);
     if (!region) return 0;
-    if (out && capacity >= region->rangeEdits.size()) {
-        for (size_t index = 0; index < region->rangeEdits.size(); ++index) {
-            const auto& edit = region->rangeEdits[index];
-            out[index] = {edit.start, edit.end, edit.gain, edit.fadeIn, edit.fadeOut};
-        }
+    const auto* view = region->clip();
+    if (out && capacity >= view->rangeEditCount && view->rangeEditCount != 0) {
+        std::copy(view->rangeEdits, view->rangeEdits + view->rangeEditCount, out);
     }
-    return region->rangeEdits.size();
+    return view->rangeEditCount;
 }
 
 void* HirariUnifiedEngine::regionHostRetainAudio(void* host, uint32_t trackId,
@@ -524,14 +512,12 @@ size_t HirariUnifiedEngine::regionHostCompRanges(void* host, uint32_t trackId,
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     const Region* region = engine->findRegionLocked(trackId, regionId);
     if (!region) return 0;
-    if (managed) *managed = region->compManaged;
-    if (out && capacity >= region->compRanges.size()) {
-        for (size_t index = 0; index < region->compRanges.size(); ++index) {
-            const auto& range = region->compRanges[index];
-            out[index] = {range.start, range.end, range.fadeIn, range.fadeOut};
-        }
+    const auto* view = region->clip();
+    if (managed) *managed = view->compManaged != 0;
+    if (out && capacity >= view->compRangeCount && view->compRangeCount != 0) {
+        std::copy(view->compRanges, view->compRanges + view->compRangeCount, out);
     }
-    return region->compRanges.size();
+    return view->compRangeCount;
 }
 
 size_t HirariUnifiedEngine::regionHostListSyncGroup(void* host, uint32_t group,

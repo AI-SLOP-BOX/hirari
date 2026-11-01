@@ -34,8 +34,9 @@
             // The note-edit table is Rust-owned: republish its immutable
             // projection here and let the callback read it lock-free.
             region.publishNoteEdits();
+            region.publishClipEdits();
             region.needsSpectralStretch = hirari_region_needs_spectral_stretch(
-                region.sourceFramesPerTimelineFrame(), region.warpMarkers.size(),
+                region.sourceFramesPerTimelineFrame(), region.clip()->warpMarkerCount,
                 region.pitchSemitones, region.noteCurves, region.noteCurveCount);
             if (!region.pitchPreserveWarp) continue;
             region.timeStretch = std::shared_ptr<void>(
@@ -69,17 +70,6 @@
         static_assert(offsetof(HirariWarpMarker, sourceSample) == 0);
         static_assert(offsetof(HirariWarpMarker, timelineSample) == 8);
         static_assert(offsetof(HirariWarpMarker, transient) == 16);
-        static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
-        static_assert(offsetof(Region::RangeEdit, start) == offsetof(HirariRegionRangeEdit, start));
-        static_assert(offsetof(Region::RangeEdit, end) == offsetof(HirariRegionRangeEdit, end));
-        static_assert(offsetof(Region::RangeEdit, gain) == offsetof(HirariRegionRangeEdit, gain));
-        static_assert(offsetof(Region::RangeEdit, fadeIn) == offsetof(HirariRegionRangeEdit, fade_in));
-        static_assert(offsetof(Region::RangeEdit, fadeOut) == offsetof(HirariRegionRangeEdit, fade_out));
-        static_assert(sizeof(Region::CompRange) == sizeof(HirariRegionCompRange));
-        static_assert(offsetof(Region::CompRange, start) == offsetof(HirariRegionCompRange, start));
-        static_assert(offsetof(Region::CompRange, end) == offsetof(HirariRegionCompRange, end));
-        static_assert(offsetof(Region::CompRange, fadeIn) == offsetof(HirariRegionCompRange, fade_in));
-        static_assert(offsetof(Region::CompRange, fadeOut) == offsetof(HirariRegionCompRange, fade_out));
         static_assert(sizeof(HirariRegionBlockConfig) == 88);
         static_assert(sizeof(HirariRegionBlockOutput) == 56);
         static_assert(sizeof(HirariRegionRenderConfig) == 128);
@@ -97,18 +87,19 @@
             const float* sourceLeft = sourceChannels > 0 ? region.audio->getReadPointer(0) : nullptr;
             const float* sourceRight = sourceChannels > 1 ? region.audio->getReadPointer(1) : sourceLeft;
             auto& input = snapshot->renderInputs[index];
+            const auto* clip = region.clip();
             input.sourceLeft = sourceLeft;
             input.sourceRight = sourceRight;
-            input.compRanges = reinterpret_cast<const HirariRegionCompRange*>(region.compRanges.data());
-            input.compRangeCount = region.compRanges.size();
-            input.rangeEdits = reinterpret_cast<const HirariRegionRangeEdit*>(region.rangeEdits.data());
-            input.rangeEditCount = region.rangeEdits.size();
+            input.compRanges = clip->compRanges;
+            input.compRangeCount = clip->compRangeCount;
+            input.rangeEdits = clip->rangeEdits;
+            input.rangeEditCount = clip->rangeEditCount;
             input.noteRanges = region.noteRanges;
             input.noteRangeCount = region.noteRangeCount;
             input.noteCurves = region.noteCurves;
             input.noteCurveCount = region.noteCurveCount;
-            input.warpMarkers = region.warpMarkers.data();
-            input.warpMarkerCount = region.warpMarkers.size();
+            input.warpMarkers = clip->warpMarkers;
+            input.warpMarkerCount = clip->warpMarkerCount;
             input.resampleKernel = m_regionResampleKernel;
             input.wsolaWindow = kTrackWsolaWindow.data();
             input.stretchHandle = region.timeStretch.get();
@@ -134,7 +125,7 @@
             input.regionId = region.id;
             input.syncGroup = region.syncGroup;
             input.muted = static_cast<uint8_t>(region.muted ? 1 : 0);
-            input.compManaged = static_cast<uint8_t>(region.compManaged ? 1 : 0);
+            input.compManaged = clip->compManaged;
             input.reverse = static_cast<uint8_t>(region.reverse ? 1 : 0);
             input.pitchPreserveWarp = static_cast<uint8_t>(region.pitchPreserveWarp ? 1 : 0);
             input.needsSpectralStretch = static_cast<uint8_t>(region.needsSpectralStretch ? 1 : 0);

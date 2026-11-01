@@ -289,6 +289,7 @@ pub mod recording_session;
 pub mod recording_stream;
 pub mod region_alignment;
 pub mod region_audio;
+pub mod region_clip_edits;
 pub mod region_comp_ranges;
 pub mod region_edit_host;
 pub mod region_hydration;

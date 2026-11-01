@@ -1,5 +1,6 @@
 #include "../src/core/engine/track.hpp"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -20,24 +21,28 @@ int main() {
     region.start = 0;
     region.len = 8;
     region.audio = audio;
-    region.rangeEdits.push_back({0, 100, 0.5f, 999, 999});
-    region.rangeEdits.push_back({8, 12, 1.0f, 0, 0});
-    region.rangeEdits.push_back({1, 2, std::numeric_limits<float>::quiet_NaN(), 0, 0});
+    const std::array<HirariRegionRangeEdit, 3> seed{{
+        {0, 100, 0.5f, 999, 999},
+        {8, 12, 1.0f, 0, 0},
+        {1, 2, std::numeric_limits<float>::quiet_NaN(), 0, 0}}};
+    assert(hirari_region_clip_edits_replace_range_edits(
+        region.clipEdits.get(), seed.data(), seed.size(), region.len, false));
 
     Track track(1, "range-contract", Track::Audio);
     track.addRegion(region);
     const auto regions = track.getRegions();
     assert(regions.size() == 1);
-    assert(regions.front().rangeEdits.size() == 1);
-    assert(regions.front().rangeEdits.front().end == 8);
-    assert(regions.front().rangeEdits.front().fadeIn == 8);
-    assert(regions.front().rangeEdits.front().fadeOut == 8);
+    assert(regions.front().clip()->rangeEditCount == 1);
+    assert(regions.front().clip()->rangeEdits->end == 8);
+    assert(regions.front().clip()->rangeEdits->fade_in == 8);
+    assert(regions.front().clip()->rangeEdits->fade_out == 8);
 
-    std::vector<Region::RangeEdit> replacement{{0, 4, 1.0f, 99, 99}};
-    assert(track.replaceRegionRangeEdits(1, replacement));
+    const std::array<Region::RangeEdit, 1> replacement{{{0, 4, 1.0f, 99, 99}}};
+    assert(track.replaceRegionRangeEdits(1, replacement.data(), replacement.size()));
     const auto replaced = track.regionRangeEdits(1);
-    assert(replaced.size() == 1 && replaced.front().fadeIn == 4 && replaced.front().fadeOut == 4);
-    std::vector<Region::RangeEdit> invalid{{0, 9, 1.0f, 0, 0}};
-    assert(!track.replaceRegionRangeEdits(1, invalid));
+    assert(replaced.size() == 1 && replaced.front().fade_in == 4 &&
+           replaced.front().fade_out == 4);
+    const std::array<Region::RangeEdit, 1> invalid{{{0, 9, 1.0f, 0, 0}}};
+    assert(!track.replaceRegionRangeEdits(1, invalid.data(), invalid.size()));
     return 0;
 }

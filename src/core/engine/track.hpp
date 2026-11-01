@@ -52,8 +52,8 @@ struct ProjectLayoutRevision {
 };
 
 struct Region {
-    struct RangeEdit { uint64_t start = 0; uint64_t end = 0; float gain = 1.0f; uint64_t fadeIn = 0; uint64_t fadeOut = 0; };
-    struct CompRange { uint64_t start = 0; uint64_t end = 0; uint64_t fadeIn = 0; uint64_t fadeOut = 0; };
+    using RangeEdit = ::HirariRegionRangeEdit;
+    using CompRange = ::HirariRegionCompRange;
     using WarpMarker = ::HirariWarpMarker;
     uint32_t id;
     std::string path;
@@ -191,13 +191,41 @@ struct Region {
     // Repairing replace (project load): the Rust store drops malformed entries
     // and orders the survivors.
     uint32_t loopCount = 1;
-    std::vector<RangeEdit> rangeEdits;
-    bool compManaged = false;
-    std::vector<CompRange> compRanges;
     bool locked = false;
     uint32_t syncGroup = 0;
-    // Region-local, source-to-timeline anchors for non-destructive timing edits.
-    std::vector<WarpMarker> warpMarkers;
+    // Rust owns the range-edit, comp-range and warp-marker tables. The frozen
+    // projection below is what a published snapshot and the audio callback
+    // read, so the mutable store never has to be touched off the control side.
+    std::shared_ptr<HirariRegionClipEdits> clipEdits{
+        hirari_region_clip_edits_create(),
+        [](HirariRegionClipEdits* store) { hirari_region_clip_edits_destroy(store); }};
+    std::shared_ptr<HirariRegionClipEditsFrozen> clipSnapshot;
+    const HirariRegionClipEditsView* clipView = nullptr;
+    void publishClipEdits() noexcept {
+        clipSnapshot.reset(
+            clipEdits ? hirari_region_clip_edits_freeze(clipEdits.get()) : nullptr,
+            [](HirariRegionClipEditsFrozen* frozen) {
+                hirari_region_clip_edits_frozen_free(frozen);
+            });
+        clipView = clipSnapshot
+            ? hirari_region_clip_edits_frozen_view(clipSnapshot.get()) : nullptr;
+    }
+    // Region-add gives the region its own table; the copy shares the caller's
+    // store handle until this detach.
+    void detachClipEdits() {
+        auto* copy = clipEdits ? hirari_region_clip_edits_clone(clipEdits.get()) : nullptr;
+        if (!copy) return;
+        clipEdits.reset(copy, [](HirariRegionClipEdits* store) {
+            hirari_region_clip_edits_destroy(store);
+        });
+        // Republish from the clone: a detached copy (region snapshot handle,
+        // pending add) must keep reading its own tables, not the source's.
+        publishClipEdits();
+    }
+    const HirariRegionClipEditsView* clip() const noexcept {
+        static const HirariRegionClipEditsView empty{};
+        return clipView ? clipView : &empty;
+    }
     // Non-destructive processing-step history. Rust owns the authoritative
     // table; C++ hands steps in and the layout serializer reads it directly.
     std::shared_ptr<HirariRegionProcessingHistoryStore> processingStore{

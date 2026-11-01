@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- A region's range-edit, comp-range and warp-marker tables are now Rust-owned
+  (`region_clip_edits.rs`), and the `Region` vectors plus `compManaged` field
+  are deleted. Each region holds an opaque store handle and a frozen projection
+  published with the region snapshot, so the audio callback and the layout
+  serializer read the tables lock-free through `hirari_region_clip_edits_*`.
+  Region-add, the comp/marker/range setters and project hydration now hand the
+  data straight to Rust instead of copying it into the region.
 - The engine command and event queues are now Rust-owned single-producer
   rings (`engine_rings.rs`), with the C++ `RingBuffer` template and both
   engine members deleted. Each engine holds an opaque handle created and

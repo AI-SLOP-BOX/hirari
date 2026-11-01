@@ -381,11 +381,8 @@
             region.fadeInSamples = state.fadeInSamples;
             region.fadeOutSamples = state.fadeOutSamples;
             region.warpRatio = state.warpRatio;
-            if (markerCount == 0) {
-                region.warpMarkers.clear();
-            } else {
-                region.warpMarkers.assign(markers, markers + markerCount);
-            }
+            (void)hirari_region_clip_edits_set_warp_markers(
+                region.clipEdits.get(), markers, markerCount, 0, 0, false);
             publishRegionSnapshot();
             return true;
         }
@@ -419,71 +416,40 @@
     // overlap, fade width, region bounds, lock/managed interaction) live in
     // `hirari_region_comp_ranges_validate`; storing the accepted batch is all
     // that is left here.
-    bool replaceRegionCompRanges(uint32_t rid, std::vector<Region::CompRange> ranges,
-                                 bool managed) {
-        static_assert(sizeof(Region::CompRange) == sizeof(HirariRegionCompRange));
-        static_assert(offsetof(Region::CompRange, start) == offsetof(HirariRegionCompRange, start));
+    bool replaceRegionCompRanges(uint32_t rid, const HirariRegionCompRange* ranges,
+                                 size_t count, bool managed) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid) continue;
-            region.compManaged = managed;
-            region.compRanges = std::move(ranges);
+            if (!hirari_region_clip_edits_replace_comp_ranges(
+                    region.clipEdits.get(), ranges, count, managed)) return false;
             publishRegionSnapshot();
             return true;
         }
         return false;
     }
 
-    // Adopts the result of a Rust range-edit transform.
-    //
-    // Rust returns a buffer it owns and the caller releases; nothing is ever
-    // written through a pointer into this vector, so a returned count can no
-    // longer be turned into a resize that value-initializes over data a
-    // foreign language had already written.
-    static bool adoptRangeEdits(std::vector<Region::RangeEdit>& destination,
-                                const std::vector<Region::RangeEdit>& current,
-                                uint32_t op, uint64_t regionLength,
-                                uint64_t start = 0, uint64_t end = 0,
-                                float gain = 0.0f, uint64_t fadeIn = 0,
-                                uint64_t fadeOut = 0) {
-        static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
-        static_assert(offsetof(Region::RangeEdit, start) == offsetof(HirariRegionRangeEdit, start));
-        size_t produced = 0;
-        HirariRegionRangeEdit* result = hirari_region_range_edits_apply(
-            reinterpret_cast<const HirariRegionRangeEdit*>(current.data()),
-            current.size(), regionLength, op, start, end, gain, fadeIn, fadeOut,
-            &produced);
-        if (!result) return false;
-        std::vector<Region::RangeEdit> adopted;
-        adopted.reserve(produced);
-        for (size_t index = 0; index < produced; ++index) {
-            const auto& edit = result[index];
-            adopted.push_back({edit.start, edit.end, edit.gain, edit.fade_in, edit.fade_out});
-        }
-        hirari_free_range_edits(result, produced);
-        destination = std::move(adopted);
-        return true;
-    }
-
     std::vector<Region::RangeEdit> regionRangeEdits(uint32_t rid) const {
-        for (const auto& region : m_regions) if (region.id == rid) return region.rangeEdits;
+        for (const auto& region : m_regions) if (region.id == rid) {
+            const auto* view = region.clip();
+            if (view->rangeEditCount == 0) return {};
+            return {view->rangeEdits, view->rangeEdits + view->rangeEditCount};
+        }
         return {};
     }
 
-    bool replaceRegionRangeEdits(uint32_t rid, std::vector<Region::RangeEdit> edits,
-                                 bool validate = true) {
-        if (edits.size() > 4096) return false;
+    // `validate` re-admits the replacement batch; without it Rust already
+    // produced this sorted, bounded list.
+    bool replaceRegionRangeEdits(uint32_t rid, const Region::RangeEdit* edits,
+                                 size_t count, bool validate = true) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
             if (region.id != rid || region.locked) continue;
-            if (validate) {
-                if (!adoptRangeEdits(region.rangeEdits, edits, 3u, region.len)) return false;
-            } else {
-                // Rust already produced this sorted, bounded list; storing it
-                // verbatim is the old direct-setter path, not a re-admission.
-                region.rangeEdits = std::move(edits);
+            if (!hirari_region_clip_edits_replace_range_edits(
+                    region.clipEdits.get(), edits, count, region.len, validate)) {
+                return false;
             }
             publishRegionSnapshot();
             return true;
@@ -491,44 +457,9 @@
         return false;
     }
 
-    // Validates and orders warp markers through the Rust pure transform.
-    //
-    // Rust returns a buffer it owns and never writes into caller storage, so
-    // the former in-place sort/compact cannot corrupt a C++ vector. Returns
-    // false when normalization would drop any marker, matching the previous
-    // contract that rejected anything which did not survive 1:1. On success
-    // `ordered` holds the normalized markers in their stored order.
-    static bool normalizeWarpMarkers(const std::vector<Region::WarpMarker>& input,
-                                     uint64_t sourceSpan, uint64_t timelineLength,
-                                     std::vector<Region::WarpMarker>& ordered) {
-        // An empty marker list is valid: it means "no warp markers", which is
-        // the state of nearly every region. The normalizer below reports
-        // emptiness with a null pointer, which previously made clearing (or
-        // restoring) an unmarked region fail and broke project loading.
-        if (input.empty()) {
-            ordered.clear();
-            return true;
-        }
-        static_assert(sizeof(Region::WarpMarker) == sizeof(HirariWarpMarker));
-        size_t produced = 0;
-        HirariWarpMarker* result = hirari_region_normalize_warp_markers(
-            reinterpret_cast<const HirariWarpMarker*>(input.data()), input.size(),
-            sourceSpan, timelineLength, &produced);
-        if (!result) return false;
-        std::vector<Region::WarpMarker> adopted;
-        adopted.reserve(produced);
-        for (size_t index = 0; index < produced; ++index) {
-            adopted.push_back(result[index]);
-        }
-        hirari_free_warp_markers(result, produced);
-        if (produced != input.size()) return false;
-        ordered = std::move(adopted);
-        return true;
-    }
-
-    bool setRegionWarpMarkers(uint32_t rid, std::vector<Region::WarpMarker> markers) {
-        if (markers.size() > 100'000) return false;
-        if (!normalizeWarpMarkers(markers, UINT64_MAX, UINT64_MAX, markers)) return false;
+    // Rejects the edit when normalization would drop any marker, matching the
+    // previous contract. An unchanged list is accepted without republishing.
+    bool setRegionWarpMarkers(uint32_t rid, const HirariWarpMarker* markers, size_t count) {
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         auto it = std::find_if(m_regions.begin(), m_regions.end(), [rid](const Region& r) {
@@ -536,16 +467,10 @@
         });
         if (it == m_regions.end() || it->locked) return false;
         const uint64_t sourceSpan = it->sourceLength > 0 ? it->sourceLength : it->len;
-        if (!normalizeWarpMarkers(markers, sourceSpan, it->len, markers)) return false;
-        if (it->warpMarkers.size() == markers.size() &&
-            std::equal(it->warpMarkers.begin(), it->warpMarkers.end(), markers.begin(),
-                       [](const auto& a, const auto& b) {
-                           return a.sourceSample == b.sourceSample &&
-                               a.timelineSample == b.timelineSample &&
-                               a.transient == b.transient;
-                       })) return true;
-        it->warpMarkers = std::move(markers);
-        publishRegionSnapshot();
+        const int32_t applied = hirari_region_clip_edits_set_warp_markers(
+            it->clipEdits.get(), markers, count, sourceSpan, it->len, true);
+        if (applied < 0) return false;
+        if (applied > 0) publishRegionSnapshot();
         return true;
     }
 

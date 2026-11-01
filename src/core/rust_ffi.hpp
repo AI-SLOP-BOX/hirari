@@ -436,6 +436,42 @@ extern "C" HirariWarpMarker* hirari_region_normalize_warp_markers(
     const HirariWarpMarker* markers_in, size_t count,
     uint64_t source_span, uint64_t timeline_length, size_t* out_count);
 extern "C" void hirari_free_warp_markers(HirariWarpMarker* markers, size_t count);
+// Per-region range-edit, comp-range and warp-marker storage. Rust owns the
+// tables; a frozen projection is what a published snapshot and the audio
+// callback read.
+struct HirariRegionClipEdits;
+struct HirariRegionClipEditsFrozen;
+struct HirariRegionClipEditsView {
+    const HirariRegionRangeEdit* rangeEdits = nullptr;
+    size_t rangeEditCount = 0;
+    const HirariRegionCompRange* compRanges = nullptr;
+    size_t compRangeCount = 0;
+    const HirariWarpMarker* warpMarkers = nullptr;
+    size_t warpMarkerCount = 0;
+    uint8_t compManaged = 0;
+};
+extern "C" HirariRegionClipEdits* hirari_region_clip_edits_create();
+extern "C" void hirari_region_clip_edits_destroy(HirariRegionClipEdits* store);
+extern "C" HirariRegionClipEdits* hirari_region_clip_edits_clone(
+    const HirariRegionClipEdits* store);
+extern "C" bool hirari_region_clip_edits_replace_range_edits(
+    HirariRegionClipEdits* store, const HirariRegionRangeEdit* edits, size_t count,
+    uint64_t region_length, bool validate);
+extern "C" void hirari_region_clip_edits_normalize_range_edits(
+    HirariRegionClipEdits* store, uint64_t region_length);
+extern "C" bool hirari_region_clip_edits_replace_comp_ranges(
+    HirariRegionClipEdits* store, const HirariRegionCompRange* ranges, size_t count,
+    bool managed);
+extern "C" int32_t hirari_region_clip_edits_set_warp_markers(
+    HirariRegionClipEdits* store, const HirariWarpMarker* markers, size_t count,
+    uint64_t source_span, uint64_t timeline_length, bool normalize);
+extern "C" void hirari_region_clip_edits_normalize_warp_markers(
+    HirariRegionClipEdits* store, uint64_t source_span, uint64_t timeline_length);
+extern "C" HirariRegionClipEditsFrozen* hirari_region_clip_edits_freeze(
+    const HirariRegionClipEdits* store);
+extern "C" const HirariRegionClipEditsView* hirari_region_clip_edits_frozen_view(
+    const HirariRegionClipEditsFrozen* frozen);
+extern "C" void hirari_region_clip_edits_frozen_free(HirariRegionClipEditsFrozen* frozen);
 // Region edit host bridge.
 //
 // Region storage stays in the engine because it owns the audio buffers and the

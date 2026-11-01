@@ -1,7 +1,7 @@
 use std::slice;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HirariWarpMarker {
     pub source_sample: u64,
     pub timeline_sample: u64,

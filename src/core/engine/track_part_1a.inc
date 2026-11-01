@@ -58,35 +58,15 @@ public:
         // discarding the whole edit.
         normalized.detachNoteEdits();
         (void)hirari_region_vari_audio_store_normalize(normalized.noteStore.get());
-        if (normalized.warpMarkers.size() > 100'000) {
-            normalized.warpMarkers.resize(100'000);
-        }
+        // Edit tables follow the same rule: detach first so this region owns
+        // its table, then let Rust cap and normalize the stored entries.
+        normalized.detachClipEdits();
         const uint64_t warpSourceSpan = normalized.sourceLength > 0
             ? normalized.sourceLength : normalized.len;
-        // Rust normalizes into a buffer it owns; nothing is written through a
-        // pointer into this vector, so no returned count can drive a resize
-        // over foreign-written data.
-        size_t validWarpMarkerCount = 0;
-        HirariWarpMarker* normalizedWarpMarkers = hirari_region_normalize_warp_markers(
-            normalized.warpMarkers.data(), normalized.warpMarkers.size(),
-            warpSourceSpan, normalized.len, &validWarpMarkerCount);
-        if (normalizedWarpMarkers) {
-            std::vector<Region::WarpMarker> adopted;
-            adopted.reserve(validWarpMarkerCount);
-            for (size_t index = 0; index < validWarpMarkerCount; ++index) {
-                const auto& marker = normalizedWarpMarkers[index];
-                adopted.push_back({marker.sourceSample, marker.timelineSample,
-                                   marker.transient != 0});
-            }
-            hirari_free_warp_markers(normalizedWarpMarkers, validWarpMarkerCount);
-            normalized.warpMarkers = std::move(adopted);
-        } else {
-            normalized.warpMarkers.clear();
-        }
-        // The Rust render core owns validation and normalization so the audio
-        // callback receives bounded, ordered range data.
-        (void)adoptRangeEdits(normalized.rangeEdits, normalized.rangeEdits, 0u,
-                              normalized.len);
+        hirari_region_clip_edits_normalize_warp_markers(
+            normalized.clipEdits.get(), warpSourceSpan, normalized.len);
+        hirari_region_clip_edits_normalize_range_edits(
+            normalized.clipEdits.get(), normalized.len);
         normalized.fadeInSamples = std::min(normalized.fadeInSamples, normalized.len);
         normalized.fadeOutSamples = std::min(normalized.fadeOutSamples, normalized.len);
         auto it = std::lower_bound(
@@ -131,7 +111,8 @@ public:
                 region.sourceOffset = 0;
                 region.baseStart = region.start;
                 region.baseSourceOffset = 0;
-                region.warpMarkers.clear();
+                (void)hirari_region_clip_edits_set_warp_markers(
+                    region.clipEdits.get(), nullptr, 0, 0, 0, false);
                 region.sourceLength = region.audio->getNumSamples();
                 region.len = static_cast<uint64_t>(std::ceil(
                     static_cast<long double>(region.sourceLength) /

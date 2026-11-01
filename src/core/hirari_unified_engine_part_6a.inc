@@ -25,7 +25,6 @@ bool HirariUnifiedEngine::collectProjectLayout(ProjectLayoutData* out, bool incl
                                                const std::atomic<bool>* cancellation) const {
     static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) ==
                   sizeof(HirariLayoutAutomationPoint));
-    static_assert(sizeof(Region::RangeEdit) == sizeof(HirariRegionRangeEdit));
 
     const auto cancelled = [cancellation]() noexcept {
         return cancellation && cancellation->load(std::memory_order_acquire);
@@ -164,11 +163,10 @@ bool HirariUnifiedEngine::collectProjectLayout(ProjectLayoutData* out, bool incl
             // decoded during project hydration; clients can surface a relink
             // or decoder error instead of silently showing an empty region.
             regionView.audioLoaded = region.audio != nullptr;
-            regionView.warpMarkers = region.warpMarkers.data();
-            regionView.warpMarkerCount = region.warpMarkers.size();
-            regionView.rangeEdits =
-                reinterpret_cast<const HirariRegionRangeEdit*>(region.rangeEdits.data());
-            regionView.rangeEditCount = region.rangeEdits.size();
+            regionView.warpMarkers = region.clip()->warpMarkers;
+            regionView.warpMarkerCount = region.clip()->warpMarkerCount;
+            regionView.rangeEdits = region.clip()->rangeEdits;
+            regionView.rangeEditCount = region.clip()->rangeEditCount;
             regionView.noteStore = region.noteStore.get();
             regionView.noteFrozen = region.noteSnapshot.get();
             regionView.processingStore = region.processingStore.get();
