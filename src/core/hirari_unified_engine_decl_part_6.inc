@@ -52,22 +52,11 @@ private:
     // generation one before any callback or command can observe it.
     std::atomic<uint64_t> m_audioConfigGeneration{1};
     std::atomic<bool> m_audioConfigTransition{false};
-    
-    // Lock-free queues
-    struct Command {
-        ::Hirari::Core::CommandType type;
-        uint32_t tid;
-        float val;
-        uint64_t ts;
-        // Commands are valid only for the audio configuration snapshot from
-        // which the UI/CLI observed them.  The callback rechecks this before
-        // mutating a Track, preventing a queued command from crossing a
-        // sample-rate or block-size transition.
-        uint64_t expectedAudioGeneration{0};
-    };
 
-    ::Hirari::Core::RingBuffer<Command, 1024> m_commandQueue;
-    mutable ::Hirari::Core::RingBuffer<::Hirari::Core::EngineEvent, 512> m_eventQueue;
+    // The command and event queues are Rust-owned SPSC rings (engine_rings.rs);
+    // neither the records nor the storage for them live on the engine. The
+    // handle is per engine so offline engines and tests never share a queue.
+    void* m_engineRings = nullptr;
 
     // Internal components (using PIMPL principles where possible)
     ::Hirari::Core::AudioBuffer m_masterBuffer;

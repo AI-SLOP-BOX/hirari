@@ -9,7 +9,6 @@
 #include "audio_buffer.hpp"
 #include "midi_buffer.hpp"
 #include "bridge_types.hpp"
-#include "utils/ring_buffer.hpp"
 #include "concurrency/audio_task_manager.hpp"
 #include <optional>
 #include "engine/routing_engine.hpp"

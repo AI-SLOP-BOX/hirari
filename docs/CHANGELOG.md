@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- The engine command and event queues are now Rust-owned single-producer
+  rings (`engine_rings.rs`), with the C++ `RingBuffer` template and both
+  engine members deleted. Each engine holds an opaque handle created and
+  released by Rust, and every C++ command, event push and project-boundary
+  clear goes through the ring ABI (`hirari_engine_command_ring_*`,
+  `hirari_engine_event_ring_*`), so the queue storage and its
+  acquire/release index protocol exist in Rust only.
 - The diagnostic ring no longer carries a C++ owner: `log_buffer.hpp` and its
   `LogBuffer` wrapper are deleted, and every C++ site posts through
   `hirari_log_post`, which hands the message straight to the Rust ring.

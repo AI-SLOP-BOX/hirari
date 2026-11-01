@@ -214,7 +214,7 @@ void HirariUnifiedEngine::new_project() {
     // it before reusing any track IDs in the new project.
     m_inputMonitorTrackId.store(kNoInputMonitorTrack, std::memory_order_release);
     m_inputMonitorBlockPublished.store(false, std::memory_order_release);
-    m_commandQueue.clear();
+    hirari_engine_command_ring_clear(m_engineRings);
     hirari_region_jobs_clear(this);
     set_test_tone(false);
     set_playhead(0);

@@ -134,11 +134,9 @@ bool HirariUnifiedEngine::execute_auto_arrangement() {
         harmonyTension, harmonyValence,
         [](void* context, uint64_t start, uint64_t length) {
             auto* engine = static_cast<HirariUnifiedEngine*>(context);
-            ::Hirari::Core::EngineEvent event{};
-            event.type = 0x50;  // EVENT_TYPE_STRUCTURE_MARKER
-            event.timestamp = start;
-            event.value = static_cast<float>(length);
-            engine->push_event(event);
+            // EVENT_TYPE_STRUCTURE_MARKER carries the section length as its value.
+            (void)hirari_engine_event_ring_push(engine->m_engineRings, start, 0x50, 0,
+                                                static_cast<float>(length), nullptr, 0);
             hirari_log_post(0, 0, "AI | ARRANGEMENT | SECTION_DETECTED");
         });
 }

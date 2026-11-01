@@ -313,8 +313,10 @@ void HirariUnifiedEngine::installCommandHost() {
         [](void* host, uint32_t type, uint32_t tid, float val, uint64_t ts,
            uint64_t audioGeneration) -> bool {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            return engine && engine->m_commandQueue.push(Command{
-                static_cast<::Hirari::Core::CommandType>(type), tid, val, ts, audioGeneration});
+            if (!engine) return false;
+            const HirariEngineCommandRecord record{
+                static_cast<uint32_t>(type), tid, val, ts, audioGeneration};
+            return hirari_engine_command_ring_push(engine->m_engineRings, &record);
         },
         [](void* host, uint32_t type, uint32_t tid, float val, uint64_t ts) {
             if (auto* engine = static_cast<HirariUnifiedEngine*>(host))

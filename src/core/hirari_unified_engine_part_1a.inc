@@ -74,6 +74,7 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     // Sandbox observed-health state is keyed by engine address for the same
     // reason. Drop it after shutdown() has joined the recovery thread.
     hirari_plugin_sandbox_maintenance_forget(this);
+    hirari_engine_rings_destroy(m_engineRings);
     hirari_midi_snapshot_store_destroy(m_midiSnapshotStore);
     hirari_control_room_state_destroy(m_controlRoomState);
     hirari_native_pdc_destroy(m_pdcState);
@@ -153,6 +154,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     : m_playhead(0)
     , m_loopEnabled(false) {
     m_midiSnapshotStore = hirari_midi_snapshot_store_create();
+    m_engineRings = hirari_engine_rings_create();
     m_masterBuffer.setSize(2, 4096);
     m_context = std::make_unique<::Hirari::DSP::ProcessContext>();
     *m_context = ::Hirari::DSP::ProcessContext{};
@@ -237,8 +239,8 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
             if (state.activeTracks[i]) state.activeTracks[i]->clearMidiInput();
         }
-        Command command{};
-        while (m_commandQueue.pop(command)) {
+        HirariEngineCommandRecord command{};
+        while (hirari_engine_command_ring_pop(m_engineRings, &command)) {
             // A command may have waited in the lock-free queue while the
             // control thread rebuilt the audio state. Never apply it to a
             // different device configuration.

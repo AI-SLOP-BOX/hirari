@@ -47,6 +47,33 @@ inline void* hirari_log_state() noexcept {
     return const_cast<void*>(hirari_log_buffer_default_state());
 }
 
+// The engine's command and event queues are Rust-owned fixed-capacity SPSC
+// rings (engine_rings.rs). C++ keeps neither the storage nor the index
+// arithmetic: it holds an opaque per-engine handle, fills a record and calls
+// the ring. Field order and width here match engine_rings::CommandRecord.
+struct HirariEngineCommandRecord {
+    uint32_t type;
+    uint32_t tid;
+    float val;
+    uint64_t ts;
+    uint64_t expectedAudioGeneration;
+};
+static_assert(sizeof(HirariEngineCommandRecord) == 32,
+              "HirariEngineCommandRecord must match the Rust CommandRecord layout");
+extern "C" void* hirari_engine_rings_create();
+extern "C" void hirari_engine_rings_destroy(void* rings);
+extern "C" bool hirari_engine_command_ring_push(const void* rings,
+                                                const HirariEngineCommandRecord* record);
+extern "C" bool hirari_engine_command_ring_pop(const void* rings,
+                                               HirariEngineCommandRecord* record);
+extern "C" void hirari_engine_command_ring_clear(const void* rings);
+extern "C" bool hirari_engine_event_ring_push(const void* rings, uint64_t timestamp,
+                                              uint32_t type, uint32_t track_id, float value,
+                                              const uint8_t* label, size_t label_len);
+extern "C" bool hirari_engine_event_ring_pop(const void* rings, uint64_t* timestamp,
+                                             uint32_t* type, uint32_t* track_id, float* value,
+                                             uint8_t* label, size_t label_capacity);
+
 struct HirariScheduledMidiNote {
     uint32_t track_id;
     uint8_t pitch;

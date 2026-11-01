@@ -40,6 +40,7 @@ pub mod audio_resampler;
 pub mod audio_test_tone;
 pub mod audio_engine_delegate_ext;
 pub mod engine_edit_ext;
+pub mod engine_rings;
 pub mod auditor;
 pub mod auto_filter;
 pub mod auto_pitch_corrector;

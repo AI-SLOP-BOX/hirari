@@ -121,7 +121,7 @@
         for (const auto& track : m_tracks) {
             hirari_sidechain_engine_remove_track(m_sidechainEngine, track->getId());
         }
-        m_commandQueue.clear();
+        hirari_engine_command_ring_clear(m_engineRings);
         hirari_native_pdc_reset_for_project(m_pdcState);
         hirari_sidechain_engine_reset(m_sidechainEngine);
         hirari_routing_engine_reset(m_routingEngine);

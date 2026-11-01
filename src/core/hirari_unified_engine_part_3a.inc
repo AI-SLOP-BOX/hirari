@@ -48,15 +48,10 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
            const uint8_t* label, size_t labelLength) {
             if (!host) return;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            ::Hirari::Core::EngineEvent event{};
-            event.timestamp = engine->m_playhead.load(std::memory_order_relaxed);
-            event.type = type;
-            event.trackId = trackId;
-            event.value = value;
-            std::snprintf(event.label, sizeof(event.label), "%.*s",
-                          static_cast<int>(labelLength),
-                          reinterpret_cast<const char*>(label));
-            engine->push_event(event);
+            (void)hirari_engine_event_ring_push(
+                engine->m_engineRings,
+                engine->m_playhead.load(std::memory_order_relaxed), type, trackId, value,
+                label, labelLength);
         },
     };
     hirari_plugin_sandbox_maintenance_host_install(&ops);
