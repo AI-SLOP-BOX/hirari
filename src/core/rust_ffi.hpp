@@ -224,20 +224,35 @@ extern "C" bool hirari_bus_system_reconcile(
     void* state, const bool* active, uint32_t count);
 extern "C" void hirari_bus_system_reset(void* state);
 extern "C" void hirari_bus_system_clear(const void* state, uint32_t frames);
+extern "C" void* hirari_audio_buffer_storage_create();
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
-extern "C" float* hirari_audio_buffer_storage_data(const void* storage);
-extern "C" size_t hirari_audio_buffer_storage_capacity(const void* storage);
 extern "C" bool hirari_audio_buffer_storage_update_channel_pointers(
     void* storage, float* data, uint32_t channels, uint32_t samples);
-extern "C" float** hirari_audio_buffer_storage_channel_pointers(const void* storage);
 extern "C" uint8_t hirari_audio_buffer_storage_reserve_buffer(
-    void** storage, uint32_t channels, uint32_t current_channels, uint32_t samples,
-    size_t current_capacity,
-    bool is_external, bool* needs_data_allocation);
+    void* storage, uint32_t channels, uint32_t samples);
+extern "C" bool hirari_audio_buffer_storage_resize(
+    void* storage, uint32_t channels, uint32_t samples);
 extern "C" bool hirari_audio_buffer_storage_wrap_channels(
-    void** storage, uint32_t* current_channels, uint32_t* current_samples,
-    size_t* current_capacity, float** current_data, bool* is_external, float*** external_data,
-    float** channels, uint32_t channel_count, uint32_t sample_count);
+    void* storage, float** channels, uint32_t channel_count, uint32_t sample_count);
+extern "C" uint32_t hirari_audio_buffer_storage_channels(const void* storage);
+extern "C" uint32_t hirari_audio_buffer_storage_samples(const void* storage);
+extern "C" const float* const* hirari_audio_buffer_storage_array_read(const void* storage);
+extern "C" float** hirari_audio_buffer_storage_array_write(const void* storage);
+extern "C" float* hirari_audio_buffer_storage_write_pointer(
+    const void* storage, uint32_t channel);
+extern "C" const float* hirari_audio_buffer_storage_read_pointer(
+    const void* storage, uint32_t channel, uint32_t offset);
+extern "C" float* hirari_audio_buffer_storage_write_pointer_at(
+    const void* storage, uint32_t channel, uint32_t offset);
+extern "C" void hirari_audio_buffer_storage_clear(
+    const void* storage, uint32_t offset, uint32_t samples);
+extern "C" uint32_t hirari_audio_buffer_storage_sanitize(const void* storage);
+extern "C" void hirari_audio_buffer_storage_apply_gain(const void* storage, float gain);
+extern "C" void hirari_audio_buffer_storage_add_from(
+    const void* storage, const void* source, uint32_t sample_count);
+extern "C" void hirari_audio_buffer_storage_add_channels_from(
+    const void* storage, const float* source_left, const float* source_right,
+    uint32_t sample_count);
 extern "C" void hirari_audio_buffer_set_realtime_guard(bool is_realtime);
 extern "C" uint64_t hirari_audio_buffer_realtime_resize_attempts();
 extern "C" size_t hirari_audio_buffer_last_realtime_requested_capacity();

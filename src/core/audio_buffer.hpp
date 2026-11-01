@@ -14,45 +14,27 @@ namespace Hirari::Core {
 
 /**
  * @brief AudioBuffer: The 'Blood' of the DAW.
- * HONEST FIX: Unified the memory allocation into a single contiguous block.
+ * The Rust audio storage owns the sample block, the channel view and the
+ * buffer dimensions; this class is only the typed C++ handle for them.
  */
 class AudioBuffer {
 public:
     static constexpr uint32_t kMaxFastPathChannels = 16;
 
-    AudioBuffer() : m_numChannels(0), m_numSamples(0), m_capacity(0),
-                    m_isExternal(false), m_data(nullptr) {}
-    
+    AudioBuffer() : m_storage(hirari_audio_buffer_storage_create()) {}
+
     AudioBuffer(uint32_t channels, uint32_t samples) : AudioBuffer() {
         resize(channels, samples);
     }
 
     ~AudioBuffer() { hirari_audio_buffer_storage_destroy(m_storage); }
 
-    /**
-     * @brief Pins the buffer in physical RAM to prevent kernel page-faults.
-     */
     AudioBuffer(AudioBuffer&& other) noexcept : AudioBuffer() { *this = std::move(other); }
     AudioBuffer& operator=(AudioBuffer&& other) noexcept {
         if (this != &other) {
             hirari_audio_buffer_storage_destroy(m_storage);
-            m_numChannels = other.m_numChannels;
-            m_numSamples = other.m_numSamples;
-            m_capacity = other.m_capacity;
             m_storage = other.m_storage;
-            m_data = other.m_data;
-            m_isExternal = other.m_isExternal;
-            m_externalData = other.m_externalData;
-            m_isDirty = other.m_isDirty;
-            other.m_storage = nullptr;
-            other.m_data = nullptr;
-            other.m_externalData = nullptr;
-            other.m_numChannels = 0;
-            other.m_numSamples = 0;
-            other.m_capacity = 0;
-            other.m_isExternal = false;
-            other.m_isDirty = true;
-            updatePointers();
+            other.m_storage = hirari_audio_buffer_storage_create();
         }
         return *this;
     }
@@ -61,31 +43,16 @@ public:
     AudioBuffer& operator=(const AudioBuffer&) = delete;
 
     bool reserve(uint32_t channels, uint32_t samples) {
-        bool needsDataAllocation = false;
-        const uint8_t result = hirari_audio_buffer_storage_reserve_buffer(
-            &m_storage, channels, m_numChannels, samples, m_capacity,
-            m_isExternal, &needsDataAllocation);
-        if (result == 1) {
+        const uint8_t result =
+            hirari_audio_buffer_storage_reserve_buffer(m_storage, channels, samples);
+        if (result == 1 || result == 5) {
             pushEngineStatus(StatusSeverity::Critical,
-                needsDataAllocation ? "AUDIO_BUFFER_RESIZE_ATTEMPTED"
-                                    : "AUDIO_BUFFER_POINTER_RESIZE_ATTEMPTED");
+                result == 1 ? "AUDIO_BUFFER_RESIZE_ATTEMPTED"
+                            : "AUDIO_BUFFER_POINTER_RESIZE_ATTEMPTED");
             return false;
         }
         if (result == 2) throw std::bad_array_new_length();
-        if (result == 3) throw std::bad_alloc();
-        if (result == 4) {
-            m_data = hirari_audio_buffer_storage_data(m_storage);
-            m_capacity = hirari_audio_buffer_storage_capacity(m_storage);
-            if (needsDataAllocation) m_isExternal = false;
-            throw std::bad_alloc();
-        }
         if (result != 0) throw std::bad_alloc();
-        if (needsDataAllocation) {
-            m_data = hirari_audio_buffer_storage_data(m_storage);
-            m_capacity = hirari_audio_buffer_storage_capacity(m_storage);
-            m_isExternal = false;
-        }
-        updatePointers();
         return true;
     }
 
@@ -105,13 +72,7 @@ public:
 
     bool resize(uint32_t channels, uint32_t samples) {
         if (!reserve(channels, samples)) return false;
-        m_isExternal = false;
-        m_externalData = nullptr;
-        m_numChannels = channels;
-        m_numSamples = samples;
-        updatePointers();
-        clear();
-        return true;
+        return hirari_audio_buffer_storage_resize(m_storage, channels, samples);
     }
 
     bool setSize(uint32_t channels, uint32_t samples) {
@@ -119,120 +80,67 @@ public:
     }
 
     void wrapChannels(float** channels, uint32_t numChannels, uint32_t numSamples) {
-        if (hirari_audio_buffer_storage_wrap_channels(
-                &m_storage, &m_numChannels, &m_numSamples, &m_capacity,
-                &m_data, &m_isExternal, &m_externalData, channels, numChannels, numSamples)) {
-            m_isDirty = true;
-        }
+        (void)hirari_audio_buffer_storage_wrap_channels(
+            m_storage, channels, numChannels, numSamples);
     }
 
-    float* getWritePointer(uint32_t channel) { 
-        m_isDirty = true; 
-        if (channel >= m_numChannels) return nullptr;
-        if (m_isExternal) return m_externalData[channel];
-        return m_data + (channel * m_numSamples);
+    float* getWritePointer(uint32_t channel) {
+        return hirari_audio_buffer_storage_write_pointer(m_storage, channel);
     }
-    
-    const float* getReadPointer(uint32_t channel) const { 
-        if (channel >= m_numChannels) return nullptr;
-        if (m_isExternal) return m_externalData[channel];
-        return m_data + (channel * m_numSamples);
+
+    const float* getReadPointer(uint32_t channel) const {
+        return hirari_audio_buffer_storage_read_pointer(m_storage, channel, 0);
     }
+
     const float* getReadPointer(uint32_t channel, uint32_t offset) const {
-        const float* pointer = getReadPointer(channel);
-        return pointer ? pointer + std::min(offset, m_numSamples) : nullptr;
+        return hirari_audio_buffer_storage_read_pointer(m_storage, channel, offset);
     }
+
     float* getWritePointer(uint32_t channel, uint32_t offset) {
-        float* pointer = getWritePointer(channel);
-        return pointer ? pointer + std::min(offset, m_numSamples) : nullptr;
+        return hirari_audio_buffer_storage_write_pointer_at(m_storage, channel, offset);
     }
 
-    void clear() {
-        clear(m_numSamples);
-    }
+    void clear() { hirari_audio_buffer_storage_clear(m_storage, 0, getNumSamples()); }
 
-    void clear(uint32_t samples) {
-        clear(0, samples);
-    }
+    void clear(uint32_t samples) { hirari_audio_buffer_storage_clear(m_storage, 0, samples); }
 
     void clear(uint32_t offset, uint32_t samples) {
-        if (offset >= m_numSamples || m_numChannels == 0) return;
-        uint32_t n = std::min(samples, m_numSamples - offset);
-        hirari_audio_buffer_clear(getArrayOfWritePointers(), m_numChannels, offset, n);
-        m_isDirty = false;
+        hirari_audio_buffer_storage_clear(m_storage, offset, samples);
     }
 
     // Boundary sanitizer for third-party DSP.  A plugin is not allowed to
-    // poison the rest of the graph with NaN/Inf; keep the operation allocation
-    // free so it is safe on the audio thread.
+    // poison the rest of the graph with NaN/Inf; the scan stays allocation free
+    // so it is safe on the audio thread.
     uint32_t sanitizeNonFinite() noexcept {
-        if (m_numChannels > 0) m_isDirty = true;
-        return hirari_audio_buffer_sanitize_non_finite(
-            getArrayOfWritePointers(), m_numChannels, m_numSamples);
+        return hirari_audio_buffer_storage_sanitize(m_storage);
     }
 
     void addFrom(const AudioBuffer& other, uint32_t numSamples) {
-        uint32_t channels = std::min(m_numChannels, other.getNumChannels());
-        uint32_t n = std::min(numSamples, std::min(m_numSamples, other.getNumSamples()));
-
-        if (channels > 0) m_isDirty = true;
-        hirari_audio_buffer_add_channels(
-            getArrayOfWritePointers(), other.getArrayOfReadPointers(), channels, n);
+        hirari_audio_buffer_storage_add_from(m_storage, other.m_storage, numSamples);
     }
 
     void addFrom(const float* srcL, const float* srcR, uint32_t numSamples) {
-        // Raw-pointer callers include device/plugin bridges.  A missing
-        // channel must never turn a disconnect or malformed callback into a
-        // null dereference on the realtime thread.
-        if (srcL == nullptr || (m_numChannels > 1 && srcR == nullptr)) return;
-        uint32_t n = std::min(numSamples, m_numSamples);
-        if (m_numChannels < 1) return;
-
-        float* dL = getWritePointer(0);
-        float* dR = m_numChannels > 1 ? getWritePointer(1) : nullptr;
-        float* destinations[] = {dL, dR};
-        const float* sources[] = {srcL, srcR};
-        hirari_audio_buffer_add_channels(destinations, sources, dR ? 2u : 1u, n);
+        hirari_audio_buffer_storage_add_channels_from(m_storage, srcL, srcR, numSamples);
     }
 
     void applyGain(float gain) {
-        // Gain values can arrive from automation or an external control
-        // surface. Reject non-finite values at the buffer boundary instead
-        // of spreading NaN/Inf through every downstream processor.
-        if (!std::isfinite(gain) || gain == 1.0f) return;
-        if (m_numChannels > 0) m_isDirty = true;
-        hirari_audio_buffer_apply_gain(
-            getArrayOfWritePointers(), m_numChannels, m_numSamples, gain);
+        hirari_audio_buffer_storage_apply_gain(m_storage, gain);
     }
 
-    uint32_t getNumChannels() const { return m_numChannels; }
-    uint32_t getNumSamples() const { return m_numSamples; }
+    uint32_t getNumChannels() const { return hirari_audio_buffer_storage_channels(m_storage); }
+    uint32_t getNumSamples() const { return hirari_audio_buffer_storage_samples(m_storage); }
+
     const float* const* getArrayOfReadPointers() const {
-        if (m_isExternal) return const_cast<const float* const*>(m_externalData);
-        return const_cast<const float* const*>(
-            hirari_audio_buffer_storage_channel_pointers(m_storage));
+        return reinterpret_cast<const float* const*>(
+            hirari_audio_buffer_storage_array_read(m_storage));
     }
 
     float** getArrayOfWritePointers() {
-        if (m_isExternal) return m_externalData;
-        return hirari_audio_buffer_storage_channel_pointers(m_storage);
+        return hirari_audio_buffer_storage_array_write(m_storage);
     }
 
 private:
-    void updatePointers() {
-        if (m_isExternal || !m_storage || m_data == nullptr) return;
-        (void)hirari_audio_buffer_storage_update_channel_pointers(
-            m_storage, m_data, m_numChannels, m_numSamples);
-    }
-
-    uint32_t m_numChannels;
-    uint32_t m_numSamples;
-    size_t m_capacity;
     void* m_storage = nullptr;
-    bool m_isExternal = false;
-    bool m_isDirty = true;
-    float* m_data = nullptr;
-    float** m_externalData = nullptr;
 };
 
 } // namespace Hirari::Core

@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- `AudioBuffer` dimensions, the channel view and externally wrapped planes are
+  now owned by the Rust storage (`hirari_audio_buffer_storage_*`); the C++
+  class keeps only one opaque handle and its pointer/resize/clear/gain
+  operations. A dead write-only dirty flag was removed with the fields it
+  guarded.
 - Track freeze publication is now Rust-owned (`track_frozen_store.rs`): the
   published frozen buffer, its retire/clear lifecycle, generation counters,
   cache path and validation live behind `hirari_track_frozen_store_*`, so the

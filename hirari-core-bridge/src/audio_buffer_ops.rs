@@ -200,6 +200,10 @@ struct AlignedAudioStorage {
     inline_channel_pointers: [*mut f32; AUDIO_BUFFER_INLINE_CHANNELS],
     channel_pointers: Vec<*mut f32>,
     pointer_count: usize,
+    channels: u32,
+    frame_count: u32,
+    external: bool,
+    external_data: *mut *mut f32,
 }
 
 fn new_aligned_audio_storage() -> AlignedAudioStorage {
@@ -209,6 +213,10 @@ fn new_aligned_audio_storage() -> AlignedAudioStorage {
         inline_channel_pointers: [std::ptr::null_mut(); AUDIO_BUFFER_INLINE_CHANNELS],
         channel_pointers: Vec::new(),
         pointer_count: 0,
+        channels: 0,
+        frame_count: 0,
+        external: false,
+        external_data: std::ptr::null_mut(),
     }
 }
 
@@ -459,22 +467,19 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_channel_count(
         .map_or(0, |storage| storage.pointer_count)
 }
 
-/// Applies AudioBuffer's capacity and channel-table growth plan on the Rust
-/// side. Status is 0 for success, 1 for a rejected realtime resize, 2 for an
-/// invalid size, 3 for sample allocation failure, and 4 for pointer allocation failure.
+/// Applies the AudioBuffer growth plan on the Rust side. Status is 0 for
+/// success, 1 for a rejected realtime sample resize, 5 for a rejected realtime
+/// channel-table resize, 2 for an invalid size, 3 for sample allocation
+/// failure, and 4 for pointer allocation failure.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve_buffer(
-    storage_handle: *mut *mut c_void,
+    storage_handle: *mut c_void,
     channels: u32,
-    current_channels: u32,
     samples: u32,
-    current_capacity: usize,
-    is_external: bool,
-    needs_data_allocation: *mut bool,
 ) -> u8 {
-    if storage_handle.is_null() || needs_data_allocation.is_null() {
+    let Some(storage) = (unsafe { storage_handle.cast::<AlignedAudioStorage>().as_mut() }) else {
         return 3;
-    }
+    };
     if samples > u32::MAX - 15 {
         return 2;
     }
@@ -485,20 +490,12 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve_buffer(
     if required > usize::MAX / std::mem::size_of::<f32>() {
         return 2;
     }
-    let storage = unsafe { &mut *storage_handle };
-    let pointer_count = if storage.is_null() {
-        0
-    } else {
-        unsafe { hirari_audio_buffer_storage_channel_count(*storage) }
-    };
-    let needs_data = required > current_capacity || (is_external && required != 0);
-    let required_pointers = channels.max(current_channels) as usize;
+    let needs_data = required > storage.capacity || (storage.external && required != 0);
+    let required_pointers = channels.max(storage.channels) as usize;
     let target_pointer_count = required_pointers.max(AUDIO_BUFFER_INLINE_CHANNELS);
-    let needs_pointer_table = (needs_data || !storage.is_null() || required_pointers > AUDIO_BUFFER_INLINE_CHANNELS)
-        && pointer_count < target_pointer_count;
+    let needs_pointer_table = storage.pointer_count < target_pointer_count;
     let needs_pointer_allocation = needs_pointer_table
         && required_pointers > AUDIO_BUFFER_INLINE_CHANNELS;
-    unsafe { needs_data_allocation.write(needs_data) };
     if !needs_data && !needs_pointer_table {
         return 0;
     }
@@ -506,23 +503,55 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve_buffer(
     if realtime && (needs_data || needs_pointer_allocation) {
         AUDIO_BUFFER_RESIZE_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         AUDIO_BUFFER_LAST_REQUESTED_CAPACITY.store(required, Ordering::Relaxed);
-        AUDIO_BUFFER_LAST_CAPACITY.store(current_capacity, Ordering::Relaxed);
-        return 1;
-    }
-    if storage.is_null() {
-        *storage = Box::into_raw(Box::new(new_aligned_audio_storage())).cast();
+        AUDIO_BUFFER_LAST_CAPACITY.store(storage.capacity, Ordering::Relaxed);
+        return if needs_data { 1 } else { 5 };
     }
     if needs_data
-        && !unsafe { hirari_audio_buffer_storage_reserve(*storage, required) }
+        && !unsafe { hirari_audio_buffer_storage_reserve(storage_handle, required) }
     {
         return 3;
     }
     if needs_pointer_table
-        && !unsafe { hirari_audio_buffer_storage_prepare_channels(*storage, target_pointer_count) }
+        && !unsafe { hirari_audio_buffer_storage_prepare_channels(storage_handle, target_pointer_count) }
     {
         return 4;
     }
     0
+}
+
+/// Commits a new owned buffer size after a successful reserve. Ownership of
+/// the dimension fields and the channel view lives here, not in C++.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_resize(
+    storage_handle: *mut c_void,
+    channels: u32,
+    samples: u32,
+) -> bool {
+    let Some(storage) = (unsafe { storage_handle.cast::<AlignedAudioStorage>().as_mut() }) else {
+        return false;
+    };
+    if storage.pointer_count < channels as usize {
+        return false;
+    }
+    let Some(required) = (channels as usize).checked_mul(samples as usize) else {
+        return false;
+    };
+    if required > storage.capacity {
+        return false;
+    }
+    storage.external = false;
+    storage.external_data = std::ptr::null_mut();
+    storage.channels = channels;
+    storage.frame_count = samples;
+    if !unsafe {
+        hirari_audio_buffer_storage_update_channel_pointers(
+            storage_handle, storage.samples, channels, samples,
+        )
+    } {
+        return false;
+    }
+    unsafe { hirari_audio_buffer_storage_clear(storage_handle, 0, samples) };
+    true
 }
 
 /// Switches a native AudioBuffer between owned and externally wrapped planes.
@@ -530,49 +559,247 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve_buffer(
 /// the compatibility API's failure behavior.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_audio_buffer_storage_wrap_channels(
-    storage_handle: *mut *mut c_void,
-    current_channels: *mut u32,
-    current_samples: *mut u32,
-    current_capacity: *mut usize,
-    current_data: *mut *mut f32,
-    is_external: *mut bool,
-    external_data: *mut *mut *mut f32,
+    storage_handle: *mut c_void,
     channels: *mut *mut f32,
     channel_count: u32,
     sample_count: u32,
 ) -> bool {
-    if storage_handle.is_null() || current_channels.is_null() || current_samples.is_null()
-        || current_capacity.is_null() || current_data.is_null() || is_external.is_null()
-        || external_data.is_null()
-    {
+    let Some(storage) = (unsafe { storage_handle.cast::<AlignedAudioStorage>().as_mut() }) else {
+        return false;
+    };
+    storage.release();
+    storage.channels = 0;
+    storage.frame_count = 0;
+    storage.external = false;
+    storage.external_data = std::ptr::null_mut();
+    if channels.is_null() || channel_count == 0 || sample_count == 0 {
         return false;
     }
-    let valid = if channels.is_null() || channel_count == 0 || sample_count == 0 {
-        false
-    } else {
-        (0..channel_count as usize)
-            .all(|index| unsafe { !(*channels.add(index)).is_null() })
-    };
-    let storage = unsafe { *storage_handle };
-    if !storage.is_null() {
-        unsafe { hirari_audio_buffer_storage_release(storage) };
+    if (0..channel_count as usize).any(|index| unsafe { (*channels.add(index)).is_null() }) {
+        return false;
     }
-    unsafe {
-        current_capacity.write(0);
-        current_data.write(std::ptr::null_mut());
-        if !valid {
-            current_channels.write(0);
-            current_samples.write(0);
-            is_external.write(false);
-            external_data.write(std::ptr::null_mut());
-            return false;
-        }
-        current_channels.write(channel_count);
-        current_samples.write(sample_count);
-        is_external.write(true);
-        external_data.write(channels);
-    }
+    storage.channels = channel_count;
+    storage.frame_count = sample_count;
+    storage.external = true;
+    storage.external_data = channels;
     true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_channels(
+    storage: *const c_void,
+) -> u32 {
+    unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }.map_or(0, |storage| storage.channels)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_samples(
+    storage: *const c_void,
+) -> u32 {
+    unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }
+        .map_or(0, |storage| storage.frame_count)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_array_read(
+    storage: *const c_void,
+) -> *const *mut f32 {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return std::ptr::null();
+    };
+    if storage.external {
+        storage.external_data as *const *mut f32
+    } else {
+        storage.channel_pointers() as *const *mut f32
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_array_write(
+    storage: *const c_void,
+) -> *mut *mut f32 {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    if storage.external {
+        storage.external_data
+    } else {
+        storage.channel_pointers()
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_write_pointer(
+    storage: *const c_void,
+    channel: u32,
+) -> *mut f32 {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return std::ptr::null_mut();
+    };
+    if channel >= storage.channels {
+        return std::ptr::null_mut();
+    }
+    if storage.external {
+        return unsafe { *storage.external_data.add(channel as usize) };
+    }
+    unsafe { storage.samples.add(channel as usize * storage.frame_count as usize) }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_read_pointer(
+    storage: *const c_void,
+    channel: u32,
+    offset: u32,
+) -> *const f32 {
+    let pointer = unsafe { hirari_audio_buffer_storage_write_pointer(storage, channel) };
+    if pointer.is_null() {
+        return std::ptr::null();
+    }
+    let samples = unsafe { hirari_audio_buffer_storage_samples(storage) };
+    unsafe { pointer.add(offset.min(samples) as usize) as *const f32 }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_write_pointer_at(
+    storage: *const c_void,
+    channel: u32,
+    offset: u32,
+) -> *mut f32 {
+    let pointer = unsafe { hirari_audio_buffer_storage_write_pointer(storage, channel) };
+    if pointer.is_null() {
+        return std::ptr::null_mut();
+    }
+    let samples = unsafe { hirari_audio_buffer_storage_samples(storage) };
+    unsafe { pointer.add(offset.min(samples) as usize) }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_clear(
+    storage_handle: *const c_void,
+    offset: u32,
+    samples: u32,
+) {
+    let Some(storage) = (unsafe { storage_handle.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return;
+    };
+    if offset >= storage.frame_count || storage.channels == 0 {
+        return;
+    }
+    let count = samples.min(storage.frame_count - offset);
+    let pointers = if storage.external {
+        storage.external_data
+    } else {
+        storage.channel_pointers()
+    };
+    unsafe {
+        hirari_audio_buffer_clear(pointers, storage.channels, offset, count);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_sanitize(
+    storage: *const c_void,
+) -> u32 {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return 0;
+    };
+    let pointers = if storage.external {
+        storage.external_data
+    } else {
+        storage.channel_pointers()
+    };
+    unsafe {
+        hirari_audio_buffer_sanitize_non_finite(pointers, storage.channels, storage.frame_count)
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_apply_gain(
+    storage: *const c_void,
+    gain: f32,
+) {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return;
+    };
+    if !gain.is_finite() || gain == 1.0 {
+        return;
+    }
+    let pointers = if storage.external {
+        storage.external_data
+    } else {
+        storage.channel_pointers()
+    };
+    unsafe {
+        hirari_audio_buffer_apply_gain(pointers, storage.channels, storage.frame_count, gain);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_add_from(
+    storage_handle: *const c_void,
+    source_handle: *const c_void,
+    sample_count: u32,
+) {
+    let Some(storage) = (unsafe { storage_handle.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return;
+    };
+    let Some(source) = (unsafe { source_handle.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return;
+    };
+    let channels = storage.channels.min(source.channels);
+    let frames = sample_count.min(storage.frame_count.min(source.frame_count));
+    if channels == 0 {
+        return;
+    }
+    let destinations = if storage.external {
+        storage.external_data
+    } else {
+        storage.channel_pointers()
+    };
+    let sources = if source.external {
+        source.external_data as *const *const f32
+    } else {
+        source.channel_pointers() as *const *const f32
+    };
+    unsafe {
+        hirari_audio_buffer_add_channels(destinations, sources, channels, frames);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_audio_buffer_storage_add_channels_from(
+    storage: *const c_void,
+    source_left: *const f32,
+    source_right: *const f32,
+    sample_count: u32,
+) {
+    let Some(storage) = (unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }) else {
+        return;
+    };
+    if source_left.is_null() || (storage.channels > 1 && source_right.is_null()) {
+        return;
+    }
+    if storage.channels < 1 {
+        return;
+    }
+    let frames = sample_count.min(storage.frame_count);
+    let handle = storage as *const AlignedAudioStorage as *const c_void;
+    let left = unsafe { hirari_audio_buffer_storage_write_pointer(handle, 0) };
+    let right = if storage.channels > 1 {
+        unsafe { hirari_audio_buffer_storage_write_pointer(handle, 1) }
+    } else {
+        std::ptr::null_mut()
+    };
+    let mut destinations: [*mut f32; 2] = [left, right];
+    let mut sources: [*const f32; 2] = [source_left, source_right];
+    unsafe {
+        hirari_audio_buffer_add_channels(
+            destinations.as_mut_ptr(),
+            sources.as_mut_ptr(),
+            if right.is_null() { 1 } else { 2 },
+            frames,
+        );
+    }
 }
 
 #[no_mangle]
