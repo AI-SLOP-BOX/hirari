@@ -4,6 +4,9 @@
 // strategy. The realtime contract is preserved by the code itself — the
 // protocol paths below use no allocation and no locking.
 #[cfg(feature = "worker-runtime")]
+mod worker_main;
+
+#[cfg(feature = "worker-runtime")]
 mod worker_runtime;
 
 #[cfg(feature = "worker-runtime")]

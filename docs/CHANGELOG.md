@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- The sandboxed plug-in worker's process lifetime now belongs to the Rust
+  plug-in runtime: argument parsing, launch limits, mailbox mapping, protocol
+  handshake, adapter selection, CLAP/AU/VST3 backend dispatch, and teardown
+  run in `hirari-plugin-protocol`, whose `hirari_plugin_worker_main` is the
+  entry point. The C++ `plugin_sandbox_worker.cpp` is reduced to the shared
+  mailbox view accessors, the VST3 SDK hooks, and `main`, and the
+  `plugin_sandbox_worker_main_start/backend/main_loop` include files are
+  deleted.
 - Project hydration policy now lives in the Rust bridge: plug-in type ids are
   decoded from the container codec, region paths/defaults are resolved on load,
   decoded regions are clamped and legacy pre-v42 geometry is migrated in Rust,

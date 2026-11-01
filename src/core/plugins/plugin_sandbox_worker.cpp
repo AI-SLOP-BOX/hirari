@@ -3,122 +3,142 @@
 #include "vst3_sandbox_adapter.hpp"
 #endif
 
+#include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstdio>
 #include <cstring>
-#include <unistd.h>
-#include <string>
-#include <algorithm>
-#if !defined(_WIN32)
-#include <dlfcn.h>
-#endif
+#include <memory>
+#include <vector>
 
-struct HirariPluginWorkerBackend {
-    bool (*reset)(void*);
-    uint16_t (*state)(void*, uint8_t);
-    bool (*process)(void*, void*, uint32_t, uint32_t);
-};
-struct HirariPluginWorkerFaultConfig {
-    uint64_t crashAfterBlocks;
-    uint32_t delayMilliseconds;
-};
-struct HirariPluginWorkerLaunchOptions {
-    int32_t controlFd;
-    int32_t statusFd;
-    int32_t sharedFd;
-    const char* pluginPath;
-    const char* sharedName;
-    uint32_t requestedFormat;
-    double sampleRate;
-    uint32_t minFrames;
-    uint32_t maxFrames;
-    uint32_t channels;
-    uint64_t crashAfterBlocks;
-    uint32_t delayMilliseconds;
-    uint8_t pathIsClap;
-    uint8_t pathIsVst3;
-    uint8_t pathIsAudioUnit;
-    uint8_t builtinPassthrough;
-    uint32_t resolvedFormats;
-};
-extern "C" bool hirari_plugin_worker_parse_args(
-    int32_t argc, const char* const* argv,
-    HirariPluginWorkerLaunchOptions* output, uint32_t* errorKind);
-extern "C" const char* hirari_plugin_worker_parse_error_text(uint32_t errorKind);
-extern "C" uint32_t hirari_plugin_worker_load_failure(int32_t loadResult);
-extern "C" int32_t hirari_plugin_worker_run(
-    int32_t controlFd, void* shared, void* backendContext,
-    const HirariPluginWorkerBackend* backend,
-    const HirariPluginWorkerFaultConfig* faults);
-extern "C" void* hirari_clap_input_context_create(
-    void* outputCount, void* droppedCount, void* outputEvents);
-extern "C" void hirari_clap_input_context_destroy(void* context);
-extern "C" bool hirari_clap_process_block(
-    const void* plugin, void* context, float* inputAudio, float* outputAudio,
-    uint32_t channels, uint32_t frames, const void* midiEvents,
-    uint32_t midiCount, void* extendedRing, const void* parameterChanges,
-    uint32_t parameterCount);
-extern "C" uint16_t hirari_clap_state_block(
-    const void* plugin, const void* extension, void* context, uint8_t mode,
-    uint8_t* state, const void* stateSize, const void* stateVersion,
-    const void* stateChecksum, double sampleRate, uint32_t minFrames,
-    uint32_t maxFrames);
-extern "C" int32_t hirari_clap_instance_load(
-    const char* imagePath, const char* packagePath, double sampleRate,
-    uint32_t minFrames, uint32_t maxFrames, void** instance, bool* midiInstrument);
-extern "C" const void* hirari_clap_instance_plugin(const void* instance);
-extern "C" const void* hirari_clap_instance_state(const void* instance);
-extern "C" void hirari_clap_instance_destroy(void* instance);
-extern "C" bool hirari_clap_instance_reset(
-    void* instance, double sampleRate, uint32_t minFrames, uint32_t maxFrames);
-extern "C" char* hirari_plugin_resolve_image_path(const char* path);
-extern "C" void hirari_plugin_resolved_image_free(char* path);
-// AudioUnit v2 hosting (bundles, component selection, render/MIDI/parameter
-// callbacks and the ClassInfo state envelope) lives in the Rust worker
-// runtime; the worker only marshals the shared mailbox into these calls.
-extern "C" void* hirari_au_instance_load(
-    const char* path, double sampleRate, uint32_t maxFrames, uint32_t channels,
-    bool* midiInstrument);
-extern "C" void hirari_au_instance_destroy(void* instance);
-extern "C" bool hirari_au_instance_reset(
-    void* instance, double sampleRate, uint32_t minFrames, uint32_t maxFrames);
-extern "C" bool hirari_au_process_block(
-    void* instance, const float* inputAudio, float* outputAudio,
-    uint32_t channels, uint32_t frames, const void* midiEvents,
-    uint32_t midiCount, const void* parameterChanges, uint32_t parameterCount);
-extern "C" uint16_t hirari_au_state_block(
-    void* instance, uint8_t mode, uint8_t* state, void* stateSize,
-    void* stateVersion, void* stateChecksum);
-extern "C" bool hirari_plugin_worker_apply_limits();
-extern "C" void* hirari_plugin_worker_map_shared(
-    int32_t fd, const char* name, size_t size, uint32_t* errorKind);
-extern "C" void hirari_plugin_worker_unmap_shared(void* shared, size_t size);
+// The worker process itself is Rust (`hirari-plugin-protocol/src/worker_main.rs`):
+// argument parsing, process limits, mailbox mapping, adapter selection, the
+// readiness handshake, the control loop and teardown all live there. Only the
+// VST3 hooks below remain in C++ because the official VST3 interfaces are C++.
+
+extern "C" int hirari_plugin_worker_main(int argc, const char* const* argv);
 extern "C" uint8_t hirari_plugin_worker_publish_state(
     const uint8_t* data, uint32_t size, void* sizeOut, void* versionOut, void* checksumOut);
 extern "C" uint8_t hirari_plugin_worker_validate_state(
     const uint8_t* data, const void* sizeIn, const void* versionIn, const void* checksumIn);
 
-bool debugEnabled() noexcept { return std::getenv("HIRARI_PLUGIN_DEBUG") != nullptr; }
-void debugLog(const char* message) noexcept {
-    if (debugEnabled()) std::fprintf(stderr, "[hirari-plugin-worker] %s\n", message);
+using Hirari::Core::Plugins::SandboxProtocol::SharedAudioBlock;
+
+// Stable field order shared with `WorkerMailboxView` in worker_main.rs. Keeping
+// this as opaque pointers lets Rust address the mailbox without duplicating the
+// full `SharedAudioBlock` layout.
+struct HirariPluginWorkerMailboxView {
+    void* fields[18];
+};
+
+extern "C" size_t hirari_plugin_worker_shared_bytes() {
+    return sizeof(SharedAudioBlock);
 }
 
-// AU/VST3/CLAP packages are directories on macOS.  dlopen() cannot load the
-// package directory itself; it must receive the Mach-O binary in
-// Contents/MacOS.  Keep the package path for CLAP's entry->init callback, but
-// resolve the actual image only for the dynamic loader.
-std::string resolveMacPluginImage(const char* pluginPath) {
-    char* resolved = hirari_plugin_resolve_image_path(pluginPath);
-    if (!resolved) return {};
-    std::string result(resolved);
-    hirari_plugin_resolved_image_free(resolved);
-    return result;
+extern "C" void hirari_plugin_worker_mailbox_view(void* opaque,
+                                                  HirariPluginWorkerMailboxView* out) {
+    if (!opaque || !out) return;
+    auto* shared = static_cast<SharedAudioBlock*>(opaque);
+    out->fields[0] = &shared->protocolVersion;
+    out->fields[1] = &shared->activeSampleRate;
+    out->fields[2] = &shared->activeChannels;
+    out->fields[3] = &shared->midiInstrument;
+    out->fields[4] = &shared->outputMidiEvents;
+    out->fields[5] = &shared->outputMidiDropped;
+    out->fields[6] = shared->outputMidi;
+    out->fields[7] = shared->input[0];
+    out->fields[8] = shared->output[0];
+    out->fields[9] = shared->midi;
+    out->fields[10] = &shared->midiEvents;
+    out->fields[11] = shared->parameterChange;
+    out->fields[12] = &shared->parameterChanges;
+    out->fields[13] = &shared->extendedMidi;
+    out->fields[14] = shared->state;
+    out->fields[15] = &shared->stateSize;
+    out->fields[16] = &shared->stateVersion;
+    out->fields[17] = &shared->stateChecksum;
 }
+
+#if defined(HIRARI_ENABLE_VST3_SDK)
+
+using Hirari::Core::Plugins::SandboxProtocol::kStateErrorNone;
+using Hirari::Core::Plugins::SandboxProtocol::kStateErrorOversize;
+using Hirari::Core::Plugins::SandboxProtocol::kStateErrorPlugin;
+using Hirari::Core::Plugins::SandboxVST3::Runtime;
+
+extern "C" bool hirari_worker_vst3_supported() { return true; }
+
+extern "C" void* hirari_worker_vst3_load(const char* path, double sampleRate,
+                                         uint32_t maxFrames, bool* midiInstrument) {
+    auto runtime = std::make_unique<Runtime>();
+    if (!runtime->load(path, sampleRate, maxFrames)) return nullptr;
+    if (midiInstrument) *midiInstrument = runtime->isMidiInstrument();
+    return runtime.release();
+}
+
+extern "C" void hirari_worker_vst3_destroy(void* instance) {
+    delete static_cast<Runtime*>(instance);
+}
+
+extern "C" bool hirari_worker_vst3_reset(void* instance, double, uint32_t, uint32_t) {
+    auto* runtime = static_cast<Runtime*>(instance);
+    return runtime && runtime->reset();
+}
+
+extern "C" bool hirari_worker_vst3_process(void* instance, void* opaque, uint32_t channels,
+                                           uint32_t frames) {
+    auto* runtime = static_cast<Runtime*>(instance);
+    if (!runtime || !opaque) return false;
+    return runtime->process(*static_cast<SharedAudioBlock*>(opaque), channels, frames);
+}
+
+// VST3 state handling needs the shared mailbox and the Rust state envelope, so
+// the hook resolves both here and reports the same packed result the loop reads.
+extern "C" uint16_t hirari_worker_vst3_state(void* instance, void* opaque, uint8_t mode) {
+    auto* runtime = static_cast<Runtime*>(instance);
+    auto* shared = static_cast<SharedAudioBlock*>(opaque);
+    if (!runtime || !shared) return static_cast<uint16_t>(kStateErrorPlugin) << 8;
+    bool stateOk = false;
+    uint8_t stateError = kStateErrorPlugin;
+    if (mode == 1) {
+        std::vector<uint8_t> state;
+        stateOk = runtime->saveState(state);
+        if (stateOk && state.size() <= sizeof(shared->state)) {
+            std::memcpy(shared->state, state.data(), state.size());
+            stateError = hirari_plugin_worker_publish_state(
+                shared->state, static_cast<uint32_t>(state.size()),
+                &shared->stateSize, &shared->stateVersion, &shared->stateChecksum);
+            if (stateError != kStateErrorNone) stateOk = false;
+        } else if (stateOk) {
+            stateOk = false;
+            stateError = kStateErrorOversize;
+        }
+    } else if (mode == 2) {
+        const uint32_t size = shared->stateSize.load(std::memory_order_acquire);
+        stateError = hirari_plugin_worker_validate_state(
+            shared->state, &shared->stateSize, &shared->stateVersion, &shared->stateChecksum);
+        if (stateError == kStateErrorNone) {
+            stateOk = runtime->loadState(shared->state, size);
+            if (!stateOk) stateError = kStateErrorPlugin;
+        }
+    }
+    return static_cast<uint16_t>((static_cast<uint16_t>(stateError) << 8) |
+                                 static_cast<uint16_t>(stateOk));
+}
+
+#else
+
+// A build without the Steinberg SDK still reports the format as unavailable so
+// the launcher fails closed during capability negotiation.
+extern "C" bool hirari_worker_vst3_supported() { return false; }
+extern "C" void* hirari_worker_vst3_load(const char*, double, uint32_t, bool*) { return nullptr; }
+extern "C" void hirari_worker_vst3_destroy(void*) {}
+extern "C" bool hirari_worker_vst3_reset(void*, double, uint32_t, uint32_t) { return false; }
+extern "C" bool hirari_worker_vst3_process(void*, void*, uint32_t, uint32_t) { return false; }
+extern "C" uint16_t hirari_worker_vst3_state(void*, void*, uint8_t) { return 0; }
+
+#endif
+
 // The helper is intentionally a separate executable: plugin loading and
-// format-specific ABI code belong here, never in the DAW. CLAP, AUv2, and,
-// when built with the official Steinberg SDK, VST3 instances use the shared
-// mailbox for real audio processing. A VST3 build without that SDK fails
-// closed during capability negotiation rather than pretending to process.
-#include "plugin_sandbox_worker_main_start.inc"
-#include "plugin_sandbox_worker_main_loop.inc"
+// format-specific ABI code belong here, never in the DAW.
+int main(int argc, char** argv) {
+    return hirari_plugin_worker_main(argc, const_cast<const char* const*>(argv));
+}
