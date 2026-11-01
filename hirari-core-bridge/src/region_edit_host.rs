@@ -67,6 +67,10 @@ pub const HIRARI_REGION_EDIT_RANGE_EDITS: i32 = 16;
 /// Payload op: store the comp-range batch packed in `blob` plus `managed`
 /// exactly as given.
 pub const HIRARI_REGION_EDIT_COMP_RANGES: i32 = 17;
+/// Payload op: commit an owned F0 analysis result (blob) into the region's
+/// note table when the region still matches `state` at `generation`. The host
+/// takes the analysis handle over on every path.
+pub const HIRARI_REGION_EDIT_PITCH_COMMIT: i32 = 19;
 /// Payload op: swap in a decoded audio handle. The blob starts with a
 /// native-layout header (handle, source rate, timeline rate) followed by the
 /// path bytes.
@@ -141,6 +145,9 @@ pub struct HirariRegionEditPayload {
     pub state: HirariRegionState,
     /// Comp-range batch flag; unused by the other ops.
     pub managed: bool,
+    /// Region-table generation the payload was decided against; 0 skips the
+    /// staleness check. Only the pitch commit reads it.
+    pub generation: u64,
 }
 
 // The payload only borrows a buffer (or hands over an opaque snapshot handle)
@@ -260,9 +267,6 @@ pub type HirariRegionRetainTrackFn = unsafe extern "C" fn(*mut c_void, u32) -> *
 pub type HirariRegionReleaseTrackFn = unsafe extern "C" fn(*mut c_void);
 /// Starts F0 analysis ownership on a retained track.
 pub type HirariRegionPitchBeginFn = unsafe extern "C" fn(*mut c_void) -> bool;
-/// Runs the analysis kernel on a retained track.
-pub type HirariRegionPitchAnalyzeFn =
-    unsafe extern "C" fn(*mut c_void, u32, f64) -> bool;
 /// Ends F0 analysis ownership on a retained track.
 pub type HirariRegionPitchFinishFn = unsafe extern "C" fn(*mut c_void);
 /// Copies a region's note table from a retained track into an owned store.
@@ -305,7 +309,6 @@ pub struct HirariRegionHostOps {
     pub retain_track: Option<HirariRegionRetainTrackFn>,
     pub release_track: Option<HirariRegionReleaseTrackFn>,
     pub pitch_begin: Option<HirariRegionPitchBeginFn>,
-    pub pitch_analyze: Option<HirariRegionPitchAnalyzeFn>,
     pub pitch_finish: Option<HirariRegionPitchFinishFn>,
     pub note_snapshot: Option<HirariRegionNoteSnapshotFn>,
     pub clone_region: Option<HirariRegionCloneFn>,
@@ -1328,6 +1331,7 @@ fn set_comp_ranges_with(
         blob_len: word_count * std::mem::size_of::<u64>(),
         state,
         managed,
+        generation: 0,
     };
     unsafe { apply(host, &payload) }
 }
@@ -1800,6 +1804,7 @@ fn apply_split_side(
             blob: comp_ranges.as_ptr().cast(),
             blob_len: std::mem::size_of_val(comp_ranges),
             managed: comp_managed,
+            generation: 0,
             ..Default::default()
         },
         note_store_payload(track_id, region_id, notes),

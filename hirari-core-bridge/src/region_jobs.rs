@@ -141,6 +141,8 @@ impl Drop for NoteStore {
 struct RetainedTrack {
     ops: HirariRegionHostOps,
     handle: *mut c_void,
+    host: *mut c_void,
+    track_id: u32,
 }
 
 unsafe impl Send for RetainedTrack {}
@@ -156,6 +158,8 @@ impl RetainedTrack {
         Some(Self {
             ops: *ops,
             handle,
+            host,
+            track_id,
         })
     }
 
@@ -174,9 +178,13 @@ impl RetainedTrack {
     }
 
     fn pitch_analyze(&self, region_id: u32, sample_rate: f64) -> bool {
-        match self.ops.pitch_analyze {
-            Some(analyze) => unsafe { analyze(self.handle, region_id, sample_rate) },
-            None => false,
+        unsafe {
+            crate::region_pitch::hirari_region_pitch_analyze(
+                self.host,
+                self.track_id,
+                region_id,
+                sample_rate,
+            )
         }
     }
 

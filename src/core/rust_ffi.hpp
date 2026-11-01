@@ -569,6 +569,10 @@ enum HirariRegionEditOp : int32_t {
     // header (audio handle, source rate, timeline rate) followed by the path
     // bytes; the host takes the handle over on every path.
     kHirariRegionEditReplaceAudio = 18,
+    // Commit an owned F0 analysis result (blob) into the region's note table
+    // when the region still matches `state` at `generation`. The host takes
+    // the analysis handle over on every path.
+    kHirariRegionEditPitchCommit = 19,
 };
 
 struct HirariRegionEditPayload {
@@ -582,6 +586,9 @@ struct HirariRegionEditPayload {
     HirariRegionState state;
     // Comp-range batch flag; unused by the other ops.
     bool managed = false;
+    // Region-table generation the payload was decided against; 0 skips the
+    // staleness check. Only the pitch commit reads it.
+    uint64_t generation = 0;
 };
 
 struct HirariRegionGroupMember {
@@ -654,7 +661,6 @@ struct HirariRegionHostOps {
     void* (*retainTrack)(void* host, uint32_t trackId) = nullptr;
     void (*releaseTrack)(void* handle) = nullptr;
     bool (*pitchBegin)(void* trackHandle) = nullptr;
-    bool (*pitchAnalyze)(void* trackHandle, uint32_t regionId, double sampleRate) = nullptr;
     void (*pitchFinish)(void* trackHandle) = nullptr;
     // Copies a region's note table into an owned Rust store handle.
     void* (*noteSnapshot)(void* trackHandle, uint32_t regionId) = nullptr;

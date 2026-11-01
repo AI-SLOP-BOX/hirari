@@ -17,7 +17,6 @@
 #include "../effect_chain.hpp"
 #include "../plugin_host.hpp"
 #include "../plugins/process_sandbox_processor.hpp"
-#include "../editing/audio_pitch_analysis.hpp"
 
 namespace Hirari::Core::Engine {
 

@@ -9,19 +9,19 @@ use core::ffi::{c_char, c_void, CStr};
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::ffi::CString;
 
-use crate::clap_loader::{
-    hirari_clap_instance_destroy, hirari_clap_instance_load, hirari_clap_instance_plugin,
-    hirari_clap_instance_reset, hirari_clap_instance_state, hirari_plugin_resolve_image_path,
-    hirari_plugin_resolved_image_free,
+#[cfg(target_os = "macos")]
+use crate::au_host::{
+    hirari_au_instance_destroy, hirari_au_instance_load, hirari_au_instance_reset,
+    hirari_au_process_block, hirari_au_state_block,
 };
 use crate::clap_events::{
     hirari_clap_input_context_create, hirari_clap_input_context_destroy, hirari_clap_process_block,
     hirari_clap_state_block,
 };
-#[cfg(target_os = "macos")]
-use crate::au_host::{
-    hirari_au_instance_destroy, hirari_au_instance_load, hirari_au_instance_reset,
-    hirari_au_process_block, hirari_au_state_block,
+use crate::clap_loader::{
+    hirari_clap_instance_destroy, hirari_clap_instance_load, hirari_clap_instance_plugin,
+    hirari_clap_instance_reset, hirari_clap_instance_state, hirari_plugin_resolve_image_path,
+    hirari_plugin_resolved_image_free,
 };
 use crate::worker_runtime::{
     hirari_plugin_worker_apply_limits, hirari_plugin_worker_load_failure,
@@ -304,8 +304,9 @@ extern "C" fn backend_process(
             processed
         }
         FORMAT_VST3 => {
-            let processed =
-                unsafe { hirari_worker_vst3_process(context.vst3_instance, context.shared, channels, frames) };
+            let processed = unsafe {
+                hirari_worker_vst3_process(context.vst3_instance, context.shared, channels, frames)
+            };
             if !processed {
                 unsafe { clear_output(context) };
             }
@@ -327,15 +328,20 @@ unsafe fn resolve_plugin_image(plugin_path: *const c_char) -> Option<CString> {
 
 /// Worker entry point. Returns the process exit status the launcher observes.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_worker_main(
-    argc: i32,
-    argv: *const *const c_char,
-) -> i32 {
+pub unsafe extern "C" fn hirari_plugin_worker_main(argc: i32, argv: *const *const c_char) -> i32 {
     if argc == 2 && !argv.is_null() {
         let argument = unsafe { *argv.add(1) };
-        if !argument.is_null() && unsafe { CStr::from_ptr(argument) }.to_bytes() == b"--capabilities" {
+        if !argument.is_null()
+            && unsafe { CStr::from_ptr(argument) }.to_bytes() == b"--capabilities"
+        {
             let capabilities = capabilities_json();
-            unsafe { write(1, capabilities.as_ptr().cast::<c_void>(), capabilities.len()) };
+            unsafe {
+                write(
+                    1,
+                    capabilities.as_ptr().cast::<c_void>(),
+                    capabilities.len(),
+                )
+            };
             return 0;
         }
     }
@@ -362,7 +368,12 @@ pub unsafe extern "C" fn hirari_plugin_worker_main(
     let mut mapping_error = 0_u32;
     let shared_bytes = unsafe { hirari_plugin_worker_shared_bytes() };
     let shared = unsafe {
-        hirari_plugin_worker_map_shared(options.shared_fd, options.shared_name, shared_bytes, &mut mapping_error)
+        hirari_plugin_worker_map_shared(
+            options.shared_fd,
+            options.shared_name,
+            shared_bytes,
+            &mut mapping_error,
+        )
     };
     if shared.is_null() {
         if mapping_error == 2 {
@@ -372,7 +383,9 @@ pub unsafe extern "C" fn hirari_plugin_worker_main(
         debug_log("shared audio block descriptor and name are unavailable");
         return 4;
     }
-    let mut view = WorkerMailboxView { fields: [core::ptr::null_mut(); 18] };
+    let mut view = WorkerMailboxView {
+        fields: [core::ptr::null_mut(); 18],
+    };
     unsafe { hirari_plugin_worker_mailbox_view(shared, &mut view) };
     let protocol_version = view.field(MAILBOX_PROTOCOL_VERSION).cast::<AtomicU32>();
     if unsafe { (*protocol_version).load(Ordering::Acquire) } != AUDIO_BLOCK_PROTOCOL_VERSION {
@@ -424,8 +437,9 @@ pub unsafe extern "C" fn hirari_plugin_worker_main(
             unsafe { hirari_plugin_worker_unmap_shared(shared, shared_bytes) };
             return 12;
         }
-        context.vst3_instance =
-            unsafe { hirari_worker_vst3_load(plugin_path, sample_rate, max_frames, &mut midi_instrument) };
+        context.vst3_instance = unsafe {
+            hirari_worker_vst3_load(plugin_path, sample_rate, max_frames, &mut midi_instrument)
+        };
         if context.vst3_instance.is_null() {
             debug_log("VST3 load failed");
             unsafe { send_status(status_fd, ERROR_INSTANCE) };
@@ -437,7 +451,13 @@ pub unsafe extern "C" fn hirari_plugin_worker_main(
         #[cfg(target_os = "macos")]
         {
             context.au_instance = unsafe {
-                hirari_au_instance_load(plugin_path, sample_rate, max_frames, channels, &mut midi_instrument)
+                hirari_au_instance_load(
+                    plugin_path,
+                    sample_rate,
+                    max_frames,
+                    channels,
+                    &mut midi_instrument,
+                )
             };
             if context.au_instance.is_null() {
                 unsafe { send_status(status_fd, ERROR_INSTANCE) };
@@ -486,9 +506,12 @@ pub unsafe extern "C" fn hirari_plugin_worker_main(
     }
     #[cfg(unix)]
     if !(builtin_passthrough || is_audio_unit || vst3_sdk_loaded || is_clap) {
-        let symbol = if is_vst3 { c"GetPluginFactory".as_ptr() } else { core::ptr::null() };
-        let resolved = symbol.is_null()
-            || unsafe { dlsym(plugin_handle, symbol) }.is_null();
+        let symbol = if is_vst3 {
+            c"GetPluginFactory".as_ptr()
+        } else {
+            core::ptr::null()
+        };
+        let resolved = symbol.is_null() || unsafe { dlsym(plugin_handle, symbol) }.is_null();
         if resolved {
             unsafe { send_status(status_fd, ERROR_ABI) };
             unsafe {
@@ -554,8 +577,11 @@ pub unsafe extern "C" fn hirari_plugin_worker_main(
         FORMAT_NONE
     };
     unsafe {
-        (*context.view.field(MAILBOX_MIDI_INSTRUMENT).cast::<AtomicU8>())
-            .store(u8::from(midi_instrument), Ordering::Release);
+        (*context
+            .view
+            .field(MAILBOX_MIDI_INSTRUMENT)
+            .cast::<AtomicU8>())
+        .store(u8::from(midi_instrument), Ordering::Release);
     }
     debug_log("sending ready");
     if !unsafe { send_status(status_fd, STATUS_READY) } {
@@ -574,7 +600,13 @@ pub unsafe extern "C" fn hirari_plugin_worker_main(
         delay_milliseconds: options.delay_milliseconds,
     };
     let _result = unsafe {
-        hirari_plugin_worker_run(control_fd, shared, &mut context as *mut WorkerContext as *mut c_void, &backend, &faults)
+        hirari_plugin_worker_run(
+            control_fd,
+            shared,
+            &mut context as *mut WorkerContext as *mut c_void,
+            &backend,
+            &faults,
+        )
     };
     unsafe { destroy_worker_resources(&mut context, plugin_handle) };
     unsafe { hirari_plugin_worker_unmap_shared(shared, shared_bytes) };
@@ -621,7 +653,9 @@ mod tests {
         let context = WorkerContext {
             format: FORMAT_NONE,
             shared: core::ptr::null_mut(),
-            view: WorkerMailboxView { fields: [core::ptr::null_mut(); 18] },
+            view: WorkerMailboxView {
+                fields: [core::ptr::null_mut(); 18],
+            },
             clap_instance: core::ptr::null_mut(),
             clap_plugin: core::ptr::null(),
             clap_state: core::ptr::null(),

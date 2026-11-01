@@ -279,86 +279,20 @@
     bool audioPitchAnalysisRunning() const noexcept {
         return m_audioPitchAnalysisRunning.load(std::memory_order_acquire);
     }
-
-    // Offline VariAudio-style F0 detection. This is deliberately a control/
-    // analysis-thread operation; the audio callback only consumes the
-    // immutable snapshot published below.
-    bool analyzeAudioNoteSegments(uint32_t regionId,
-                                  double sampleRate,
-                                  ::hirari::editing::AudioPitchAnalyzer::Config config = {}) {
-        if (!std::isfinite(sampleRate) || sampleRate <= 0.0) return false;
-        invalidateFrozenForEdit();
-        Region analysisRegion{};
-        uint64_t generation = 0;
-        {
-            std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-            auto it = std::find_if(m_regions.begin(), m_regions.end(),
-                [regionId](const Region& region) { return region.id == regionId; });
-            if (it == m_regions.end() || !it->audio || it->audio->getNumSamples() == 0 ||
-                it->audio->getNumSamples() > 16'000'000 || it->audio->getNumChannels() == 0) {
-                return false;
-            }
-            analysisRegion = *it;
-            generation = regionGeneration();
-        }
-        const auto& audio = analysisRegion.audio;
-        const double sourceSampleRate = std::isfinite(analysisRegion.sourceSampleRate) &&
-            analysisRegion.sourceSampleRate >= 8000.0
-            ? analysisRegion.sourceSampleRate : sampleRate;
-        const double timelineSampleRate = std::isfinite(analysisRegion.timelineSampleRate) &&
-            analysisRegion.timelineSampleRate >= 8000.0
-            ? analysisRegion.timelineSampleRate : sampleRate;
-        const uint64_t sourceSpan = analysisRegion.sourceLength > 0
-            ? analysisRegion.sourceLength : analysisRegion.len;
-        if (!audio || sourceSpan == 0 || sourceSpan > 16'000'000 ||
-            analysisRegion.sourceOffset > audio->getNumSamples() ||
-            sourceSpan > audio->getNumSamples() - analysisRegion.sourceOffset ||
-            analysisRegion.len == 0) return false;
-
-        const uint32_t channels = audio->getNumChannels();
-        std::vector<const float*> channelData(channels, nullptr);
-        for (uint32_t channel = 0; channel < channels; ++channel) {
-            channelData[channel] = audio->getReadPointer(channel);
-        }
-        std::vector<::HirariWarpMarker> pitchWarpMarkers;
-        pitchWarpMarkers.reserve(analysisRegion.warpMarkers.size());
-        for (const auto& marker : analysisRegion.warpMarkers) {
-            pitchWarpMarkers.push_back({marker.sourceSample, marker.timelineSample, marker.transient});
-        }
-        const double sourceFramesPerTimelineFrame = std::isfinite(analysisRegion.warpRatio) &&
-            analysisRegion.sourceFramesPerTimelineFrame() > 0.0
-            ? analysisRegion.sourceFramesPerTimelineFrame() : 1.0;
-        void* rawAnalysis = hirari_audio_pitch_analyze_region(
-            channelData.data(), channelData.size(),
-            static_cast<size_t>(analysisRegion.sourceOffset), static_cast<size_t>(sourceSpan),
-            analysisRegion.reverse ? 1 : 0, sourceSampleRate, timelineSampleRate,
-            analysisRegion.len, sourceFramesPerTimelineFrame,
-            pitchWarpMarkers.data(), pitchWarpMarkers.size(), config.minHz, config.maxHz,
-            config.threshold, config.noteChangeThresholdCents,
-            config.noteChangeConfirmationFrames);
-        if (!rawAnalysis) return false;
-        std::unique_ptr<void, decltype(&hirari_audio_pitch_result_destroy)>
-            analysis(rawAnalysis, &hirari_audio_pitch_result_destroy);
-
+    // Commits a Rust F0 analysis result into the region's note table while
+    // the analysis job holds the gate; the gate only keeps other editors out.
+    bool commitAudioPitchAnalysis(uint32_t regionId, uint64_t expectedGeneration,
+                                  void* analysis) {
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::find_if(m_regions.begin(), m_regions.end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (it == m_regions.end() || it->audio != audio || regionGeneration() != generation ||
-            it->sourceOffset != analysisRegion.sourceOffset || it->sourceLength != analysisRegion.sourceLength ||
-            it->len != analysisRegion.len || it->reverse != analysisRegion.reverse ||
-            it->warpRatio != analysisRegion.warpRatio ||
-            it->sourceSampleRate != analysisRegion.sourceSampleRate ||
-            it->timelineSampleRate != analysisRegion.timelineSampleRate ||
-            it->warpMarkers.size() != analysisRegion.warpMarkers.size())
-            return false;
-        for (size_t index = 0; index < it->warpMarkers.size(); ++index) {
-            if (it->warpMarkers[index].sourceSample != analysisRegion.warpMarkers[index].sourceSample ||
-                it->warpMarkers[index].timelineSample != analysisRegion.warpMarkers[index].timelineSample) return false;
+        if (regionGeneration() != expectedGeneration || !analysis) return false;
+        for (auto& region : m_regions) {
+            if (region.id != regionId) continue;
+            if (!hirari_audio_pitch_commit_region_result(analysis, region.noteStore.get()))
+                return false;
+            publishRegionSnapshot();
+            return true;
         }
-        if (!hirari_audio_pitch_commit_region_result(
-                analysis.get(), it->noteStore.get())) return false;
-        publishRegionSnapshot();
-        return true;
+        return false;
     }
 
     bool appendProcessingStep(uint32_t regionId, uint32_t stepId, const std::string& operation,

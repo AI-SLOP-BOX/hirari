@@ -99,7 +99,6 @@ public:
     static void* regionHostRetainTrack(void* host, uint32_t trackId);
     static void regionHostReleaseTrack(void* handle);
     static bool regionHostPitchBegin(void* trackHandle);
-    static bool regionHostPitchAnalyze(void* trackHandle, uint32_t regionId, double sampleRate);
     static void regionHostPitchFinish(void* trackHandle);
     static void* regionHostNoteSnapshot(void* trackHandle, uint32_t regionId);
     static uint32_t regionHostClone(void* host, uint32_t trackId, uint32_t regionId,

@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Region F0 analysis now runs from the Rust host: the sample-rate fallbacks,
+  span and buffer admission, geometry staleness check and note-table commit
+  live in the regional pitch host, which reads the region and its decoded
+  audio through the existing region host callbacks. `Track` keeps only the
+  locked commit and republish, `regionHostPitchAnalyze` and the unused
+  `editing/audio_pitch_analysis.hpp` config helper are deleted, and the
+  analysis handle travels as a `kHirariRegionEditPitchCommit` payload.
 - The sandboxed plug-in worker's process lifetime now belongs to the Rust
   plug-in runtime: argument parsing, launch limits, mailbox mapping, protocol
   handshake, adapter selection, CLAP/AU/VST3 backend dispatch, and teardown

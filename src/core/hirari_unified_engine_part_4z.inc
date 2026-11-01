@@ -159,6 +159,16 @@ bool HirariUnifiedEngine::regionHostApply(void* host,
                                                      payload->managed);
             break;
         }
+        case kHirariRegionEditPitchCommit: {
+            // The job owns the analysis gate, so the commit bypasses the
+            // editor-facing gate check but keeps the single region lock.
+            auto* analysis = reinterpret_cast<void*>(const_cast<uint8_t*>(payload->blob));
+            applied = analysis != nullptr &&
+                      track->commitAudioPitchAnalysis(payload->regionId,
+                                                      payload->generation, analysis);
+            if (analysis) hirari_audio_pitch_result_destroy(analysis);
+            break;
+        }
         case kHirariRegionEditReplaceAudio: {
             // Header: audio handle, source rate, timeline rate, then the path.
             static_assert(sizeof(void*) == sizeof(uint64_t));
@@ -474,18 +484,6 @@ bool HirariUnifiedEngine::regionHostPitchBegin(void* trackHandle) {
     return track && track->beginAudioPitchAnalysis();
 }
 
-bool HirariUnifiedEngine::regionHostPitchAnalyze(void* trackHandle, uint32_t regionId,
-                                                 double sampleRate) {
-    if (!trackHandle) return false;
-    const auto track = *static_cast<const std::shared_ptr<Track>*>(trackHandle);
-    if (!track) return false;
-    try {
-        return track->analyzeAudioNoteSegments(regionId, sampleRate);
-    } catch (...) {
-        return false;
-    }
-}
-
 void HirariUnifiedEngine::regionHostPitchFinish(void* trackHandle) {
     if (!trackHandle) return;
     const auto track = *static_cast<const std::shared_ptr<Track>*>(trackHandle);
@@ -597,7 +595,6 @@ const HirariRegionHostOps kRegionEditHostOps = {
     &HirariUnifiedEngine::regionHostRetainTrack,
     &HirariUnifiedEngine::regionHostReleaseTrack,
     &HirariUnifiedEngine::regionHostPitchBegin,
-    &HirariUnifiedEngine::regionHostPitchAnalyze,
     &HirariUnifiedEngine::regionHostPitchFinish,
     &HirariUnifiedEngine::regionHostNoteSnapshot,
     &HirariUnifiedEngine::regionHostClone,
