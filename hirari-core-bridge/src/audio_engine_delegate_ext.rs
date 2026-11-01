@@ -28,6 +28,7 @@ use crate::routing_edit_host::{
     hirari_routing_edit_set_track_armed, hirari_routing_edit_set_track_delay_samples,
 };
 use crate::track_edit_host::{hirari_track_add, hirari_track_duplicate, hirari_track_remove};
+use crate::undo_edit_host::hirari_engine_sync_structural_changes;
 
 // Scalar field ids shared with the C++ mirror in rust_ffi.hpp.
 const SCALAR_CLIP_GAIN: i32 = 1;
@@ -42,6 +43,16 @@ const SCALAR_PITCH_PRESERVE_WARP: i32 = 9;
 fn host(engine: &ffi::AudioEngine) -> *mut c_void {
     let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
     core as *mut c_void
+}
+
+fn learn_state(engine: &ffi::AudioEngine) -> *const c_void {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    unsafe { (*core).midi_learn_state() as *const c_void }
+}
+
+fn preview_state(engine: &ffi::AudioEngine) -> *mut c_void {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    unsafe { (*core).preview_synth_state() as *mut c_void }
 }
 
 fn bytes(text: &str) -> *const u8 {
@@ -588,6 +599,46 @@ impl ffi::AudioEngine {
                 right,
             )
         }
+    }
+
+    pub fn set_track_input_monitor(&self, tid: u32, enabled: bool) -> bool {
+        self.set_track_input_monitor_channels(tid, enabled, 0, 1)
+    }
+
+    pub fn move_plugin(&self, tid: u32, from_index: u32, to_index: u32) -> bool {
+        if !unsafe {
+            plugin_edit_host::hirari_plugin_edit_move(host(self), tid, from_index, to_index)
+        } {
+            return false;
+        }
+        unsafe { hirari_engine_sync_structural_changes(host(self)) };
+        true
+    }
+
+    pub fn handle_midi_cc(&self, channel: u8, cc: u8, value: u8) {
+        unsafe {
+            crate::midi_learn::hirari_midi_learn_handle_cc(
+                learn_state(self),
+                channel,
+                cc,
+                value,
+            )
+        };
+    }
+
+    pub fn handle_midi_cc14(&self, channel: u8, controller: u16, value: u16) {
+        unsafe {
+            crate::midi_learn::hirari_midi_learn_handle_cc14(
+                learn_state(self),
+                channel,
+                controller,
+                value,
+            )
+        };
+    }
+
+    pub fn set_preview_synth_engine(&self, engine: u32) {
+        unsafe { crate::preview_synth::hirari_preview_synth_set_engine(preview_state(self), engine) };
     }
 
     pub fn set_sidechain_link(

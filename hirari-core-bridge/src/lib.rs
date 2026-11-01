@@ -171,6 +171,8 @@ pub mod ffi {
         // The MIDI snapshot store is native to Rust already; the engine keeps
         // the handle its render callback pins, so hand that address back.
         fn midi_snapshot_store(self: &HirariUnifiedEngine) -> usize;
+        fn midi_learn_state(self: &HirariUnifiedEngine) -> usize;
+        fn preview_synth_state(self: &HirariUnifiedEngine) -> usize;
         // "The project changed" revision the UI polls. The shims that used to
         // bump it after an edit moved into Rust along with the edit itself.
         fn mark_project_state_changed(self: &AudioEngine);
@@ -212,15 +214,12 @@ pub mod ffi {
         fn try_apply_config(self: &AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool;
         fn set_playhead(self: &AudioEngine, pos: u64);
         fn set_test_tone(self: &AudioEngine, enabled: bool);
-        fn handle_midi_cc(self: &AudioEngine, channel: u8, cc: u8, value: u8);
-        fn handle_midi_cc14(self: &AudioEngine, channel: u8, controller: u16, value: u16);
         fn set_preview_sample(self: &AudioEngine, samples: &[f32], source_rate: f64);
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn trigger_preview_sample(self: &AudioEngine);
         fn shutdown(self: &AudioEngine);
         fn assign_track_to_vca(self: &AudioEngine, track_id: u32, group_id: u32) -> bool;
         fn new_project(self: &AudioEngine);
-        fn move_plugin(self: &AudioEngine, tid: u32, from_index: u32, to_index: u32) -> bool;
         fn process_sandboxed_plugin_block(
             self: &AudioEngine,
             tid: u32,
@@ -286,7 +285,6 @@ pub mod ffi {
             transient_flags: &[u8],
         ) -> bool;
 
-        fn set_track_input_monitor(self: &AudioEngine, tid: u32, enabled: bool) -> bool;
         fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
         fn get_plugin_parameter(
             self: &HirariUnifiedEngine,
@@ -312,7 +310,6 @@ pub mod ffi {
             bypassed: bool,
         ) -> bool;
         fn get_plugin_bypass(self: &HirariUnifiedEngine, tid: u32, plugin_index: u32) -> bool;
-        fn set_preview_synth_engine(self: &AudioEngine, engine: u32);
         fn has_sidechain_link(
             self: &HirariUnifiedEngine,
             source_id: u32,

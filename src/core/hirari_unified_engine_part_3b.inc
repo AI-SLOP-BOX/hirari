@@ -3,46 +3,12 @@ bool HirariUnifiedEngine::get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) 
     const Track* track = findTrackLocked(tid);
     return track && track->getPluginBypass(pluginIndex);
 }
-bool HirariUnifiedEngine::move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex) {
-    if (!hirari_plugin_edit_move(this, tid, fromIndex, toIndex)) return false;
-    syncStructuralChanges();
-    return true;
-}
 uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     const Track* track = findTrackLocked(tid);
     return track ? track->getTrackDelaySamples() : 0;
 }
 
-bool HirariUnifiedEngine::set_track_input_monitor(uint32_t tid, bool enabled) {
-    return set_track_input_monitor_channels(tid, enabled, 0, 1);
-}
-
-bool HirariUnifiedEngine::set_track_input_monitor_channels(
-    uint32_t tid, bool enabled, uint32_t leftChannel, uint32_t rightChannel) {
-    return hirari_control_edit_set_input_monitor(
-        this, tid, enabled, leftChannel, rightChannel);
-}
-
-bool HirariUnifiedEngine::set_sidechain_link(uint32_t sourceId, uint32_t destId,
-                                             uint32_t pluginIndex, uint32_t tapPoint,
-                                             bool enabled) {
-    return hirari_routing_edit_set_sidechain_link(this, sourceId, destId, pluginIndex, tapPoint,
-                                                  enabled);
-}
-
-void HirariUnifiedEngine::handle_midi_cc(uint8_t channel, uint8_t cc,
-                                       uint8_t value) noexcept {
-    hirari_midi_learn_handle_cc(m_midiLearnState, channel, cc, value);
-}
-
-void HirariUnifiedEngine::handle_midi_cc14(uint8_t channel, uint16_t controller,
-                                         uint16_t value) noexcept {
-    hirari_midi_learn_handle_cc14(m_midiLearnState, channel, controller, value);
-}
-void HirariUnifiedEngine::set_preview_synth_engine(uint32_t engine) {
-    hirari_preview_synth_set_engine(m_previewSynthState, engine);
-}
 // Routing edit host callbacks. Rust decides every edit and the undo capture;
 // these handlers only apply the resolved mutation to the live objects, under
 // the same locks the previous per-method code took.

@@ -35,6 +35,8 @@
         return hirari_log_state();
     }
     size_t midi_snapshot_store() const noexcept { return reinterpret_cast<size_t>(m_midiSnapshotStore); }
+    size_t midi_learn_state() const noexcept { return reinterpret_cast<size_t>(m_midiLearnState); }
+    size_t preview_synth_state() const noexcept { return reinterpret_cast<size_t>(m_previewSynthState); }
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;
         std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -53,9 +55,6 @@
     void set_offline_render_tail_seconds(float seconds) noexcept;
     void set_offline_render_options(bool pre_fader, bool include_inserts) noexcept;
     uint32_t get_track_delay_samples(uint32_t tid) const;
-    bool set_track_input_monitor(uint32_t tid, bool enabled);
-    bool set_track_input_monitor_channels(uint32_t tid, bool enabled,
-                                          uint32_t leftChannel, uint32_t rightChannel);
     double get_sample_rate() const { return m_sampleRate.load(std::memory_order_relaxed); }
     uint64_t get_audio_config_generation() const noexcept {
         return m_audioConfigGeneration.load(std::memory_order_acquire);
@@ -68,8 +67,6 @@
     void set_metronome_enabled(bool enabled) noexcept;
     bool is_metronome_enabled() const noexcept;
     void set_test_tone(bool enabled);
-    void handle_midi_cc(uint8_t channel, uint8_t cc, uint8_t value) noexcept;
-    void handle_midi_cc14(uint8_t channel, uint16_t controller, uint16_t value) noexcept;
     // Preview sampler bridge. The sample is replaced off the audio thread;
     // the callback only reads an immutable shared snapshot.
     void set_preview_sample(const float* samples, size_t count, double sourceRate);

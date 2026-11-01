@@ -75,9 +75,6 @@ public:
     void set_offline_render_options(bool preFader, bool includeInserts) const noexcept {
         if (m_engine) m_engine->set_offline_render_options(preFader, includeInserts);
     }
-    bool set_track_input_monitor(uint32_t tid, bool enabled) const {
-        return m_engine && m_engine->set_track_input_monitor(tid, enabled);
-    }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = m_driver && m_driver->is_running();

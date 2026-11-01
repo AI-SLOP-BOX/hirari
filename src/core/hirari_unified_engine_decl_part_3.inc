@@ -6,8 +6,6 @@
     // Regions & Plugins
     bool add_region(uint32_t trackId, std::string_view path, double start_beat);
     bool region_table_mirror_matches(uint32_t trackId) const;
-    // 0 = still decoding, 1 = committed, 2 = failed or stale, 3 = unknown ticket.
-    bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex);
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
                                         float* left, float* right, uint32_t frames);
     std::vector<uint8_t> process_sandboxed_plugin_midi_block(
@@ -43,9 +41,6 @@
     std::string get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId) const;
     bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed);
     bool get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const;
-    void set_preview_synth_engine(uint32_t engine);
-    bool set_sidechain_link(uint32_t sourceId, uint32_t destId,
-                            uint32_t pluginIndex, uint32_t tapPoint, bool enabled);
     bool has_sidechain_link(uint32_t sourceId, uint32_t destId, uint32_t pluginIndex) const;
     // Installs the routing edit host callbacks Rust drives; see part_3b.
     static void installRoutingEditHost();

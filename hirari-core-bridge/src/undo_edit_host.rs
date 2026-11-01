@@ -25,7 +25,7 @@ const HISTORY_COMPONENT: u32 = 0xA001;
 const MAX_LOG_MESSAGE: usize = 95;
 
 extern "C" {
-    fn hirari_engine_sync_structural_changes(host: *mut c_void);
+    pub(crate) fn hirari_engine_sync_structural_changes(host: *mut c_void);
 }
 
 fn post_history_log(log: *const c_void, prefix: &[u8], name: &[u8]) {

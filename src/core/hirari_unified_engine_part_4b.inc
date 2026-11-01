@@ -156,8 +156,9 @@
         // engine running at the previous device rate.
         prepareToPlay(projectSampleRate, currentBlockSize);
         for (const auto& sidechain : state.sidechains) {
-            if (!set_sidechain_link(sidechain.sourceId, sidechain.destinationId,
-                                    sidechain.pluginIndex, sidechain.tapPoint, true)) {
+            if (!hirari_routing_edit_set_sidechain_link(
+                    this, sidechain.sourceId, sidechain.destinationId, sidechain.pluginIndex,
+                    sidechain.tapPoint, true)) {
                 return false;
             }
         }

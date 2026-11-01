@@ -7,7 +7,6 @@
         return m_engine && m_engine->add_region(tid, std::string_view(path.data(), path.size()), startBeat);
     }
     
-    bool move_plugin(uint32_t tid, uint32_t fromIndex, uint32_t toIndex) const { return m_engine && m_engine->move_plugin(tid, fromIndex, toIndex); }
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandbox_index,
                                         rust::Slice<float> left, rust::Slice<float> right) const {
         if (!m_engine || left.empty() || left.size() != right.size()) return false;
@@ -84,14 +83,6 @@
     }
 
 
-
-    void handle_midi_cc(uint8_t channel, uint8_t cc, uint8_t value) const noexcept {
-        if (m_engine) m_engine->handle_midi_cc(channel, cc, value);
-    }
-    void handle_midi_cc14(uint8_t channel, uint16_t controller, uint16_t value) const noexcept {
-        if (m_engine) m_engine->handle_midi_cc14(channel, controller, value);
-    }
-    void set_preview_synth_engine(uint32_t engine) const { if (m_engine) m_engine->set_preview_synth_engine(engine); }
 
     bool save_project(rust::Str path) const { return m_engine && m_engine->saveProject(std::string_view(path.data(), path.size())); }
     bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }

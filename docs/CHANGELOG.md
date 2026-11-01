@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Track input monitoring, plugin reordering, MIDI CC learn dispatch, the
+  preview-synth selector and sidechain links now reach the Rust policy layer
+  directly, so the C++ engine relays and their `AudioEngine` forwarders are
+  gone; the project-load sidechain pass calls the Rust routing edit itself.
 - MIDI-note editing now runs as a Rust extension trait on the engine bridge:
   clearing, replacing, snapshotting and the range remove/transpose/move edits
   repack and call the Rust note store directly, so the C++ engine methods and
