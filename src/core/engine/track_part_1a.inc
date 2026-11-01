@@ -93,34 +93,25 @@ public:
         }
     }
 
-    // Adopts a decoded replacement. Path/rate policy and the undo snapshots
-    // live in `region_edit_host.rs`; the null check keeps a bad handle from
-    // replacing the region's audio outright.
+    // Adopts a decoded replacement. Path/rate policy, the timeline geometry
+    // derived from the decoded length, and the undo snapshots live in
+    // `region_edit_host.rs`; this stores the resolved state and drops the warp
+    // markers that belonged to the previous source.
     bool replaceRegionAudio(uint32_t rid, std::string path, std::shared_ptr<AudioBuffer> audio,
-                            double sourceSampleRate, double timelineSampleRate) {
+                            const HirariRegionState& state) {
         if (!audio) return false;
         invalidateFrozenForEdit();
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         for (auto& region : m_regions) {
-            if (region.id == rid) {
-                region.path = std::move(path);
-                region.name = region.path;
-                region.audio = std::move(audio);
-                region.sourceSampleRate = sourceSampleRate;
-                region.timelineSampleRate = timelineSampleRate;
-                region.sourceOffset = 0;
-                region.baseStart = region.start;
-                region.baseSourceOffset = 0;
-                (void)hirari_region_clip_edits_set_warp_markers(
-                    region.clipEdits.get(), nullptr, 0, 0, 0, false);
-                region.sourceLength = region.audio->getNumSamples();
-                region.len = static_cast<uint64_t>(std::ceil(
-                    static_cast<long double>(region.sourceLength) /
-                    region.sourceFramesPerTimelineFrame()));
-                region.baseLength = region.sourceLength;
-                publishRegionSnapshot();
-                return true;
-            }
+            if (region.id != rid) continue;
+            region.path = std::move(path);
+            region.name = region.path;
+            region.audio = std::move(audio);
+            region.applyEditableState(state);
+            (void)hirari_region_clip_edits_set_warp_markers(
+                region.clipEdits.get(), nullptr, 0, 0, 0, false);
+            publishRegionSnapshot();
+            return true;
         }
         return false;
     }

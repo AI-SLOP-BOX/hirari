@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- Replacing a region's audio now resolves its timeline geometry in Rust: the
+  decoded length and the source/timeline frame mapping produce the stored
+  state, so the C++ setter only installs the handle it is handed.
 - Insertion-time region validation now operates on the shared
   `HirariRegionState` record, so the C++ metadata transfer helpers and the
   separate add-metadata struct are gone and the fade clamp runs in Rust.

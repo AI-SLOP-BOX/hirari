@@ -71,11 +71,11 @@ pub const HIRARI_REGION_EDIT_COMP_RANGES: i32 = 17;
 /// note table when the region still matches `state` at `generation`. The host
 /// takes the analysis handle over on every path.
 pub const HIRARI_REGION_EDIT_PITCH_COMMIT: i32 = 19;
-/// Payload op: swap in a decoded audio handle. The blob starts with a
-/// native-layout header (handle, source rate, timeline rate) followed by the
-/// path bytes.
+/// Payload op: swap in a decoded audio handle. The blob starts with the owned
+/// handle followed by the path bytes; the resolved rates and timeline geometry
+/// travel in the payload state.
 pub const HIRARI_REGION_EDIT_REPLACE_AUDIO: i32 = 18;
-const REPLACE_AUDIO_HEADER_BYTES: usize = 8 + 2 * 8;
+const REPLACE_AUDIO_HEADER_BYTES: usize = 8;
 const _: () = assert!(std::mem::size_of::<usize>() == 8);
 
 /// The editable part of a region. Mirrors the C++ `HirariRegionState` byte for
@@ -106,7 +106,9 @@ pub struct HirariRegionState {
 }
 
 impl HirariRegionState {
-    /// Matches `Region::sourceFramesPerTimelineFrame()` in `track.hpp`.
+    /// Source frames consumed per project-timeline frame. This is the only
+    /// copy of the mapping: the replace-audio geometry and the spectral
+    /// stretch decision both read it.
     pub(crate) fn source_frames_per_timeline_frame(&self) -> f64 {
         let source_rate = if self.source_sample_rate.is_finite() && self.source_sample_rate > 0.0 {
             self.source_sample_rate
@@ -1646,10 +1648,33 @@ fn replace_audio_with(
             unsafe { release(host, handle) };
         }
     };
+    let Some(audio_view) = ops.audio_view else {
+        return false;
+    };
+    let mut decoded_samples = 0u64;
+    if unsafe { audio_view(handle, ptr::null_mut(), 0, &mut decoded_samples) } == 0
+        || decoded_samples == 0
+    {
+        return false;
+    }
+    // The decoded length and the source/timeline mapping give the replacement
+    // its timeline geometry, so the native setter only stores what is resolved
+    // here. Rates are installed first: the mapping is derived from them.
+    state.source_sample_rate = source_sample_rate;
+    state.timeline_sample_rate = timeline_sample_rate;
+    let frames_per_timeline = state.source_frames_per_timeline_frame();
+    let length = (decoded_samples as f64 / frames_per_timeline).ceil();
+    if !length.is_finite() || length < 1.0 || length >= u64::MAX as f64 {
+        return false;
+    }
+    state.source_offset = 0;
+    state.base_source_offset = 0;
+    state.source_length = decoded_samples;
+    state.base_start = state.start;
+    state.base_length = decoded_samples;
+    state.len = length as u64;
     let mut blob = Vec::with_capacity(REPLACE_AUDIO_HEADER_BYTES + path.len());
     blob.extend_from_slice(&(audio.into_raw() as usize).to_ne_bytes());
-    blob.extend_from_slice(&source_sample_rate.to_ne_bytes());
-    blob.extend_from_slice(&timeline_sample_rate.to_ne_bytes());
     blob.extend_from_slice(path);
     let payload = HirariRegionEditPayload {
         track_id,
@@ -1657,6 +1682,7 @@ fn replace_audio_with(
         op: HIRARI_REGION_EDIT_REPLACE_AUDIO,
         blob: blob.as_ptr(),
         blob_len: blob.len(),
+        state,
         ..Default::default()
     };
     if !unsafe { apply(host, &payload) } {
@@ -3188,6 +3214,21 @@ use crate::audio_note_curve::{
         std::sync::atomic::AtomicUsize::new(0);
     static FAKE_RATE_BITS: std::sync::atomic::AtomicU64 =
         std::sync::atomic::AtomicU64::new(48_000f64.to_bits());
+    static FAKE_AUDIO_SAMPLES: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(48_000);
+
+    unsafe extern "C" fn fake_audio_view(
+        _handle: *mut c_void,
+        _out: *mut *const f32,
+        _capacity: usize,
+        samples: *mut u64,
+    ) -> u32 {
+        if !samples.is_null() {
+            let count = FAKE_AUDIO_SAMPLES.load(std::sync::atomic::Ordering::SeqCst);
+            unsafe { samples.write(count) };
+        }
+        1
+    }
 
     unsafe extern "C" fn fake_decode_audio(
         _host: *mut c_void,
@@ -3227,6 +3268,7 @@ use crate::audio_note_curve::{
             range_edits: Some(fake_range_edits),
             sample_rate: Some(fake_sample_rate),
             decode_audio: Some(fake_decode_audio),
+            audio_view: Some(fake_audio_view),
             release_audio: Some(fake_release_audio),
             clone_region: Some(fake_clone),
             comp_ranges: Some(fake_comp_ranges),
@@ -4074,6 +4116,7 @@ use crate::audio_note_curve::{
         let host = 1usize as *mut c_void;
         reset(HirariRegionState {
             len: 100,
+            warp_ratio: 1.0,
             ..Default::default()
         });
         RELEASED_AUDIO.store(0, std::sync::atomic::Ordering::SeqCst);
@@ -4090,15 +4133,17 @@ use crate::audio_note_curve::{
         assert_eq!(blob.len(), REPLACE_AUDIO_HEADER_BYTES + path.len());
         let raw = usize::from_ne_bytes(blob[0..8].try_into().unwrap());
         assert_eq!(raw, &FAKE_AUDIO as *const u8 as usize);
-        assert_eq!(
-            f64::from_ne_bytes(blob[8..16].try_into().unwrap()),
-            44_100.0
-        );
-        assert_eq!(
-            f64::from_ne_bytes(blob[16..24].try_into().unwrap()),
-            48_000.0
-        );
         assert_eq!(&blob[REPLACE_AUDIO_HEADER_BYTES..], path);
+        // The decoded length and the rate conversion resolve the geometry.
+        let state = guard.applied[0].state;
+        assert_eq!(state.source_sample_rate, 44_100.0);
+        assert_eq!(state.timeline_sample_rate, 48_000.0);
+        assert_eq!(state.source_length, 48_000);
+        assert_eq!(state.base_length, 48_000);
+        assert_eq!(state.source_offset, 0);
+        assert_eq!(state.base_source_offset, 0);
+        assert_eq!(state.base_start, state.start);
+        assert_eq!(state.len, 52_245);
         assert_eq!(guard.undo_name, "Replace Region Audio");
         assert!(!guard.coalesce);
         assert!(!guard.perform);
