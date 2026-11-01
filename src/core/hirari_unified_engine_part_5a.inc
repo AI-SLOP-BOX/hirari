@@ -101,7 +101,7 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
                     engine->m_bounceProgress.store(0.0f, std::memory_order_release);
                     engine->m_bounceState.store(
                         static_cast<uint32_t>(BounceState::Failed), std::memory_order_release);
-                    ::Hirari::Core::Diagnostics::LogBuffer::post(
+                    hirari_log_post(
                         0, 0, "BOUNCE_OFFLINE_RENDER_BUSY_TIMEOUT");
                     return 2;
                 }
@@ -162,7 +162,7 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
             if (status != 0) {
                 // A rejected plan must publish a terminal state, not look
                 // like an immortal render.
-                ::Hirari::Core::Diagnostics::LogBuffer::post(
+                hirari_log_post(
                     1, 0, status == -2 ? "BOUNCE_INVALID_RANGE" : "BOUNCE_INVALID_SAMPLE_RATE");
             }
             return status;
@@ -214,7 +214,7 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
             return hirari_bounce_stream_finish(stream) != 0 ? 1 : 2;
         },
         [](void*, uint32_t level, const uint8_t* message, size_t length) {
-            ::Hirari::Core::Diagnostics::LogBuffer::post(
+            hirari_log_post(
                 level, 0, std::string_view(reinterpret_cast<const char*>(message), length));
         },
     };

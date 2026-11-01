@@ -32,7 +32,7 @@
     void* tempo_state() const noexcept { return m_tempoState; }
     void* undo_state() const noexcept { return m_undoState; }
     void* log_state() const noexcept {
-        return ::Hirari::Core::Diagnostics::LogBuffer::state();
+        return hirari_log_state();
     }
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;

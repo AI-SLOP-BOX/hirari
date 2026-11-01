@@ -25,7 +25,7 @@ bool HirariUnifiedEngine::bounce_project_async(std::string_view path, uint32_t f
     m_bounceThread = std::thread([this, outputPath, format]() {
         const bool success = bounce_project(outputPath, format);
         const bool cancelled = get_bounce_state() == static_cast<uint32_t>(BounceState::Cancelled);
-        ::Hirari::Core::Diagnostics::LogBuffer::post(
+        hirari_log_post(
             success ? 2 : (cancelled ? 1 : 0), 0,
             success ? "BOUNCE_COMPLETE" : (cancelled ? "BOUNCE_CANCELLED" : "BOUNCE_FAILED"));
         m_bounceRunning.store(false, std::memory_order_release);

@@ -9,7 +9,7 @@ bool HirariUnifiedEngine::set_tempo(float bpm) {
     // entering C++ at all.
     return hirari_tempo_edit_set_tempo(
         m_tempoState, m_undoState,
-        ::Hirari::Core::Diagnostics::LogBuffer::state(),
+        hirari_log_state(),
         m_playhead.load(std::memory_order_relaxed),
         m_sampleRate.load(std::memory_order_relaxed), bpm);
 }
@@ -139,7 +139,7 @@ bool HirariUnifiedEngine::execute_auto_arrangement() {
             event.timestamp = start;
             event.value = static_cast<float>(length);
             engine->push_event(event);
-            ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0, "AI | ARRANGEMENT | SECTION_DETECTED");
+            hirari_log_post(0, 0, "AI | ARRANGEMENT | SECTION_DETECTED");
         });
 }
 

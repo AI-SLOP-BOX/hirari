@@ -321,7 +321,7 @@ void HirariUnifiedEngine::installCommandHost() {
                 hirari_forensic_journaler_log(engine->m_forensicJournal, type, tid, val, ts);
         },
         [](void*, uint32_t tid) {
-            ::Hirari::Core::Diagnostics::LogBuffer::post(1, tid, "COMMAND_QUEUE_FULL");
+            hirari_log_post(1, tid, "COMMAND_QUEUE_FULL");
         },
     };
     hirari_command_host_install(&ops);

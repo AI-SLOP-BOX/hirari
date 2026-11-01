@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include "../log_buffer.hpp"
 #include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Driver {
@@ -227,7 +226,7 @@ public:
 
 private:
     static void log_trampoline(void*, uint32_t level, const char* message) noexcept {
-        ::Hirari::Core::Diagnostics::LogBuffer::post(level, 0xA001, message);
+        hirari_log_post(level, 0xA001, message);
     }
 
     static std::string take_string(char* value) {

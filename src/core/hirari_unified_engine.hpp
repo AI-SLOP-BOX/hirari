@@ -37,7 +37,6 @@ namespace Hirari::DSP { struct ProcessContext; }
 
 namespace Hirari::Core::Video { class VideoSync; }
 
-#include "log_buffer.hpp"
 #include "engine/routing_engine.hpp"
 #include "rust_ffi.hpp"
 #include <thread>

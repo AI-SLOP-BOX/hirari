@@ -19,7 +19,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "concurrency/audio_task_manager.hpp"
-#include "log_buffer.hpp"
 #include "rust_ffi.hpp"
 
 namespace Hirari::Core::Engine {

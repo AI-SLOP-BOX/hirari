@@ -67,7 +67,12 @@ production support.
 
 ### Changed
 
-- Region F0 analysis now runs from the Rust host: the sample-rate fallbacks,
+- The diagnostic ring no longer carries a C++ owner: `log_buffer.hpp` and its
+  `LogBuffer` wrapper are deleted, and every C++ site posts through
+  `hirari_log_post`, which hands the message straight to the Rust ring.
+  Engine log-state accessors and the CoreAudio log trampoline use
+  `hirari_log_state`, so the bounded ring, its capacity, and its pop contract
+  stay in Rust only.
   span and buffer admission, geometry staleness check and note-table commit
   live in the regional pitch host, which reads the region and its decoded
   audio through the existing region host callbacks. `Track` keeps only the

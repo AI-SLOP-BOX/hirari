@@ -7,6 +7,7 @@
 // failed on `unknown type name 'size_t'`.
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 
 #include "project_automation.hpp"
@@ -34,6 +35,17 @@ extern "C" void hirari_log_buffer_post(
     const void* state, uint32_t level, uint32_t component_id,
     const uint8_t* message, size_t message_len);
 extern "C" bool hirari_log_buffer_pop(const void* state, void* output);
+
+// The diagnostic ring is Rust-owned. C++ sites post and address it through
+// these two helpers instead of carrying their own wrapper class.
+inline void hirari_log_post(uint32_t level, uint32_t component_id,
+                            std::string_view message) noexcept {
+    hirari_log_buffer_post(hirari_log_buffer_default_state(), level, component_id,
+                           reinterpret_cast<const uint8_t*>(message.data()), message.size());
+}
+inline void* hirari_log_state() noexcept {
+    return const_cast<void*>(hirari_log_buffer_default_state());
+}
 
 struct HirariScheduledMidiNote {
     uint32_t track_id;

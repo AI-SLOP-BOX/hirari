@@ -133,7 +133,7 @@ void HirariUnifiedEngine::syncStructuralChanges() {
             track->setPdcCompensationSamples(pdcOffsets[i]);
     }
 
-    ::Hirari::Core::Diagnostics::LogBuffer::post(0, 0x1, "Structural Sync: Topology Rebuilt.");
+    hirari_log_post(0, 0x1, "Structural Sync: Topology Rebuilt.");
 }
 
 // Region import policy (validation, decoder dispatch, ticket limits, worker
@@ -143,9 +143,9 @@ bool HirariUnifiedEngine::add_region(uint32_t tid, std::string_view path, double
     const int32_t result = hirari_region_import_add(
         this, tid, reinterpret_cast<const uint8_t*>(path.data()), path.size(), start_smp);
     if (result == 1) {
-        ::Hirari::Core::Diagnostics::LogBuffer::post(1, 0x2102, "REGION_TRACK_NOT_FOUND");
+        hirari_log_post(1, 0x2102, "REGION_TRACK_NOT_FOUND");
     } else if (result == 2) {
-        ::Hirari::Core::Diagnostics::LogBuffer::post(1, 0x2101, "REGION_IMPORT_FAILED");
+        hirari_log_post(1, 0x2101, "REGION_IMPORT_FAILED");
     }
     return result == 0;
 }
