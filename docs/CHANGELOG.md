@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Dropped the C++ declarations for FFI entry points nothing on the native side
+  calls any more (scheduled-note pack/unpack/upsert, preview engine binding,
+  routing connection JSON, metronome enable, MIDI-learn CC and plugin/control
+  edit relays).
 - Transport tempo, MIDI clock rate/tick, playback state, sample rate and region
   warp-marker writes now run as bridge-side Rust entry points on the engine
   handle; the C++ `AudioEngine` relays, the engine const-qualification they

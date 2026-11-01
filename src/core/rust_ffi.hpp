@@ -101,19 +101,6 @@ extern "C" uint64_t hirari_midi_scheduled_note_end(const HirariScheduledMidiNote
 extern "C" HirariScheduledMidiNote* hirari_midi_notes_snapshot_take(
     const void* store, size_t* count);
 extern "C" void hirari_midi_notes_snapshot_take_free(HirariScheduledMidiNote*, size_t);
-extern "C" size_t hirari_midi_notes_unpack(
-    const uint64_t* packed, size_t len, HirariScheduledMidiNote* output, size_t capacity);
-extern "C" size_t hirari_midi_notes_pack(
-    const HirariScheduledMidiNote* notes, size_t note_count, uint64_t* output, size_t capacity);
-extern "C" bool hirari_midi_notes_replace(
-    void* store, const HirariScheduledMidiNote* notes, size_t count,
-    bool record_undo, void* undo, const void* log);
-extern "C" bool hirari_midi_notes_edit_range(
-    void* store, uint32_t track_id, uint64_t start_sample, uint64_t end_sample,
-    uint32_t operation, int64_t amount, void* undo, const void* log);
-extern "C" void hirari_midi_notes_upsert(
-    void* store, uint32_t track_id, uint8_t pitch, uint8_t velocity,
-    uint64_t start_sample, uint64_t length_samples, void* undo, const void* log);
 using HirariScheduledMidiEventCallback = void (*)(
     void* context, const HirariScheduledMidiNote* note,
     uint64_t sample_offset, uint8_t note_off);
@@ -156,7 +143,6 @@ extern "C" uint64_t hirari_project_state_revision_mix(
 extern "C" float hirari_samples_to_milliseconds(uint64_t samples, double sample_rate);
 extern "C" void* hirari_preview_synth_create();
 extern "C" void hirari_preview_synth_destroy(void* state);
-extern "C" void hirari_preview_synth_set_engine(void* state, uint32_t engine);
 extern "C" void hirari_preview_synth_reset(void* state);
 extern "C" void hirari_preview_synth_process(
     void* state, const void* events, size_t event_count, float* left, float* right,
@@ -1069,8 +1055,6 @@ extern "C" void hirari_routing_engine_inject_feedback(
     const void* state, uint32_t destination, float* left, float* right, uint32_t frames);
 extern "C" void hirari_routing_engine_capture_feedback(
     void* state, uint32_t source, const float* left, const float* right, uint32_t frames);
-extern "C" char* hirari_routing_engine_connections_json(const void* state);
-extern "C" void hirari_routing_engine_connections_json_free(char* json);
 extern "C" void hirari_routing_engine_enter_send_pdc_read(void* state);
 extern "C" void hirari_routing_engine_leave_send_pdc_read(void* state);
 extern "C" bool hirari_routing_engine_resolve_process_order(
@@ -1200,8 +1184,6 @@ struct HirariControlEditHostOps {
 };
 
 extern "C" void hirari_control_edit_host_install(const HirariControlEditHostOps* ops);
-extern "C" bool hirari_control_edit_set_input_monitor(
-    void* host, uint32_t trackId, bool enabled, uint32_t leftChannel, uint32_t rightChannel);
 
 // Plugin-chain edit policy (bypass, reordering, parameters and presets).
 struct HirariPluginEditHostOps {
@@ -1311,8 +1293,6 @@ struct HirariTrackControlHostOps {
 extern "C" void hirari_track_control_host_install(const HirariTrackControlHostOps* ops);
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
-extern "C" bool hirari_plugin_edit_move(
-    void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex);
 
 // Status pointers refer to Track::SandboxStatus, mirrored field for field in
 // plugin_sandbox_maintenance.rs.
@@ -1648,7 +1628,6 @@ extern "C" bool hirari_status_queue_pop_default(void* output_message);
 extern "C" uint64_t hirari_status_queue_take_dropped_default();
 extern "C" void* hirari_metronome_create(double sample_rate);
 extern "C" void hirari_metronome_destroy(void* state);
-extern "C" void hirari_metronome_set_enabled(void* state, bool enabled);
 extern "C" bool hirari_metronome_is_enabled(const void* state);
 extern "C" void hirari_metronome_process(
     void* state, float* left, float* right, uint32_t sample_count,
@@ -1718,10 +1697,6 @@ extern "C" void hirari_midi_learn_add_mapping_14bit(
     void* state, uint16_t controller, uint8_t channel, const void* macro_state,
     uint32_t macro_index,
     float minimum, float maximum, float curve, bool pickup);
-extern "C" void hirari_midi_learn_handle_cc(
-    const void* state, uint8_t channel, uint8_t cc, uint8_t value);
-extern "C" void hirari_midi_learn_handle_cc14(
-    const void* state, uint8_t channel, uint16_t controller, uint16_t value);
 
 extern "C" void* hirari_project_db_create();
 extern "C" void hirari_project_db_destroy(void* state);
