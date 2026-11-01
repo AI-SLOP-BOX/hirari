@@ -40,6 +40,15 @@ const SCALAR_SYNC_GROUP: i32 = 6;
 const SCALAR_FADES: i32 = 7;
 const SCALAR_PITCH_PRESERVE_WARP: i32 = 9;
 
+fn core_mut(engine: &ffi::AudioEngine) -> *mut ffi::HirariUnifiedEngine {
+    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+    core as *mut ffi::HirariUnifiedEngine
+}
+
+fn pinned(engine: &ffi::AudioEngine) -> core::pin::Pin<&mut ffi::HirariUnifiedEngine> {
+    unsafe { core::pin::Pin::new_unchecked(&mut *core_mut(engine)) }
+}
+
 fn host(engine: &ffi::AudioEngine) -> *mut c_void {
     let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
     core as *mut c_void
@@ -821,6 +830,77 @@ impl ffi::AudioEngine {
     }
     pub fn get_track_correlation(&self, tid: u32) -> f32 {
         self.get_core().get_track_correlation(tid)
+    }
+    pub fn assign_track_to_vca(&self, track_id: u32, group_id: u32) -> bool {
+        pinned(self).assign_track_to_vca(track_id, group_id)
+    }
+    pub fn new_project(&self) {
+        pinned(self).new_project()
+    }
+    pub fn take_watchdog_trips(&self) -> u32 {
+        pinned(self).take_watchdog_trips()
+    }
+    pub fn retry_sandboxed_plugin(&self, track_id: u32, sandbox_index: u32) -> bool {
+        pinned(self).retry_sandboxed_plugin(track_id, sandbox_index)
+    }
+    pub fn restart_sandboxed_plugin(&self, track_id: u32, sandbox_index: u32) -> bool {
+        pinned(self).restart_sandboxed_plugin(track_id, sandbox_index)
+    }
+    pub fn set_plugin_bypass(&self, tid: u32, plugin_index: u32, bypassed: bool) -> bool {
+        pinned(self).set_plugin_bypass(tid, plugin_index, bypassed)
+    }
+    pub fn has_plugin_native_editor(&self, track_id: u32, plugin_index: u32) -> bool {
+        self.get_core()
+            .has_plugin_native_editor(track_id, plugin_index)
+    }
+    pub fn cancel_bounce(&self) -> bool {
+        pinned(self).cancel_bounce()
+    }
+    pub fn pause_bounce(&self) -> bool {
+        pinned(self).pause_bounce()
+    }
+    pub fn resume_bounce(&self) -> bool {
+        pinned(self).resume_bounce()
+    }
+    pub fn execute_vocal_remover(&self, tid: u32) -> bool {
+        pinned(self).execute_vocal_remover(tid)
+    }
+    pub fn set_articulation_map(&self, tid: u32, map_hash: u32) -> bool {
+        pinned(self).set_articulation_map(tid, map_hash)
+    }
+    pub fn set_track_eq(
+        &self,
+        tid: u32,
+        low_boost_db: f32,
+        low_cut_db: f32,
+        high_boost_db: f32,
+        high_cut_db: f32,
+    ) -> bool {
+        pinned(self).set_track_eq(
+            tid,
+            low_boost_db,
+            low_cut_db,
+            high_boost_db,
+            high_cut_db,
+        )
+    }
+    pub fn execute_auto_arrangement(&self) -> bool {
+        pinned(self).execute_auto_arrangement()
+    }
+    pub fn set_project_scale(&self, root: i32, scale_type: i32) -> bool {
+        pinned(self).set_project_scale(root, scale_type)
+    }
+    pub fn clear_region_processing(&self, tid: u32, rid: u32) -> bool {
+        pinned(self).clear_region_processing(tid, rid)
+    }
+    pub fn set_automation_record_mode(&self, mode: u32) -> bool {
+        pinned(self).set_automation_record_mode(mode)
+    }
+    pub fn request_video_frame(&self, seconds: f64) -> bool {
+        pinned(self).request_video_frame(seconds)
+    }
+    pub fn mark_project_layout_changed(&self) {
+        self.get_core().mark_project_layout_changed()
     }
     pub fn get_project_layout_revision(&self) -> u64 {
         self.get_core().get_project_layout_revision()

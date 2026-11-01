@@ -79,6 +79,12 @@ production support.
   now call the Rust routines directly from the bridge; the C++ `AudioEngine`
   relays, the local sandbox-status shim declaration, and the unused FFI
   declarations they needed are gone.
+- New-project reset, watchdog counters, sandbox retry/restart, plugin bypass,
+  native-editor availability, bounce controls, vocal-remover, articulation,
+  track EQ, auto-arrangement, project scale, region-processing and automation
+  record mode, video-frame requests and VCA assignment now run as Rust
+  extension methods on the engine bridge; their C++ `AudioEngine` relays are
+  gone.
 
 - Low-latency mode, preview triggering, metronome control, tempo reads,
   sample/beat conversion and the routing snapshot now run as Rust extension

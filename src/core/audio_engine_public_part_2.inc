@@ -1,17 +1,13 @@
-    bool assign_track_to_vca(uint32_t trackId, uint32_t groupId) const { return m_engine && m_engine->assign_track_to_vca(trackId, groupId); }
-    void new_project() const { if (m_engine) m_engine->new_project(); }
-
-
     bool add_region(uint32_t tid, rust::Str path, double startBeat) const {
         return m_engine && m_engine->add_region(tid, std::string_view(path.data(), path.size()), startBeat);
     }
-    
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandbox_index,
                                         rust::Slice<float> left, rust::Slice<float> right) const {
         if (!m_engine || left.empty() || left.size() != right.size()) return false;
         return m_engine->process_sandboxed_plugin_block(
             tid, sandbox_index, left.data(), right.data(), static_cast<uint32_t>(left.size()));
     }
+    
     rust::Vec<uint8_t> process_sandboxed_plugin_midi_block(
         uint32_t tid, uint32_t sandbox_index, uint32_t frames,
         rust::Slice<const uint8_t> midi_data) const {
@@ -21,16 +17,6 @@
             tid, sandbox_index, frames, midi_data.data(), static_cast<uint32_t>(midi_data.size()));
         for (const auto byte : output) result.push_back(byte);
         return result;
-    }
-    uint32_t take_watchdog_trips() const {
-        return m_engine ? m_engine->take_watchdog_trips() : 0;
-    }
-
-    bool retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
-        return m_engine && m_engine->retry_sandboxed_plugin(trackId, sandboxIndex);
-    }
-    bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) const {
-        return m_engine && m_engine->restart_sandboxed_plugin(trackId, sandboxIndex);
     }
     rust::String get_last_sandbox_failure_text(uint32_t trackId) const {
         return rust::String(m_engine ? m_engine->get_last_sandbox_failure_text(trackId)
@@ -60,31 +46,25 @@
 
 
 
+
+
+
+
+
     rust::String get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const {
         return rust::String(m_engine ? m_engine->get_sandbox_plugin_state_error_text(trackId, sandboxIndex)
                                      : "state-unavailable");
     }
-
-
     rust::String get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
                                            uint32_t parameterId) const {
         return rust::String(m_engine ? m_engine->get_plugin_parameter_name(tid, pluginIndex, parameterId) : "");
     }
-    bool set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) const {
-        return m_engine && m_engine->set_plugin_bypass(tid, pluginIndex, bypassed);
-    }
-
-
-
     bool save_project(rust::Str path) const { return m_engine && m_engine->saveProject(std::string_view(path.data(), path.size())); }
     bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }
     bool bounce_project(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project(std::string_view(path.data(), path.size()), format); }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
 
 
-    bool has_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const noexcept {
-        return m_engine && m_engine->has_plugin_native_editor(trackId, pluginIndex);
-    }
     uint64_t open_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex,
                                        uint64_t parent) const {
         if (!m_engine || !m_engine->has_plugin_native_editor(trackId, pluginIndex)) return 0;
@@ -109,28 +89,11 @@
     bool plugin_native_editor_embedded(uint32_t trackId, uint32_t pluginIndex) const {
         return hirari_native_editor_sessions_embedded(m_nativeEditorSessions, trackId, pluginIndex);
     }
-    bool cancel_bounce() const noexcept { return m_engine && m_engine->cancel_bounce(); }
-    bool pause_bounce() const noexcept { return m_engine && m_engine->pause_bounce(); }
-    bool resume_bounce() const noexcept { return m_engine && m_engine->resume_bounce(); }
-    bool execute_vocal_remover(uint32_t tid) const { return m_engine && m_engine->execute_vocal_remover(tid); }
-    bool set_articulation_map(uint32_t tid, uint32_t mapHash) const { return m_engine && m_engine->set_articulation_map(tid, mapHash); }
-    bool set_track_eq(uint32_t tid, float lowBoostDb, float lowCutDb,
-                      float highBoostDb, float highCutDb) const {
-        return m_engine && m_engine->set_track_eq(tid, lowBoostDb, lowCutDb, highBoostDb, highCutDb);
-    }
 
-    bool execute_auto_arrangement() const { return m_engine && m_engine->execute_auto_arrangement(); }
-    bool set_project_scale(int32_t root, int32_t type) const {
-        return m_engine && m_engine->set_project_scale(root, type);
-    }
 
 
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, rust::Str operation, float parameter, bool enabled) const {
         return m_engine && m_engine->append_region_processing(tid, rid, stepId, std::string_view(operation.data(), operation.size()), parameter, enabled);
-    }
-    bool clear_region_processing(uint32_t tid, uint32_t rid) const { return m_engine && m_engine->clear_region_processing(tid, rid); }
-    bool set_automation_record_mode(uint32_t mode) const {
-        return m_engine && m_engine->set_automation_record_mode(mode);
     }
     // Compatibility API: stop only this wrapper's device.  The underlying
     // HirariUnifiedEngine is a process-wide singleton and must not be shut down
@@ -140,7 +103,6 @@
 
     rust::Vec<uint8_t> get_video_frame() const;
 
-    bool request_video_frame(double seconds) const { return m_engine && m_engine->request_video_frame(seconds); }
     bool load_video(rust::Str path) const {
         return m_engine && m_engine->load_video(std::string_view(path.data(), path.size()));
     }
@@ -164,9 +126,6 @@
             +[](void* opaque) noexcept {
                 delete static_cast<std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>*>(opaque);
             });
-    }
-    void mark_project_layout_changed() const {
-        if (m_engine) m_engine->mark_project_layout_changed();
     }
     uint64_t request_project_layout_snapshot() const {
         if (!m_engine) return 0;
@@ -195,6 +154,7 @@
         return requestId != 0 && hirari_layout_snapshot_cancel(requestId, m_layoutSnapshotOwnerId);
     }
 
+    
     // Command Dispatch (admission lives in Rust; the engine keeps the queue)
     bool push_command(CommandType type, uint32_t tid, float val, uint64_t ts,
                       uint64_t expectedProjectGeneration,
@@ -203,6 +163,6 @@
             m_engine.get(), static_cast<uint32_t>(type), tid, val, ts,
             expectedProjectGeneration, expectedAudioGeneration);
     }
-    
+
     // Core Access for telemetry shims
     const ::Hirari::Core::Engine::HirariUnifiedEngine& get_core() const { return *m_engine; }

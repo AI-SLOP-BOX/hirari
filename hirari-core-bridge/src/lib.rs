@@ -9,6 +9,8 @@
 // resolves the Mach-O image inside the bundle before loading it.
 
 include!("module_exports.rs");
+use core::pin::Pin;
+
 pub use analysis_views::{
     analysis_arrangement_advice, analysis_creative_advice, analysis_dashboard_json,
     analysis_mel_spectrogram, analysis_mixing_advice, analysis_motion_energy,
@@ -192,8 +194,12 @@ pub mod ffi {
         fn set_preview_sample(self: &AudioEngine, samples: &[f32], source_rate: f64);
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn shutdown(self: &AudioEngine);
-        fn assign_track_to_vca(self: &AudioEngine, track_id: u32, group_id: u32) -> bool;
-        fn new_project(self: &AudioEngine);
+        fn assign_track_to_vca(
+            self: Pin<&mut HirariUnifiedEngine>,
+            track_id: u32,
+            group_id: u32,
+        ) -> bool;
+        fn new_project(self: Pin<&mut HirariUnifiedEngine>);
         fn process_sandboxed_plugin_block(
             self: &AudioEngine,
             tid: u32,
@@ -208,10 +214,18 @@ pub mod ffi {
             frames: u32,
             midi_data: &[u8],
         ) -> Vec<u8>;
-        fn take_watchdog_trips(self: &AudioEngine) -> u32;
+        fn take_watchdog_trips(self: Pin<&mut HirariUnifiedEngine>) -> u32;
         fn non_finite_plugin_samples(self: &HirariUnifiedEngine) -> u64;
-        fn retry_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
-        fn restart_sandboxed_plugin(self: &AudioEngine, track_id: u32, sandbox_index: u32) -> bool;
+        fn retry_sandboxed_plugin(
+            self: Pin<&mut HirariUnifiedEngine>,
+            track_id: u32,
+            sandbox_index: u32,
+        ) -> bool;
+        fn restart_sandboxed_plugin(
+            self: Pin<&mut HirariUnifiedEngine>,
+            track_id: u32,
+            sandbox_index: u32,
+        ) -> bool;
         fn get_last_sandbox_failure(self: &HirariUnifiedEngine, track_id: u32) -> u8;
         fn get_last_sandbox_failure_text(self: &AudioEngine, track_id: u32) -> String;
         fn get_sandbox_plugin_paths(self: &AudioEngine) -> Vec<String>;
@@ -248,9 +262,10 @@ pub mod ffi {
             parameter: f32,
             enabled: bool,
         ) -> bool;
-        fn clear_region_processing(self: &AudioEngine, tid: u32, rid: u32) -> bool;
+        fn clear_region_processing(self: Pin<&mut HirariUnifiedEngine>, tid: u32, rid: u32)
+            -> bool;
 
-        fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
+        fn set_automation_record_mode(self: Pin<&mut HirariUnifiedEngine>, mode: u32) -> bool;
         fn get_plugin_parameter(
             self: &HirariUnifiedEngine,
             tid: u32,
@@ -269,7 +284,7 @@ pub mod ffi {
             parameter_id: u32,
         ) -> String;
         fn set_plugin_bypass(
-            self: &AudioEngine,
+            self: Pin<&mut HirariUnifiedEngine>,
             tid: u32,
             plugin_index: u32,
             bypassed: bool,
@@ -287,10 +302,14 @@ pub mod ffi {
         fn bounce_project_async(self: &AudioEngine, path: &str, format: u32) -> bool;
         fn get_bounce_progress(self: &HirariUnifiedEngine) -> f32;
         fn get_bounce_state(self: &HirariUnifiedEngine) -> u32;
-        fn cancel_bounce(self: &AudioEngine) -> bool;
-        fn pause_bounce(self: &AudioEngine) -> bool;
-        fn resume_bounce(self: &AudioEngine) -> bool;
-        fn has_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32) -> bool;
+        fn cancel_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
+        fn pause_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
+        fn resume_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
+        fn has_plugin_native_editor(
+            self: &HirariUnifiedEngine,
+            track_id: u32,
+            plugin_index: u32,
+        ) -> bool;
         fn plugin_native_editor_embedded(
             self: &AudioEngine,
             track_id: u32,
@@ -309,12 +328,20 @@ pub mod ffi {
         fn midi_clock_last_tick(self: &HirariUnifiedEngine) -> u64;
         fn midi_clock_rate(self: &HirariUnifiedEngine) -> f64;
         fn set_midi_clock_rate(self: &HirariUnifiedEngine, bpm: f64);
-        fn execute_auto_arrangement(self: &AudioEngine) -> bool;
-        fn set_project_scale(self: &AudioEngine, root: i32, scale_type: i32) -> bool;
-        fn execute_vocal_remover(self: &AudioEngine, tid: u32) -> bool;
-        fn set_articulation_map(self: &AudioEngine, tid: u32, map_hash: u32) -> bool;
+        fn execute_auto_arrangement(self: Pin<&mut HirariUnifiedEngine>) -> bool;
+        fn set_project_scale(
+            self: Pin<&mut HirariUnifiedEngine>,
+            root: i32,
+            scale_type: i32,
+        ) -> bool;
+        fn execute_vocal_remover(self: Pin<&mut HirariUnifiedEngine>, tid: u32) -> bool;
+        fn set_articulation_map(
+            self: Pin<&mut HirariUnifiedEngine>,
+            tid: u32,
+            map_hash: u32,
+        ) -> bool;
         fn set_track_eq(
-            self: &AudioEngine,
+            self: Pin<&mut HirariUnifiedEngine>,
             tid: u32,
             low_boost_db: f32,
             low_cut_db: f32,
@@ -329,7 +356,7 @@ pub mod ffi {
         fn get_project_generation(self: &HirariUnifiedEngine) -> u64;
         fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
         fn get_project_state_revision(self: &HirariUnifiedEngine) -> u64;
-        fn mark_project_layout_changed(self: &AudioEngine);
+        fn mark_project_layout_changed(self: &HirariUnifiedEngine);
         fn audio_range_overflowed(self: &HirariUnifiedEngine) -> bool;
 
         fn get_runtime_telemetry(bridge: &AudioEngine) -> Vec<f32>;
@@ -345,7 +372,7 @@ pub mod ffi {
         fn get_sample_rate(self: &HirariUnifiedEngine) -> f64;
         fn get_video_frame(self: &AudioEngine) -> Vec<u8>;
         fn get_video_frame_revision(self: &HirariUnifiedEngine) -> u64;
-        fn request_video_frame(self: &AudioEngine, seconds: f64) -> bool;
+        fn request_video_frame(self: Pin<&mut HirariUnifiedEngine>, seconds: f64) -> bool;
         fn load_video(self: &AudioEngine, path: &str) -> bool;
 
         fn push_command(
