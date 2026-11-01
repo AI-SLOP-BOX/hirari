@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Track freeze publication is now Rust-owned (`track_frozen_store.rs`): the
+  published frozen buffer, its retire/clear lifecycle, generation counters,
+  cache path and validation live behind `hirari_track_frozen_store_*`, so the
+  C++ `Track` members for the frozen buffer, edit mutex and counters are
+  deleted. Dead `IProcessor::ParameterDescriptor` /
+  `getParameterDescriptor` API is removed with it.
 - The audio input block queue is now used through the Rust SPSC
   implementation directly (`hirari_audio_input_queue_*`); the C++
   `MacAudioInputBlockQueue` wrapper class is deleted and only its capacity

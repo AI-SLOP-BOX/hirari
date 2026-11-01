@@ -950,7 +950,6 @@ extern "C" bool hirari_audio_input_queue_poll(
     uint32_t* channel_count, uint32_t* frame_count, uint64_t* dropped_blocks);
 extern "C" uint64_t hirari_audio_input_queue_dropped(const void* queue);
 extern "C" void hirari_audio_input_queue_discard(const void* queue);
-extern "C" void hirari_audio_input_queue_reset(const void* queue);
 extern "C" void* hirari_tempo_map_create();
 extern "C" void hirari_tempo_map_destroy(void* state);
 extern "C" bool hirari_tempo_map_add_tempo(
@@ -1624,6 +1623,30 @@ extern "C" bool hirari_track_freeze_write_float32(
 extern "C" bool hirari_track_freeze_read_float32(
     const uint8_t* path, size_t path_size, uint32_t sample_rate,
     uint64_t total_samples, float* left, float* right);
+// Publication state of the frozen render. The store retains the C++ owner
+// handles and publishes the read-side pointer/counters for the callback.
+struct HirariTrackFrozenOps {
+    void (*destroy_owner)(void*);
+};
+extern "C" void* hirari_track_frozen_store_create(const HirariTrackFrozenOps* ops);
+extern "C" void hirari_track_frozen_store_destroy(void* state);
+extern "C" bool hirari_track_frozen_store_publish(
+    const void* state, void* owner, void* audio, uint32_t channels, uint64_t frames,
+    uint64_t total_samples, uint32_t sample_rate, uint64_t project_generation,
+    uint64_t audio_generation, const uint8_t* path, size_t path_len);
+extern "C" void hirari_track_frozen_store_clear(const void* state);
+extern "C" void hirari_track_frozen_store_retire(const void* state);
+extern "C" const void* hirari_track_frozen_store_current(const void* state);
+extern "C" bool hirari_track_frozen_store_is_frozen(const void* state);
+extern "C" uint64_t hirari_track_frozen_store_total_samples(const void* state);
+extern "C" uint32_t hirari_track_frozen_store_sample_rate(const void* state);
+extern "C" uint64_t hirari_track_frozen_store_project_generation(const void* state);
+extern "C" uint64_t hirari_track_frozen_store_audio_generation(const void* state);
+extern "C" size_t hirari_track_frozen_store_path_len(const void* state);
+extern "C" size_t hirari_track_frozen_store_path_copy(
+    const void* state, uint8_t* out, size_t capacity);
+extern "C" bool hirari_track_frozen_store_set_path(
+    const void* state, const uint8_t* path, size_t path_len);
 extern "C" bool hirari_midi_extended_ring_init(void* storage, size_t bytes);
 extern "C" bool hirari_midi_extended_ring_push(
     void* state, uint64_t sample_offset, uint8_t articulation_id,

@@ -51,81 +51,65 @@
     // observes the raw pointer and copies bounded samples from it.  Published
     // buffers are retained for the lifetime of the Track so replacing a
     // freeze cannot invalidate a callback already in flight.
+    // The freeze store retains the owner handles, so a replaced buffer stays
+    // alive until the control side explicitly retires it after quiescing.
     bool publishFrozenAudio(std::shared_ptr<AudioBuffer> rendered,
                             uint64_t totalSamples,
                             uint32_t sampleRate,
                             uint64_t projectGeneration = 0,
                             uint64_t audioGeneration = 0,
                             std::string_view cachePath = {}) {
-        if (!rendered || rendered->getNumChannels() == 0 ||
-            rendered->getNumSamples() == 0 || sampleRate == 0 ||
-            totalSamples == 0 || totalSamples > rendered->getNumSamples()) {
+        if (!rendered) return false;
+        auto* owner = new std::shared_ptr<AudioBuffer>(std::move(rendered));
+        if (!hirari_track_frozen_store_publish(
+                m_frozenStore, owner, owner->get(), (*owner)->getNumChannels(),
+                (*owner)->getNumSamples(), totalSamples, sampleRate,
+                projectGeneration, audioGeneration,
+                reinterpret_cast<const uint8_t*>(cachePath.data()), cachePath.size())) {
+            delete owner;
             return false;
         }
-        std::lock_guard<std::mutex> freezeLock(m_freezeEditMutex);
-        m_frozenBuffers.push_back(rendered);
-        m_frozenTotalSamples.store(totalSamples, std::memory_order_relaxed);
-        m_frozenSampleRate.store(sampleRate, std::memory_order_relaxed);
-        m_frozenProjectGeneration.store(projectGeneration, std::memory_order_relaxed);
-        m_frozenAudioGeneration.store(audioGeneration, std::memory_order_relaxed);
-        m_frozenPath = std::string(cachePath);
-        m_frozenAudio.store(rendered.get(), std::memory_order_release);
-        m_frozen.store(true, std::memory_order_release);
         markProjectLayoutChanged();
         return true;
     }
 
     void clearFrozenAudio() noexcept {
-        std::lock_guard<std::mutex> freezeLock(m_freezeEditMutex);
-        m_frozen.store(false, std::memory_order_release);
-        m_frozenAudio.store(nullptr, std::memory_order_release);
-        m_frozenTotalSamples.store(0, std::memory_order_relaxed);
-        m_frozenSampleRate.store(0, std::memory_order_relaxed);
-        m_frozenProjectGeneration.store(0, std::memory_order_relaxed);
-        m_frozenAudioGeneration.store(0, std::memory_order_relaxed);
-        m_frozenPath.clear();
+        hirari_track_frozen_store_clear(m_frozenStore);
         markProjectLayoutChanged();
     }
 
-    // Must be called by the control side only after the audio callback has
-    // been quiesced. This is the reclamation point for replaced freeze
-    // buffers; keeping it explicit avoids both RT-side refcount work and an
-    // unbounded control-side retention leak during repeated freeze cycles.
-    void collectRetiredFrozenAudio() {
-        std::lock_guard<std::mutex> freezeLock(m_freezeEditMutex);
-        const AudioBuffer* current = m_frozenAudio.load(std::memory_order_acquire);
-        m_frozenBuffers.erase(
-            std::remove_if(m_frozenBuffers.begin(), m_frozenBuffers.end(),
-                [current](const auto& buffer) { return buffer.get() != current; }),
-            m_frozenBuffers.end());
-    }
+    // Control side only, after the audio callback has been quiesced.
+    void collectRetiredFrozenAudio() { hirari_track_frozen_store_retire(m_frozenStore); }
 
-    bool isFrozen() const noexcept { return m_frozen.load(std::memory_order_acquire); }
+    bool isFrozen() const noexcept { return hirari_track_frozen_store_is_frozen(m_frozenStore); }
     // Live edits invalidate the rendered snapshot so stale audio cannot
     // survive a parameter, region, or automation mutation.
     void invalidateFrozenForEdit() noexcept {
         clearFrozenAudio();
     }
     uint64_t frozenTotalSamples() const noexcept {
-        return m_frozenTotalSamples.load(std::memory_order_relaxed);
+        return hirari_track_frozen_store_total_samples(m_frozenStore);
     }
     uint32_t frozenSampleRate() const noexcept {
-        return m_frozenSampleRate.load(std::memory_order_relaxed);
+        return hirari_track_frozen_store_sample_rate(m_frozenStore);
     }
     uint64_t frozenProjectGeneration() const noexcept {
-        return m_frozenProjectGeneration.load(std::memory_order_relaxed);
+        return hirari_track_frozen_store_project_generation(m_frozenStore);
     }
     uint64_t frozenAudioGeneration() const noexcept {
-        return m_frozenAudioGeneration.load(std::memory_order_relaxed);
+        return hirari_track_frozen_store_audio_generation(m_frozenStore);
     }
     std::string frozenPath() const {
-        std::lock_guard<std::mutex> freezeLock(m_freezeEditMutex);
-        return m_frozenPath;
+        std::string path(hirari_track_frozen_store_path_len(m_frozenStore), '\0');
+        (void)hirari_track_frozen_store_path_copy(
+            m_frozenStore, reinterpret_cast<uint8_t*>(path.data()), path.size());
+        return path;
     }
     bool setFrozenCachePath(std::string_view path) {
-        if (path.empty() || !isFrozen()) return false;
-        std::lock_guard<std::mutex> freezeLock(m_freezeEditMutex);
-        m_frozenPath = std::string(path);
+        if (!hirari_track_frozen_store_set_path(
+                m_frozenStore, reinterpret_cast<const uint8_t*>(path.data()), path.size())) {
+            return false;
+        }
         markProjectLayoutChanged();
         return true;
     }

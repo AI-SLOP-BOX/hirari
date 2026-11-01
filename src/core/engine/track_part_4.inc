@@ -181,17 +181,13 @@
     AudioBuffer m_sendPostFaderBuffer;
     AudioBuffer m_preInsertBuffer;
     // Control-thread-owned retention prevents an in-flight audio callback
-    // from observing freed freeze memory. The callback only loads the raw
-    // published pointer and never changes shared_ptr reference counts.
-    std::vector<std::shared_ptr<AudioBuffer>> m_frozenBuffers;
-    mutable std::mutex m_freezeEditMutex;
-    std::atomic<const AudioBuffer*> m_frozenAudio{nullptr};
-    std::atomic<bool> m_frozen{false};
-    std::atomic<uint64_t> m_frozenTotalSamples{0};
-    std::atomic<uint32_t> m_frozenSampleRate{0};
-    std::atomic<uint64_t> m_frozenProjectGeneration{0};
-    std::atomic<uint64_t> m_frozenAudioGeneration{0};
-    std::string m_frozenPath;
+    // from observing freed freeze memory; the store publishes the read-side
+    // pointer through an atomic the callback loads without locking.
+    static void destroyFrozenOwner(void* owner) {
+        delete static_cast<std::shared_ptr<AudioBuffer>*>(owner);
+    }
+    static constexpr HirariTrackFrozenOps kFrozenOps = {&Track::destroyFrozenOwner};
+    void* m_frozenStore = hirari_track_frozen_store_create(&kFrozenOps);
     float m_lowGain = 1.0f;
     float m_highGain = 1.0f;
     float m_lowStateL = 0.0f;

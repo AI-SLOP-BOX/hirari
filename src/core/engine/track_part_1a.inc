@@ -27,6 +27,7 @@ public:
         hirari_region_table_free(m_regionTable);
         hirari_channel_strip_destroy(m_strip);
         hirari_track_holographic_panner_destroy(m_spatialPanner);
+        hirari_track_frozen_store_destroy(m_frozenStore);
     }
 
     /**
@@ -355,7 +356,8 @@ private:
         size_t pluginLaneCount = 0;
         const auto* pluginLanes = hirari_track_automation_store_plugin_lane_views(
             m_automationStore, &pluginLaneCount);
-        const AudioBuffer* frozen = m_frozenAudio.load(std::memory_order_acquire);
+        const auto* frozen = static_cast<const AudioBuffer*>(
+            hirari_track_frozen_store_current(m_frozenStore));
         uint32_t trackDelaySamples = m_trackDelaySamples.load(std::memory_order_relaxed);
         struct MidiPreparationContext {
             Track* track;
@@ -365,11 +367,11 @@ private:
             buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples(),
             sz, playhead, static_cast<uint8_t>(clearInput),
             static_cast<uint8_t>(m_muted.load(std::memory_order_relaxed)),
-            static_cast<uint8_t>(m_frozen.load(std::memory_order_acquire)),
+            static_cast<uint8_t>(hirari_track_frozen_store_is_frozen(m_frozenStore)),
             frozen ? frozen->getArrayOfReadPointers() : nullptr,
             frozen ? frozen->getNumChannels() : 0,
             frozen ? frozen->getNumSamples() : 0,
-            m_frozenTotalSamples.load(std::memory_order_relaxed),
+            hirari_track_frozen_store_total_samples(m_frozenStore),
             regions && !regions->renderInputs.empty() ? regions->renderInputs.data() : nullptr,
             regions ? regions->renderInputs.size() : 0,
             static_cast<uint8_t>(regions != nullptr),

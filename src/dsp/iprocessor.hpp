@@ -57,15 +57,6 @@ struct ProcessContext {
  */
 class IProcessor {
 public:
-    struct ParameterDescriptor {
-        float minimum = 0.0f;
-        float maximum = 1.0f;
-        bool stepped = false;
-        bool valid() const noexcept {
-            return std::isfinite(minimum) && std::isfinite(maximum) && minimum <= maximum;
-        }
-    };
-
     virtual ~IProcessor() = default;
 
     virtual void prepareToPlay(double sr, uint32_t bs) noexcept = 0;
@@ -125,12 +116,6 @@ public:
     }
     virtual float getParameter(uint32_t /*id*/) const noexcept { return 0.0f; }
     virtual uint32_t getNumParameters() const noexcept { return 0; }
-    // Native-unit parameter metadata is optional for legacy processors. A
-    // false return means the processor owns validation of the supplied value.
-    virtual bool getParameterDescriptor(uint32_t /*id*/, ParameterDescriptor& out) const noexcept {
-        out = {};
-        return false;
-    }
     virtual void getParameterName(uint32_t /*id*/, char* outName, uint32_t maxSize) const noexcept {
         if (outName && maxSize > 0) outName[0] = '\0';
     }

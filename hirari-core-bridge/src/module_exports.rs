@@ -85,6 +85,7 @@ pub mod plugin_edit_host;
 pub mod track_control_host;
 pub mod track_edit_host;
 pub mod track_freeze_host;
+pub mod track_frozen_store;
 pub mod master_edit_host;
 pub mod undo_edit_host;
 pub mod control_room;
