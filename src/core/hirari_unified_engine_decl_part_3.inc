@@ -5,7 +5,6 @@
 
     // Regions & Plugins
     bool add_region(uint32_t trackId, std::string_view path, double start_beat);
-    bool region_table_mirror_matches(uint32_t trackId) const;
     bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
                                         float* left, float* right, uint32_t frames);
     std::vector<uint8_t> process_sandboxed_plugin_midi_block(

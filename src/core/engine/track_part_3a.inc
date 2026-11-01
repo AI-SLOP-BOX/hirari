@@ -222,9 +222,6 @@
     const std::vector<Region>* getRegionSnapshot() const noexcept {
         return m_regionSnapshot.load(std::memory_order_acquire);
     }
-    // Rust mirror of the region table as of the last snapshot publish. Every
-    // mutation of m_regions ends in publishRegionSnapshot(), which refreshes it.
-    const HirariRegionTable* regionTableMirror() const noexcept { return m_regionTable; }
     // Clones a region's Rust note table for an analysis worker. The worker
     // owns the returned store and releases it through the note-store ABI.
     HirariRegionVariAudioStore* cloneRegionNoteStore(uint32_t regionId) const {

@@ -787,9 +787,6 @@ impl ffi::AudioEngine {
     pub fn trigger_preview_sample(&self) {
         unsafe { crate::preview_sampler::hirari_preview_sampler_trigger(preview_sampler(self)) }
     }
-    pub fn region_table_mirror_matches(&self, tid: u32) -> bool {
-        self.get_core().region_table_mirror_matches(tid)
-    }
     pub fn non_finite_plugin_samples(&self) -> u64 {
         self.get_core().non_finite_plugin_samples()
     }

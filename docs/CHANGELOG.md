@@ -95,6 +95,10 @@ production support.
   are derived from a trimmed source struct, so the C++ publication path no
   longer carries the `Region` crossfade/spectral members, the overlap-view
   FFI declarations or the 39-field assignment block.
+- Removed the unused Rust region-table mirror and its differential check: the
+  published render inputs already carry the whole region state the audio
+  callback reads, so the per-publish mirror copy, its FFI surface and the test
+  that only compared the mirror with the same list are gone.
 
 - Low-latency mode, preview triggering, metronome control, tempo reads,
   sample/beat conversion and the routing snapshot now run as Rust extension

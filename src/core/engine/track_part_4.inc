@@ -4,23 +4,7 @@
         std::vector<HirariTrackRegionRenderInput> renderInputs;
     };
 
-    // Replaces the Rust mirror with the current region list. Every region
-    // mutation ends in publishRegionSnapshot(), so syncing here keeps the
-    // mirror equal to m_regions without touching each mutation path.
-    void syncRegionTableMirror() {
-        std::vector<uint32_t> ids;
-        std::vector<HirariRegionState> states;
-        ids.reserve(m_regions.size());
-        states.reserve(m_regions.size());
-        for (const auto& region : m_regions) {
-            ids.push_back(region.id);
-            states.push_back(region.editableState());
-        }
-        (void)hirari_region_table_replace(m_regionTable, ids.data(), states.data(), ids.size());
-    }
-
     void publishRegionSnapshot() {
-        syncRegionTableMirror();
         // Streaming processors are mutable. Give each published snapshot its
         // own instances so an older callback/render can never advance state
         // that a newer snapshot is using. Allocation and configuration stay
@@ -113,7 +97,6 @@
     std::atomic<bool> m_solo{false};
     std::atomic<bool> m_recordArmed{false};
     std::vector<Region> m_regions;
-    HirariRegionTable* m_regionTable = hirari_region_table_new();
     mutable std::mutex m_regionEditMutex;
     // Published only by the control thread. Old generations intentionally
     // remain alive until Track destruction, avoiding RT-side shared_ptr release.

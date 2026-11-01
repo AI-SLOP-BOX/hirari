@@ -297,7 +297,6 @@ pub mod region_edit_host;
 pub mod region_hydration;
 pub mod region_jobs;
 pub mod region_processing_history;
-pub mod region_table;
 pub mod region_mutations;
 pub mod region_pitch;
 pub mod region_pitch_correction;

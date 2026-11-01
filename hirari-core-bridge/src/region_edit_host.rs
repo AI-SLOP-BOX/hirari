@@ -105,6 +105,33 @@ pub struct HirariRegionState {
     pub pitch_preserve_warp: bool,
 }
 
+// Bitwise float comparison: a region whose rate is NaN is still the same
+// region, and the tests compare states that crossed the C++ ABI.
+impl PartialEq for HirariRegionState {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start
+            && self.len == other.len
+            && self.base_start == other.base_start
+            && self.base_length == other.base_length
+            && self.source_offset == other.source_offset
+            && self.base_source_offset == other.base_source_offset
+            && self.source_length == other.source_length
+            && self.fade_in_samples == other.fade_in_samples
+            && self.fade_out_samples == other.fade_out_samples
+            && self.warp_ratio.to_bits() == other.warp_ratio.to_bits()
+            && self.source_sample_rate.to_bits() == other.source_sample_rate.to_bits()
+            && self.timeline_sample_rate.to_bits() == other.timeline_sample_rate.to_bits()
+            && self.clip_gain.to_bits() == other.clip_gain.to_bits()
+            && self.pitch_semitones.to_bits() == other.pitch_semitones.to_bits()
+            && self.loop_count == other.loop_count
+            && self.sync_group == other.sync_group
+            && self.muted == other.muted
+            && self.reverse == other.reverse
+            && self.locked == other.locked
+            && self.pitch_preserve_warp == other.pitch_preserve_warp
+    }
+}
+
 /// Source frames consumed per project-timeline frame. The replace-audio
 /// geometry, the split/trim mapping and the spectral-stretch decision all read
 /// this one function, including the fallbacks for unset rates.

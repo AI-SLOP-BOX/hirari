@@ -256,7 +256,6 @@ pub mod ffi {
         ) -> String;
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
-        fn region_table_mirror_matches(self: &HirariUnifiedEngine, tid: u32) -> bool;
         fn append_region_processing(
             self: &AudioEngine,
             tid: u32,
