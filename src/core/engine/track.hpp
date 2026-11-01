@@ -78,15 +78,6 @@ struct Region {
     // independent varispeed/warp setting.
     double sourceSampleRate = 0.0;
     double timelineSampleRate = 0.0;
-    double sourceFramesPerTimelineFrame() const noexcept {
-        const double sourceRate = std::isfinite(sourceSampleRate) && sourceSampleRate > 0.0
-            ? sourceSampleRate : timelineSampleRate;
-        const double timelineRate = std::isfinite(timelineSampleRate) && timelineSampleRate > 0.0
-            ? timelineSampleRate : sourceRate;
-        const double conversion = sourceRate / timelineRate;
-        const double effective = warpRatio * conversion;
-        return std::isfinite(effective) && effective > 0.0 ? effective : warpRatio;
-    }
     // The single mapping between Region storage and the Rust-owned edit state.
     // Split, duplicate, the host bridge and the mirror all go through these so
     // a new field cannot be added on one side only.

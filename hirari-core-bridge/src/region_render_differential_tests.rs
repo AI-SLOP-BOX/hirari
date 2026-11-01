@@ -6,7 +6,9 @@ use crate::region_processing::{HirariRegionBlockConfig, HirariRegionBlockOutput}
 
 unsafe extern "C" {
     fn hirari_region_needs_spectral_stretch_reference(
-        source_rate: f64,
+        source_sample_rate: f64,
+        timeline_sample_rate: f64,
+        warp_ratio: f64,
         warp_marker_count: usize,
         pitch_semitones: f32,
         note_curves: *const HirariAudioNoteCurveView,
@@ -384,20 +386,26 @@ fn rust_spectral_stretch_eligibility_matches_frozen_cpp_thresholds() {
         }
     };
     let fixtures = [
-        (1.0, 0, 0.0, curve(&[], 0.0, 0.0)),
-        (1.000_009, 0, 0.0, curve(&[], 0.0, 0.0)),
-        (1.000_011, 0, 0.0, curve(&[], 0.0, 0.0)),
-        (1.0, 1, 0.0, curve(&[], 0.0, 0.0)),
-        (1.0, 0, 1.0e-4, curve(&[], 0.0, 0.0)),
-        (1.0, 0, 1.001e-4, curve(&[], 0.0, 0.0)),
-        (1.0, 0, 0.0, curve(&[], 1.0e-3, -1.0e-3)),
-        (1.0, 0, 0.0, curve(&[], 1.001e-3, 0.0)),
-        (1.0, 0, 0.0, curve(&[], 0.0, -1.001e-3)),
-        (1.0, 0, 0.0, curve(&neutral_anchor, 0.0, 0.0)),
-        (1.0, 0, 0.0, curve(&changed_pitch_anchor, 0.0, 0.0)),
-        (1.0, 0, 0.0, curve(&changed_formant_anchor, 0.0, 0.0)),
+        (1.0, 1.0, 1.0, 0, 0.0, curve(&[], 0.0, 0.0)),
+        (1.000_009, 1.0, 1.0, 0, 0.0, curve(&[], 0.0, 0.0)),
+        (1.000_011, 1.0, 1.0, 0, 0.0, curve(&[], 0.0, 0.0)),
+        (1.0, 1.0, 1.0, 1, 0.0, curve(&[], 0.0, 0.0)),
+        (1.0, 1.0, 1.0, 0, 1.0e-4, curve(&[], 0.0, 0.0)),
+        (1.0, 1.0, 1.0, 0, 1.001e-4, curve(&[], 0.0, 0.0)),
+        (1.0, 1.0, 1.0, 0, 0.0, curve(&[], 1.0e-3, -1.0e-3)),
+        (1.0, 1.0, 1.0, 0, 0.0, curve(&[], 1.001e-3, 0.0)),
+        (1.0, 1.0, 1.0, 0, 0.0, curve(&[], 0.0, -1.001e-3)),
+        (1.0, 1.0, 1.0, 0, 0.0, curve(&neutral_anchor, 0.0, 0.0)),
+        (1.0, 1.0, 1.0, 0, 0.0, curve(&changed_pitch_anchor, 0.0, 0.0)),
+        (1.0, 1.0, 1.0, 0, 0.0, curve(&changed_formant_anchor, 0.0, 0.0)),
+        // Rate and warp mapping: the ratio itself is derived in Rust now.
+        (48_000.0, 48_000.0, 1.0, 0, 0.0, curve(&[], 0.0, 0.0)),
+        (44_100.0, 48_000.0, 1.0, 0, 0.0, curve(&[], 0.0, 0.0)),
+        (48_000.0, 48_000.0, 1.05, 0, 0.0, curve(&[], 0.0, 0.0)),
+        (0.0, 0.0, 0.0, 0, 0.0, curve(&[], 0.0, 0.0)),
+        (f64::NAN, f64::INFINITY, f64::NAN, 0, 0.0, curve(&[], 0.0, 0.0)),
     ];
-    for (source_rate, warp_count, semitones, curve) in fixtures {
+    for (source_rate, timeline_rate, warp_ratio, warp_count, semitones, curve) in fixtures {
         let pointer = if curve.anchor_count == 0
             && curve.pitch_offset_cents == 0.0
             && curve.formant_offset_cents == 0.0
@@ -408,11 +416,21 @@ fn rust_spectral_stretch_eligibility_matches_frozen_cpp_thresholds() {
         };
         let count = usize::from(!pointer.is_null());
         let rust = unsafe {
-            hirari_region_needs_spectral_stretch(source_rate, warp_count, semitones, pointer, count)
+            hirari_region_needs_spectral_stretch(
+                source_rate,
+                timeline_rate,
+                warp_ratio,
+                warp_count,
+                semitones,
+                pointer,
+                count,
+            )
         };
         let cpp = unsafe {
             hirari_region_needs_spectral_stretch_reference(
                 source_rate,
+                timeline_rate,
+                warp_ratio,
                 warp_count,
                 semitones,
                 pointer,

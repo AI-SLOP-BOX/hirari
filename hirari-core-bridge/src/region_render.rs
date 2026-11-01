@@ -72,12 +72,19 @@ impl WsolaRegionCache {
 /// the realtime callback.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_needs_spectral_stretch(
-    source_rate: f64,
+    source_sample_rate: f64,
+    timeline_sample_rate: f64,
+    warp_ratio: f64,
     warp_marker_count: usize,
     pitch_semitones: f32,
     note_curves: *const HirariAudioNoteCurveView,
     note_curve_count: usize,
 ) -> bool {
+    let source_rate = crate::region_edit_host::source_frames_per_timeline_frame(
+        warp_ratio,
+        source_sample_rate,
+        timeline_sample_rate,
+    );
     let mut needed = (source_rate - 1.0).abs() > 1.0e-5
         || warp_marker_count != 0
         || pitch_semitones.abs() > 1.0e-4;

@@ -36,8 +36,9 @@
             region.publishNoteEdits();
             region.publishClipEdits();
             region.needsSpectralStretch = hirari_region_needs_spectral_stretch(
-                region.sourceFramesPerTimelineFrame(), region.clip()->warpMarkerCount,
-                region.pitchSemitones, region.noteCurves, region.noteCurveCount);
+                region.sourceSampleRate, region.timelineSampleRate, region.warpRatio,
+                region.clip()->warpMarkerCount, region.pitchSemitones, region.noteCurves,
+                region.noteCurveCount);
             if (!region.pitchPreserveWarp) continue;
             region.timeStretch = std::shared_ptr<void>(
                 hirari_region_stretch_create(),

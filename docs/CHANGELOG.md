@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- The spectral-stretch decision now receives a region's raw sample rates and
+  warp ratio and derives the source-per-timeline mapping in Rust, so the
+  duplicated C++ ratio helper is gone.
 - Replacing a region's audio now resolves its timeline geometry in Rust: the
   decoded length and the source/timeline frame mapping produce the stored
   state, so the C++ setter only installs the handle it is handed.

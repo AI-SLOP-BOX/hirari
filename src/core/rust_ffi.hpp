@@ -892,7 +892,8 @@ struct HirariTrackRegionRenderInput {
     uint8_t needsSpectralStretch = 0;
 };
 extern "C" bool hirari_region_needs_spectral_stretch(
-    double source_rate, size_t warp_marker_count, float pitch_semitones,
+    double source_sample_rate, double timeline_sample_rate, double warp_ratio,
+    size_t warp_marker_count, float pitch_semitones,
     const HirariAudioNoteCurveView* note_curves, size_t note_curve_count);
 // Native built-in DSP processors share one dispatch surface; the host below
 // owns the processor handles, so the per-processor entry points stay inside

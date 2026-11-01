@@ -105,29 +105,40 @@ pub struct HirariRegionState {
     pub pitch_preserve_warp: bool,
 }
 
+/// Source frames consumed per project-timeline frame. The replace-audio
+/// geometry, the split/trim mapping and the spectral-stretch decision all read
+/// this one function, including the fallbacks for unset rates.
+pub(crate) fn source_frames_per_timeline_frame(
+    warp_ratio: f64,
+    source_sample_rate: f64,
+    timeline_sample_rate: f64,
+) -> f64 {
+    let source_rate = if source_sample_rate.is_finite() && source_sample_rate > 0.0 {
+        source_sample_rate
+    } else {
+        timeline_sample_rate
+    };
+    let timeline_rate = if timeline_sample_rate.is_finite() && timeline_sample_rate > 0.0 {
+        timeline_sample_rate
+    } else {
+        source_rate
+    };
+    let conversion = source_rate / timeline_rate;
+    let effective = warp_ratio * conversion;
+    if effective.is_finite() && effective > 0.0 {
+        effective
+    } else {
+        warp_ratio
+    }
+}
+
 impl HirariRegionState {
-    /// Source frames consumed per project-timeline frame. This is the only
-    /// copy of the mapping: the replace-audio geometry and the spectral
-    /// stretch decision both read it.
     pub(crate) fn source_frames_per_timeline_frame(&self) -> f64 {
-        let source_rate = if self.source_sample_rate.is_finite() && self.source_sample_rate > 0.0 {
-            self.source_sample_rate
-        } else {
-            self.timeline_sample_rate
-        };
-        let timeline_rate = if self.timeline_sample_rate.is_finite() && self.timeline_sample_rate > 0.0
-        {
-            self.timeline_sample_rate
-        } else {
-            source_rate
-        };
-        let conversion = source_rate / timeline_rate;
-        let effective = self.warp_ratio * conversion;
-        if effective.is_finite() && effective > 0.0 {
-            effective
-        } else {
-            self.warp_ratio
-        }
+        source_frames_per_timeline_frame(
+            self.warp_ratio,
+            self.source_sample_rate,
+            self.timeline_sample_rate,
+        )
     }
 }
 

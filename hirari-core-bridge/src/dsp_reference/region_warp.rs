@@ -5,12 +5,30 @@ use crate::region_warp::HirariWarpMarker;
 
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_needs_spectral_stretch_reference(
-    source_rate: f64,
+    source_sample_rate: f64,
+    timeline_sample_rate: f64,
+    warp_ratio: f64,
     warp_marker_count: usize,
     pitch_semitones: f32,
     note_curves: *const HirariAudioNoteCurveView,
     note_curve_count: usize,
 ) -> bool {
+    let source_rate = if source_sample_rate.is_finite() && source_sample_rate > 0.0 {
+        source_sample_rate
+    } else {
+        timeline_sample_rate
+    };
+    let timeline_rate = if timeline_sample_rate.is_finite() && timeline_sample_rate > 0.0 {
+        timeline_sample_rate
+    } else {
+        source_rate
+    };
+    let effective = warp_ratio * (source_rate / timeline_rate);
+    let source_rate = if effective.is_finite() && effective > 0.0 {
+        effective
+    } else {
+        warp_ratio
+    };
     let needed = (source_rate - 1.0).abs() > 1.0e-5
         || warp_marker_count != 0
         || pitch_semitones.abs() > 1.0e-4;
