@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Plugin identity now travels with the Rust-owned effect-chain entry
+  (`kind` on `HostNode`, `hirari_effect_chain_node_kind` /
+  `hirari_effect_chain_set_node_kind`), so the deleted C++ `m_pluginTypes`
+  vector can no longer drift from chain order during add, remove, restore or
+  move. Unreachable C++ declarations for retired range-edit, warp-marker,
+  legacy-migration and pitch-analysis entry points are removed with it.
 - A region's range-edit, comp-range and warp-marker tables are now Rust-owned
   (`region_clip_edits.rs`), and the `Region` vectors plus `compManaged` field
   are deleted. Each region holds an opaque store handle and a frozen projection

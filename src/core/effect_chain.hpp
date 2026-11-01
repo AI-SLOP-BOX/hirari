@@ -28,6 +28,7 @@ public:
         std::shared_ptr<DSP::IProcessor> processor;
         bool bypassed = false;
         bool parallel = false;
+        uint32_t kind = 0;
     };
 
     // Bound shared by the Rust publication slots and this reader scratch pair.
@@ -81,6 +82,16 @@ public:
 
     uint32_t getTotalLatencySamples() const {
         return hirari_effect_chain_total_latency_samples(m_state);
+    }
+
+    uint32_t nodeCount() const { return hirari_effect_chain_count(m_state); }
+
+    uint32_t nodeKind(uint32_t index) const {
+        return hirari_effect_chain_node_kind(m_state, index);
+    }
+
+    void setNodeKind(uint32_t index, uint32_t kind) {
+        (void)hirari_effect_chain_set_node_kind(m_state, index, kind);
     }
 
     // Maximum post-input duration needed for an offline bounce.  Serial
@@ -193,6 +204,7 @@ public:
     bool removeProcessor(uint32_t index, Entry* removed = nullptr) {
         bool bypassed = false;
         bool parallel = false;
+        const uint32_t kind = hirari_effect_chain_node_kind(m_state, index);
         auto* owner = static_cast<std::shared_ptr<DSP::IProcessor>*>(
             hirari_effect_chain_remove(m_state, index, &bypassed, &parallel));
         if (!owner) return false;
@@ -200,6 +212,7 @@ public:
             removed->processor = *owner;
             removed->bypassed = bypassed;
             removed->parallel = parallel;
+            removed->kind = kind;
         }
         delete owner;
         return true;
@@ -215,6 +228,7 @@ public:
             delete owner;
             return false;
         }
+        (void)hirari_effect_chain_set_node_kind(m_state, index, entry.kind);
         return true;
     }
 

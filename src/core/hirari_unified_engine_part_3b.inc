@@ -357,7 +357,7 @@ void HirariUnifiedEngine::installPluginEditHost() {
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
             const Track* track = engine->findTrackLocked(trackId);
             if (!track) return std::numeric_limits<size_t>::max();
-            const auto& types = track->getPluginTypes();
+            const auto types = track->getPluginTypes();
             const auto states = track->getPluginStates();
             if (pluginIndex >= types.size() || pluginIndex >= states.size())
                 return std::numeric_limits<size_t>::max();

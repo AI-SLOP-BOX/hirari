@@ -81,6 +81,9 @@
         std::vector<HirariLayoutAutomationPoint> trackDelayAutomation;
         std::vector<HirariLayoutPluginLane> pluginAutomation;
         std::vector<std::vector<Hirari::Core::ProjectAutomationPoint>> pluginAutomationPoints;
+        // Owned copy: the layout view points into this block, so it must live
+        // as long as the snapshot rather than the collection loop.
+        std::vector<uint32_t> pluginTypes;
         std::vector<uint8_t> pluginBypass;
         std::vector<std::vector<float>> pluginParameters;
         std::vector<HirariLayoutParameterBlock> pluginParameterBlocks;

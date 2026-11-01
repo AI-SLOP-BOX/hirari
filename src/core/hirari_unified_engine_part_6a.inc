@@ -90,7 +90,8 @@ bool HirariUnifiedEngine::collectProjectLayout(ProjectLayoutData* out, bool incl
             lane.pointCount = storage->pluginAutomationPoints[index].size();
         }
 
-        const auto& pluginTypes = track->getPluginTypes();
+        storage->pluginTypes = track->getPluginTypes();
+        const auto& pluginTypes = storage->pluginTypes;
         storage->pluginBypass.resize(pluginTypes.size());
         for (size_t index = 0; index < pluginTypes.size(); ++index) {
             storage->pluginBypass[index] =

@@ -168,7 +168,6 @@
     std::atomic<const RegionSnapshot*> m_regionSnapshot{nullptr};
     std::atomic<uint64_t> m_regionGeneration{0};
     std::atomic<bool> m_audioPitchAnalysisRunning{false};
-    std::vector<uint32_t> m_pluginTypes;
     // Updated on the control thread from sandbox-reported plugin metadata;
     // the callback reads it to choose the built-in MIDI fallback.
     std::atomic<uint32_t> m_midiInstrumentPluginCount{0};

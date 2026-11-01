@@ -30,11 +30,9 @@ constexpr uint64_t kMaxAudioQuantizerWarpSamples = 16'777'216u;
 } // namespace hirari::limits
 
 extern "C" const void* hirari_log_buffer_default_state();
-extern "C" uint64_t hirari_log_buffer_timestamp();
 extern "C" void hirari_log_buffer_post(
     const void* state, uint32_t level, uint32_t component_id,
     const uint8_t* message, size_t message_len);
-extern "C" bool hirari_log_buffer_pop(const void* state, void* output);
 
 // The diagnostic ring is Rust-owned. C++ sites post and address it through
 // these two helpers instead of carrying their own wrapper class.
@@ -360,7 +358,6 @@ HirariRegionVariAudioStore* hirari_region_vari_audio_store_new();
 HirariRegionVariAudioStore* hirari_region_vari_audio_store_clone(
     const HirariRegionVariAudioStore* store);
 void hirari_region_vari_audio_store_clear(HirariRegionVariAudioStore* store);
-bool hirari_region_vari_audio_store_clear_segments(HirariRegionVariAudioStore* store);
 struct HirariAudioNoteSegmentRange;
 
 // Control-thread snapshot of the whole table. The views it hands out point
@@ -383,11 +380,6 @@ bool hirari_region_vari_audio_store_normalize(HirariRegionVariAudioStore* store)
 // edits and returns a buffer it owns. Nothing is written through a pointer into
 // caller storage, so no returned count can drive a container resize over data
 // a foreign language had already written.
-extern "C" HirariRegionRangeEdit* hirari_region_range_edits_apply(
-    const HirariRegionRangeEdit* edits_in, size_t count_in, uint64_t region_length,
-    uint32_t op, uint64_t start, uint64_t end, float gain, uint64_t fade_in,
-    uint64_t fade_out, size_t* out_count);
-extern "C" void hirari_free_range_edits(HirariRegionRangeEdit* edits, size_t count);
 struct HirariRegionCompRange {
     uint64_t start;
     uint64_t end;
@@ -430,12 +422,8 @@ struct HirariWarpMarker {
     uint64_t timelineSample = 0;
     bool transient = false;
 };
-// Warp-marker normalization is a pure transform: Rust reads the caller's
-// markers and returns a buffer it owns, released with hirari_free_warp_markers.
-extern "C" HirariWarpMarker* hirari_region_normalize_warp_markers(
-    const HirariWarpMarker* markers_in, size_t count,
-    uint64_t source_span, uint64_t timeline_length, size_t* out_count);
-extern "C" void hirari_free_warp_markers(HirariWarpMarker* markers, size_t count);
+// Warp-marker normalization is a pure transform owned by the range-edit store;
+// no C++ caller transforms buffers directly.
 // Per-region range-edit, comp-range and warp-marker storage. Rust owns the
 // tables; a frozen projection is what a published snapshot and the audio
 // callback read.
@@ -513,50 +501,6 @@ struct HirariRegionState {
 // returns the new right-hand id, or 0.
 // Duplicates a region at `startSample` and returns the new id, or 0.
 
-// Pre-v42 region hydration policy is Rust-owned: the source-rate migration
-// (older documents stored native source frames as timeline frames) and the
-// range-edit filter. Both mirror `hirari-core-bridge/src/region_hydration.rs`.
-struct HirariLegacyWarpMarker {
-    uint64_t source_sample = 0;
-    uint64_t timeline_sample = 0;
-    bool transient = false;
-};
-
-struct HirariLegacyRangeEdit {
-    uint64_t start = 0;
-    uint64_t end = 0;
-    float gain = 1.0f;
-    uint64_t fade_in = 0;
-    uint64_t fade_out = 0;
-};
-
-struct HirariRegionLegacyMigration {
-    uint64_t source_offset = 0;
-    uint64_t base_source_offset = 0;
-    uint64_t source_length = 0;
-    uint64_t base_start = 0;
-    double warp_ratio = 1.0;
-    uint32_t loop_count = 1;
-    uint64_t fade_in = 0;
-    uint64_t fade_out = 0;
-    double decoded_source_rate = 0.0;
-    double project_sample_rate = 0.0;
-    HirariLegacyWarpMarker* markers = nullptr;
-    size_t marker_count = 0;
-    HirariLegacyRangeEdit* range_edits = nullptr;
-    size_t range_edit_count = 0;
-    // Outputs, applied by the loader.
-    uint64_t start = 0;
-    uint64_t len = 0;
-    uint64_t out_fade_in = 0;
-    uint64_t out_fade_out = 0;
-    double source_sample_rate = 0.0;
-};
-
-extern "C" bool hirari_region_legacy_source_rate_migrate(
-    HirariRegionLegacyMigration* input);
-extern "C" size_t hirari_region_range_edits_sanitize(
-    HirariLegacyRangeEdit* edits, size_t count, uint64_t playable_length);
 
 // Bounce planning is Rust-owned. C++ supplies the arrangement spans and the
 // streaming writers; the acceptance rules and the render extent live in
@@ -1421,14 +1365,6 @@ extern "C" size_t hirari_native_pdc_sync_graph(
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
-extern "C" void* hirari_audio_pitch_analyze_region(
-    const float* const* channels, size_t channel_count,
-    size_t source_offset, size_t source_span, uint8_t reverse,
-    double source_sample_rate, double timeline_sample_rate,
-    uint64_t timeline_length, double source_frames_per_timeline_frame,
-    const HirariWarpMarker* warp_markers, size_t warp_marker_count,
-    double min_hz, double max_hz, double threshold,
-    double note_change_threshold_cents, size_t note_change_confirmation_frames);
 extern "C" bool hirari_audio_pitch_commit_region_result(
     const void* result, void* region_note_store);
 extern "C" void hirari_audio_pitch_result_destroy(void* state);
@@ -1565,6 +1501,12 @@ extern "C" bool hirari_effect_chain_insert(
 extern "C" void* hirari_effect_chain_remove(
     void* state, uint32_t index, bool* bypassed, bool* parallel);
 extern "C" bool hirari_effect_chain_move(void* state, uint32_t from, uint32_t to);
+extern "C" uint32_t hirari_effect_chain_count(const void* state);
+// Plugin identity travels with the chain entry so ordering, removal and
+// restoration cannot desynchronise the type table from the processors.
+extern "C" uint32_t hirari_effect_chain_node_kind(const void* state, uint32_t index);
+extern "C" bool hirari_effect_chain_set_node_kind(
+    const void* state, uint32_t index, uint32_t kind);
 extern "C" void hirari_effect_chain_clear(void* state);
 extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
 extern "C" void* hirari_effect_chain_owner_clone(const void* state, uint32_t index);

@@ -38,8 +38,8 @@
         if (!processor->isOperational()) return false;
 
         m_effectChain.addProcessor(std::move(processor));
+        m_effectChain.setNodeKind(m_effectChain.nodeCount() - 1, pluginType);
         invalidateFrozenForEdit();
-        m_pluginTypes.push_back(pluginType);
         if (m_isPrepared) {
             m_effectChain.setSampleRate(m_sampleRate, m_blockSize);
         }
@@ -57,13 +57,13 @@
     };
 
     bool removePlugin(uint32_t pluginIndex, PluginSnapshot* snapshot = nullptr) {
-        if (pluginIndex >= m_pluginTypes.size()) return false;
+        if (pluginIndex >= m_effectChain.nodeCount()) return false;
         EffectChain::Entry removed{};
         if (!m_effectChain.removeProcessor(pluginIndex, &removed)) return false;
         const bool removedMidiInstrument = removed.processor &&
             removed.processor->isMidiInstrument();
         if (snapshot) {
-            snapshot->type = m_pluginTypes[pluginIndex];
+            snapshot->type = removed.kind;
             snapshot->processor = removed.processor;
             snapshot->bypassed = removed.bypassed;
             snapshot->parallel = removed.parallel;
@@ -73,7 +73,6 @@
                 if (slot != SIZE_MAX) snapshot->sandboxPath = sandboxSlotPath(slot);
             }
         }
-        m_pluginTypes.erase(m_pluginTypes.begin() + pluginIndex);
         if (removedMidiInstrument)
             m_midiInstrumentPluginCount.fetch_sub(1, std::memory_order_release);
         invalidateFrozenForEdit();
@@ -85,10 +84,10 @@
     }
 
     bool restorePlugin(uint32_t pluginIndex, const PluginSnapshot& snapshot) {
-        if (!snapshot.processor || pluginIndex > m_pluginTypes.size()) return false;
-        EffectChain::Entry entry{snapshot.processor, snapshot.bypassed, snapshot.parallel};
+        if (!snapshot.processor || pluginIndex > m_effectChain.nodeCount()) return false;
+        EffectChain::Entry entry{snapshot.processor, snapshot.bypassed, snapshot.parallel,
+                                 snapshot.type};
         if (!m_effectChain.insertProcessor(pluginIndex, std::move(entry))) return false;
-        m_pluginTypes.insert(m_pluginTypes.begin() + pluginIndex, snapshot.type);
         if (snapshot.midiInstrument)
             m_midiInstrumentPluginCount.fetch_add(1, std::memory_order_release);
         if (snapshot.type == 0xFFFFFFFFu) {
@@ -103,12 +102,9 @@
     }
 
     bool movePlugin(uint32_t from, uint32_t to) {
-        if (from >= m_pluginTypes.size() || to >= m_pluginTypes.size() || from == to)
-            return false;
+        if (from >= m_effectChain.nodeCount() || to >= m_effectChain.nodeCount() ||
+            from == to) return false;
         if (!m_effectChain.moveProcessor(from, to)) return false;
-        const uint32_t type = m_pluginTypes[from];
-        m_pluginTypes.erase(m_pluginTypes.begin() + from);
-        m_pluginTypes.insert(m_pluginTypes.begin() + to, type);
 
         // Same Rust-owned permutation as removal, now with the from/to remap.
         hirari_sandbox_slots_move(m_sandboxSlots, from, to);
@@ -160,10 +156,10 @@
         m_lastSandboxFailure.store(0, std::memory_order_release);
         m_lastSandboxFailureText = "none";
         const bool midiInstrument = processor->isMidiInstrument();
-        const uint32_t processorIndex = static_cast<uint32_t>(m_pluginTypes.size());
+        const uint32_t processorIndex = m_effectChain.nodeCount();
         if (m_isPrepared) processor->prepareToPlay(m_sampleRate, m_blockSize);
         m_effectChain.addProcessor(processor);
-        m_pluginTypes.push_back(0xFFFFFFFFu);
+        m_effectChain.setNodeKind(processorIndex, 0xFFFFFFFFu);
         if (midiInstrument)
             m_midiInstrumentPluginCount.fetch_add(1, std::memory_order_release);
         (void)hirari_sandbox_slots_push(
@@ -228,13 +224,19 @@
     uint64_t nonFiniteSampleCount() const noexcept {
         return m_effectChain.nonFiniteSampleCount();
     }
-    size_t getPluginCount() const { return m_pluginTypes.size(); }
-    const std::vector<uint32_t>& getPluginTypes() const { return m_pluginTypes; }
+    size_t getPluginCount() const { return m_effectChain.nodeCount(); }
+    std::vector<uint32_t> getPluginTypes() const {
+        std::vector<uint32_t> types(m_effectChain.nodeCount());
+        for (uint32_t index = 0; index < types.size(); ++index)
+            types[index] = m_effectChain.nodeKind(index);
+        return types;
+    }
     std::vector<std::vector<uint8_t>> getPluginStates() const {
+        const uint32_t count = m_effectChain.nodeCount();
         std::vector<std::vector<uint8_t>> states;
-        states.reserve(m_pluginTypes.size());
-        for (size_t index = 0; index < m_pluginTypes.size(); ++index)
-            states.push_back(m_effectChain.getProcessorState(static_cast<uint32_t>(index)));
+        states.reserve(count);
+        for (uint32_t index = 0; index < count; ++index)
+            states.push_back(m_effectChain.getProcessorState(index));
         return states;
     }
     bool setPluginState(size_t pluginIndex, const std::vector<uint8_t>& state) {
@@ -246,13 +248,15 @@
         return changed;
     }
     std::vector<std::vector<uint8_t>> getPluginGuiStates() const {
+        const uint32_t count = m_effectChain.nodeCount();
         std::vector<std::vector<uint8_t>> states;
-        states.reserve(m_pluginTypes.size());
-        for (size_t index = 0; index < m_pluginTypes.size(); ++index) states.push_back(m_effectChain.getProcessorGuiState(static_cast<uint32_t>(index)));
+        states.reserve(count);
+        for (uint32_t index = 0; index < count; ++index)
+            states.push_back(m_effectChain.getProcessorGuiState(index));
         return states;
     }
     bool setPluginGuiState(size_t pluginIndex, const std::vector<uint8_t>& state) {
-        if (pluginIndex >= m_pluginTypes.size() || state.size() > 1024u * 1024u) return false;
+        if (pluginIndex >= m_effectChain.nodeCount() || state.size() > 1024u * 1024u) return false;
         const bool changed = m_effectChain.setProcessorGuiState(static_cast<uint32_t>(pluginIndex), state);
         if (changed) markProjectLayoutChanged();
         return changed;
@@ -416,13 +420,13 @@
         return name;
     }
     bool setPluginBypass(uint32_t pluginIndex, bool bypassed) {
-        if (pluginIndex >= m_pluginTypes.size()) return false;
+        if (pluginIndex >= m_effectChain.nodeCount()) return false;
         m_effectChain.setBypass(pluginIndex, bypassed);
         invalidateFrozenForEdit();
         markProjectLayoutChanged();
         return true;
     }
     bool getPluginBypass(uint32_t pluginIndex) const {
-        if (pluginIndex >= m_pluginTypes.size()) return false;
+        if (pluginIndex >= m_effectChain.nodeCount()) return false;
         return m_effectChain.getBypass(pluginIndex);
     }

@@ -50,6 +50,10 @@ struct HostNode {
     processor: *mut c_void,
     bypassed: bool,
     parallel: bool,
+    /// Built-in plugin type, or `u32::MAX` for a sandboxed instance. The entry
+    /// carries its own identity so ordering and removal cannot drift from the
+    /// processor they describe.
+    kind: u32,
 }
 
 struct HostInner {
@@ -219,6 +223,7 @@ pub unsafe extern "C" fn hirari_effect_chain_insert(
             processor,
             bypassed,
             parallel,
+            kind: 0,
         },
     );
     unsafe { publish(host, &guard) };
@@ -306,6 +311,34 @@ pub unsafe extern "C" fn hirari_effect_chain_processor(
         .nodes
         .get(index as usize)
         .map_or(std::ptr::null_mut(), |node| node.processor)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_effect_chain_node_kind(state: *const c_void, index: u32) -> u32 {
+    let Some(host) = (unsafe { host(state.cast_mut()) }) else {
+        return 0;
+    };
+    unsafe { inner(host) }
+        .nodes
+        .get(index as usize)
+        .map_or(0, |node| node.kind)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_effect_chain_set_node_kind(
+    state: *const c_void,
+    index: u32,
+    kind: u32,
+) -> bool {
+    let Some(host) = (unsafe { host(state.cast_mut()) }) else {
+        return false;
+    };
+    let mut guard = unsafe { inner(host) };
+    let Some(node) = guard.nodes.get_mut(index as usize) else {
+        return false;
+    };
+    node.kind = kind;
+    true
 }
 
 /// Boxed `shared_ptr` copy for a processor the caller wants to hold. The
@@ -858,6 +891,30 @@ mod tests {
         assert!(!clone.is_null());
         unsafe { drop(Box::from_raw(clone.cast::<*mut c_void>())) };
         assert_eq!(unsafe { hirari_effect_chain_count(chain) }, 1);
+        unsafe { hirari_effect_chain_destroy(chain) };
+    }
+
+    #[test]
+    fn node_kind_tracks_order_and_removal() {
+        let chain = create();
+        let a = Box::into_raw(Box::new(FakeProcessor::new())).cast::<c_void>();
+        let b = Box::into_raw(Box::new(FakeProcessor::new())).cast::<c_void>();
+        let a_owner = Box::into_raw(Box::new(a));
+        let b_owner = Box::into_raw(Box::new(b));
+        assert!(unsafe { hirari_effect_chain_add(chain, a_owner.cast(), a, false) });
+        assert!(unsafe { hirari_effect_chain_add(chain, b_owner.cast(), b, false) });
+        assert!(unsafe { hirari_effect_chain_set_node_kind(chain, 0, 7) });
+        assert!(unsafe { hirari_effect_chain_set_node_kind(chain, 1, u32::MAX) });
+        assert!(unsafe { hirari_effect_chain_move(chain, 0, 1) });
+        assert_eq!(unsafe { hirari_effect_chain_node_kind(chain, 1) }, 7);
+        assert_eq!(unsafe { hirari_effect_chain_node_kind(chain, 0) }, u32::MAX);
+        let mut bypassed = false;
+        let mut parallel = false;
+        let clone = unsafe { hirari_effect_chain_remove(chain, 1, &mut bypassed, &mut parallel) };
+        unsafe { drop(Box::from_raw(clone.cast::<*mut c_void>())) };
+        assert_eq!(unsafe { hirari_effect_chain_count(chain) }, 1);
+        assert_eq!(unsafe { hirari_effect_chain_node_kind(chain, 0) }, u32::MAX);
+        assert_eq!(unsafe { hirari_effect_chain_node_kind(chain, 5) }, 0);
         unsafe { hirari_effect_chain_destroy(chain) };
     }
 
