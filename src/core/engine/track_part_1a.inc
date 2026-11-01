@@ -39,14 +39,15 @@ public:
         std::lock_guard<std::mutex> editLock(m_regionEditMutex);
         Region normalized = r;
         // Keep audio-buffer ownership in C++; delegate timeline, loop, gain,
-        // pitch and source-range invariants to the Rust core.
-        auto addMetadata = regionAddMetadataForRust(normalized);
+        // pitch, fade and source-range invariants to the Rust core. The state
+        // record round-trips through the same layout the edit host uses.
+        auto state = normalized.editableState();
         const bool hasAudio = static_cast<bool>(normalized.audio);
         const uint64_t audioSamples = hasAudio ? normalized.audio->getNumSamples() : 0;
         const uint32_t audioChannels = hasAudio ? normalized.audio->getNumChannels() : 0;
         if (!hirari_region_normalize_add_metadata(
-                &addMetadata, hasAudio, audioSamples, audioChannels)) return;
-        applyRegionAddMetadata(normalized, addMetadata);
+                &state, hasAudio, audioSamples, audioChannels)) return;
+        normalized.applyEditableState(state);
         // VariAudio-style note segments are immutable render metadata.  Keep
         // only bounded, well-formed segments in the published snapshot so a
         // malformed project cannot inject NaN/Inf pitch ratios into the audio
@@ -68,8 +69,6 @@ public:
             normalized.clipEdits.get(), warpSourceSpan, normalized.len);
         hirari_region_clip_edits_normalize_range_edits(
             normalized.clipEdits.get(), normalized.len);
-        normalized.fadeInSamples = std::min(normalized.fadeInSamples, normalized.len);
-        normalized.fadeOutSamples = std::min(normalized.fadeOutSamples, normalized.len);
         auto it = std::lower_bound(
             m_regions.begin(),
             m_regions.end(),
@@ -304,32 +303,6 @@ public:
     }
 
 private:
-    static HirariNativeRegionAddMetadata regionAddMetadataForRust(const Region& region) {
-        static_assert(std::is_standard_layout_v<HirariNativeRegionAddMetadata>);
-        static_assert(offsetof(HirariNativeRegionAddMetadata, clip_gain) == 60);
-        static_assert(offsetof(HirariNativeRegionAddMetadata, warp_ratio) == 64);
-        static_assert(offsetof(HirariNativeRegionAddMetadata, pitch_semitones) == 72);
-        static_assert(sizeof(HirariNativeRegionAddMetadata) == 80);
-        return {region.start, region.len, region.sourceLength, region.sourceOffset,
-                region.baseStart, region.baseSourceOffset, region.baseLength,
-                region.loopCount, region.clipGain, region.warpRatio, region.pitchSemitones};
-    }
-
-    static void applyRegionAddMetadata(Region& region,
-                                       const HirariNativeRegionAddMetadata& metadata) {
-        region.start = metadata.start;
-        region.len = metadata.length;
-        region.sourceLength = metadata.source_length;
-        region.sourceOffset = metadata.source_offset;
-        region.baseStart = metadata.base_start;
-        region.baseSourceOffset = metadata.base_source_offset;
-        region.baseLength = metadata.base_length;
-        region.loopCount = metadata.loop_count;
-        region.clipGain = metadata.clip_gain;
-        region.warpRatio = metadata.warp_ratio;
-        region.pitchSemitones = metadata.pitch_semitones;
-    }
-
     std::string copyExpressionMapJson(uint8_t mapKind) const {
         size_t size = 0;
         auto* json = hirari_track_midi_expression_map_take(m_articulationState, mapKind, &size);

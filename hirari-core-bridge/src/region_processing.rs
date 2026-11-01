@@ -1,6 +1,7 @@
 use crate::audio_note_curve::{
     hirari_audio_note_curve_block, HirariAudioNoteCurveView, HirariAudioNoteSegmentRange,
 };
+use crate::region_edit_host::HirariRegionState;
 use crate::region_warp::{
     hirari_region_source_block, hirari_region_source_position_at, HirariWarpMarker,
 };
@@ -35,88 +36,78 @@ pub struct NativeRegionGeometry {
     pub timeline_sample_rate: f64,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NativeRegionAddMetadata {
-    pub start: u64,
-    pub length: u64,
-    pub source_length: u64,
-    pub source_offset: u64,
-    pub base_start: u64,
-    pub base_source_offset: u64,
-    pub base_length: u64,
-    pub loop_count: u32,
-    pub clip_gain: f32,
-    pub warp_ratio: f64,
-    pub pitch_semitones: f32,
-}
-
 /// Applies the scalar invariants for a newly inserted region. Audio ownership
 /// stays in C++; all shared range and overflow policy lives in the Rust core.
+/// The caller's editable state is updated in place, so the C++ side applies
+/// one state record instead of shuttling a second metadata copy.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_normalize_add_metadata(
-    metadata: *mut NativeRegionAddMetadata,
+    state: *mut HirariRegionState,
     has_audio: bool,
     audio_samples: u64,
     audio_channels: u32,
 ) -> bool {
-    let Some(metadata) = metadata.as_mut() else {
+    let Some(state) = state.as_mut() else {
         return false;
     };
-    if metadata.length == 0 || metadata.start.checked_add(metadata.length).is_none() {
+    if state.len == 0 || state.start.checked_add(state.len).is_none() {
         return false;
     }
-    if !metadata.warp_ratio.is_finite() || !(0.5..=2.0).contains(&metadata.warp_ratio) {
-        metadata.warp_ratio = 1.0;
+    if !state.warp_ratio.is_finite() || !(0.5..=2.0).contains(&state.warp_ratio) {
+        state.warp_ratio = 1.0;
     }
-    if !metadata.pitch_semitones.is_finite() || !(-24.0..=24.0).contains(&metadata.pitch_semitones)
+    if !state.pitch_semitones.is_finite() || !(-24.0..=24.0).contains(&state.pitch_semitones) {
+        state.pitch_semitones = 0.0;
+    }
+    if state.loop_count == 0
+        || state.loop_count > 1024
+        || state.len > u64::MAX / u64::from(state.loop_count)
     {
-        metadata.pitch_semitones = 0.0;
+        state.loop_count = 1;
     }
-    if metadata.loop_count == 0
-        || metadata.loop_count > 1024
-        || metadata.length > u64::MAX / u64::from(metadata.loop_count)
-    {
-        metadata.loop_count = 1;
-    }
-    let Some(timeline_length) = metadata.length.checked_mul(u64::from(metadata.loop_count)) else {
+    let Some(timeline_length) = state.len.checked_mul(u64::from(state.loop_count)) else {
         return false;
     };
-    if metadata.start.checked_add(timeline_length).is_none() {
+    if state.start.checked_add(timeline_length).is_none() {
         return false;
     }
-    if !metadata.clip_gain.is_finite() {
-        metadata.clip_gain = 1.0;
+    if !state.clip_gain.is_finite() {
+        state.clip_gain = 1.0;
     }
-    metadata.clip_gain = metadata.clip_gain.clamp(0.0, 2.0);
+    state.clip_gain = state.clip_gain.clamp(0.0, 2.0);
 
     if has_audio {
-        if audio_channels == 0 || audio_samples == 0 || metadata.source_offset >= audio_samples {
+        if audio_channels == 0 || audio_samples == 0 || state.source_offset >= audio_samples {
             return false;
         }
-        let available = audio_samples - metadata.source_offset;
-        metadata.source_length = if metadata.source_length == 0 {
+        let available = audio_samples - state.source_offset;
+        state.source_length = if state.source_length == 0 {
             available
         } else {
-            metadata.source_length.min(available)
+            state.source_length.min(available)
         };
-        if metadata.source_length == 0 {
+        if state.source_length == 0 {
             return false;
         }
-        if metadata.base_length == 0 {
-            metadata.base_length = metadata.source_length;
+        if state.base_length == 0 {
+            state.base_length = state.source_length;
         }
-        if metadata.base_start == 0 {
-            metadata.base_start = metadata.start;
+        if state.base_start == 0 {
+            state.base_start = state.start;
         }
-        if metadata.base_source_offset == 0 {
-            metadata.base_source_offset = metadata.source_offset;
+        if state.base_source_offset == 0 {
+            state.base_source_offset = state.source_offset;
         }
-    } else if metadata.source_length == 0 {
-        metadata.source_length = metadata.length;
+    } else if state.source_length == 0 {
+        state.source_length = state.len;
     }
 
-    metadata.start.checked_add(metadata.length).is_some()
+    // Fades are bounded by the playable length, as the loader used to clamp
+    // them next to the insertion.
+    state.fade_in_samples = state.fade_in_samples.min(state.len);
+    state.fade_out_samples = state.fade_out_samples.min(state.len);
+
+    state.start.checked_add(state.len).is_some()
 }
 
 fn source_frames_per_timeline_frame(region: &NativeRegionGeometry) -> Option<f64> {

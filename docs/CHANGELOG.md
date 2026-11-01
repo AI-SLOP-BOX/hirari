@@ -67,6 +67,9 @@ production support.
 
 ### Changed
 
+- Insertion-time region validation now operates on the shared
+  `HirariRegionState` record, so the C++ metadata transfer helpers and the
+  separate add-metadata struct are gone and the fade clamp runs in Rust.
 - Project loading now installs the region's editable state as returned by the
   Rust hydration pass (`hirari_region_hydrate_decoded`), so the persisted
   field mapping lives beside the state layout instead of being re-assigned

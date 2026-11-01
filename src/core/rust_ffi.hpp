@@ -322,21 +322,11 @@ struct HirariRegionRangeEdit {
     uint64_t fade_in;
     uint64_t fade_out;
 };
-struct HirariNativeRegionAddMetadata {
-    uint64_t start;
-    uint64_t length;
-    uint64_t source_length;
-    uint64_t source_offset;
-    uint64_t base_start;
-    uint64_t base_source_offset;
-    uint64_t base_length;
-    uint32_t loop_count;
-    float clip_gain;
-    double warp_ratio;
-    float pitch_semitones;
-};
+struct HirariRegionState;
+// Validates a newly inserted region's editable state in place; the C++ side
+// applies the same record it already holds.
 extern "C" bool hirari_region_normalize_add_metadata(
-    HirariNativeRegionAddMetadata* metadata, bool has_audio,
+    HirariRegionState* state, bool has_audio,
     uint64_t audio_samples, uint32_t audio_channels);
 // VariAudio note-segment ownership. Rust now owns the note-edit table; C++
 // keeps only a published immutable projection and the project-file layout.
