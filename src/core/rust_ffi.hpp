@@ -723,11 +723,6 @@ extern "C" void* hirari_region_waveform(
     void* host, uint32_t trackId, uint32_t regionId, uint32_t numPeaks);
 extern "C" void hirari_region_waveform_forget(void* host, uint32_t regionId);
 extern "C" void hirari_region_waveform_clear(void* host);
-extern "C" bool hirari_region_edit_set_warp_markers(
-    void* host, uint32_t trackId, uint32_t regionId,
-    const uint64_t* sourceSamples, size_t sourceCount,
-    const uint64_t* timelineSamples, size_t timelineCount,
-    const uint8_t* transientFlags, size_t flagCount);
 // Decodes `path`, swaps it into the region and records the undo pair. Rust
 // owns the path/rate policy and the snapshots; C++ performs the swap.
 

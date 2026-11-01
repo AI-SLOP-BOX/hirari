@@ -138,28 +138,11 @@ pub mod ffi {
         fn is_loop_enabled(self: &HirariUnifiedEngine) -> bool;
         fn cycle_start(self: &HirariUnifiedEngine) -> u64;
         fn cycle_end(self: &HirariUnifiedEngine) -> u64;
-        fn is_playing(self: &AudioEngine) -> bool;
+        fn is_playing(self: &HirariUnifiedEngine) -> bool;
         fn get_playhead(self: &HirariUnifiedEngine) -> u64;
-        // Tempo and time-signature editing is not declared here: those
-        // operations live in hirari_core_engine_tempo.rs and work on the
-        // addresses above. These two remain on the C++ path because the
-        // native contract test drives it directly -- and it lands in the
-        // same Rust implementation.
-        fn set_tempo(self: &AudioEngine, bpm: f32) -> bool;
+        fn set_tempo(self: &HirariUnifiedEngine, bpm: f32) -> bool;
         fn set_master_gain(self: &AudioEngine, value: f32) -> bool;
-        // The Control Room runtime state is owned and implemented in Rust
-        // (control_room_runtime.rs). C++ only holds the handle its audio
-        // callback renders with, so Rust reaches that same object directly
-        // instead of round-tripping through the C++ forwarding shims. These
-        // two are the only Control Room operations that still cross the
-        // boundary: the handle itself, and the BusTrack-existence check that
-        // answers against the C++-owned track list.
         fn control_room_state(self: &AudioEngine) -> usize;
-        // The tempo map, the undo history and the diagnostic ring are owned
-        // by Rust; these three hand Rust their addresses so an edit can call
-        // the same objects the engine's render path reads, without the
-        // forwarding shims that used to relay each operation out to C++ and
-        // straight back in again.
         fn tempo_state(self: &AudioEngine) -> usize;
         fn undo_state(self: &AudioEngine) -> usize;
         fn log_state(self: &AudioEngine) -> usize;
@@ -168,8 +151,6 @@ pub mod ffi {
         fn midi_snapshot_store(self: &HirariUnifiedEngine) -> usize;
         fn midi_learn_state(self: &HirariUnifiedEngine) -> usize;
         fn preview_synth_state(self: &HirariUnifiedEngine) -> usize;
-        // "The project changed" revision the UI polls. The shims that used to
-        // bump it after an edit moved into Rust along with the edit itself.
         fn mark_project_state_changed(self: &AudioEngine);
         fn bus_track_exists(self: &HirariUnifiedEngine, bus_track_id: u32) -> bool;
         fn get_master_gain(self: &HirariUnifiedEngine) -> f32;
@@ -195,7 +176,6 @@ pub mod ffi {
         fn get_audio_input_channel_count(self: &AudioEngine) -> u32;
         fn get_audio_output_channel_count(self: &AudioEngine) -> u32;
         fn try_reconnect_audio_device(self: &AudioEngine);
-        fn get_sample_rate(self: &AudioEngine) -> f64;
         fn list_audio_devices_json(self: &AudioEngine) -> String;
         fn audio_input_device_uid(self: &AudioEngine) -> String;
         fn select_audio_device(
@@ -269,14 +249,6 @@ pub mod ffi {
             enabled: bool,
         ) -> bool;
         fn clear_region_processing(self: &AudioEngine, tid: u32, rid: u32) -> bool;
-        fn set_region_warp_markers(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            source_samples: &[u64],
-            timeline_samples: &[u64],
-            transient_flags: &[u8],
-        ) -> bool;
 
         fn set_automation_record_mode(self: &AudioEngine, mode: u32) -> bool;
         fn get_plugin_parameter(
@@ -332,11 +304,11 @@ pub mod ffi {
         ) -> u64;
         fn close_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32)
             -> bool;
-        fn midi_clock_tick(self: &AudioEngine, timestamp: u64);
+        fn midi_clock_tick(self: &HirariUnifiedEngine, timestamp: u64);
         fn midi_clock_ticks(self: &HirariUnifiedEngine) -> u64;
         fn midi_clock_last_tick(self: &HirariUnifiedEngine) -> u64;
         fn midi_clock_rate(self: &HirariUnifiedEngine) -> f64;
-        fn set_midi_clock_rate(self: &AudioEngine, bpm: f64);
+        fn set_midi_clock_rate(self: &HirariUnifiedEngine, bpm: f64);
         fn execute_auto_arrangement(self: &AudioEngine) -> bool;
         fn set_project_scale(self: &AudioEngine, root: i32, scale_type: i32) -> bool;
         fn execute_vocal_remover(self: &AudioEngine, tid: u32) -> bool;

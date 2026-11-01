@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- Transport tempo, MIDI clock rate/tick, playback state, sample rate and region
+  warp-marker writes now run as bridge-side Rust entry points on the engine
+  handle; the C++ `AudioEngine` relays, the engine const-qualification they
+  needed, and the now-unused warp-marker FFI declaration are gone.
 - Sandbox status enumeration, WAV diagnostic text, and waveform result polling
   now call the Rust routines directly from the bridge; the C++ `AudioEngine`
   relays, the local sandbox-status shim declaration, and the unused FFI

@@ -6,58 +6,22 @@ public:
     void set_playing(bool playing) const {
         (void)try_set_playing(playing);
     }
+    void set_loop(bool enabled) const { if (m_engine) { m_engine->set_loop(enabled); m_engine->mark_project_state_changed(); } }
+    bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { if (!m_engine || !m_engine->set_cycle_range(start_sample, end_sample, enabled)) return false; m_engine->mark_project_state_changed(); return true; }
     bool try_set_playing(bool playing) const {
         if (!m_engine) return false;
         if (playing && (!m_driver || !m_driver->is_running())) return false;
         m_engine->set_playing(playing);
         return true;
     }
-    void set_loop(bool enabled) const { if (m_engine) { m_engine->set_loop(enabled); m_engine->mark_project_state_changed(); } }
-    bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) const { if (!m_engine || !m_engine->set_cycle_range(start_sample, end_sample, enabled)) return false; m_engine->mark_project_state_changed(); return true; }
-
-
-    bool is_playing() const { return m_engine && m_engine->is_playing(); }
     void set_playhead(uint64_t pos) const { if (m_engine) m_engine->set_playhead(pos); }
-
-
-
-    // Tempo and time-signature editing moved to Rust with the objects it
-    // touches (hirari_core_engine_tempo.rs), which reach them through the
-    // three handles above; nothing about it is relayed through here now. The
-    // write below stays on the C++ path because the native contract tests
-    // drive the engine singleton through it; it lands in the same Rust
-    // implementation.
-    bool set_tempo(float bpm) const { if (!m_engine || !m_engine->set_tempo(bpm)) return false; m_engine->mark_project_state_changed(); return true; }
-    void midi_clock_tick(uint64_t timestamp) const { if (m_engine) m_engine->midi_clock_tick(timestamp); }
-
-
-
-    void set_midi_clock_rate(double bpm) const { if (m_engine) m_engine->set_midi_clock_rate(bpm); }
     bool set_master_gain(float value) const {
         if (!m_engine || !m_engine->set_master_gain(value)) return false;
         m_engine->mark_project_state_changed(); return true;
     }
-    uintptr_t control_room_state() const {
-        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->control_room_state()) : 0;
-    }
-    // Addresses of the Rust-owned tempo map, undo history and diagnostic ring.
-    // Rust reads them once at construction; from then on an edit reaches those
-    // objects directly instead of coming back through these shims. A zero means
-    // "no engine", which is the same branch these shims used to take themselves.
-    uintptr_t tempo_state() const {
-        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->tempo_state()) : 0;
-    }
-    uintptr_t undo_state() const {
-        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->undo_state()) : 0;
-    }
-    uintptr_t log_state() const {
-        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->log_state()) : 0;
-    }
     void mark_project_state_changed() const {
         if (m_engine) m_engine->mark_project_state_changed();
     }
-
-
     bool set_offline_render_target(uint32_t tid) const {
         return m_engine && m_engine->set_offline_render_target(tid);
     }
@@ -70,6 +34,19 @@ public:
     void set_offline_render_options(bool preFader, bool includeInserts) const noexcept {
         if (m_engine) m_engine->set_offline_render_options(preFader, includeInserts);
     }
+    uintptr_t control_room_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->control_room_state()) : 0;
+    }
+    uintptr_t tempo_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->tempo_state()) : 0;
+    }
+    uintptr_t undo_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->undo_state()) : 0;
+    }
+    uintptr_t log_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->log_state()) : 0;
+    }
+    void set_test_tone(bool enabled) const { if (m_engine) m_engine->set_test_tone(enabled); }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = m_driver && m_driver->is_running();
@@ -136,7 +113,6 @@ public:
             if (!m_driver->is_running() && m_engine) m_engine->set_playing(false);
         }
     }
-    double get_sample_rate() const { return m_engine ? m_engine->get_sample_rate() : 44100.0; }
     rust::String list_audio_devices_json() const {
 #if defined(__APPLE__)
         return rust::String(m_driver ? m_driver->list_devices_json() : "[]");
@@ -168,7 +144,6 @@ public:
     }
     uint32_t get_block_size() const { return m_engine ? m_engine->get_block_size() : 0; }
 
-    void set_test_tone(bool enabled) const { if (m_engine) m_engine->set_test_tone(enabled); }
     void set_preview_sample(rust::Slice<const float> samples, double sourceRate) const {
         if (m_engine) m_engine->set_preview_sample(samples.data(), samples.size(), sourceRate);
     }
@@ -193,19 +168,6 @@ public:
 #endif
         float* channels[2] = {left.data(), right.data()};
         if (m_engine) m_engine->processBlockDirect(channels, 2, static_cast<uint32_t>(left.size()));
-    }
-
-    bool set_region_warp_markers(uint32_t tid, uint32_t rid,
-                                 rust::Slice<const uint64_t> source_samples,
-                                 rust::Slice<const uint64_t> timeline_samples,
-                                 rust::Slice<const uint8_t> transient_flags) const {
-        // Slice agreement, the marker cap and the conversion to the marker
-        // layout are Rust-owned (hirari_region_edit_set_warp_markers).
-        return m_engine && hirari_region_edit_set_warp_markers(
-            m_engine.get(), tid, rid,
-            source_samples.data(), source_samples.size(),
-            timeline_samples.data(), timeline_samples.size(),
-            transient_flags.data(), transient_flags.size());
     }
 
     void apply_config(float tempo, uint32_t sr, uint32_t bs) const {

@@ -1,4 +1,4 @@
-bool HirariUnifiedEngine::set_tempo(float bpm) {
+bool HirariUnifiedEngine::set_tempo(float bpm) const {
     // Thin entry point onto the Rust implementation, kept only because
     // tests/timeline_bpm_ghost_contract.cpp drives this method straight off
     // the engine singleton. Every other tempo edit reaches Rust without

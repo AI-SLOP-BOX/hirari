@@ -825,6 +825,50 @@ impl ffi::AudioEngine {
     pub fn get_project_layout_revision(&self) -> u64 {
         self.get_core().get_project_layout_revision()
     }
+    pub fn is_playing(&self) -> bool {
+        self.get_core().is_playing()
+    }
+    pub fn set_tempo(&self, bpm: f32) -> bool {
+        let core = self.get_core();
+        if !core.set_tempo(bpm) {
+            return false;
+        }
+        self.mark_project_state_changed();
+        true
+    }
+    pub fn midi_clock_tick(&self, timestamp: u64) {
+        self.get_core().midi_clock_tick(timestamp)
+    }
+    pub fn set_midi_clock_rate(&self, bpm: f64) {
+        self.get_core().set_midi_clock_rate(bpm)
+    }
+    pub fn get_sample_rate(&self) -> f64 {
+        self.get_core().get_sample_rate()
+    }
+    pub fn set_region_warp_markers(
+        &self,
+        tid: u32,
+        rid: u32,
+        source_samples: &[u64],
+        timeline_samples: &[u64],
+        transient_flags: &[u8],
+    ) -> bool {
+        // The slice agreement checks, marker cap and marker layout live in
+        // region_edit_host; this only hands it the engine host handle.
+        unsafe {
+            crate::region_edit_host::hirari_region_edit_set_warp_markers(
+                host(self),
+                tid,
+                rid,
+                source_samples.as_ptr(),
+                source_samples.len(),
+                timeline_samples.as_ptr(),
+                timeline_samples.len(),
+                transient_flags.as_ptr(),
+                transient_flags.len(),
+            )
+        }
+    }
     pub fn get_sandbox_statuses(&self) -> Vec<u32> {
         plugin_sandbox_maintenance::sandbox_statuses_packed(host(self) as usize)
     }
