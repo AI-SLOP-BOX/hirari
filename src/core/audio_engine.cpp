@@ -94,19 +94,19 @@ AudioEngine::AudioEngine(bool startDevice)
         droppedInputBlocks = 0;
         if (!m_driver) return result;
         std::lock_guard<std::mutex> pollLock(m_inputPollMutex);
-        constexpr uint32_t kMaxChannels = ::Hirari::Core::Driver::MacAudioInputBlockQueue::kMaxChannels;
-        constexpr uint32_t kMaxFrames = ::Hirari::Core::Driver::MacAudioInputBlockQueue::kMaxFrames;
-        const uint32_t channelCapacity = std::min(m_driver->input_channel_count(), kMaxChannels);
+        using ::Hirari::Core::Driver::kAudioInputQueueChannels;
+        using ::Hirari::Core::Driver::kAudioInputQueueFrames;
+        const uint32_t channelCapacity = std::min(m_driver->input_channel_count(), kAudioInputQueueChannels);
         if (channelCapacity == 0) return result;
-        const size_t requiredSamples = static_cast<size_t>(channelCapacity) * kMaxFrames;
+        const size_t requiredSamples = static_cast<size_t>(channelCapacity) * kAudioInputQueueFrames;
         if (m_inputPollScratch.size() < requiredSamples)
             m_inputPollScratch.resize(requiredSamples);
-        std::array<float*, kMaxChannels> channels{};
+        std::array<float*, kAudioInputQueueChannels> channels{};
         for (uint32_t channel = 0; channel < channelCapacity; ++channel)
-            channels[channel] = m_inputPollScratch.data() + static_cast<size_t>(channel) * kMaxFrames;
-        ::Hirari::Core::Driver::MacAudioInputBlockQueue::BlockInfo info{};
+            channels[channel] = m_inputPollScratch.data() + static_cast<size_t>(channel) * kAudioInputQueueFrames;
+        ::Hirari::Core::Driver::AudioInputBlockInfo info{};
         uint64_t dropped = 0;
-        if (!m_driver->poll_input_block(channels.data(), channelCapacity, kMaxFrames, info, dropped)) {
+        if (!m_driver->poll_input_block(channels.data(), channelCapacity, kAudioInputQueueFrames, info, dropped)) {
             droppedInputBlocks = dropped;
             return result;
         }
@@ -114,7 +114,7 @@ AudioEngine::AudioEngine(bool startDevice)
         channelCount = info.channelCount;
         return ::Hirari::Core::Bridge::interleave_planar_audio_input(
             rust::Slice<const float>(m_inputPollScratch.data(), m_inputPollScratch.size()),
-            info.channelCount, info.frameCount, kMaxFrames);
+            info.channelCount, info.frameCount, kAudioInputQueueFrames);
     }
 
 } // namespace Hirari::Core::BridgeFFI

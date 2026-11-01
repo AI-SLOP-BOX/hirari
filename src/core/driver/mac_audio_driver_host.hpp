@@ -8,59 +8,15 @@
 
 namespace Hirari::Core::Driver {
 
-/**
- * ABI adapter to the Rust-owned fixed-capacity SPSC input queue.
- */
-class MacAudioInputBlockQueue final {
-public:
-    static constexpr uint32_t kCapacity = 8;
-    static constexpr uint32_t kMaxChannels = 32;
-    static constexpr uint32_t kMaxFrames = 8192;
+// Fixed capacities of the Rust-owned SPSC input queue. Callers size their
+// scratch buffers from these, so they live with the block descriptor instead
+// of a C++ wrapper class.
+constexpr uint32_t kAudioInputQueueChannels = 32;
+constexpr uint32_t kAudioInputQueueFrames = 8192;
 
-    struct BlockInfo {
-        uint32_t channelCount = 0;
-        uint32_t frameCount = 0;
-    };
-
-    MacAudioInputBlockQueue() : m_queue(hirari_audio_input_queue_create()) {}
-    ~MacAudioInputBlockQueue() { hirari_audio_input_queue_free(m_queue); }
-    MacAudioInputBlockQueue(const MacAudioInputBlockQueue&) = delete;
-    MacAudioInputBlockQueue& operator=(const MacAudioInputBlockQueue&) = delete;
-
-    bool push_planar(const float* const* channels,
-                     uint32_t channelCount,
-                     uint32_t frameCount) noexcept {
-        return hirari_audio_input_queue_push(m_queue, channels, channelCount, frameCount);
-    }
-
-    // droppedBlocks is the number accumulated since the previous poll. It is
-    // reported even when no complete block is currently available.
-    bool poll(float* const* destination,
-              uint32_t destinationChannelCapacity,
-              uint32_t destinationFrameCapacity,
-              BlockInfo& info,
-              uint64_t& droppedBlocks) noexcept {
-        return hirari_audio_input_queue_poll(
-            m_queue, destination, destinationChannelCapacity, destinationFrameCapacity,
-            &info.channelCount, &info.frameCount, &droppedBlocks);
-    }
-
-    uint64_t dropped_blocks() const noexcept {
-        return hirari_audio_input_queue_dropped(m_queue);
-    }
-
-    // Discard input accumulated before a new recording starts.
-    void discard_pending() noexcept {
-        hirari_audio_input_queue_discard(m_queue);
-    }
-
-    // Called only after the driver has stopped and its callbacks are quiescent.
-    void reset() noexcept {
-        hirari_audio_input_queue_reset(m_queue);
-    }
-
-private:
-    void* m_queue = nullptr;
+struct AudioInputBlockInfo {
+    uint32_t channelCount = 0;
+    uint32_t frameCount = 0;
 };
 
 } // namespace Hirari::Core::Driver
@@ -104,7 +60,7 @@ uint64_t hirari_mac_audio_host_callback_count(void* host);
 bool hirari_mac_audio_host_poll_input_block(void* host, float* const* destination,
                                             uint32_t destinationChannels,
                                             uint32_t destinationFrames,
-                                            Hirari::Core::Driver::MacAudioInputBlockQueue::BlockInfo* info,
+                                            Hirari::Core::Driver::AudioInputBlockInfo* info,
                                             uint64_t* dropped);
 void hirari_mac_audio_host_discard_pending_input(void* host);
 void hirari_mac_audio_host_capture_input(void* host, const float* const* channels,
@@ -195,12 +151,12 @@ public:
     }
 
     // Non-realtime consumer API. The destination must provide at least
-    // kMaxChannels pointers and kMaxFrames samples per channel for all blocks
-    // accepted by the queue.
+    // kAudioInputQueueChannels pointers and kAudioInputQueueFrames samples per
+    // channel for all blocks accepted by the queue.
     bool poll_input_block(float* const* destination,
                           uint32_t destinationChannelCapacity,
                           uint32_t destinationFrameCapacity,
-                          MacAudioInputBlockQueue::BlockInfo& info,
+                          AudioInputBlockInfo& info,
                           uint64_t& droppedBlocks) noexcept {
         if (!m_handle) {
             info = {};

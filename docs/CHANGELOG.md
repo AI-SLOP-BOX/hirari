@@ -67,6 +67,10 @@ production support.
 
 ### Changed
 
+- The audio input block queue is now used through the Rust SPSC
+  implementation directly (`hirari_audio_input_queue_*`); the C++
+  `MacAudioInputBlockQueue` wrapper class is deleted and only its capacity
+  constants plus the plain `AudioInputBlockInfo` descriptor remain.
 - Plugin identity now travels with the Rust-owned effect-chain entry
   (`kind` on `HostNode`, `hirari_effect_chain_node_kind` /
   `hirari_effect_chain_set_node_kind`), so the deleted C++ `m_pluginTypes`

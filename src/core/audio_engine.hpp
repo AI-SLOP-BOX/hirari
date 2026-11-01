@@ -39,6 +39,11 @@ class JackAudioDriverHost final {
 public:
     using ProcessCallback = ::Hirari::Core::External::JackBridgeDeep::ProcessCallback;
 
+    JackAudioDriverHost() : m_inputQueue(hirari_audio_input_queue_create()) {}
+    ~JackAudioDriverHost() { hirari_audio_input_queue_free(m_inputQueue); }
+    JackAudioDriverHost(const JackAudioDriverHost&) = delete;
+    JackAudioDriverHost& operator=(const JackAudioDriverHost&) = delete;
+
     bool start() {
         auto& jack = ::Hirari::Core::External::JackBridgeDeep::getInstance();
         if (!jack.tryInitialize("Hirari")) {
@@ -101,19 +106,26 @@ public:
     const char* last_error() const noexcept { return m_error.c_str(); }
     float output_peak() const noexcept { return m_outputPeak.load(std::memory_order_acquire); }
     uint64_t callback_count() const noexcept { return m_callbackCount.load(std::memory_order_acquire); }
-    uint64_t dropped_input_blocks() const noexcept { return m_inputQueue.dropped_blocks(); }
-    void discard_pending_input_blocks() noexcept { m_inputQueue.discard_pending(); }
+    uint64_t dropped_input_blocks() const noexcept {
+        return hirari_audio_input_queue_dropped(m_inputQueue);
+    }
+    void discard_pending_input_blocks() noexcept {
+        hirari_audio_input_queue_discard(m_inputQueue);
+    }
     bool poll_input_block(float* const* destination,
                           uint32_t destinationChannelCapacity,
                           uint32_t destinationFrameCapacity,
-                          ::Hirari::Core::Driver::MacAudioInputBlockQueue::BlockInfo& info,
+                          ::Hirari::Core::Driver::AudioInputBlockInfo& info,
                           uint64_t& droppedBlocks) noexcept {
-        return m_inputQueue.poll(destination, destinationChannelCapacity,
-                                 destinationFrameCapacity, info, droppedBlocks);
+        return hirari_audio_input_queue_poll(
+            m_inputQueue, destination, destinationChannelCapacity,
+            destinationFrameCapacity, &info.channelCount, &info.frameCount,
+            &droppedBlocks);
     }
     void capture_input(const float* const* channels, uint32_t channelCount,
                        uint32_t frameCount) noexcept {
-        (void)m_inputQueue.push_planar(channels, channelCount, frameCount);
+        (void)hirari_audio_input_queue_push(m_inputQueue, channels, channelCount,
+                                            frameCount);
     }
     const char* list_devices_json() const noexcept {
         return "[{\"id\":0,\"name\":\"JACK server\",\"api\":\"JACK\"}]";
@@ -141,8 +153,7 @@ private:
     std::atomic<bool> m_running{false};
     std::atomic<uint64_t> m_callbackCount{0};
     std::atomic<float> m_outputPeak{0.0f};
-    ::Hirari::Core::Driver::MacAudioInputBlockQueue m_inputQueue;
-    std::string m_status = "stopped";
+    void* m_inputQueue = nullptr;    std::string m_status = "stopped";
     std::string m_error;
 };
 using AudioDriverHost = JackAudioDriverHost;
@@ -174,7 +185,7 @@ public:
         m_callback(nullptr, 0, outputs, 2, frames, m_context);
         return true;
     }
-    using InputBlockInfo = ::Hirari::Core::Driver::MacAudioInputBlockQueue::BlockInfo;
+    using InputBlockInfo = ::Hirari::Core::Driver::AudioInputBlockInfo;
     bool poll_input_block(float* const*, uint32_t, uint32_t, InputBlockInfo&, uint64_t& dropped) noexcept {
         dropped = 0;
         return false;
