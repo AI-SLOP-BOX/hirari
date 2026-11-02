@@ -111,6 +111,13 @@ impl HirariCore {
         let message = engine
             .get_sandbox_plugin_state_error_text(track_id, sandbox_index)
             .to_string();
+        // An unresolved track answers with no text; the state-error table names
+        // the fallback.
+        let message = if message.is_empty() {
+            "state-unavailable".to_owned()
+        } else {
+            message
+        };
         SandboxStateDiagnostic { ok, code, message }
     }
 

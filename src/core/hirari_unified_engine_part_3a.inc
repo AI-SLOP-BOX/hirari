@@ -2,18 +2,20 @@
 
 bool HirariUnifiedEngine::process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
                                                        float* left, float* right, uint32_t frames) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(tid);
-    return track && track->processSandboxedPluginBlock(sandboxIndex, left, right, frames);
+    return mutateLockedTrack(tid, [&](Track& track) {
+        return track.processSandboxedPluginBlock(sandboxIndex, left, right, frames);
+    });
 }
 
 std::vector<uint8_t> HirariUnifiedEngine::process_sandboxed_plugin_midi_block(
     uint32_t tid, uint32_t sandboxIndex, uint32_t frames,
     const uint8_t* midiData, uint32_t midiSize) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(tid);
-    return track ? track->processSandboxedPluginMidiBlock(sandboxIndex, frames, midiData, midiSize)
-                 : std::vector<uint8_t>{};
+    std::vector<uint8_t> result;
+    (void)mutateLockedTrack(tid, [&](Track& track) {
+        result = track.processSandboxedPluginMidiBlock(sandboxIndex, frames, midiData, midiSize);
+        return true;
+    });
+    return result;
 }
 
 // The maintenance pass itself lives in Rust; these handlers only resolve a
@@ -58,15 +60,13 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
 }
 
 bool HirariUnifiedEngine::retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(trackId);
-    return track && track->retrySandboxedPlugin(sandboxIndex);
+    return mutateLockedTrack(trackId,
+                             [&](Track& track) { return track.retrySandboxedPlugin(sandboxIndex); });
 }
 
 bool HirariUnifiedEngine::restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(trackId);
-    return track && track->restartSandboxedPlugin(sandboxIndex);
+    return mutateLockedTrack(trackId,
+                             [&](Track& track) { return track.restartSandboxedPlugin(sandboxIndex); });
 }
 
 uint32_t HirariUnifiedEngine::take_watchdog_trips() {
@@ -86,25 +86,22 @@ uint64_t HirariUnifiedEngine::non_finite_plugin_samples() const {
 }
 
 uint8_t HirariUnifiedEngine::get_last_sandbox_failure(uint32_t trackId) const {
-    const auto tracks = get_tracks_snapshot();
-    for (const auto& track : tracks) {
-        if (track && track->getId() == trackId) return track->lastSandboxFailure();
-    }
-    return 0;
+    return querySnapshotTrack(trackId, uint8_t{0},
+                              [](const Track& track) { return track.lastSandboxFailure(); });
 }
 
+// An unresolved track reports an empty text; naming the not-found fallback is
+// the Rust query surface's job.
 std::string HirariUnifiedEngine::get_last_sandbox_failure_text(uint32_t trackId) const {
-    const auto tracks = get_tracks_snapshot();
-    for (const auto& track : tracks) {
-        if (track && track->getId() == trackId) return track->lastSandboxFailureText();
-    }
-    return "track-not-found";
+    return querySnapshotTrack(trackId, std::string{},
+                              [](const Track& track) -> std::string {
+                                  return track.lastSandboxFailureText();
+                              });
 }
 
 std::vector<std::string> HirariUnifiedEngine::get_sandbox_plugin_paths() const {
-    const auto tracks = get_tracks_snapshot();
     std::vector<std::string> result;
-    for (const auto& track : tracks) {
+    for (const auto& track : get_tracks_snapshot()) {
         if (!track) continue;
         const auto& paths = track->getSandboxedPluginPaths();
         result.insert(result.end(), paths.begin(), paths.end());
@@ -114,79 +111,62 @@ std::vector<std::string> HirariUnifiedEngine::get_sandbox_plugin_paths() const {
 
 std::vector<uint8_t> HirariUnifiedEngine::get_sandbox_plugin_state(
     uint32_t trackId, uint32_t sandboxIndex) const {
-    const auto tracks = get_tracks_snapshot();
-    for (const auto& track : tracks) {
-        if (track && track->getId() == trackId)
-            return track->getSandboxedPluginState(sandboxIndex);
-    }
-    return {};
+    return querySnapshotTrack(trackId, std::vector<uint8_t>{},
+                              [&](const Track& track) {
+                                  return track.getSandboxedPluginState(sandboxIndex);
+                              });
 }
 
 bool HirariUnifiedEngine::set_sandbox_plugin_state(
     uint32_t trackId, uint32_t sandboxIndex, const std::vector<uint8_t>& state) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(trackId);
-    return track && track->setSandboxedPluginState(sandboxIndex, state);
+    return mutateLockedTrack(trackId, [&](Track& track) {
+        return track.setSandboxedPluginState(sandboxIndex, state);
+    });
 }
 
 uint8_t HirariUnifiedEngine::get_sandbox_plugin_state_error(uint32_t trackId, uint32_t sandboxIndex) const {
-    const auto tracks = get_tracks_snapshot();
-    for (const auto& track : tracks)
-        if (track && track->getId() == trackId) return track->sandboxedPluginStateError(sandboxIndex);
-    return Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
+    return querySnapshotTrack(
+        trackId, Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable,
+        [&](const Track& track) { return track.sandboxedPluginStateError(sandboxIndex); });
 }
 
 std::string HirariUnifiedEngine::get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const {
-    const auto tracks = get_tracks_snapshot();
-    for (const auto& track : tracks)
-        if (track && track->getId() == trackId) return track->sandboxedPluginStateErrorText(sandboxIndex);
-    return "state-unavailable";
+    return querySnapshotTrack(trackId, std::string{}, [&](const Track& track) -> std::string {
+        return track.sandboxedPluginStateErrorText(sandboxIndex);
+    });
 }
 
 float HirariUnifiedEngine::get_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
                                               uint32_t parameterId) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track ? track->getPluginParameter(pluginIndex, parameterId) : 0.0f;
+    return queryLockedTrack(tid, 0.0f, [&](const Track& track) {
+        return track.getPluginParameter(pluginIndex, parameterId);
+    });
 }
 uint32_t HirariUnifiedEngine::get_plugin_parameter_count(uint32_t tid, uint32_t pluginIndex) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track ? track->getPluginParameterCount(pluginIndex) : 0;
+    return queryLockedTrack(tid, 0u,
+                            [&](const Track& track) { return track.getPluginParameterCount(pluginIndex); });
 }
 bool HirariUnifiedEngine::has_plugin_native_editor(uint32_t tid, uint32_t pluginIndex) const {
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target = findTrackSharedLocked(tid);
-    }
-    // Plugin/editor calls can enter vendor UI code. Keep the Track alive but
-    // release the project topology lock before crossing that boundary.
+    const auto target = takeTrackHandle(tid);
+    // Plugin/editor calls can enter vendor UI code, so the Track stays alive
+    // while the project topology lock is already released.
     return target && target->hasPluginNativeEditor(pluginIndex);
 }
 uint64_t HirariUnifiedEngine::open_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
                                                       uintptr_t parent) const {
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target = findTrackSharedLocked(tid);
-    }
+    const auto target = takeTrackHandle(tid);
     return target ? target->openPluginNativeEditor(pluginIndex, parent) : 0;
 }
 bool HirariUnifiedEngine::close_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
                                                    uint64_t session) const {
-    std::shared_ptr<Track> target;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        target = findTrackSharedLocked(tid);
-    }
+    const auto target = takeTrackHandle(tid);
     return target && target->closePluginNativeEditor(pluginIndex, session);
 }
 std::string HirariUnifiedEngine::get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
                                                          uint32_t parameterId) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track ? track->getPluginParameterName(pluginIndex, parameterId) : std::string{};
+    return queryLockedTrack(tid, std::string{}, [&](const Track& track) -> std::string {
+        return track.getPluginParameterName(pluginIndex, parameterId);
+    });
 }
 bool HirariUnifiedEngine::set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) {
     if (!hirari_plugin_edit_set_bypass(this, tid, pluginIndex, bypassed)) return false;

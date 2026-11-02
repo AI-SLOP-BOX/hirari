@@ -270,7 +270,16 @@ impl HirariCore {
     pub fn last_sandbox_failure_text(&self, track_id: u32) -> String {
         self.engine.as_ref().map_or_else(
             || "engine-unavailable".to_owned(),
-            |engine| engine.get_last_sandbox_failure_text(track_id).to_string(),
+            // The native engine answers only for a track it resolved; naming an
+            // unresolved id is this layer's decision.
+            |engine| {
+                let text = engine.get_last_sandbox_failure_text(track_id).to_string();
+                if text.is_empty() {
+                    "track-not-found".to_owned()
+                } else {
+                    text
+                }
+            },
         )
     }
 

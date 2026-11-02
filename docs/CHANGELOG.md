@@ -67,6 +67,11 @@ production support.
 
 ### Changed
 
+- Track and region id resolution now has one implementation shared by every
+  engine host callback, and Track's edit protocol (drop the frozen render,
+  mutate, bump the layout revision) is a helper instead of three statements
+  repeated at each site; the messages for an unresolved track or region id are
+  named in Rust, so the C++ surface only answers for ids it actually found.
 - Sandboxed plug-in lifecycle state now lives in the Rust sandbox host: the
   prepared device format, the late-block streak, the recovery latch, the
   quarantine clear and the parameter replay cache are decided there, so the

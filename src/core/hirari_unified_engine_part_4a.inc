@@ -1,48 +1,19 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Pitch analysis is a Rust job (region_jobs.rs): rate validation, the worker,
 // its registry limits, the staleness check and the undo pair all live there.
 // The engine only exposes the retained-track storage callbacks (part_4z).
-
-
-
 
 // Alignment and sync-group quantize are Rust jobs: validation, the job
 // registry, analysis threads, staleness checks and the marker commit all live
 // in hirari-core-bridge/src/region_time_jobs.rs. The engine only provides the
 // host callbacks (part_4z) that expose storage.
 
-
-
-
-
 bool HirariUnifiedEngine::append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(tid);
-    return track && track->appendProcessingStep(rid, stepId, std::string(operation), parameter,
-                                                enabled);
+    return mutateLockedTrack(tid, [&](Track& track) {
+        return track.appendProcessingStep(rid, stepId, std::string(operation), parameter, enabled);
+    });
 }
 bool HirariUnifiedEngine::clear_region_processing(uint32_t tid, uint32_t rid) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(tid);
-    return track && track->clearProcessingHistory(rid);
+    return mutateLockedTrack(tid, [&](Track& track) { return track.clearProcessingHistory(rid); });
 }
 
 bool HirariUnifiedEngine::loadProject(std::string_view path) {

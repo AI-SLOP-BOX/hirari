@@ -1,9 +1,7 @@
 
 
 float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track ? track->getVolume() : -1.0f;
+    return queryLockedTrack(tid, -1.0f, [](const Track& track) { return track.getVolume(); });
 }
 
 bool HirariUnifiedEngine::set_offline_render_target(uint32_t tid) {

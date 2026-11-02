@@ -61,18 +61,16 @@ float HirariUnifiedEngine::get_latency_ms() const noexcept {
 
 float HirariUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track ? hirari_samples_to_milliseconds(track->getTotalLatencySamples(), sampleRate)
-                 : 0.0f;
+    return queryLockedTrack(tid, 0.0f, [&](const Track& track) {
+        return hirari_samples_to_milliseconds(track.getTotalLatencySamples(), sampleRate);
+    });
 }
 
 float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track ? hirari_samples_to_milliseconds(track->getPdcCompensationSamples(), sampleRate)
-                 : 0.0f;
+    return queryLockedTrack(tid, 0.0f, [&](const Track& track) {
+        return hirari_samples_to_milliseconds(track.getPdcCompensationSamples(), sampleRate);
+    });
 }
 
 void HirariUnifiedEngine::set_playhead(uint64_t p) { m_playhead.store(p); }

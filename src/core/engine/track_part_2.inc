@@ -11,20 +11,69 @@
         return path;
     }
 
-    void setVolume(float v) {
+    // A control edit follows one protocol: drop the frozen render, mutate, then
+    // bump the layout revision. A helper keeps the three steps from being
+    // re-ordered site by site.
+    template <typename Fn>
+    void editControl(const Fn& fn) {
         invalidateFrozenForEdit();
-        const float next = std::isfinite(v) ? std::clamp(v, 0.0f, 2.0f) : 1.0f;
-        m_volume.store(next,
-                       std::memory_order_release);
-        hirari_channel_strip_set_gain(m_strip, v);
+        fn();
         markProjectLayoutChanged();
     }
+
+    // A successful edit that only needs the layout revision bumped; the frozen
+    // render stays valid because nothing audible changed.
+    bool commitLayoutChange(bool changed) {
+        if (changed) markProjectLayoutChanged();
+        return changed;
+    }
+
+    // Same protocol for edits that only count when the chain actually changed.
+    bool commitEditChange(bool changed) {
+        if (changed) {
+            invalidateFrozenForEdit();
+            markProjectLayoutChanged();
+        }
+        return changed;
+    }
+
+    // Reads through the chain processor at an index; an empty slot answers with
+    // the caller's fallback instead of repeating the shared_ptr check.
+    template <typename Fn>
+    std::invoke_result_t<Fn, ::Hirari::DSP::IProcessor&> withProcessor(
+        uint32_t pluginIndex, std::invoke_result_t<Fn, ::Hirari::DSP::IProcessor&> missing,
+        const Fn& fn) const {
+        const auto processor = m_effectChain.getProcessor(pluginIndex);
+        return processor ? fn(*processor) : missing;
+    }
+
+    // Reads through the sandbox bound to a slot; a missing slot or a
+    // non-sandbox processor answers with the caller's fallback.
+    template <typename Fn>
+    std::invoke_result_t<Fn, Hirari::Core::Plugins::ProcessSandboxProcessor&> withSandbox(
+        size_t sandboxIndex,
+        std::invoke_result_t<Fn, Hirari::Core::Plugins::ProcessSandboxProcessor&> missing,
+        const Fn& fn) const {
+        if (sandboxIndex >= sandboxSlotCount()) return missing;
+        const auto processor = m_effectChain.getProcessor(sandboxSlotIndex(sandboxIndex));
+        auto* sandbox =
+            dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
+        return sandbox ? fn(*sandbox) : missing;
+    }
+
+    void setVolume(float v) {
+        editControl([&] {
+            const float next = std::isfinite(v) ? std::clamp(v, 0.0f, 2.0f) : 1.0f;
+            m_volume.store(next, std::memory_order_release);
+            hirari_channel_strip_set_gain(m_strip, v);
+        });
+    }
     void setPan(float p) {
-        invalidateFrozenForEdit();
-        const float next = std::isfinite(p) ? std::clamp(p, -1.0f, 1.0f) : 0.0f;
-        m_pan.store(next, std::memory_order_release);
-        hirari_channel_strip_set_pan(m_strip, next);
-        markProjectLayoutChanged();
+        editControl([&] {
+            const float next = std::isfinite(p) ? std::clamp(p, -1.0f, 1.0f) : 0.0f;
+            m_pan.store(next, std::memory_order_release);
+            hirari_channel_strip_set_pan(m_strip, next);
+        });
     }
     virtual bool addPlugin(uint32_t pluginType) {
         // The built-in catalog (type <-> path) is Rust-owned. Unknown types
@@ -240,12 +289,8 @@
         return states;
     }
     bool setPluginState(size_t pluginIndex, const std::vector<uint8_t>& state) {
-        const bool changed = m_effectChain.setProcessorState(static_cast<uint32_t>(pluginIndex), state);
-        if (changed) {
-            invalidateFrozenForEdit();
-            markProjectLayoutChanged();
-        }
-        return changed;
+        return commitEditChange(
+            m_effectChain.setProcessorState(static_cast<uint32_t>(pluginIndex), state));
     }
     std::vector<std::vector<uint8_t>> getPluginGuiStates() const {
         const uint32_t count = m_effectChain.nodeCount();
@@ -257,9 +302,8 @@
     }
     bool setPluginGuiState(size_t pluginIndex, const std::vector<uint8_t>& state) {
         if (pluginIndex >= m_effectChain.nodeCount() || state.size() > 1024u * 1024u) return false;
-        const bool changed = m_effectChain.setProcessorGuiState(static_cast<uint32_t>(pluginIndex), state);
-        if (changed) markProjectLayoutChanged();
-        return changed;
+        return commitLayoutChange(m_effectChain.setProcessorGuiState(
+            static_cast<uint32_t>(pluginIndex), state));
     }
     std::vector<std::string> getSandboxedPluginPaths() const {
         std::vector<std::string> paths;
@@ -280,38 +324,24 @@
     }
     bool setSandboxedPluginState(size_t sandboxIndex, const std::vector<uint8_t>& state) {
         if (sandboxIndex >= sandboxSlotCount()) return false;
-        const bool changed = m_effectChain.setProcessorState(
-            sandboxSlotIndex(sandboxIndex), state);
-        if (changed) {
-            invalidateFrozenForEdit();
-            markProjectLayoutChanged();
-        }
-        return changed;
+        return commitEditChange(m_effectChain.setProcessorState(
+            sandboxSlotIndex(sandboxIndex), state));
     }
     uint8_t sandboxedPluginStateError(size_t sandboxIndex) const noexcept {
-        if (sandboxIndex >= sandboxSlotCount())
-            return Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
-        auto processor = m_effectChain.getProcessor(sandboxSlotIndex(sandboxIndex));
-        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
-        return sandbox ? sandbox->stateErrorCode() : Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable;
+        return withSandbox(sandboxIndex,
+                           Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable,
+                           [](auto& sandbox) { return sandbox.stateErrorCode(); });
     }
     const char* sandboxedPluginStateErrorText(size_t sandboxIndex) const noexcept {
-        if (sandboxIndex >= sandboxSlotCount()) return "state-unavailable";
-        auto processor = m_effectChain.getProcessor(sandboxSlotIndex(sandboxIndex));
-        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
-        return sandbox ? sandbox->stateErrorText() : "state-unavailable";
+        return withSandbox(sandboxIndex, "state-unavailable",
+                           [](auto& sandbox) { return sandbox.stateErrorText(); });
     }
     bool restartSandboxedPlugin(size_t sandboxIndex) {
-        if (sandboxIndex >= sandboxSlotCount()) return false;
-        const uint32_t index = sandboxSlotIndex(sandboxIndex);
-        auto processor = m_effectChain.getProcessor(index);
-        auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         // This entry point is an explicit user/control action, not the
         // background maintenance retry.  It must be allowed to recover a
         // quarantined plugin and reset the bounded automatic-restart budget.
-        const bool restarted = sandbox && sandbox->restart(true);
-        if (restarted) markProjectLayoutChanged();
-        return restarted;
+        return commitLayoutChange(withSandbox(
+            sandboxIndex, false, [](auto& sandbox) { return sandbox.restart(true); }));
     }
     bool retrySandboxedPlugin(size_t sandboxIndex) {
         if (sandboxIndex >= sandboxSlotCount()) return false;
@@ -385,45 +415,37 @@
         return result;
     }
     virtual bool setPluginParameter(uint32_t pluginIndex, uint32_t parameterId, float value) {
-        const bool changed = m_effectChain.setParameter(pluginIndex, parameterId, value);
-        if (changed) {
-            invalidateFrozenForEdit();
-            markProjectLayoutChanged();
-        }
-        return changed;
+        return commitEditChange(m_effectChain.setParameter(pluginIndex, parameterId, value));
     }
     virtual float getPluginParameter(uint32_t pluginIndex, uint32_t parameterId) const noexcept {
-        const auto processor = m_effectChain.getProcessor(pluginIndex);
-        return processor ? processor->getParameter(parameterId) : 0.0f;
+        return withProcessor(pluginIndex, 0.0f,
+                             [&](auto& p) { return p.getParameter(parameterId); });
     }
     virtual uint32_t getPluginParameterCount(uint32_t pluginIndex) const noexcept {
-        const auto processor = m_effectChain.getProcessor(pluginIndex);
-        return processor ? processor->getNumParameters() : 0;
+        return withProcessor(pluginIndex, 0u, [](auto& p) { return p.getNumParameters(); });
     }
     bool hasPluginNativeEditor(uint32_t pluginIndex) const noexcept {
-        const auto processor = m_effectChain.getProcessor(pluginIndex);
-        return processor && processor->hasNativeEditor();
+        return withProcessor(pluginIndex, false, [](auto& p) { return p.hasNativeEditor(); });
     }
     uint64_t openPluginNativeEditor(uint32_t pluginIndex, uintptr_t parent) noexcept {
-        const auto processor = m_effectChain.getProcessor(pluginIndex);
-        return processor ? processor->openNativeEditor(parent) : 0;
+        return withProcessor(pluginIndex, uint64_t{0},
+                             [&](auto& p) { return p.openNativeEditor(parent); });
     }
     bool closePluginNativeEditor(uint32_t pluginIndex, uint64_t session) noexcept {
-        const auto processor = m_effectChain.getProcessor(pluginIndex);
-        return processor && processor->closeNativeEditor(session);
+        return withProcessor(pluginIndex, false,
+                             [&](auto& p) { return p.closeNativeEditor(session); });
     }
     std::string getPluginParameterName(uint32_t pluginIndex, uint32_t parameterId) const {
-        const auto processor = m_effectChain.getProcessor(pluginIndex);
-        if (!processor || parameterId >= processor->getNumParameters()) return {};
-        char name[128]{};
-        processor->getParameterName(parameterId, name, sizeof(name));
-        return name;
+        return withProcessor(pluginIndex, std::string{}, [&](auto& processor) -> std::string {
+            if (parameterId >= processor.getNumParameters()) return {};
+            char name[128]{};
+            processor.getParameterName(parameterId, name, sizeof(name));
+            return name;
+        });
     }
     bool setPluginBypass(uint32_t pluginIndex, bool bypassed) {
         if (pluginIndex >= m_effectChain.nodeCount()) return false;
-        m_effectChain.setBypass(pluginIndex, bypassed);
-        invalidateFrozenForEdit();
-        markProjectLayoutChanged();
+        editControl([&] { m_effectChain.setBypass(pluginIndex, bypassed); });
         return true;
     }
     bool getPluginBypass(uint32_t pluginIndex) const {

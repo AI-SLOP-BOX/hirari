@@ -1,12 +1,10 @@
 bool HirariUnifiedEngine::get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track && track->getPluginBypass(pluginIndex);
+    return queryLockedTrack(tid, false,
+                           [&](const Track& track) { return track.getPluginBypass(pluginIndex); });
 }
 uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    const Track* track = findTrackLocked(tid);
-    return track ? track->getTrackDelaySamples() : 0;
+    return queryLockedTrack(tid, uint32_t{0},
+                            [&](const Track& track) { return track.getTrackDelaySamples(); });
 }
 
 // Routing edit host callbacks. Rust decides every edit and the undo capture;
@@ -26,19 +24,17 @@ void HirariUnifiedEngine::installRoutingEditHost() {
         },
         [](void* host, uint32_t trackId, HirariRoutingTrackState* out) {
             if (!out) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            out->armed = track->isRecordArmed();
-            out->phaseInverted = track->isPhaseInverted();
-            out->delaySamples = track->getTrackDelaySamples();
-            out->isBus = dynamic_cast<const BusTrack*>(track) != nullptr;
-            out->volume = track->getVolume();
-            out->pan = track->getPan();
-            out->muted = track->isMuted();
-            out->solo = track->isSolo();
-            return true;
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                out->armed = track.isRecordArmed();
+                out->phaseInverted = track.isPhaseInverted();
+                out->delaySamples = track.getTrackDelaySamples();
+                out->isBus = dynamic_cast<const BusTrack*>(&track) != nullptr;
+                out->volume = track.getVolume();
+                out->pan = track.getPan();
+                out->muted = track.isMuted();
+                out->solo = track.isSolo();
+                return true;
+            });
         },
         [](void* host, HirariRoutingSidechainEntry* out, size_t capacity) {
             static_assert(sizeof(HirariRoutingSidechainEntry) == sizeof(HirariSidechainRoute));
@@ -98,16 +94,14 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             return hirari_routing_engine_add_feedback(routing, sourceId, destId, gain);
         },
         [](void* host, uint32_t trackId, int32_t op, bool enabled, uint32_t samples) {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            if (op == kHirariRoutingEditArm) track->setRecordArmed(enabled);
-            else if (op == kHirariRoutingEditPhase) track->setPhaseInverted(enabled);
-            else if (op == kHirariRoutingEditMute) track->setMuted(enabled);
-            else if (op == kHirariRoutingEditSolo) track->setSolo(enabled);
-            else track->setTrackDelaySamples(samples);
-            return true;
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                if (op == kHirariRoutingEditArm) track.setRecordArmed(enabled);
+                else if (op == kHirariRoutingEditPhase) track.setPhaseInverted(enabled);
+                else if (op == kHirariRoutingEditMute) track.setMuted(enabled);
+                else if (op == kHirariRoutingEditSolo) track.setSolo(enabled);
+                else track.setTrackDelaySamples(samples);
+                return true;
+            });
         },
         [](void* host, uint32_t destId, uint32_t pluginIndex) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
@@ -194,28 +188,23 @@ void HirariUnifiedEngine::installRoutingEditHost() {
 void HirariUnifiedEngine::installControlEditHost() {
     static const HirariControlEditHostOps ops = {
         [](void* host, uint32_t trackId, uint8_t* out, size_t capacity) -> intptr_t {
-            if (!host) return -1;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const Track* track = engine->findTrackLocked(trackId);
-            if (!track) return -1;
-            const std::string& name = track->getName();
-            if (!out || capacity == 0) return static_cast<intptr_t>(name.size());
-            const size_t written = std::min(capacity, name.size());
-            std::memcpy(out, name.data(), written);
-            return static_cast<intptr_t>(written);
+            return withHostTrack(host, trackId, intptr_t{-1}, [&](Track& track) {
+                const std::string& name = track.getName();
+                if (!out || capacity == 0) return static_cast<intptr_t>(name.size());
+                const size_t written = std::min(capacity, name.size());
+                std::memcpy(out, name.data(), written);
+                return static_cast<intptr_t>(written);
+            });
         },
         [](void* host, uint32_t trackId, const uint8_t* name, size_t nameLen) {
-            if (!host || (!name && nameLen > 0)) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            if (!name && nameLen > 0) return false;
             const std::string value =
                 nameLen > 0 ? std::string(reinterpret_cast<const char*>(name), nameLen)
                             : std::string();
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            track->setName(value);
-            return true;
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                track.setName(value);
+                return true;
+            });
         },
         nullptr,  // undo capture lives in the Rust control edit host.
         [](void* host, uint32_t trackId, bool enabled, uint32_t leftChannel,
@@ -275,75 +264,61 @@ void HirariUnifiedEngine::installControlEditHost() {
 void HirariUnifiedEngine::installPluginEditHost() {
     static const HirariPluginEditHostOps ops = {
         [](void* host, uint32_t trackId, uint32_t pluginIndex) -> int32_t {
-            if (!host) return -1;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const Track* track = engine->findTrackLocked(trackId);
-            return track ? (track->getPluginBypass(pluginIndex) ? 1 : 0) : -1;
+            return withHostTrack(host, trackId, -1, [&](Track& track) {
+                return track.getPluginBypass(pluginIndex) ? 1 : 0;
+            });
         },
         [](void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed) {
-            if (!host) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            return track && track->setPluginBypass(pluginIndex, bypassed);
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                return track.setPluginBypass(pluginIndex, bypassed);
+            });
         },
         [](void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex) {
-            if (!host) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            return track && track->movePlugin(fromIndex, toIndex);
+            return withHostTrack(
+                host, trackId, false,
+                [&](Track& track) { return track.movePlugin(fromIndex, toIndex); });
         },
         nullptr,  // undo capture lives in the Rust plugin edit host.
         nullptr,  // undo capture lives in the Rust plugin edit host.
         [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
            float* out) -> bool {
-            if (!host || !out) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            *out = track->getPluginParameter(pluginIndex, parameterId);
-            return true;
+            if (!out) return false;
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                *out = track.getPluginParameter(pluginIndex, parameterId);
+                return true;
+            });
         },
         [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
            float value) -> bool {
-            if (!host) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            return track && track->setPluginParameter(pluginIndex, parameterId, value);
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                return track.setPluginParameter(pluginIndex, parameterId, value);
+            });
         },
         nullptr,  // undo capture lives in the Rust plugin edit host.
         [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t* type,
            uint8_t* out, size_t capacity) -> size_t {
-            if (!host) return std::numeric_limits<size_t>::max();
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const Track* track = engine->findTrackLocked(trackId);
-            if (!track) return std::numeric_limits<size_t>::max();
-            const auto types = track->getPluginTypes();
-            const auto states = track->getPluginStates();
-            if (pluginIndex >= types.size() || pluginIndex >= states.size())
-                return std::numeric_limits<size_t>::max();
-            const auto& state = states[pluginIndex];
-            if (type) *type = types[pluginIndex];
-            if (out && capacity >= state.size() && !state.empty()) {
-                std::memcpy(out, state.data(), state.size());
-            }
-            return state.size();
+            return withHostTrack(
+                host, trackId, std::numeric_limits<size_t>::max(), [&](Track& track) {
+                    const auto types = track.getPluginTypes();
+                    const auto states = track.getPluginStates();
+                    if (pluginIndex >= types.size() || pluginIndex >= states.size())
+                        return std::numeric_limits<size_t>::max();
+                    const auto& state = states[pluginIndex];
+                    if (type) *type = types[pluginIndex];
+                    if (out && capacity >= state.size() && !state.empty()) {
+                        std::memcpy(out, state.data(), state.size());
+                    }
+                    return state.size();
+                });
         },
         [](void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* state,
            size_t size, const uint8_t*, size_t, bool) -> bool {
-            if (!host || (size != 0 && !state)) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            std::vector<uint8_t> replacement;
-            if (size != 0) replacement.assign(state, state + size);
-            return track->setPluginState(pluginIndex, replacement);
+            if (size != 0 && !state) return false;
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                std::vector<uint8_t> replacement;
+                if (size != 0) replacement.assign(state, state + size);
+                return track.setPluginState(pluginIndex, replacement);
+            });
         },
         [](void* host, uint32_t trackId, uint32_t pluginType, const uint8_t* path, size_t pathLength,
            bool prepare, uint32_t* outIndex) -> bool {
@@ -365,27 +340,23 @@ void HirariUnifiedEngine::installPluginEditHost() {
             return true;
         },
         [](void* host, uint32_t trackId, uint32_t pluginIndex, void** outSnapshot) -> bool {
-            if (!host) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            if (!outSnapshot) return track->removePlugin(pluginIndex);
-            auto* snapshot = new Track::PluginSnapshot();
-            if (track->removePlugin(pluginIndex, snapshot)) {
-                *outSnapshot = snapshot;
-                return true;
-            }
-            delete snapshot;
-            return false;
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                if (!outSnapshot) return track.removePlugin(pluginIndex);
+                auto* snapshot = new Track::PluginSnapshot();
+                if (track.removePlugin(pluginIndex, snapshot)) {
+                    *outSnapshot = snapshot;
+                    return true;
+                }
+                delete snapshot;
+                return false;
+            });
         },
         [](void* host, uint32_t trackId, uint32_t pluginIndex, void* snapshot) -> bool {
-            if (!host || !snapshot) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            return track && track->restorePlugin(
-                pluginIndex, *static_cast<const Track::PluginSnapshot*>(snapshot));
+            if (!snapshot) return false;
+            return withHostTrack(host, trackId, false, [&](Track& track) {
+                return track.restorePlugin(
+                    pluginIndex, *static_cast<const Track::PluginSnapshot*>(snapshot));
+            });
         },
         [](void* snapshot) { delete static_cast<Track::PluginSnapshot*>(snapshot); },
         nullptr,  // undo capture lives in the Rust plugin edit host.

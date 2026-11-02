@@ -170,11 +170,11 @@
         const auto sanitize = [](float value) {
             return std::isfinite(value) ? std::clamp(value, -100.0f, 100.0f) : 0.0f;
         };
-        invalidateFrozenForEdit();
-        m_spatialX.store(sanitize(x), std::memory_order_relaxed);
-        m_spatialY.store(sanitize(y), std::memory_order_relaxed);
-        m_spatialZ.store(sanitize(z), std::memory_order_relaxed);
-        markProjectLayoutChanged();
+        editControl([&] {
+            m_spatialX.store(sanitize(x), std::memory_order_relaxed);
+            m_spatialY.store(sanitize(y), std::memory_order_relaxed);
+            m_spatialZ.store(sanitize(z), std::memory_order_relaxed);
+        });
     }
     float getSpatialX() const { return m_spatialX.load(std::memory_order_relaxed); }
     float getSpatialY() const { return m_spatialY.load(std::memory_order_relaxed); }
@@ -188,26 +188,19 @@
         return changed;
     }
     void clearHrtfKernel() {
-        invalidateFrozenForEdit();
-        hirari_track_holographic_panner_clear_kernel(m_spatialPanner);
-        markProjectLayoutChanged();
+        editControl(
+            [&] { hirari_track_holographic_panner_clear_kernel(m_spatialPanner); });
     }
     bool isMuted() const { return m_muted.load(std::memory_order_relaxed); }
     void setMuted(bool muted) {
-        invalidateFrozenForEdit();
-        m_muted.store(muted, std::memory_order_relaxed);
-        markProjectLayoutChanged();
+        editControl([&] { m_muted.store(muted, std::memory_order_relaxed); });
     }
     bool isPhaseInverted() const { return m_phaseInvert.load(std::memory_order_relaxed); }
     void setPhaseInverted(bool inverted) {
-        invalidateFrozenForEdit();
-        m_phaseInvert.store(inverted, std::memory_order_relaxed);
-        markProjectLayoutChanged();
+        editControl([&] { m_phaseInvert.store(inverted, std::memory_order_relaxed); });
     }
     void setSolo(bool solo) {
-        invalidateFrozenForEdit();
-        m_solo.store(solo, std::memory_order_relaxed);
-        markProjectLayoutChanged();
+        editControl([&] { m_solo.store(solo, std::memory_order_relaxed); });
     }
     bool isSolo() const { return m_solo.load(std::memory_order_relaxed); }
     const std::vector<Region>& getRegions() const noexcept {
