@@ -94,7 +94,8 @@ public:
                                            size_t expectedTrack, const uint8_t* path,
                                            size_t pathLength, uint64_t startSample,
                                            double sourceSampleRate, double timelineSampleRate,
-                                           uint64_t length, void* audioHandle);
+                                           uint64_t length, uint32_t regionId,
+                                           void* audioHandle);
     static size_t regionHostTrackIdentity(void* host, uint32_t trackId);
     static void* regionHostRetainTrack(void* host, uint32_t trackId);
     static void regionHostReleaseTrack(void* handle);
@@ -102,7 +103,7 @@ public:
     static void regionHostPitchFinish(void* trackHandle);
     static void* regionHostNoteSnapshot(void* trackHandle, uint32_t regionId);
     static uint32_t regionHostClone(void* host, uint32_t trackId, uint32_t regionId,
-                                    const HirariRegionState* state);
+                                    const HirariRegionState* state, uint32_t newRegionId);
     static size_t regionHostCompRanges(void* host, uint32_t trackId, uint32_t regionId,
                                        HirariRegionCompRange* out, size_t capacity,
                                        bool* managed);

@@ -21,12 +21,10 @@
             for (auto& t : loadedTracks) {
                 if (t->getId() != rs.trackId) continue;
                 Region r;
-                if (state.version >= 28) {
-                    r.id = rs.id;
-                    nextRegionId = std::max(nextRegionId, r.id + 1u);
-                } else {
-                    r.id = nextRegionId++;
-                }
+                // Versions before 28 stored no region ids, so hydration hands
+                // them out in document order. The allocator resumes past the
+                // highest id once the document is installed.
+                r.id = state.version >= 28 ? rs.id : nextRegionId++;
                 // Decode before hydration so Rust can clamp the region to the
                 // media that actually exists and migrate legacy geometry.
                 std::shared_ptr<AudioBuffer> audio;
@@ -87,17 +85,6 @@
             if (!track->canProcess(currentBlockSize)) return false;
         }
         
-        uint32_t nextTrackId = 1;
-        for (const auto& track : loadedTracks) {
-            // Only the uint32 max sentinel is refused here. new_project()
-            // never produces ID 0 any more -- the starter track is ID 1 and
-            // zero is the invalid sentinel -- but native containers written
-            // before that change can still carry a track at 0, so rejecting
-            // zero here would fail hydration on reload for files that
-            // serialize fine.
-            if (!track) return false;
-            nextTrackId = std::max(nextTrackId, track->getId() + 1u);
-        }
         // Commit point: all validation and hydration above completed while
         // the old project remained published.  Only now replace the graph,
         // reset project-scoped managers, and publish fresh ID allocators.
@@ -111,8 +98,6 @@
         hirari_bus_system_reset(m_busSystem);
         hirari_control_room_reset(m_controlRoomState);
         hirari_sidechain_routes_clear(m_sidechainRoutes);
-        m_regionIdCounter.store(nextRegionId, std::memory_order_release);
-        m_trackIdCounter.store(nextTrackId, std::memory_order_release);
         m_tracks = std::move(loadedTracks);
         mark_project_layout_changed();
         for (const auto& route : state.routes) {
@@ -128,6 +113,7 @@
             }
         }
         lock.unlock();
+        hirari_ids_seed_from_project(this);
         hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(state.bpm));
         m_rootNote.store(state.rootNote, std::memory_order_relaxed);
         m_scaleType.store(state.scaleType, std::memory_order_relaxed);

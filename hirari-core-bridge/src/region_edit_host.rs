@@ -283,9 +283,9 @@ pub type HirariRegionDecodeAudioFn = unsafe extern "C" fn(
     *mut *mut c_void,
     *mut f64,
 ) -> bool;
-/// Inserts a freshly decoded region into the project with its computed
-/// timeline length. The audio handle is consumed on every path. Returns the
-/// new region id, or 0 on failure.
+/// Inserts a freshly decoded region under the id the caller allocated. The
+/// audio handle is consumed on every path. Returns the new region id, or 0 on
+/// failure.
 pub type HirariRegionInsertFn = unsafe extern "C" fn(
     *mut c_void,
     u32,
@@ -296,6 +296,7 @@ pub type HirariRegionInsertFn = unsafe extern "C" fn(
     f64,
     f64,
     u64,
+    u32,
     *mut c_void,
 ) -> u32;
 /// Reports the live track's identity, or 0 when the id is not in the project.
@@ -312,10 +313,15 @@ pub type HirariRegionPitchFinishFn = unsafe extern "C" fn(*mut c_void);
 /// Copies a region's note table from a retained track into an owned store.
 pub type HirariRegionNoteSnapshotFn =
     unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
-/// Clones a region under a fresh id, optionally replacing its editable state
-/// first, and adds the copy. Returns the new id, or 0 on failure.
-pub type HirariRegionCloneFn =
-    unsafe extern "C" fn(*mut c_void, u32, u32, *const HirariRegionState) -> u32;
+/// Clones a region under the id the caller allocated, optionally replacing its
+/// editable state first, and adds the copy. Returns the new id, or 0 on failure.
+pub type HirariRegionCloneFn = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    u32,
+    *const HirariRegionState,
+    u32,
+) -> u32;
 /// Copies a region's comp ranges into `out` and reports the managed flag,
 /// with the same count-then-copy contract as the range-edit listing.
 pub type HirariRegionCompRangesFn =
@@ -1998,8 +2004,8 @@ fn split_region_with(
         }
         return 0;
     }
-    let right_id = unsafe { clone(host, track_id, region_id, ptr::null()) };
-    if right_id == 0 {
+    let right_id = crate::id_host::next_region_id(ops.list_tracks, ops.list_regions, host);
+    if right_id == 0 || unsafe { clone(host, track_id, region_id, ptr::null(), right_id) } == 0 {
         unsafe {
             release_snapshot(host, before);
             vari_store_release(left_notes);
@@ -2128,8 +2134,13 @@ fn duplicate_region_with(
     if !unsafe { hirari_region_duplicate_state(&state, start_sample, &mut duplicate) } {
         return 0;
     }
-    let duplicate_id = unsafe { clone(host, track_id, region_id, &duplicate) };
-    if duplicate_id == 0 || !can_record(ops) {
+    let duplicate_id = crate::id_host::next_region_id(ops.list_tracks, ops.list_regions, host);
+    if duplicate_id == 0
+        || unsafe { clone(host, track_id, region_id, &duplicate, duplicate_id) } == 0
+    {
+        return 0;
+    }
+    if !can_record(ops) {
         return duplicate_id;
     }
     // A duplicated clip is a new timeline instance that keeps one stable
@@ -3006,7 +3017,6 @@ use crate::audio_note_curve::{
         comp_ranges: Vec<NativeCompRange>,
         comp_managed: bool,
         cloned_states: Vec<HirariRegionState>,
-        next_region_id: u32,
     }
 
     static FAKE: OnceLock<Mutex<FakeHost>> = OnceLock::new();
@@ -3218,6 +3228,7 @@ use crate::audio_note_curve::{
         _track_id: u32,
         _region_id: u32,
         state: *const HirariRegionState,
+        new_region_id: u32,
     ) -> u32 {
         let mut guard = fake().lock().unwrap();
         guard.cloned_states.push(if state.is_null() {
@@ -3225,12 +3236,34 @@ use crate::audio_note_curve::{
         } else {
             unsafe { *state }
         });
-        guard.next_region_id = if guard.next_region_id == 0 {
-            100
-        } else {
-            guard.next_region_id + 1
-        };
-        guard.next_region_id
+        new_region_id
+    }
+
+    unsafe extern "C" fn fake_list_tracks(_host: *mut c_void, out: *mut u32, capacity: usize) -> usize {
+        if out.is_null() || capacity < 1 {
+            return 1;
+        }
+        unsafe { out.write(1) };
+        1
+    }
+
+    unsafe extern "C" fn fake_list_regions(
+        _host: *mut c_void,
+        track_id: u32,
+        out: *mut u32,
+        capacity: usize,
+    ) -> usize {
+        if track_id != 1 {
+            return 0;
+        }
+        if out.is_null() || capacity < 2 {
+            return 2;
+        }
+        unsafe {
+            out.write(1);
+            out.add(1).write(2);
+        }
+        2
     }
 
     unsafe extern "C" fn fake_retain_track(_host: *mut c_void, _track_id: u32) -> *mut c_void {
@@ -3310,6 +3343,8 @@ use crate::audio_note_curve::{
             release_audio: Some(fake_release_audio),
             clone_region: Some(fake_clone),
             comp_ranges: Some(fake_comp_ranges),
+            list_tracks: Some(fake_list_tracks),
+            list_regions: Some(fake_list_regions),
             retain_track: Some(fake_retain_track),
             release_track: Some(fake_release_track),
             note_snapshot: Some(fake_note_snapshot),
@@ -3323,6 +3358,9 @@ use crate::audio_note_curve::{
             state,
             ..Default::default()
         };
+        // The Rust allocator keys counters by host, so every test restarts them
+        // to keep the id it hands the fake host predictable.
+        unsafe { crate::id_host::hirari_ids_reset_project(1usize as *mut c_void) };
     }
 
     #[test]
@@ -4284,7 +4322,7 @@ use crate::audio_note_curve::{
         }
 
         let right = split_region_with(&ops, host, 1, 2, 600.0);
-        assert_eq!(right, 100);
+        assert_eq!(right, 3);
 
         let guard = fake().lock().unwrap();
         // The clone starts from the original payload; the right-hand state
@@ -4319,11 +4357,11 @@ use crate::audio_note_curve::{
         assert_eq!(guard.undo.len(), 2);
         assert_eq!(guard.undo[0].op, HIRARI_REGION_EDIT_RESTORE);
         assert_eq!(guard.undo[1].op, HIRARI_REGION_EDIT_REMOVE);
-        assert_eq!(guard.undo[1].region_id, 100);
+        assert_eq!(guard.undo[1].region_id, 3);
         assert_eq!(guard.redo.len(), 2);
         assert_eq!(guard.redo[0].op, HIRARI_REGION_EDIT_RESTORE);
         assert_eq!(guard.redo[1].op, HIRARI_REGION_EDIT_RESTORE);
-        assert_eq!(guard.redo[1].region_id, 100);
+        assert_eq!(guard.redo[1].region_id, 3);
         drop(guard);
         assert_eq!(RELEASED.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
@@ -4342,7 +4380,7 @@ use crate::audio_note_curve::{
         RELEASED.store(0, std::sync::atomic::Ordering::SeqCst);
 
         let id = duplicate_region_with(&ops, host, 1, 2, 5000);
-        assert_eq!(id, 100);
+        assert_eq!(id, 3);
 
         let guard = fake().lock().unwrap();
         assert_eq!(guard.cloned_states.len(), 1);
@@ -4355,7 +4393,7 @@ use crate::audio_note_curve::{
         assert!(!guard.perform);
         assert_eq!(guard.undo.len(), 1);
         assert_eq!(guard.undo[0].op, HIRARI_REGION_EDIT_REMOVE);
-        assert_eq!(guard.undo[0].region_id, 100);
+        assert_eq!(guard.undo[0].region_id, 3);
         assert_eq!(guard.redo.len(), 1);
         assert_eq!(guard.redo[0].op, HIRARI_REGION_EDIT_RESTORE);
         drop(guard);

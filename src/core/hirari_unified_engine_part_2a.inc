@@ -90,43 +90,6 @@ uint64_t HirariUnifiedEngine::cycle_start() const noexcept { return m_cycleStart
 uint64_t HirariUnifiedEngine::cycle_end() const noexcept { return m_cycleEnd.load(std::memory_order_acquire); }
 void HirariUnifiedEngine::set_test_tone(bool enabled) { m_testTone.store(enabled, std::memory_order_release); }
 
-uint32_t HirariUnifiedEngine::allocateTrackIdLocked() noexcept {
-    uint32_t candidate = m_trackIdCounter.load(std::memory_order_relaxed);
-    if (candidate == 0) candidate = 1;
-    for (uint64_t attempts = 0; attempts < std::numeric_limits<uint32_t>::max(); ++attempts) {
-        const bool used = std::any_of(m_tracks.begin(), m_tracks.end(),
-            [candidate](const auto& track) { return track && track->getId() == candidate; });
-        if (!used && candidate != 0 && candidate != std::numeric_limits<uint32_t>::max()) {
-            m_trackIdCounter.store(candidate + 1u, std::memory_order_relaxed);
-            return candidate;
-        }
-        candidate = candidate == std::numeric_limits<uint32_t>::max() - 1u ? 1u : candidate + 1u;
-    }
-    return 0;
-}
-
-uint32_t HirariUnifiedEngine::allocateRegionIdLocked() noexcept {
-    uint32_t candidate = m_regionIdCounter.load(std::memory_order_relaxed);
-    if (candidate == 0) candidate = 1;
-    for (uint64_t attempts = 0; attempts < std::numeric_limits<uint32_t>::max(); ++attempts) {
-        bool used = false;
-        for (const auto& track : m_tracks) {
-            if (!track) continue;
-            for (const auto& region : track->getRegions()) {
-                if (region.id == candidate) { used = true; break; }
-            }
-            if (used) break;
-        }
-        if (!used && candidate != std::numeric_limits<uint32_t>::max()) {
-            m_regionIdCounter.store(candidate + 1u, std::memory_order_relaxed);
-            return candidate;
-        }
-        candidate = candidate == std::numeric_limits<uint32_t>::max() - 1u ? 1u : candidate + 1u;
-    }
-    return 0;
-}
-
-
 bool HirariUnifiedEngine::assign_track_to_vca(uint32_t trackId, uint32_t groupId) {
     if (trackId == 0 || groupId == 0) return false;
     {
@@ -172,13 +135,7 @@ void HirariUnifiedEngine::new_project() {
                                        std::make_move_iterator(m_tracks.end()));
     m_tracks.clear();
     mark_project_layout_changed();
-    m_regionIdCounter.store(1, std::memory_order_release);
-    // Track ID 0 is the invalid/stale-ID sentinel across the whole bridge:
-    // ProjectDocument::validate() rejects it outright and the argument guards
-    // treat it as "no track", so a starter track at ID 0 could never be
-    // persisted or addressed. The starter therefore takes ID 1 (reserved for
-    // it while the session is fresh) and user-created tracks continue at 2.
-    m_trackIdCounter.store(2, std::memory_order_release);
+    hirari_ids_reset_project(this);
     // Start with one audio track so a new project is immediately usable for
     // importing or recording, instead of presenting a dead empty canvas.
     auto bootstrapTrack = std::make_shared<Track>(1, "Audio 1", Track::Audio,

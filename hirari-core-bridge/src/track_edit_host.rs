@@ -13,12 +13,11 @@ use std::ffi::c_void;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::plugin_edit_host::{commit_closures, UndoStateFn};
+use crate::region_edit_host::{HirariRegionListRegionsFn, HirariRegionListTracksFn};
 
 /// `Track::Type::Bus`, mirrored from `track_part_1a.inc`.
 pub const TRACK_TYPE_BUS: u32 = 3;
 
-/// Allocates the next free track id; 0 when none is available.
-pub type AllocateTrackIdFn = unsafe extern "C" fn(*mut c_void) -> u32;
 /// Creates a track with the given display name and appends it. Writes the
 /// insert index and returns a handle that keeps the created track alive.
 pub type CreateTrackFn = unsafe extern "C" fn(
@@ -29,10 +28,12 @@ pub type CreateTrackFn = unsafe extern "C" fn(
     usize,
     *mut usize,
 ) -> *mut c_void;
-/// Deep-clones a track, appends the copy, writes its id and index, and returns
-/// a handle. Returns null when the source track is missing.
+/// Deep-clones a track under the id the caller allocated, giving each copied
+/// region the matching id from the caller's batch, appends the copy, writes its
+/// insert index and returns a handle. Null when the source track is missing or
+/// its region count no longer matches the batch.
 pub type DuplicateTrackFn =
-    unsafe extern "C" fn(*mut c_void, u32, *mut u32, *mut usize) -> *mut c_void;
+    unsafe extern "C" fn(*mut c_void, u32, u32, *const u32, usize, *mut usize) -> *mut c_void;
 /// Takes a track out of the project together with its links and routes and
 /// returns the handle that owns it. Null when the track is missing.
 pub type TakeTrackFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
@@ -64,7 +65,10 @@ pub type SyncStructuralChangesFn = unsafe extern "C" fn(*mut c_void);
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct HirariTrackEditHostOps {
-    pub allocate_id: Option<AllocateTrackIdFn>,
+    /// Lists track ids / one track's region ids in storage order; the id
+    /// allocator in `id_host` reads the project through these.
+    pub list_tracks: Option<HirariRegionListTracksFn>,
+    pub list_regions: Option<HirariRegionListRegionsFn>,
     pub create: Option<CreateTrackFn>,
     pub duplicate: Option<DuplicateTrackFn>,
     pub take: Option<TakeTrackFn>,
@@ -259,10 +263,10 @@ fn add_track_impl(
     host: *mut c_void,
     track_type: u32,
 ) -> u32 {
-    let (Some(allocate), Some(create)) = (ops.allocate_id, ops.create) else {
+    let Some(create) = ops.create else {
         return 0;
     };
-    let id = unsafe { allocate(host) };
+    let id = crate::id_host::next_track_id(ops.list_tracks, host);
     if id == 0 {
         return 0;
     }
@@ -311,10 +315,30 @@ fn duplicate_track_impl(
     let Some(duplicate) = ops.duplicate else {
         return 0;
     };
-    let mut new_id = 0_u32;
+    let new_id = crate::id_host::next_track_id(ops.list_tracks, host);
+    if new_id == 0 {
+        return 0;
+    }
+    // The copy's regions each need an id of their own; the host checks that the
+    // batch covers every region the source track holds before it clones them.
+    let region_count = crate::id_host::region_count(ops.list_regions, host, track_id);
+    let region_ids =
+        crate::id_host::next_region_ids(ops.list_tracks, ops.list_regions, host, region_count);
+    if region_ids.len() != region_count {
+        return 0;
+    }
     let mut index = 0_usize;
-    let handle = unsafe { duplicate(host, track_id, &mut new_id, &mut index) };
-    if handle.is_null() || new_id == 0 {
+    let handle = unsafe {
+        duplicate(
+            host,
+            track_id,
+            new_id,
+            region_ids.as_ptr(),
+            region_ids.len(),
+            &mut index,
+        )
+    };
+    if handle.is_null() {
         return 0;
     }
     record_track_edit(
@@ -348,6 +372,12 @@ fn remove_track_impl(
     let handle = unsafe { take(host, track_id) };
     if handle.is_null() {
         return false;
+    }
+    // Removing the bootstrap placeholder (ID 1) from an otherwise empty project
+    // rewinds the counter so the first track a document installs keeps its
+    // canonical ID instead of becoming ID 2.
+    if track_id == 1 {
+        crate::id_host::rewind_track_counter(ops.list_tracks, host);
     }
     record_track_edit(
         ops,
@@ -419,6 +449,8 @@ mod tests {
     #[derive(Default)]
     struct TestState {
         calls: Vec<String>,
+        track_ids: Vec<u32>,
+        region_ids: Vec<u32>,
         undo: Option<(ReplayTrackEditFn, usize)>,
         redo: Option<(ReplayTrackEditFn, usize)>,
         release: Option<(ReplayTrackEditFn, usize)>,
@@ -427,6 +459,8 @@ mod tests {
     static SERIAL: Mutex<()> = Mutex::new(());
     static STATE: Mutex<TestState> = Mutex::new(TestState {
         calls: Vec::new(),
+        track_ids: Vec::new(),
+        region_ids: Vec::new(),
         undo: None,
         redo: None,
         release: None,
@@ -435,6 +469,8 @@ mod tests {
     fn reset() {
         let mut state = STATE.lock().unwrap();
         state.calls.clear();
+        state.track_ids.clear();
+        state.region_ids.clear();
         state.undo = None;
         state.redo = None;
         state.release = None;
@@ -448,8 +484,44 @@ mod tests {
         STATE.lock().unwrap().calls.push(entry.to_string());
     }
 
-    unsafe extern "C" fn fake_allocate(_host: *mut c_void) -> u32 {
-        7
+    /// Gives the project the ids it holds and restarts the counters, so the ids
+    /// the allocator hands out next are the same in every run.
+    fn project(host: usize, track_ids: &[u32], region_ids: &[u32]) -> *mut c_void {
+        {
+            let mut state = STATE.lock().unwrap();
+            state.track_ids = track_ids.to_vec();
+            state.region_ids = region_ids.to_vec();
+        }
+        let host = host as *mut c_void;
+        unsafe { crate::id_host::hirari_ids_reset_project(host) };
+        host
+    }
+
+    fn fill(ids: &[u32], out: *mut u32, capacity: usize) -> usize {
+        if out.is_null() || capacity < ids.len() {
+            return ids.len();
+        }
+        unsafe { std::ptr::copy_nonoverlapping(ids.as_ptr(), out, ids.len()) };
+        ids.len()
+    }
+
+    unsafe extern "C" fn fake_list_tracks(
+        _host: *mut c_void,
+        out: *mut u32,
+        capacity: usize,
+    ) -> usize {
+        let state = STATE.lock().unwrap();
+        fill(&state.track_ids.clone(), out, capacity)
+    }
+
+    unsafe extern "C" fn fake_list_regions(
+        _host: *mut c_void,
+        _track_id: u32,
+        out: *mut u32,
+        capacity: usize,
+    ) -> usize {
+        let state = STATE.lock().unwrap();
+        fill(&state.region_ids.clone(), out, capacity)
     }
 
     unsafe extern "C" fn fake_create(
@@ -472,19 +544,24 @@ mod tests {
     unsafe extern "C" fn fake_duplicate(
         _host: *mut c_void,
         track_id: u32,
-        out_id: *mut u32,
+        new_id: u32,
+        region_ids: *const u32,
+        region_id_count: usize,
         out_index: *mut usize,
     ) -> *mut c_void {
-        call(&format!("duplicate {track_id}"));
-        unsafe {
-            *out_id = 9;
-            *out_index = 2;
-        }
+        let ids = unsafe { std::slice::from_raw_parts(region_ids, region_id_count) }.to_vec();
+        call(&format!("duplicate {track_id} -> {new_id} regions={ids:?}"));
+        unsafe { *out_index = 2 };
         0xCAFE as *mut c_void
     }
 
     unsafe extern "C" fn fake_take(_host: *mut c_void, track_id: u32) -> *mut c_void {
         call(&format!("take {track_id}"));
+        if track_id == 1 {
+            // The bootstrap placeholder is the last track of a fresh project, so
+            // taking it leaves the listing empty for the counter rewind to read.
+            STATE.lock().unwrap().track_ids.clear();
+        }
         0xF00D as *mut c_void
     }
 
@@ -538,7 +615,8 @@ mod tests {
 
     fn fake_ops() -> HirariTrackEditHostOps {
         HirariTrackEditHostOps {
-            allocate_id: Some(fake_allocate),
+            list_tracks: Some(fake_list_tracks),
+            list_regions: Some(fake_list_regions),
             create: Some(fake_create),
             duplicate: Some(fake_duplicate),
             take: Some(fake_take),
@@ -564,12 +642,15 @@ mod tests {
         )
     }
 
+    /// Six ids already taken, so the next track the allocator hands out is 7.
+    const TAKEN_TRACKS: [u32; 6] = [1, 2, 3, 4, 5, 6];
+
     #[test]
     fn add_names_tracks_and_replays_undo_and_redo() {
         let _guard = SERIAL.lock().unwrap();
         reset();
         let ops = fake_ops();
-        let host = std::ptr::null_mut();
+        let host = project(0x100, &TAKEN_TRACKS, &[]);
 
         assert_eq!(add_track_impl(&ops, host, 0), 7);
         assert_eq!(
@@ -594,7 +675,10 @@ mod tests {
         reset();
         let ops = fake_ops();
 
-        assert_eq!(add_track_impl(&ops, std::ptr::null_mut(), TRACK_TYPE_BUS), 7);
+        assert_eq!(
+            add_track_impl(&ops, project(0x200, &TAKEN_TRACKS, &[]), TRACK_TYPE_BUS),
+            7
+        );
         assert_eq!(
             drain(),
             vec!["create type=3 id=7 name=Bus 8", "record Add Track", "sync"]
@@ -606,10 +690,17 @@ mod tests {
         let _guard = SERIAL.lock().unwrap();
         reset();
         let ops = fake_ops();
-        let host = std::ptr::null_mut();
+        let host = project(0x300, &TAKEN_TRACKS, &[1, 2]);
 
-        assert_eq!(duplicate_track_impl(&ops, host, 4), 9);
-        assert_eq!(drain(), vec!["duplicate 4", "record Duplicate Track", "sync"]);
+        assert_eq!(duplicate_track_impl(&ops, host, 4), 7);
+        assert_eq!(
+            drain(),
+            vec![
+                "duplicate 4 -> 7 regions=[3, 4]",
+                "record Duplicate Track",
+                "sync"
+            ]
+        );
 
         let ((undo, edit), (redo, _), (release, _)) = pending();
         unsafe { undo(edit as *mut c_void) };
@@ -627,7 +718,7 @@ mod tests {
         let _guard = SERIAL.lock().unwrap();
         reset();
         let ops = fake_ops();
-        let host = std::ptr::null_mut();
+        let host = project(0x400, &[4], &[1]);
 
         assert!(remove_track_impl(&ops, host, 4));
         assert_eq!(drain(), vec!["take 4", "record Remove Track", "sync"]);
@@ -644,6 +735,17 @@ mod tests {
     }
 
     #[test]
+    fn removing_the_bootstrap_placeholder_reuses_its_id() {
+        let _guard = SERIAL.lock().unwrap();
+        reset();
+        let ops = fake_ops();
+        let host = project(0x900, &[1], &[]);
+
+        assert!(remove_track_impl(&ops, host, 1));
+        assert_eq!(crate::id_host::next_track_id(ops.list_tracks, host), 1);
+    }
+
+    #[test]
     fn a_missing_track_records_nothing() {
         let _guard = SERIAL.lock().unwrap();
         reset();
@@ -653,7 +755,7 @@ mod tests {
             sync_structural_changes: Some(fake_sync),
             ..Default::default()
         };
-        assert!(!remove_track_impl(&ops, std::ptr::null_mut(), 4));
+        assert!(!remove_track_impl(&ops, project(0xA00, &TAKEN_TRACKS, &[]), 4));
         assert_eq!(drain(), vec!["take 4"]);
     }
 
@@ -681,7 +783,7 @@ mod tests {
         let mut ops = fake_ops();
         ops.record_replay = None;
         ops.undo_state = Some(fake_undo_state);
-        let host = 1usize as *mut c_void;
+        let host = project(0xB00, &TAKEN_TRACKS, &[]);
         assert_eq!(add_track_impl(&ops, host, 0), 7);
         assert_eq!(
             drain(),

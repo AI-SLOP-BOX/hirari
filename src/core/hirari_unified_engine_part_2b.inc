@@ -216,12 +216,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
         std::vector<RoutingEngine::FeedbackConnection> feedback;
     };
     static const HirariTrackEditHostOps ops = {
-        [](void* host) -> uint32_t {
-            if (!host) return 0;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            return engine->allocateTrackIdLocked();
-        },
+        &HirariUnifiedEngine::regionHostListTracks,
+        &HirariUnifiedEngine::regionHostListRegions,
         [](void* host, uint32_t type, uint32_t id, const uint8_t* name, size_t nameLength,
            size_t* outIndex) -> void* {
             if (!host || !name || !outIndex) return nullptr;
@@ -238,12 +234,12 @@ void HirariUnifiedEngine::installTrackEditHost() {
             *outIndex = handle->index;
             return handle;
         },
-        [](void* host, uint32_t tid, uint32_t* outId, size_t* outIndex) -> void* {
-            if (!host || !outId || !outIndex) return nullptr;
+        [](void* host, uint32_t tid, uint32_t newId, const uint32_t* regionIds,
+           size_t regionIdCount, size_t* outIndex) -> void* {
+            if (!host || !outIndex || (!regionIds && regionIdCount != 0)) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             std::shared_ptr<Track> copy;
             size_t insertIndex = 0;
-            uint32_t newId = 0;
             std::vector<uint32_t> pluginTypes;
             std::vector<std::vector<uint8_t>> pluginStates;
             std::vector<bool> pluginBypasses;
@@ -258,6 +254,7 @@ void HirariUnifiedEngine::installTrackEditHost() {
                                            [tid](const auto& track) { return track->getId() == tid; });
                 if (source == engine->m_tracks.end()) return nullptr;
                 const auto& original = *source;
+                if (original->getRegions().size() != regionIdCount) return nullptr;
                 pluginTypes = original->getPluginTypes();
                 pluginStates = original->getPluginStates();
                 volumeAutomation = original->getVolumeAutomationPoints();
@@ -269,8 +266,6 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     pluginBypasses.push_back(original->getPluginBypass(static_cast<uint32_t>(index)));
                 }
                 sandboxPaths = original->getSandboxedPluginPaths();
-                newId = engine->allocateTrackIdLocked();
-                if (newId == 0) return nullptr;
                 copy = engine->makeTrack(newId, original->getName() + " Copy",
                                          original->getType());
                 copy->setVolume(original->getVolume());
@@ -303,10 +298,10 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     }
                 }
                 if (!pluginAutomation.empty()) copy->setPluginAutomation(pluginAutomation);
-                for (const auto& region : original->getRegions()) {
-                    Region cloned = region;
-                    cloned.id = engine->allocateRegionIdLocked();
-                    if (cloned.id == 0) return nullptr;
+                const auto& sourceRegions = original->getRegions();
+                for (size_t regionIndex = 0; regionIndex < sourceRegions.size(); ++regionIndex) {
+                    Region cloned = sourceRegions[regionIndex];
+                    cloned.id = regionIds[regionIndex];
                     copy->addRegion(cloned);
                 }
                 insertIndex = engine->m_tracks.size();
@@ -315,7 +310,6 @@ void HirariUnifiedEngine::installTrackEditHost() {
                 engine->publishTrackSnapshotLocked(false);
             }
             auto* handle = new Handle{copy, insertIndex, newId};
-            *outId = newId;
             *outIndex = insertIndex;
             return handle;
         },
@@ -349,13 +343,6 @@ void HirariUnifiedEngine::installTrackEditHost() {
                 routingBackup = takeRoutingConnections(removedRouting, routingCount);
                 feedbackBackup = takeRoutingFeedback(removedFeedback, feedbackCount);
                 removed = engine->detachTrackLocked(tid, false);
-                if (tid == 1 && engine->m_tracks.empty()) {
-                    // new_project() creates the bootstrap at ID 1 and advances the
-                    // allocator to 2. Removing that placeholder during project
-                    // hydration must rewind the allocator so the first persisted track
-                    // keeps its canonical ID instead of becoming ID 2.
-                    engine->m_trackIdCounter.store(1, std::memory_order_release);
-                }
             }
             return new Handle{std::move(removed), originalIndex, tid, sidechainBackup,
                               sidechainRouteBackup, std::move(routingBackup),

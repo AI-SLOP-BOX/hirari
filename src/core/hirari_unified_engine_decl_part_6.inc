@@ -3,8 +3,6 @@ public:
     static constexpr uint32_t kMaxTrackMap = 2048;
 
 private:
-    uint32_t allocateTrackIdLocked() noexcept;
-    uint32_t allocateRegionIdLocked() noexcept;
     // Audio engine state management (Linus-Grade: Cache-aligned cluster)
     struct alignas(64) AudioThreadState {
         Track* activeTracks[kMaxTracks];

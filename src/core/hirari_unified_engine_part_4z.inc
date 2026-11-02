@@ -359,10 +359,11 @@ bool HirariUnifiedEngine::regionHostDecodeAudio(void* host, const uint8_t* path,
 uint32_t HirariUnifiedEngine::regionHostInsertRegion(
     void* host, uint32_t trackId, size_t expectedTrack, const uint8_t* path,
     size_t pathLength, uint64_t startSample, double sourceSampleRate,
-    double timelineSampleRate, uint64_t length, void* audioHandle) {
+    double timelineSampleRate, uint64_t length, uint32_t regionId, void* audioHandle) {
     if (!host || !audioHandle || (!path && pathLength != 0)) return 0;
     // The handle is consumed on every path, success or failure. The caller has
-    // already validated the decode and derived the timeline length.
+    // already validated the decode, derived the timeline length and allocated
+    // the id this region is addressed by.
     auto* ownedAudio = static_cast<std::shared_ptr<AudioBuffer>*>(audioHandle);
     auto audio = std::move(*ownedAudio);
     delete ownedAudio;
@@ -377,8 +378,7 @@ uint32_t HirariUnifiedEngine::regionHostInsertRegion(
             });
         if (current == engine->m_tracks.end()) return 0;
         Region region{};
-        region.id = engine->allocateRegionIdLocked();
-        if (region.id == 0) return 0;
+        region.id = regionId;
         region.path.assign(reinterpret_cast<const char*>(path), pathLength);
         region.start = startSample;
         region.sourceSampleRate = sourceSampleRate;
@@ -430,7 +430,8 @@ void* HirariUnifiedEngine::regionHostNoteSnapshot(void* trackHandle, uint32_t re
 
 uint32_t HirariUnifiedEngine::regionHostClone(void* host, uint32_t trackId,
                                               uint32_t regionId,
-                                              const HirariRegionState* state) {
+                                              const HirariRegionState* state,
+                                              uint32_t newRegionId) {
     if (!host) return 0;
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
@@ -440,8 +441,7 @@ uint32_t HirariUnifiedEngine::regionHostClone(void* host, uint32_t trackId,
     if (!region) return 0;
     Region copy = *region;
     if (state) copy.applyEditableState(*state);
-    copy.id = engine->allocateRegionIdLocked();
-    if (copy.id == 0) return 0;
+    copy.id = newRegionId;
     track->addRegion(copy);
     return copy.id;
 }

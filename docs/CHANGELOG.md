@@ -67,6 +67,12 @@ production support.
 
 ### Changed
 
+- Track and region id allocation now lives in Rust: one allocator keeps the
+  counters, the wrap-around walk that never hands out the invalid sentinels, the
+  restart a new project takes and the reseed a loaded document gets. The engine's
+  create, insert, clone and duplicate callbacks receive the id they must use, so
+  they answer for storage only and no longer carry a counter or scan the project
+  for a free number.
 - Track and region id resolution now has one implementation shared by every
   engine host callback, and Track's edit protocol (drop the frozen render,
   mutate, bump the layout revision) is a helper instead of three statements

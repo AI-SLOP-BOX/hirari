@@ -664,12 +664,12 @@ struct HirariRegionHostOps {
     // Decodes a media file and returns an owned audio handle plus its rate.
     bool (*decodeAudio)(void* host, const uint8_t* path, size_t length,
                         void** outHandle, double* outRate) = nullptr;
-    // Inserts a decoded region with its already-computed timeline length. The
-    // audio handle is consumed on every path.
+    // Inserts a decoded region under the id the caller allocated. The audio
+    // handle is consumed on every path.
     uint32_t (*insertRegion)(void* host, uint32_t trackId, size_t expectedTrack,
                              const uint8_t* path, size_t pathLength, uint64_t startSample,
                              double sourceSampleRate, double timelineSampleRate,
-                             uint64_t length, void* audioHandle) = nullptr;
+                             uint64_t length, uint32_t regionId, void* audioHandle) = nullptr;
     // Live track identity, or 0 when the id is not in the project.
     size_t (*trackIdentity)(void* host, uint32_t trackId) = nullptr;
     // Retains a track for a worker thread.
@@ -679,10 +679,10 @@ struct HirariRegionHostOps {
     void (*pitchFinish)(void* trackHandle) = nullptr;
     // Copies a region's note table into an owned Rust store handle.
     void* (*noteSnapshot)(void* trackHandle, uint32_t regionId) = nullptr;
-    // Clones a region under a fresh id, optionally replacing its editable
-    // state first, and adds the copy. Returns 0 on failure.
+    // Clones a region under the id the caller allocated, optionally replacing
+    // its editable state first, and adds the copy. Returns 0 on failure.
     uint32_t (*cloneRegion)(void* host, uint32_t trackId, uint32_t regionId,
-                            const HirariRegionState* state) = nullptr;
+                            const HirariRegionState* state, uint32_t newRegionId) = nullptr;
     // Copies a region's comp ranges into `out` and reports the managed flag.
     // Returns the total count, with the same count-then-copy contract as the
     // range-edit listing.
@@ -1245,9 +1245,14 @@ extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* o
 
 // Track lifecycle edit policy (create, duplicate, remove and their undo).
 struct HirariTrackEditHostOps {
-    uint32_t (*allocateId)(void*) = nullptr;
+    // Lists track ids / one track's region ids in storage order. The Rust id
+    // allocator reads the project through these before it hands out an id.
+    size_t (*listTracks)(void*, uint32_t*, size_t) = nullptr;
+    size_t (*listRegions)(void*, uint32_t, uint32_t*, size_t) = nullptr;
     void* (*create)(void*, uint32_t, uint32_t, const uint8_t*, size_t, size_t*) = nullptr;
-    void* (*duplicate)(void*, uint32_t, uint32_t*, size_t*) = nullptr;
+    // Deep-clones a track under the id the caller allocated, giving each copied
+    // region the matching id from the caller's batch.
+    void* (*duplicate)(void*, uint32_t, uint32_t, const uint32_t*, size_t, size_t*) = nullptr;
     void* (*take)(void*, uint32_t) = nullptr;
     // The flags drop sidechain links and routing; created and removed tracks
     // take different paths. Restore replays the captured links and routes.
@@ -1262,6 +1267,12 @@ struct HirariTrackEditHostOps {
 };
 
 extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops);
+
+// Track and region id allocation lives in Rust (id_host.rs). An emptied
+// project restarts the counters; an installed document resumes them past the
+// highest ids it carries. Both are store-only and safe under the track lock.
+extern "C" void hirari_ids_reset_project(void* host);
+extern "C" void hirari_ids_seed_from_project(void* host);
 
 // Track freeze admission policy (limits, project-end sizing, paths, ordering).
 struct HirariTrackFreezeHostOps {

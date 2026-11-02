@@ -332,6 +332,10 @@ fn commit_import(
     if !length.is_finite() || length < 1.0 || length >= u64::MAX as f64 {
         return false;
     }
+    let new_region_id = crate::id_host::next_region_id(ops.list_tracks, ops.list_regions, host);
+    if new_region_id == 0 {
+        return false;
+    }
     let region_id = unsafe {
         insert(
             host,
@@ -343,6 +347,7 @@ fn commit_import(
             source_rate,
             timeline_rate,
             length as u64,
+            new_region_id,
             audio.into_raw(),
         )
     };
