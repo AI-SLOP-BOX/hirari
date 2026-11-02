@@ -273,7 +273,10 @@ impl HirariCore {
             // The native engine answers only for a track it resolved; naming an
             // unresolved id is this layer's decision.
             |engine| {
-                let text = engine.get_last_sandbox_failure_text(track_id).to_string();
+                let (_, text) = crate::plugin_sandbox_maintenance::last_sandbox_failure(
+                    crate::audio_engine_delegate_ext::host(engine),
+                    track_id,
+                );
                 if text.is_empty() {
                     "track-not-found".to_owned()
                 } else {

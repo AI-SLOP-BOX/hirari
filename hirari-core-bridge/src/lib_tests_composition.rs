@@ -202,7 +202,9 @@
         assert!(!engine_ref.add_sandboxed_plugin(track_id, ""));
         assert!(!engine_ref.add_sandboxed_plugin(track_id, "/definitely/missing/hirari-plugin.clap"));
         let _ = engine_ref.get_sandbox_statuses();
-        let _ = engine_ref.get_sandbox_plugin_paths();
+        let _ = crate::plugin_sandbox_maintenance::sandbox_plugin_paths(
+            crate::audio_engine_delegate_ext::host(engine_ref),
+        );
     }
 
     #[test]

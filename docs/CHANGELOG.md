@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- The sandbox query surface now lives in Rust: slot enumeration, the track and
+  plugin-index lookup behind every state read and write, the bounded state-write
+  admission, the isolated block-render boundary and the failure and state-error
+  diagnostic names are answered by `plugin_sandbox_maintenance.rs` through the
+  sandbox host ops. C++ lost the engine wrapper methods, the bridge forwarders,
+  the unreachable Track state accessors and the Rust-only FFI declarations, so
+  it only resolves an id it actually found.
 - Track and region id allocation now lives in Rust: one allocator keeps the
   counters, the wrap-around walk that never hands out the invalid sentinels, the
   restart a new project takes and the reseed a loaded document gets. The engine's

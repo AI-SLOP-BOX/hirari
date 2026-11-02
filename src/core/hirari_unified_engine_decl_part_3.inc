@@ -5,29 +5,16 @@
 
     // Regions & Plugins
     bool add_region(uint32_t trackId, std::string_view path, double start_beat);
-    bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
-                                        float* left, float* right, uint32_t frames);
-    std::vector<uint8_t> process_sandboxed_plugin_midi_block(
-        uint32_t tid, uint32_t sandboxIndex, uint32_t frames,
-        const uint8_t* midiData, uint32_t midiSize);
     // Control-thread maintenance. Returns the number of sandbox processes
     // successfully recovered during this pass.
     bool retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
     bool restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex);
-    // Status enumeration for the UI lives in Rust; see
-    // plugin_sandbox_maintenance.rs and AudioEngine::get_sandbox_statuses.
+    // Status and slot enumeration lives in Rust; see
+    // plugin_sandbox_maintenance.rs and the sandbox host ops in part_3a.
     // Control-thread diagnostic edge: number of AU processors that crossed
     // the consecutive-overrun watchdog since the previous poll.
     uint32_t take_watchdog_trips();
     uint64_t non_finite_plugin_samples() const;
-    uint8_t get_last_sandbox_failure(uint32_t trackId) const;
-    std::string get_last_sandbox_failure_text(uint32_t trackId) const;
-    std::vector<std::string> get_sandbox_plugin_paths() const;
-    std::vector<uint8_t> get_sandbox_plugin_state(uint32_t trackId, uint32_t sandboxIndex) const;
-    bool set_sandbox_plugin_state(uint32_t trackId, uint32_t sandboxIndex,
-                                  const std::vector<uint8_t>& state);
-    uint8_t get_sandbox_plugin_state_error(uint32_t trackId, uint32_t sandboxIndex) const;
-    std::string get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const;
     // Internal automation/hydration path. It applies the value without
     // creating a user-facing Undo step for every generated control event.
     float get_plugin_parameter(uint32_t tid, uint32_t pluginIndex, uint32_t parameterId) const;

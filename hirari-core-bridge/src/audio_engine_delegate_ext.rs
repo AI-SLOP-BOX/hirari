@@ -49,7 +49,7 @@ fn pinned(engine: &ffi::AudioEngine) -> core::pin::Pin<&mut ffi::HirariUnifiedEn
     unsafe { core::pin::Pin::new_unchecked(&mut *core_mut(engine)) }
 }
 
-fn host(engine: &ffi::AudioEngine) -> *mut c_void {
+pub(crate) fn host(engine: &ffi::AudioEngine) -> *mut c_void {
     let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
     core as *mut c_void
 }
@@ -791,7 +791,12 @@ impl ffi::AudioEngine {
         self.get_core().non_finite_plugin_samples()
     }
     pub fn get_sandbox_plugin_state_error(&self, track_id: u32, sandbox_index: u32) -> u8 {
-        self.get_core().get_sandbox_plugin_state_error(track_id, sandbox_index)
+        crate::plugin_sandbox_maintenance::sandbox_state_error(
+            host(self),
+            track_id,
+            sandbox_index,
+        )
+        .0
     }
     pub fn get_plugin_parameter(&self, tid: u32, plugin_index: u32, parameter_id: u32) -> f32 {
         self.get_core()

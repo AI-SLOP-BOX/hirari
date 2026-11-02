@@ -204,20 +204,6 @@ pub mod ffi {
             group_id: u32,
         ) -> bool;
         fn new_project(self: Pin<&mut HirariUnifiedEngine>);
-        fn process_sandboxed_plugin_block(
-            self: &AudioEngine,
-            tid: u32,
-            sandbox_index: u32,
-            left: &mut [f32],
-            right: &mut [f32],
-        ) -> bool;
-        fn process_sandboxed_plugin_midi_block(
-            self: &AudioEngine,
-            tid: u32,
-            sandbox_index: u32,
-            frames: u32,
-            midi_data: &[u8],
-        ) -> Vec<u8>;
         fn take_watchdog_trips(self: Pin<&mut HirariUnifiedEngine>) -> u32;
         fn non_finite_plugin_samples(self: &HirariUnifiedEngine) -> u64;
         fn retry_sandboxed_plugin(
@@ -230,30 +216,6 @@ pub mod ffi {
             track_id: u32,
             sandbox_index: u32,
         ) -> bool;
-        fn get_last_sandbox_failure(self: &HirariUnifiedEngine, track_id: u32) -> u8;
-        fn get_last_sandbox_failure_text(self: &AudioEngine, track_id: u32) -> String;
-        fn get_sandbox_plugin_paths(self: &AudioEngine) -> Vec<String>;
-        fn get_sandbox_plugin_state(
-            self: &AudioEngine,
-            track_id: u32,
-            sandbox_index: u32,
-        ) -> Vec<u8>;
-        fn set_sandbox_plugin_state(
-            self: &AudioEngine,
-            track_id: u32,
-            sandbox_index: u32,
-            state: &[u8],
-        ) -> bool;
-        fn get_sandbox_plugin_state_error(
-            self: &HirariUnifiedEngine,
-            track_id: u32,
-            sandbox_index: u32,
-        ) -> u8;
-        fn get_sandbox_plugin_state_error_text(
-            self: &AudioEngine,
-            track_id: u32,
-            sandbox_index: u32,
-        ) -> String;
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
         fn append_region_processing(

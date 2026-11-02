@@ -11,7 +11,11 @@ impl HirariCore {
 
     pub fn last_sandbox_failure(&self, track_id: u32) -> u8 {
         self.engine.as_ref().map_or(0, |engine| {
-            engine.get_core().get_last_sandbox_failure(track_id)
+            crate::plugin_sandbox_maintenance::last_sandbox_failure(
+                crate::audio_engine_delegate_ext::host(engine),
+                track_id,
+            )
+            .0
         })
     }
 
@@ -46,7 +50,9 @@ impl HirariCore {
 
     pub fn sandbox_plugin_paths(&self) -> Vec<String> {
         self.engine.as_ref().map_or_else(Vec::new, |engine| {
-            engine.get_sandbox_plugin_paths().into_iter().collect()
+            crate::plugin_sandbox_maintenance::sandbox_plugin_paths(
+                crate::audio_engine_delegate_ext::host(engine),
+            )
         })
     }
 
@@ -58,10 +64,11 @@ impl HirariCore {
             return Vec::new();
         };
         self.engine.as_ref().map_or_else(Vec::new, |engine| {
-            engine
-                .get_sandbox_plugin_state(track_id, sandbox_index)
-                .into_iter()
-                .collect()
+            crate::plugin_sandbox_maintenance::sandbox_plugin_state(
+                crate::audio_engine_delegate_ext::host(engine),
+                track_id,
+                sandbox_index,
+            )
         })
     }
 
@@ -74,9 +81,14 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return false;
         };
-        self.engine
-            .as_ref()
-            .is_some_and(|engine| engine.set_sandbox_plugin_state(track_id, sandbox_index, state))
+        self.engine.as_ref().is_some_and(|engine| {
+            crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
+                crate::audio_engine_delegate_ext::host(engine),
+                track_id,
+                sandbox_index,
+                state,
+            )
+        })
     }
 
     pub fn sandbox_plugin_state_diagnostic(
@@ -106,11 +118,12 @@ impl HirariCore {
                 message: "state-unavailable".into(),
             };
         };
-        let ok = engine.set_sandbox_plugin_state(track_id, sandbox_index, state);
-        let code = engine.get_sandbox_plugin_state_error(track_id, sandbox_index);
-        let message = engine
-            .get_sandbox_plugin_state_error_text(track_id, sandbox_index)
-            .to_string();
+        let host = crate::audio_engine_delegate_ext::host(engine);
+        let ok = crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
+            host, track_id, sandbox_index, state,
+        );
+        let (code, message) =
+            crate::plugin_sandbox_maintenance::sandbox_state_error(host, track_id, sandbox_index);
         // An unresolved track answers with no text; the state-error table names
         // the fallback.
         let message = if message.is_empty() {
@@ -230,10 +243,13 @@ impl HirariCore {
         midi_data: &[u8],
     ) -> Vec<u8> {
         self.engine.as_ref().map_or_else(Vec::new, |engine| {
-            engine
-                .process_sandboxed_plugin_midi_block(track_id, sandbox_index, frames, midi_data)
-                .into_iter()
-                .collect()
+            crate::plugin_sandbox_maintenance::process_sandbox_midi_block(
+                crate::audio_engine_delegate_ext::host(engine),
+                track_id,
+                sandbox_index,
+                frames,
+                midi_data,
+            )
         })
     }
 

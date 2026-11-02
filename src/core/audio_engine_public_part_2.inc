@@ -1,60 +1,9 @@
     bool add_region(uint32_t tid, rust::Str path, double startBeat) const {
         return m_engine && m_engine->add_region(tid, std::string_view(path.data(), path.size()), startBeat);
     }
-    bool process_sandboxed_plugin_block(uint32_t tid, uint32_t sandbox_index,
-                                        rust::Slice<float> left, rust::Slice<float> right) const {
-        if (!m_engine || left.empty() || left.size() != right.size()) return false;
-        return m_engine->process_sandboxed_plugin_block(
-            tid, sandbox_index, left.data(), right.data(), static_cast<uint32_t>(left.size()));
-    }
-    
-    rust::Vec<uint8_t> process_sandboxed_plugin_midi_block(
-        uint32_t tid, uint32_t sandbox_index, uint32_t frames,
-        rust::Slice<const uint8_t> midi_data) const {
-        rust::Vec<uint8_t> result;
-        if (!m_engine || midi_data.empty()) return result;
-        const auto output = m_engine->process_sandboxed_plugin_midi_block(
-            tid, sandbox_index, frames, midi_data.data(), static_cast<uint32_t>(midi_data.size()));
-        for (const auto byte : output) result.push_back(byte);
-        return result;
-    }
-    rust::String get_last_sandbox_failure_text(uint32_t trackId) const {
-        return rust::String(m_engine ? m_engine->get_last_sandbox_failure_text(trackId)
-                                     : "engine-unavailable");
-    }
-    rust::Vec<rust::String> get_sandbox_plugin_paths() const {
-        rust::Vec<rust::String> result;
-        if (!m_engine) return result;
-        for (const auto& path : m_engine->get_sandbox_plugin_paths())
-            result.push_back(rust::String(path));
-        return result;
-    }
-    rust::Vec<uint8_t> get_sandbox_plugin_state(uint32_t trackId, uint32_t sandboxIndex) const {
-        rust::Vec<uint8_t> result;
-        if (!m_engine) return result;
-        for (const auto byte : m_engine->get_sandbox_plugin_state(trackId, sandboxIndex))
-            result.push_back(byte);
-        return result;
-    }
-    bool set_sandbox_plugin_state(uint32_t trackId, uint32_t sandboxIndex,
-                                  rust::Slice<const uint8_t> state) const {
-        if (!m_engine || state.size() > Hirari::Core::Plugins::SandboxProtocol::kMaxStateBytes)
-            return false;
-        std::vector<uint8_t> bytes(state.begin(), state.end());
-        return m_engine && m_engine->set_sandbox_plugin_state(trackId, sandboxIndex, bytes);
-    }
+    // The sandbox query surface lives in Rust (plugin_sandbox_maintenance.rs);
+    // it reaches the graph through the sandbox host ops, not this bridge.
 
-
-
-
-
-
-
-
-    rust::String get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const {
-        return rust::String(m_engine ? m_engine->get_sandbox_plugin_state_error_text(trackId, sandboxIndex)
-                                     : "state-unavailable");
-    }
     rust::String get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
                                            uint32_t parameterId) const {
         return rust::String(m_engine ? m_engine->get_plugin_parameter_name(tid, pluginIndex, parameterId) : "");

@@ -1,26 +1,20 @@
 
 
-bool HirariUnifiedEngine::process_sandboxed_plugin_block(uint32_t tid, uint32_t sandboxIndex,
-                                                       float* left, float* right, uint32_t frames) {
-    return mutateLockedTrack(tid, [&](Track& track) {
-        return track.processSandboxedPluginBlock(sandboxIndex, left, right, frames);
-    });
-}
+// Shared answer for a query whose track or slot could not be resolved; the
+// Rust query surface names the fallback.
+namespace {
+constexpr size_t kSandboxQueryFailed = std::numeric_limits<size_t>::max();
 
-std::vector<uint8_t> HirariUnifiedEngine::process_sandboxed_plugin_midi_block(
-    uint32_t tid, uint32_t sandboxIndex, uint32_t frames,
-    const uint8_t* midiData, uint32_t midiSize) {
-    std::vector<uint8_t> result;
-    (void)mutateLockedTrack(tid, [&](Track& track) {
-        result = track.processSandboxedPluginMidiBlock(sandboxIndex, frames, midiData, midiSize);
-        return true;
-    });
-    return result;
+size_t copySandboxText(const char* value, uint8_t* out, size_t capacity) {
+    const std::string text(value ? value : "");
+    if (out && capacity >= text.size()) std::memcpy(out, text.data(), text.size());
+    return text.size();
 }
+} // namespace
 
 // The maintenance pass itself lives in Rust; these handlers only resolve a
-// track, report its sandbox statuses, restart what can be restarted, and post
-// the resulting event with the engine's playhead.
+// track, report its sandbox slots and statuses, run one isolated block, and
+// post the resulting event with the engine's playhead.
 static_assert(sizeof(Track::SandboxStatus) == 24,
               "plugin_sandbox_maintenance.rs mirrors this layout");
 void HirariUnifiedEngine::installSandboxMaintenanceHost() {
@@ -55,6 +49,61 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
                 engine->m_playhead.load(std::memory_order_relaxed), type, trackId, value,
                 label, labelLength);
         },
+        [](void* host, void* context, HirariPluginSandboxSlotVisitorFn visit) -> bool {
+            if (!host) return false;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            for (const auto& track : engine->get_tracks_snapshot())
+                for (size_t slot = 0; slot < track->sandboxSlotCount(); ++slot) {
+                    const auto path = track->sandboxSlotPath(slot);
+                    if (!visit(context, track->getId(), static_cast<uint32_t>(slot),
+                               track->sandboxSlotIndex(slot),
+                               reinterpret_cast<const uint8_t*>(path.data()), path.size()))
+                        return false;
+                }
+            return true;
+        },
+        [](void* host, uint32_t trackId, uint32_t slot, float* left, float* right,
+           uint32_t frames) -> bool {
+            if (!host) return false;
+            return static_cast<HirariUnifiedEngine*>(host)->mutateLockedTrack(
+                trackId, [&](Track& track) {
+                    return track.processSandboxedPluginBlock(slot, left, right, frames);
+                });
+        },
+        [](void* host, uint32_t trackId, uint32_t slot, uint32_t frames,
+           const uint8_t* midiData, size_t midiLength, uint8_t* out,
+           size_t capacity) -> size_t {
+            if (!host) return kSandboxQueryFailed;
+            std::vector<uint8_t> result;
+            (void)static_cast<HirariUnifiedEngine*>(host)->mutateLockedTrack(
+                trackId, [&](Track& track) {
+                    result = track.processSandboxedPluginMidiBlock(
+                        slot, frames, midiData, static_cast<uint32_t>(midiLength));
+                    return true;
+                });
+            if (result.size() > capacity) return kSandboxQueryFailed;
+            if (!result.empty()) std::memcpy(out, result.data(), result.size());
+            return result.size();
+        },
+        [](void* host, uint32_t trackId, uint8_t* code, uint8_t* text,
+           size_t capacity) -> size_t {
+            if (!host) return kSandboxQueryFailed;
+            return static_cast<HirariUnifiedEngine*>(host)->querySnapshotTrack(
+                trackId, kSandboxQueryFailed, [&](const Track& track) -> size_t {
+                    if (code) *code = track.lastSandboxFailure();
+                    return copySandboxText(track.lastSandboxFailureText(), text, capacity);
+                });
+        },
+        [](void* host, uint32_t trackId, uint32_t slot, uint8_t* code, uint8_t* text,
+           size_t capacity) -> size_t {
+            if (!host) return kSandboxQueryFailed;
+            return static_cast<HirariUnifiedEngine*>(host)->querySnapshotTrack(
+                trackId, kSandboxQueryFailed, [&](const Track& track) -> size_t {
+                    if (code) *code = track.sandboxedPluginStateError(slot);
+                    return copySandboxText(track.sandboxedPluginStateErrorText(slot),
+                                           text, capacity);
+                });
+        },
     };
     hirari_plugin_sandbox_maintenance_host_install(&ops);
 }
@@ -83,57 +132,6 @@ uint64_t HirariUnifiedEngine::non_finite_plugin_samples() const {
         if (track) count += track->nonFiniteSampleCount();
     }
     return count;
-}
-
-uint8_t HirariUnifiedEngine::get_last_sandbox_failure(uint32_t trackId) const {
-    return querySnapshotTrack(trackId, uint8_t{0},
-                              [](const Track& track) { return track.lastSandboxFailure(); });
-}
-
-// An unresolved track reports an empty text; naming the not-found fallback is
-// the Rust query surface's job.
-std::string HirariUnifiedEngine::get_last_sandbox_failure_text(uint32_t trackId) const {
-    return querySnapshotTrack(trackId, std::string{},
-                              [](const Track& track) -> std::string {
-                                  return track.lastSandboxFailureText();
-                              });
-}
-
-std::vector<std::string> HirariUnifiedEngine::get_sandbox_plugin_paths() const {
-    std::vector<std::string> result;
-    for (const auto& track : get_tracks_snapshot()) {
-        if (!track) continue;
-        const auto& paths = track->getSandboxedPluginPaths();
-        result.insert(result.end(), paths.begin(), paths.end());
-    }
-    return result;
-}
-
-std::vector<uint8_t> HirariUnifiedEngine::get_sandbox_plugin_state(
-    uint32_t trackId, uint32_t sandboxIndex) const {
-    return querySnapshotTrack(trackId, std::vector<uint8_t>{},
-                              [&](const Track& track) {
-                                  return track.getSandboxedPluginState(sandboxIndex);
-                              });
-}
-
-bool HirariUnifiedEngine::set_sandbox_plugin_state(
-    uint32_t trackId, uint32_t sandboxIndex, const std::vector<uint8_t>& state) {
-    return mutateLockedTrack(trackId, [&](Track& track) {
-        return track.setSandboxedPluginState(sandboxIndex, state);
-    });
-}
-
-uint8_t HirariUnifiedEngine::get_sandbox_plugin_state_error(uint32_t trackId, uint32_t sandboxIndex) const {
-    return querySnapshotTrack(
-        trackId, Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable,
-        [&](const Track& track) { return track.sandboxedPluginStateError(sandboxIndex); });
-}
-
-std::string HirariUnifiedEngine::get_sandbox_plugin_state_error_text(uint32_t trackId, uint32_t sandboxIndex) const {
-    return querySnapshotTrack(trackId, std::string{}, [&](const Track& track) -> std::string {
-        return track.sandboxedPluginStateErrorText(sandboxIndex);
-    });
 }
 
 float HirariUnifiedEngine::get_plugin_parameter(uint32_t tid, uint32_t pluginIndex,

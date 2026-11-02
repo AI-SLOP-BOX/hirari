@@ -1,11 +1,13 @@
-//! Plugin sandbox maintenance policy.
+//! Plugin sandbox maintenance and query policy.
 //!
 //! The track keeps its sandboxed processors because the audio callback drives
 //! them. This module owns the control-side pass around them: walking the track
 //! list, remembering the previous health of each sandbox, deciding which
 //! failure/recovery/quarantine edges are worth an engine event, and asking the
-//! engine to restart what can be restarted. The native side only resolves a
-//! track, reports its statuses, runs the restart loop and posts an event.
+//! engine to restart what can be restarted. It also answers the query surface
+//! the engine used to forward by hand — slot paths, slot plugin state, the
+//! stored-state and last-add failures, and the isolated block-render test
+//! boundary — so the engine only resolves a track and touches the graph.
 //!
 //! Every entry point runs on the control thread. The observed-state map is
 //! keyed by engine address, and the engine forgets its entry when it is
@@ -44,6 +46,33 @@ pub type MaintainFn =
 /// playhead and copies the pre-formatted label.
 pub type PublishEventFn =
     unsafe extern "C" fn(*mut c_void, u32, u32, f32, *const u8, usize);
+/// Visits one sandbox slot with the plugin index bound to it and its bundle
+/// path; returning false stops the enumeration.
+pub type SlotVisitorFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const u8, usize) -> bool;
+pub type VisitSlotsFn =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, Option<SlotVisitorFn>) -> bool;
+/// Renders one sandbox slot over a caller-owned stereo block.
+pub type ProcessBlockFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *mut f32, *mut f32, u32) -> bool;
+/// Feeds one MIDI event through a sandbox slot and copies the event produced.
+/// Returns the byte count, or `usize::MAX` when the query failed.
+pub type ProcessMidiBlockFn = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    u32,
+    u32,
+    *const u8,
+    usize,
+    *mut u8,
+    usize,
+) -> usize;
+/// Copies a diagnostic code and its text, returning the text length, or
+/// `usize::MAX` when the track (or slot) could not be resolved.
+pub type LastFailureFn =
+    unsafe extern "C" fn(*mut c_void, u32, *mut u8, *mut u8, usize) -> usize;
+pub type StateErrorFn =
+    unsafe extern "C" fn(*mut c_void, u32, u32, *mut u8, *mut u8, usize) -> usize;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -51,6 +80,11 @@ pub struct HirariPluginSandboxHostOps {
     pub statuses: Option<StatusesFn>,
     pub maintain: Option<MaintainFn>,
     pub publish_event: Option<PublishEventFn>,
+    pub visit_slots: Option<VisitSlotsFn>,
+    pub process_block: Option<ProcessBlockFn>,
+    pub process_midi_block: Option<ProcessMidiBlockFn>,
+    pub last_failure: Option<LastFailureFn>,
+    pub state_error: Option<StateErrorFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -104,10 +138,250 @@ pub fn sandbox_statuses_packed(host: usize) -> Vec<u32> {
     packed
 }
 
+/// One sandbox slot as the engine ordered it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SandboxSlot {
+    pub track_id: u32,
+    pub slot: u32,
+    pub plugin_index: u32,
+    pub path: String,
+}
+
+/// Every sandbox slot in engine order; empty when the callbacks are missing.
+pub fn sandbox_slots(host: *mut c_void) -> Vec<SandboxSlot> {
+    let Some(visit_slots) = host_ops().and_then(|ops| ops.visit_slots) else {
+        return Vec::new();
+    };
+    unsafe extern "C" fn visit(
+        context: *mut c_void,
+        track_id: u32,
+        slot: u32,
+        plugin_index: u32,
+        path: *const u8,
+        path_length: usize,
+    ) -> bool {
+        if context.is_null() {
+            return false;
+        }
+        if path_length != 0 && path.is_null() {
+            return false;
+        }
+        let bytes = if path_length == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(path, path_length).to_vec() }
+        };
+        unsafe { &mut *context.cast::<Vec<SandboxSlot>>() }.push(SandboxSlot {
+            track_id,
+            slot,
+            plugin_index,
+            path: String::from_utf8_lossy(&bytes).into_owned(),
+        });
+        true
+    }
+    let mut slots = Vec::new();
+    unsafe {
+        visit_slots(
+            host,
+            (&mut slots as *mut Vec<SandboxSlot>).cast(),
+            Some(visit),
+        )
+    };
+    slots
+}
+
+/// Bundle path of every sandboxed plugin, in engine order.
+pub fn sandbox_plugin_paths(host: *mut c_void) -> Vec<String> {
+    sandbox_slots(host).into_iter().map(|entry| entry.path).collect()
+}
+
+/// The plugin index bound to one sandbox slot.
+fn slot_plugin_index(host: *mut c_void, track_id: u32, slot: u32) -> Option<u32> {
+    sandbox_slots(host)
+        .into_iter()
+        .find(|entry| entry.track_id == track_id && entry.slot == slot)
+        .map(|entry| entry.plugin_index)
+}
+
+/// Reads a sandbox slot's plugin state through the plugin-chain state op; the
+/// slot keeps the engine's plugin index, so the state is the same bytes the
+/// audio graph would persist.
+pub fn sandbox_plugin_state(host: *mut c_void, track_id: u32, slot: u32) -> Vec<u8> {
+    let Some(plugin_index) = slot_plugin_index(host, track_id, slot) else {
+        return Vec::new();
+    };
+    let length = unsafe {
+        crate::plugin_edit_host::hirari_plugin_edit_get_state(
+            host,
+            track_id,
+            plugin_index,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if length == 0 || length == usize::MAX {
+        return Vec::new();
+    }
+    let mut state = vec![0u8; length];
+    let written = unsafe {
+        crate::plugin_edit_host::hirari_plugin_edit_get_state(
+            host,
+            track_id,
+            plugin_index,
+            state.as_mut_ptr(),
+            length,
+        )
+    };
+    state.truncate(written.min(length));
+    state
+}
+
+/// Stores a sandbox slot's plugin state. Mirrors the engine's admission: an
+/// oversized blob is refused before the graph is touched, and no undo entry is
+/// recorded because hydration and recovery replay the preset themselves.
+pub fn set_sandbox_plugin_state(
+    host: *mut c_void,
+    track_id: u32,
+    slot: u32,
+    state: &[u8],
+) -> bool {
+    if state.len() > MAX_SANDBOX_STATE_BYTES {
+        return false;
+    }
+    let Some(plugin_index) = slot_plugin_index(host, track_id, slot) else {
+        return false;
+    };
+    unsafe {
+        crate::plugin_edit_host::hirari_plugin_edit_set_state(
+            host,
+            track_id,
+            plugin_index,
+            state.as_ptr(),
+            state.len(),
+        )
+    }
+}
+
+/// Runs one isolated stereo block through a sandbox slot. The caller owns the
+/// buffers; both must hold `frames` samples.
+pub fn process_sandbox_block(
+    host: *mut c_void,
+    track_id: u32,
+    slot: u32,
+    left: &mut [f32],
+    right: &mut [f32],
+) -> bool {
+    let Some(process) = host_ops().and_then(|ops| ops.process_block) else {
+        return false;
+    };
+    if left.is_empty() || left.len() != right.len() {
+        return false;
+    }
+    unsafe {
+        process(
+            host,
+            track_id,
+            slot,
+            left.as_mut_ptr(),
+            right.as_mut_ptr(),
+            left.len() as u32,
+        )
+    }
+}
+
+/// Feeds one MIDI event through a sandbox slot and returns the event it
+/// produced. An empty result means the sandbox produced nothing usable.
+pub fn process_sandbox_midi_block(
+    host: *mut c_void,
+    track_id: u32,
+    slot: u32,
+    frames: u32,
+    midi_data: &[u8],
+) -> Vec<u8> {
+    let Some(process) = host_ops().and_then(|ops| ops.process_midi_block) else {
+        return Vec::new();
+    };
+    if midi_data.is_empty() {
+        return Vec::new();
+    }
+    let mut output = vec![0u8; MAX_SANDBOX_MIDI_BYTES];
+    let length = unsafe {
+        process(
+            host,
+            track_id,
+            slot,
+            frames,
+            midi_data.as_ptr(),
+            midi_data.len(),
+            output.as_mut_ptr(),
+            output.len(),
+        )
+    };
+    if length == usize::MAX || length > MAX_SANDBOX_MIDI_BYTES {
+        return Vec::new();
+    }
+    output.truncate(length);
+    output
+}
+
+/// The last sandbox-add failure of one track. An unresolved track answers with
+/// no failure and no text, which is what the previous native surface returned.
+pub fn last_sandbox_failure(host: *mut c_void, track_id: u32) -> (u8, String) {
+    let Some(read) = host_ops().and_then(|ops| ops.last_failure) else {
+        return (0, String::new());
+    };
+    let mut code = 0_u8;
+    let text = {
+        let mut call = |out: *mut u8, capacity: usize| unsafe {
+            read(host, track_id, &mut code, out, capacity)
+        };
+        let length = call(std::ptr::null_mut(), 0);
+        if length == usize::MAX {
+            return (0, String::new());
+        }
+        let mut bytes = vec![0u8; length];
+        if call(bytes.as_mut_ptr(), length) != length {
+            return (0, String::new());
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    (code, text)
+}
+
+/// One sandbox slot's stored-state error. The engine's own fallback code is
+/// reported when the track or slot is missing.
+pub fn sandbox_state_error(host: *mut c_void, track_id: u32, slot: u32) -> (u8, String) {
+    let Some(read) = host_ops().and_then(|ops| ops.state_error) else {
+        return (STATE_ERROR_UNAVAILABLE, String::new());
+    };
+    let mut code = STATE_ERROR_UNAVAILABLE;
+    let text = {
+        let mut call = |out: *mut u8, capacity: usize| unsafe {
+            read(host, track_id, slot, &mut code, out, capacity)
+        };
+        let length = call(std::ptr::null_mut(), 0);
+        if length == usize::MAX {
+            return (STATE_ERROR_UNAVAILABLE, String::new());
+        }
+        let mut bytes = vec![0u8; length];
+        if call(bytes.as_mut_ptr(), length) != length {
+            return (STATE_ERROR_UNAVAILABLE, String::new());
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    (code, text)
+}
+
+/// Mirrors `SandboxProtocol::kStateErrorUnavailable`.
+const STATE_ERROR_UNAVAILABLE: u8 = 5;
+/// Mirrors `SandboxProtocol::kMaxStateBytes`.
+const MAX_SANDBOX_STATE_BYTES: usize = 4 * 1024 * 1024;
+/// Mirrors `SandboxProtocol::kMaxMidiPayloadBytes`.
+const MAX_SANDBOX_MIDI_BYTES: usize = 256;
+
 /// Installs the native host callbacks. Passing null clears them.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_sandbox_maintenance_host_install(
-    ops: *const HirariPluginSandboxHostOps,
+pub unsafe extern "C" fn hirari_plugin_sandbox_maintenance_host_install(    ops: *const HirariPluginSandboxHostOps,
 ) {
     let slot = HOST_OPS.get_or_init(|| Mutex::new(None));
     let value = if ops.is_null() {
@@ -416,6 +690,7 @@ mod tests {
             statuses: Some(statuses),
             maintain: Some(maintain),
             publish_event: Some(publish_event),
+            ..HirariPluginSandboxHostOps::default()
         };
         unsafe { hirari_plugin_sandbox_maintenance_host_install(&ops) };
     }

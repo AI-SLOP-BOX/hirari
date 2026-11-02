@@ -83,19 +83,8 @@ struct HirariScheduledMidiNote {
     uint8_t probability;
     uint32_t region_id;
 };
-struct HirariMidiSnapshotView {
-    const HirariScheduledMidiNote* notes;
-    size_t note_count;
-    const size_t* indices_by_end;
-    size_t end_count;
-    size_t slot;
-    uint64_t revision;
-};
 extern "C" void* hirari_midi_snapshot_store_create();
 extern "C" void hirari_midi_snapshot_store_destroy(void* store);
-extern "C" bool hirari_midi_snapshot_store_pin(
-    const void* store, HirariMidiSnapshotView* output);
-extern "C" void hirari_midi_snapshot_store_release(const void* store, size_t slot);
 extern "C" uint64_t hirari_midi_snapshot_store_revision(const void* store);
 extern "C" uint64_t hirari_midi_scheduled_note_end(const HirariScheduledMidiNote* note);
 extern "C" HirariScheduledMidiNote* hirari_midi_notes_snapshot_take(
@@ -104,11 +93,6 @@ extern "C" void hirari_midi_notes_snapshot_take_free(HirariScheduledMidiNote*, s
 using HirariScheduledMidiEventCallback = void (*)(
     void* context, const HirariScheduledMidiNote* note,
     uint64_t sample_offset, uint8_t note_off);
-extern "C" void hirari_midi_schedule_block(
-    const HirariScheduledMidiNote* notes, size_t note_count,
-    const size_t* indices_by_end, size_t end_count, uint64_t playhead,
-    uint32_t frames, uint8_t playback_active, uint8_t reconcile,
-    uint64_t pass, void* context, HirariScheduledMidiEventCallback callback);
 // Playback reconciliation state (discontinuity, snapshot revision, panic
 // request) lives in Rust; the callback supplies the voices it must reset.
 using HirariMidiPanicCallback = void (*)(void* context);
@@ -194,13 +178,6 @@ extern "C" bool hirari_bus_audio_read(
 extern "C" void* hirari_bus_track_create();
 extern "C" void hirari_bus_track_destroy(void* state);
 extern "C" void hirari_bus_track_set_phase_inverted(void* state, bool inverted);
-extern "C" void* hirari_plugin_parameter_snapshot_create();
-extern "C" void hirari_plugin_parameter_snapshot_destroy(void* handle);
-extern "C" bool hirari_plugin_parameter_snapshot_set(const void* handle, uint32_t parameter_id, double value);
-extern "C" bool hirari_plugin_parameter_snapshot_get(const void* handle, uint32_t parameter_id, double* output);
-using HirariPluginParameterVisitCallback = bool (*)(void* context, uint32_t parameter_id, double value);
-extern "C" bool hirari_plugin_parameter_snapshot_visit(
-    const void* handle, void* context, HirariPluginParameterVisitCallback callback);
 extern "C" bool hirari_hot_swap_default_quiesce_requested();
 extern "C" void hirari_hot_swap_default_acknowledge();
 extern "C" void* hirari_bus_system_create();
@@ -1329,6 +1306,10 @@ extern "C" bool hirari_plugin_edit_set_bypass(
 // Status pointers refer to Track::SandboxStatus, mirrored field for field in
 // plugin_sandbox_maintenance.rs.
 using HirariPluginSandboxVisitorFn = bool (*)(void* context, uint32_t trackId, const void* status);
+// Visits one sandbox slot with its plugin index and bundle path.
+using HirariPluginSandboxSlotVisitorFn = bool (*)(void* context, uint32_t trackId,
+                                                  uint32_t slot, uint32_t pluginIndex,
+                                                  const uint8_t* path, size_t pathLength);
 struct HirariPluginSandboxHostOps {
     // Reports every track's statuses in engine order.
     bool (*statuses)(void* host, void* context, HirariPluginSandboxVisitorFn visit) = nullptr;
@@ -1338,6 +1319,24 @@ struct HirariPluginSandboxHostOps {
                          HirariPluginSandboxVisitorFn visit) = nullptr;
     void (*publishEvent)(void* host, uint32_t type, uint32_t trackId, float value,
                          const uint8_t* label, size_t labelLength) = nullptr;
+    // Reports every track's sandbox slots in engine order.
+    bool (*visitSlots)(void* host, void* context,
+                       HirariPluginSandboxSlotVisitorFn visit) = nullptr;
+    // Renders one sandbox slot over a caller-owned stereo block.
+    bool (*processBlock)(void* host, uint32_t trackId, uint32_t slot, float* left, float* right,
+                         uint32_t frames) = nullptr;
+    // Feeds one MIDI event through a sandbox slot and copies the event it
+    // produced; returns the byte count, or SIZE_MAX when the query failed.
+    size_t (*processMidiBlock)(void* host, uint32_t trackId, uint32_t slot, uint32_t frames,
+                               const uint8_t* midiData, size_t midiLength, uint8_t* out,
+                               size_t capacity) = nullptr;
+    // Copies a diagnostic code plus its text into the caller's buffer and
+    // returns the text length, or SIZE_MAX when the track (or slot) is
+    // missing. Naming an unresolved id is the query surface's decision.
+    size_t (*lastFailure)(void* host, uint32_t trackId, uint8_t* code, uint8_t* text,
+                          size_t capacity) = nullptr;
+    size_t (*stateError)(void* host, uint32_t trackId, uint32_t slot, uint8_t* code,
+                         uint8_t* text, size_t capacity) = nullptr;
 };
 extern "C" void hirari_plugin_sandbox_maintenance_host_install(
     const HirariPluginSandboxHostOps* ops);

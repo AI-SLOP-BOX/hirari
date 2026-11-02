@@ -318,15 +318,6 @@
             states.push_back(m_effectChain.getProcessorState(sandboxSlotIndex(slot)));
         return states;
     }
-    std::vector<uint8_t> getSandboxedPluginState(size_t sandboxIndex) const {
-        if (sandboxIndex >= sandboxSlotCount()) return {};
-        return m_effectChain.getProcessorState(sandboxSlotIndex(sandboxIndex));
-    }
-    bool setSandboxedPluginState(size_t sandboxIndex, const std::vector<uint8_t>& state) {
-        if (sandboxIndex >= sandboxSlotCount()) return false;
-        return commitEditChange(m_effectChain.setProcessorState(
-            sandboxSlotIndex(sandboxIndex), state));
-    }
     uint8_t sandboxedPluginStateError(size_t sandboxIndex) const noexcept {
         return withSandbox(sandboxIndex,
                            Hirari::Core::Plugins::SandboxProtocol::kStateErrorUnavailable,

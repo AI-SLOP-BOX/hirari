@@ -628,7 +628,13 @@ impl HirariCore {
             return false;
         }
         self.engine.as_ref().is_some_and(|engine| {
-            engine.process_sandboxed_plugin_block(track_id, sandbox_index, left, right)
+            crate::plugin_sandbox_maintenance::process_sandbox_block(
+                crate::audio_engine_delegate_ext::host(engine),
+                track_id,
+                sandbox_index,
+                left,
+                right,
+            )
         })
     }
 

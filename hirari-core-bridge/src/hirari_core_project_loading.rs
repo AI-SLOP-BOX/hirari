@@ -399,11 +399,14 @@ impl HirariCore {
                         )));
                     };
                     if !engine.add_sandboxed_plugin(native_id, path) {
-                        let admission = engine.get_last_sandbox_failure_text(native_id);
+                        let (_, admission) = crate::plugin_sandbox_maintenance::last_sandbox_failure(
+                            crate::audio_engine_delegate_ext::host(engine),
+                            native_id,
+                        );
                         let admission = if admission.is_empty() {
                             "track-not-found".to_owned()
                         } else {
-                            admission.to_string()
+                            admission
                         };
                         return Err(rollback_error(anyhow::anyhow!(
                             "native engine failed to restore sandbox plugin {plugin_index} on track {}: {}",
@@ -424,14 +427,22 @@ impl HirariCore {
                     }
                     if let Some(state) = track.sandbox_plugin_states.get(sandbox_index as usize) {
                         if !state.is_empty()
-                            && !engine.set_sandbox_plugin_state(native_id, sandbox_index, state)
-                        {
-                            let state_error = engine
-                                .get_sandbox_plugin_state_error_text(native_id, sandbox_index);
+                            && !crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
+                                crate::audio_engine_delegate_ext::host(engine),
+                                native_id,
+                                sandbox_index,
+                                state,
+                            ) {
+                            let (_, state_error) =
+                                crate::plugin_sandbox_maintenance::sandbox_state_error(
+                                    crate::audio_engine_delegate_ext::host(engine),
+                                    native_id,
+                                    sandbox_index,
+                                );
                             let state_error = if state_error.is_empty() {
                                 "state-unavailable".to_owned()
                             } else {
-                                state_error.to_string()
+                                state_error
                             };
                             return Err(rollback_error(anyhow::anyhow!(
                                 "native engine failed to restore sandbox plugin state {plugin_index} on track {}: {}",
