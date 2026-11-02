@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- The region table now lives in Rust: `region_store.rs` owns each track's regions
+  with their clip, note and processing-history stores, the snapshot a removal keeps
+  for undo, the re-normalization a geometry change triggers and the frozen
+  publication the renderer installs. It is keyed by the live track rather than the
+  track id, because ids are allocated per engine and two engines can own the same
+  id at once. C++ `Track` keeps only the atomics the audio callback reads plus the
+  handles the store cannot own — decoded audio, the media cache and the pitch gate.
 - The sandbox query surface now lives in Rust: slot enumeration, the track and
   plugin-index lookup behind every state read and write, the bounded state-write
   admission, the isolated block-render boundary and the failure and state-error

@@ -8,7 +8,6 @@
 
 int main() {
     using Hirari::Core::AudioBuffer;
-    using Hirari::Core::Engine::Region;
     using Hirari::Core::Engine::Track;
 
     auto audio = std::make_shared<AudioBuffer>(2, 8);
@@ -16,33 +15,60 @@ int main() {
         audio->getWritePointer(0)[i] = 0.25f;
         audio->getWritePointer(1)[i] = 0.25f;
     }
-    Region region{};
-    region.id = 1;
-    region.start = 0;
-    region.len = 8;
-    region.audio = audio;
     const std::array<HirariRegionRangeEdit, 3> seed{{
         {0, 100, 0.5f, 999, 999},
         {8, 12, 1.0f, 0, 0},
         {1, 2, std::numeric_limits<float>::quiet_NaN(), 0, 0}}};
-    assert(hirari_region_clip_edits_replace_range_edits(
-        region.clipEdits.get(), seed.data(), seed.size(), region.len, false));
 
     Track track(1, "range-contract", Track::Audio);
-    track.addRegion(region);
-    const auto regions = track.getRegions();
-    assert(regions.size() == 1);
-    assert(regions.front().clip()->rangeEditCount == 1);
-    assert(regions.front().clip()->rangeEdits->end == 8);
-    assert(regions.front().clip()->rangeEdits->fade_in == 8);
-    assert(regions.front().clip()->rangeEdits->fade_out == 8);
+    HirariRegionState state{};
+    state.len = 8;
+    auto* draft = hirari_region_store_draft_new(1, nullptr, 0, nullptr, 0, &state);
+    auto* clip = hirari_region_store_draft_clip(draft);
+    assert(clip != nullptr);
+    assert(hirari_region_clip_edits_replace_range_edits(
+        clip, seed.data(), seed.size(), state.len, false));
+    assert(hirari_region_store_draft_add(
+        draft, &track, new std::shared_ptr<AudioBuffer>(audio)));
 
-    const std::array<Region::RangeEdit, 1> replacement{{{0, 4, 1.0f, 99, 99}}};
-    assert(track.replaceRegionRangeEdits(1, replacement.data(), replacement.size()));
-    const auto replaced = track.regionRangeEdits(1);
-    assert(replaced.size() == 1 && replaced.front().fade_in == 4 &&
-           replaced.front().fade_out == 4);
-    const std::array<Region::RangeEdit, 1> invalid{{{0, 9, 1.0f, 0, 0}}};
-    assert(!track.replaceRegionRangeEdits(1, invalid.data(), invalid.size()));
+    std::array<HirariRegionRangeEdit, 4> read{};
+    assert(hirari_region_store_range_edits(&track, 1, read.data(),
+                                          read.size()) == 1);
+    assert(read[0].end == 8);
+    assert(read[0].fade_in == 8);
+    assert(read[0].fade_out == 8);
+
+    // Validated re-admission: fades are clamped to the span and a batch whose
+    // span leaves the region is refused, leaving the stored list untouched.
+    auto* standalone = hirari_region_clip_edits_create();
+    const std::array<HirariRegionRangeEdit, 1> fade{{ {0, 4, 1.0f, 99, 99} }};
+    assert(hirari_region_clip_edits_replace_range_edits(standalone, fade.data(), fade.size(), 8, true));
+    const std::array<HirariRegionRangeEdit, 1> beyond{{ {0, 9, 1.0f, 0, 0} }};
+    assert(!hirari_region_clip_edits_replace_range_edits(
+        standalone, beyond.data(), beyond.size(), 8, true));
+    auto* frozen = hirari_region_clip_edits_freeze(standalone);
+    const auto* view = hirari_region_clip_edits_frozen_view(frozen);
+    assert(view->rangeEditCount == 1);
+    assert(view->rangeEdits->end == 4);
+    assert(view->rangeEdits->fade_in == 4 && view->rangeEdits->fade_out == 4);
+    hirari_region_clip_edits_frozen_free(frozen);
+    hirari_region_clip_edits_destroy(standalone);
+
+    // The store installs what its caller already admitted, so an unbounded fade
+    // survives the round trip and a ragged blob is refused.
+    const std::array<HirariRegionRangeEdit, 1> replacement{{ {0, 4, 1.0f, 99, 99} }};
+    HirariRegionEditPayload payload{};
+    payload.trackId = track.getId();
+    payload.regionId = 1;
+    payload.op = kHirariRegionEditRangeEdits;
+    payload.blob = reinterpret_cast<const uint8_t*>(replacement.data());
+    payload.blobLen = replacement.size() * sizeof(HirariRegionRangeEdit);
+    assert(hirari_region_store_apply_edit(&track, &track, &payload));
+    assert(hirari_region_store_range_edits(&track, 1, read.data(),
+                                          read.size()) == 1);
+    assert(read[0].end == 4 && read[0].fade_in == 99 && read[0].fade_out == 99);
+
+    payload.blobLen = sizeof(HirariRegionRangeEdit) - 1;
+    assert(!hirari_region_store_apply_edit(&track, &track, &payload));
     return 0;
 }

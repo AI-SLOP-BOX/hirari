@@ -42,7 +42,7 @@ void HirariUnifiedEngine::set_playing(bool p) {
         waitForAudioCallbacks();
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         for (auto& track : m_tracks) {
-            track->collectRetiredRegionSnapshots();
+            hirari_region_store_trim_retired(track.get());
         }
     }
 }

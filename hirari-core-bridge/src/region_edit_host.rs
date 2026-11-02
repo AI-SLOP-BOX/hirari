@@ -372,14 +372,150 @@ pub(crate) fn host_ops() -> Option<HirariRegionHostOps> {
     HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
 }
 
+/// Store lookups are keyed by the live `Track` the host holds, because track
+/// ids only name a track inside one engine.
+pub(crate) fn store_key(host: *mut c_void, track_id: u32) -> *mut c_void {
+    let Some(ops) = host_ops() else {
+        return ptr::null_mut();
+    };
+    let Some(identity) = ops.track_identity else {
+        return ptr::null_mut();
+    };
+    match unsafe { identity(host, track_id) } {
+        0 => ptr::null_mut(),
+        value => value as *mut c_void,
+    }
+}
+
+extern "C" fn store_find(host: *mut c_void, track_id: u32, region_id: u32,
+                         out: *mut HirariRegionState) -> bool {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_find(key, region_id, out) }
+}
+
+extern "C" fn store_apply_edit(host: *mut c_void, payload: *const HirariRegionEditPayload) -> bool {
+    let track_id = unsafe { (*payload).track_id };
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_apply_edit(host, key, payload) }
+}
+
+extern "C" fn store_list_sync_group(host: *mut c_void, group: u32,
+                                    out: *mut HirariRegionGroupMember, capacity: usize) -> usize {
+    unsafe { crate::region_store::hirari_region_store_list_sync_group(host, group, out, capacity) }
+}
+
+extern "C" fn store_note_edit(host: *mut c_void, track_id: u32, region_id: u32,
+                              context: *mut c_void, mutate: HirariRegionNoteEditFn) -> bool {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_note_edit(key, region_id, context, mutate) }
+}
+
+extern "C" fn store_snapshot_region(host: *mut c_void, track_id: u32, region_id: u32) -> *mut c_void {
+    let key = store_key(host, track_id);
+    crate::region_store::hirari_region_store_snapshot_region(key, region_id)
+}
+
+extern "C" fn store_release_snapshot(_host: *mut c_void, handle: *mut c_void) {
+    unsafe { crate::region_store::hirari_region_store_release_snapshot(handle) };
+}
+
+extern "C" fn store_warp_markers(host: *mut c_void, track_id: u32, region_id: u32,
+                                 out: *mut crate::region_warp::HirariWarpMarker,
+                                 capacity: usize) -> usize {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_warp_markers(key, region_id, out, capacity) }
+}
+
+extern "C" fn store_range_edits(host: *mut c_void, track_id: u32, region_id: u32,
+                                out: *mut crate::region_processing::NativeRangeEdit,
+                                capacity: usize) -> usize {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_range_edits(key, region_id, out, capacity) }
+}
+
+extern "C" fn store_comp_ranges(host: *mut c_void, track_id: u32, region_id: u32,
+                                out: *mut crate::region_comp_ranges::NativeCompRange,
+                                capacity: usize, managed: *mut bool) -> usize {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_comp_ranges(key, region_id, out, capacity, managed) }
+}
+
+extern "C" fn store_retain_audio(host: *mut c_void, track_id: u32, region_id: u32) -> *mut c_void {
+    let key = store_key(host, track_id);
+    crate::region_store::hirari_region_store_retain_audio(key, region_id)
+}
+
+extern "C" fn store_track_token(host: *mut c_void, track_id: u32, generation: *mut u64,
+                                snapshot: *mut usize) -> bool {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_track_token(key, generation, snapshot) }
+}
+
+/// Lists a track's region ids for the host tables that address tracks by id.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_region_store_list_regions(host: *mut c_void, track_id: u32,
+                                                          out: *mut u32,
+                                                          capacity: usize) -> usize {
+    let key = store_key(host, track_id);
+    crate::region_store::hirari_region_store_list_track_regions(key, out, capacity)
+}
+
+extern "C" fn store_region_path(host: *mut c_void, track_id: u32, region_id: u32, out: *mut u8,
+                                capacity: usize) -> usize {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_region_path(key, region_id, out, capacity) }
+}
+
+extern "C" fn store_insert_region(host: *mut c_void, _track_id: u32, expected: usize,
+                                  path: *const u8, length: usize, start: u64, source_rate: f64,
+                                  timeline_rate: f64, duration: u64, region_id: u32,
+                                  audio: *mut c_void) -> u32 {
+    let _ = host;
+    unsafe {
+        crate::region_store::hirari_region_store_insert_region(
+            expected as *mut c_void, path, length, start, source_rate, timeline_rate,
+            duration, region_id, audio
+        )
+    }
+}
+
+extern "C" fn store_clone_region(host: *mut c_void, track_id: u32, region_id: u32,
+                                 state: *const HirariRegionState, new_id: u32) -> u32 {
+    let key = store_key(host, track_id);
+    unsafe { crate::region_store::hirari_region_store_clone_region(key, region_id, state, new_id) }
+}
+
 /// Installs the native host callbacks. Passing null clears them.
+///
+/// The region-data callbacks are answered by the Rust region store
+/// (`region_store.rs`); the host table only supplies the callbacks that need
+/// the native engine — decoded-buffer access, track listing, tempo, undo state
+/// and media decoding.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_region_host_install(ops: *const HirariRegionHostOps) {
     let slot = HOST_OPS.get_or_init(|| Mutex::new(None));
     let value = if ops.is_null() {
         None
     } else {
-        Some(unsafe { ptr::read(ops) })
+        let mut ops = unsafe { ptr::read(ops) };
+        if crate::region_store::region_data_installed() {
+            ops.find_region = Some(store_find);
+            ops.apply_edit = Some(store_apply_edit);
+            ops.list_sync_group = Some(store_list_sync_group);
+            ops.note_edit = Some(store_note_edit);
+            ops.snapshot_region = Some(store_snapshot_region);
+            ops.release_snapshot = Some(store_release_snapshot);
+            ops.warp_markers = Some(store_warp_markers);
+            ops.range_edits = Some(store_range_edits);
+            ops.comp_ranges = Some(store_comp_ranges);
+            ops.retain_audio = Some(store_retain_audio);
+            ops.track_token = Some(store_track_token);
+            ops.list_regions = Some(hirari_region_store_list_regions);
+            ops.region_path = Some(store_region_path);
+            ops.insert_region = Some(store_insert_region);
+            ops.clone_region = Some(store_clone_region);
+        }
+        Some(ops)
     };
     if let Ok(mut guard) = slot.lock() {
         *guard = value;

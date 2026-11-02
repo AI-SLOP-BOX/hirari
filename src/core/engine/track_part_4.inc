@@ -1,78 +1,18 @@
-    struct RegionSnapshot : std::vector<Region> {
-        explicit RegionSnapshot(const std::vector<Region>& source)
-            : std::vector<Region>(source) {}
-        std::vector<HirariTrackRegionRenderInput> renderInputs;
-    };
-
-    void publishRegionSnapshot() {
-        // Streaming processors are mutable. Give each published snapshot its
-        // own instances so an older callback/render can never advance state
-        // that a newer snapshot is using. Allocation and configuration stay
-        // on this control-side publication path.
-        for (auto& region : m_regions) {
-            // The note-edit table is Rust-owned: republish its immutable
-            // projection here and let the callback read it lock-free.
-            region.publishNoteEdits();
-            region.publishClipEdits();
-            if (!region.pitchPreserveWarp) continue;
-            region.timeStretch = std::shared_ptr<void>(
-                hirari_region_stretch_create(),
-                [](void* handle) { hirari_region_stretch_destroy(handle); });
-            (void)hirari_region_stretch_prepare(region.timeStretch.get(), m_sampleRate,
-                                                std::max<uint32_t>(m_blockSize, 512u));
-        }
-        auto snapshot = std::make_unique<RegionSnapshot>(m_regions);
-        // The published note views address the shared Rust snapshot, so the
-        // snapshot copy needs no second rebuild pass.
-        static_assert(sizeof(HirariWarpMarker) == 24);
-        static_assert(offsetof(HirariWarpMarker, sourceSample) == 0);
-        static_assert(offsetof(HirariWarpMarker, timelineSample) == 8);
-        static_assert(offsetof(HirariWarpMarker, transient) == 16);
-        static_assert(sizeof(HirariRegionBlockConfig) == 88);
-        static_assert(sizeof(HirariRegionBlockOutput) == 56);
-        static_assert(sizeof(HirariRegionRenderConfig) == 128);
-        static_assert(sizeof(HirariAudioNoteCurveView) == 64);
-        static_assert(offsetof(HirariAudioNoteCurveView, formantOffsetCents) == 56);
-        static_assert(sizeof(HirariTrackRegionRenderInput) == 312);
-        static_assert(offsetof(HirariTrackRegionRenderInput, playhead) == 160);
-        static_assert(offsetof(HirariTrackRegionRenderInput, warpRatio) == 248);
-        static_assert(offsetof(HirariTrackRegionRenderInput, muted) == 300);
-        std::vector<HirariRegionRenderSource> sources(snapshot->size());
-        for (size_t index = 0; index < snapshot->size(); ++index) {
-            const auto& region = (*snapshot)[index];
-            const uint32_t sourceChannels = region.audio ? region.audio->getNumChannels() : 0;
-            const float* sourceLeft =
-                sourceChannels > 0 ? region.audio->getReadPointer(0) : nullptr;
-            auto& source = sources[index];
-            source.state = region.editableState();
-            source.id = region.id;
-            source.muted = static_cast<uint8_t>(region.muted ? 1 : 0);
-            source.audioLeft = sourceLeft;
-            source.audioRight =
-                sourceChannels > 1 ? region.audio->getReadPointer(1) : sourceLeft;
-            source.audioSamples = region.audio ? region.audio->getNumSamples() : 0;
-            source.clip = region.clip();
-            source.noteRanges = region.noteRanges;
-            source.noteRangeCount = region.noteRangeCount;
-            source.noteCurves = region.noteCurves;
-            source.noteCurveCount = region.noteCurveCount;
-            source.noteCacheSegments = region.noteCacheKey;
-            source.stretchHandle = region.timeStretch.get();
-        }
-        snapshot->renderInputs.resize(snapshot->size());
-        if (hirari_track_build_region_render_inputs(
-                sources.data(), sources.size(), m_sampleRate, m_regionResampleKernel,
-                kTrackWsolaWindow.data(), reinterpret_cast<std::uintptr_t>(this),
-                reinterpret_cast<std::uintptr_t>(snapshot.get()),
-                snapshot->renderInputs.data(), snapshot->renderInputs.size()) != sources.size()) {
-            return;
-        }
-        const RegionSnapshot* published = snapshot.get();
-        m_regionSnapshots.push_back(std::move(snapshot));
-        m_regionGeneration.fetch_add(1, std::memory_order_release);
-        m_regionSnapshot.store(published, std::memory_order_release);
-        markProjectLayoutChanged();
-    }
+    // Region layout is shared with the Rust store, so the ABI it publishes
+    // through has to stay pinned here too.
+    static_assert(sizeof(HirariWarpMarker) == 24);
+    static_assert(offsetof(HirariWarpMarker, sourceSample) == 0);
+    static_assert(offsetof(HirariWarpMarker, timelineSample) == 8);
+    static_assert(offsetof(HirariWarpMarker, transient) == 16);
+    static_assert(sizeof(HirariRegionBlockConfig) == 88);
+    static_assert(sizeof(HirariRegionBlockOutput) == 56);
+    static_assert(sizeof(HirariRegionRenderConfig) == 128);
+    static_assert(sizeof(HirariAudioNoteCurveView) == 64);
+    static_assert(offsetof(HirariAudioNoteCurveView, formantOffsetCents) == 56);
+    static_assert(sizeof(HirariTrackRegionRenderInput) == 312);
+    static_assert(offsetof(HirariTrackRegionRenderInput, playhead) == 160);
+    static_assert(offsetof(HirariTrackRegionRenderInput, warpRatio) == 248);
+    static_assert(offsetof(HirariTrackRegionRenderInput, muted) == 300);
 
     std::shared_ptr<ProjectLayoutRevision> m_layoutRevision;
     uint32_t m_id;
@@ -85,7 +25,6 @@
     void* m_articulationState = nullptr;
     void* m_builtInMidiState = nullptr;
     double m_sampleRate = 44100.0;
-    const float* m_regionResampleKernel = nullptr;
     std::atomic<double> m_transportBpm{120.0};
     std::atomic<bool> m_transportPlaying{false};
     uint32_t m_blockSize = 0;
@@ -96,13 +35,11 @@
     std::atomic<bool> m_phaseInvert{false};
     std::atomic<bool> m_solo{false};
     std::atomic<bool> m_recordArmed{false};
-    std::vector<Region> m_regions;
-    mutable std::mutex m_regionEditMutex;
-    // Published only by the control thread. Old generations intentionally
-    // remain alive until Track destruction, avoiding RT-side shared_ptr release.
-    std::vector<std::unique_ptr<RegionSnapshot>> m_regionSnapshots;
-    std::atomic<const RegionSnapshot*> m_regionSnapshot{nullptr};
-    std::atomic<uint64_t> m_regionGeneration{0};
+    // The Rust region store owns the table and publishes immutable render
+    // inputs; the audio callback reads only these three atomics.
+    std::atomic<const HirariTrackRegionRenderInput*> m_regionInputs{nullptr};
+    std::atomic<size_t> m_regionInputCount{0};
+    std::atomic<uint8_t> m_regionPublished{0};
     std::atomic<bool> m_audioPitchAnalysisRunning{false};
     // Updated on the control thread from sandbox-reported plugin metadata;
     // the callback reads it to choose the built-in MIDI fallback.

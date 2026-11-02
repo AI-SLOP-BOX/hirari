@@ -7,13 +7,7 @@
         m_sampleRate = sr;
         m_blockSize = blockSize;
         m_isPrepared = true;
-        {
-            std::lock_guard<std::mutex> regionLock(m_regionEditMutex);
-            for (auto& region : m_regions) {
-                if (region.pitchPreserveWarp && region.timeStretch)
-                    (void)hirari_region_stretch_prepare(region.timeStretch.get(), sr, blockSize);
-            }
-        }
+        (void)hirari_region_store_prepare(this, sr, blockSize);
         hirari_channel_strip_set_sample_rate(m_strip, sr);
         hirari_track_holographic_panner_set_sample_rate(m_spatialPanner, sr);
         // Preparing a track is also the boundary used by offline renders and
@@ -26,14 +20,6 @@
         m_sendPostFaderBuffer.resize(2, blockSize);
         m_preInsertBuffer.resize(2, blockSize);
         m_effectChain.setSampleRate(sr, blockSize);
-        // A published region snapshot bakes this track's sample rate into
-        // HirariTrackRegionRenderInput::sampleRate. prepareToPlay is the only
-        // place the rate changes, and it is also the offline-render and
-        // project-reload boundary, so a snapshot published earlier (while the
-        // track still held its default rate) would otherwise keep rendering at
-        // the stale rate. Republish so the rate is captured with the new
-        // configuration. This is a per-prepare rebuild, not a per-block reset.
-        publishRegionSnapshot();
     }
     void resetForOfflineRender() noexcept {
         hirari_channel_strip_reset(m_strip);
@@ -203,45 +189,53 @@
         editControl([&] { m_solo.store(solo, std::memory_order_relaxed); });
     }
     bool isSolo() const { return m_solo.load(std::memory_order_relaxed); }
-    const std::vector<Region>& getRegions() const noexcept {
-        const auto* snapshot = getRegionSnapshot();
-        if (snapshot != nullptr) return *snapshot;
-        static const std::vector<Region> empty;
-        return empty;
+    // The Rust region store owns the table and publishes its render inputs;
+    // these three atomics are the only region state the audio callback reads.
+    void installRegionInputs(const HirariTrackRegionRenderInput* inputs,
+                             size_t length, uint8_t published) noexcept {
+        m_regionInputs.store(inputs, std::memory_order_release);
+        m_regionInputCount.store(length, std::memory_order_release);
+        m_regionPublished.store(published, std::memory_order_release);
     }
-    // Immutable generations are retained for the lifetime of the Track. UI
-    // and analysis code must read this snapshot instead of m_regions, which
-    // is owned by the control side and may be edited between frames.
-    const std::vector<Region>* getRegionSnapshot() const noexcept {
-        return m_regionSnapshot.load(std::memory_order_acquire);
-    }
-    // Clones a region's Rust note table for an analysis worker. The worker
-    // owns the returned store and releases it through the note-store ABI.
-    HirariRegionVariAudioStore* cloneRegionNoteStore(uint32_t regionId) const {
-        const auto* snapshot = getRegionSnapshot();
-        if (!snapshot) return nullptr;
-        const auto it = std::find_if(snapshot->begin(), snapshot->end(),
-            [regionId](const Region& region) { return region.id == regionId; });
-        if (it == snapshot->end()) return nullptr;
-        return it->noteStore ? hirari_region_vari_audio_store_clone(it->noteStore.get()) : nullptr;
-    }
-
-    // Runs a Rust note-table mutation under the region lock and republishes.
-    // The table handle is borrowed for the duration of the callback only.
-    bool editRegionNoteStore(uint32_t regionId, void* context,
-                             HirariRegionNoteMutateFn mutate) {
-        if (!mutate || audioPitchAnalysisRunning()) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != regionId) continue;
-            if (!mutate(context, region.noteStore.get())) return false;
-            publishRegionSnapshot();
-            return true;
+    static uint32_t regionHostAudioView(void* handle, const float** out,
+                                        size_t capacity, uint64_t* samples) {
+        if (handle == nullptr) return 0;
+        const auto audio = *static_cast<const std::shared_ptr<AudioBuffer>*>(handle);
+        if (!audio) return 0;
+        const uint32_t channels = static_cast<uint32_t>(audio->getNumChannels());
+        if (samples) *samples = static_cast<uint64_t>(audio->getNumSamples());
+        if (out && capacity >= channels) {
+            for (uint32_t channel = 0; channel < channels; ++channel) {
+                out[channel] = audio->getReadPointer(channel);
+            }
         }
-        return false;
+        return channels;
     }
-
+    static void* regionHostRetainHandle(void* handle) {
+        return new std::shared_ptr<AudioBuffer>(
+            *static_cast<std::shared_ptr<AudioBuffer>*>(handle));
+    }
+    static void regionHostReleaseHandle(void* handle) {
+        delete static_cast<std::shared_ptr<AudioBuffer>*>(handle);
+    }
+    static void regionHostInstall(void* track, const HirariTrackRegionRenderInput* inputs,
+                                  size_t length, uint8_t published) {
+        static_cast<Track*>(track)->installRegionInputs(inputs, length, published);
+    }
+    static void regionHostInvalidateFrozen(void* track) {
+        static_cast<Track*>(track)->invalidateFrozenForEdit();
+    }
+    static void regionHostMarkLayout(void* track) {
+        static_cast<Track*>(track)->markProjectLayoutChanged();
+    }
+    static bool regionHostPitchRunning(void* track) {
+        return static_cast<Track*>(track)->audioPitchAnalysisRunning();
+    }
+    static constexpr HirariRegionStorageHostOps kRegionStorageHost = {
+        &Track::regionHostAudioView, &Track::regionHostRetainHandle,
+        &Track::regionHostReleaseHandle, &Track::regionHostInstall,
+        &Track::regionHostInvalidateFrozen, &Track::regionHostMarkLayout,
+        &Track::regionHostPitchRunning};
     bool beginAudioPitchAnalysis() noexcept {
         bool expected = false;
         return m_audioPitchAnalysisRunning.compare_exchange_strong(
@@ -252,200 +246,6 @@
     }
     bool audioPitchAnalysisRunning() const noexcept {
         return m_audioPitchAnalysisRunning.load(std::memory_order_acquire);
-    }
-    // Commits a Rust F0 analysis result into the region's note table while
-    // the analysis job holds the gate; the gate only keeps other editors out.
-    bool commitAudioPitchAnalysis(uint32_t regionId, uint64_t expectedGeneration,
-                                  void* analysis) {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        if (regionGeneration() != expectedGeneration || !analysis) return false;
-        for (auto& region : m_regions) {
-            if (region.id != regionId) continue;
-            if (!hirari_audio_pitch_commit_region_result(analysis, region.noteStore.get()))
-                return false;
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-
-    bool appendProcessingStep(uint32_t regionId, uint32_t stepId, const std::string& operation,
-                              float parameter, bool enabled) {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) if (region.id == regionId) {
-            if (!region.appendProcessingStep(stepId, operation, parameter, enabled)) return false;
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-    bool clearProcessingHistory(uint32_t regionId) {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) if (region.id == regionId) {
-            if (!region.processingStore ||
-                hirari_region_processing_history_count(region.processingStore.get()) == 0) {
-                return false;
-            }
-            hirari_region_processing_history_reset(region.processingStore.get());
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-    uint64_t regionGeneration() const {
-        return m_regionGeneration.load(std::memory_order_acquire);
-    }
-
-    // May only be called while the audio callback is quiescent. This bounds
-    // the retired-generation list after a long editing session without ever
-    // reclaiming memory that an RT callback could still be reading.
-    void collectRetiredRegionSnapshots() {
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        const RegionSnapshot* current =
-            m_regionSnapshot.load(std::memory_order_acquire);
-        m_regionSnapshots.erase(
-            std::remove_if(m_regionSnapshots.begin(), m_regionSnapshots.end(),
-                [current](const auto& snapshot) { return snapshot.get() != current; }),
-            m_regionSnapshots.end());
-    }
-
-    // Host entry point for the scalar fields the Rust policy owns. Rust has
-    // already decided and resolved every value, so this only stores them and
-    // republishes; no second validation can disagree with it.
-    bool applyRegionScalarFields(uint32_t rid, const HirariRegionState& state) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            region.clipGain = state.clipGain;
-            region.muted = state.muted;
-            region.reverse = state.reverse;
-            region.pitchSemitones = state.pitchSemitones;
-            region.loopCount = state.loopCount;
-            region.syncGroup = state.syncGroup;
-            region.fadeInSamples = state.fadeInSamples;
-            region.fadeOutSamples = state.fadeOutSamples;
-            region.locked = state.locked;
-            if (state.pitchPreserveWarp != region.pitchPreserveWarp) {
-                // The renderer needs the untrimmed length to build the warp
-                // map, so backfill it the way the old setter did.
-                if (region.sourceLength == 0) region.sourceLength = region.len;
-                region.pitchPreserveWarp = state.pitchPreserveWarp;
-            }
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-
-    // Host entry point for trim and warp-ratio edits. Rust computed the
-    // geometry and the undo pair; this stores exactly those fields and swaps
-    // the marker list in a single publish.
-    bool applyRegionGeometry(uint32_t rid, const HirariRegionState& state,
-                             const HirariWarpMarker* markers, size_t markerCount) {
-        if (markerCount != 0 && markers == nullptr) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid || region.locked) continue;
-            region.start = state.start;
-            region.len = state.len;
-            region.sourceOffset = state.sourceOffset;
-            region.sourceLength = state.sourceLength;
-            region.fadeInSamples = state.fadeInSamples;
-            region.fadeOutSamples = state.fadeOutSamples;
-            region.warpRatio = state.warpRatio;
-            (void)hirari_region_clip_edits_set_warp_markers(
-                region.clipEdits.get(), markers, markerCount, 0, 0, false);
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-
-    // Host entry point for edits that move or re-trim a region. Re-adding the
-    // replacement runs the same normalisation (`addRegion`) the previous
-    // remove/add path used, including the sorted insert into `m_regions`.
-    bool applyRegionState(uint32_t rid, const HirariRegionState& state) {
-        invalidateFrozenForEdit();
-        Region replacement;
-        {
-            std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-            bool found = false;
-            for (const auto& region : m_regions) {
-                if (region.id != rid) continue;
-                replacement = region;
-                found = true;
-                break;
-            }
-            if (!found) return false;
-        }
-        replacement.applyEditableState(state);
-        removeRegion(rid);
-        addRegion(replacement);
-        return true;
-    }
-
-    // Adopts the comp-range batch Rust admitted. The rules (count, ordering,
-    // overlap, fade width, region bounds, lock/managed interaction) live in
-    // `hirari_region_comp_ranges_validate`; storing the accepted batch is all
-    // that is left here.
-    bool replaceRegionCompRanges(uint32_t rid, const HirariRegionCompRange* ranges,
-                                 size_t count, bool managed) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            if (!hirari_region_clip_edits_replace_comp_ranges(
-                    region.clipEdits.get(), ranges, count, managed)) return false;
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-
-    std::vector<Region::RangeEdit> regionRangeEdits(uint32_t rid) const {
-        for (const auto& region : m_regions) if (region.id == rid) {
-            const auto* view = region.clip();
-            if (view->rangeEditCount == 0) return {};
-            return {view->rangeEdits, view->rangeEdits + view->rangeEditCount};
-        }
-        return {};
-    }
-
-    // `validate` re-admits the replacement batch; without it Rust already
-    // produced this sorted, bounded list.
-    bool replaceRegionRangeEdits(uint32_t rid, const Region::RangeEdit* edits,
-                                 size_t count, bool validate = true) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid || region.locked) continue;
-            if (!hirari_region_clip_edits_replace_range_edits(
-                    region.clipEdits.get(), edits, count, region.len, validate)) {
-                return false;
-            }
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
-    }
-
-    // Rejects the edit when normalization would drop any marker, matching the
-    // previous contract. An unchanged list is accepted without republishing.
-    bool setRegionWarpMarkers(uint32_t rid, const HirariWarpMarker* markers, size_t count) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::find_if(m_regions.begin(), m_regions.end(), [rid](const Region& r) {
-            return r.id == rid;
-        });
-        if (it == m_regions.end() || it->locked) return false;
-        const uint64_t sourceSpan = it->sourceLength > 0 ? it->sourceLength : it->len;
-        const int32_t applied = hirari_region_clip_edits_set_warp_markers(
-            it->clipEdits.get(), markers, count, sourceSpan, it->len, true);
-        if (applied < 0) return false;
-        if (applied > 0) publishRegionSnapshot();
-        return true;
     }
 
     // Audio-thread producer for write automation. The queue is deliberately

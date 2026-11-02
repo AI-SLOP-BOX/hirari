@@ -62,7 +62,6 @@
     std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid) const {
         return const_cast<HirariUnifiedEngine*>(this)->findTrackSharedLocked(tid);
     }
-    const Region* findRegionLocked(uint32_t tid, uint32_t rid) const;
     // Track lookup in the published audio snapshot. Used by control callbacks
     // that do not hold m_tracksMutex.
     Track* findPublishedTrack(uint32_t tid) const;
@@ -117,35 +116,11 @@
         return findTrackSharedLocked(tid);
     }
 
-    // Region resolution for the host callbacks, on the same single traversal.
-    template <typename Fn>
-    static std::invoke_result_t<Fn, const Region&> withHostRegion(
-        void* host, uint32_t tid, uint32_t rid,
-        std::invoke_result_t<Fn, const Region&> missing, const Fn& fn) {
-        if (!host) return missing;
-        auto* engine = static_cast<HirariUnifiedEngine*>(host);
-        std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-        const Region* region = engine->findRegionLocked(tid, rid);
-        return region != nullptr ? fn(*region) : missing;
-    }
-
     // Variable-length host reads answer "how many" when the caller's buffer is
     // missing or too small, and fill it otherwise.
     template <typename T>
     static size_t fillSpan(const T* items, size_t count, T* out, size_t capacity) {
         if (out && capacity >= count && count != 0) std::copy(items, items + count, out);
-        return count;
-    }
-
-    // Same contract for spans that need a projection before they can be copied.
-    template <typename Range, typename T, typename Project>
-    static size_t fillProjected(const Range& range, T* out, size_t capacity,
-                                const Project& project) {
-        size_t count = 0;
-        for (const auto& item : range) {
-            if (out && count < capacity) out[count] = project(item);
-            ++count;
-        }
         return count;
     }
 

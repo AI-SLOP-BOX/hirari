@@ -429,10 +429,10 @@ extern "C" const HirariRegionClipEditsView* hirari_region_clip_edits_frozen_view
 extern "C" void hirari_region_clip_edits_frozen_free(HirariRegionClipEditsFrozen* frozen);
 // Region edit host bridge.
 //
-// Region storage stays in the engine because it owns the audio buffers and the
-// immutable snapshot the audio callback reads. Rust owns the edit policy: it
-// reads the current state through the host, decides, asks the host to apply,
-// and asks the host to record exactly one undo entry. Every callback runs on
+// The region table lives in Rust (region_store.rs); the engine keeps only the
+// handles the store cannot own — decoded audio buffers and the publish target.
+// Rust owns the edit policy: it reads the current state, decides, applies and
+// records exactly one undo entry, all inside the store. Every callback runs on
 // the control thread; none of them is reachable from the audio callback.
 //
 // The structs below mirror `hirari-core-bridge/src/region_edit_host.rs` byte
@@ -849,8 +849,8 @@ struct HirariTrackRegionRenderInput {
     uint8_t pitchPreserveWarp = 0;
     uint8_t needsSpectralStretch = 0;
 };
-// Snapshot publication: C++ keeps the Region copies that own the decoded audio
-// and the edit projections, Rust derives the overlap crossfades, the
+// Snapshot publication: Rust keeps the region copies that own the decoded audio
+// and the edit projections, derives the overlap crossfades, the
 // spectral-stretch decision and the render input the callback reads.
 struct HirariRegionRenderSource {
     HirariRegionState state{};
@@ -873,6 +873,97 @@ extern "C" size_t hirari_track_build_region_render_inputs(
     const HirariRegionRenderSource* sources, size_t count, double sample_rate,
     const float* resample_kernel, const float* wsola_window, uintptr_t cache_owner,
     uintptr_t cache_snapshot, HirariTrackRegionRenderInput* out, size_t capacity);
+// The region table itself is Rust-owned (region_store.rs). A track installs its
+// identity here and receives back only the immutable render-input array the
+// audio callback reads; the decoded buffer stays a C++ handle the store retains
+// and releases through the callbacks below.
+struct HirariRegionStorageHostOps {
+    uint32_t (*audioView)(void* handle, const float** out, size_t capacity,
+                          uint64_t* samples) = nullptr;
+    void* (*retainHandle)(void* handle) = nullptr;
+    void (*releaseHandle)(void* handle) = nullptr;
+    void (*installRegions)(void* track, const HirariTrackRegionRenderInput* inputs,
+                           size_t length, uint8_t published) = nullptr;
+    void (*invalidateFrozen)(void* track) = nullptr;
+    void (*markLayout)(void* track) = nullptr;
+    bool (*pitchRunning)(void* track) = nullptr;
+};
+extern "C" void hirari_region_storage_host_install(const HirariRegionStorageHostOps* ops);
+// A region under construction; its edit tables are the Rust stores the finished
+// region will own.
+struct HirariRegionDraft;
+extern "C" HirariRegionDraft* hirari_region_store_draft_new(
+    uint32_t id, const uint8_t* path, size_t pathLength, const uint8_t* name,
+    size_t nameLength, const HirariRegionState* state);
+extern "C" HirariRegionClipEdits* hirari_region_store_draft_clip(HirariRegionDraft* draft);
+extern "C" HirariRegionVariAudioStore* hirari_region_store_draft_notes(HirariRegionDraft* draft);
+extern "C" HirariRegionProcessingHistoryStore* hirari_region_store_draft_history(
+    HirariRegionDraft* draft);
+extern "C" bool hirari_region_store_draft_add(
+    HirariRegionDraft* draft, void* track, void* audio);
+extern "C" void hirari_region_store_draft_discard(HirariRegionDraft* draft);
+// The region table is keyed by the live Track, not by the track id: ids are
+// allocated per engine, so two engines can own the same id at the same time.
+// Entry points that only have an engine and an id resolve the track through
+// the host's `trackIdentity` callback before reaching the store.
+extern "C" void hirari_region_store_install(void* track, uint32_t trackId);
+extern "C" void hirari_region_store_forget(void* track);
+extern "C" bool hirari_region_store_prepare(void* track, double sampleRate,
+                                            uint32_t blockSize);
+extern "C" void hirari_region_store_trim_retired(void* track);
+extern "C" size_t hirari_region_store_count(void* track);
+extern "C" bool hirari_region_store_find(void* track, uint32_t regionId,
+                                         HirariRegionState* out);
+extern "C" size_t hirari_region_store_warp_markers(void* track,
+                                                   uint32_t regionId, HirariWarpMarker* out,
+                                                   size_t capacity);
+extern "C" size_t hirari_region_store_range_edits(void* track,
+                                                  uint32_t regionId,
+                                                  HirariRegionRangeEdit* out, size_t capacity);
+extern "C" size_t hirari_region_store_comp_ranges(void* track,
+                                                  uint32_t regionId,
+                                                  HirariRegionCompRange* out, size_t capacity,
+                                                  bool* managed);
+extern "C" size_t hirari_region_store_region_path(void* track,
+                                                  uint32_t regionId, uint8_t* out,
+                                                  size_t capacity);
+extern "C" size_t hirari_region_store_list_regions(void* host, uint32_t trackId,
+                                                   uint32_t* out, size_t capacity);
+extern "C" bool hirari_region_store_track_token(void* track,
+                                                uint64_t* generation, size_t* snapshot);
+extern "C" size_t hirari_region_store_list_sync_group(void* host, uint32_t group,
+                                                      HirariRegionGroupMember* out,
+                                                      size_t capacity);
+extern "C" void* hirari_region_store_retain_audio(void* track,
+                                                  uint32_t regionId);
+extern "C" void* hirari_region_store_note_snapshot(void* track, uint32_t regionId);
+extern "C" bool hirari_region_store_note_edit(void* track, uint32_t regionId,
+                                              void* context, HirariRegionNoteMutateFn mutate);
+extern "C" void* hirari_region_store_snapshot_region(void* track,
+                                                     uint32_t regionId);
+extern "C" void hirari_region_store_release_snapshot(void* handle);
+extern "C" uint32_t hirari_region_store_clone_region(void* track,
+                                                     uint32_t regionId,
+                                                     const HirariRegionState* state,
+                                                     uint32_t newRegionId);
+extern "C" bool hirari_region_store_copy_regions(void* sourceTrack,
+                                                 void* destinationTrack,
+                                                 const uint32_t* regionIds, size_t count);
+struct HirariLayoutRegionHeader;
+extern "C" bool hirari_region_store_layout_header(void* track, size_t index,
+                                                  HirariLayoutRegionHeader* out);
+extern "C" size_t hirari_region_store_layout_string(void* track, size_t index,
+                                                    uint32_t kind, uint8_t* out,
+                                                    size_t capacity);
+extern "C" bool hirari_region_store_project_end(void* track, uint64_t* out);
+extern "C" bool hirari_region_store_span_at(void* track, size_t index, uint64_t* start,
+                                            uint64_t* length, uint32_t* loopCount);
+extern "C" void hirari_region_store_forget_waveforms(void* host, void* track);
+extern "C" bool hirari_region_store_apply_edit(void* host, void* track,
+                                               const HirariRegionEditPayload* payload);
+extern "C" bool hirari_region_store_append_processing(void* track, uint32_t regionId,
+                                                      HirariEventStep step);
+extern "C" bool hirari_region_store_clear_processing(void* track, uint32_t regionId);
 // Native built-in DSP processors share one dispatch surface; the host below
 // owns the processor handles, so the per-processor entry points stay inside
 // Rust instead of appearing as a C++ ABI.

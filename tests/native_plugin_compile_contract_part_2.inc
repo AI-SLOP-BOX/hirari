@@ -62,14 +62,14 @@
         freezeTrack->clearFrozenAudio();
         if (freezeTrack->isFrozen()) return 67;
         auto renderedTrack = std::make_shared<Hirari::Core::Engine::Track>(80, "Rendered Freeze", Hirari::Core::Engine::Track::Audio);
-        Hirari::Core::Engine::Region sourceRegion{};
-        sourceRegion.id = 1;
-        sourceRegion.start = 0;
-        sourceRegion.len = 8;
-        sourceRegion.muted = false;
-        sourceRegion.name = "freeze-source";
-        sourceRegion.audio = frozen;
-        renderedTrack->addRegion(sourceRegion);
+        HirariRegionState sourceState{};
+        sourceState.len = 8;
+        auto* sourceDraft = hirari_region_store_draft_new(
+            1, nullptr, 0, reinterpret_cast<const uint8_t*>("freeze-source"),
+            sizeof("freeze-source") - 1, &sourceState);
+        if (!hirari_region_store_draft_add(
+                sourceDraft, renderedTrack.get(),
+                new std::shared_ptr<Hirari::Core::AudioBuffer>(frozen))) return 68;
         if (!Hirari::Core::Engine::TrackFreezeManager::freezeTrack(renderedTrack, 8, 48'000) ||
             !renderedTrack->isFrozen()) return 68;
         Hirari::Core::Engine::TrackFreezeManager::unfreezeTrack(renderedTrack);

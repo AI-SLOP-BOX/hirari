@@ -59,54 +59,22 @@
     // callbacks that module drives.
 
 public:
-    // Region edit host callbacks. Rust drives every region edit through these
-    // entry points; see hirari_unified_engine_part_4z.inc.
-    static bool regionHostFind(void* host, uint32_t trackId, uint32_t regionId,
-                               HirariRegionState* out);
-    static bool regionHostApply(void* host, const HirariRegionEditPayload* payload);
-    static void* regionHostSnapshot(void* host, uint32_t trackId, uint32_t regionId);
-    static void regionHostReleaseSnapshot(void* host, void* handle);
-    static size_t regionHostWarpMarkers(void* host, uint32_t trackId, uint32_t regionId,
-                                        HirariWarpMarker* out, size_t capacity);
-    static size_t regionHostRangeEdits(void* host, uint32_t trackId, uint32_t regionId,
-                                       HirariRegionRangeEdit* out, size_t capacity);
-    static size_t regionHostListSyncGroup(void* host, uint32_t group,
-                                          HirariRegionGroupMember* out, size_t capacity);
-    static bool regionHostNoteEdit(void* host, uint32_t trackId, uint32_t regionId,
-                                   void* context, HirariRegionNoteMutateFn mutate);
-    static void* regionHostRetainAudio(void* host, uint32_t trackId, uint32_t regionId);
-    static uint32_t regionHostAudioView(void* handle, const float** out, size_t capacity,
-                                        uint64_t* samples);
-    static void regionHostReleaseAudio(void* handle);
-    static bool regionHostTrackToken(void* host, uint32_t trackId, uint64_t* generation,
-                                     size_t* snapshot);
+    // Region edit host callbacks. The Rust region store owns the table, so
+    // these only expose the engine surface it cannot reach: the track
+    // registry, media decode and the pitch-analysis gate. Decoded-buffer
+    // access lives on Track as the region storage host.
     static size_t regionHostListTracks(void* host, uint32_t* out, size_t capacity);
-    static size_t regionHostListRegions(void* host, uint32_t trackId, uint32_t* out,
-                                        size_t capacity);
     static void* regionHostTempoState(void* host);
     static void* regionHostUndoState(void* host);
     static double regionHostSampleRate(void* host);
-    static size_t regionHostRegionPath(void* host, uint32_t trackId, uint32_t regionId,
-                                       uint8_t* out, size_t capacity);
     static bool regionHostDecodeAudio(void* host, const uint8_t* path, size_t length,
                                       void** outHandle, double* outRate);
-    static uint32_t regionHostInsertRegion(void* host, uint32_t trackId,
-                                           size_t expectedTrack, const uint8_t* path,
-                                           size_t pathLength, uint64_t startSample,
-                                           double sourceSampleRate, double timelineSampleRate,
-                                           uint64_t length, uint32_t regionId,
-                                           void* audioHandle);
     static size_t regionHostTrackIdentity(void* host, uint32_t trackId);
     static void* regionHostRetainTrack(void* host, uint32_t trackId);
     static void regionHostReleaseTrack(void* handle);
     static bool regionHostPitchBegin(void* trackHandle);
     static void regionHostPitchFinish(void* trackHandle);
     static void* regionHostNoteSnapshot(void* trackHandle, uint32_t regionId);
-    static uint32_t regionHostClone(void* host, uint32_t trackId, uint32_t regionId,
-                                    const HirariRegionState* state, uint32_t newRegionId);
-    static size_t regionHostCompRanges(void* host, uint32_t trackId, uint32_t regionId,
-                                       HirariRegionCompRange* out, size_t capacity,
-                                       bool* managed);
 
     // Automation edit host callbacks. Rust drives the curve edits; see
     // hirari_unified_engine_part_6b.inc.

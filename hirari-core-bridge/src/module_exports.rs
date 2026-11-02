@@ -307,6 +307,7 @@ pub mod region_processing;
 pub mod region_render;
 pub mod region_resampler;
 pub mod region_split;
+pub mod region_store;
 pub mod region_time_jobs;
 pub mod region_time_stretch;
 pub mod region_warp;

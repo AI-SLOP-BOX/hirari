@@ -8,12 +8,14 @@
 // host callbacks (part_4z) that expose storage.
 
 bool HirariUnifiedEngine::append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled) {
-    return mutateLockedTrack(tid, [&](Track& track) {
-        return track.appendProcessingStep(rid, stepId, std::string(operation), parameter, enabled);
-    });
+    const HirariEventStep step{stepId, reinterpret_cast<const uint8_t*>(operation.data()),
+                               operation.size(), parameter, enabled};
+    Track* track = findPublishedTrack(tid);
+    return track != nullptr && hirari_region_store_append_processing(track, rid, step);
 }
 bool HirariUnifiedEngine::clear_region_processing(uint32_t tid, uint32_t rid) {
-    return mutateLockedTrack(tid, [&](Track& track) { return track.clearProcessingHistory(rid); });
+    Track* track = findPublishedTrack(tid);
+    return track != nullptr && hirari_region_store_clear_processing(track, rid);
 }
 
 bool HirariUnifiedEngine::loadProject(std::string_view path) {

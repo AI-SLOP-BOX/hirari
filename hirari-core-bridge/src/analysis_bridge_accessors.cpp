@@ -57,9 +57,16 @@ rust::String get_song_structure_json(const Engine::HirariUnifiedEngine& engine) 
     uint64_t maxLen = 0;
     for (const auto& t : tracks) {
         if (!t) continue;
-        for (const auto& r : t->getRegions()) {
-            regionStarts.push_back(r.start);
-            maxLen = std::max(maxLen, r.start + r.len);
+        const size_t regionCount = hirari_region_store_count(t.get());
+        for (size_t i = 0; i < regionCount; ++i) {
+            uint64_t start = 0;
+            uint64_t length = 0;
+            uint32_t loopCount = 0;
+            if (!hirari_region_store_span_at(t.get(), i, &start, &length, &loopCount)) {
+                continue;
+            }
+            regionStarts.push_back(start);
+            maxLen = std::max(maxLen, start + length);
         }
     }
     const double sr = engine.get_sample_rate();

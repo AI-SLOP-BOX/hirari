@@ -196,36 +196,18 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         },
         [](void* host, size_t index) {
             const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
-            return track ? track->getRegions().size() : size_t{0};
+            return track ? hirari_region_store_count(const_cast<Track*>(track)) : size_t{0};
         },
         [](void* host, size_t index, size_t regionIndex, HirariLayoutRegionHeader* out) {
             const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
-            if (!track) return false;
-            const auto& regions = track->getRegions();
-            if (regionIndex >= regions.size()) return false;
-            const auto& region = regions[regionIndex];
-            out->id = region.id;
-            out->state = region.editableState();
-            out->sourceSampleRate = region.sourceSampleRate;
-            out->audioLoaded = region.audio != nullptr;
-            out->warpMarkers = region.clip()->warpMarkers;
-            out->warpMarkerCount = region.clip()->warpMarkerCount;
-            out->rangeEdits = region.clip()->rangeEdits;
-            out->rangeEditCount = region.clip()->rangeEditCount;
-            out->noteStore = region.noteStore.get();
-            out->noteFrozen = region.noteSnapshot.get();
-            out->processingStore = region.processingStore.get();
-            return true;
+            return track && hirari_region_store_layout_header(const_cast<Track*>(track), regionIndex, out);
         },
         [](void* host, size_t index, size_t regionIndex, uint32_t kind, uint8_t* out,
            size_t capacity) {
             const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
-            if (!track) return size_t{0};
-            const auto& regions = track->getRegions();
-            if (regionIndex >= regions.size()) return size_t{0};
-            return layoutCopyString(kind == 0 ? regions[regionIndex].name
-                                        : regions[regionIndex].path,
-                              out, capacity);
+            return track ? hirari_region_store_layout_string(const_cast<Track*>(track), regionIndex, kind,
+                                                             out, capacity)
+                         : size_t{0};
         },
         [](void* host, HirariLayoutSidechainRoute* out, size_t capacity) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
@@ -375,13 +357,8 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
         },
         [](void* handle, uint64_t* out) -> bool {
             if (!handle || !out) return false;
-            uint64_t projectEnd = 0;
-            for (const auto& region : (*static_cast<std::shared_ptr<Track>*>(handle))->getRegions()) {
-                if (region.len == 0 || region.start > UINT64_MAX - region.len) return false;
-                projectEnd = std::max(projectEnd, region.start + region.len);
-            }
-            *out = projectEnd;
-            return true;
+            const auto track = *static_cast<std::shared_ptr<Track>*>(handle);
+            return track && hirari_region_store_project_end(track.get(), out);
         },
         [](void* host) -> uint32_t {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);

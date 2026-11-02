@@ -132,8 +132,13 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
                 std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
                 for (const auto& track : engine->m_tracks) {
                     if (!track) continue;
-                    for (const auto& region : track->getRegions()) {
-                        regionSpans.push_back({region.start, region.len, region.loopCount});
+                    const size_t regionCount = hirari_region_store_count(track.get());
+                    for (size_t index = 0; index < regionCount; ++index) {
+                        uint64_t start = 0, length = 0;
+                        uint32_t loopCount = 0;
+                        if (hirari_region_store_span_at(track.get(), index, &start,
+                                                        &length, &loopCount))
+                            regionSpans.push_back({start, length, loopCount});
                     }
                 }
             }

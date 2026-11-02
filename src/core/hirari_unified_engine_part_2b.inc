@@ -171,9 +171,7 @@ std::shared_ptr<Track> HirariUnifiedEngine::detachTrackLocked(uint32_t tid, bool
                            [tid](const auto& track) { return track->getId() == tid; });
     if (it == m_tracks.end()) return nullptr;
     auto detached = *it;
-    for (const auto& region : detached->getRegions()) {
-        hirari_region_waveform_forget(this, region.id);
-    }
+    hirari_region_store_forget_waveforms(this, detached.get());
     m_deferredDestructionTracks.push_back(detached);
     m_tracks.erase(it);
     mark_project_layout_changed();
@@ -217,7 +215,7 @@ void HirariUnifiedEngine::installTrackEditHost() {
     };
     static const HirariTrackEditHostOps ops = {
         &HirariUnifiedEngine::regionHostListTracks,
-        &HirariUnifiedEngine::regionHostListRegions,
+        &hirari_region_store_list_regions,
         [](void* host, uint32_t type, uint32_t id, const uint8_t* name, size_t nameLength,
            size_t* outIndex) -> void* {
             if (!host || !name || !outIndex) return nullptr;
@@ -254,7 +252,7 @@ void HirariUnifiedEngine::installTrackEditHost() {
                                            [tid](const auto& track) { return track->getId() == tid; });
                 if (source == engine->m_tracks.end()) return nullptr;
                 const auto& original = *source;
-                if (original->getRegions().size() != regionIdCount) return nullptr;
+                if (hirari_region_store_count(original.get()) != regionIdCount) return nullptr;
                 pluginTypes = original->getPluginTypes();
                 pluginStates = original->getPluginStates();
                 volumeAutomation = original->getVolumeAutomationPoints();
@@ -298,12 +296,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     }
                 }
                 if (!pluginAutomation.empty()) copy->setPluginAutomation(pluginAutomation);
-                const auto& sourceRegions = original->getRegions();
-                for (size_t regionIndex = 0; regionIndex < sourceRegions.size(); ++regionIndex) {
-                    Region cloned = sourceRegions[regionIndex];
-                    cloned.id = regionIds[regionIndex];
-                    copy->addRegion(cloned);
-                }
+                if (!hirari_region_store_copy_regions(original.get(), copy.get(), regionIds, regionIdCount))
+                    return nullptr;
                 insertIndex = engine->m_tracks.size();
                 engine->m_tracks.push_back(copy);
                 engine->mark_project_layout_changed();

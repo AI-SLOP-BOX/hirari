@@ -144,6 +144,7 @@ namespace {
     HirariUnifiedEngine::installTrackFreezeHost();
     HirariUnifiedEngine::installCommandHost();
     HirariUnifiedEngine::installTrackControlHost();
+    hirari_region_storage_host_install(&Hirari::Core::Engine::Track::kRegionStorageHost);
     hirari_region_host_install(&kRegionEditHostOps);
     hirari_automation_host_install(&kAutomationEditHostOps);
     return true;

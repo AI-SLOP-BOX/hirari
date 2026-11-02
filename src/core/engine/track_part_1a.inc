@@ -14,11 +14,11 @@ public:
         }
         m_articulationState = hirari_track_midi_articulation_create();
         m_pdcDelayState = hirari_track_pdc_delay_create();
-        m_regionResampleKernel = hirari_region_resampler_prepare();
-        publishRegionSnapshot();
+        hirari_region_store_install(this, m_id);
     }
 
     virtual ~Track() {
+        hirari_region_store_forget(this);
         hirari_builtin_midi_instrument_destroy(m_builtInMidiState);
         hirari_track_midi_articulation_destroy(m_articulationState);
         hirari_track_pdc_delay_destroy(m_pdcDelayState);
@@ -27,92 +27,6 @@ public:
         hirari_channel_strip_destroy(m_strip);
         hirari_track_holographic_panner_destroy(m_spatialPanner);
         hirari_track_frozen_store_destroy(m_frozenStore);
-    }
-
-    /**
-     * @brief Adds a region with industrial-grade management and temporal sovereignty.
-     * INDUSTRIAL: Delegating region management and sorting to the Rust 'TrackOrchestrator'.
-     */
-    void addRegion(const Region& r) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        Region normalized = r;
-        // Keep audio-buffer ownership in C++; delegate timeline, loop, gain,
-        // pitch, fade and source-range invariants to the Rust core. The state
-        // record round-trips through the same layout the edit host uses.
-        auto state = normalized.editableState();
-        const bool hasAudio = static_cast<bool>(normalized.audio);
-        const uint64_t audioSamples = hasAudio ? normalized.audio->getNumSamples() : 0;
-        const uint32_t audioChannels = hasAudio ? normalized.audio->getNumChannels() : 0;
-        if (!hirari_region_normalize_add_metadata(
-                &state, hasAudio, audioSamples, audioChannels)) return;
-        normalized.applyEditableState(state);
-        // VariAudio-style note segments are immutable render metadata.  Keep
-        // only bounded, well-formed segments in the published snapshot so a
-        // malformed project cannot inject NaN/Inf pitch ratios into the audio
-        // callback.  Ordering is deterministic for fast segment lookup.
-        // The whole policy (cap, drop malformed, normalize anchor windows,
-        // sort, phase prefixes) lives in the Rust store. Detach first: the
-        // copy shares the caller's store handle until it owns its own table.
-        // A failed normalization only drops notes, so keep the region and let
-        // the caller observe it in the published snapshot rather than silently
-        // discarding the whole edit.
-        normalized.detachNoteEdits();
-        (void)hirari_region_vari_audio_store_normalize(normalized.noteStore.get());
-        // Edit tables follow the same rule: detach first so this region owns
-        // its table, then let Rust cap and normalize the stored entries.
-        normalized.detachClipEdits();
-        const uint64_t warpSourceSpan = normalized.sourceLength > 0
-            ? normalized.sourceLength : normalized.len;
-        hirari_region_clip_edits_normalize_warp_markers(
-            normalized.clipEdits.get(), warpSourceSpan, normalized.len);
-        hirari_region_clip_edits_normalize_range_edits(
-            normalized.clipEdits.get(), normalized.len);
-        auto it = std::lower_bound(
-            m_regions.begin(),
-            m_regions.end(),
-            normalized.start,
-            [](const Region& lhs, uint64_t start) { return lhs.start < start; }
-        );
-        m_regions.insert(it, std::move(normalized));
-        publishRegionSnapshot();
-    }
-
-    void removeRegion(uint32_t rid) {
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        auto it = std::remove_if(
-            m_regions.begin(),
-            m_regions.end(),
-            [rid](const Region& r) { return r.id == rid; }
-        );
-        if (it != m_regions.end()) {
-            m_regions.erase(it, m_regions.end());
-            publishRegionSnapshot();
-        }
-    }
-
-    // Adopts a decoded replacement. Path/rate policy, the timeline geometry
-    // derived from the decoded length, and the undo snapshots live in
-    // `region_edit_host.rs`; this stores the resolved state and drops the warp
-    // markers that belonged to the previous source.
-    bool replaceRegionAudio(uint32_t rid, std::string path, std::shared_ptr<AudioBuffer> audio,
-                            const HirariRegionState& state) {
-        if (!audio) return false;
-        invalidateFrozenForEdit();
-        std::lock_guard<std::mutex> editLock(m_regionEditMutex);
-        for (auto& region : m_regions) {
-            if (region.id != rid) continue;
-            region.path = std::move(path);
-            region.name = region.path;
-            region.audio = std::move(audio);
-            region.applyEditableState(state);
-            (void)hirari_region_clip_edits_set_warp_markers(
-                region.clipEdits.get(), nullptr, 0, 0, 0, false);
-            publishRegionSnapshot();
-            return true;
-        }
-        return false;
     }
 
     /**
@@ -312,7 +226,9 @@ private:
         std::array<DSP::TimedParameterEvent, kMaxPluginAutomationEventsPerBlock>
             pluginAutomationEvents{};
         size_t pluginAutomationEventCount = 0;
-        const auto* regions = m_regionSnapshot.load(std::memory_order_acquire);
+        const auto* regionInputs = m_regionInputs.load(std::memory_order_acquire);
+        const size_t regionInputCount = m_regionInputCount.load(std::memory_order_acquire);
+        const uint8_t regionPublished = m_regionPublished.load(std::memory_order_acquire);
         size_t trackDelayCount = 0;
         const auto* trackDelayAutomation = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
             hirari_track_automation_store_points(m_automationStore, 2, &trackDelayCount));
@@ -335,9 +251,7 @@ private:
             frozen ? frozen->getNumChannels() : 0,
             frozen ? frozen->getNumSamples() : 0,
             hirari_track_frozen_store_total_samples(m_frozenStore),
-            regions && !regions->renderInputs.empty() ? regions->renderInputs.data() : nullptr,
-            regions ? regions->renderInputs.size() : 0,
-            static_cast<uint8_t>(regions != nullptr),
+            regionInputs, regionInputCount, regionPublished,
             static_cast<uint8_t>(m_phaseInvert.load(std::memory_order_relaxed)),
             trackDelayAutomation && trackDelayCount != 0 ? trackDelayAutomation : nullptr,
             trackDelayCount, hirari_track_automation_store_hint(m_automationStore, 2),
