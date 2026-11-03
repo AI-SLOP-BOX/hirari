@@ -1,15 +1,18 @@
 //! Control-command admission policy: target lookup, project/audio generation
 //! recheck, queue-full reporting and the forensic journal ordering.
 //!
-//! The engine keeps the lock-free queue and the consumer that applies commands
-//! in the audio callback. This module decides whether a command may enter that
-//! queue at all, and which error the caller sees when it may not.
+//! The engine keeps the tracks the target lookup resolves against and the
+//! consumer that applies commands in the audio callback. This module owns the
+//! admission decision and writes the admitted command straight into the Rust
+//! command ring, forensic journal and diagnostic log that the engine holds.
 //!
 //! Every entry point runs on the control thread.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Mutex, OnceLock};
+
+use crate::engine_rings::CommandRecord;
 
 pub const COMMAND_ERROR_NONE: u8 = 0;
 pub const COMMAND_ERROR_INVALID_TARGET: u8 = 1;
@@ -21,21 +24,16 @@ pub const COMMAND_ERROR_QUEUE_FULL: u8 = 4;
 pub type TrackExistsFn = unsafe extern "C" fn(*mut c_void, u32) -> bool;
 /// Write the current project and audio-configuration generations.
 pub type GenerationsFn = unsafe extern "C" fn(*mut c_void, *mut u64, *mut u64) -> bool;
-/// Enqueue a command stamped with the audio generation it was admitted for.
-pub type EnqueueFn = unsafe extern "C" fn(*mut c_void, u32, u32, f32, u64, u64) -> bool;
-/// Append the command to the forensic journal.
-pub type JournalFn = unsafe extern "C" fn(*mut c_void, u32, u32, f32, u64);
-/// Surface a full command queue in the diagnostics log.
-pub type LogQueueFullFn = unsafe extern "C" fn(*mut c_void, u32);
+/// Hand over a Rust store the engine only holds.
+pub type StoreFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct HirariCommandHostOps {
     pub track_exists: Option<TrackExistsFn>,
     pub generations: Option<GenerationsFn>,
-    pub enqueue: Option<EnqueueFn>,
-    pub journal: Option<JournalFn>,
-    pub log_queue_full: Option<LogQueueFullFn>,
+    pub command_rings: Option<StoreFn>,
+    pub journaler: Option<StoreFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -91,9 +89,43 @@ pub fn engine_last_command_error(host: usize) -> u8 {
     last_error(host as *mut c_void)
 }
 
+fn resolve(store: Option<StoreFn>, host: *mut c_void) -> *mut c_void {
+    let Some(store) = store else {
+        return std::ptr::null_mut();
+    };
+    unsafe { store(host) }
+}
+
 fn journal(ops: &HirariCommandHostOps, host: *mut c_void, entry: (u32, u32, f32, u64)) {
-    if let Some(journal) = ops.journal {
-        unsafe { journal(host, entry.0, entry.1, entry.2, entry.3) };
+    let journaler = resolve(ops.journaler, host);
+    if journaler.is_null() {
+        return;
+    }
+    // SAFETY: the host hands back a journaler created by
+    // `hirari_forensic_journaler_create` and keeps it alive for the engine.
+    unsafe {
+        crate::forensic_journaler::hirari_forensic_journaler_log(
+            journaler,
+            entry.0,
+            entry.1,
+            entry.2,
+            entry.3,
+        );
+    }
+}
+
+/// The command queue being full is a reportable fault, not a rejected edit.
+fn report_queue_full(track_id: u32) {
+    const MESSAGE: &[u8] = b"COMMAND_QUEUE_FULL";
+    // SAFETY: the default diagnostic ring is process-lifetime storage.
+    unsafe {
+        crate::log_buffer::hirari_log_buffer_post(
+            crate::log_buffer::hirari_log_buffer_default_state(),
+            1,
+            track_id,
+            MESSAGE.as_ptr(),
+            MESSAGE.len(),
+        );
     }
 }
 
@@ -108,11 +140,10 @@ fn push_impl(
     expected_project_generation: u64,
     expected_audio_generation: u64,
 ) -> bool {
-    let (Some(track_exists), Some(generations), Some(enqueue)) =
-        (ops.track_exists, ops.generations, ops.enqueue)
-    else {
+    let (Some(track_exists), Some(generations)) = (ops.track_exists, ops.generations) else {
         return false;
     };
+    let rings = resolve(ops.command_rings, host);
     let entry = (command_type, track_id, value, timestamp);
     // A stale id must never fall through to the queue: the consumer would
     // resolve it against a different project after a reload.
@@ -142,21 +173,20 @@ fn push_impl(
     }
     // A full queue means the audio thread cannot observe the command, so it is
     // a real failure rather than a best-effort enqueue.
-    if !unsafe {
-        enqueue(
-            host,
-            command_type,
-            track_id,
-            value,
-            timestamp,
-            expected_audio_generation,
-        )
-    } {
+    let record = CommandRecord {
+        type_: command_type,
+        tid: track_id,
+        val: value,
+        ts: timestamp,
+        expected_audio_generation,
+    };
+    // SAFETY: `rings` is either null or the engine's own ring handle, and the
+    // record is a local value the ring copies out of.
+    if rings.is_null() || !unsafe { crate::engine_rings::hirari_engine_command_ring_push(rings.cast(), &record) }
+    {
         publish_error(host, COMMAND_ERROR_QUEUE_FULL);
         journal(ops, host, entry);
-        if let Some(log) = ops.log_queue_full {
-            unsafe { log(host, track_id) };
-        }
+        report_queue_full(track_id);
         return false;
     }
     publish_error(host, COMMAND_ERROR_NONE);
@@ -235,16 +265,17 @@ pub unsafe extern "C" fn hirari_engine_audio_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::{Cell, RefCell};
+    use std::cell::RefCell;
 
     thread_local! {
         static LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-        static ENQUEUE_OK: Cell<bool> = const { Cell::new(true) };
     }
 
-    // The last-command error table is process state, so these tests must not
-    // overlap.
+    // The last-command error table, the command ring and the journal file are
+    // process state, so these tests must not overlap.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
+    static JOURNAL_SEQUENCE: std::sync::atomic::AtomicU32 =
+        std::sync::atomic::AtomicU32::new(0);
 
     fn serial() -> std::sync::MutexGuard<'static, ()> {
         TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner())
@@ -260,6 +291,134 @@ mod tests {
 
     fn error_for(host: *mut c_void) -> u8 {
         last_error(host)
+    }
+
+    const JOURNAL_BYTES: usize = 24;
+
+    /// Real Rust ring and journaler handles behind a host pointer, so the
+    /// admission policy is tested against the stores it now writes itself.
+    struct TestHost {
+        rings: *mut c_void,
+        journaler: *mut c_void,
+        journal_path: String,
+    }
+
+    impl TestHost {
+        fn new() -> Self {
+            let journal_path = std::env::temp_dir()
+                .join(format!(
+                    "hirari-command-journal-{}-{}",
+                    std::process::id(),
+                    JOURNAL_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ))
+                .to_string_lossy()
+                .into_owned();
+            let rings: *mut c_void = crate::engine_rings::hirari_engine_rings_create().cast();
+            let journaler = crate::forensic_journaler::hirari_forensic_journaler_create();
+            // SAFETY: both handles come from the matching create functions and
+            // the path bytes outlive the call.
+            unsafe {
+                crate::forensic_journaler::hirari_forensic_journaler_start(
+                    journaler,
+                    journal_path.as_ptr(),
+                    journal_path.len(),
+                );
+            }
+            Self {
+                rings,
+                journaler,
+                journal_path,
+            }
+        }
+
+        fn host(&mut self) -> *mut c_void {
+            self as *mut Self as *mut c_void
+        }
+
+        fn push_to_ring(&self, record: &CommandRecord) -> bool {
+            // SAFETY: `rings` is this host's own ring handle.
+            unsafe { crate::engine_rings::hirari_engine_command_ring_push(self.rings.cast(), record) }
+        }
+
+        fn drain_ring(&self) -> Vec<CommandRecord> {
+            let mut drained = Vec::new();
+            loop {
+                let mut record = CommandRecord::default();
+                // SAFETY: `rings` is this host's own ring handle.
+                let popped = unsafe {
+                    crate::engine_rings::hirari_engine_command_ring_pop(
+                        self.rings.cast(),
+                        &mut record,
+                    )
+                };
+                if !popped {
+                    return drained;
+                }
+                drained.push(record);
+            }
+        }
+
+        /// Flushes the writer thread and returns the records it persisted.
+        fn journal_records(&self) -> Vec<(u32, u32, f32, u64)> {
+            // SAFETY: `journaler` is this host's own journaler handle.
+            unsafe { crate::forensic_journaler::hirari_forensic_journaler_stop(self.journaler) };
+            let bytes = std::fs::read(&self.journal_path).unwrap_or_default();
+            bytes
+                .chunks(JOURNAL_BYTES)
+                .filter(|chunk| chunk.len() == JOURNAL_BYTES)
+                .map(|chunk| {
+                    let kind = u32::from_ne_bytes(chunk[0..4].try_into().unwrap());
+                    let track_id = u32::from_ne_bytes(chunk[4..8].try_into().unwrap());
+                    let value = f32::from_ne_bytes(chunk[8..12].try_into().unwrap());
+                    let timestamp = u64::from_ne_bytes(chunk[16..24].try_into().unwrap());
+                    (kind, track_id, value, timestamp)
+                })
+                .collect()
+        }
+
+        fn fill_ring(&self) {
+            let record = CommandRecord::default();
+            while self.push_to_ring(&record) {}
+        }
+
+        fn pop_log_entry(&self) -> Option<crate::log_buffer::LogEntry> {
+            let mut entry = crate::log_buffer::LogEntry::default();
+            // SAFETY: the default diagnostic ring is process-lifetime storage.
+            let popped = unsafe {
+                crate::log_buffer::hirari_log_buffer_pop(
+                    crate::log_buffer::hirari_log_buffer_default_state(),
+                    &mut entry,
+                )
+            };
+            popped.then_some(entry)
+        }
+
+        fn clear_log(&self) {
+            while self.pop_log_entry().is_some() {}
+        }
+
+        fn queue_full_reported(&self, track_id: u32) -> bool {
+            while let Some(entry) = self.pop_log_entry() {
+                let text = std::str::from_utf8(&entry.message)
+                    .unwrap_or_default()
+                    .trim_end_matches('\0');
+                if entry.component_id == track_id && text == "COMMAND_QUEUE_FULL" {
+                    return true;
+                }
+            }
+            false
+        }
+    }
+
+    impl Drop for TestHost {
+        fn drop(&mut self) {
+            // SAFETY: each handle was boxed by its own create function.
+            unsafe {
+                crate::engine_rings::hirari_engine_rings_destroy(self.rings.cast());
+                crate::forensic_journaler::hirari_forensic_journaler_destroy(self.journaler);
+            }
+            let _ = std::fs::remove_file(&self.journal_path);
+        }
     }
 
     unsafe extern "C" fn fake_track_exists(_host: *mut c_void, track_id: u32) -> bool {
@@ -289,64 +448,50 @@ mod tests {
         false
     }
 
-    unsafe extern "C" fn fake_enqueue(
-        _host: *mut c_void,
-        command_type: u32,
-        track_id: u32,
-        value: f32,
-        timestamp: u64,
-        audio_generation: u64,
-    ) -> bool {
-        log(format!(
-            "enqueue {command_type} {track_id} {value} {timestamp} {audio_generation}"
-        ));
-        ENQUEUE_OK.with(|ok| ok.get())
+    unsafe extern "C" fn host_rings(host: *mut c_void) -> *mut c_void {
+        // SAFETY: the host pointer is a live TestHost supplied by each test.
+        unsafe { &*(host.cast::<TestHost>()) }.rings
     }
 
-    unsafe extern "C" fn fake_journal(
-        _host: *mut c_void,
-        command_type: u32,
-        track_id: u32,
-        value: f32,
-        timestamp: u64,
-    ) {
-        log(format!("journal {command_type} {track_id} {value} {timestamp}"));
-    }
-
-    unsafe extern "C" fn fake_log_queue_full(_host: *mut c_void, track_id: u32) {
-        log(format!("queue_full {track_id}"));
+    unsafe extern "C" fn host_journaler(host: *mut c_void) -> *mut c_void {
+        // SAFETY: the host pointer is a live TestHost supplied by each test.
+        unsafe { &*(host.cast::<TestHost>()) }.journaler
     }
 
     fn fake_ops() -> HirariCommandHostOps {
         HirariCommandHostOps {
             track_exists: Some(fake_track_exists),
             generations: Some(fake_generations),
-            enqueue: Some(fake_enqueue),
-            journal: Some(fake_journal),
-            log_queue_full: Some(fake_log_queue_full),
+            command_rings: Some(host_rings),
+            journaler: Some(host_journaler),
         }
     }
 
     #[test]
     fn push_rejects_an_unknown_target_before_reading_generations() {
         let _serial = serial();
+        let mut host = TestHost::new();
         let ops = fake_ops();
-        assert!(!push_impl(&ops, 8_usize as *mut c_void, 0, 99, 1.0, 10, 7, 3));
-        assert_eq!(take_log(), vec!["exists 99", "journal 0 99 1 10"]);
-        assert_eq!(error_for(8_usize as *mut c_void), COMMAND_ERROR_INVALID_TARGET);
+        let pointer = host.host();
+        assert!(!push_impl(&ops, pointer, 0, 99, 1.0, 10, 7, 3));
+        assert_eq!(take_log(), vec!["exists 99"]);
+        assert!(host.drain_ring().is_empty());
+        assert_eq!(host.journal_records(), vec![(0, 99, 1.0, 10)]);
+        assert_eq!(error_for(pointer), COMMAND_ERROR_INVALID_TARGET);
     }
 
     #[test]
     fn push_rejects_a_stale_project_generation_before_the_audio_generation() {
         let _serial = serial();
+        let mut host = TestHost::new();
         let ops = fake_ops();
-        assert!(!push_impl(&ops, 8_usize as *mut c_void, 0, 5, 1.0, 10, 6, 3));
+        let pointer = host.host();
+        assert!(!push_impl(&ops, pointer, 0, 5, 1.0, 10, 6, 3));
+        assert_eq!(take_log(), vec!["exists 5", "generations"]);
+        assert!(host.drain_ring().is_empty());
+        assert_eq!(host.journal_records(), vec![(0, 5, 1.0, 10)]);
         assert_eq!(
-            take_log(),
-            vec!["exists 5", "generations", "journal 0 5 1 10"]
-        );
-        assert_eq!(
-            error_for(8_usize as *mut c_void),
+            error_for(pointer),
             COMMAND_ERROR_STALE_PROJECT_GENERATION
         );
     }
@@ -354,67 +499,69 @@ mod tests {
     #[test]
     fn push_rejects_a_stale_audio_generation() {
         let _serial = serial();
+        let mut host = TestHost::new();
         let ops = fake_ops();
-        assert!(!push_impl(&ops, 8_usize as *mut c_void, 0, 5, 1.0, 10, 7, 2));
-        assert_eq!(
-            take_log(),
-            vec!["exists 5", "generations", "journal 0 5 1 10"]
-        );
-        assert_eq!(
-            error_for(8_usize as *mut c_void),
-            COMMAND_ERROR_STALE_AUDIO_GENERATION
-        );
+        let pointer = host.host();
+        assert!(!push_impl(&ops, pointer, 0, 5, 1.0, 10, 7, 2));
+        assert_eq!(take_log(), vec!["exists 5", "generations"]);
+        assert!(host.drain_ring().is_empty());
+        assert_eq!(host.journal_records(), vec![(0, 5, 1.0, 10)]);
+        assert_eq!(error_for(pointer), COMMAND_ERROR_STALE_AUDIO_GENERATION);
     }
 
     #[test]
     fn push_reports_a_full_queue_after_the_journal_entry() {
         let _serial = serial();
-        ENQUEUE_OK.with(|ok| ok.set(false));
+        let mut host = TestHost::new();
+        host.clear_log();
+        host.fill_ring();
+        let queued = host.drain_ring().len();
+        host.fill_ring();
         let ops = fake_ops();
-        assert!(!push_impl(&ops, 8_usize as *mut c_void, 2, 5, 0.5, 10, 7, 3));
-        assert_eq!(
-            take_log(),
-            vec![
-                "exists 5",
-                "generations",
-                "enqueue 2 5 0.5 10 3",
-                "journal 2 5 0.5 10",
-                "queue_full 5",
-            ]
-        );
-        assert_eq!(error_for(8_usize as *mut c_void), COMMAND_ERROR_QUEUE_FULL);
-        ENQUEUE_OK.with(|ok| ok.set(true));
+        let pointer = host.host();
+        assert!(!push_impl(&ops, pointer, 2, 5, 0.5, 10, 7, 3));
+        assert_eq!(take_log(), vec!["exists 5", "generations"]);
+        assert_eq!(host.drain_ring().len(), queued);
+        assert_eq!(host.journal_records(), vec![(2, 5, 0.5, 10)]);
+        assert!(host.queue_full_reported(5));
+        assert_eq!(error_for(pointer), COMMAND_ERROR_QUEUE_FULL);
     }
 
     #[test]
     fn push_stamps_the_accepted_command_and_journals_it() {
         let _serial = serial();
+        let mut host = TestHost::new();
         let ops = fake_ops();
-        assert!(push_impl(&ops, 8_usize as *mut c_void, 3, 5, 1.0, 10, 7, 3));
+        let pointer = host.host();
+        assert!(push_impl(&ops, pointer, 3, 5, 1.0, 10, 7, 3));
+        assert_eq!(take_log(), vec!["exists 5", "generations"]);
         assert_eq!(
-            take_log(),
-            vec![
-                "exists 5",
-                "generations",
-                "enqueue 3 5 1 10 3",
-                "journal 3 5 1 10",
-            ]
+            host.drain_ring(),
+            vec![CommandRecord {
+                type_: 3,
+                tid: 5,
+                val: 1.0,
+                ts: 10,
+                expected_audio_generation: 3,
+            }]
         );
-        assert_eq!(error_for(8_usize as *mut c_void), COMMAND_ERROR_NONE);
+        assert_eq!(host.journal_records(), vec![(3, 5, 1.0, 10)]);
+        assert_eq!(error_for(pointer), COMMAND_ERROR_NONE);
     }
 
     #[test]
     fn unreadable_generations_fail_closed_as_a_stale_project() {
         let _serial = serial();
+        let mut host = TestHost::new();
         let mut ops = fake_ops();
         ops.generations = Some(unreadable_generations);
-        assert!(!push_impl(&ops, 8_usize as *mut c_void, 0, 5, 1.0, 10, 0, 0));
+        let pointer = host.host();
+        assert!(!push_impl(&ops, pointer, 0, 5, 1.0, 10, 0, 0));
+        assert_eq!(take_log(), vec!["exists 5", "generations"]);
+        assert!(host.drain_ring().is_empty());
+        assert_eq!(host.journal_records(), vec![(0, 5, 1.0, 10)]);
         assert_eq!(
-            take_log(),
-            vec!["exists 5", "generations", "journal 0 5 1 10"]
-        );
-        assert_eq!(
-            error_for(8_usize as *mut c_void),
+            error_for(pointer),
             COMMAND_ERROR_STALE_PROJECT_GENERATION
         );
     }
@@ -422,10 +569,12 @@ mod tests {
     #[test]
     fn missing_ops_fail_closed_without_touching_the_error() {
         let _serial = serial();
+        let mut host = TestHost::new();
+        let pointer = host.host();
         let ops = HirariCommandHostOps::default();
-        assert!(!push_impl(&ops, 8_usize as *mut c_void, 0, 5, 1.0, 10, 7, 3));
+        assert!(!push_impl(&ops, pointer, 0, 5, 1.0, 10, 7, 3));
         assert!(take_log().is_empty());
-        assert_eq!(error_for(8_usize as *mut c_void), COMMAND_ERROR_NONE);
+        assert_eq!(error_for(pointer), COMMAND_ERROR_NONE);
     }
 }
 

@@ -67,6 +67,13 @@ production support.
 
 ### Changed
 
+- Command admission now writes Rust's own stores. The engine's command host
+  callbacks that filled a ring record, appended the forensic journal and posted
+  the queue-full diagnostic are replaced by two handles, so the command ring,
+  the journal file and the diagnostic log are written from Rust directly, and
+  the admission tests now assert the records that actually land in the ring and
+  on disk instead of mock callback strings.
+
 - More engine edits skip the C++ forwarding layer. The sidechain route table,
   the routing graph, the sidechain gate, the macro controller and the MIDI learn
   manager are all Rust stores that the engine only holds, so Rust now reaches

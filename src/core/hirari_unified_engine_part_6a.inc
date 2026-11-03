@@ -273,21 +273,8 @@ void HirariUnifiedEngine::installCommandHost() {
             *audio = engine->get_audio_config_generation();
             return true;
         },
-        [](void* host, uint32_t type, uint32_t tid, float val, uint64_t ts,
-           uint64_t audioGeneration) -> bool {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            if (!engine) return false;
-            const HirariEngineCommandRecord record{
-                static_cast<uint32_t>(type), tid, val, ts, audioGeneration};
-            return hirari_engine_command_ring_push(engine->m_engineRings, &record);
-        },
-        [](void* host, uint32_t type, uint32_t tid, float val, uint64_t ts) {
-            if (auto* engine = static_cast<HirariUnifiedEngine*>(host))
-                hirari_forensic_journaler_log(engine->m_forensicJournal, type, tid, val, ts);
-        },
-        [](void*, uint32_t tid) {
-            hirari_log_post(1, tid, "COMMAND_QUEUE_FULL");
-        },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_engineRings; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_forensicJournal; },
     };
     hirari_command_host_install(&ops);
 }

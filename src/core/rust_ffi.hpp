@@ -47,8 +47,9 @@ inline void* hirari_log_state() noexcept {
 
 // The engine's command and event queues are Rust-owned fixed-capacity SPSC
 // rings (engine_rings.rs). C++ keeps neither the storage nor the index
-// arithmetic: it holds an opaque per-engine handle, fills a record and calls
-// the ring. Field order and width here match engine_rings::CommandRecord.
+// arithmetic: it holds an opaque per-engine handle, and the audio callback
+// drains what the Rust command host admitted. Field order and width here match
+// engine_rings::CommandRecord.
 struct HirariEngineCommandRecord {
     uint32_t type;
     uint32_t tid;
@@ -60,8 +61,6 @@ static_assert(sizeof(HirariEngineCommandRecord) == 32,
               "HirariEngineCommandRecord must match the Rust CommandRecord layout");
 extern "C" void* hirari_engine_rings_create();
 extern "C" void hirari_engine_rings_destroy(void* rings);
-extern "C" bool hirari_engine_command_ring_push(const void* rings,
-                                                const HirariEngineCommandRecord* record);
 extern "C" bool hirari_engine_command_ring_pop(const void* rings,
                                                HirariEngineCommandRecord* record);
 extern "C" void hirari_engine_command_ring_clear(const void* rings);
@@ -1137,14 +1136,15 @@ struct HirariTrackFreezeHostOps {
 
 extern "C" void hirari_track_freeze_host_install(const HirariTrackFreezeHostOps* ops);
 
-// Control-command admission (target, generations, queue-full ordering).
+// Control-command admission (target and generations). The command ring and the
+// forensic journal are Rust objects the engine only holds, so they travel as
+// handles and the queue-full diagnostic is posted to the Rust log directly.
 struct HirariCommandHostOps {
     bool (*trackExists)(void*, uint32_t) = nullptr;
     // Writes the current project and audio-configuration generations.
     bool (*generations)(void*, uint64_t*, uint64_t*) = nullptr;
-    bool (*enqueue)(void*, uint32_t, uint32_t, float, uint64_t, uint64_t) = nullptr;
-    void (*journal)(void*, uint32_t, uint32_t, float, uint64_t) = nullptr;
-    void (*logQueueFull)(void*, uint32_t) = nullptr;
+    void* (*commandRings)(void*) = nullptr;
+    void* (*journaler)(void*) = nullptr;
 };
 extern "C" void hirari_command_host_install(const HirariCommandHostOps* ops);
 extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t trackId,
@@ -1590,8 +1590,6 @@ extern "C" void hirari_mpe_manager_reset(void* state);
 
 extern "C" void* hirari_forensic_journaler_create();
 extern "C" void hirari_forensic_journaler_destroy(void* state);
-extern "C" bool hirari_forensic_journaler_log(
-    const void* state, uint32_t type, uint32_t track_id, float value, uint64_t timestamp);
 extern "C" void hirari_forensic_journaler_stop(void* state);
 
 using HirariSnapshotComputeCallback = bool (*)(void*, void**);
