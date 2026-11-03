@@ -1,10 +1,12 @@
-// Every consumer of this crate (the C++ bridge and the isolated worker) is a
-// std binary, and the crate is also built as a static archive, so it must not
-// claim `no_std`: a no_std staticlib would force a workspace-wide panic=abort
-// strategy. The realtime contract is preserved by the code itself — the
-// protocol paths below use no allocation and no locking.
+// Both consumers of this crate are std binaries — the engine-side bridge and the
+// isolated worker executable built from `src/bin/plugin_worker.rs` — so the
+// crate must not claim `no_std`: that would force a workspace-wide
+// panic=abort strategy. The realtime contract is preserved by the code itself —
+// the protocol paths below use no allocation and no locking.
+pub mod mailbox;
+
 #[cfg(feature = "worker-runtime")]
-mod worker_main;
+pub mod worker_main;
 
 #[cfg(feature = "worker-runtime")]
 mod worker_runtime;

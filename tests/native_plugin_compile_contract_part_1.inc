@@ -38,15 +38,8 @@ int main() {
         sandbox->is_alive()
             ? Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock
             : Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined;
-    static_assert(Hirari::Core::Plugins::SandboxProtocol::kStatusHeaderV9 == 0x41555209u);
-    static_assert(Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion == 1u);
     static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock) == 0u);
     static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined) == 1u);
-    if (!Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
-            Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion) ||
-        Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(0u) ||
-        Hirari::Core::Plugins::SandboxProtocol::isSupportedStateVersion(
-            Hirari::Core::Plugins::SandboxProtocol::kStateProtocolVersion + 1u)) return 64;
     (void)sandbox;
     (void)chain;
     (void)recovery;

@@ -7,13 +7,15 @@ description = "Allocation-free Rust ABI primitives shared with the isolated plug
 
 [lib]
 path = "src/lib.rs"
-# The worker links this crate as a standalone archive. Declaring the staticlib
-# here keeps cargo building dependencies (the macOS AudioUnit surface) as rlibs
-# instead of metadata-only artifacts when the archive is requested.
-crate-type = ["rlib", "staticlib"]
+
+[[bin]]
+# The isolated plugin helper. It was a C++ `main` that linked this crate as an
+# archive; the entry point is Rust now, so the executable is built from here.
+name = "hirari-plugin-host-worker"
+path = "src/bin/plugin_worker.rs"
+required-features = ["worker-runtime"]
 
 [features]
-standalone-static = []
 worker-runtime = []
 
 [target.'cfg(target_os = "macos")'.dependencies]

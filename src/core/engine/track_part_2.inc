@@ -249,7 +249,7 @@
         auto processor = m_effectChain.getProcessor(pluginIndex);
         auto* sandbox = dynamic_cast<Hirari::Core::Plugins::ProcessSandboxProcessor*>(processor.get());
         if (!sandbox) return {};
-        if (midiSize > sizeof(Hirari::Core::Plugins::SandboxProtocol::MidiEvent::data)) {
+        if (midiSize > Hirari::Core::Plugins::SandboxProtocol::kMaxMidiPayloadBytes) {
             sandbox->recordInputMidiRejection();
             return {};
         }

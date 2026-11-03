@@ -6,8 +6,8 @@
 //! shared-memory mailbox, request/response framing and validation, timeouts,
 //! restart policy, and teardown.
 //!
-//! The C++ `PluginSandboxHost` is only a forwarding facade. It exists because
-//! the engine and the native contracts name that type directly.
+//! The C++ side is the engine's `ProcessSandboxProcessor` DSP boundary only; it
+//! names this host directly instead of forwarding through another C++ wrapper.
 
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, c_void, CString};
@@ -21,12 +21,10 @@ use hirari_plugin_protocol::{
     MAX_STATE_BYTES, RING_STORAGE_BYTES, STATE_ERROR_NONE, STATE_PROTOCOL_VERSION,
 };
 
-pub const MAX_FRAMES: usize = 8192;
-pub const MAX_CHANNELS: usize = 2;
-pub const MAX_MIDI_EVENTS: usize = 1024;
-pub const MAX_PARAMETER_CHANGES: usize = 4096;
-pub const MAX_MIDI_PAYLOAD_BYTES: usize = 256;
-pub const AUDIO_BLOCK_PROTOCOL_VERSION: u32 = 5;
+pub use hirari_plugin_protocol::mailbox::{
+    MAX_CHANNELS, MAX_FRAMES, MAX_MIDI_EVENTS, MAX_MIDI_PAYLOAD_BYTES, MAX_PARAMETER_CHANGES,
+};
+pub use hirari_plugin_protocol::mailbox::AUDIO_BLOCK_PROTOCOL_VERSION;
 
 pub const FAILURE_NONE: u8 = 0;
 pub const FAILURE_MISSING_HELPER: u8 = 1;
@@ -156,93 +154,12 @@ mod ffi {
 
 pub use ffi::SandboxGeneration;
 
-// The shared mailbox is a byte-for-byte mirror of `SandboxProtocol::SharedAudioBlock`.
-// The worker (C++) and this host (Rust) map the same shm object, so any layout
-// drift corrupts the protocol. `assert_shared_audio_block_layout` below locks
-// the offsets measured from the C++ definition.
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct WireMidiEvent {
-    sample_offset: u64,
-    size: u32,
-    data: [u8; MAX_MIDI_PAYLOAD_BYTES],
-    articulation_id: u8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct WireParameterChange {
-    parameter_id: u32,
-    sample_offset: u32,
-    value: f64,
-}
-
-#[repr(C, align(64))]
-struct ExtendedRingStorage {
-    bytes: [u8; RING_STORAGE_BYTES],
-}
-
-#[repr(C, align(64))]
-struct StereoBlock {
-    samples: [[f32; MAX_FRAMES]; MAX_CHANNELS],
-}
-
-#[repr(C)]
-struct SharedAudioBlock {
-    protocol_version: AtomicU32,
-    request_sequence: AtomicU64,
-    completed_sequence: AtomicU64,
-    heartbeat: AtomicU64,
-    frames: AtomicU32,
-    channels: AtomicU32,
-    active_sample_rate: AtomicU32,
-    active_channels: AtomicU32,
-    midi_events: AtomicU32,
-    parameter_changes: AtomicU32,
-    output_midi_events: AtomicU32,
-    output_midi_dropped: AtomicU32,
-    mailbox_overruns: AtomicU32,
-    input_midi_truncations: AtomicU32,
-    process_errors: AtomicU32,
-    midi_instrument: AtomicU8,
-    state_request_sequence: AtomicU64,
-    state_completed_sequence: AtomicU64,
-    state_project_generation: AtomicU64,
-    state_plugin_generation: AtomicU64,
-    state_audio_generation: AtomicU64,
-    state_generation: AtomicU64,
-    state_size: AtomicU32,
-    state_checksum: AtomicU64,
-    state_version: AtomicU32,
-    state_mode: AtomicU8,
-    state_result: AtomicU8,
-    state_error: AtomicU8,
-    extended_midi: ExtendedRingStorage,
-    input: StereoBlock,
-    output: StereoBlock,
-    midi: [WireMidiEvent; MAX_MIDI_EVENTS],
-    parameter_change: [WireParameterChange; MAX_PARAMETER_CHANGES],
-    output_midi: [WireMidiEvent; MAX_MIDI_EVENTS],
-    state: [u8; MAX_STATE_BYTES],
-}
-
-// Offsets measured from `SandboxProtocol::SharedAudioBlock` in the C++ worker
-// header. If this assertion fires after a protocol change, both sides must be
-// updated together.
-const _: () = assert!(std::mem::size_of::<SharedAudioBlock>() == 9_142_656);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, request_sequence) == 8);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, midi_instrument) == 76);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, state_request_sequence) == 80);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, state_size) == 128);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, state_checksum) == 136);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, state_error) == 150);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, extended_midi) == 192);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, input) == 4_194_688);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, output) == 4_260_224);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, midi) == 4_325_760);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, parameter_change) == 4_604_288);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, output_midi) == 4_669_824);
-const _: () = assert!(std::mem::offset_of!(SharedAudioBlock, state) == 4_948_352);
+// The mailbox layout has exactly one owner: `hirari_plugin_protocol::mailbox`.
+// The host and the isolated worker map the same shm object, so a second
+// definition here could drift silently and corrupt the protocol.
+pub use hirari_plugin_protocol::mailbox::{
+    SharedAudioBlock, WireMidiEvent, WireParameterChange,
+};
 
 #[derive(Clone, Copy)]
 struct Generation {

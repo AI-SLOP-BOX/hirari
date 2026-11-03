@@ -67,6 +67,20 @@ production support.
 
 ### Changed
 
+- The plugin worker is Rust all the way down. Its launch translation unit was a
+  C++ `main` that forwarded to the Rust worker and republished the mailbox's
+  field addresses as an opaque 18-pointer table; the executable is now built from
+  `hirari-plugin-protocol` (`src/bin/plugin_worker.rs`) and addresses the mailbox
+  through a single Rust layout owner (`src/mailbox.rs`), which the engine-side
+  host imports instead of keeping its own byte-for-byte mirror of the struct.
+  C++ retains only the numeric bounds it validates before crossing into Rust —
+  `kMaxFrames`, `kMaxChannels`, `kMaxParameterChanges`, `kMaxMidiPayloadBytes`
+  and the recovery/state-error codes — so the shared `SharedAudioBlock`, the
+  272-byte MIDI event and parameter-change wire structs, the extended-MIDI ring
+  wrapper together with its four FFI declarations, and the state-version
+  predicate the Rust validator already owns are deleted. The protocol crate no
+  longer emits a static archive or declares the `standalone-static` feature,
+  because nothing links the archive now that the helper is a Rust binary.
 - The C++ engine no longer carries control-plane surface that nothing uses.
   `EffectChain::syncToAudioThread()` was an empty stub left over from the
   pre-Rust chain lock handoff — publication is handled by the Rust-published

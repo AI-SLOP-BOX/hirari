@@ -1,108 +1,24 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <atomic>
-#include "midi_fragment_transport.hpp"
-#include "../rust_ffi.hpp"
 
 namespace Hirari::Core::Plugins::SandboxProtocol {
 
-// Mailbox framing bytes and result codes live in the Rust protocol crate.
+// The shared-memory mailbox is Rust-owned (`hirari-plugin-protocol/src/mailbox.rs`);
+// C++ only needs the numeric bounds it enforces before handing data to the host.
 inline constexpr uint32_t kMaxFrames = 8192;
 inline constexpr uint32_t kMaxChannels = 2;
-inline constexpr uint32_t kMaxMidiEvents = 1024;
 inline constexpr uint32_t kMaxParameterChanges = 4096;
 inline constexpr uint32_t kMaxMidiPayloadBytes = 256;
-inline constexpr uint32_t kMaxStateBytes = 4u * 1024u * 1024u;
-inline constexpr uint32_t kStateProtocolVersion = 1u;
-inline constexpr uint8_t kStateErrorNone = 0u;
+
+// Recovery modes mirror `SandboxRecovery` in the Rust host; the C++ processor
+// maps them onto its own enum so a stalled or quarantined slot stays visible.
+inline constexpr uint8_t kRecoveryClearBlock = 0u;
+inline constexpr uint8_t kRecoveryQuarantined = 1u;
+
+// State error surfaced when a slot cannot serve a state request. The Rust
+// worker owns the remaining result codes.
 inline constexpr uint8_t kStateErrorUnavailable = 5u;
-inline constexpr uint32_t kStatusHeaderV9 = 0x41555209u;
-inline constexpr uint32_t kRecoveryClearBlock = 0u;
-inline constexpr uint32_t kRecoveryQuarantined = 1u;
-
-// Whether a serialized plugin state carrying `version` can be read by this
-// build. The Rust validator in hirari-plugin-protocol rejects anything that is
-// not exactly STATE_PROTOCOL_VERSION, so this predicate mirrors that contract
-// instead of letting each side re-derive the rule.
-inline bool isSupportedStateVersion(uint32_t version) noexcept {
-    return version == kStateProtocolVersion;
-}
-
-struct MidiEvent {
-    uint64_t sampleOffset = 0;
-    uint32_t size = 0;
-    uint8_t data[kMaxMidiPayloadBytes]{};
-    uint8_t articulationId = 0;
-};
-
-struct ParameterChange {
-    uint32_t parameterId = 0;
-    uint32_t sampleOffset = 0;
-    double value = 0.0;
-};
-
-static_assert(sizeof(MidiEvent) == 272);
-static_assert(offsetof(MidiEvent, data) == 12);
-static_assert(offsetof(MidiEvent, articulationId) == 268);
-static_assert(sizeof(ParameterChange) == 16);
-
-// This mailbox is inherited across fork and backed by MAP_SHARED memory.
-// It is deliberately bounded so the audio callback never allocates or waits.
-struct SharedAudioBlock {
-    std::atomic<uint32_t> protocolVersion{0};
-    std::atomic<uint64_t> requestSequence{0};
-    std::atomic<uint64_t> completedSequence{0};
-    std::atomic<uint64_t> heartbeat{0};
-    std::atomic<uint32_t> frames{0};
-    std::atomic<uint32_t> channels{0};
-    std::atomic<uint32_t> activeSampleRate{0};
-    std::atomic<uint32_t> activeChannels{0};
-    std::atomic<uint32_t> midiEvents{0};
-    std::atomic<uint32_t> parameterChanges{0};
-    std::atomic<uint32_t> outputMidiEvents{0};
-    std::atomic<uint32_t> outputMidiDropped{0};
-    std::atomic<uint32_t> mailboxOverruns{0};
-    std::atomic<uint32_t> inputMidiTruncations{0};
-    std::atomic<uint32_t> processErrors{0};
-    std::atomic<uint8_t> midiInstrument{0};
-    std::atomic<uint64_t> stateRequestSequence{0};
-    std::atomic<uint64_t> stateCompletedSequence{0};
-    // State is valid only for the exact project/plugin/audio generation that
-    // requested it. These are written before stateRequestSequence is published
-    // and read back before the host accepts the acknowledgement.
-    std::atomic<uint64_t> stateProjectGeneration{0};
-    std::atomic<uint64_t> statePluginGeneration{0};
-    std::atomic<uint64_t> stateAudioGeneration{0};
-    std::atomic<uint64_t> stateGeneration{0};
-    std::atomic<uint32_t> stateSize{0};
-    std::atomic<uint64_t> stateChecksum{0};
-    std::atomic<uint32_t> stateVersion{0};
-    std::atomic<uint8_t> stateMode{0}; // 1 = save, 2 = load
-    std::atomic<uint8_t> stateResult{0};
-    std::atomic<uint8_t> stateError{kStateErrorNone};
-    // Completed SysEx/MIDI 2.0 messages use the bounded ring rather than
-    // being silently truncated into the legacy 256-byte event slot.
-    MidiExtendedMessageRing extendedMidi;
-    alignas(64) float input[kMaxChannels][kMaxFrames]{};
-    alignas(64) float output[kMaxChannels][kMaxFrames]{};
-    MidiEvent midi[kMaxMidiEvents]{};
-    ParameterChange parameterChange[kMaxParameterChanges]{};
-    MidiEvent outputMidi[kMaxMidiEvents]{};
-    alignas(64) uint8_t state[kMaxStateBytes]{};
-};
-
-// The Rust worker views this stable prefix directly while the host owns the
-// remainder of the shared block. Keep these offsets in
-// lockstep with SharedAudioPrefix in hirari-plugin-protocol/worker_runtime.rs.
-static_assert(offsetof(SharedAudioBlock, requestSequence) == 8);
-static_assert(offsetof(SharedAudioBlock, heartbeat) == 24);
-static_assert(offsetof(SharedAudioBlock, frames) == 32);
-static_assert(offsetof(SharedAudioBlock, processErrors) == 72);
-static_assert(offsetof(SharedAudioBlock, stateRequestSequence) == 80);
-static_assert(offsetof(SharedAudioBlock, stateChecksum) == 136);
-static_assert(offsetof(SharedAudioBlock, stateError) == 150);
 
 } // namespace Hirari::Core::Plugins::SandboxProtocol

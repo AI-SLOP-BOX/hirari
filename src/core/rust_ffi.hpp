@@ -1496,13 +1496,6 @@ extern "C" size_t hirari_track_frozen_store_path_copy(
     const void* state, uint8_t* out, size_t capacity);
 extern "C" bool hirari_track_frozen_store_set_path(
     const void* state, const uint8_t* path, size_t path_len);
-extern "C" bool hirari_midi_extended_ring_init(void* storage, size_t bytes);
-extern "C" bool hirari_midi_extended_ring_push(
-    void* state, uint64_t sample_offset, uint8_t articulation_id,
-    const uint8_t* bytes, size_t size);
-extern "C" bool hirari_midi_extended_ring_pop(
-    void* state, void* destination_message, size_t destination_bytes);
-extern "C" size_t hirari_midi_extended_ring_size(const void* state);
 extern "C" void hirari_forensic_scratchpad_reset();
 extern "C" bool hirari_status_queue_push_default(
     uint32_t severity, const uint8_t* text, size_t text_size);
