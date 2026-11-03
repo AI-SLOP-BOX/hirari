@@ -74,6 +74,21 @@ production support.
 
 ### Changed
 
+- The bounce session state machine is Rust. `HirariUnifiedEngine` dropped its
+  thirteen bounce atomics, the publish and lifecycle mutexes and the
+  `std::thread` that carried an async render; `hirari-core-bridge/src/bounce_driver.rs`
+  now owns the session handle, so the offline-ownership gate (progress and state
+  publication, the callback-thread token, the compare-and-set spin with its
+  cancel and busy-timeout exits), the cancel/pause/resume lifecycle, the
+  queued-state async worker with its retirement join and the engine-address TLS
+  flags are all decided in Rust. The engine keeps only what is genuinely its own:
+  `HirariBounceHostOps` hands the Rust driver the seven calls it cannot make
+  itself -- graph reset, region/MIDI span planning, one `processBlock` render, a
+  1024-frame chunk, transport get and set -- and every bounce control entry point
+  is a forwarder. Acquire ordering, both failure codes, cancel-clears-pause, the
+  `include_inserts` default and the three-part realtime block guard are
+  reproduced field for field; behaviour and reported values are unchanged. C++
+  9963 -> 9810 (-153).
 - The engine's live document graph moved to Rust. `HirariUnifiedEngine` no
   longer owns a `std::vector<std::shared_ptr<Track>>`, its deferred-destruction
   list or the double-buffered snapshot the realtime callback traverses:

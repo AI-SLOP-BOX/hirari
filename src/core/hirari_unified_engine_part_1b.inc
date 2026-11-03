@@ -101,7 +101,7 @@
 
         // Control Room is strictly device-monitoring. Never bake speaker trim
         // or DIM into an offline master/stem render.
-        if (!m_offlineRenderActive.load(std::memory_order_acquire)) {
+        if (!hirari_bounce_offline_active(m_bounceSession)) {
             const uint32_t activeCueBus = hirari_control_room_active_cue_bus(m_controlRoomState);
             uint32_t cueOutputChannel = hirari_control_room_active_cue_output(m_controlRoomState);
             const bool cueUsesDedicatedPair = cueOutputChannel >= 2;

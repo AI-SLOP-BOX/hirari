@@ -1,20 +1,3 @@
-// A callback-safe thread identity.  std::hash<std::thread::id> may trigger
-// runtime machinery on some standard libraries; this monotonically assigned
-// token is allocation-free and is shared by realtime and offline callbacks.
-inline uint64_t hirari_callback_thread_token() noexcept {
-    static std::atomic<uint64_t> next{1};
-    thread_local uint64_t token = 0;
-    if (token == 0) token = next.fetch_add(1, std::memory_order_relaxed);
-    return token;
-}
-
-// Marks the control worker that is intentionally driving an offline bounce.
-// The token check below protects the realtime callback from seeing the
-// temporary offline graph, while this explicit thread-local gate avoids
-// relying on implementation-specific merging of inline-function TLS across
-// translation units.
-inline thread_local bool hirari_offline_render_thread = false;
-
 using ScopedDenormalGuard = ::Hirari::Core::Concurrency::ScopedDenormalGuard;
 
 namespace {
@@ -68,6 +51,8 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     // Sandbox observed-health state is keyed by engine address for the same
     // reason. Drop it after shutdown() has joined the recovery thread.
     hirari_plugin_sandbox_maintenance_forget(this);
+    // shutdown() has retired the bounce worker, so its session has no borrower.
+    hirari_bounce_session_destroy(m_bounceSession);
     hirari_engine_rings_destroy(m_engineRings);
     hirari_midi_snapshot_store_destroy(m_midiSnapshotStore);
     hirari_midi_playback_clock_destroy(m_midiPlaybackClock);
@@ -120,12 +105,7 @@ void HirariUnifiedEngine::shutdown() {
     // Shutdown must cancel offline work before joining it.  Joining a render
     // that is still publishing blocks can otherwise keep app teardown alive
     // indefinitely and leave its temporary output/worker state behind.
-    m_bounceCancelRequested.store(true, std::memory_order_release);
-    {
-        std::lock_guard<std::mutex> bounceLifecycleLock(m_bounceLifecycleMutex);
-        if (m_bounceThread.joinable()) m_bounceThread.join();
-        m_bounceRunning.store(false, std::memory_order_release);
-    }
+    hirari_bounce_join(m_bounceSession);
     hirari_sandbox_recovery_stop();
 
     if (wasShutdown) return;
@@ -174,15 +154,13 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         }
     sz = std::min(sz, output.getNumSamples() - off);
     if (m_audioConfigTransition.load(std::memory_order_acquire) &&
-        !hirari_offline_render_thread) {
+        !hirari_bounce_offline_thread()) {
         output.clear(off, sz);
         return;
     }
         const uint64_t threadToken = hirari_callback_thread_token();
         RoutingEngine::SendPdcReadGuard sendPdcReadGuard(m_routingEngine);
-        if (m_offlineRenderActive.load(std::memory_order_acquire) &&
-            m_offlineRenderOwner.load(std::memory_order_acquire) != threadToken &&
-            !hirari_offline_render_thread) {
+        if (hirari_bounce_offline_blocks(m_bounceSession, threadToken)) {
             output.clear(off, sz);
             return;
         }
@@ -215,7 +193,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         }
         const uint64_t callbackGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
         const auto state = trackView(m_trackTable);
-        if (state.audioConfigGeneration != callbackGeneration && !hirari_offline_render_thread) {
+        if (state.audioConfigGeneration != callbackGeneration && !hirari_bounce_offline_thread()) {
             // Structural/configuration publication is double-buffered.  Do
             // not process a state prepared for a different device format;
             // the next published state will carry the current generation.
@@ -256,8 +234,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         const bool previewActive = hirari_preview_sampler_is_active(m_previewSampler);
         const bool midiPanicPending =
             hirari_midi_playback_panic_pending(m_midiPlaybackClock);
-        if (!hirari_offline_render_thread &&
-            !m_offlineRenderActive.load(std::memory_order_acquire) &&
+        if (!hirari_bounce_offline_engaged(m_bounceSession) &&
             !m_isPlaying.load(std::memory_order_acquire) &&
             !m_testTone.load(std::memory_order_relaxed) &&
             !previewActive && !midiPanicPending) {
@@ -267,8 +244,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         output.clear(off, sz);
         m_blockMidi.clear();
         {
-            const bool midiPlaybackActive = hirari_offline_render_thread ||
-                m_offlineRenderActive.load(std::memory_order_acquire) ||
+            const bool midiPlaybackActive = hirari_bounce_offline_engaged(m_bounceSession) ||
                 m_isPlaying.load(std::memory_order_acquire);
             if (currentPlayhead > std::numeric_limits<uint64_t>::max() - sz) {
                 output.clear(off, sz);
@@ -369,8 +345,8 @@ HirariUnifiedEngine::HirariUnifiedEngine()
                 break;
             }
         }
-        const bool offlineTargetActive = m_offlineTargetActive.load(std::memory_order_acquire);
-        const uint32_t offlineTargetId = m_offlineTargetId.load(std::memory_order_acquire);
+        const bool offlineTargetActive = hirari_bounce_target_active(m_bounceSession) != 0;
+        const uint32_t offlineTargetId = hirari_bounce_target_id(m_bounceSession);
         void* routing = m_routingEngine;
         hirari_bus_system_clear(m_busSystem, sz);
         for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
@@ -459,9 +435,9 @@ HirariUnifiedEngine::HirariUnifiedEngine()
             if (!offlineTargetActive && hirari_control_room_is_cue_bus(m_controlRoomState, source->getId())) return;
             if (offlineTargetActive && offlineTargetId != 0 &&
                 source->getId() == offlineTargetId) {
-                const auto& targetBuffer = m_offlineRenderPreFader.load(std::memory_order_acquire)
+                const auto& targetBuffer = hirari_bounce_pre_fader(m_bounceSession)
                     ? source->offlinePreFaderBuffer()
-                    : (!m_offlineRenderIncludeInserts.load(std::memory_order_acquire)
+                    : (!hirari_bounce_include_inserts(m_bounceSession)
                         ? source->offlinePreInsertBuffer() : sourceBuffer);
                 if (targetBuffer.getNumSamples() < sz || targetBuffer.getNumChannels() < 2) return;
                 const float* sourceL = targetBuffer.getReadPointer(0, 0);

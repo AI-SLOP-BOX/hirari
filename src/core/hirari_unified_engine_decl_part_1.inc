@@ -5,16 +5,6 @@ public:
     // process, or accepting a size the graph does not bound.
     static constexpr uint32_t kMaxAudioBlockSize = 16'384u;
 
-    enum class BounceState : uint32_t {
-        Idle = 0,
-        Queued = 1,
-        Rendering = 2,
-        Completed = 3,
-        Failed = 4,
-        Cancelled = 5,
-        Paused = 6,
-    };
-
     HirariUnifiedEngine();
     ~HirariUnifiedEngine();
 

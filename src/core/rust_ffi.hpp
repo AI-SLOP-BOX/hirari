@@ -477,34 +477,53 @@ struct HirariBouncePlan {
 // range. The engine maps each code to its existing failure path.
 extern "C" int32_t hirari_bounce_render_extent(
     const HirariBouncePlanInput* input, HirariBouncePlan* out);
-// Lifecycle admission sets (bounce_plan.rs): terminal, cancellable, pausable, resumable.
-extern "C" bool hirari_bounce_state_terminal(uint32_t state), hirari_bounce_state_cancellable(uint32_t state), hirari_bounce_state_pausable(uint32_t state), hirari_bounce_state_resumable(uint32_t state);
 
-// Host operations for the Rust bounce render driver. The engine owns the
-// graph, transport atomics and streaming writers; the driver owns chunking,
-// pause/cancel, dither, progress and state publication. Every entry must be
-// set: a missing operation fails the render.
+// Host operations for the Rust bounce driver. Only the audio graph stays here:
+// the render block, the plan's region and MIDI contents, the transport and the
+// reproducible-reset pass. Everything else a bounce owns - offline-render
+// ownership, progress, the lifecycle state, cancel/pause, the async worker and
+// the publish boundary - is Rust state (bounce_driver.rs) below. Every entry
+// must be set: a missing operation fails the render.
 struct HirariBounceHostOps {
-    uint8_t (*begin)(void* host);
-    void (*finish)(void* host);
+    uint8_t (*run)(void* host, const uint8_t* path, size_t path_length, uint32_t format);
     void (*reset)(void* host);
     int32_t (*plan)(void* host, HirariBouncePlan* out);
     void (*render)(void* host, float* left, float* right, uint32_t frames);
     uint32_t (*render_chunk)(void* host);
-    void (*publish)(void* host, float progress, uint8_t state);
-    uint8_t (*control)(void* host);
     void (*read_transport)(void* host, uint64_t* playhead, uint8_t* playing);
     void (*set_transport)(void* host, uint64_t playhead, uint8_t playing);
-    uint8_t (*finish_stream)(void* host, void* stream);
-    void (*log)(void* host, uint32_t level, const uint8_t* message, size_t length);
 };
+static_assert(sizeof(HirariBounceHostOps) == 7 * sizeof(void*));
 
 extern "C" bool hirari_bounce_render_driver(
-    void* host, const HirariBounceHostOps* ops, const uint8_t* path,
+    void* host, void* session, const HirariBounceHostOps* ops, const uint8_t* path,
     size_t path_length, uint32_t format);
-// The host only finalises streams the driver opened; creation and writes stay
-// behind the driver's own host callbacks.
-extern "C" uint8_t hirari_bounce_stream_finish(void* stream);
+// The bounce session is per-engine Rust state. The engine holds the handle and
+// answers its realtime and control-plane questions from it; `join` cancels and
+// retires the async worker before teardown.
+extern "C" void* hirari_bounce_session_create();
+extern "C" void hirari_bounce_session_destroy(void* session);
+extern "C" bool hirari_bounce_start_async(
+    void* session, void* host, const HirariBounceHostOps* ops, const uint8_t* path,
+    size_t path_length, uint32_t format);
+extern "C" void hirari_bounce_join(void* session);
+extern "C" bool hirari_bounce_cancel(void* session), hirari_bounce_pause(void* session),
+    hirari_bounce_resume(void* session);
+extern "C" uint8_t hirari_bounce_offline_thread(), hirari_bounce_offline_active(void* session),
+    hirari_bounce_offline_engaged(void* session), hirari_bounce_target_active(void* session),
+    hirari_bounce_pre_fader(void* session), hirari_bounce_include_inserts(void* session);
+extern "C" uint8_t hirari_bounce_offline_blocks(void* session, uint64_t thread_token);
+// Callback-safe thread identity shared by the realtime callback and the
+// offline render worker (bounce_driver.rs).
+extern "C" uint64_t hirari_callback_thread_token();
+extern "C" uint32_t hirari_bounce_target_id(void* session), hirari_bounce_tail_millis(void* session);
+extern "C" uint32_t hirari_bounce_state(void* session);
+extern "C" float hirari_bounce_progress(void* session);
+extern "C" void hirari_bounce_set_offline_target(void* session, uint32_t track_id);
+extern "C" void hirari_bounce_clear_offline_target(void* session);
+extern "C" void hirari_bounce_set_tail_seconds(void* session, float seconds);
+extern "C" void hirari_bounce_set_render_options(
+    void* session, uint8_t pre_fader, uint8_t include_inserts);
 
 enum HirariRegionEditOp : int32_t {
     // Replace the editable state and republish it (normalising add path).

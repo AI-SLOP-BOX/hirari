@@ -19,6 +19,9 @@ public:
     bool loadProject(std::string_view path);
     bool bounce_project(std::string_view outputPath, uint32_t format);
     bool bounce_project_async(std::string_view outputPath, uint32_t format);
+    // The graph operations the Rust bounce driver calls back into. Static
+    // storage: an async worker uses the table after its starting call returned.
+    const HirariBounceHostOps* bounceOps();
     // Lock-free status reads for UI/control threads. These never wait on the
     // audio callback or the bounce worker.
     float get_bounce_progress() const noexcept;

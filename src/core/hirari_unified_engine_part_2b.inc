@@ -12,29 +12,22 @@ bool HirariUnifiedEngine::set_offline_render_target(uint32_t tid) {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         if (!findTrackLocked(tid)) return false;
     }
-    m_offlineTargetId.store(tid, std::memory_order_release);
-    m_offlineTargetActive.store(true, std::memory_order_release);
+    hirari_bounce_set_offline_target(m_bounceSession, tid);
     return true;
 }
 
 void HirariUnifiedEngine::clear_offline_render_target() {
-    m_offlineTargetActive.store(false, std::memory_order_release);
-    m_offlineTargetId.store(0, std::memory_order_release);
-    m_offlineRenderTailMillis.store(0, std::memory_order_release);
-    m_offlineRenderPreFader.store(false, std::memory_order_release);
-    m_offlineRenderIncludeInserts.store(true, std::memory_order_release);
+    hirari_bounce_clear_offline_target(m_bounceSession);
 }
 
 void HirariUnifiedEngine::set_offline_render_tail_seconds(float seconds) {
-    // Bounds and non-finite rejection are enforced by the bridge; this only
-    // stores the value the render loop consumes.
-    m_offlineRenderTailMillis.store(
-        static_cast<uint32_t>(seconds * 1000.0f), std::memory_order_release);
+    // Bounds and non-finite rejection are enforced by the bridge; the session
+    // stores the millisecond value the render plan consumes.
+    hirari_bounce_set_tail_seconds(m_bounceSession, seconds);
 }
 
 void HirariUnifiedEngine::set_offline_render_options(bool preFader, bool includeInserts) {
-    m_offlineRenderPreFader.store(preFader, std::memory_order_release);
-    m_offlineRenderIncludeInserts.store(includeInserts, std::memory_order_release);
+    hirari_bounce_set_render_options(m_bounceSession, preFader, includeInserts);
 }
 
 void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {

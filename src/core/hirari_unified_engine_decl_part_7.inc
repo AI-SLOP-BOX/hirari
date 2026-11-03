@@ -20,30 +20,12 @@
     // managers as one control-plane transaction.  Reject a concurrent load
     // instead of allowing two documents to interleave partial state.
     std::atomic<bool> m_projectHydrationActive{false};
-    std::atomic<bool> m_offlineRenderActive{false};
-    std::atomic<uint64_t> m_offlineRenderOwner{0};
-    std::atomic<bool> m_offlineTargetActive{false};
-    std::atomic<uint32_t> m_offlineTargetId{0};
-    std::atomic<uint32_t> m_offlineRenderTailMillis{0};
-    std::atomic<bool> m_offlineRenderPreFader{false};
-    std::atomic<bool> m_offlineRenderIncludeInserts{true};
-    std::atomic<bool> m_offlineRenderRangeActive{false};
-    std::atomic<uint64_t> m_offlineRenderStartSample{0};
-    std::atomic<uint64_t> m_offlineRenderEndSample{0};
-    std::atomic<bool> m_bounceRunning{false};
-    std::atomic<float> m_bounceProgress{0.0f};
-    std::atomic<uint32_t> m_bounceState{static_cast<uint32_t>(BounceState::Idle)};
-    std::atomic<bool> m_bounceCancelRequested{false};
-    std::atomic<bool> m_bouncePauseRequested{false};
-    // Serializes cancellation with the final temporary-file publish so a
-    // cancel cannot race a stale render into the destination path.
-    mutable std::mutex m_bouncePublishMutex;
-    // Serializes render thread retirement with a subsequent start. The
-    // worker publishes Failed/Completed before its wrapper flips
-    // m_bounceRunning, so callers must be able to join a terminal worker
-    // before accepting the next render.
-    mutable std::mutex m_bounceLifecycleMutex;
-    std::thread m_bounceThread;
+    // A bounce is control-plane state, so Rust owns all of it (bounce_driver.rs):
+    // offline-render ownership and its thread gate, the async worker, progress,
+    // the lifecycle state, the cancel/pause requests and the publish boundary.
+    // The engine keeps only this handle, which the realtime callback and the
+    // control surface both read through narrow FFI entry points.
+    void* m_bounceSession = hirari_bounce_session_create();
     std::shared_ptr<ProjectLayoutRevision> m_projectLayoutRevision =
         std::make_shared<ProjectLayoutRevision>();
     std::atomic<uint64_t> m_projectControlRevision{0};
