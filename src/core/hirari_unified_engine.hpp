@@ -25,7 +25,6 @@
 #include <fstream>
 #include <filesystem>
 #include <ostream>
-#include <array>
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <unistd.h>
@@ -34,9 +33,6 @@
 // Forward declarations
 namespace Hirari::DSP { struct ProcessContext; }
 
-namespace Hirari::Core::Video { class VideoSync; }
-
-#include "engine/routing_engine.hpp"
 #include "rust_ffi.hpp"
 #include <thread>
 #include <future>

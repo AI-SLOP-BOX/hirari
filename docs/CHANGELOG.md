@@ -67,6 +67,15 @@ production support.
 
 ### Changed
 
+- The never-buildable JACK backend is gone. `HIRARI_ENABLE_JACK` appeared in no
+  build script, CMake target or release job, so `JackBridgeDeep` and its
+  conditional driver, graph-sync, capture and peak paths were unreachable code;
+  CoreAudio remains the only native device backend and the non-macOS bridge
+  still refuses to report a running device. Sweeping the Rust FFI header for
+  symbols no C++ translation unit calls removed 45 prototypes plus the mirrors
+  they existed for, so `rust_ffi.hpp` now declares only the surface the engine
+  actually uses.
+
 - The region table now lives in Rust: `region_store.rs` owns each track's regions
   with their clip, note and processing-history stores, the snapshot a removal keeps
   for undo, the re-normalization a geometry change triggers and the frozen

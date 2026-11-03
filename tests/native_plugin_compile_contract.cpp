@@ -8,7 +8,6 @@
 #include "src/core/midi_buffer.hpp"
 #include "src/core/plugins/midi_fragment_transport.hpp"
 #include "src/core/plugin_host.hpp"
-#include "src/core/external/jack_bridge_deep.hpp"
 #include "src/core/HirariPluginSDK.hpp"
 #include <atomic>
 #include <array>

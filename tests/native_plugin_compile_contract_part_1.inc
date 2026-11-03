@@ -1,13 +1,5 @@
 int main() {
     {
-        auto& jack = Hirari::Core::External::JackBridgeDeep::getInstance();
-        jack.shutdown();
-#if !defined(HIRARI_ENABLE_JACK)
-        if (jack.tryInitialize("hirari-contract") || jack.isRunning() ||
-            jack.lastError().find("HIRARI_ENABLE_JACK") == std::string::npos) return 88;
-#endif
-    }
-    {
         SDKContractFactory factory;
         const auto descriptor = factory.getDescriptor();
         if (descriptor.sdkVersion != Hirari::SDK::kSDKVersion ||

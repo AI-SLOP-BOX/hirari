@@ -57,9 +57,6 @@ public:
         return rust::String(m_driver->status());
 #else
         if (m_driver->isSilentFallback()) return rust::String("silent-fallback");
-#if defined(HIRARI_ENABLE_JACK)
-        return rust::String(m_driver->status());
-#endif
 #endif
         return rust::String("stopped");
     }
@@ -105,7 +102,7 @@ public:
 #endif
     }
     bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
-#if defined(__APPLE__) || defined(HIRARI_ENABLE_JACK)
+#if defined(__APPLE__)
         if (!m_driver || !m_engine ||
             !m_driver->select_device(deviceId, sampleRate, bufferSize) ||
             !m_driver->is_running()) return false;
@@ -135,7 +132,7 @@ public:
             left.size() > ::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize) {
             return;
         }
-#if !defined(__APPLE__) && !defined(HIRARI_ENABLE_JACK)
+#if !defined(__APPLE__)
         // Keep the non-hardware fallback on the same callback boundary as a
         // real driver. The dispatcher invokes process_driver_block, which
         // owns the single native graph render; do not render it a second time
@@ -192,12 +189,6 @@ public:
         // Device/sample-rate/block-size changes are control-thread events.
         // Quiesce any callback that still owns the previous audio context
         // before rebuilding track processors and PDC state.
-#if defined(HIRARI_ENABLE_JACK)
-        if (m_driver && m_driver->is_running() &&
-            !m_driver->reconfigure(static_cast<double>(sr), bs)) {
-            return false;
-        }
-#endif
         m_engine->waitForAudioCallbacks();
         m_engine->apply_config(cfg);
 #endif

@@ -275,13 +275,6 @@ extern "C" bool hirari_plugin_scan_cache_record_failure(const uint8_t* path, siz
                                                         uint32_t reason);
 extern "C" bool hirari_plugin_scan_cache_record_success(const uint8_t* path, size_t pathSize);
 
-// Streaming time-stretch state (region_time_stretch.rs); the region owns the
-// handle and destroys it through the shared_ptr deleter in track.hpp.
-extern "C" void* hirari_region_stretch_create();
-extern "C" void hirari_region_stretch_destroy(void* handle);
-extern "C" bool hirari_region_stretch_prepare(void* handle, double sampleRate,
-                                              uint32_t maxBlockSize);
-
 extern "C" bool hirari_processor_state_encode(
     bool bypassed, float mix, uint32_t sidechain_bus,
     uint8_t* output, size_t output_len);
@@ -296,22 +289,9 @@ struct HirariRegionRangeEdit {
     uint64_t fade_out;
 };
 struct HirariRegionState;
-// Validates a newly inserted region's editable state in place; the C++ side
-// applies the same record it already holds.
-extern "C" bool hirari_region_normalize_add_metadata(
-    HirariRegionState* state, bool has_audio,
-    uint64_t audio_samples, uint32_t audio_channels);
 // VariAudio note-segment ownership. Rust now owns the note-edit table; C++
 // keeps only a published immutable projection and the project-file layout.
 typedef struct HirariRegionVariAudioStore HirariRegionVariAudioStore;
-
-struct HirariAudioNoteSegment {
-    double start_seconds = 0.0;
-    double end_seconds = 0.0;
-    double detected_pitch_cents = 0.0;
-    double pitch_offset_cents = 0.0;
-    double formant_offset_cents = 0.0;
-};
 
 struct HirariAudioNoteAnchor;
 struct HirariAudioNoteCurveView;
@@ -320,27 +300,8 @@ typedef struct HirariVariAudioFrozen HirariVariAudioFrozen;
 // Authoritative note-edit store. Rust-owned; C++ consumes it through this
 // narrow, allocation-free handle.
 extern "C" {
-HirariRegionVariAudioStore* hirari_region_vari_audio_store_new();
-// Fresh deep copy, owned by the caller and released with store_clear.
-HirariRegionVariAudioStore* hirari_region_vari_audio_store_clone(
-    const HirariRegionVariAudioStore* store);
-void hirari_region_vari_audio_store_clear(HirariRegionVariAudioStore* store);
 struct HirariAudioNoteSegmentRange;
 
-// Control-thread snapshot of the whole table. The views it hands out point
-// into the snapshot's own arrays, so the audio thread can read them without
-// a lock for as long as the snapshot is retained.
-HirariVariAudioFrozen* hirari_region_vari_audio_freeze(
-    const HirariRegionVariAudioStore* store);
-void hirari_region_vari_audio_frozen_free(HirariVariAudioFrozen* frozen);
-const HirariAudioNoteSegmentRange* hirari_region_vari_audio_frozen_ranges(
-    const HirariVariAudioFrozen* frozen, size_t* out_count);
-const HirariAudioNoteCurveView* hirari_region_vari_audio_frozen_curves(
-    const HirariVariAudioFrozen* frozen, size_t* out_count);
-
-// Applies the region-add policy in place (cap, drop malformed, normalize
-// anchor windows, sort, rebuild phases).
-bool hirari_region_vari_audio_store_normalize(HirariRegionVariAudioStore* store);
 }
 
 // Region range edits are a pure transform: Rust reads the caller's current
@@ -364,26 +325,11 @@ struct HirariEventStep {
     float parameter = 0.0f;
     bool enabled = true;
 };
-struct HirariEventStepView {
-    uint32_t id = 0;
-    float parameter = 0.0f;
-    bool enabled = true;
-    size_t operation_len = 0;
-    size_t operation_offset = 0;
-};
 typedef struct HirariRegionProcessingHistoryStore HirariRegionProcessingHistoryStore;
 extern "C" {
-HirariRegionProcessingHistoryStore* hirari_region_processing_history_new();
-void hirari_region_processing_history_clear(
-    HirariRegionProcessingHistoryStore* store);
-void hirari_region_processing_history_reset(
-    HirariRegionProcessingHistoryStore* store);
 bool hirari_region_processing_history_append(
     HirariRegionProcessingHistoryStore* store, HirariEventStep step);
-size_t hirari_region_processing_history_count(
-    const HirariRegionProcessingHistoryStore* store);
 }
-extern "C" const float* hirari_region_resampler_prepare();
 struct HirariWarpMarker {
     uint64_t sourceSample = 0;
     uint64_t timelineSample = 0;
@@ -407,21 +353,12 @@ struct HirariRegionClipEditsView {
 };
 extern "C" HirariRegionClipEdits* hirari_region_clip_edits_create();
 extern "C" void hirari_region_clip_edits_destroy(HirariRegionClipEdits* store);
-extern "C" HirariRegionClipEdits* hirari_region_clip_edits_clone(
-    const HirariRegionClipEdits* store);
 extern "C" bool hirari_region_clip_edits_replace_range_edits(
     HirariRegionClipEdits* store, const HirariRegionRangeEdit* edits, size_t count,
     uint64_t region_length, bool validate);
-extern "C" void hirari_region_clip_edits_normalize_range_edits(
-    HirariRegionClipEdits* store, uint64_t region_length);
-extern "C" bool hirari_region_clip_edits_replace_comp_ranges(
-    HirariRegionClipEdits* store, const HirariRegionCompRange* ranges, size_t count,
-    bool managed);
 extern "C" int32_t hirari_region_clip_edits_set_warp_markers(
     HirariRegionClipEdits* store, const HirariWarpMarker* markers, size_t count,
     uint64_t source_span, uint64_t timeline_length, bool normalize);
-extern "C" void hirari_region_clip_edits_normalize_warp_markers(
-    HirariRegionClipEdits* store, uint64_t source_span, uint64_t timeline_length);
 extern "C" HirariRegionClipEditsFrozen* hirari_region_clip_edits_freeze(
     const HirariRegionClipEdits* store);
 extern "C" const HirariRegionClipEditsView* hirari_region_clip_edits_frozen_view(
@@ -473,7 +410,6 @@ extern "C" uint8_t hirari_region_hydrate_decoded(
 // Splits a region at `splitBeat` (an absolute timeline sample position) and
 // returns the new right-hand id, or 0.
 // Duplicates a region at `startSample` and returns the new id, or 0.
-
 
 // Bounce planning is Rust-owned. C++ supplies the arrangement spans and the
 // streaming writers; the acceptance rules and the render extent live in
@@ -695,7 +631,6 @@ extern "C" bool hirari_native_editor_sessions_forget(void* state, uint32_t track
 extern "C" uint64_t hirari_native_editor_sessions_session(const void* state, uint32_t track, uint32_t plugin);
 extern "C" void* hirari_region_waveform(
     void* host, uint32_t trackId, uint32_t regionId, uint32_t numPeaks);
-extern "C" void hirari_region_waveform_forget(void* host, uint32_t regionId);
 extern "C" void hirari_region_waveform_clear(void* host);
 // Decodes `path`, swaps it into the region and records the undo pair. Rust
 // owns the path/rate policy and the snapshots; C++ performs the swap.
@@ -733,10 +668,6 @@ struct HirariAutomationHostOps {
 };
 
 extern "C" void hirari_automation_host_install(const HirariAutomationHostOps* ops);
-
-// Restores `store` from a snapshot handle produced by the Rust side.
-extern "C" bool hirari_region_note_store_restore(void* snapshot,
-                                                  HirariRegionVariAudioStore* store);
 
 struct HirariRegionBlockConfig {
     uint64_t regionOffset = 0;
@@ -849,30 +780,6 @@ struct HirariTrackRegionRenderInput {
     uint8_t pitchPreserveWarp = 0;
     uint8_t needsSpectralStretch = 0;
 };
-// Snapshot publication: Rust keeps the region copies that own the decoded audio
-// and the edit projections, derives the overlap crossfades, the
-// spectral-stretch decision and the render input the callback reads.
-struct HirariRegionRenderSource {
-    HirariRegionState state{};
-    uint32_t id = 0;
-    uint8_t muted = 0;
-    const float* audioLeft = nullptr;
-    const float* audioRight = nullptr;
-    uint64_t audioSamples = 0;
-    const HirariRegionClipEditsView* clip = nullptr;
-    const HirariAudioNoteSegmentRange* noteRanges = nullptr;
-    size_t noteRangeCount = 0;
-    const HirariAudioNoteCurveView* noteCurves = nullptr;
-    size_t noteCurveCount = 0;
-    uintptr_t noteCacheSegments = 0;
-    void* stretchHandle = nullptr;
-    uint64_t crossfadeIn = 0;
-    uint64_t crossfadeOut = 0;
-};
-extern "C" size_t hirari_track_build_region_render_inputs(
-    const HirariRegionRenderSource* sources, size_t count, double sample_rate,
-    const float* resample_kernel, const float* wsola_window, uintptr_t cache_owner,
-    uintptr_t cache_snapshot, HirariTrackRegionRenderInput* out, size_t capacity);
 // The region table itself is Rust-owned (region_store.rs). A track installs its
 // identity here and receives back only the immutable render-input array the
 // audio callback reads; the decoded buffer stays a C++ handle the store retains
@@ -912,40 +819,12 @@ extern "C" bool hirari_region_store_prepare(void* track, double sampleRate,
                                             uint32_t blockSize);
 extern "C" void hirari_region_store_trim_retired(void* track);
 extern "C" size_t hirari_region_store_count(void* track);
-extern "C" bool hirari_region_store_find(void* track, uint32_t regionId,
-                                         HirariRegionState* out);
-extern "C" size_t hirari_region_store_warp_markers(void* track,
-                                                   uint32_t regionId, HirariWarpMarker* out,
-                                                   size_t capacity);
 extern "C" size_t hirari_region_store_range_edits(void* track,
                                                   uint32_t regionId,
                                                   HirariRegionRangeEdit* out, size_t capacity);
-extern "C" size_t hirari_region_store_comp_ranges(void* track,
-                                                  uint32_t regionId,
-                                                  HirariRegionCompRange* out, size_t capacity,
-                                                  bool* managed);
-extern "C" size_t hirari_region_store_region_path(void* track,
-                                                  uint32_t regionId, uint8_t* out,
-                                                  size_t capacity);
 extern "C" size_t hirari_region_store_list_regions(void* host, uint32_t trackId,
                                                    uint32_t* out, size_t capacity);
-extern "C" bool hirari_region_store_track_token(void* track,
-                                                uint64_t* generation, size_t* snapshot);
-extern "C" size_t hirari_region_store_list_sync_group(void* host, uint32_t group,
-                                                      HirariRegionGroupMember* out,
-                                                      size_t capacity);
-extern "C" void* hirari_region_store_retain_audio(void* track,
-                                                  uint32_t regionId);
 extern "C" void* hirari_region_store_note_snapshot(void* track, uint32_t regionId);
-extern "C" bool hirari_region_store_note_edit(void* track, uint32_t regionId,
-                                              void* context, HirariRegionNoteMutateFn mutate);
-extern "C" void* hirari_region_store_snapshot_region(void* track,
-                                                     uint32_t regionId);
-extern "C" void hirari_region_store_release_snapshot(void* handle);
-extern "C" uint32_t hirari_region_store_clone_region(void* track,
-                                                     uint32_t regionId,
-                                                     const HirariRegionState* state,
-                                                     uint32_t newRegionId);
 extern "C" bool hirari_region_store_copy_regions(void* sourceTrack,
                                                  void* destinationTrack,
                                                  const uint32_t* regionIds, size_t count);
@@ -1003,17 +882,6 @@ extern "C" void hirari_midi_process_mpe(
     HirariMpeState* state, const void* events, size_t event_count);
 extern "C" void hirari_midi_apply_articulations_from_state(
     const HirariMpeState* state, void* events, size_t event_count);
-extern "C" void* hirari_audio_input_queue_create();
-extern "C" void hirari_audio_input_queue_free(void* queue);
-extern "C" bool hirari_audio_input_queue_push(
-    const void* queue, const float* const* channels,
-    uint32_t channel_count, uint32_t frame_count);
-extern "C" bool hirari_audio_input_queue_poll(
-    const void* queue, float* const* destination,
-    uint32_t destination_channels, uint32_t destination_frames,
-    uint32_t* channel_count, uint32_t* frame_count, uint64_t* dropped_blocks);
-extern "C" uint64_t hirari_audio_input_queue_dropped(const void* queue);
-extern "C" void hirari_audio_input_queue_discard(const void* queue);
 extern "C" void* hirari_tempo_map_create();
 extern "C" void hirari_tempo_map_destroy(void* state);
 extern "C" bool hirari_tempo_map_add_tempo(
@@ -1453,9 +1321,6 @@ extern "C" size_t hirari_native_pdc_sync_graph(
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
-extern "C" bool hirari_audio_pitch_commit_region_result(
-    const void* result, void* region_note_store);
-extern "C" void hirari_audio_pitch_result_destroy(void* state);
 extern "C" void* hirari_builtin_midi_instrument_create();
 extern "C" void hirari_builtin_midi_instrument_destroy(void* state);
 extern "C" void hirari_builtin_midi_instrument_process(
@@ -1760,7 +1625,6 @@ extern "C" bool hirari_undo_manager_transaction_active(const void* state);
 extern "C" size_t hirari_undo_manager_undo_count(const void* state);
 extern "C" size_t hirari_undo_manager_redo_count(const void* state);
 extern "C" void hirari_undo_manager_clear(void* state);
-
 
 // MIDI expression-map edit policy. Rust validates and applies the packed map
 // through the track's articulation runtime; the engine only resolves the

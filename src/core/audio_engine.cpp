@@ -42,13 +42,10 @@ AudioEngine::AudioEngine(bool startDevice)
             }
         }
 #else
-        const bool started = m_driver->start();
-        if (!started) {
+        if (!m_driver->start()) {
             ::Hirari::Core::pushEngineStatus(
             ::Hirari::Core::StatusSeverity::Warning,
             "Audio backend unavailable on this platform; using offline backend.");
-        } else {
-            sync_jack_graph_config();
         }
 #endif
     }
