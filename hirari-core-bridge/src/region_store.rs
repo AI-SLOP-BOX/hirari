@@ -1925,6 +1925,10 @@ mod tests {
         0x1000 as *mut c_void
     }
 
+    fn range_edit(start: u64, end: u64, gain: f32, fade_in: u64, fade_out: u64) -> NativeRangeEdit {
+        NativeRangeEdit { start, end, gain, fade_in, fade_out }
+    }
+
     fn add(key: *mut c_void, id: u32, start: u64, length: u64) -> bool {
         let draft = unsafe {
             hirari_region_store_draft_new(id, b"a.wav".as_ptr(), 5, b"a.wav".as_ptr(), 5, ptr::null())
@@ -2117,6 +2121,74 @@ mod tests {
             5
         );
         assert_eq!(&path[..5], b"a.wav");
+        unsafe { hirari_region_store_forget(key) };
+    }
+
+    #[test]
+    fn a_draft_clip_batch_is_normalized_at_insert() {
+        let _serial = serial();
+        let _host_ops = setup();
+        AUDIO_FRAMES.store(8, Ordering::Relaxed);
+        let (key, track) = (0x7700 as *mut c_void, 75u32);
+        unsafe { hirari_region_store_install(key, track) };
+        let state = HirariRegionState {
+            len: 8,
+            source_sample_rate: 48_000.0,
+            timeline_sample_rate: 48_000.0,
+            ..Default::default()
+        };
+        let draft =
+            unsafe { hirari_region_store_draft_new(1, ptr::null(), 0, ptr::null(), 0, &state) };
+        let clip = unsafe { hirari_region_store_draft_clip(draft) };
+        assert!(!clip.is_null());
+        let seed = [
+            range_edit(0, 100, 0.5, 999, 999),
+            range_edit(8, 12, 1.0, 0, 0),
+            range_edit(1, 2, f32::NAN, 0, 0),
+        ];
+        assert!(unsafe {
+            hirari_region_clip_edits_replace_range_edits(clip, seed.as_ptr(), seed.len(), 8, false)
+        });
+        assert!(unsafe { hirari_region_store_draft_add(draft, key, 0x999 as *mut c_void) });
+
+        // Insert normalization trims the survivor to the region and drops both
+        // malformed edits before the table is readable.
+        let mut read = [NativeRangeEdit::default(); 4];
+        assert_eq!(
+            unsafe { hirari_region_store_range_edits(key, 1, read.as_mut_ptr(), 4) },
+            1
+        );
+        assert_eq!(read[0].end, 8);
+        assert_eq!(read[0].fade_in, 8);
+        assert_eq!(read[0].fade_out, 8);
+
+        // The store installs what its caller already admitted, so an unbounded
+        // fade survives the round trip and a ragged blob is refused.
+        let replacement = [range_edit(0, 4, 1.0, 99, 99)];
+        let mut payload = HirariRegionEditPayload {
+            track_id: track,
+            region_id: 1,
+            op: HIRARI_REGION_EDIT_RANGE_EDITS,
+            blob: ptr::from_ref(&replacement).cast::<u8>(),
+            blob_len: std::mem::size_of::<NativeRangeEdit>(),
+            ..Default::default()
+        };
+        assert!(unsafe { hirari_region_store_apply_edit(host(), key, &payload) });
+        assert_eq!(
+            unsafe { hirari_region_store_range_edits(key, 1, read.as_mut_ptr(), 4) },
+            1
+        );
+        assert_eq!(read[0].end, 4);
+        assert_eq!(read[0].fade_in, 99);
+        assert_eq!(read[0].fade_out, 99);
+
+        payload.blob_len -= 1;
+        assert!(!unsafe { hirari_region_store_apply_edit(host(), key, &payload) });
+        assert_eq!(
+            unsafe { hirari_region_store_range_edits(key, 1, read.as_mut_ptr(), 4) },
+            1
+        );
+        assert_eq!(read[0].fade_in, 99);
         unsafe { hirari_region_store_forget(key) };
     }
 

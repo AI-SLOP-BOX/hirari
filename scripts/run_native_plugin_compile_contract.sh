@@ -63,8 +63,8 @@ fi
 # ---------------------------------------------------------------------------
 # Contract runner
 #
-# Each contract is independent, so one failure must not hide the ones behind
-# it. Build, link and run every contract, recording each outcome, then report a
+# Each check is independent, so one failure must not hide the ones behind it.
+# Build, link and run every contract, recording each outcome, then report a
 # full accounting and exit non-zero if any of them failed. The previous
 # fail-fast structure meant a single defect masked every later contract, which
 # is how a mono-export bug and a recording-publish bug both stayed latent.
@@ -77,51 +77,10 @@ record() {
     CONTRACT_STATUS="$CONTRACT_STATUS $2"
 }
 
-build_link_run() {
-    # $1 = label, $2 = source path, rest = extra link inputs.
-    label=$1
-    source=$2
-    shift 2
-    binary="$OUT_DIR/$label"
-    # A failed build must never be able to execute a binary left behind by an
-    # earlier successful one, so any previous artifact goes first.
-    rm -f "$binary"
-    # Linking the large staticlib is memory-hungry and this machine can OOM the
-    # compiler without reporting a diagnostic. Retry once before declaring the
-    # link failed, so an environment kill is not mistaken for a real defect.
-    linked=1
-    attempt=1
-    while [ "$attempt" -le 2 ]; do
-        # `-Itarget/cxxbridge` exposes the cxx-generated sandbox bridge header
-        # through the engine headers that include the plugin sandbox facade.
-        if "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc \
-            -Itarget/cxxbridge \
-            "$source" "$@" $LINK_FLAGS -o "$binary"; then
-            linked=0
-            break
-        fi
-        attempt=$((attempt + 1))
-    done
-    if [ "$linked" -ne 0 ]; then
-        record "$label" BUILD_OR_LINK_FAILED
-        return 0
-    fi
-    if [ "$(uname -s)" = "Darwin" ]; then
-        if (ulimit -s 16384 && "$binary"); then
-            record "$label" PASSED
-        else
-            record "$label" FAILED
-        fi
-    elif "$binary"; then
-        record "$label" PASSED
-    else
-        record "$label" FAILED
-    fi
-}
-
 # The main contract needs the audio driver translation unit and the frameworks.
-# Same memory-driven retry as build_link_run: this translation unit pulls in
-# the whole engine and is the most likely to be OOM-killed on a small machine.
+# Linking it pulls in the whole engine and the Rust staticlib, which is
+# memory-hungry enough that this machine can OOM the compiler without reporting
+# a diagnostic, so retry once before declaring the link failed.
 main_linked=1
 main_attempt=1
 while [ "$main_attempt" -le 2 ]; do
@@ -153,9 +112,6 @@ else
         record native-plugin-compile FAILED
     fi
 fi
-
-build_link_run audio-buffer-contract tests/audio_buffer_contract.cpp "$BRIDGE_LIB"
-build_link_run range-edit-contract tests/range_edit_contract.cpp "$BRIDGE_LIB"
 
 echo "native contract summary:"
 overall=0

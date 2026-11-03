@@ -74,6 +74,19 @@ production support.
 
 ### Changed
 
+- The audio-buffer and range-edit native contracts run as Rust tests.
+  `tests/audio_buffer_contract.cpp` and `tests/range_edit_contract.cpp` were
+  assertion sequences over entry points Rust already owns -- every method of the
+  C++ `AudioBuffer` handle is a one-line forward to `hirari_audio_buffer_storage_*`
+  -- so they are now `audio_buffer_ops::storage_contract_tests` (plane mixing
+  rejects incomplete sources, non-finite gains are a no-op, read offsets clamp to
+  the frame count, the array views alias the channel planes, an invalid wrap
+  releases the owned block), `region_store::tests::a_draft_clip_batch_is_normalized_at_insert`
+  (insert normalization, an admitted unbounded fade surviving the round trip, a
+  ragged blob refused) and `region_clip_edits::tests::a_validated_batch_clamps_fades_and_a_leaving_span_is_refused`.
+  The contract script lost the two `build_link_run` calls and the runner helper
+  they were its only users for; the full native-surface link contract is
+  unchanged. C++ 9810 -> 9668 (-142).
 - The bounce session state machine is Rust. `HirariUnifiedEngine` dropped its
   thirteen bounce atomics, the publish and lifecycle mutexes and the
   `std::thread` that carried an async render; `hirari-core-bridge/src/bounce_driver.rs`

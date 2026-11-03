@@ -1175,3 +1175,162 @@ mod builtin_gain_tests {
         assert_eq!(rust_right, cpp_right);
     }
 }
+
+/// The whole owned/wrapped buffer contract: dimensions, channel views, bounds,
+/// non-finite sanitising and the mixing entry points the native audio thread
+/// uses. These drive the same C ABI the engine's typed handle forwards to.
+#[cfg(test)]
+mod storage_contract_tests {
+    use std::ffi::c_void;
+    use std::ptr;
+
+    use super::{
+        hirari_audio_buffer_storage_add_channels_from, hirari_audio_buffer_storage_add_from,
+        hirari_audio_buffer_storage_apply_gain, hirari_audio_buffer_storage_array_read,
+        hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_channels,
+        hirari_audio_buffer_storage_clear, hirari_audio_buffer_storage_create,
+        hirari_audio_buffer_storage_destroy, hirari_audio_buffer_storage_read_pointer,
+        hirari_audio_buffer_storage_reserve_buffer, hirari_audio_buffer_storage_resize,
+        hirari_audio_buffer_storage_samples, hirari_audio_buffer_storage_sanitize,
+        hirari_audio_buffer_storage_wrap_channels, hirari_audio_buffer_storage_write_pointer,
+    };
+
+    struct Storage(*mut c_void);
+
+    impl Storage {
+        fn empty() -> Self {
+            Self(hirari_audio_buffer_storage_create())
+        }
+
+        fn owned(channels: u32, samples: u32) -> Self {
+            let storage = Self::empty();
+            assert_eq!(unsafe { hirari_audio_buffer_storage_reserve_buffer(storage.0, channels, samples) }, 0);
+            assert!(unsafe { hirari_audio_buffer_storage_resize(storage.0, channels, samples) });
+            storage
+        }
+
+        fn write(&self, channel: u32) -> *mut f32 {
+            unsafe { hirari_audio_buffer_storage_write_pointer(self.0, channel) }
+        }
+
+        fn read(&self, channel: u32) -> *const f32 {
+            unsafe { hirari_audio_buffer_storage_read_pointer(self.0, channel, 0) }
+        }
+
+        fn fill(&self, channel: u32, values: &[f32]) {
+            let pointer = self.write(channel);
+            assert!(!pointer.is_null());
+            for (index, value) in values.iter().enumerate() {
+                unsafe { *pointer.add(index) = *value };
+            }
+        }
+
+        fn sample(&self, channel: u32, index: u32) -> f32 {
+            unsafe { *self.read(channel).add(index as usize) }
+        }
+
+        fn dimensions(&self) -> (u32, u32) {
+            unsafe {
+                (
+                    hirari_audio_buffer_storage_channels(self.0),
+                    hirari_audio_buffer_storage_samples(self.0),
+                )
+            }
+        }
+    }
+
+    impl Drop for Storage {
+        fn drop(&mut self) {
+            unsafe { hirari_audio_buffer_storage_destroy(self.0) };
+        }
+    }
+
+    #[test]
+    fn mixed_planes_ignore_incomplete_sources_and_keep_finite_audio() {
+        let stereo = Storage::owned(2, 4);
+        stereo.fill(0, &[0.25, 0.0, 0.0, 0.0]);
+        stereo.fill(1, &[-0.25, 0.0, 0.0, 0.0]);
+
+        // Invalid raw bridge input must be rejected without touching audio.
+        unsafe {
+            hirari_audio_buffer_storage_add_channels_from(stereo.0, ptr::null(), ptr::null(), 4);
+        }
+        assert_eq!(stereo.sample(0, 0), 0.25);
+        assert_eq!(stereo.sample(1, 0), -0.25);
+
+        // A stereo destination needs both planes; a missing right is refused.
+        let left = [0.5_f32, 0.0, 0.0, 0.0];
+        let right = [-0.5_f32, 0.0, 0.0, 0.0];
+        unsafe {
+            hirari_audio_buffer_storage_add_channels_from(stereo.0, left.as_ptr(), ptr::null(), 4);
+        }
+        assert_eq!(stereo.sample(0, 0), 0.25);
+        assert_eq!(stereo.sample(1, 0), -0.25);
+
+        unsafe {
+            hirari_audio_buffer_storage_add_channels_from(
+                stereo.0,
+                left.as_ptr(),
+                right.as_ptr(),
+                4,
+            );
+        }
+        assert_eq!(stereo.sample(0, 0), 0.75);
+        assert_eq!(stereo.sample(1, 0), -0.75);
+
+        // A non-finite gain is a no-op rather than a way to poison the block.
+        unsafe {
+            hirari_audio_buffer_storage_apply_gain(stereo.0, f32::NAN);
+            hirari_audio_buffer_storage_apply_gain(stereo.0, f32::INFINITY);
+        }
+        assert!(stereo.sample(0, 0).is_finite());
+        assert!(stereo.sample(1, 0).is_finite());
+    }
+
+    #[test]
+    fn dimensions_and_channel_views_are_bounded() {
+        let stereo = Storage::owned(2, 4);
+        assert_eq!(stereo.dimensions(), (2, 4));
+        assert!(stereo.write(2).is_null());
+        assert!(stereo.read(2).is_null());
+
+        // Read offsets clamp to the frame count instead of running past a plane.
+        let offset = unsafe { hirari_audio_buffer_storage_read_pointer(stereo.0, 0, 99) };
+        assert_eq!(offset, unsafe { stereo.read(0).add(4) });
+
+        let array_write = unsafe { hirari_audio_buffer_storage_array_write(stereo.0) };
+        assert_eq!(unsafe { *array_write.add(1) } as usize, stereo.write(1) as usize);
+        let array_read = unsafe { hirari_audio_buffer_storage_array_read(stereo.0) };
+        assert_eq!(unsafe { *array_read } as usize, stereo.read(0) as usize);
+
+        stereo.fill(0, &[0.0, f32::INFINITY, 0.0, 0.0]);
+        assert_eq!(unsafe { hirari_audio_buffer_storage_sanitize(stereo.0) }, 1);
+        assert_eq!(stereo.sample(0, 1), 0.0);
+
+        unsafe { hirari_audio_buffer_storage_clear(stereo.0, 0, 1) };
+        assert_eq!(stereo.sample(0, 0), 0.0);
+    }
+
+    #[test]
+    fn another_storage_is_summed_and_an_external_wrap_replaces_the_block() {
+        let destination = Storage::owned(2, 4);
+        let source = Storage::owned(2, 4);
+        source.fill(0, &[2.0, 0.0, 0.0, 0.0]);
+        source.fill(1, &[-2.0, 0.0, 0.0, 0.0]);
+        unsafe { hirari_audio_buffer_storage_add_from(destination.0, source.0, 4) };
+        assert_eq!(destination.sample(0, 0), 2.0);
+        assert_eq!(destination.sample(1, 0), -2.0);
+
+        let mut external_left = [1.0_f32, 0.0, 0.0, 0.0];
+        let mut external_right = [-1.0_f32, 0.0, 0.0, 0.0];
+        let mut planes = [external_left.as_mut_ptr(), external_right.as_mut_ptr()];
+        let wrapped = Storage::empty();
+        assert!(unsafe { hirari_audio_buffer_storage_wrap_channels(wrapped.0, planes.as_mut_ptr(), 2, 4) });
+        assert_eq!(wrapped.dimensions().0, 2);
+        assert_eq!(wrapped.write(0), external_left.as_mut_ptr());
+
+        // An invalid wrap releases the owned block and leaves an empty view.
+        assert!(!unsafe { hirari_audio_buffer_storage_wrap_channels(wrapped.0, ptr::null_mut(), 0, 0) });
+        assert_eq!(wrapped.dimensions(), (0, 0));
+    }
+}

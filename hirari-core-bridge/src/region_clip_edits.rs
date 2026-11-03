@@ -399,6 +399,30 @@ mod tests {
     }
 
     #[test]
+    fn a_validated_batch_clamps_fades_and_a_leaving_span_is_refused() {
+        let store = hirari_region_clip_edits_create();
+        let inside = [edit(0, 4, 1.0, 99, 99)];
+        assert!(unsafe {
+            hirari_region_clip_edits_replace_range_edits(store, inside.as_ptr(), 1, 8, true)
+        });
+        let beyond = [edit(0, 9, 1.0, 0, 0)];
+        assert!(!unsafe {
+            hirari_region_clip_edits_replace_range_edits(store, beyond.as_ptr(), 1, 8, true)
+        });
+        let frozen = unsafe { hirari_region_clip_edits_freeze(store) };
+        let view = unsafe { &*hirari_region_clip_edits_frozen_view(frozen) };
+        assert_eq!(view.range_edit_count, 1);
+        let kept = unsafe { *view.range_edits };
+        assert_eq!(kept.end, 4);
+        assert_eq!(kept.fade_in, 4);
+        assert_eq!(kept.fade_out, 4);
+        unsafe {
+            hirari_region_clip_edits_frozen_free(frozen);
+            hirari_region_clip_edits_destroy(store);
+        }
+    }
+
+    #[test]
     fn unvalidated_range_edits_are_stored_verbatim() {
         let store = hirari_region_clip_edits_create();
         let raw = [edit(50, 20, 1.0, 0, 0), edit(1, 2, 1.0, 0, 0)];
