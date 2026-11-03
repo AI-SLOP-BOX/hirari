@@ -828,7 +828,7 @@ impl ffi::AudioEngine {
         self.get_core().audio_range_overflowed()
     }
     pub fn get_video_frame_revision(&self) -> u64 {
-        self.get_core().get_video_frame_revision()
+        crate::video_system::video_service().frame_revision()
     }
     pub fn get_track_correlation(&self, tid: u32) -> f32 {
         self.get_core().get_track_correlation(tid)
@@ -899,7 +899,7 @@ impl ffi::AudioEngine {
         pinned(self).set_automation_record_mode(mode)
     }
     pub fn request_video_frame(&self, seconds: f64) -> bool {
-        pinned(self).request_video_frame(seconds)
+        crate::video_system::video_service().request_frame(seconds)
     }
     pub fn mark_project_layout_changed(&self) {
         self.get_core().mark_project_layout_changed()

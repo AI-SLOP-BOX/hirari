@@ -49,12 +49,6 @@
     // when one Rust/FFI handle is dropped.
     void shutdown() const;
 
-
-    rust::Vec<uint8_t> get_video_frame() const;
-
-    bool load_video(rust::Str path) const {
-        return m_engine && m_engine->load_video(std::string_view(path.data(), path.size()));
-    }
     uint64_t queue_region_waveform(uint32_t tid, uint32_t rid) const {
         if (!m_engine || tid == 0 || rid == 0) return 0;
         auto* context = new (std::nothrow) std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>(m_engine);

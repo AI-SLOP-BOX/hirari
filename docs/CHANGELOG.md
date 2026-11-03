@@ -74,6 +74,30 @@ production support.
 
 ### Changed
 
+- Video preview decoding is Rust. `src/core/engine/video_system.hpp`,
+  `video_system_bridge.hpp` and `video_system_bridge.mm` were an Objective-C++
+  AVFoundation adapter sitting behind the Rust request queue, so the frame
+  worker was split across two languages for one asset: the queue, generation
+  counter and cached packet lived in Rust while track probing, image generation
+  and the RGBA blit lived in Objective-C++. All of it now lives in
+  `hirari-core-bridge/src/video_native.rs`, which drives `AVURLAsset`,
+  `AVAssetImageGenerator` and `CGBitmapContextCreate` through `objc2` bindings
+  and keeps the same behaviour the native layer had — 2-second deadlines on the
+  track load and the image generation (cancelling generation on timeout),
+  `appliesPreferredTrackTransform`, zero time tolerance, the 8192-pixel edge
+  cap, and dropping a frame whose generation was superseded while it rendered.
+  The `dispatch_semaphore` handshakes became the same bounded condvar wait the
+  rest of the bridge uses, and `hirari-core-bridge/build.rs` no longer compiles
+  any Objective-C++: the engine's remaining native code is plain C++, with
+  CoreAudio, CoreMIDI and now AVFoundation all owned by Rust. Decoding still
+  happens only on the `hirari-video-frame` worker thread and never on the audio
+  thread, and the UI packet is byte-identical (little-endian width, height, then
+  packed RGBA8). The video path previously had no tests at all; the runtime is
+  now covered by deterministic unit tests over a scripted frame source — failed
+  load, request clamping, packet framing, stale-generation drop, reload
+  clearing, service argument guards — plus an opt-in test that decodes a real
+  clip through the worker when `HIRARI_VIDEO_FIXTURE` names one.
+
 - The sandbox's CLAP test plugin is a Rust crate. `tests/fixtures/minimal_gain_clap.cpp`
   is replaced by the workspace member `tests/fixtures/minimal-gain-clap`, a cdylib
   that exports `clap_entry` and mirrors the same CLAP 1.x structures the worker

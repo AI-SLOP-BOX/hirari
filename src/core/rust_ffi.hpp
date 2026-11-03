@@ -1601,23 +1601,6 @@ extern "C" void hirari_layout_snapshot_owner_release(uint64_t owner);
 extern "C" uint64_t hirari_waveform_snapshot_request(
     void* context, uint32_t track_id, uint32_t region_id,
     HirariWaveformComputeCallback compute, HirariSnapshotDestroyCallback destroy_context);
-using HirariVideoDecodeCallback = bool (*)(void*, double, uint64_t, void**);
-using HirariVideoReadFrameCallback = bool (*)(
-    void*, uint32_t*, uint32_t*, double*, const uint8_t**, size_t*);
-using HirariVideoDestroyFrameCallback = void (*)(void*);
-using HirariVideoPixelsVisitor = void (*)(void*, const uint8_t*, size_t);
-extern "C" void* hirari_video_runtime_create(
-    void* context, HirariVideoDecodeCallback decode,
-    HirariVideoReadFrameCallback read, HirariVideoDestroyFrameCallback destroy);
-extern "C" void hirari_video_runtime_destroy(void* runtime);
-extern "C" uint64_t hirari_video_runtime_clear(void* runtime);
-extern "C" bool hirari_video_runtime_set_metadata(void* runtime, double duration, double fps);
-extern "C" bool hirari_video_runtime_request_frame(void* runtime, double seconds);
-extern "C" bool hirari_video_runtime_has_video(const void* runtime);
-extern "C" uint64_t hirari_video_runtime_revision(const void* runtime);
-extern "C" bool hirari_video_runtime_copy_frame(
-    const void* runtime, void* context, HirariVideoPixelsVisitor visit,
-    uint32_t* width, uint32_t* height, double* seconds);
 
 // Project-layout gathering. Rust walks the live engine model through this
 // table (layout_gather.rs), owns the snapshot and its backing blocks, and

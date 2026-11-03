@@ -81,10 +81,6 @@ fn main() {
         build.flag("-mavx2").flag("-mfma");
     }
 
-    if target_os == "macos" {
-        build.file("../src/core/engine/video_system_bridge.mm");
-    }
-
     // The plugin sandbox host lives in its own cxx bridge so its generated
     // header is self-contained (it pulls in no engine headers), which lets the
     // header-only C++ facade include it from plugin code without cycles.
@@ -125,10 +121,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../src/core/audio_engine.hpp");
     println!("cargo:rerun-if-changed=../src/core/hirari_unified_engine.hpp");
     println!("cargo:rerun-if-changed=../src/core/engine/track.hpp");
-    println!("cargo:rerun-if-changed=../src/core/engine/undo_transaction_manager.hpp");
-    println!("cargo:rerun-if-changed=../src/core/engine/video_system_bridge.hpp");
-    println!("cargo:rerun-if-changed=../src/core/engine/video_system_bridge.mm");
-    println!("cargo:rerun-if-changed=../src/core/engine/video_system.hpp");
 
     if target_os == "macos" {
         println!("cargo:rustc-link-lib=framework=Foundation");

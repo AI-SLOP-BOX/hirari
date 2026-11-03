@@ -75,10 +75,6 @@ AudioEngine::AudioEngine(bool startDevice)
         if (m_engine) m_engine->shutdown();
     }
 
-    rust::Vec<uint8_t> AudioEngine::get_video_frame() const {
-        return m_engine ? m_engine->get_video_frame() : rust::Vec<uint8_t>();
-    }
-
     void AudioEngine::discard_pending_audio_input() const {
         std::lock_guard<std::mutex> pollLock(m_inputPollMutex);
         if (m_driver) m_driver->discard_pending_input_blocks();

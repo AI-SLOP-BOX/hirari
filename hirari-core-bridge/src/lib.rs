@@ -334,10 +334,6 @@ pub mod ffi {
         fn metronome_state(self: &HirariUnifiedEngine) -> usize;
         fn routing_engine_state(self: &HirariUnifiedEngine) -> usize;
         fn get_sample_rate(self: &HirariUnifiedEngine) -> f64;
-        fn get_video_frame(self: &AudioEngine) -> Vec<u8>;
-        fn get_video_frame_revision(self: &HirariUnifiedEngine) -> u64;
-        fn request_video_frame(self: Pin<&mut HirariUnifiedEngine>, seconds: f64) -> bool;
-        fn load_video(self: &AudioEngine, path: &str) -> bool;
 
         fn push_command(
             engine: &AudioEngine,

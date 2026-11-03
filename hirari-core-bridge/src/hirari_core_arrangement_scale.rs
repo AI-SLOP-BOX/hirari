@@ -374,25 +374,19 @@ impl HirariCore {
             .collect()
     }
     pub fn get_video_frame(&self) -> Vec<u8> {
-        self.engine
-            .as_ref()
-            .map_or_else(Vec::new, |e| e.get_video_frame().into_iter().collect())
+        crate::video_system::video_service().frame_packet()
     }
 
     pub fn get_video_frame_revision(&self) -> u64 {
-        self.engine
-            .as_ref()
-            .map_or(0, |e| e.get_video_frame_revision())
+        crate::video_system::video_service().frame_revision()
     }
 
     pub fn request_video_frame(&self, seconds: f64) -> bool {
-        self.engine
-            .as_ref()
-            .is_some_and(|e| e.request_video_frame(seconds))
+        crate::video_system::video_service().request_frame(seconds)
     }
 
     pub fn load_video(&self, path: &str) -> bool {
-        self.engine.as_ref().is_some_and(|e| e.load_video(path))
+        crate::video_system::video_service().load_video(path)
     }
 
     pub fn get_song_structure_json(&self) -> String {

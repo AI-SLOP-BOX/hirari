@@ -126,21 +126,3 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
         m_scaleType.load(std::memory_order_relaxed));
 }
 
-rust::Vec<uint8_t> HirariUnifiedEngine::get_video_frame() {
-    rust::Vec<uint8_t> frame;
-#if defined(__APPLE__)
-    std::vector<uint8_t> rgba;
-    uint32_t width = 0, height = 0;
-    if (::Hirari::Core::Engine::VideoBridge::copyCurrentFrame(rgba, width, height) &&
-        width > 0 && height > 0 && rgba.size() == static_cast<size_t>(width) * height * 4u) {
-        // Packet: little-endian width, height, followed by packed RGBA8.
-        frame.reserve(8u + rgba.size());
-        for (uint32_t shift = 0; shift < 32; shift += 8) frame.push_back(static_cast<uint8_t>((width >> shift) & 0xffu));
-        for (uint32_t shift = 0; shift < 32; shift += 8) frame.push_back(static_cast<uint8_t>((height >> shift) & 0xffu));
-        for (uint8_t value : rgba) frame.push_back(value);
-    }
-#endif
-    // Without the platform video bridge there is no frame producer: the
-    // Rust video runtime owns decoding and caching, so this stays empty.
-    return frame;
-}

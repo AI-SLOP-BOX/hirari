@@ -351,10 +351,12 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        if self.engine.is_null() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
-        };
-        let result = if engine.load_video(path.to_string_lossy().as_ref()) {
+        }
+        let result = if crate::video_system::video_service()
+            .load_video(path.to_string_lossy().as_ref())
+        {
             return "{\"ok\":true,\"operation\":\"load_video\"}".to_owned();
         } else {
             crate::bridge_error::BridgeError::new(

@@ -29,8 +29,4 @@ public:
     bool execute_vocal_remover(uint32_t tid);
     bool set_automation_record_mode(uint32_t mode);
     float get_track_correlation(uint32_t trackId) const;
-    rust::Vec<uint8_t> get_video_frame();
-    uint64_t get_video_frame_revision() const noexcept;
-    bool request_video_frame(double seconds);
-    bool load_video(std::string_view path);
     rust::Vec<float> get_region_waveform(uint32_t tid, uint32_t rid, uint32_t numPeaks);

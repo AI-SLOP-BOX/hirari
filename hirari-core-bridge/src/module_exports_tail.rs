@@ -34,6 +34,7 @@ pub mod vca {
 pub mod vca_fader_state;
 pub mod vca_gain_orchestrator;
 pub mod video;
+pub(crate) mod video_native;
 pub mod video_system;
 pub mod piano_visualizer;
 pub mod vintage_eq;

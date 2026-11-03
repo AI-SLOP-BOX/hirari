@@ -25,38 +25,6 @@ rust::Vec<float> HirariUnifiedEngine::get_region_waveform(uint32_t tid, uint32_t
     return takeFloatBuffer(hirari_region_waveform(this, tid, rid, numPeaks));
 }
 
-uint64_t HirariUnifiedEngine::get_video_frame_revision() const noexcept {
-#if defined(__APPLE__)
-    return ::Hirari::Core::Engine::VideoBridge::frameRevision();
-#else
-    return 0;
-#endif
-}
-
-bool HirariUnifiedEngine::request_video_frame(double seconds) {
-    if (!std::isfinite(seconds) || seconds < 0.0) return false;
-#if defined(__APPLE__)
-    return ::Hirari::Core::Engine::VideoBridge::requestFrameAt(seconds);
-#else
-    (void)seconds;
-    return false;
-#endif
-}
-
-bool HirariUnifiedEngine::load_video(std::string_view path) {
-    if (path.empty()) return false;
-#if defined(__APPLE__)
-    std::string owned(path);
-    return ::Hirari::Core::Engine::VideoBridge::loadVideo(owned.c_str());
-#else
-    (void)path;
-    return false;
-#endif
-}
-
-
-
-
 bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format) {
     // Project loads and deferred structural edits publish tracks through the
     // control-side container first. Rebuild the immutable callback snapshot so
