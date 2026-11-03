@@ -64,11 +64,6 @@ public:
     }
 
     /**
-     * @brief Safe no-op interface mapping. Replaced try_lock with lock-free atomic pointer load.
-     */
-    void syncToAudioThread() noexcept {}
-
-    /**
      * @brief Process the Rust-published processor snapshot on the audio thread.
      */
     void process(Core::AudioBuffer& buffer, Core::MidiBuffer& midi, const DSP::ProcessContext& context) {

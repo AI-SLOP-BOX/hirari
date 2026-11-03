@@ -81,9 +81,6 @@
         callbackContext.audioConfigGeneration = callbackGeneration;
         callbackContext.isPlaying = m_isPlaying.load(std::memory_order_acquire);
         callbackContext.anyoneSoloed = anySolo;
-        callbackContext.isLooping = m_loopEnabled.load(std::memory_order_acquire);
-        callbackContext.cycleStart = cycleStart;
-        callbackContext.cycleEnd = cycleEnd;
         // The master limiter is part of the rendered signal as well as the
         // live monitor path. Offline bounces now append the configured tail,
         // so its look-ahead history is flushed instead of being truncated at

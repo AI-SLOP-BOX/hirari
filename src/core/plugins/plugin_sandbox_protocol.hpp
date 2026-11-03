@@ -9,16 +9,7 @@
 
 namespace Hirari::Core::Plugins::SandboxProtocol {
 
-inline constexpr uint8_t kReady = 0xA1;
-inline constexpr uint8_t kShutdown = 0xA2;
-inline constexpr uint8_t kHeartbeat = 0xA3;
-inline constexpr uint8_t kReset = 0xA4;
-inline constexpr uint8_t kError = 0xAF;
-inline constexpr uint8_t kErrorLoad = 0xB0;
-inline constexpr uint8_t kErrorAbi = 0xB1;
-inline constexpr uint8_t kErrorInstance = 0xB2;
-inline constexpr uint8_t kErrorSecurity = 0xB3;
-inline constexpr uint8_t kErrorUnsupported = 0xB4;
+// Mailbox framing bytes and result codes live in the Rust protocol crate.
 inline constexpr uint32_t kMaxFrames = 8192;
 inline constexpr uint32_t kMaxChannels = 2;
 inline constexpr uint32_t kMaxMidiEvents = 1024;
@@ -26,23 +17,12 @@ inline constexpr uint32_t kMaxParameterChanges = 4096;
 inline constexpr uint32_t kMaxMidiPayloadBytes = 256;
 inline constexpr uint32_t kMaxStateBytes = 4u * 1024u * 1024u;
 inline constexpr uint32_t kStateProtocolVersion = 1u;
-// SharedAudioBlock contains the 64-bit state checksum and a bounded queue of
-// timed parameter events. Bump the ABI whenever that shared layout changes.
-inline constexpr uint32_t kAudioBlockProtocolVersion = 5u;
 inline constexpr uint8_t kStateErrorNone = 0u;
-inline constexpr uint8_t kStateErrorOversize = 1u;
-inline constexpr uint8_t kStateErrorVersion = 2u;
-inline constexpr uint8_t kStateErrorChecksum = 3u;
-inline constexpr uint8_t kStateErrorPlugin = 4u;
 inline constexpr uint8_t kStateErrorUnavailable = 5u;
-inline constexpr uint8_t kStateErrorBusy = 6u;
-inline constexpr uint8_t kStateErrorTimeout = 7u;
 inline constexpr uint32_t kStatusHeaderV9 = 0x41555209u;
 inline constexpr uint32_t kRecoveryClearBlock = 0u;
 inline constexpr uint32_t kRecoveryQuarantined = 1u;
 
-// Modular comparison remains correct when a uint64 sequence wraps. Never
-// compare mailbox sequence numbers with plain >= or <=.
 // Whether a serialized plugin state carrying `version` can be read by this
 // build. The Rust validator in hirari-plugin-protocol rejects anything that is
 // not exactly STATE_PROTOCOL_VERSION, so this predicate mirrors that contract
@@ -114,8 +94,8 @@ struct SharedAudioBlock {
     alignas(64) uint8_t state[kMaxStateBytes]{};
 };
 
-// The Rust worker views this stable prefix directly while the format-specific
-// C++ adapters own the remainder of the shared block. Keep these offsets in
+// The Rust worker views this stable prefix directly while the host owns the
+// remainder of the shared block. Keep these offsets in
 // lockstep with SharedAudioPrefix in hirari-plugin-protocol/worker_runtime.rs.
 static_assert(offsetof(SharedAudioBlock, requestSequence) == 8);
 static_assert(offsetof(SharedAudioBlock, heartbeat) == 24);

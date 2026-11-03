@@ -67,6 +67,20 @@ production support.
 
 ### Changed
 
+- The C++ engine no longer carries control-plane surface that nothing uses.
+  `EffectChain::syncToAudioThread()` was an empty stub left over from the
+  pre-Rust chain lock handoff — publication is handled by the Rust-published
+  processor snapshot, so the stub and its two audio-thread calls are gone.
+  `BusTrack` kept a second Rust bus-track handle that only its dead
+  `setPhaseInverted()` wrote; the phase-invert feature the mixer and project
+  use is owned by the routing engine (`hirari_routing_edit_set_phase_invert`)
+  and is untouched, while the redundant handle, its three FFI declarations and
+  the duplicate `addPreFxInput` buffer overload are removed. `ProcessContext`
+  dropped `isLooping`, `cycleStart`, `cycleEnd`, `isSeeking`, `isSpatial` and
+  `cpuLoad`, which no processor read, and the sandbox protocol header dropped
+  the mailbox framing bytes and error codes that only the Rust worker
+  interprets.
+
 - The duplicate C++ plugin SDK is gone. `src/core/HirariPluginSDK.hpp` was a
   second descriptor/automation implementation that no engine, plugin, host or
   build included — only the native compile contract instantiated it. Its

@@ -20,8 +20,7 @@ public:
              void* sidechainEngine = nullptr,
              std::shared_ptr<ProjectLayoutRevision> layoutRevision = {})
         : Track(id, name, Track::Type::Bus, sidechainEngine, std::move(layoutRevision)),
-          m_busId(busId), m_trackState(hirari_bus_track_create(), &hirari_bus_track_destroy),
-          m_busEffectChain(sidechainEngine) {}
+          m_busId(busId), m_busEffectChain(sidechainEngine) {}
 
     void resolveBus(void* busState) noexcept { m_busState = busState; }
     uint32_t busId() const noexcept { return m_busId; }
@@ -87,15 +86,9 @@ public:
         context.blockSize = len;
         context.isPlaying = isTransportPlaying();
         context.numOutputChannels = work.getNumChannels();
-        m_busEffectChain.syncToAudioThread();
         m_busEffectChain.process(work, midi, context, getId());
         finalizeTrackOutput(len, playhead);
         return true;
-    }
-
-    bool addPreFxInput(const AudioBuffer& input, uint32_t len, float gain) noexcept {
-        if (input.getNumChannels() < 2 || input.getNumSamples() < len) return false;
-        return addPreFxInput(input.getReadPointer(0), input.getReadPointer(1), len, gain);
     }
 
     bool addPreFxInput(const float* left, const float* right,
@@ -111,10 +104,6 @@ public:
                                      work.getWritePointer(1), len, false);
     }
 
-    void setPhaseInverted(bool inverted) noexcept {
-        hirari_bus_track_set_phase_inverted(m_trackState.get(), inverted);
-    }
-
     // BusTrack processing boundary: pre-FX bus input is placed in the Track
     // work buffer, then the inherited Track chain processes it and the result
     // is published as the bus post-FX stage. No allocation is performed here.
@@ -128,8 +117,6 @@ public:
 private:
     uint32_t m_busId = 0;
     void* m_busState = nullptr;
-    std::unique_ptr<void, decltype(&hirari_bus_track_destroy)> m_trackState{
-        nullptr, &hirari_bus_track_destroy};
     Hirari::Core::EffectChain m_busEffectChain;
 };
 

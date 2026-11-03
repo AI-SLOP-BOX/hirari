@@ -39,16 +39,8 @@ struct ProcessContext {
     uint64_t audioConfigGeneration = 0;
     bool isPlaying;
     bool anyoneSoloed;
-    bool isLooping = false;                 // --- RT-SAFE LOOPING ---
-    uint64_t cycleStart = 0;
-    uint64_t cycleEnd = 0;
-    bool isSeeking = false; 
     const Core::AudioBuffer* sidechainBuffer = nullptr;
     uint32_t numOutputChannels = 2;
-    bool isSpatial = false;
-
-    // Performance context for CPU monitoring
-    mutable double cpuLoad = 0.0; 
 };
 
 /**
@@ -137,7 +129,6 @@ public:
 
     // Mix and Bypass
     float getMix() const noexcept { return m_mix; }
-    void setBypassed(bool b) noexcept { m_bypassed = b; }
     bool isBypassed() const noexcept { return m_bypassed; }
 
 protected:

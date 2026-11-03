@@ -272,10 +272,6 @@ private:
         if (!hirari_track_process_prepare(&request)) return;
         m_trackDelaySamples.store(trackDelaySamples, std::memory_order_relaxed);
 
-        // Activate control-thread edits only at a block boundary. The chain's
-        // syncToAudioThread() uses try_lock(), so the audio thread never waits
-        // for a UI/plugin-edit lock here.
-        m_effectChain.syncToAudioThread();
         // Queue chronological offsets for isolated plugin workers. Preserve
         // the existing native sort policy for equal-key event ordering.
         m_effectChain.setParameterAutomationRealtime(

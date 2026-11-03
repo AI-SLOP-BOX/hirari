@@ -174,9 +174,6 @@ extern "C" bool hirari_bus_audio_replace_post(
     void* state, const float* left, const float* right, uint32_t frames);
 extern "C" bool hirari_bus_audio_read(
     void* state, float* left, float* right, uint32_t frames, bool post);
-extern "C" void* hirari_bus_track_create();
-extern "C" void hirari_bus_track_destroy(void* state);
-extern "C" void hirari_bus_track_set_phase_inverted(void* state, bool inverted);
 extern "C" bool hirari_hot_swap_default_quiesce_requested();
 extern "C" void hirari_hot_swap_default_acknowledge();
 extern "C" void* hirari_bus_system_create();

@@ -27,9 +27,6 @@ public:
         ClearBlock = SandboxProtocol::kRecoveryClearBlock,
         Quarantined = SandboxProtocol::kRecoveryQuarantined
     };
-    static constexpr size_t kMaxStateBytes = SandboxProtocol::kMaxStateBytes;
-    static constexpr uint32_t kMaxParameterSnapshotEntries =
-        SandboxProtocol::kMaxParameterChanges;
     // Bit returned by hirari_plugin_sandbox_block_outcome.
     static constexpr std::uint32_t kBlockClearMidi = 2;
 
