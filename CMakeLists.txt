@@ -222,37 +222,14 @@ add_custom_target(hirari-test-cli-e2e
 add_dependencies(hirari-test-all hirari-test-cli-e2e)
 add_dependencies(hirari-test-all hirari-test-fuzz)
 
-add_custom_target(hirari-test-vst3
-    COMMAND "${CMAKE_COMMAND}" -E env
-            HIRARI_REQUIRE_VST3=1
-            /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_vst3_e2e_smoke.sh"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    USES_TERMINAL
-    COMMENT "Running strict VST3 SDK and fixture E2E contract"
-)
-
 if(APPLE)
     add_custom_target(hirari-test-plugin-matrix
-        COMMAND "${CMAKE_COMMAND}" -E env
-                HIRARI_RELEASE_MODE=1
-                HIRARI_REQUIRE_VST3=1
-                /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_vst3_e2e_smoke.sh"
         COMMAND "${CMAKE_COMMAND}" -E env
                 HIRARI_RELEASE_MODE=1
                 /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_au_e2e_smoke.sh"
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         USES_TERMINAL
-        COMMENT "Running the strict external-plugin matrix (VST3 and AU)"
-    )
-else()
-    add_custom_target(hirari-test-plugin-matrix
-        COMMAND "${CMAKE_COMMAND}" -E env
-                HIRARI_RELEASE_MODE=1
-                HIRARI_REQUIRE_VST3=1
-                /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_vst3_e2e_smoke.sh"
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        USES_TERMINAL
-        COMMENT "Running the strict external-plugin matrix (VST3)"
+        COMMENT "Running the strict external-plugin matrix (macOS AU)"
     )
 endif()
 
@@ -298,8 +275,8 @@ add_custom_target(hirari-verify-release
 add_dependencies(hirari-verify-release hirari-app)
 add_dependencies(hirari-verify-release hirari-test-all)
 if(APPLE)
-    # A macOS release must prove the actual AU/VST3 paths and the CoreAudio
-    # lifecycle, not only the packaged CLAP worker. Missing SDKs, fixtures, or
+    # A macOS release must prove the actual AU path and the CoreAudio
+    # lifecycle, not only the packaged CLAP worker. Missing fixtures, or
     # an unusable hardware output intentionally fail this gate.
     add_dependencies(hirari-verify-release hirari-test-plugin-matrix)
     add_dependencies(hirari-verify-release hirari-test-macos-device)

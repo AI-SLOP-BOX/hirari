@@ -118,17 +118,17 @@ ctest --test-dir build -L portable --output-on-failure
 ```
 
 The native plug-in compile contract uses repository-owned fixtures and is
-portable. Real VST3/AU and CoreAudio checks are explicit targets and are not
+portable. Real AU and CoreAudio checks are explicit targets and are not
 included in the portable CTest set:
 
 ```sh
-cmake --build build --target hirari-test-vst3
 # macOS only:
 cmake --build build --target hirari-test-au
+cmake --build build --target hirari-test-plugin-matrix
 cmake --build build --target hirari-test-macos-device
 ```
 
-For a capability-by-capability report that records missing SDKs, fixtures, or
+For a capability-by-capability report that records missing fixtures or
 devices as `SKIPPED`, run `hirari-test-real-device-matrix`. Set
 `HIRARI_REAL_DEVICE_STRICT=1` to fail when any capability is skipped. Release
 verification remains stricter and requires its configured real plug-in and

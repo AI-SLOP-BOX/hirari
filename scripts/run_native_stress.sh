@@ -107,7 +107,7 @@ new_worker_pids() {
     for pid in $(descendant_pids "$root_pid"); do
         command_line=$(ps -o command= -p "$pid" 2>/dev/null || true)
         case "$command_line" in
-            */hirari-plugin-host-worker|*/hirari-plugin-host-worker-vst3|*/hirari-plugin-host-worker\ *|*/hirari-plugin-host-worker-vst3\ *)
+            */hirari-plugin-host-worker|*/hirari-plugin-host-worker\ *)
                 printf '%s\n' "$pid" ;;
         esac
     done
@@ -287,12 +287,11 @@ run_test_command() {
     # not let the child execute the coordinator's cleanup trap.
     trap - EXIT INT TERM
     test_name=$1
-    if [ "$test_name" = "official_vst3_fixture_instantiates_and_processes_in_the_isolated_worker" ] ||
-       [ "$test_name" = "isolated_plugin_worker_survives_audio_reconfiguration" ] ||
+    if [ "$test_name" = "isolated_plugin_worker_survives_audio_reconfiguration" ] ||
        [ "$test_name" = "real_plugin_worker_fault_is_quarantined_without_nonfinite_audio" ] ||
        [ "$test_name" = "real_plugin_overruns_quarantine_then_recover_audio_and_midi" ]; then
         HIRARI_PLUGIN_HOST_BIN="$WORKER_BIN" \
-        HIRARI_VST3_FIXTURE="$HIRARI_VST3_FIXTURE" \
+        HIRARI_AU_FIXTURE="${HIRARI_AU_FIXTURE:-}" \
         "$SANDBOX_TEST_BIN" "$test_name" --exact --ignored --test-threads=1
     else
         HIRARI_PLUGIN_HOST_BIN="$WORKER_BIN" \
@@ -318,13 +317,7 @@ if [ -z "$SANDBOX_TEST_BIN" ] || [ ! -x "$SANDBOX_TEST_BIN" ]; then
 fi
 
 WORKER_BIN="$ROOT_DIR/build-tools/hirari-plugin-host-worker"
-if [ -n "${HIRARI_VST3_FIXTURE:-}" ]; then
-    HIRARI_PLUGIN_WORKER_OUTPUT="$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3" \
-        "$ROOT_DIR/scripts/build_plugin_worker_with_vst3.sh" >/dev/null
-    WORKER_BIN="$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3"
-else
-    "$ROOT_DIR/scripts/build_plugin_worker.sh" >/dev/null
-fi
+"$ROOT_DIR/scripts/build_plugin_worker.sh" >/dev/null
 "$ROOT_DIR/scripts/build_clap_fixture.sh" >/dev/null
 
 i=1
@@ -340,8 +333,7 @@ while [ "$i" -le "$ROUNDS" ]; do
     run_worker_test repeated_mailbox_overruns_quarantine_then_recover_to_audio
     run_worker_test crashing_clap_worker_is_restarted_then_quarantined
     run_worker_test generic_worker_fault_injection_quarantines_clap
-    if [ -n "${HIRARI_VST3_FIXTURE:-}" ]; then
-        run_worker_test official_vst3_fixture_instantiates_and_processes_in_the_isolated_worker
+    if [ -n "${HIRARI_AU_FIXTURE:-}" ]; then
         run_worker_test isolated_plugin_worker_survives_audio_reconfiguration
         run_worker_test real_plugin_worker_fault_is_quarantined_without_nonfinite_audio
         run_worker_test real_plugin_overruns_quarantine_then_recover_audio_and_midi

@@ -3,10 +3,6 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-if [ -n "${HIRARI_VST3_SDK:-}" ]; then
-    exec "$ROOT_DIR/scripts/build_plugin_worker_with_vst3.sh"
-fi
-
 CXX_BIN=${CXX:-c++}
 OUTPUT="${HIRARI_PLUGIN_WORKER_OUTPUT:-$ROOT_DIR/build-tools/hirari-plugin-host-worker}"
 TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT_DIR/target}

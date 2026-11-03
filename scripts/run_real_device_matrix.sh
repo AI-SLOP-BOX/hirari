@@ -57,28 +57,6 @@ else
     record coreaudio_device SKIPPED "requires macOS CoreAudio"
 fi
 
-if { [ -n "${HIRARI_VST3_FIXTURE:-}" ] || [ -e "$HOME/Library/Audio/Plug-Ins/VST3/Surge XT.vst3" ]; } \
-    && { [ -x "${HIRARI_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3" ] || [ -n "${HIRARI_VST3_SDK:-}" ]; }; then
-    VST3_SDK_READY=0
-    for sdk in "${HIRARI_VST3_SDK:-}" /tmp/hirari-vst3-sdk-new; do
-        if [ -n "$sdk" ] && [ -f "$sdk/CMakeLists.txt" ] && [ -d "$sdk/public.sdk" ]; then
-            VST3_SDK_READY=1
-            break
-        fi
-    done
-    if [ "$VST3_SDK_READY" -eq 1 ]; then
-        run_optional vst3 "$ROOT_DIR/scripts/run_vst3_e2e_local.sh"
-    elif [ -x "${HIRARI_PLUGIN_HOST_BIN:-}" ] || [ -x "$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3" ]; then
-        PREBUILT="${HIRARI_PLUGIN_HOST_BIN:-$ROOT_DIR/build-tools/hirari-plugin-host-worker-vst3}"
-        run_optional vst3 env HIRARI_PLUGIN_HOST_BIN="$PREBUILT" \
-            "$ROOT_DIR/scripts/run_vst3_e2e_smoke.sh"
-    else
-        record vst3 SKIPPED "VST3 fixture found but HIRARI_VST3_SDK is not prepared"
-    fi
-else
-    record vst3 SKIPPED "set HIRARI_VST3_FIXTURE to a real VST3 bundle"
-fi
-
 if [ "$(uname -s)" = "Darwin" ]; then
     if command -v auval >/dev/null 2>&1; then
         # auval can hang while probing a misbehaving third-party component;

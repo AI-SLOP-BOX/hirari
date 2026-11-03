@@ -82,16 +82,17 @@ succeed; failed loads restore Core and then publish the matching UI rollback.
 
 ## Release capabilities
 
-The release bundle currently has a mandatory CLAP worker smoke. AU and VST3
-are capability-gated because their SDKs, host permissions, and real fixtures
-are platform-dependent:
+The release bundle currently has a mandatory CLAP worker smoke. AU is
+capability-gated because its host permissions and real fixtures are
+platform-dependent. VST3 binaries are still discovered and inventoried, but the
+worker no longer implements the format, so loading one fails closed:
 
 | Capability | Required for every bundle | Required when enabled in CI |
 | --- | ---: | ---: |
 | App bundle and native worker | Yes | Yes |
 | CLAP worker handshake/process/recovery | Yes | Yes |
 | AU real-device smoke | No | Yes on macOS AU jobs |
-| VST3 SDK worker/E2E | No | Yes when `HIRARI_VST3_SDK` and fixture are present |
+| VST3 hosting | No | Not implemented; the worker reports the format unavailable |
 
 The build target `hirari-verify-release` is the strict entry point. It builds
 the app, builds the CLAP fixture, runs the full test gate, and then verifies

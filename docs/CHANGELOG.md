@@ -67,6 +67,14 @@ production support.
 
 ### Changed
 
+- VST3 hosting is removed. The official-SDK sandbox adapter and the worker's
+  real VST3 load/process/state path are deleted; the worker now exports
+  fail-closed stubs, so a `.vst3` bundle is still inventoried and reported but
+  never loaded. The `hirari-test-vst3` target, the SDK-enabled worker build and
+  the `run_vst3_e2e_*` harnesses are gone with it, and the release plugin matrix
+  proves macOS AU only. VST3 is no longer a supported playback format, and the
+  earlier local Surge XT evidence in the audits is historical.
+
 - Command admission now writes Rust's own stores. The engine's command host
   callbacks that filled a ring record, appended the forensic journal and posted
   the queue-full diagnostic are replaced by two handles, so the command ring,
