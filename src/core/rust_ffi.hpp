@@ -935,14 +935,8 @@ extern "C" void hirari_routing_engine_destroy(void* state);
 extern "C" void hirari_routing_engine_reset(void* state);
 extern "C" bool hirari_routing_engine_add_connection(
     void* state, uint32_t source, uint32_t destination, float gain, bool send, bool pre_fader);
-extern "C" void hirari_routing_engine_remove_connection(
-    void* state, uint32_t source, uint32_t destination);
-extern "C" void hirari_routing_engine_remove_send(
-    void* state, uint32_t source, uint32_t destination);
-extern "C" bool hirari_routing_engine_add_dependency(
-    void* state, uint32_t source, uint32_t destination);
-extern "C" void hirari_routing_engine_remove_dependency(
-    void* state, uint32_t source, uint32_t destination);
+// The edge reads, mutations and dependency bookkeeping the routing edit policy
+// needs run in Rust against this same handle, so they are not declared here.
 extern "C" void hirari_routing_engine_remove_dependencies_for_node(void* state, uint32_t node);
 extern "C" void* hirari_routing_engine_remove_connections_for_node(
     void* state, uint32_t node, size_t* count);
@@ -951,23 +945,11 @@ extern "C" void* hirari_routing_engine_remove_feedback_for_node(
     void* state, uint32_t node, size_t* count);
 extern "C" void* hirari_routing_engine_copy_feedback(const void* state, size_t* count);
 extern "C" void hirari_routing_feedback_array_free(void* records, size_t count);
-extern "C" bool hirari_routing_engine_has_connection(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" float hirari_routing_engine_connection_gain(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" float hirari_routing_engine_send_gain(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" bool hirari_routing_engine_send_pre_fader(
-    const void* state, uint32_t source, uint32_t destination);
-extern "C" float hirari_routing_engine_feedback_gain(
-    const void* state, uint32_t source, uint32_t destination);
 extern "C" bool hirari_routing_engine_should_process(
     const void* state, uint32_t source, bool offline_target_active, uint32_t offline_target,
     bool any_solo, bool source_solo);
 extern "C" bool hirari_routing_engine_add_feedback(
     void* state, uint32_t source, uint32_t destination, float gain);
-extern "C" void hirari_routing_engine_remove_feedback(
-    void* state, uint32_t source, uint32_t destination);
 extern "C" bool hirari_routing_engine_build(void* state);
 extern "C" void hirari_routing_engine_inject_feedback(
     const void* state, uint32_t destination, float* left, float* right, uint32_t frames);
@@ -1008,14 +990,6 @@ struct HirariRoutingEditPayload {
     bool preFader = false;
 };
 
-struct HirariRoutingEdgeState {
-    bool routeEnabled = false;
-    float routeGain = 0.0f;
-    float sendGain = 0.0f;
-    bool sendPreFader = false;
-    float feedbackGain = -1.0f;
-};
-
 struct HirariRoutingTrackState {
     bool armed = false;
     bool phaseInverted = false;
@@ -1025,13 +999,6 @@ struct HirariRoutingTrackState {
     float pan = 0.0f;
     bool muted = false;
     bool solo = false;
-};
-
-struct HirariRoutingSidechainEntry {
-    uint32_t sourceId = 0;
-    uint32_t destId = 0;
-    uint32_t pluginIndex = 0;
-    uint32_t tapPoint = 0;
 };
 
 struct HirariRoutingSidechainContext {
@@ -1059,23 +1026,22 @@ enum HirariRoutingEditOp : int32_t {
 };
 
 struct HirariRoutingHostOps {
-    bool (*queryEdge)(void*, uint32_t, uint32_t, HirariRoutingEdgeState*) = nullptr;
+    // The routing graph and the sidechain route table are Rust objects the
+    // engine only holds, so Rust reads and edits them through its own store
+    // API. These two accessors are the remaining object-graph reach.
+    void* (*routingStore)(void*) = nullptr;
+    void* (*sidechainRoutesStore)(void*) = nullptr;
     bool (*queryTrack)(void*, uint32_t, HirariRoutingTrackState*) = nullptr;
-    size_t (*listSidechain)(void*, HirariRoutingSidechainEntry*, size_t) = nullptr;
     bool (*sidechainContext)(void*, uint32_t, uint32_t,
                              HirariRoutingSidechainContext*) = nullptr;
-    bool (*applyRoute)(void*, const HirariRoutingEditPayload*) = nullptr;
-    bool (*applyFeedback)(void*, uint32_t, uint32_t, float) = nullptr;
     bool (*applyTrackScalar)(void*, uint32_t, int32_t, bool, uint32_t) = nullptr;
     bool (*removeSidechain)(void*, uint32_t, uint32_t) = nullptr;
     bool (*registerSidechain)(void*, uint32_t, uint32_t, uint32_t,
                               const HirariRoutingSidechainContext*, uint32_t, bool) = nullptr;
     bool (*writeSidechainRoute)(void*, uint32_t, uint32_t, uint32_t, uint32_t) = nullptr;
-    bool (*addDependency)(void*, uint32_t, uint32_t) = nullptr;
-    bool (*removeDependency)(void*, uint32_t, uint32_t) = nullptr;
-    void (*buildGraph)(void*) = nullptr;
     void (*markLayoutChanged)(void*) = nullptr;
-    void (*publishRoutes)(void*) = nullptr;
+    // Rebuilds the published track/PDC graph; takes the tracks lock itself.
+    void (*syncStructural)(void*) = nullptr;
     void (*recordUndo)(void*, const char*, const HirariRoutingEditPayload*, size_t,
                        const HirariRoutingEditPayload*, size_t, bool, bool) = nullptr;
     bool (*applyTrackMix)(void*, uint32_t, int32_t, float) = nullptr;

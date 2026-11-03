@@ -1,11 +1,12 @@
 //! Host-driven routing and track-state edits.
 //!
-//! The engine owns the live routing graph, the sidechain manager and the
-//! per-track control state because those are consumed by the audio callback.
-//! This module owns the edit policy instead: it reads the current state
-//! through host callbacks, decides whether the edit is legal, asks the host to
-//! apply the resolved mutation, and records exactly one undo entry whose
-//! payloads replay through this same module.
+//! The routing graph and the sidechain route table are Rust stores that the
+//! engine only holds, so this module reads and mutates them through its own
+//! store API. It owns the edit policy: decide whether an edit is legal, apply
+//! the resolved mutation, and record exactly one undo entry whose payloads
+//! replay through this same module. Host callbacks remain only for the C++
+//! state the engine really owns — the live Track objects and the lock guarding
+//! them.
 //!
 //! Every callback runs on the control thread. Nothing here is reachable from
 //! the audio callback.
@@ -18,10 +19,6 @@ use crate::plugin_edit_host::{register_replay, UndoStateFn};
 
 /// Matches `RoutingEngine::kMaxNodes`; ids at or above it are not routable.
 const MAX_ROUTING_NODES: u32 = 128;
-/// Maximum sidechain routes mirrored for one policy decision. Rejecting the
-/// edit when the table is larger keeps cycle detection complete instead of
-/// silently truncating it.
-const MAX_SIDECHAIN_ROUTES: usize = 512;
 
 /// Payload ops. The numeric values are shared with
 /// `rust_ffi.hpp::HirariRoutingEditOp`.
@@ -92,7 +89,7 @@ pub struct HirariRoutingTrackState {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HirariRoutingSidechainEntry {
     pub source_id: u32,
     pub dest_id: u32,
@@ -111,16 +108,10 @@ pub struct HirariRoutingSidechainContext {
     pub source_prepared: bool,
 }
 
-pub type QueryEdgeFn =
-    unsafe extern "C" fn(*mut c_void, u32, u32, *mut HirariRoutingEdgeState) -> bool;
 pub type QueryTrackFn =
     unsafe extern "C" fn(*mut c_void, u32, *mut HirariRoutingTrackState) -> bool;
-pub type ListSidechainFn =
-    unsafe extern "C" fn(*mut c_void, *mut HirariRoutingSidechainEntry, usize) -> usize;
 pub type SidechainContextFn =
     unsafe extern "C" fn(*mut c_void, u32, u32, *mut HirariRoutingSidechainContext) -> bool;
-pub type ApplyRouteFn = unsafe extern "C" fn(*mut c_void, *const HirariRoutingEditPayload) -> bool;
-pub type ApplyFeedbackFn = unsafe extern "C" fn(*mut c_void, u32, u32, f32) -> bool;
 pub type ApplyTrackScalarFn = unsafe extern "C" fn(*mut c_void, u32, i32, bool, u32) -> bool;
 pub type ApplyTrackMixFn = unsafe extern "C" fn(*mut c_void, u32, i32, f32) -> bool;
 pub type RemoveSidechainFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> bool;
@@ -136,7 +127,9 @@ pub type RegisterSidechainFn = unsafe extern "C" fn(
     bool,
 ) -> bool;
 pub type WriteSidechainRouteFn = unsafe extern "C" fn(*mut c_void, u32, u32, u32, u32) -> bool;
-pub type DependencyFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> bool;
+/// Hands the Rust-owned store handle to the edit host. The engine holds the
+/// routing graph and the sidechain route table but never interprets them.
+pub type StoreFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 pub type HostFn = unsafe extern "C" fn(*mut c_void);
 pub type RecordUndoFn = unsafe extern "C" fn(
     *mut c_void,
@@ -152,21 +145,18 @@ pub type RecordUndoFn = unsafe extern "C" fn(
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct HirariRoutingHostOps {
-    pub query_edge: Option<QueryEdgeFn>,
+    /// The routing graph and the sidechain route table are Rust stores the
+    /// engine only holds, so the edit host reads and writes them directly.
+    pub routing_store: Option<StoreFn>,
+    pub sidechain_routes_store: Option<StoreFn>,
     pub query_track: Option<QueryTrackFn>,
-    pub list_sidechain: Option<ListSidechainFn>,
     pub sidechain_context: Option<SidechainContextFn>,
-    pub apply_route: Option<ApplyRouteFn>,
-    pub apply_feedback: Option<ApplyFeedbackFn>,
     pub apply_track_scalar: Option<ApplyTrackScalarFn>,
     pub remove_sidechain: Option<RemoveSidechainFn>,
     pub register_sidechain: Option<RegisterSidechainFn>,
     pub write_sidechain_route: Option<WriteSidechainRouteFn>,
-    pub add_dependency: Option<DependencyFn>,
-    pub remove_dependency: Option<DependencyFn>,
-    pub build_graph: Option<HostFn>,
     pub mark_layout_changed: Option<HostFn>,
-    pub publish_routes: Option<HostFn>,
+    pub sync_structural: Option<HostFn>,
     pub record_undo: Option<RecordUndoFn>,
     pub apply_track_mix: Option<ApplyTrackMixFn>,
     pub undo_state: Option<UndoStateFn>,
@@ -261,15 +251,42 @@ fn track_mix_payload(op: i32, track_id: u32, value: f32) -> HirariRoutingEditPay
     }
 }
 
+fn routing_store(ops: &HirariRoutingHostOps, host: *mut c_void) -> Option<*mut c_void> {
+    let access = ops.routing_store?;
+    Some(unsafe { access(host) })
+}
+
+fn sidechain_routes_store(ops: &HirariRoutingHostOps, host: *mut c_void) -> Option<*mut c_void> {
+    let access = ops.sidechain_routes_store?;
+    Some(unsafe { access(host) })
+}
+
 fn query_edge(
     ops: &HirariRoutingHostOps,
     host: *mut c_void,
     source_id: u32,
     dest_id: u32,
 ) -> Option<HirariRoutingEdgeState> {
-    let query = ops.query_edge?;
-    let mut state = HirariRoutingEdgeState::default();
-    unsafe { query(host, source_id, dest_id, &mut state) }.then_some(state)
+    let routing = routing_store(ops, host)?;
+    Some(unsafe {
+        HirariRoutingEdgeState {
+            route_enabled: crate::routing_engine_core::hirari_routing_engine_has_connection(
+                routing, source_id, dest_id,
+            ),
+            route_gain: crate::routing_engine_core::hirari_routing_engine_connection_gain(
+                routing, source_id, dest_id,
+            ),
+            send_gain: crate::routing_engine_core::hirari_routing_engine_send_gain(
+                routing, source_id, dest_id,
+            ),
+            send_pre_fader: crate::routing_engine_core::hirari_routing_engine_send_pre_fader(
+                routing, source_id, dest_id,
+            ),
+            feedback_gain: crate::routing_engine_core::hirari_routing_engine_feedback_gain(
+                routing, source_id, dest_id,
+            ),
+        }
+    })
 }
 
 fn query_track(
@@ -286,14 +303,37 @@ fn list_sidechain(
     ops: &HirariRoutingHostOps,
     host: *mut c_void,
 ) -> Option<Vec<HirariRoutingSidechainEntry>> {
-    let list = ops.list_sidechain?;
-    let mut buffer = vec![HirariRoutingSidechainEntry::default(); MAX_SIDECHAIN_ROUTES];
-    let total = unsafe { list(host, buffer.as_mut_ptr(), buffer.len()) };
-    if total > buffer.len() {
-        return None;
+    let routes = sidechain_routes_store(ops, host)?;
+    let count = unsafe { crate::sidechain_route_store::hirari_sidechain_routes_count(routes) };
+    let mut buffer = vec![
+        crate::sidechain_route_store::HirariSidechainRoute {
+            source_id: 0,
+            destination_id: 0,
+            plugin_index: 0,
+            tap_point: 0,
+        };
+        count
+    ];
+    if count > 0 {
+        unsafe {
+            crate::sidechain_route_store::hirari_sidechain_routes_copy(
+                routes,
+                buffer.as_mut_ptr(),
+                count,
+            );
+        }
     }
-    buffer.truncate(total);
-    Some(buffer)
+    Some(
+        buffer
+            .into_iter()
+            .map(|route| HirariRoutingSidechainEntry {
+                source_id: route.source_id,
+                dest_id: route.destination_id,
+                plugin_index: route.plugin_index,
+                tap_point: route.tap_point,
+            })
+            .collect(),
+    )
 }
 
 fn sidechain_context(
@@ -308,10 +348,13 @@ fn sidechain_context(
 }
 
 fn build_graph(ops: &HirariRoutingHostOps, host: *mut c_void) -> bool {
-    let Some(build) = ops.build_graph else {
+    let Some(routing) = routing_store(ops, host) else {
         return false;
     };
-    unsafe { build(host) };
+    // The native host callback ignored the topology result, so a rebuild is
+    // reported as done; cycle admission is decided before the dependency is
+    // added.
+    unsafe { crate::routing_engine_core::hirari_routing_engine_build(routing) };
     true
 }
 
@@ -327,15 +370,93 @@ fn add_dependency(
     source_id: u32,
     dest_id: u32,
 ) -> bool {
-    match ops.add_dependency {
-        Some(add) => unsafe { add(host, source_id, dest_id) },
+    match routing_store(ops, host) {
+        Some(routing) => unsafe {
+            crate::routing_engine_core::hirari_routing_engine_add_dependency(
+                routing, source_id, dest_id,
+            )
+        },
         None => false,
     }
 }
 
 fn remove_dependency(ops: &HirariRoutingHostOps, host: *mut c_void, source_id: u32, dest_id: u32) {
-    if let Some(remove) = ops.remove_dependency {
-        unsafe { remove(host, source_id, dest_id) };
+    if let Some(routing) = routing_store(ops, host) {
+        unsafe {
+            crate::routing_engine_core::hirari_routing_engine_remove_dependency(
+                routing, source_id, dest_id,
+            );
+        }
+    }
+}
+
+/// Rebuilds the routing graph and republishes the derived track/PDC state.
+fn publish_routes(ops: &HirariRoutingHostOps, host: *mut c_void) {
+    if let Some(routing) = routing_store(ops, host) {
+        unsafe {
+            crate::routing_engine_core::hirari_routing_engine_build(routing);
+        }
+    }
+    if let Some(sync) = ops.sync_structural {
+        unsafe { sync(host) };
+    }
+}
+
+/// Applies one resolved route/send mutation to the Rust-owned graph. A route
+/// without a saved gain is a unity route; a disabled entry removes the edge.
+fn apply_route_payload(ops: &HirariRoutingHostOps, host: *mut c_void, edit: &HirariRoutingEditPayload) -> bool {
+    let Some(routing) = routing_store(ops, host) else {
+        return false;
+    };
+    unsafe {
+        if edit.op == HIRARI_ROUTING_EDIT_SEND {
+            if edit.enabled {
+                crate::routing_engine_core::hirari_routing_engine_add_connection(
+                    routing,
+                    edit.source_id,
+                    edit.dest_id,
+                    edit.gain,
+                    true,
+                    edit.pre_fader,
+                );
+            } else {
+                crate::routing_engine_core::hirari_routing_engine_remove_send(
+                    routing, edit.source_id, edit.dest_id,
+                );
+            }
+        } else if edit.enabled {
+            crate::routing_engine_core::hirari_routing_engine_add_connection(
+                routing,
+                edit.source_id,
+                edit.dest_id,
+                if edit.gain > 0.0 { edit.gain } else { 1.0 },
+                false,
+                false,
+            );
+        } else {
+            crate::routing_engine_core::hirari_routing_engine_remove_connection(
+                routing, edit.source_id, edit.dest_id,
+            );
+        }
+    }
+    true
+}
+
+/// A negative feedback gain names the absent edge, so it removes it.
+fn apply_feedback(ops: &HirariRoutingHostOps, host: *mut c_void, source_id: u32, dest_id: u32, gain: f32) -> bool {
+    let Some(routing) = routing_store(ops, host) else {
+        return false;
+    };
+    unsafe {
+        if gain < 0.0 {
+            crate::routing_engine_core::hirari_routing_engine_remove_feedback(
+                routing, source_id, dest_id,
+            );
+            return true;
+        }
+        crate::routing_engine_core::hirari_routing_engine_add_feedback(
+            routing, source_id, dest_id, gain,
+        )
     }
 }
 
@@ -448,22 +569,11 @@ fn set_route_with(
     if before.route_enabled == enabled {
         return false;
     }
-    let Some(apply) = ops.apply_route else {
-        return false;
-    };
-    if !unsafe {
-        apply(
-            host,
-            &route_payload(
-                HIRARI_ROUTING_EDIT_ROUTE,
-                source_id,
-                dest_id,
-                1.0,
-                enabled,
-                false,
-            ),
-        )
-    } {
+    if !apply_route_payload(
+        ops,
+        host,
+        &route_payload(HIRARI_ROUTING_EDIT_ROUTE, source_id, dest_id, 1.0, enabled, false),
+    ) {
         return false;
     }
     let Some(after) = query_edge(ops, host, source_id, dest_id) else {
@@ -496,9 +606,7 @@ fn set_route_with(
         false,
         false,
     );
-    if let Some(publish) = ops.publish_routes {
-        unsafe { publish(host) };
-    }
+    publish_routes(ops, host);
     true
 }
 
@@ -523,22 +631,11 @@ fn set_route_gain_with(
     if before.route_enabled == enabled && (!enabled || (before.route_gain - gain).abs() < 1.0e-6) {
         return false;
     }
-    let Some(apply) = ops.apply_route else {
-        return false;
-    };
-    if !unsafe {
-        apply(
-            host,
-            &route_payload(
-                HIRARI_ROUTING_EDIT_ROUTE_GAIN,
-                source_id,
-                dest_id,
-                gain,
-                enabled,
-                false,
-            ),
-        )
-    } {
+    if !apply_route_payload(
+        ops,
+        host,
+        &route_payload(HIRARI_ROUTING_EDIT_ROUTE_GAIN, source_id, dest_id, gain, enabled, false),
+    ) {
         return false;
     }
     let Some(after) = query_edge(ops, host, source_id, dest_id) else {
@@ -570,9 +667,7 @@ fn set_route_gain_with(
         false,
         false,
     );
-    if let Some(publish) = ops.publish_routes {
-        unsafe { publish(host) };
-    }
+    publish_routes(ops, host);
     true
 }
 
@@ -614,22 +709,11 @@ fn set_send_route_with(
     {
         return false;
     }
-    let Some(apply) = ops.apply_route else {
-        return false;
-    };
-    if !unsafe {
-        apply(
-            host,
-            &route_payload(
-                HIRARI_ROUTING_EDIT_SEND,
-                source_id,
-                dest_id,
-                gain,
-                enabled,
-                pre_fader,
-            ),
-        )
-    } {
+    if !apply_route_payload(
+        ops,
+        host,
+        &route_payload(HIRARI_ROUTING_EDIT_SEND, source_id, dest_id, gain, enabled, pre_fader),
+    ) {
         return false;
     }
     let Some(after) = query_edge(ops, host, source_id, dest_id) else {
@@ -661,9 +745,7 @@ fn set_send_route_with(
         false,
         false,
     );
-    if let Some(publish) = ops.publish_routes {
-        unsafe { publish(host) };
-    }
+    publish_routes(ops, host);
     true
 }
 
@@ -685,18 +767,15 @@ fn set_feedback_route_with(
     let Some(before) = query_edge(ops, host, source_id, dest_id) else {
         return false;
     };
-    let Some(apply) = ops.apply_feedback else {
-        return false;
-    };
     if enabled {
-        if !unsafe { apply(host, source_id, dest_id, gain) } {
+        if !apply_feedback(ops, host, source_id, dest_id, gain) {
             return false;
         }
     } else {
         if before.feedback_gain < 0.0 {
             return false;
         }
-        unsafe { apply(host, source_id, dest_id, -1.0) };
+        apply_feedback(ops, host, source_id, dest_id, -1.0);
     }
     mark_layout_changed(ops, host);
     record_undo(
@@ -1202,22 +1281,12 @@ fn apply_payload_with(
     edit: &HirariRoutingEditPayload,
 ) {
     match edit.op {
-        HIRARI_ROUTING_EDIT_ROUTE | HIRARI_ROUTING_EDIT_ROUTE_GAIN => {
-            if let Some(apply) = ops.apply_route {
-                unsafe { apply(host, edit) };
-            }
-            build_graph(ops, host);
-        }
-        HIRARI_ROUTING_EDIT_SEND => {
-            if let Some(apply) = ops.apply_route {
-                unsafe { apply(host, edit) };
-            }
+        HIRARI_ROUTING_EDIT_ROUTE | HIRARI_ROUTING_EDIT_ROUTE_GAIN | HIRARI_ROUTING_EDIT_SEND => {
+            apply_route_payload(ops, host, edit);
             build_graph(ops, host);
         }
         HIRARI_ROUTING_EDIT_FEEDBACK => {
-            if let Some(apply) = ops.apply_feedback {
-                unsafe { apply(host, edit.source_id, edit.dest_id, edit.gain) };
-            }
+            apply_feedback(ops, host, edit.source_id, edit.dest_id, edit.gain);
             mark_layout_changed(ops, host);
         }
         HIRARI_ROUTING_EDIT_SIDECHAIN => {
@@ -1433,15 +1502,6 @@ mod tests {
         solo: bool,
     }
 
-    #[derive(Clone, Copy)]
-    struct TestConnection {
-        source: u32,
-        dest: u32,
-        gain: f32,
-        send: bool,
-        pre_fader: bool,
-    }
-
     struct UndoRecord {
         name: String,
         undo: Vec<HirariRoutingEditPayload>,
@@ -1450,17 +1510,16 @@ mod tests {
         coalesce: bool,
     }
 
-    #[derive(Default)]
+    /// The routing graph and sidechain route table are the real Rust stores the
+    /// edit host now drives directly; only track state and the C++ sidechain
+    /// manager registration are faked here.
     struct TestHost {
         tracks: Vec<(u32, TestTrack)>,
-        connections: Vec<TestConnection>,
-        feedback: Vec<(u32, u32, f32)>,
-        routes: Vec<HirariRoutingSidechainEntry>,
+        routing: *mut c_void,
+        routes: *mut c_void,
         // (destination, plugin, source, tap)
         links: Vec<(u32, u32, u32, u32)>,
-        dependencies: Vec<(u32, u32)>,
         undo: Vec<UndoRecord>,
-        graphs: u32,
         layouts: u32,
         publishes: u32,
         source_found: bool,
@@ -1468,37 +1527,30 @@ mod tests {
         source_prepared: bool,
     }
 
-    unsafe extern "C" fn test_query_edge(
-        host: *mut c_void,
-        source: u32,
-        dest: u32,
-        out: *mut HirariRoutingEdgeState,
-    ) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        let mut state = HirariRoutingEdgeState::default();
-        if let Some(conn) = host
-            .connections
-            .iter()
-            .find(|conn| conn.source == source && conn.dest == dest && !conn.send)
-        {
-            state.route_enabled = true;
-            state.route_gain = conn.gain;
+    impl TestHost {
+        fn new() -> Self {
+            TestHost {
+                tracks: Vec::new(),
+                routing: crate::routing_engine_core::hirari_routing_engine_create(),
+                routes: crate::sidechain_route_store::hirari_sidechain_routes_create(),
+                links: Vec::new(),
+                undo: Vec::new(),
+                layouts: 0,
+                publishes: 0,
+                source_found: false,
+                destination_found: false,
+                source_prepared: false,
+            }
         }
-        if let Some(conn) = host
-            .connections
-            .iter()
-            .find(|conn| conn.source == source && conn.dest == dest && conn.send)
-        {
-            state.send_gain = conn.gain.max(0.0);
-            state.send_pre_fader = conn.pre_fader;
+    }
+
+    impl Drop for TestHost {
+        fn drop(&mut self) {
+            unsafe {
+                crate::routing_engine_core::hirari_routing_engine_destroy(self.routing);
+                crate::sidechain_route_store::hirari_sidechain_routes_destroy(self.routes);
+            }
         }
-        state.feedback_gain = host
-            .feedback
-            .iter()
-            .find(|edge| edge.0 == source && edge.1 == dest)
-            .map_or(-1.0, |edge| edge.2);
-        *out = state;
-        true
     }
 
     unsafe extern "C" fn test_query_track(
@@ -1523,18 +1575,12 @@ mod tests {
         true
     }
 
-    unsafe extern "C" fn test_list_sidechain(
-        host: *mut c_void,
-        out: *mut HirariRoutingSidechainEntry,
-        capacity: usize,
-    ) -> usize {
-        let host = &mut *(host as *mut TestHost);
-        for (index, route) in host.routes.iter().enumerate() {
-            if index < capacity {
-                *out.add(index) = *route;
-            }
-        }
-        host.routes.len()
+    unsafe extern "C" fn test_routing_store(host: *mut c_void) -> *mut c_void {
+        unsafe { &*(host as *const TestHost) }.routing
+    }
+
+    unsafe extern "C" fn test_sidechain_routes_store(host: *mut c_void) -> *mut c_void {
+        unsafe { &*(host as *const TestHost) }.routes
     }
 
     unsafe extern "C" fn test_sidechain_context(
@@ -1552,43 +1598,6 @@ mod tests {
             destination_found: host.destination_found,
             source_prepared: host.source_prepared,
         };
-        true
-    }
-
-    unsafe extern "C" fn test_apply_route(
-        host: *mut c_void,
-        payload: *const HirariRoutingEditPayload,
-    ) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        let edit = &*payload;
-        let send = edit.op == HIRARI_ROUTING_EDIT_SEND;
-        host.connections.retain(|conn| {
-            !(conn.source == edit.source_id && conn.dest == edit.dest_id && conn.send == send)
-        });
-        if edit.enabled {
-            host.connections.push(TestConnection {
-                source: edit.source_id,
-                dest: edit.dest_id,
-                gain: edit.gain,
-                send,
-                pre_fader: edit.pre_fader,
-            });
-        }
-        true
-    }
-
-    unsafe extern "C" fn test_apply_feedback(
-        host: *mut c_void,
-        source: u32,
-        dest: u32,
-        gain: f32,
-    ) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        host.feedback
-            .retain(|edge| !(edge.0 == source && edge.1 == dest));
-        if gain >= 0.0 {
-            host.feedback.push((source, dest, gain));
-        }
         true
     }
 
@@ -1634,13 +1643,12 @@ mod tests {
 
     unsafe extern "C" fn test_remove_sidechain(host: *mut c_void, dest: u32, plugin: u32) -> bool {
         let host = &mut *(host as *mut TestHost);
-        let route_count = host.routes.len();
-        host.routes
-            .retain(|route| !(route.dest_id == dest && route.plugin_index == plugin));
+        let removed =
+            unsafe { crate::sidechain_route_store::hirari_sidechain_routes_remove_link(host.routes, dest, plugin) };
         let link_count = host.links.len();
         host.links
             .retain(|link| !(link.0 == dest && link.1 == plugin));
-        route_count != host.routes.len() || link_count != host.links.len()
+        removed || link_count != host.links.len()
     }
 
     unsafe extern "C" fn test_register_sidechain(
@@ -1667,41 +1675,7 @@ mod tests {
         tap: u32,
     ) -> bool {
         let host = &mut *(host as *mut TestHost);
-        if let Some(route) = host
-            .routes
-            .iter_mut()
-            .find(|route| route.dest_id == dest && route.plugin_index == plugin)
-        {
-            route.source_id = source;
-            route.tap_point = tap;
-        } else {
-            host.routes.push(HirariRoutingSidechainEntry {
-                source_id: source,
-                dest_id: dest,
-                plugin_index: plugin,
-                tap_point: tap,
-            });
-        }
-        true
-    }
-
-    unsafe extern "C" fn test_add_dependency(host: *mut c_void, source: u32, dest: u32) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        if !host.dependencies.contains(&(source, dest)) {
-            host.dependencies.push((source, dest));
-        }
-        true
-    }
-
-    unsafe extern "C" fn test_remove_dependency(host: *mut c_void, source: u32, dest: u32) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        host.dependencies.retain(|edge| *edge != (source, dest));
-        true
-    }
-
-    unsafe extern "C" fn test_build_graph(host: *mut c_void) {
-        let host = &mut *(host as *mut TestHost);
-        host.graphs += 1;
+        unsafe { crate::sidechain_route_store::hirari_sidechain_routes_set(host.routes, source, dest, plugin, tap) }
     }
 
     unsafe extern "C" fn test_mark_layout_changed(host: *mut c_void) {
@@ -1709,7 +1683,7 @@ mod tests {
         host.layouts += 1;
     }
 
-    unsafe extern "C" fn test_publish_routes(host: *mut c_void) {
+    unsafe extern "C" fn test_sync_structural(host: *mut c_void) {
         let host = &mut *(host as *mut TestHost);
         host.publishes += 1;
     }
@@ -1756,29 +1730,63 @@ mod tests {
 
     fn test_ops() -> HirariRoutingHostOps {
         HirariRoutingHostOps {
-            query_edge: Some(test_query_edge),
+            routing_store: Some(test_routing_store),
+            sidechain_routes_store: Some(test_sidechain_routes_store),
             query_track: Some(test_query_track),
-            list_sidechain: Some(test_list_sidechain),
             sidechain_context: Some(test_sidechain_context),
-            apply_route: Some(test_apply_route),
-            apply_feedback: Some(test_apply_feedback),
             apply_track_scalar: Some(test_apply_track_scalar),
             remove_sidechain: Some(test_remove_sidechain),
             register_sidechain: Some(test_register_sidechain),
             write_sidechain_route: Some(test_write_sidechain_route),
-            add_dependency: Some(test_add_dependency),
-            remove_dependency: Some(test_remove_dependency),
-            build_graph: Some(test_build_graph),
             mark_layout_changed: Some(test_mark_layout_changed),
-            publish_routes: Some(test_publish_routes),
+            sync_structural: Some(test_sync_structural),
             record_undo: Some(test_record_undo),
             apply_track_mix: Some(test_apply_track_mix),
             undo_state: None,
         }
     }
 
-    fn host_ptr(host: &mut TestHost) -> *mut c_void {
-        host as *mut TestHost as *mut c_void
+    fn host_ptr(host: &TestHost) -> *mut c_void {
+        host as *const TestHost as *mut c_void
+    }
+
+    /// Reads the live routing graph through the same path the policy uses.
+    fn edge(host: &TestHost, source: u32, dest: u32) -> HirariRoutingEdgeState {
+        let ops = test_ops();
+        query_edge(&ops, host_ptr(host), source, dest).expect("routing store")
+    }
+
+    fn route_table(host: &TestHost) -> Vec<HirariRoutingSidechainEntry> {
+        let ops = test_ops();
+        list_sidechain(&ops, host_ptr(host)).expect("sidechain route store")
+    }
+
+    fn seed_connection(host: &TestHost, source: u32, dest: u32, gain: f32, send: bool) {
+        unsafe {
+            crate::routing_engine_core::hirari_routing_engine_add_connection(
+                host.routing, source, dest, gain, send, false,
+            )
+        };
+    }
+
+    fn seed_route(host: &TestHost, source: u32, dest: u32, plugin: u32, tap: u32) {
+        unsafe {
+            crate::sidechain_route_store::hirari_sidechain_routes_set(
+                host.routes, source, dest, plugin, tap,
+            )
+        };
+    }
+
+    fn seed_dependency(host: &TestHost, source: u32, dest: u32) {
+        unsafe {
+            crate::routing_engine_core::hirari_routing_engine_add_dependency(
+                host.routing, source, dest,
+            )
+        };
+    }
+
+    fn has_dependency(host: &TestHost, source: u32, dest: u32) -> bool {
+        unsafe { crate::routing_engine_core::hirari_routing_engine_has_dependency(host.routing, source, dest) }
     }
 
     fn sidechain(source: u32, dest: u32, plugin: u32, tap: u32) -> HirariRoutingSidechainEntry {
@@ -1793,16 +1801,15 @@ mod tests {
     #[test]
     fn sidechain_rejects_feedback_cycle_without_applying() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.source_found = true;
         host.destination_found = true;
         host.source_prepared = true;
         // Existing edge 1 -> 2. Adding 2 -> 1 would close the loop.
-        host.routes.push(sidechain(1, 2, 0, 2));
-        let host_ptr = host_ptr(&mut host);
+        seed_route(&host, 1, 2, 0, 2);
+        let host_ptr = host_ptr(&host);
         assert!(!set_sidechain_with(&ops, host_ptr, 2, 1, 0, 2, true, true));
-        assert_eq!(host.routes.len(), 1);
-        assert_eq!(host.routes[0].source_id, 1);
+        assert_eq!(route_table(&host), vec![sidechain(1, 2, 0, 2)]);
         assert!(host.links.is_empty());
         assert!(host.undo.is_empty());
     }
@@ -1810,20 +1817,18 @@ mod tests {
     #[test]
     fn sidechain_replacing_source_repoints_the_existing_route() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.source_found = true;
         host.destination_found = true;
         host.source_prepared = true;
-        host.routes.push(sidechain(1, 3, 0, 2));
-        host.dependencies.push((1, 3));
-        let host_ptr = host_ptr(&mut host);
+        seed_route(&host, 1, 3, 0, 2);
+        seed_dependency(&host, 1, 3);
+        let host_ptr = host_ptr(&host);
         assert!(set_sidechain_with(&ops, host_ptr, 2, 3, 0, 1, true, true));
-        assert_eq!(host.routes.len(), 1);
-        assert_eq!(host.routes[0].source_id, 2);
-        assert_eq!(host.routes[0].tap_point, 1);
+        assert_eq!(route_table(&host), vec![sidechain(2, 3, 0, 1)]);
         assert_eq!(host.links, vec![(3, 0, 2, 1)]);
-        assert!(host.dependencies.contains(&(2, 3)));
-        assert!(!host.dependencies.contains(&(1, 3)));
+        assert!(has_dependency(&host, 2, 3));
+        assert!(!has_dependency(&host, 1, 3));
         assert_eq!(host.undo.len(), 1);
         assert_eq!(host.undo[0].name, "Sidechain Connect");
     }
@@ -1831,9 +1836,9 @@ mod tests {
     #[test]
     fn arm_and_phase_are_idempotent_and_record_only_real_changes() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.tracks.push((7, TestTrack::default()));
-        let host_ptr = host_ptr(&mut host);
+        let host_ptr = host_ptr(&host);
         // Already disarmed: success without an undo entry.
         assert!(set_track_armed_with(&ops, host_ptr, 7, false, true));
         assert!(host.undo.is_empty());
@@ -1853,48 +1858,40 @@ mod tests {
     #[test]
     fn undo_payload_restores_the_previous_sidechain_link() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.source_found = true;
         host.destination_found = true;
         host.source_prepared = true;
-        host.routes.push(sidechain(1, 3, 0, 2));
-        host.dependencies.push((1, 3));
-        let host_ptr = host_ptr(&mut host);
+        seed_route(&host, 1, 3, 0, 2);
+        seed_dependency(&host, 1, 3);
+        let host_ptr = host_ptr(&host);
         assert!(set_sidechain_with(&ops, host_ptr, 2, 3, 0, 1, true, true));
         let undo = host.undo[0].undo.clone();
         assert_eq!(undo.len(), 1);
         apply_payloads_with(&ops, host_ptr, &undo);
-        assert_eq!(host.routes.len(), 1);
-        assert_eq!(host.routes[0].source_id, 1);
-        assert_eq!(host.routes[0].tap_point, 2);
+        assert_eq!(route_table(&host), vec![sidechain(1, 3, 0, 2)]);
         assert_eq!(host.links, vec![(3, 0, 1, 2)]);
-        assert!(host.dependencies.contains(&(1, 3)));
-        assert!(!host.dependencies.contains(&(2, 3)));
+        assert!(has_dependency(&host, 1, 3));
+        assert!(!has_dependency(&host, 2, 3));
     }
 
     #[test]
     fn route_gain_undo_restores_the_previous_gain() {
         let ops = test_ops();
-        let mut host = TestHost::default();
-        host.connections.push(TestConnection {
-            source: 1,
-            dest: 2,
-            gain: 0.75,
-            send: false,
-            pre_fader: false,
-        });
-        let host_ptr = host_ptr(&mut host);
+        let host = TestHost::new();
+        seed_connection(&host, 1, 2, 0.75, false);
+        let host_ptr = host_ptr(&host);
         assert!(set_route_gain_with(&ops, host_ptr, 1, 2, 0.5, true));
-        assert_eq!(host.connections[0].gain, 0.5);
+        assert_eq!(edge(&host, 1, 2).route_gain, 0.5);
         let undo = host.undo[0].undo.clone();
         apply_payloads_with(&ops, host_ptr, &undo);
-        assert_eq!(host.connections[0].gain, 0.75);
+        assert_eq!(edge(&host, 1, 2).route_gain, 0.75);
     }
 
     #[test]
     fn send_route_requires_bus_destination_and_existing_tracks() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.tracks.push((1, TestTrack::default()));
         host.tracks.push((
             2,
@@ -1903,7 +1900,7 @@ mod tests {
                 ..Default::default()
             },
         ));
-        let host_ptr = host_ptr(&mut host);
+        let host_ptr = host_ptr(&host);
         assert!(!set_send_route_with(&ops, host_ptr, 1, 2, 1.0, false, true));
         host.tracks[1].1.is_bus = true;
         assert!(set_send_route_with(&ops, host_ptr, 1, 2, 1.0, false, true));
@@ -1916,27 +1913,20 @@ mod tests {
     #[test]
     fn feedback_route_rejects_non_finite_and_missing_remove() {
         let ops = test_ops();
-        let mut host = TestHost::default();
-        let host_ptr = host_ptr(&mut host);
-        assert!(!set_feedback_route_with(
-            &ops,
-            host_ptr,
-            1,
-            2,
-            f32::NAN,
-            true
-        ));
+        let host = TestHost::new();
+        let host_ptr = host_ptr(&host);
+        assert!(!set_feedback_route_with(&ops, host_ptr, 1, 2, f32::NAN, true));
         assert!(!set_feedback_route_with(&ops, host_ptr, 1, 2, 1.0, false));
         assert!(set_feedback_route_with(&ops, host_ptr, 1, 2, 1.5, true));
-        assert_eq!(host.feedback, vec![(1, 2, 1.5)]);
+        assert_eq!(edge(&host, 1, 2).feedback_gain, 1.5);
         assert!(set_feedback_route_with(&ops, host_ptr, 1, 2, 0.0, false));
-        assert!(host.feedback.is_empty());
+        assert!(edge(&host, 1, 2).feedback_gain < 0.0);
     }
 
     #[test]
     fn mix_edits_apply_and_restore_the_previous_value() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.tracks.push((
             3,
             TestTrack {
@@ -1945,7 +1935,7 @@ mod tests {
                 ..Default::default()
             },
         ));
-        let host_ptr = host_ptr(&mut host);
+        let host_ptr = host_ptr(&host);
         assert!(set_track_volume_with(&ops, host_ptr, 3, 0.5, true));
         assert!(set_track_pan_with(&ops, host_ptr, 3, 0.75, true));
         assert_eq!(host.tracks[0].1.volume, 0.5);
@@ -1966,7 +1956,7 @@ mod tests {
     #[test]
     fn mix_ranges_reject_out_of_domain_values() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.tracks.push((
             4,
             TestTrack {
@@ -1974,7 +1964,7 @@ mod tests {
                 ..Default::default()
             },
         ));
-        let host_ptr = host_ptr(&mut host);
+        let host_ptr = host_ptr(&host);
         assert!(!set_track_volume_with(&ops, host_ptr, 4, 2.5, true));
         assert!(!set_track_volume_with(&ops, host_ptr, 4, -0.1, true));
         assert!(!set_track_volume_with(&ops, host_ptr, 4, f32::NAN, true));
@@ -1989,9 +1979,9 @@ mod tests {
     #[test]
     fn mute_and_solo_record_unchanged_values_like_the_previous_engine() {
         let ops = test_ops();
-        let mut host = TestHost::default();
+        let mut host = TestHost::new();
         host.tracks.push((5, TestTrack::default()));
-        let host_ptr = host_ptr(&mut host);
+        let host_ptr = host_ptr(&host);
         assert!(set_track_mute_with(&ops, host_ptr, 5, false, true));
         assert!(set_track_solo_with(&ops, host_ptr, 5, true, true));
         assert!(set_track_solo_with(&ops, host_ptr, 5, true, true));
@@ -2015,21 +2005,21 @@ mod tests {
 
     #[test]
     fn route_edit_without_native_recorder_uses_the_rust_history() {
-        let mut host = TestHost::default();
-        let host_ptr = host_ptr(&mut host);
+        let host = TestHost::new();
+        let host_ptr = host_ptr(&host);
         let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
         FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
         let mut ops = test_ops();
         ops.record_undo = None;
         ops.undo_state = Some(fake_undo_state);
         assert!(set_route_with(&ops, host_ptr, 0, 1, true));
-        assert_eq!(host.connections.len(), 1);
+        assert!(edge(&host, 0, 1).route_enabled);
         assert_eq!(
             unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
             1
         );
         assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
-        assert!(host.connections.is_empty());
+        assert!(!edge(&host, 0, 1).route_enabled);
         unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
         FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
     }

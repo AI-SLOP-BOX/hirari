@@ -67,6 +67,15 @@ production support.
 
 ### Changed
 
+- Routing edits skip the C++ forwarding layer. The routing graph and the
+  sidechain route table are Rust stores the engine only holds, so the Rust edit
+  policy now reads and mutates them through its own store API instead of asking
+  the engine to do it: the eight host callbacks that only forwarded
+  (edge query, route-table listing, route and feedback apply, dependency
+  add/remove, graph build, publish), the edge and sidechain-entry state mirrors,
+  and the ten `hirari_routing_engine_*` declarations C++ no longer calls are
+  gone. `installRoutingEditHost` keeps only the handlers that reach a live
+  `Track` or the lock around it, and its tests now drive real stores.
 - Importing media is decided in Rust. The engine no longer adapts a decode into
   an audio buffer: the import-cache verdict, the frame and channel validation,
   the planar build and the weak cache offer live in

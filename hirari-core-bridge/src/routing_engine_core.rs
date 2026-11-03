@@ -170,6 +170,24 @@ pub unsafe extern "C" fn hirari_routing_engine_remove_dependency(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn hirari_routing_engine_has_dependency(
+    state: *const c_void,
+    source: u32,
+    destination: u32,
+) -> bool {
+    let Some(core) = (unsafe { engine(state) }) else {
+        return false;
+    };
+    unsafe {
+        crate::routing_graph_pdc::hirari_routing_graph_has_dependency(
+            core.graph,
+            source,
+            destination,
+        )
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn hirari_routing_engine_remove_dependencies_for_node(
     state: *mut c_void,
     node: u32,

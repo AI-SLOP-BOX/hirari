@@ -571,6 +571,21 @@ pub unsafe extern "C" fn hirari_routing_graph_remove_dependency(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn hirari_routing_graph_has_dependency(
+    handle: *const c_void,
+    source: u32,
+    destination: u32,
+) -> bool {
+    let Some(state) = (unsafe { routing_graph_state(handle) }) else {
+        return false;
+    };
+    state
+        .data
+        .lock()
+        .is_ok_and(|data| data.processing_dependencies.contains(&(source, destination)))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn hirari_routing_graph_remove_dependencies_for_node(
     handle: *const c_void,
     node: u32,

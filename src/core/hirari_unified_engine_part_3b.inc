@@ -7,21 +7,14 @@ uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
                             [&](const Track& track) { return track.getTrackDelaySamples(); });
 }
 
-// Routing edit host callbacks. Rust decides every edit and the undo capture;
-// these handlers only apply the resolved mutation to the live objects, under
-// the same locks the previous per-method code took.
+// Routing edit host callbacks. Rust owns the routing graph and the sidechain
+// route table — both are Rust stores the engine only holds — so it reads and
+// mutates them directly. These handlers remain only where C++ state is
+// involved: the live Track objects and the lock that guards them.
 void HirariUnifiedEngine::installRoutingEditHost() {
     static const HirariRoutingHostOps ops = {
-        [](void* host, uint32_t sourceId, uint32_t destId, HirariRoutingEdgeState* out) {
-            if (!out) return false;
-            void* routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
-            out->routeEnabled = hirari_routing_engine_has_connection(routing, sourceId, destId);
-            out->routeGain = hirari_routing_engine_connection_gain(routing, sourceId, destId);
-            out->sendGain = hirari_routing_engine_send_gain(routing, sourceId, destId);
-            out->sendPreFader = hirari_routing_engine_send_pre_fader(routing, sourceId, destId);
-            out->feedbackGain = hirari_routing_engine_feedback_gain(routing, sourceId, destId);
-            return true;
-        },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
         [](void* host, uint32_t trackId, HirariRoutingTrackState* out) {
             if (!out) return false;
             return withHostTrack(host, trackId, false, [&](Track& track) {
@@ -35,13 +28,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
                 out->solo = track.isSolo();
                 return true;
             });
-        },
-        [](void* host, HirariRoutingSidechainEntry* out, size_t capacity) {
-            static_assert(sizeof(HirariRoutingSidechainEntry) == sizeof(HirariSidechainRoute));
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            return hirari_sidechain_routes_copy(
-                engine->m_sidechainRoutes,
-                reinterpret_cast<HirariSidechainRoute*>(out), capacity);
         },
         [](void* host, uint32_t sourceId, uint32_t destId,
            HirariRoutingSidechainContext* out) {
@@ -62,36 +48,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             out->destinationFound = destination != nullptr;
             out->sourcePrepared = source && destination && source->canProcess(out->blockSize);
             return true;
-        },
-        [](void* host, const HirariRoutingEditPayload* payload) {
-            if (!payload) return false;
-            void* routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
-            if (payload->op == kHirariRoutingEditSend) {
-                if (payload->enabled) {
-                    hirari_routing_engine_add_connection(
-                        routing, payload->sourceId, payload->destId, payload->gain,
-                        true, payload->preFader);
-                } else {
-                    hirari_routing_engine_remove_send(
-                        routing, payload->sourceId, payload->destId);
-                }
-            } else if (payload->enabled) {
-                hirari_routing_engine_add_connection(
-                    routing, payload->sourceId, payload->destId,
-                    payload->gain > 0.0f ? payload->gain : 1.0f, false, false);
-            } else {
-                hirari_routing_engine_remove_connection(
-                    routing, payload->sourceId, payload->destId);
-            }
-            return true;
-        },
-        [](void* host, uint32_t sourceId, uint32_t destId, float gain) {
-            void* routing = static_cast<HirariUnifiedEngine*>(host)->m_routingEngine;
-            if (gain < 0.0f) {
-                hirari_routing_engine_remove_feedback(routing, sourceId, destId);
-                return true;
-            }
-            return hirari_routing_engine_add_feedback(routing, sourceId, destId, gain);
         },
         [](void* host, uint32_t trackId, int32_t op, bool enabled, uint32_t samples) {
             return withHostTrack(host, trackId, false, [&](Track& track) {
@@ -142,28 +98,13 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             return hirari_sidechain_routes_set(engine->m_sidechainRoutes, sourceId, destId,
                                                pluginIndex, tapPoint);
         },
-        [](void* host, uint32_t sourceId, uint32_t destId) {
-            return hirari_routing_engine_add_dependency(
-                static_cast<HirariUnifiedEngine*>(host)->m_routingEngine, sourceId, destId);
-        },
-        [](void* host, uint32_t sourceId, uint32_t destId) {
-            hirari_routing_engine_remove_dependency(
-                static_cast<HirariUnifiedEngine*>(host)->m_routingEngine, sourceId, destId);
-            return true;
-        },
-        [](void* host) {
-            hirari_routing_engine_build(
-                static_cast<HirariUnifiedEngine*>(host)->m_routingEngine);
-        },
         [](void* host) {
             static_cast<HirariUnifiedEngine*>(host)->mark_project_layout_changed();
         },
         [](void* host) {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            hirari_routing_engine_build(engine->m_routingEngine);
             // syncStructuralChanges takes m_tracksMutex itself; Rust calls this
             // only after every mutation callback has released its lock.
-            engine->syncStructuralChanges();
+            static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
         },
         nullptr,  // undo capture lives in the Rust routing edit host.
         [](void* host, uint32_t trackId, int32_t op, float value) {
