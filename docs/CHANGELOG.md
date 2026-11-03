@@ -74,6 +74,27 @@ production support.
 
 ### Changed
 
+- Driver status, telemetry and the device catalog are read from Rust. Each value
+  the UI polled travelled three hops -- `mac_audio_driver.rs` behind a C ABI
+  entry point, a null-checking `MacAudioDriverHost` method, then an `AudioEngine`
+  forwarder whose only contribution was a `#if defined(__APPLE__)` arm -- and
+  neither C++ layer owned any state. `AudioEngine` now publishes the host it
+  constructed (`audio_driver_host()`, the same handle idiom as
+  `control_room_state()`), `hirari-core-bridge/src/audio_driver_view.rs` answers
+  every read against it, and `mac_audio_driver.rs` exposes `view_*` readers where
+  the now-uncalled C ABI getters were. Reported values are unchanged, platform
+  split included: `silent-fallback` off macOS, `unavailable` and `start-failed`
+  treated as silent, and an absent host answering the empty catalog with no
+  channels, peaks or callbacks -- which is also what a zero engine handle means,
+  so the Rust wrappers kept their own absent-engine answers. `UnavailableAudioDriver`
+  keeps only the callback boundary and the lifecycle calls the engine's control
+  flow actually makes. The real-device contract in
+  `tests/macos_audio_device_contract.cpp` runs as the ignored
+  `mac_audio_driver::tests::real_device_starts_renegotiates_and_stops`, which
+  `scripts/run_macos_audio_device_contract.sh` invokes with the same
+  SKIPPED-unless-hardware-required policy; it settles the host before reporting a
+  rejection, and its failure text is byte-identical to the C++ binary's. C++
+  10145 -> 9967 (-178).
 - Video preview decoding is Rust. `src/core/engine/video_system.hpp`,
   `video_system_bridge.hpp` and `video_system_bridge.mm` were an Objective-C++
   AVFoundation adapter sitting behind the Rust request queue, so the frame

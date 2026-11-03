@@ -19,7 +19,7 @@ impl HirariCore {
     }
 
     pub fn audio_output_channel_count(&self) -> u32 {
-        self.engine.as_ref().map_or(0, |engine| engine.get_audio_output_channel_count())
+        crate::audio_driver_view::output_channel_count(self.driver_handle())
     }
 
     pub fn add_control_room_speaker(&self, name: &str, gain: f32) -> bool {

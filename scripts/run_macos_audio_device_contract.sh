@@ -11,22 +11,12 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 0
 fi
 
-OUT_DIR=${TMPDIR:-/tmp}/hirari-macos-audio-device-contract
-mkdir -p "$OUT_DIR"
-
-# The CoreAudio device lifecycle moved to Rust; this contract links the same
-# staticlib every other native contract uses and drives the engine-facing
-# `MacAudioDriverHost` adapter against the real default output device.
-BRIDGE_LIB=$("$ROOT_DIR/scripts/build_bridge_staticlib.sh")
-
-${CXX:-clang++} -std=c++20 -Wall -Wextra -I"$ROOT_DIR" -I"$ROOT_DIR/src" \
-    "$ROOT_DIR/tests/macos_audio_device_contract.cpp" \
-    "$BRIDGE_LIB" \
-    -framework Foundation -framework CoreAudio -framework CoreMIDI \
-    -framework AudioToolbox -framework AudioUnit -framework CoreMedia \
-    -o "$OUT_DIR/macos-audio-device-contract"
-
-if "$OUT_DIR/macos-audio-device-contract"; then
+# The CoreAudio device lifecycle is Rust-owned (`mac_audio_driver.rs`), so the
+# contract runs against `MacAudioHost` directly instead of through a C++ adapter
+# that only forwarded across the C ABI. The test is `#[ignore]`d because CI hosts
+# have no usable default output device; this script is the hardware path.
+TEST=mac_audio_driver::tests::real_device_starts_renegotiates_and_stops
+if (cd "$ROOT_DIR" && cargo test -p hirari-core-bridge --lib -- --exact --ignored "$TEST"); then
     echo "macOS CoreAudio device contract passed (initialize/start/stop/reconfigure)"
     exit 0
 fi

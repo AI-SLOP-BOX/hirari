@@ -187,10 +187,7 @@ impl HirariCore {
         serde_json::json!({
             "ok": error.is_none() && callback_ready,
             "status": status,
-            "error_code": self
-                .engine
-                .as_ref()
-                .map_or(0, |engine| engine.audio_driver_error_code()),
+            "error_code": crate::audio_driver_view::error_code(self.driver_handle()),
             "error": error,
             "project_generation": self.project_generation(),
             "audio_generation": self.audio_config_generation(),

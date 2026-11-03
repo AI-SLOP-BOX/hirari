@@ -42,30 +42,21 @@ bool hirari_mac_audio_host_is_running(void* host);
 double hirari_mac_audio_host_sample_rate(void* host);
 uint32_t hirari_mac_audio_host_buffer_size(void* host);
 uint32_t hirari_mac_audio_host_input_channels(void* host);
-uint32_t hirari_mac_audio_host_output_channels(void* host);
 const char* hirari_mac_audio_host_status(void* host);
 int32_t hirari_mac_audio_host_last_error_code(void* host);
 void hirari_mac_audio_host_try_reconnect(void* host);
 bool hirari_mac_audio_host_reconfigure(void* host, double sampleRate, uint32_t bufferSize);
 bool hirari_mac_audio_host_select_device(void* host, uint32_t device,
                                          double sampleRate, uint32_t bufferSize);
-char* hirari_mac_audio_host_list_devices_json(void* host);
-char* hirari_mac_audio_host_selected_device_uid(void* host);
-void hirari_mac_audio_string_free(char* value);
 void hirari_mac_audio_host_set_process_callback(void* host,
                                                 HirariMacProcessCallback process,
                                                 void* context);
-float hirari_mac_audio_host_output_peak(void* host);
-uint64_t hirari_mac_audio_host_callback_count(void* host);
 bool hirari_mac_audio_host_poll_input_block(void* host, float* const* destination,
                                             uint32_t destinationChannels,
                                             uint32_t destinationFrames,
                                             Hirari::Core::Driver::AudioInputBlockInfo* info,
                                             uint64_t* dropped);
 void hirari_mac_audio_host_discard_pending_input(void* host);
-void hirari_mac_audio_host_capture_input(void* host, const float* const* channels,
-                                         uint32_t channelCount, uint32_t frameCount);
-uint64_t hirari_mac_audio_host_dropped_input_blocks(void* host);
 }
 
 namespace Hirari::Core::Driver {
@@ -74,8 +65,10 @@ namespace Hirari::Core::Driver {
  * Engine-facing macOS audio host contract.
  *
  * The implementation is Rust (`mac_audio_driver.rs`). This class only marshals
- * the engine's callback boundary and the public status/device surface across
- * the C ABI. It deliberately keeps the pre-port method names and status text.
+ * the lifecycle calls the engine's own control flow needs across the C ABI; the
+ * status and device telemetry the UI polls is read from Rust against the handle
+ * published by `raw_handle()`. It deliberately keeps the pre-port method names
+ * and status text.
  */
 class MacAudioDriverHost {
 public:
@@ -90,6 +83,10 @@ public:
 
     MacAudioDriverHost(const MacAudioDriverHost&) = delete;
     MacAudioDriverHost& operator=(const MacAudioDriverHost&) = delete;
+
+    // The Rust `MacAudioHost` this adapter owns. The engine's lifetime bounds
+    // it, so the telemetry readers may use it for as long as `this` is alive.
+    void* raw_handle() const noexcept { return m_handle; }
 
     // Returns true only after the device callback is running. Callers must
     // not infer readiness from construction or from status alone.
@@ -109,9 +106,6 @@ public:
     uint32_t input_channel_count() const {
         return m_handle ? hirari_mac_audio_host_input_channels(m_handle) : 0u;
     }
-    uint32_t output_channel_count() const noexcept {
-        return m_handle ? hirari_mac_audio_host_output_channels(m_handle) : 0u;
-    }
     const char* status() const noexcept {
         const char* value = m_handle ? hirari_mac_audio_host_status(m_handle) : nullptr;
         return value ? value : "unavailable";
@@ -126,14 +120,6 @@ public:
         return m_handle != nullptr &&
                hirari_mac_audio_host_reconfigure(m_handle, sampleRate, bufferSize);
     }
-    std::string list_devices_json() const {
-        return take_string(m_handle ? hirari_mac_audio_host_list_devices_json(m_handle)
-                                    : nullptr);
-    }
-    std::string selected_device_uid() const {
-        return take_string(m_handle ? hirari_mac_audio_host_selected_device_uid(m_handle)
-                                    : nullptr);
-    }
     bool select_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) {
         return m_handle != nullptr &&
                hirari_mac_audio_host_select_device(m_handle, deviceId, sampleRate,
@@ -142,12 +128,6 @@ public:
     void set_process_callback(ProcessCallback callback, void* context) noexcept {
         if (m_handle)
             hirari_mac_audio_host_set_process_callback(m_handle, callback, context);
-    }
-    float output_peak() const {
-        return m_handle ? hirari_mac_audio_host_output_peak(m_handle) : 0.0f;
-    }
-    uint64_t callback_count() const {
-        return m_handle ? hirari_mac_audio_host_callback_count(m_handle) : 0;
     }
 
     // Non-realtime consumer API. The destination must provide at least
@@ -170,25 +150,10 @@ public:
     void discard_pending_input_blocks() noexcept {
         if (m_handle) hirari_mac_audio_host_discard_pending_input(m_handle);
     }
-    void capture_input(const float* const* channels, uint32_t channelCount,
-                       uint32_t frameCount) noexcept {
-        if (m_handle)
-            hirari_mac_audio_host_capture_input(m_handle, channels, channelCount,
-                                                frameCount);
-    }
-    uint64_t dropped_input_blocks() const noexcept {
-        return m_handle ? hirari_mac_audio_host_dropped_input_blocks(m_handle) : 0;
-    }
 
 private:
     static void log_trampoline(void*, uint32_t level, const char* message) noexcept {
         hirari_log_post(level, 0xA001, message);
-    }
-
-    static std::string take_string(char* value) {
-        std::string result = value ? std::string(value) : std::string{};
-        hirari_mac_audio_string_free(value);
-        return result;
     }
 
     void* m_handle = nullptr;

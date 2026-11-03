@@ -215,25 +215,29 @@ impl HirariCore {
             .as_ref()
             .is_some_and(|engine| engine.has_sidechain_link(source_id, dest_id, plugin_index))
     }
+    /// Address of the Rust driver host the engine owns, or zero when there is no
+    /// engine to own one. Every driver value below is read from that host
+    /// through `audio_driver_view`; the `AudioEngine` forwarders that relayed
+    /// them one C++ layer at a time are gone, and a zero handle answers exactly
+    /// as their absent-`m_driver` branches did.
+    pub(crate) fn driver_handle(&self) -> usize {
+        self.engine
+            .as_ref()
+            .map_or(0, crate::audio_engine_delegate_ext::driver_host)
+    }
     pub fn is_audio_device_ready(&self) -> bool {
         self.engine
             .as_ref()
             .is_some_and(|e| e.is_audio_device_ready())
     }
     pub fn get_audio_output_peak(&self) -> f32 {
-        self.engine
-            .as_ref()
-            .map_or(0.0, |e| e.get_audio_output_peak())
+        crate::audio_driver_view::output_peak(self.driver_handle())
     }
     pub fn get_audio_callback_count(&self) -> u64 {
-        self.engine
-            .as_ref()
-            .map_or(0, |e| e.get_audio_callback_count())
+        crate::audio_driver_view::callback_count(self.driver_handle())
     }
     pub fn get_dropped_input_blocks(&self) -> u64 {
-        self.engine
-            .as_ref()
-            .map_or(0, |e| e.get_dropped_input_blocks())
+        crate::audio_driver_view::dropped_input_blocks(self.driver_handle())
     }
     /// Returns `(device_ready, silent_fallback, dropped_input_blocks)` from
     /// one control-side snapshot for recording diagnostics and telemetry.
@@ -260,27 +264,18 @@ impl HirariCore {
         self.engine.as_ref().map_or(0.0, |e| e.get_sample_rate())
     }
     pub fn get_audio_input_channel_count(&self) -> u16 {
-        self.engine.as_ref().map_or(0, |engine| {
-            engine
-                .get_audio_input_channel_count()
-                .min(u32::from(u16::MAX)) as u16
-        })
+        crate::audio_driver_view::input_channel_count(self.driver_handle())
+            .min(u32::from(u16::MAX)) as u16
     }
     /// Returns the native CoreAudio device catalog. The empty catalog is a
     /// valid result on offline/non-macOS backends.
     pub fn list_audio_devices_json(&self) -> String {
-        self.engine
-            .as_ref()
-            .map(|engine| engine.list_audio_devices_json().to_string())
-            .unwrap_or_else(|| "[]".to_owned())
+        crate::audio_driver_view::list_devices_json(self.driver_handle())
     }
     /// Stable CoreAudio UID for the device currently feeding the input callback.
     /// Empty means that the platform backend does not expose a physical endpoint.
     pub fn audio_input_device_uid(&self) -> String {
-        self.engine
-            .as_ref()
-            .map(|engine| engine.audio_input_device_uid().to_string())
-            .unwrap_or_default()
+        crate::audio_driver_view::selected_device_uid(self.driver_handle())
     }
     pub fn audio_input_device_name(&self) -> String {
         let uid = self.audio_input_device_uid();

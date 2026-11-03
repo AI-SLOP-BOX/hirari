@@ -967,14 +967,6 @@ impl MacAudioHost {
         self.realtime.queue.discard_pending();
     }
 
-    fn capture_input(&self, channels: *const *const f32, channel_count: u32, frame_count: u32) {
-        unsafe {
-            self.realtime
-                .queue
-                .push_planar(channels, channel_count, frame_count);
-        }
-    }
-
     fn dropped_input_blocks(&self) -> u64 {
         self.realtime.queue.dropped_blocks()
     }
@@ -2398,23 +2390,6 @@ unsafe fn au_get<T>(
     )
 }
 
-fn into_c_string(value: String) -> *mut c_char {
-    match CString::new(value) {
-        Ok(value) => value.into_raw(),
-        Err(_) => ptr::null_mut(),
-    }
-}
-
-/// # Safety
-/// `value` must be null or a pointer returned by one of this module's string
-/// getters, and must not be used again after this call.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mac_audio_string_free(value: *mut c_char) {
-    if !value.is_null() {
-        drop(CString::from_raw(value));
-    }
-}
-
 #[no_mangle]
 pub extern "C" fn hirari_mac_audio_host_create(
     process: Option<ProcessCallback>,
@@ -2436,6 +2411,60 @@ pub unsafe extern "C" fn hirari_mac_audio_host_destroy(host: *mut c_void) {
 
 fn host_ref<'a>(host: *mut c_void) -> Option<&'a MacAudioHost> {
     unsafe { host.cast::<MacAudioHost>().as_ref() }
+}
+
+/// Read view over the host the engine publishes through
+/// `AudioEngine::audio_driver_host()`.
+///
+/// The UI-facing status, telemetry and device catalog used to reach this state
+/// through a `MacAudioDriverHost` method and an `AudioEngine` forwarder, one C++
+/// layer per value. These land in the same Rust state directly. A zero handle is
+/// exactly the host the deleted C++ null guards described: unavailable and
+/// silent, with no channels, callbacks, peaks or catalog.
+pub fn view_status(handle: usize) -> &'static str {
+    host_ref(handle as *mut c_void).map_or(status_name(STATE_UNAVAILABLE), |host| {
+        status_name(host.state.load(Ordering::Acquire))
+    })
+}
+
+pub fn view_is_running(handle: usize) -> bool {
+    host_ref(handle as *mut c_void).is_some_and(MacAudioHost::is_running)
+}
+
+pub fn view_error_code(handle: usize) -> i32 {
+    host_ref(handle as *mut c_void).map_or(0, MacAudioHost::last_error_code)
+}
+
+pub fn view_output_peak(handle: usize) -> f32 {
+    host_ref(handle as *mut c_void).map_or(0.0, MacAudioHost::output_peak)
+}
+
+pub fn view_callback_count(handle: usize) -> u64 {
+    host_ref(handle as *mut c_void).map_or(0, MacAudioHost::callback_count)
+}
+
+pub fn view_input_channel_count(handle: usize) -> u32 {
+    host_ref(handle as *mut c_void).map_or(0, MacAudioHost::input_channel_count)
+}
+
+pub fn view_output_channel_count(handle: usize) -> u32 {
+    host_ref(handle as *mut c_void).map_or(0, MacAudioHost::output_channel_count)
+}
+
+pub fn view_dropped_input_blocks(handle: usize) -> u64 {
+    host_ref(handle as *mut c_void).map_or(0, MacAudioHost::dropped_input_blocks)
+}
+
+/// An absent host answers with the empty catalog the deleted `!m_driver` branch
+/// returned, which is not what a live host with no selected device reports.
+pub fn view_list_devices_json(handle: usize) -> String {
+    host_ref(handle as *mut c_void)
+        .map_or_else(|| "[]".to_owned(), MacAudioHost::list_devices_json)
+}
+
+pub fn view_selected_device_uid(handle: usize) -> String {
+    host_ref(handle as *mut c_void)
+        .map_or_else(String::new, MacAudioHost::selected_device_uid)
 }
 
 #[no_mangle]
@@ -2468,11 +2497,6 @@ pub extern "C" fn hirari_mac_audio_host_buffer_size(host: *mut c_void) -> u32 {
 #[no_mangle]
 pub extern "C" fn hirari_mac_audio_host_input_channels(host: *mut c_void) -> u32 {
     host_ref(host).map_or(0, MacAudioHost::input_channel_count)
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_output_channels(host: *mut c_void) -> u32 {
-    host_ref(host).map_or(0, MacAudioHost::output_channel_count)
 }
 
 #[no_mangle]
@@ -2528,20 +2552,6 @@ pub extern "C" fn hirari_mac_audio_host_select_device(
 }
 
 #[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_list_devices_json(host: *mut c_void) -> *mut c_char {
-    host_ref(host).map_or(ptr::null_mut(), |host| {
-        into_c_string(host.list_devices_json())
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_selected_device_uid(host: *mut c_void) -> *mut c_char {
-    host_ref(host).map_or(ptr::null_mut(), |host| {
-        into_c_string(host.selected_device_uid())
-    })
-}
-
-#[no_mangle]
 pub extern "C" fn hirari_mac_audio_host_set_process_callback(
     host: *mut c_void,
     process: Option<ProcessCallback>,
@@ -2550,16 +2560,6 @@ pub extern "C" fn hirari_mac_audio_host_set_process_callback(
     if let Some(host) = host_ref(host) {
         host.set_process_callback(process, context);
     }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_output_peak(host: *mut c_void) -> f32 {
-    host_ref(host).map_or(0.0, MacAudioHost::output_peak)
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_callback_count(host: *mut c_void) -> u64 {
-    host_ref(host).map_or(0, MacAudioHost::callback_count)
 }
 
 #[no_mangle]
@@ -2590,23 +2590,6 @@ pub extern "C" fn hirari_mac_audio_host_discard_pending_input(host: *mut c_void)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_mac_audio_host_capture_input(
-    host: *mut c_void,
-    channels: *const *const f32,
-    channel_count: u32,
-    frame_count: u32,
-) {
-    if let Some(host) = host_ref(host) {
-        host.capture_input(channels, channel_count, frame_count);
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_dropped_input_blocks(host: *mut c_void) -> u64 {
-    host_ref(host).map_or(0, MacAudioHost::dropped_input_blocks)
-}
-
-#[no_mangle]
 pub extern "C" fn hirari_mac_audio_host_register_input_sink(
     host: *mut c_void,
     sink: *const InputCaptureSink,
@@ -2625,6 +2608,112 @@ pub extern "C" fn hirari_mac_audio_host_unregister_input_sink(host: *mut c_void)
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU32;
+
+    /// Real-device contract for the CoreAudio lifecycle, ported from the
+    /// `tests/macos_audio_device_contract.cpp` binary that used to drive it
+    /// through the C++ adapter.
+    ///
+    /// `#[ignore]`d because CI hosts have no usable default output device;
+    /// `scripts/run_macos_audio_device_contract.sh` runs it explicitly. Every
+    /// rejection names itself: a silent failure is indistinguishable from "no
+    /// device on this host".
+    #[test]
+    #[ignore]
+    fn real_device_starts_renegotiates_and_stops() {
+        static CALLBACKS: AtomicU64 = AtomicU64::new(0);
+        static FRAMES: AtomicU64 = AtomicU64::new(0);
+
+        unsafe extern "C" fn render(
+            _inputs: *const *const f32,
+            _input_channels: u32,
+            outputs: *const *mut f32,
+            output_channels: u32,
+            frames: u32,
+            _context: *mut c_void,
+        ) {
+            CALLBACKS.fetch_add(1, Ordering::Release);
+            FRAMES.fetch_add(u64::from(frames), Ordering::Release);
+            if outputs.is_null() {
+                return;
+            }
+            for channel in 0..output_channels {
+                let destination = *outputs.add(channel as usize);
+                if destination.is_null() {
+                    continue;
+                }
+                std::slice::from_raw_parts_mut(destination, frames as usize).fill(0.0);
+            }
+        }
+
+        fn rejection(host: &MacAudioHost, reason: &str) -> String {
+            format!(
+                "macOS CoreAudio contract: {reason} (status={}, error={})",
+                host.status(),
+                host.last_error_code()
+            )
+        }
+
+        // A rejection stops the device before naming itself, so the reported
+        // status describes the settled driver and the host never leaves a live
+        // AudioUnit behind for the next process.
+        fn require(host: &MacAudioHost, accepted: bool, reason: &str) {
+            if accepted {
+                return;
+            }
+            host.stop();
+            panic!("{}", rejection(host, reason));
+        }
+
+        let host = MacAudioHost::new(Box::new(CoreAudioBackend::new()), None, ptr::null_mut());
+        host.set_process_callback(Some(render), ptr::null_mut());
+
+        // First generation: negotiate 48k/128 against the real device.
+        require(
+            &host,
+            host.reconfigure(FormatRequest {
+                sample_rate: 48_000.0,
+                buffer_size: 128,
+            }),
+            "cannot open the default output device at 48000/128",
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while CALLBACKS.load(Ordering::Acquire) == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        require(
+            &host,
+            host.is_running()
+                && CALLBACKS.load(Ordering::Acquire) > 0
+                && FRAMES.load(Ordering::Acquire) > 0,
+            "the realtime callback never ran",
+        );
+        require(
+            &host,
+            host.sample_rate() == 48_000.0
+                && host.buffer_size() == 128
+                && host.output_channel_count() > 0,
+            "the negotiated generation does not match the request",
+        );
+
+        // Second generation: renegotiate while the driver is live.
+        require(
+            &host,
+            host.reconfigure(FormatRequest {
+                sample_rate: 96_000.0,
+                buffer_size: 512,
+            }),
+            "cannot renegotiate the default output device to 96000/512",
+        );
+        require(
+            &host,
+            host.sample_rate() == 96_000.0 && host.buffer_size() == 512,
+            "the second generation does not match the request",
+        );
+        require(&host, host.is_running(), "the driver stopped after renegotiation");
+
+        host.stop();
+        require(&host, !host.is_running(), "stop left the driver running");
+    }
 
     #[derive(Default)]
     struct FakeStats {

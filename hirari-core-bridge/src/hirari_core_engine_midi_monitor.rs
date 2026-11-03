@@ -610,11 +610,16 @@ impl HirariCore {
         format
     }
 
+    /// The absent engine has no driver to report on, which is a different answer
+    /// from the silent fallback an engine without a device gives.
     pub fn audio_driver_status(&self) -> String {
         self.engine
             .as_ref()
-            .map(|engine| engine.audio_driver_status().to_string())
-            .unwrap_or_else(|| "unavailable".to_owned())
+            .map_or_else(|| "unavailable".to_owned(), |engine| {
+                crate::audio_driver_view::status(
+                    crate::audio_engine_delegate_ext::driver_host(engine),
+                )
+            })
     }
 
     pub fn process_sandboxed_plugin_block(
@@ -639,9 +644,7 @@ impl HirariCore {
     }
 
     pub fn is_silent_audio_fallback(&self) -> bool {
-        self.engine
-            .as_ref()
-            .is_none_or(|engine| engine.is_silent_fallback())
+        crate::audio_driver_view::is_silent_fallback(self.driver_handle())
     }
 
     /// Runs one bounded stereo block through the native C++ graph.

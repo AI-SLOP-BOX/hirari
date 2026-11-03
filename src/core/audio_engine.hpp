@@ -24,14 +24,15 @@ using AudioDriverHost = ::Hirari::Core::Driver::MacAudioDriverHost;
 #else
 // Non-macOS builds currently have no native audio-device implementation.
 // Keep the bridge constructible for offline/UI use, but never report a fake
-// running device or fabricate callback/peak data.
+// running device or fabricate callback/peak data. The telemetry the UI polls is
+// answered from Rust (`audio_driver_view`), so only the callback boundary and
+// the lifecycle calls the engine's own control flow needs live here.
 class UnavailableAudioDriver {
 public:
-    bool start() noexcept { m_error = "native audio backend unavailable"; return false; }
-    void stop() noexcept { m_running = false; }
+    bool start() noexcept { return false; }
+    void stop() noexcept {}
     bool is_running() const noexcept { return false; }
-    bool isSilentFallback() const noexcept { return true; }
-    void try_reconnect() const noexcept { m_error = "native audio backend unavailable"; }
+    void try_reconnect() noexcept {}
     using ProcessCallback = void (*)(const float* const*, uint32_t,
                                      float* const*, uint32_t, uint32_t,
                                      void*) noexcept;
@@ -54,18 +55,9 @@ public:
         dropped = 0;
         return false;
     }
-    void capture_input(const float* const*, uint32_t, uint32_t) noexcept {}
-    float output_peak() const noexcept { return 0.0f; }
-    uint64_t callback_count() const noexcept { return 0; }
-    uint64_t dropped_input_blocks() const noexcept { return 0; }
     void discard_pending_input_blocks() noexcept {}
     uint32_t input_channel_count() const noexcept { return 0; }
-    uint32_t output_channel_count() const noexcept { return 0; }
-    const char* last_error() const noexcept { return m_error.c_str(); }
-    const char* status() const noexcept { return "unavailable"; }
 private:
-    mutable std::string m_error = "native audio backend unavailable";
-    bool m_running = false;
     ProcessCallback m_callback = nullptr;
     void* m_context = nullptr;
 };

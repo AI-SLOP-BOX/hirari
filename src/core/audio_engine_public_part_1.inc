@@ -41,40 +41,19 @@ public:
         // the real connection state without driving any transport action.
         return m_driver && m_driver->is_running();
     }
-    bool is_silent_fallback() const noexcept {
+    // The status, telemetry and device catalog the UI polls are Rust-owned
+    // (`mac_audio_driver.rs`) and read through `audio_driver_view` against this
+    // handle, which the engine's lifetime bounds. A zero handle means "no host"
+    // and answers exactly as the deleted null-`m_driver` forwarders did; the
+    // non-macOS backend has no host at all and is permanently silent.
+    uintptr_t audio_driver_host() const noexcept {
 #if defined(__APPLE__)
-        if (!m_driver) return true;
-        const char* status = m_driver->status();
-        return status == nullptr || std::strcmp(status, "unavailable") == 0 ||
-               std::strcmp(status, "start-failed") == 0;
-#else
-        return !m_driver || m_driver->isSilentFallback();
-#endif
-    }
-    rust::String audio_driver_status() const {
-        if (!m_driver) return rust::String("unavailable");
-#if defined(__APPLE__)
-        return rust::String(m_driver->status());
-#else
-        if (m_driver->isSilentFallback()) return rust::String("silent-fallback");
-#endif
-        return rust::String("stopped");
-    }
-    int32_t audio_driver_error_code() const noexcept {
-#if defined(__APPLE__)
-        return m_driver ? m_driver->last_error_code() : 0;
+        return m_driver ? reinterpret_cast<uintptr_t>(m_driver->raw_handle()) : 0;
 #else
         return 0;
 #endif
     }
-    float get_audio_output_peak() const {
-        return m_driver ? m_driver->output_peak() : 0.0f;
-    }
-    uint64_t get_audio_callback_count() const { return m_driver ? m_driver->callback_count() : 0; }
-    uint64_t get_dropped_input_blocks() const { return m_driver ? m_driver->dropped_input_blocks() : 0; }
     void discard_pending_audio_input() const;
-    uint32_t get_audio_input_channel_count() const { return m_driver ? m_driver->input_channel_count() : 0; }
-    uint32_t get_audio_output_channel_count() const { return m_driver ? m_driver->output_channel_count() : 0; }
     rust::Vec<float> poll_audio_input(uint32_t& channelCount,
                                       uint64_t& droppedInputBlocks) const;
     void try_reconnect_audio_device() const {
@@ -86,20 +65,6 @@ public:
             m_driver->try_reconnect();
             if (!m_driver->is_running() && m_engine) m_engine->set_playing(false);
         }
-    }
-    rust::String list_audio_devices_json() const {
-#if defined(__APPLE__)
-        return rust::String(m_driver ? m_driver->list_devices_json() : "[]");
-#else
-        return rust::String("[]");
-#endif
-    }
-    rust::String audio_input_device_uid() const {
-#if defined(__APPLE__)
-        return rust::String(m_driver ? m_driver->selected_device_uid() : std::string{});
-#else
-        return rust::String("");
-#endif
     }
     bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
 #if defined(__APPLE__)

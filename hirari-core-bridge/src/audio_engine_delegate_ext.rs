@@ -54,6 +54,13 @@ pub(crate) fn host(engine: &ffi::AudioEngine) -> *mut c_void {
     core as *mut c_void
 }
 
+/// Address of the Rust driver host the engine constructed, for the reads in
+/// `audio_driver_view`. Zero means no host -- off macOS there is never one, and
+/// on macOS it is the absent host the deleted C++ null guards named.
+pub(crate) fn driver_host(engine: &ffi::AudioEngine) -> usize {
+    engine.audio_driver_host()
+}
+
 fn learn_state(engine: &ffi::AudioEngine) -> *const c_void {
     let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
     unsafe { (*core).midi_learn_state() as *const c_void }

@@ -165,24 +165,15 @@ pub mod ffi {
             pre_fader: bool,
             include_inserts: bool,
         );
+        fn audio_driver_host(self: &AudioEngine) -> usize;
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
-        fn is_silent_fallback(self: &AudioEngine) -> bool;
-        fn audio_driver_status(self: &AudioEngine) -> String;
-        fn audio_driver_error_code(self: &AudioEngine) -> i32;
-        fn get_audio_output_peak(self: &AudioEngine) -> f32;
-        fn get_audio_callback_count(self: &AudioEngine) -> u64;
-        fn get_dropped_input_blocks(self: &AudioEngine) -> u64;
         fn discard_pending_audio_input(self: &AudioEngine);
         fn poll_audio_input(
             self: &AudioEngine,
             channel_count: &mut u32,
             dropped_input_blocks: &mut u64,
         ) -> Vec<f32>;
-        fn get_audio_input_channel_count(self: &AudioEngine) -> u32;
-        fn get_audio_output_channel_count(self: &AudioEngine) -> u32;
         fn try_reconnect_audio_device(self: &AudioEngine);
-        fn list_audio_devices_json(self: &AudioEngine) -> String;
-        fn audio_input_device_uid(self: &AudioEngine) -> String;
         fn select_audio_device(
             self: &AudioEngine,
             device_id: u32,
