@@ -326,10 +326,6 @@ struct HirariEventStep {
     bool enabled = true;
 };
 typedef struct HirariRegionProcessingHistoryStore HirariRegionProcessingHistoryStore;
-extern "C" {
-bool hirari_region_processing_history_append(
-    HirariRegionProcessingHistoryStore* store, HirariEventStep step);
-}
 struct HirariWarpMarker {
     uint64_t sourceSample = 0;
     uint64_t timelineSample = 0;
@@ -356,9 +352,6 @@ extern "C" void hirari_region_clip_edits_destroy(HirariRegionClipEdits* store);
 extern "C" bool hirari_region_clip_edits_replace_range_edits(
     HirariRegionClipEdits* store, const HirariRegionRangeEdit* edits, size_t count,
     uint64_t region_length, bool validate);
-extern "C" int32_t hirari_region_clip_edits_set_warp_markers(
-    HirariRegionClipEdits* store, const HirariWarpMarker* markers, size_t count,
-    uint64_t source_span, uint64_t timeline_length, bool normalize);
 extern "C" HirariRegionClipEditsFrozen* hirari_region_clip_edits_freeze(
     const HirariRegionClipEdits* store);
 extern "C" const HirariRegionClipEditsView* hirari_region_clip_edits_frozen_view(
@@ -396,12 +389,6 @@ struct HirariRegionState {
     bool locked = false;
     bool pitchPreserveWarp = false;
 };
-
-// Completes decoded-media hydration and writes the resulting editable state;
-// the loader installs `state` instead of re-mapping each persisted field.
-extern "C" uint8_t hirari_region_hydrate_decoded(
-    void* region, uint64_t decoded_samples, double decoded_source_rate,
-    double project_sample_rate, uint32_t document_version, HirariRegionState* state);
 
 // Split/duplicate policy is Rust-owned, including the note-table split and
 // the undo capture. C++ keeps the payload (buffers, cache, note-store handle)
@@ -803,12 +790,8 @@ extern "C" HirariRegionDraft* hirari_region_store_draft_new(
     uint32_t id, const uint8_t* path, size_t pathLength, const uint8_t* name,
     size_t nameLength, const HirariRegionState* state);
 extern "C" HirariRegionClipEdits* hirari_region_store_draft_clip(HirariRegionDraft* draft);
-extern "C" HirariRegionVariAudioStore* hirari_region_store_draft_notes(HirariRegionDraft* draft);
-extern "C" HirariRegionProcessingHistoryStore* hirari_region_store_draft_history(
-    HirariRegionDraft* draft);
 extern "C" bool hirari_region_store_draft_add(
     HirariRegionDraft* draft, void* track, void* audio);
-extern "C" void hirari_region_store_draft_discard(HirariRegionDraft* draft);
 // The region table is keyed by the live Track, not by the track id: ids are
 // allocated per engine, so two engines can own the same id at the same time.
 // Entry points that only have an engine and an id resolve the track through

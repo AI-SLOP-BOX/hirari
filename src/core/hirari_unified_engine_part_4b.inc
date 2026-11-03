@@ -15,73 +15,22 @@
             loadedTracks.push_back(t);
         }
         
-        // 2. Hydrate Regions
-        uint32_t nextRegionId = 1;
-        for (auto& rs : state.regions) {
-            for (auto& t : loadedTracks) {
-                if (t->getId() != rs.trackId) continue;
-                // Versions before 28 stored no region ids, so hydration hands
-                // them out in document order. The allocator resumes past the
-                // highest id once the document is installed.
-                const uint32_t regionId = state.version >= 28 ? rs.id : nextRegionId++;
-                // Decode before hydration so Rust can clamp the region to the
-                // media that actually exists and migrate legacy geometry.
-                std::shared_ptr<AudioBuffer> audio;
-                double decodedSourceRate = 0.0;
-                std::error_code fileError;
-                const std::string regionPath(rs.filePath);
-                const std::filesystem::path resolvedPath(regionPath);
-                if (std::filesystem::is_regular_file(resolvedPath, fileError) && !fileError) {
-                    audio = importAudioFile(regionPath, &decodedSourceRate);
-                    if (audio && (audio->getNumSamples() == 0 || audio->getNumChannels() == 0)) {
-                        audio.reset();
-                    }
-                }
-                HirariRegionState hydrated{};
-                const uint8_t hydration = hirari_region_hydrate_decoded(
-                    &rs, audio ? audio->getNumSamples() : 0u, decodedSourceRate,
-                    projectSampleRate, state.version, &hydrated);
-                if (hydration == 1) continue;
-                if (hydration == 2) return false;
-                // Saved tables are installed verbatim; adding the region
-                // re-normalizes it inside the Rust store.
-                auto* draft = hirari_region_store_draft_new(
-                    regionId, reinterpret_cast<const uint8_t*>(regionPath.data()),
-                    regionPath.size(), reinterpret_cast<const uint8_t*>(rs.name.data()),
-                    rs.name.size(), &hydrated);
-                std::unique_ptr<HirariRegionDraft, void (*)(HirariRegionDraft*)> draftGuard{
-                    draft, &hirari_region_store_draft_discard};
-                static_assert(sizeof(rs.warpMarkers[0]) == sizeof(HirariWarpMarker));
-                static_assert(sizeof(rs.rangeEdits[0]) == sizeof(HirariRegionRangeEdit));
-                auto* clip = hirari_region_store_draft_clip(draft);
-                (void)hirari_region_clip_edits_set_warp_markers(
-                    clip, reinterpret_cast<const HirariWarpMarker*>(rs.warpMarkers.data()),
-                    rs.warpMarkers.size(), 0, 0, false);
-                (void)hirari_region_clip_edits_replace_range_edits(
-                    clip, reinterpret_cast<const HirariRegionRangeEdit*>(rs.rangeEdits.data()),
-                    rs.rangeEdits.size(), hydrated.len, false);
-                auto* history = hirari_region_store_draft_history(draft);
-                for (const auto& step : rs.processingHistory) {
-                    const HirariEventStep entry{
-                        step.id, reinterpret_cast<const uint8_t*>(step.operation.data()),
-                        step.operation.size(), step.parameter, step.enabled};
-                    if (!hirari_region_processing_history_append(history, entry)) return false;
-                }
-                if (!hirari_region_note_store_load_native(
-                        reinterpret_cast<size_t>(hirari_region_store_draft_notes(draft)),
-                        rs.audioNoteSegments)) {
-                    return false;
-                }
-                // Hydrate audio during project load so an opened project is
-                // immediately playable. Missing files remain visible as
-                // unloaded regions and can be repaired via Relink.
-                if (!hirari_region_store_draft_add(
-                        draftGuard.release(), t.get(),
-                        audio ? new std::shared_ptr<AudioBuffer>(std::move(audio)) : nullptr)) {
-                    return false;
-                }
-                break;
-            }
+        // 2. Hydrate Regions.
+        //
+        // The walk is Rust-owned (region_hydration.rs): media decoding, the
+        // pre-v28 id handout, the clamp/migrate policy and the persisted
+        // warp, range-edit, history and note tables all live there. The engine
+        // only names the provisional tracks the regions install into.
+        rust::Vec<::Hirari::Core::Bridge::NativeTrackHandle> regionTracks;
+        regionTracks.reserve(loadedTracks.size());
+        for (const auto& track : loadedTracks) {
+            regionTracks.push_back(
+                ::Hirari::Core::Bridge::NativeTrackHandle{track->getId(),
+                    reinterpret_cast<size_t>(track.get())});
+        }
+        if (!::Hirari::Core::Bridge::native_project_hydrate_regions(
+                state, regionTracks, reinterpret_cast<size_t>(this), projectSampleRate)) {
+            return false;
         }
 
         // Prepare the detached replacement tracks before the commit point.

@@ -67,6 +67,16 @@ production support.
 
 ### Changed
 
+- Project-load region hydration is driven from Rust. Opening a document no
+  longer walks the decoded region table in the engine: media decoding, the
+  pre-v28 region-id handout, the clamp to the frames that actually exist, the
+  legacy source-frame migration and the installation of the persisted
+  warp-marker, range-edit, processing-history and note tables all live in
+  `hirari-core-bridge/src/region_hydration.rs`, which reaches the native audio
+  storage through the region host callbacks. The engine supplies the
+  provisional track handles and one call, and the prototypes for the draft
+  history/notes/discard, warp-marker setter and decoded-hydration entry points
+  that no C++ translation unit calls are gone.
 - The never-buildable JACK backend is gone. `HIRARI_ENABLE_JACK` appeared in no
   build script, CMake target or release job, so `JackBridgeDeep` and its
   conditional driver, graph-sync, capture and peak paths were unreachable code;

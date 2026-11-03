@@ -7,12 +7,14 @@
 //! region, so they live here and the loader only applies the result.
 
 use crate::audio_note_curve::HirariAudioNoteAnchor;
-use crate::ffi::{NativeNoteSegment, NativeRegionState};
+use crate::ffi::{NativeNoteSegment, NativeProjectState, NativeRegionState, NativeTrackHandle};
 use crate::region_edit_host::HirariRegionState;
+use crate::region_warp::HirariWarpMarker;
 use crate::vari_audio::{
     hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_load,
     HirariAudioNoteSegment, HirariRegionVariAudioStore,
 };
+use std::ptr;
 use std::slice;
 
 /// Mirrors the engine's warp-marker layout; only `timeline_sample` is rewritten.
@@ -409,6 +411,203 @@ pub fn hirari_region_note_store_load_native(
             offsets.as_ptr(),
             counts.as_ptr(),
         )
+    }
+}
+
+/// Hydrates every region of a decoded project into the tracks the engine is
+/// still building.
+///
+/// The loader used to walk this in C++: resolve the track, decode the media,
+/// hand out ids for pre-v28 documents, then re-borrow each persisted table
+/// (warp markers, range edits, processing history, note segments) into a draft
+/// through the flat ABI. Every one of those decisions is document policy over
+/// Rust-owned storage, so the walk lives here and the engine supplies only the
+/// provisional track handles plus the host callbacks that decode and free
+/// audio. Returns false when a region cannot be installed, which the caller
+/// treats as a hydration failure that must leave the previous project published.
+pub fn native_project_hydrate_regions(
+    state: &mut NativeProjectState,
+    tracks: &Vec<NativeTrackHandle>,
+    host: usize,
+    project_sample_rate: f64,
+) -> bool {
+    let Some(ops) = crate::region_edit_host::host_ops() else {
+        return false;
+    };
+    let host = host as *mut std::ffi::c_void;
+    let mut next_region_id = 1u32;
+    for index in 0..state.regions.len() {
+        let Some(track) = tracks
+            .iter()
+            .find(|entry| entry.id == state.regions[index].trackId)
+        else {
+            continue;
+        };
+        // The path and name are copied so the record can be migrated in place
+        // below without holding a borrow across the hydration call.
+        let (region_id, path, name) = {
+            let region = &state.regions[index];
+            let id = if state.version >= 28 {
+                region.id
+            } else {
+                let id = next_region_id;
+                next_region_id = next_region_id.saturating_add(1);
+                id
+            };
+            (
+                id,
+                region.filePath.as_bytes().to_vec(),
+                region.name.as_bytes().to_vec(),
+            )
+        };
+        // An empty or unreadable media path is a terminal decode rejection, so
+        // the region stays visible as an unloaded region for Relink.
+        let mut audio = ptr::null_mut();
+        let mut source_rate = 0.0f64;
+        let mut decoded_samples = 0u64;
+        let decoded = ops.decode_audio.is_some_and(|decode| unsafe {
+            decode(
+                host,
+                path.as_ptr(),
+                path.len(),
+                &mut audio,
+                &mut source_rate,
+            )
+        });
+        if !decoded || audio.is_null() {
+            audio = ptr::null_mut();
+            decoded_samples = 0;
+        } else if let Some(view) = ops.audio_view {
+            let channels = unsafe { view(audio, ptr::null_mut(), 0, &mut decoded_samples) };
+            if channels == 0 || decoded_samples == 0 {
+                release_audio(&ops, audio);
+                audio = ptr::null_mut();
+                decoded_samples = 0;
+            }
+        }
+        let frames = decoded_samples;
+        let mut hydrated = HirariRegionState::default();
+        let code = unsafe {
+            hirari_region_hydrate_decoded(
+                &mut state.regions[index] as *mut NativeRegionState,
+                frames,
+                source_rate,
+                project_sample_rate,
+                state.version,
+                &mut hydrated,
+            )
+        };
+        if code == HYDRATION_DROP_REGION {
+            release_audio(&ops, audio);
+            continue;
+        }
+        if code != HYDRATION_OK {
+            release_audio(&ops, audio);
+            return false;
+        }
+        let region = &state.regions[index];
+        let draft = unsafe {
+            crate::region_store::hirari_region_store_draft_new(
+                region_id,
+                path.as_ptr(),
+                path.len(),
+                name.as_ptr(),
+                name.len(),
+                &hydrated,
+            )
+        };
+        let clip = crate::region_store::hirari_region_store_draft_clip(draft);
+        let markers: Vec<HirariWarpMarker> = region
+            .warpMarkers
+            .iter()
+            .map(|marker| HirariWarpMarker {
+                source_sample: marker.sourceSample,
+                timeline_sample: marker.timelineSample,
+                transient: u8::from(marker.transient),
+            })
+            .collect();
+        let edits: Vec<crate::region_processing::NativeRangeEdit> = region
+            .rangeEdits
+            .iter()
+            .map(|edit| crate::region_processing::NativeRangeEdit {
+                start: edit.start,
+                end: edit.end,
+                gain: edit.gain,
+                fade_in: edit.fadeIn,
+                fade_out: edit.fadeOut,
+            })
+            .collect();
+        // Saved tables are installed exactly as the decoder produced them; the
+        // hydration pass above already filtered and migrated them.
+        if unsafe {
+            crate::region_clip_edits::hirari_region_clip_edits_set_warp_markers(
+                clip,
+                markers.as_ptr(),
+                markers.len(),
+                0,
+                hydrated.len,
+                false,
+            )
+        } < 0
+            || !unsafe {
+                crate::region_clip_edits::hirari_region_clip_edits_replace_range_edits(
+                    clip,
+                    edits.as_ptr(),
+                    edits.len(),
+                    hydrated.len,
+                    false,
+                )
+            }
+        {
+            unsafe { crate::region_store::hirari_region_store_draft_discard(draft) };
+            release_audio(&ops, audio);
+            return false;
+        }
+        let history = crate::region_store::hirari_region_store_draft_history(draft);
+        for step in &region.processingHistory {
+            let operation = step.operation.as_bytes();
+            let entry = crate::region_processing_history::HirariEventStep {
+                id: step.id,
+                operation: operation.as_ptr(),
+                operation_len: operation.len(),
+                parameter: step.parameter,
+                enabled: step.enabled,
+            };
+            if !unsafe {
+                crate::region_processing_history::hirari_region_processing_history_append(
+                    history, entry,
+                )
+            } {
+                unsafe { crate::region_store::hirari_region_store_draft_discard(draft) };
+                release_audio(&ops, audio);
+                return false;
+            }
+        }
+        let notes = crate::region_store::hirari_region_store_draft_notes(draft) as usize;
+        if !hirari_region_note_store_load_native(notes, &region.audioNoteSegments) {
+            unsafe { crate::region_store::hirari_region_store_draft_discard(draft) };
+            release_audio(&ops, audio);
+            return false;
+        }
+        // `draft_add` consumes the draft and the audio handle on every path.
+        if !unsafe {
+            crate::region_store::hirari_region_store_draft_add(
+                draft,
+                track.track as *mut std::ffi::c_void,
+                audio,
+            )
+        } {
+            return false;
+        }
+    }
+    true
+}
+
+fn release_audio(ops: &crate::region_edit_host::HirariRegionHostOps, audio: *mut std::ffi::c_void) {
+    if !audio.is_null() {
+        if let Some(release) = ops.release_audio {
+            unsafe { release(audio) };
+        }
     }
 }
 

@@ -20,7 +20,6 @@ pub use analysis_views::{
 };
 pub use command_host::engine_last_command_error;
 pub use plugin_sandbox_maintenance::sandbox_statuses_packed;
-pub use region_hydration::hirari_region_note_store_load_native;
 pub use runtime_views::{interleave_planar_audio_input, runtime_health_vector};
 pub use waveform_cache::{analysis_waveform_peak_envelope, resample_waveform_peak_envelope};
 pub mod ara2_protocol;
@@ -567,6 +566,15 @@ pub mod ffi {
         pub valid: bool,
     }
 
+    /// One provisional track the loader may install regions into: the id the
+    /// document knows plus the engine's own handle, opaque to Rust.
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeTrackHandle {
+        pub id: u32,
+        pub track: usize,
+    }
+
     extern "Rust" {
         /// Decodes an `ARUA` container. An unreadable or malformed file yields
         /// a default state with `valid == false`.
@@ -579,6 +587,15 @@ pub mod ffi {
             path: &str,
             state: &NativeProjectState,
             arrangement_document: usize,
+        ) -> bool;
+        /// Installs every decoded project region into the provisional tracks the
+        /// engine is building. False means the hydration aborted and the caller
+        /// must keep the previous document published.
+        fn native_project_hydrate_regions(
+            state: &mut NativeProjectState,
+            tracks: &Vec<NativeTrackHandle>,
+            host: usize,
+            project_sample_rate: f64,
         ) -> bool;
 
         fn report_hirari_log(level: u32, msg: &str);
@@ -601,13 +618,6 @@ pub mod ffi {
         fn sandbox_statuses_packed(host: usize) -> Vec<u32>;
         /// Admission error code of the most recent command on `host`.
         fn engine_last_command_error(host: usize) -> u8;
-        /// Loads persisted note segments into the Rust-owned VariAudio store
-        /// held by `store`, including the flat anchor indexing the store ABI
-        /// requires.
-        fn hirari_region_note_store_load_native(
-            store: usize,
-            segments: &Vec<NativeNoteSegment>,
-        ) -> bool;
         fn analysis_synesthesia_colors(spectrum: &[f32]) -> Vec<f32>;
         fn analysis_arrangement_advice(track_id: u32) -> String;
         fn analysis_mixing_advice(true_peak_l: f32, true_peak_r: f32, correlation: f32)
@@ -693,5 +703,6 @@ pub fn analysis_structure_sections(
 pub use native_project::{
     native_project_load, native_project_save, native_project_save_with_arrangement,
 };
+pub use region_hydration::native_project_hydrate_regions;
 
 include!("lib_runtime.rs");
