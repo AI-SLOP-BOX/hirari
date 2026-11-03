@@ -15,6 +15,7 @@ void HirariUnifiedEngine::installRoutingEditHost() {
     static const HirariRoutingHostOps ops = {
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainEngine; },
         [](void* host, uint32_t trackId, HirariRoutingTrackState* out) {
             if (!out) return false;
             return withHostTrack(host, trackId, false, [&](Track& track) {
@@ -59,14 +60,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
                 return true;
             });
         },
-        [](void* host, uint32_t destId, uint32_t pluginIndex) {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            const bool removed = hirari_sidechain_engine_remove_link(
-                engine->m_sidechainEngine, destId, pluginIndex);
-            return hirari_sidechain_routes_remove_link(
-                       engine->m_sidechainRoutes, destId, pluginIndex) || removed;
-        },
         [](void* host, uint32_t destId, uint32_t pluginIndex, uint32_t sourceId,
            const HirariRoutingSidechainContext* context, uint32_t tapPoint, bool silent) {
             if (!context) return false;
@@ -90,13 +83,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
                 engine->m_sidechainEngine, destId, pluginIndex, sourceId, left, right,
                 context->blockSize, context->sampleRate, context->generation, 1.0f,
                 static_cast<uint8_t>(tapPoint));
-        },
-        [](void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex,
-           uint32_t tapPoint) {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            return hirari_sidechain_routes_set(engine->m_sidechainRoutes, sourceId, destId,
-                                               pluginIndex, tapPoint);
         },
         [](void* host) {
             static_cast<HirariUnifiedEngine*>(host)->mark_project_layout_changed();
@@ -171,28 +157,8 @@ void HirariUnifiedEngine::installControlEditHost() {
             engine->m_inputMonitorTrackId.store(trackId, std::memory_order_release);
             return true;
         },
-        [](void* host, uint32_t macroIndex, float value) {
-            if (!host) return;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            hirari_macro_control_set_value(engine->m_macroControl, macroIndex, value);
-        },
-        [](void* host, uint32_t macroIndex, uint8_t channel, bool cc14, uint16_t controller,
-           float minimum, float maximum, float curve, bool pickup) {
-            if (!host) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            const void* targetState = engine->m_macroControl;
-            if (targetState == nullptr) return false;
-            if (cc14) {
-                hirari_midi_learn_add_mapping_14bit(
-                    engine->m_midiLearnState, controller, channel, targetState, macroIndex,
-                    minimum, maximum, curve, pickup);
-            } else {
-                hirari_midi_learn_add_mapping(
-                    engine->m_midiLearnState, static_cast<uint8_t>(controller), channel,
-                    targetState, macroIndex, minimum, maximum, curve, pickup);
-            }
-            return true;
-        },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_macroControl; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_midiLearnState; },
         [](void* host) -> void* {
             return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
         },

@@ -67,6 +67,16 @@ production support.
 
 ### Changed
 
+- More engine edits skip the C++ forwarding layer. The sidechain route table,
+  the routing graph, the sidechain gate, the macro controller and the MIDI learn
+  manager are all Rust stores that the engine only holds, so Rust now reaches
+  them through its own store API: the layout callbacks that copied the route
+  table and the feedback edges, the routing callbacks that wrote or removed a
+  sidechain route, and the control callbacks that set a macro value or added a
+  CC binding are replaced by handle accessors, and choosing between a 7-bit and
+  a 14-bit MIDI binding is now Rust's decision. The ten `extern "C"`
+  declarations, three POD mirrors and the never-called `push_event` wrapper
+  those paths left behind are deleted.
 - Routing edits skip the C++ forwarding layer. The routing graph and the
   sidechain route table are Rust stores the engine only holds, so the Rust edit
   policy now reads and mutates them through its own store API instead of asking

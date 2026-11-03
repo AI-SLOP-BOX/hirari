@@ -6,7 +6,7 @@ use std::ffi::c_void;
 use std::sync::Mutex;
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct HirariSidechainRoute {
     pub source_id: u32,
     pub destination_id: u32,

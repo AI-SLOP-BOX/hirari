@@ -114,7 +114,6 @@ pub type SidechainContextFn =
     unsafe extern "C" fn(*mut c_void, u32, u32, *mut HirariRoutingSidechainContext) -> bool;
 pub type ApplyTrackScalarFn = unsafe extern "C" fn(*mut c_void, u32, i32, bool, u32) -> bool;
 pub type ApplyTrackMixFn = unsafe extern "C" fn(*mut c_void, u32, i32, f32) -> bool;
-pub type RemoveSidechainFn = unsafe extern "C" fn(*mut c_void, u32, u32) -> bool;
 /// `silent` selects the manager's silent registration path for sources that
 /// are not prepared yet.
 pub type RegisterSidechainFn = unsafe extern "C" fn(
@@ -126,9 +125,9 @@ pub type RegisterSidechainFn = unsafe extern "C" fn(
     u32,
     bool,
 ) -> bool;
-pub type WriteSidechainRouteFn = unsafe extern "C" fn(*mut c_void, u32, u32, u32, u32) -> bool;
 /// Hands the Rust-owned store handle to the edit host. The engine holds the
-/// routing graph and the sidechain route table but never interprets them.
+/// routing graph, the sidechain route table and the sidechain gate but never
+/// interprets them.
 pub type StoreFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 pub type HostFn = unsafe extern "C" fn(*mut c_void);
 pub type RecordUndoFn = unsafe extern "C" fn(
@@ -149,12 +148,11 @@ pub struct HirariRoutingHostOps {
     /// engine only holds, so the edit host reads and writes them directly.
     pub routing_store: Option<StoreFn>,
     pub sidechain_routes_store: Option<StoreFn>,
+    pub sidechain_engine_store: Option<StoreFn>,
     pub query_track: Option<QueryTrackFn>,
     pub sidechain_context: Option<SidechainContextFn>,
     pub apply_track_scalar: Option<ApplyTrackScalarFn>,
-    pub remove_sidechain: Option<RemoveSidechainFn>,
     pub register_sidechain: Option<RegisterSidechainFn>,
-    pub write_sidechain_route: Option<WriteSidechainRouteFn>,
     pub mark_layout_changed: Option<HostFn>,
     pub sync_structural: Option<HostFn>,
     pub record_undo: Option<RecordUndoFn>,
@@ -259,6 +257,28 @@ fn routing_store(ops: &HirariRoutingHostOps, host: *mut c_void) -> Option<*mut c
 fn sidechain_routes_store(ops: &HirariRoutingHostOps, host: *mut c_void) -> Option<*mut c_void> {
     let access = ops.sidechain_routes_store?;
     Some(unsafe { access(host) })
+}
+
+/// Removes one link from both Rust stores that describe it: the sidechain gate
+/// holds the live audio routing, the route table the saved model.
+fn remove_sidechain(ops: &HirariRoutingHostOps, host: *mut c_void, dest: u32, plugin: u32) -> bool {
+    let gate_removed = match ops.sidechain_engine_store {
+        Some(access) => unsafe {
+            crate::sidechain_manager::hirari_sidechain_engine_remove_link(
+                access(host),
+                dest,
+                plugin,
+            )
+        },
+        None => false,
+    };
+    let Some(routes) = sidechain_routes_store(ops, host) else {
+        return gate_removed;
+    };
+    let route_removed = unsafe {
+        crate::sidechain_route_store::hirari_sidechain_routes_remove_link(routes, dest, plugin)
+    };
+    gate_removed || route_removed
 }
 
 fn query_edge(
@@ -856,10 +876,7 @@ fn set_sidechain_with(
     };
 
     if !enabled {
-        let Some(remove) = ops.remove_sidechain else {
-            return false;
-        };
-        let removed = unsafe { remove(host, dest_id, plugin_index) };
+        let removed = remove_sidechain(ops, host, dest_id, plugin_index);
         if had_previous && !edge_used_by_another(previous_source) {
             remove_dependency(ops, host, previous_source, dest_id);
         }
@@ -951,8 +968,16 @@ fn set_sidechain_with(
         restore_previous_dependency(ops, host);
         return false;
     }
-    if let Some(write) = ops.write_sidechain_route {
-        unsafe { write(host, source_id, dest_id, plugin_index, tap_point) };
+    if let Some(routes) = sidechain_routes_store(ops, host) {
+        unsafe {
+            crate::sidechain_route_store::hirari_sidechain_routes_set(
+                routes,
+                source_id,
+                dest_id,
+                plugin_index,
+                tap_point,
+            )
+        };
     }
     mark_layout_changed(ops, host);
     if record {
@@ -1517,6 +1542,7 @@ mod tests {
         tracks: Vec<(u32, TestTrack)>,
         routing: *mut c_void,
         routes: *mut c_void,
+        gate: *mut c_void,
         // (destination, plugin, source, tap)
         links: Vec<(u32, u32, u32, u32)>,
         undo: Vec<UndoRecord>,
@@ -1533,6 +1559,7 @@ mod tests {
                 tracks: Vec::new(),
                 routing: crate::routing_engine_core::hirari_routing_engine_create(),
                 routes: crate::sidechain_route_store::hirari_sidechain_routes_create(),
+                gate: crate::sidechain_manager::hirari_sidechain_engine_create(),
                 links: Vec::new(),
                 undo: Vec::new(),
                 layouts: 0,
@@ -1549,6 +1576,7 @@ mod tests {
             unsafe {
                 crate::routing_engine_core::hirari_routing_engine_destroy(self.routing);
                 crate::sidechain_route_store::hirari_sidechain_routes_destroy(self.routes);
+                crate::sidechain_manager::hirari_sidechain_engine_destroy(self.gate);
             }
         }
     }
@@ -1641,16 +1669,6 @@ mod tests {
         true
     }
 
-    unsafe extern "C" fn test_remove_sidechain(host: *mut c_void, dest: u32, plugin: u32) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        let removed =
-            unsafe { crate::sidechain_route_store::hirari_sidechain_routes_remove_link(host.routes, dest, plugin) };
-        let link_count = host.links.len();
-        host.links
-            .retain(|link| !(link.0 == dest && link.1 == plugin));
-        removed || link_count != host.links.len()
-    }
-
     unsafe extern "C" fn test_register_sidechain(
         host: *mut c_void,
         dest: u32,
@@ -1667,15 +1685,8 @@ mod tests {
         true
     }
 
-    unsafe extern "C" fn test_write_sidechain_route(
-        host: *mut c_void,
-        source: u32,
-        dest: u32,
-        plugin: u32,
-        tap: u32,
-    ) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        unsafe { crate::sidechain_route_store::hirari_sidechain_routes_set(host.routes, source, dest, plugin, tap) }
+    unsafe extern "C" fn test_sidechain_engine_store(host: *mut c_void) -> *mut c_void {
+        unsafe { &*(host as *const TestHost) }.gate
     }
 
     unsafe extern "C" fn test_mark_layout_changed(host: *mut c_void) {
@@ -1732,12 +1743,11 @@ mod tests {
         HirariRoutingHostOps {
             routing_store: Some(test_routing_store),
             sidechain_routes_store: Some(test_sidechain_routes_store),
+            sidechain_engine_store: Some(test_sidechain_engine_store),
             query_track: Some(test_query_track),
             sidechain_context: Some(test_sidechain_context),
             apply_track_scalar: Some(test_apply_track_scalar),
-            remove_sidechain: Some(test_remove_sidechain),
             register_sidechain: Some(test_register_sidechain),
-            write_sidechain_route: Some(test_write_sidechain_route),
             mark_layout_changed: Some(test_mark_layout_changed),
             sync_structural: Some(test_sync_structural),
             record_undo: Some(test_record_undo),

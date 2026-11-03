@@ -221,8 +221,6 @@ extern "C" size_t hirari_audio_buffer_last_realtime_requested_capacity();
 extern "C" void hirari_audio_buffer_reset_realtime_resize_stats();
 extern "C" void* hirari_macro_mapping_create();
 extern "C" void hirari_macro_mapping_destroy(void* state);
-extern "C" void hirari_macro_control_set_value(
-    void* state, uint32_t macro_index, float value);
 extern "C" void* hirari_channel_strip_create();
 extern "C" void hirari_channel_strip_destroy(void* state);
 extern "C" void hirari_channel_strip_set_sample_rate(const void* state, double sample_rate);
@@ -886,30 +884,16 @@ extern "C" bool hirari_sidechain_engine_register_silent_link(
     void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track,
     uint32_t frames, uint32_t sample_rate, uint64_t source_generation, float level,
     uint8_t tap_point);
-extern "C" bool hirari_sidechain_engine_remove_link(
-    void* state, uint32_t destination_track, uint32_t plugin_index);
 extern "C" bool hirari_sidechain_engine_has_link(
     const void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track);
 extern "C" void hirari_sidechain_engine_remove_track(void* state, uint32_t track);
 extern "C" void hirari_sidechain_engine_reset(void* state);
-// Route metadata shared by the layout writer and track edits. Rust owns the
-// list (sidechain_route_store.rs); these calls copy or mutate it in place.
-struct HirariSidechainRoute {
-    uint32_t sourceId = 0;
-    uint32_t destinationId = 0;
-    uint32_t pluginIndex = 0;
-    uint32_t tapPoint = 0;
-};
+// Rust owns the sidechain route list (sidechain_route_store.rs). The engine
+// only allocates, clears and replays whole tables; per-route reads and edits
+// go through Rust's own store API.
 extern "C" void* hirari_sidechain_routes_create();
 extern "C" void hirari_sidechain_routes_destroy(void* state);
 extern "C" void hirari_sidechain_routes_clear(const void* state);
-extern "C" size_t hirari_sidechain_routes_count(const void* state);
-extern "C" size_t hirari_sidechain_routes_copy(
-    const void* state, HirariSidechainRoute* out, size_t capacity);
-extern "C" bool hirari_sidechain_routes_set(
-    const void* state, uint32_t source, uint32_t destination, uint32_t plugin, uint32_t tap);
-extern "C" bool hirari_sidechain_routes_remove_link(
-    const void* state, uint32_t destination, uint32_t plugin);
 extern "C" bool hirari_sidechain_routes_erase_track(const void* state, uint32_t track);
 extern "C" void* hirari_sidechain_routes_capture_track(const void* state, uint32_t track);
 extern "C" void hirari_sidechain_routes_release(void* captured);
@@ -943,7 +927,6 @@ extern "C" void* hirari_routing_engine_remove_connections_for_node(
 extern "C" void hirari_routing_connection_array_free(void* records, size_t count);
 extern "C" void* hirari_routing_engine_remove_feedback_for_node(
     void* state, uint32_t node, size_t* count);
-extern "C" void* hirari_routing_engine_copy_feedback(const void* state, size_t* count);
 extern "C" void hirari_routing_feedback_array_free(void* records, size_t count);
 extern "C" bool hirari_routing_engine_should_process(
     const void* state, uint32_t source, bool offline_target_active, uint32_t offline_target,
@@ -1026,19 +1009,18 @@ enum HirariRoutingEditOp : int32_t {
 };
 
 struct HirariRoutingHostOps {
-    // The routing graph and the sidechain route table are Rust objects the
-    // engine only holds, so Rust reads and edits them through its own store
-    // API. These two accessors are the remaining object-graph reach.
+    // The routing graph, the sidechain route table and the sidechain gate are
+    // Rust objects the engine only holds, so Rust reads and edits them through
+    // its own store API. These accessors are the remaining object-graph reach.
     void* (*routingStore)(void*) = nullptr;
     void* (*sidechainRoutesStore)(void*) = nullptr;
+    void* (*sidechainEngineStore)(void*) = nullptr;
     bool (*queryTrack)(void*, uint32_t, HirariRoutingTrackState*) = nullptr;
     bool (*sidechainContext)(void*, uint32_t, uint32_t,
                              HirariRoutingSidechainContext*) = nullptr;
     bool (*applyTrackScalar)(void*, uint32_t, int32_t, bool, uint32_t) = nullptr;
-    bool (*removeSidechain)(void*, uint32_t, uint32_t) = nullptr;
     bool (*registerSidechain)(void*, uint32_t, uint32_t, uint32_t,
                               const HirariRoutingSidechainContext*, uint32_t, bool) = nullptr;
-    bool (*writeSidechainRoute)(void*, uint32_t, uint32_t, uint32_t, uint32_t) = nullptr;
     void (*markLayoutChanged)(void*) = nullptr;
     // Rebuilds the published track/PDC graph; takes the tracks lock itself.
     void (*syncStructural)(void*) = nullptr;
@@ -1061,9 +1043,8 @@ struct HirariControlEditHostOps {
     void (*recordNameUndo)(void*, uint32_t, const uint8_t*, size_t,
                            const uint8_t*, size_t) = nullptr;
     bool (*updateMonitorFocus)(void*, uint32_t, bool, uint32_t, uint32_t) = nullptr;
-    void (*setMacroValue)(void*, uint32_t, float) = nullptr;
-    bool (*bindMacro)(void*, uint32_t, uint8_t, bool, uint16_t,
-                      float, float, float, bool) = nullptr;
+    void* (*macroControlStore)(void*) = nullptr;
+    void* (*midiLearnStore)(void*) = nullptr;
     void* (*undoState)(void*) = nullptr;
 };
 
@@ -1592,15 +1573,8 @@ extern "C" uint32_t hirari_plugin_sandbox_block_outcome(
 extern "C" uint32_t hirari_plugin_sandbox_transport_retry_delay(uint32_t attempt, uint8_t failure);
 extern "C" void* hirari_midi_learn_create();
 extern "C" void hirari_midi_learn_destroy(void* state);
-extern "C" void hirari_midi_learn_add_mapping(
-    void* state, uint8_t cc, uint8_t channel, const void* macro_state,
-    uint32_t macro_index,
-    float minimum, float maximum, float curve, bool pickup);
-extern "C" void hirari_midi_learn_add_mapping_14bit(
-    void* state, uint16_t controller, uint8_t channel, const void* macro_state,
-    uint32_t macro_index,
-    float minimum, float maximum, float curve, bool pickup);
-
+// Macro bindings are added by Rust directly against the learn and macro-control
+// stores it owns, so no mapping entry point is declared here.
 extern "C" void* hirari_project_db_create();
 extern "C" void hirari_project_db_destroy(void* state);
 extern "C" bool hirari_project_db_record(
@@ -1665,17 +1639,6 @@ struct HirariLayoutAutomationPoint {
     double time = 0.0;
     float value = 0.0f;
     float curve = 0.0f;
-};
-struct HirariLayoutSidechainRoute {
-    uint32_t sourceId = 0;
-    uint32_t destinationId = 0;
-    uint32_t pluginIndex = 0;
-    uint32_t tapPoint = 0;
-};
-struct HirariLayoutFeedbackRoute {
-    uint32_t sourceId = 0;
-    uint32_t destinationId = 0;
-    float gain = 0.0f;
 };
 struct HirariLayoutTrackScalars {
     uint32_t id = 0;
@@ -1747,10 +1710,8 @@ struct HirariLayoutHostOps {
                      HirariLayoutRegionHeader* out) = nullptr;
     size_t (*regionString)(void* host, size_t index, size_t region, uint32_t kind,
                            uint8_t* out, size_t capacity) = nullptr;
-    size_t (*sidechainRoutes)(void* host, HirariLayoutSidechainRoute* out,
-                              size_t capacity) = nullptr;
-    size_t (*feedbackRoutes)(void* host, HirariLayoutFeedbackRoute* out,
-                             size_t capacity) = nullptr;
+    void* (*sidechainRoutesStore)(void* host) = nullptr;
+    void* (*routingStore)(void* host) = nullptr;
     double (*sampleRate)(void* host) = nullptr;
 };
 // Both calls gather, serialize and release inside Rust. The JSON buffer is

@@ -129,10 +129,10 @@ pub struct HirariLayoutHostOps {
         -> bool,
     pub region_string:
         unsafe extern "C" fn(*mut c_void, usize, usize, u32, *mut u8, usize) -> usize,
-    pub sidechain_routes:
-        unsafe extern "C" fn(*mut c_void, *mut HirariLayoutSidechainRoute, usize) -> usize,
-    pub feedback_routes:
-        unsafe extern "C" fn(*mut c_void, *mut HirariLayoutFeedbackRoute, usize) -> usize,
+    /// The sidechain route table and the routing graph are Rust stores the
+    /// engine only holds; Rust reads them through its own store API.
+    pub sidechain_routes_store: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    pub routing_store: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
     pub sample_rate: unsafe extern "C" fn(*mut c_void) -> f64,
 }
 
@@ -281,6 +281,49 @@ fn byte_blocks(blocks: &[Vec<u8>]) -> Vec<HirariLayoutByteBlock> {
             count: bytes.len(),
         })
         .collect()
+}
+
+/// Copies the engine's sidechain route table out of its Rust store.
+unsafe fn sidechain_route_list(store: *mut c_void) -> Vec<HirariLayoutSidechainRoute> {
+    let count = unsafe { crate::sidechain_route_store::hirari_sidechain_routes_count(store) };
+    let mut routes =
+        vec![crate::sidechain_route_store::HirariSidechainRoute::default(); count];
+    unsafe {
+        crate::sidechain_route_store::hirari_sidechain_routes_copy(
+            store,
+            routes.as_mut_ptr(),
+            count,
+        )
+    };
+    routes
+        .iter()
+        .map(|route| HirariLayoutSidechainRoute {
+            source_id: route.source_id,
+            destination_id: route.destination_id,
+            plugin_index: route.plugin_index,
+            tap_point: route.tap_point,
+        })
+        .collect()
+}
+
+/// Copies the routing graph's feedback edges out of their Rust store.
+unsafe fn feedback_route_list(store: *mut c_void) -> Vec<HirariLayoutFeedbackRoute> {
+    let mut count = 0usize;
+    let raw =
+        unsafe { crate::routing_engine_core::hirari_routing_engine_copy_feedback(store, &mut count) };
+    if raw.is_null() || count == 0 {
+        return Vec::new();
+    }
+    let routes = unsafe { std::slice::from_raw_parts(raw, count) }
+        .iter()
+        .map(|edge| HirariLayoutFeedbackRoute {
+            source_id: edge.source_id,
+            destination_id: edge.destination_id,
+            gain: edge.gain,
+        })
+        .collect();
+    unsafe { crate::routing_engine_core::hirari_routing_feedback_array_free(raw, count) };
+    routes
 }
 
 struct LayoutOwned {
@@ -551,23 +594,9 @@ unsafe fn gather(
                 scratch.push(track);
             }
         }
-        let sidechain_count =
-            unsafe { (ops.sidechain_routes)(host, std::ptr::null_mut(), 0) };
-        let mut sidechain_routes =
-            vec![HirariLayoutSidechainRoute::default(); sidechain_count];
-        if sidechain_count > 0 {
-            let written = unsafe {
-                (ops.sidechain_routes)(host, sidechain_routes.as_mut_ptr(), sidechain_count)
-            };
-            sidechain_routes.truncate(written.min(sidechain_count));
-        }
-        let feedback_count = unsafe { (ops.feedback_routes)(host, std::ptr::null_mut(), 0) };
-        let mut feedback_routes = vec![HirariLayoutFeedbackRoute::default(); feedback_count];
-        if feedback_count > 0 {
-            let written =
-                unsafe { (ops.feedback_routes)(host, feedback_routes.as_mut_ptr(), feedback_count) };
-            feedback_routes.truncate(written.min(feedback_count));
-        }
+        let sidechain_routes =
+            sidechain_route_list(unsafe { (ops.sidechain_routes_store)(host) });
+        let feedback_routes = feedback_route_list(unsafe { (ops.routing_store)(host) });
         let mut tracks = Vec::with_capacity(scratch.len());
         for entry in &mut scratch {
             tracks.push(std::mem::take(&mut entry.view));
@@ -704,8 +733,18 @@ mod tests {
 
     struct MockHost {
         tracks: Mutex<Vec<MockTrack>>,
-        sidechains: Vec<HirariLayoutSidechainRoute>,
+        routes: *mut c_void,
+        routing: *mut c_void,
         gauge: Mutex<(u32, u32)>,
+    }
+
+    impl Drop for MockHost {
+        fn drop(&mut self) {
+            unsafe {
+                crate::sidechain_route_store::hirari_sidechain_routes_destroy(self.routes);
+                crate::routing_engine_core::hirari_routing_engine_destroy(self.routing);
+            }
+        }
     }
 
     fn host_opaque(host: *mut c_void) -> &'static MockHost {
@@ -901,24 +940,11 @@ mod tests {
     ) -> usize {
         0
     }
-    unsafe extern "C" fn sidechain_routes(
-        host: *mut c_void,
-        out: *mut HirariLayoutSidechainRoute,
-        capacity: usize,
-    ) -> usize {
-        let routes = &host_opaque(host).sidechains;
-        if !out.is_null() && capacity > 0 {
-            let count = capacity.min(routes.len());
-            unsafe { std::ptr::copy_nonoverlapping(routes.as_ptr(), out, count) };
-        }
-        routes.len()
+    unsafe extern "C" fn sidechain_routes_store(host: *mut c_void) -> *mut c_void {
+        host_opaque(host).routes
     }
-    unsafe extern "C" fn feedback_routes(
-        _: *mut c_void,
-        _: *mut HirariLayoutFeedbackRoute,
-        _: usize,
-    ) -> usize {
-        0
+    unsafe extern "C" fn routing_store(host: *mut c_void) -> *mut c_void {
+        host_opaque(host).routing
     }
     unsafe extern "C" fn sample_rate(_: *mut c_void) -> f64 {
         48_000.0
@@ -948,13 +974,19 @@ mod tests {
             region_count,
             region_at,
             region_string,
-            sidechain_routes,
-            feedback_routes,
+            sidechain_routes_store,
+            routing_store,
             sample_rate,
         }
     }
 
     fn fixture() -> Box<MockHost> {
+        let routes = crate::sidechain_route_store::hirari_sidechain_routes_create();
+        let routing = crate::routing_engine_core::hirari_routing_engine_create();
+        unsafe {
+            crate::sidechain_route_store::hirari_sidechain_routes_set(routes, 1, 2, 3, 1);
+            crate::routing_engine_core::hirari_routing_engine_add_feedback(routing, 1, 2, 0.5);
+        }
         Box::new(MockHost {
             tracks: Mutex::new(vec![MockTrack {
                 scalars: HirariLayoutTrackScalars {
@@ -970,12 +1002,8 @@ mod tests {
                 gui: vec![vec![9], vec![8]],
                 region_path: b"/nonexistent/hirari-region.wav".to_vec(),
             }]),
-            sidechains: vec![HirariLayoutSidechainRoute {
-                source_id: 1,
-                destination_id: 2,
-                plugin_index: 3,
-                tap_point: 1,
-            }],
+            routes,
+            routing,
             gauge: Mutex::new((0, 0)),
         })
     }
@@ -1003,6 +1031,7 @@ mod tests {
         let (snapshot, storage) = unsafe { snapshot_of(&host) };
         assert_eq!(snapshot.track_count, 1);
         assert_eq!(snapshot.sidechain_route_count, 1);
+        assert_eq!(snapshot.feedback_route_count, 1);
         assert_eq!(snapshot.timeline_sample_rate, 48_000.0);
         let track = unsafe { &*snapshot.tracks };
         assert_eq!(track.id, 7);

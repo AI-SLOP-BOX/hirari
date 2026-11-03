@@ -66,5 +66,4 @@
         return true;
     }
     
-    void push_event(const ::Hirari::Core::EngineEvent& e);
     bool pop_event(::Hirari::Core::EngineEvent& e) const;

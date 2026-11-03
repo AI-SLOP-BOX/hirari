@@ -209,30 +209,8 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
                                                              out, capacity)
                          : size_t{0};
         },
-        [](void* host, HirariLayoutSidechainRoute* out, size_t capacity) {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            static_assert(sizeof(HirariLayoutSidechainRoute) == sizeof(HirariSidechainRoute));
-            const size_t count = hirari_sidechain_routes_count(engine->m_sidechainRoutes);
-            if (out && capacity > 0) {
-                (void)hirari_sidechain_routes_copy(
-                    engine->m_sidechainRoutes,
-                    reinterpret_cast<HirariSidechainRoute*>(out), capacity);
-            }
-            return count;
-        },
-        [](void* host, HirariLayoutFeedbackRoute* out, size_t capacity) {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            size_t count = 0;
-            void* raw = hirari_routing_engine_copy_feedback(engine->m_routingEngine, &count);
-            const auto routes = takeRoutingFeedback(raw, count);
-            if (out && capacity > 0) {
-                const size_t written = std::min(capacity, routes.size());
-                for (size_t i = 0; i < written; ++i) {
-                    out[i] = {routes[i].sourceId, routes[i].destId, routes[i].gain};
-                }
-            }
-            return routes.size();
-        },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
         [](void* host) {
             return static_cast<HirariUnifiedEngine*>(host)
                 ->m_sampleRate.load(std::memory_order_relaxed);

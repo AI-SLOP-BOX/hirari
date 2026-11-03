@@ -25,11 +25,6 @@ float HirariUnifiedEngine::get_track_correlation(uint32_t tid) const {
         buffer.getReadPointer(0), buffer.getReadPointer(1), buffer.getNumSamples());
 }
 
-void HirariUnifiedEngine::push_event(const ::Hirari::Core::EngineEvent& e) {
-    (void)hirari_engine_event_ring_push(m_engineRings, e.timestamp, e.type, e.trackId, e.value,
-                                        reinterpret_cast<const uint8_t*>(e.label),
-                                        sizeof(e.label));
-}
 bool HirariUnifiedEngine::pop_event(::Hirari::Core::EngineEvent& e) const {
     return hirari_engine_event_ring_pop(m_engineRings, &e.timestamp, &e.type, &e.trackId, &e.value,
                                         reinterpret_cast<uint8_t*>(e.label), sizeof(e.label));

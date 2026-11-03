@@ -41,11 +41,9 @@ pub type RecordNameUndoFn = unsafe extern "C" fn(
 /// Applies the monitor focus and reports whether the target track exists.
 pub type UpdateMonitorFocusFn =
     unsafe extern "C" fn(*mut c_void, u32, bool, u32, u32) -> bool;
-pub type SetMacroValueFn = unsafe extern "C" fn(*mut c_void, u32, f32);
-/// `cc14` selects the 14-bit controller table; `controller` then carries the
-/// full 0..=16383 value instead of a 7-bit CC number.
-pub type BindMacroFn =
-    unsafe extern "C" fn(*mut c_void, u32, u8, bool, u16, f32, f32, f32, bool) -> bool;
+/// Hands the Rust-owned macro-control or MIDI-learn store handle to this
+/// module; the engine holds them but never decides what a binding means.
+pub type StoreFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -54,8 +52,8 @@ pub struct HirariControlEditHostOps {
     pub apply_track_name: Option<ApplyTrackNameFn>,
     pub record_name_undo: Option<RecordNameUndoFn>,
     pub update_monitor_focus: Option<UpdateMonitorFocusFn>,
-    pub set_macro_value: Option<SetMacroValueFn>,
-    pub bind_macro: Option<BindMacroFn>,
+    pub macro_control_store: Option<StoreFn>,
+    pub midi_learn_store: Option<StoreFn>,
     pub undo_state: Option<UndoStateFn>,
 }
 
@@ -290,8 +288,10 @@ pub unsafe extern "C" fn hirari_control_edit_set_macro_value(
     if !value.is_finite() {
         return;
     }
-    if let Some(set) = host_ops().and_then(|ops| ops.set_macro_value) {
-        unsafe { set(host, macro_index, value) };
+    if let Some(control) = host_ops().and_then(|ops| ops.macro_control_store) {
+        unsafe {
+            crate::macro_mapping::hirari_macro_control_set_value(control(host), macro_index, value)
+        };
     }
 }
 
@@ -309,22 +309,49 @@ fn bind_macro(
     if !valid_macro_binding(macro_index, channel, cc14, controller, minimum, maximum, curve) {
         return false;
     }
-    let Some(bind) = host_ops().and_then(|ops| ops.bind_macro) else {
+    let Some(ops) = host_ops() else {
         return false;
     };
-    unsafe {
-        bind(
-            host,
-            macro_index,
-            channel,
-            cc14,
-            controller,
-            minimum,
-            maximum,
-            curve,
-            pickup,
-        )
+    let (Some(learn), Some(control)) = (ops.midi_learn_store, ops.macro_control_store) else {
+        return false;
+    };
+    // The learn manager stores a pointer to the macro control it drives, so a
+    // binding without that target is rejected exactly as the engine did.
+    let macro_state = unsafe { control(host) };
+    if macro_state.is_null() {
+        return false;
     }
+    let learn_state = unsafe { learn(host) };
+    if cc14 {
+        unsafe {
+            crate::midi_learn::hirari_midi_learn_add_mapping_14bit(
+                learn_state,
+                controller,
+                channel,
+                macro_state,
+                macro_index,
+                minimum,
+                maximum,
+                curve,
+                pickup,
+            )
+        };
+    } else {
+        unsafe {
+            crate::midi_learn::hirari_midi_learn_add_mapping(
+                learn_state,
+                controller as u8,
+                channel,
+                macro_state,
+                macro_index,
+                minimum,
+                maximum,
+                curve,
+                pickup,
+            )
+        };
+    }
+    true
 }
 
 /// Binds a 7-bit MIDI CC to a macro.
