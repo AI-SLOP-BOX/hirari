@@ -5,8 +5,6 @@
     virtual void prepareToPlay(double sr, uint32_t blockSize) {
         if (!std::isfinite(sr) || sr <= 0.0 || blockSize == 0) return;
         m_sampleRate = sr;
-        m_blockSize = blockSize;
-        m_isPrepared = true;
         (void)hirari_region_store_prepare(this, sr, blockSize);
         hirari_channel_strip_set_sample_rate(m_strip, sr);
         hirari_track_holographic_panner_set_sample_rate(m_spatialPanner, sr);
@@ -19,11 +17,11 @@
         m_sendPreFaderBuffer.resize(2, blockSize);
         m_sendPostFaderBuffer.resize(2, blockSize);
         m_preInsertBuffer.resize(2, blockSize);
-        m_effectChain.setSampleRate(sr, blockSize);
+        (void)hirari_effect_chain_set_sample_rate(m_chain, sr, blockSize);
     }
     void resetForOfflineRender() noexcept {
         hirari_channel_strip_reset(m_strip);
-        m_effectChain.reset();
+        hirari_effect_chain_reset(m_chain);
         hirari_track_automation_store_reset_hints(m_automationStore);
         const uint32_t pdc = m_pdcRequested.load(std::memory_order_acquire);
         const uint32_t manual = m_trackDelaySamples.load(std::memory_order_acquire);

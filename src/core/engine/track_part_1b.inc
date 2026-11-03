@@ -21,7 +21,7 @@ public:
         }
     }
     virtual uint32_t getTotalLatencySamples() const noexcept {
-        return m_effectChain.getTotalLatencySamples();
+        return hirari_effect_chain_total_latency_samples(m_chain);
     }
     uint32_t getPdcCompensationSamples() const noexcept {
         return m_pdcRequested.load(std::memory_order_acquire);

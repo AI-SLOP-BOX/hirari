@@ -854,3 +854,76 @@ pub unsafe extern "C" fn hirari_midi_buffer_sort(events: *mut c_void, count: usi
 #[cfg(all(test, feature = "dsp-differential-reference"))]
 #[path = "midi_buffer_ops_differential_tests.rs"]
 mod differential_tests;
+
+/// Typed realtime view over one owned `MidiBufferState`. The effect chain uses
+/// it to stage plugin input and collect plugin output without copying the whole
+/// fixed-capacity event table.
+pub struct MidiView {
+    state: *mut c_void,
+}
+
+impl MidiView {
+    pub fn new(state: *mut c_void) -> Self {
+        Self { state }
+    }
+
+    pub fn handle(&self) -> *mut c_void {
+        self.state
+    }
+
+    pub fn len(&self) -> usize {
+        if self.state.is_null() {
+            return 0;
+        }
+        unsafe { (*self.state.cast::<MidiBufferState>()).count }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// One event as `(sample offset, articulation id, payload)`.
+    pub fn event(&self, index: usize) -> Option<(u64, u8, &[u8])> {
+        if self.state.is_null() {
+            return None;
+        }
+        let state = unsafe { &*self.state.cast::<MidiBufferState>() };
+        let event = state.events.get(index)?;
+        if event.size == 0 || event.size as usize > MIDI_EVENT_BYTES {
+            return None;
+        }
+        Some((
+            event.sample_offset,
+            event.articulation_id,
+            &event.data[..event.size as usize],
+        ))
+    }
+
+    pub fn add(&mut self, sample_offset: u64, data: &[u8], articulation_id: u8) {
+        if self.state.is_null() {
+            return;
+        }
+        unsafe {
+            hirari_midi_buffer_add(
+                self.state,
+                sample_offset,
+                data.as_ptr(),
+                data.len() as u32,
+                articulation_id,
+            )
+        };
+    }
+
+    pub fn clear(&mut self) {
+        if !self.state.is_null() {
+            unsafe { hirari_midi_buffer_clear(self.state) };
+        }
+    }
+
+    pub fn sort(&mut self) {
+        if !self.state.is_null() {
+            unsafe { hirari_midi_buffer_sort_owned(self.state) };
+        }
+    }
+}
+

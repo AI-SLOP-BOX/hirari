@@ -35,10 +35,9 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             if (!out) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            out->blockSize = engine->m_context && engine->m_context->blockSize > 0
-                ? std::min(engine->m_context->blockSize,
-                           ::Hirari::Core::EffectChain::kMaxSidechainBlockSize)
-                : 512u;
+            // Rust's sidechain storage is 4096 frames and rejects longer links,
+            // so the request is clamped before the source buffer is read.
+            out->blockSize = std::min(engine->m_blockSize.load(std::memory_order_relaxed), 4096u);
             out->sampleRate = static_cast<uint32_t>(std::max(
                 1.0, engine->m_sampleRate.load(std::memory_order_acquire)));
             out->generation = std::max<uint64_t>(
@@ -234,8 +233,9 @@ void HirariUnifiedEngine::installPluginEditHost() {
                                 reinterpret_cast<const char*>(path), pathLength))
                           : track->addPlugin(pluginType);
             if (!inserted) return false;
-            if (prepare && engine->m_context) {
-                track->prepareToPlay(engine->m_context->sampleRate, engine->m_context->blockSize);
+            if (prepare) {
+                track->prepareToPlay(engine->m_sampleRate.load(std::memory_order_relaxed),
+                                     engine->m_blockSize.load(std::memory_order_relaxed));
             }
             *outIndex = static_cast<uint32_t>(track->getPluginCount() - 1);
             return true;

@@ -12,14 +12,16 @@ pub struct EffectChainNodeView {
     pub latency_samples: u32,
 }
 
-struct RuntimeNode {
-    processor: usize,
-    bypassed: bool,
-    parallel: bool,
+pub(crate) struct RuntimeNode {
+    /// Address of the Rust-owned chain node kept alive by the chain host until
+    /// every audio reader has drained.
+    pub node: *const c_void,
+    pub bypassed: bool,
+    pub parallel: bool,
 }
 
-struct RuntimeSnapshot {
-    nodes: Box<[RuntimeNode]>,
+pub(crate) struct RuntimeSnapshot {
+    pub nodes: Box<[RuntimeNode]>,
 }
 
 struct RuntimeEffectChain {
@@ -32,19 +34,15 @@ struct RuntimeEffectChain {
 
 pub type EffectChainMetricValue = unsafe extern "C" fn(processor: *mut c_void, metric: u32) -> u64;
 
-struct RuntimeProcessContext {
-    snapshot: *const RuntimeSnapshot,
-    user_data: *mut c_void,
-    process_node: EffectNodeProcessWithHandle,
+/// The snapshot the realtime reader currently traverses. Callers must hold an
+/// audio-reader guard for the whole traversal; the host keeps every node alive
+/// until the reader count reaches zero.
+pub(crate) unsafe fn audio_snapshot(state: *const c_void) -> *const RuntimeSnapshot {
+    let Some(runtime) = (unsafe { state.cast::<RuntimeEffectChain>().as_ref() }) else {
+        return std::ptr::null();
+    };
+    runtime.current.load(Ordering::SeqCst)
 }
-
-pub type EffectNodeProcessWithHandle = unsafe extern "C" fn(
-    user_data: *mut c_void,
-    index: u32,
-    processor: *mut c_void,
-    parallel: bool,
-    mix: *mut f32,
-) -> bool;
 
 #[no_mangle]
 pub extern "C" fn hirari_effect_chain_runtime_create() -> *mut c_void {
@@ -149,7 +147,7 @@ pub unsafe extern "C" fn hirari_effect_chain_runtime_publish(
             return false;
         }
         next_nodes.push(RuntimeNode {
-            processor: view.processor as usize,
+            node: view.processor,
             bypassed: view.bypassed != 0,
             parallel: view.parallel != 0,
         });
@@ -209,11 +207,10 @@ pub unsafe extern "C" fn hirari_effect_chain_runtime_metric(
     for node in unsafe { &(*snapshot).nodes }.iter() {
         match metric {
             0 | 1 => {
-                total = total
-                    .wrapping_add(unsafe { read_value(node.processor as *mut c_void, metric) });
+                total = total.wrapping_add(unsafe { read_value(node.node.cast_mut(), metric) });
             }
             2 if !node.bypassed => {
-                let tail = unsafe { read_value(node.processor as *mut c_void, metric) } as u32;
+                let tail = unsafe { read_value(node.node.cast_mut(), metric) } as u32;
                 if node.parallel {
                     parallel_tail = parallel_tail.max(tail);
                 } else {
@@ -247,111 +244,6 @@ pub unsafe extern "C" fn hirari_effect_chain_runtime_reclaim(state: *const c_voi
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .clear();
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_effect_chain_runtime_processor_at(
-    state: *const c_void,
-    index: u32,
-) -> *mut c_void {
-    let Some(runtime) = (unsafe { state.cast::<RuntimeEffectChain>().as_ref() }) else {
-        return std::ptr::null_mut();
-    };
-    let snapshot = runtime.current.load(Ordering::SeqCst);
-    if snapshot.is_null() {
-        return std::ptr::null_mut();
-    }
-    unsafe { (&(*snapshot).nodes).get(index as usize) }
-        .map_or(std::ptr::null_mut(), |node| node.processor as *mut c_void)
-}
-
-unsafe extern "C" fn runtime_node_info(
-    context: *mut c_void,
-    index: u32,
-    bypassed: *mut bool,
-    parallel: *mut bool,
-) -> bool {
-    if context.is_null() || bypassed.is_null() || parallel.is_null() {
-        return false;
-    }
-    let context = unsafe { &*context.cast::<RuntimeProcessContext>() };
-    let Some(node) = (unsafe { &*context.snapshot }).nodes.get(index as usize) else {
-        return false;
-    };
-    unsafe {
-        bypassed.write(node.bypassed);
-        parallel.write(node.parallel);
-    }
-    true
-}
-
-unsafe extern "C" fn runtime_process_node(
-    context: *mut c_void,
-    index: u32,
-    parallel: bool,
-    mix: *mut f32,
-) -> bool {
-    if context.is_null() || mix.is_null() {
-        return false;
-    }
-    let context = unsafe { &*context.cast::<RuntimeProcessContext>() };
-    let Some(node) = (unsafe { &*context.snapshot }).nodes.get(index as usize) else {
-        return false;
-    };
-    unsafe {
-        (context.process_node)(
-            context.user_data,
-            index,
-            node.processor as *mut c_void,
-            parallel,
-            mix,
-        )
-    }
-}
-
-/// Runs a published Rust snapshot. The host's realtime reader guard must stay
-/// alive for this whole call and must gate snapshot reclamation.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_effect_chain_runtime_process_block(
-    state: *const c_void,
-    user_data: *mut c_void,
-    channels: *const *mut f32,
-    channel_count: u32,
-    parallel_channels: *const *mut f32,
-    parallel_channel_count: u32,
-    parallel_capacity: u32,
-    frames: u32,
-    process_node: Option<EffectNodeProcessWithHandle>,
-) {
-    let Some(runtime) = (unsafe { state.cast::<RuntimeEffectChain>().as_ref() }) else {
-        return;
-    };
-    let (Some(process_node), snapshot) = (process_node, runtime.current.load(Ordering::SeqCst))
-    else {
-        return;
-    };
-    if snapshot.is_null() {
-        return;
-    }
-    let mut context = RuntimeProcessContext {
-        snapshot,
-        user_data,
-        process_node,
-    };
-    unsafe {
-        hirari_effect_chain_process_block(
-            (&mut context as *mut RuntimeProcessContext).cast(),
-            (&(*snapshot).nodes).len() as u32,
-            channels,
-            channel_count,
-            parallel_channels,
-            parallel_channel_count,
-            parallel_capacity,
-            frames,
-            Some(runtime_node_info),
-            Some(runtime_process_node),
-        );
-    }
 }
 
 pub type EffectNodeInfo = unsafe extern "C" fn(

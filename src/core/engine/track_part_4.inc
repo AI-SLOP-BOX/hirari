@@ -20,15 +20,17 @@
     Type m_type;
     // Channel-strip gain/pan/solo state is Rust-owned; this is its handle.
     void* m_strip = hirari_channel_strip_create();
-    Hirari::Core::EffectChain m_effectChain;
+    // Rust owns every insert: node instances, order, sandbox identity and the
+    // built-in-instrument count. The track keeps only the chain handle.
+    void* m_chain = hirari_effect_chain_create();
+    // Last sampled non-finite count, so a polled diagnostic never blocks.
+    mutable std::atomic<uint64_t> m_lastNonFiniteSamples{0};
     MidiBuffer m_pluginMidi;
     void* m_articulationState = nullptr;
     void* m_builtInMidiState = nullptr;
     double m_sampleRate = 44100.0;
     std::atomic<double> m_transportBpm{120.0};
     std::atomic<bool> m_transportPlaying{false};
-    uint32_t m_blockSize = 0;
-    bool m_isPrepared = false;
     std::atomic<float> m_volume{1.0f};
     std::atomic<float> m_pan{0.0f};
     std::atomic<bool> m_muted{false};
@@ -41,13 +43,6 @@
     std::atomic<size_t> m_regionInputCount{0};
     std::atomic<uint8_t> m_regionPublished{0};
     std::atomic<bool> m_audioPitchAnalysisRunning{false};
-    // Updated on the control thread from sandbox-reported plugin metadata;
-    // the callback reads it to choose the built-in MIDI fallback.
-    std::atomic<uint32_t> m_midiInstrumentPluginCount{0};
-    // Rust-owned slot registry: chain index and path per sandboxed plugin.
-    void* m_sandboxSlots = hirari_sandbox_slots_create();
-    std::atomic<uint8_t> m_lastSandboxFailure{0};
-    std::string m_lastSandboxFailureText = "none";
     AudioBuffer m_activeBuffer;
     AudioBuffer m_preFaderBuffer;
     AudioBuffer m_sendPreFaderBuffer;

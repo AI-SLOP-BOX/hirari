@@ -65,22 +65,6 @@
         hirari_master_output_process(
             dest_l, dest_r, clickLeft, clickRight, sz, masterGain, renderMetronome);
 
-        // Build the callback context locally. The control thread may update
-        // the persistent preparation context during device reconfiguration;
-        // the audio callback must never observe a partially updated struct.
-        ::Hirari::DSP::ProcessContext callbackContext{};
-        callbackContext.playhead = currentPlayhead;
-        callbackContext.blockStart = currentPlayhead;
-                callbackContext.blockEnd = currentPlayhead <=
-                    std::numeric_limits<uint64_t>::max() - sz
-                    ? currentPlayhead + sz
-                    : std::numeric_limits<uint64_t>::max();
-        callbackContext.sampleRate = std::max(1.0, m_sampleRate.load(std::memory_order_acquire));
-        callbackContext.bpm = hirari_tempo_map_get_current_bpm(m_tempoState);
-        callbackContext.blockSize = sz;
-        callbackContext.audioConfigGeneration = callbackGeneration;
-        callbackContext.isPlaying = m_isPlaying.load(std::memory_order_acquire);
-        callbackContext.anyoneSoloed = anySolo;
         // The master limiter is part of the rendered signal as well as the
         // live monitor path. Offline bounces now append the configured tail,
         // so its look-ahead history is flushed instead of being truncated at

@@ -127,13 +127,8 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     m_midiPlaybackClock = hirari_midi_playback_clock_create();
     m_engineRings = hirari_engine_rings_create();
     m_masterBuffer.setSize(2, 4096);
-    m_context = std::make_unique<::Hirari::DSP::ProcessContext>();
-    *m_context = ::Hirari::DSP::ProcessContext{};
-    m_context->sampleRate = 44100.0;
-    m_context->blockSize = 512;
-    m_context->bpm = 120.0;
-    m_context->audioConfigGeneration = 1;
-    // Both published buffers start at generation one, matching the context.
+    // Both published buffers start at generation one, matching the
+    // preparation defaults.
     // All PDC graph edits originate from the engine/control owner. Binding
     // this instance prevents an audio callback from accidentally taking the
     // configuration mutex through a mutator.

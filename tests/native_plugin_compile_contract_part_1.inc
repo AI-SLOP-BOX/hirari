@@ -1,49 +1,9 @@
 int main() {
-    // The built-in compressor is part of the production plugin contract, not
-    // merely a header-only type. Exercise prepare/process/parameter/state so
-    // a future refactor cannot leave the browser-visible plugin unlinked.
-    {
-        const std::string compressorPath = "Hirari/Compressor";
-        Hirari::Core::Plugin::ExternalPluginHost compressor(
-            compressorPath, Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);
-        if (!compressor.isOperational()) return 69;
-        compressor.prepareToPlay(48'000.0, 128);
-        compressor.setParameter(0, 0.7f);
-        compressor.setParameter(1, 0.25f);
-        Hirari::Core::AudioBuffer block(2, 128);
-        for (uint32_t i = 0; i < block.getNumSamples(); ++i) {
-            block.getWritePointer(0)[i] = 0.9f;
-            block.getWritePointer(1)[i] = -0.9f;
-        }
-        Hirari::Core::MidiBuffer midi;
-        Hirari::DSP::ProcessContext context{};
-        context.sampleRate = 48'000.0;
-        context.blockSize = 128;
-        compressor.process(block, midi, context);
-        if (block.sanitizeNonFinite() != 0 || compressor.getNumParameters() != 7) return 67;
-        const auto state = compressor.getState();
-        Hirari::Core::Plugin::ExternalPluginHost restored(
-            compressorPath, Hirari::Core::Plugin::ExternalPluginHost::Format::Internal);
-        if (!restored.restoreStateChecked(state) ||
-            restored.getParameter(0) != compressor.getParameter(0)) return 68;
-    }
-    // The Rust-owned sandbox supervisor owns bounded shared-memory staging
-    // arrays sized for the maximum plugin protocol block. Allocate it on the
-    // heap to keep this broad native contract below the platform stack limit.
-    auto sandbox = Hirari::Core::Bridge::Sandbox::new_sandbox_host(
-        "builtin://compile-contract", 44100.0, 512,
-        Hirari::Core::Plugins::SandboxProtocol::kMaxChannels, "auto");
-    Hirari::Core::EffectChain chain;
-    Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode recovery =
-        sandbox->is_alive()
-            ? Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock
-            : Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined;
-    static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::ClearBlock) == 0u);
-    static_assert(static_cast<unsigned>(Hirari::Core::Plugins::ProcessSandboxProcessor::RecoveryMode::Quarantined) == 1u);
-    (void)sandbox;
-    (void)chain;
-    (void)recovery;
-
+    // The built-in compressor and the sandbox supervisor used to be exercised
+    // here through the deleted C++ plugin host. Both are Rust-owned and covered
+    // by compressor_state_round_trips_and_resyncs_the_mirror,
+    // parameters_are_mirrored_and_flushed_at_the_block_boundary and
+    // traversal_runs_the_published_nodes.
 
     // Transactional undo is Rust-owned (hirari-core-bridge/src/undo_transaction.rs).
     // The contract drives the raw FFI so native callbacks and abort rollback

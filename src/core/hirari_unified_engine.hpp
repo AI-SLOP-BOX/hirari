@@ -30,9 +30,6 @@
 #include <unistd.h>
 #endif
 
-// Forward declarations
-namespace Hirari::DSP { struct ProcessContext; }
-
 #include "rust_ffi.hpp"
 #include <thread>
 #include <future>

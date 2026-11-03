@@ -38,13 +38,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
         rust::Str(path.data(), path.size()));
     if (state.valid) {
         const double projectSampleRate = static_cast<double>(state.sampleRate);
-        const uint32_t configuredBlockSize = m_context ? m_context->blockSize : 0u;
-        // A freshly created bridge may not have an audio device configured
-        // yet. Project hydration still needs prepared track buffers so that
-        // routing and sidechain links can be rebound deterministically.
-        const uint32_t currentBlockSize = configuredBlockSize == 0
-            ? 512u
-            : configuredBlockSize;
+        const uint32_t currentBlockSize = m_blockSize.load(std::memory_order_relaxed);
         // Every document-level invariant (track/region ids, references,
         // routing graph, sidechain cycles, plugin-array shape) is enforced by
         // native_project_load, which only returns a valid state when the file
@@ -92,7 +86,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             if (trackType == Track::Type::Bus) {
                 auto busTrack = std::make_shared<BusTrack>(
                     ts.id, trackName.empty() ? "Bus" : trackName, ts.id,
-                    m_sidechainEngine, m_projectLayoutRevision);
+                    m_projectLayoutRevision);
                 // Do not mutate the process/session bus summing system while the
                 // replacement document is still provisional. If hydration
                 // later fails, the old project must remain the only visible
@@ -101,7 +95,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             } else {
                 t = std::make_shared<Track>(ts.id,
                     trackName.empty() ? "Track" : trackName, trackType,
-                    m_sidechainEngine, m_projectLayoutRevision);
+                    m_projectLayoutRevision);
             }
             // Plugin arrays are positional within a serialized track. The
             // codec rejected inconsistent counts before this state was marked

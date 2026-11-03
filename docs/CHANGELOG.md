@@ -74,6 +74,24 @@ production support.
 
 ### Changed
 
+- Rust owns the plugin chain nodes and the realtime traversal. `ChainNode`
+  (`hirari-core-bridge/src/effect_chain_nodes.rs`) replaced the C++ `DSP::IProcessor`
+  vtable and its 16-slot `HirariEffectNodeOps` dispatch table: a node is either a
+  native built-in host or a sandbox, and the traversal calls it directly instead of
+  publishing a function-pointer table for C++ to walk. With the nodes owned in Rust,
+  the C++ facades became unreachable and were deleted -- `src/core/effect_chain.hpp`
+  (413 lines), `src/dsp/iprocessor.hpp`, `src/core/plugin_host.hpp`,
+  `src/core/plugins/process_sandbox_processor.hpp` and
+  `src/core/plugins/plugin_sandbox_protocol.hpp` -- leaving `Track` to hold one
+  `void* m_chain` and call the FFI itself. AUX/BUS tracks now share that inherited
+  chain (the type selects the bus-side DSP variant) instead of keeping a second
+  chain that project serialisation never read. The traversal also dropped the
+  control mutex: the parallel wet/dry scratch is allocated once at chain creation,
+  so `hirari_effect_chain_process` reads its channel table without locking, and
+  `scripts/check_realtime_boundary.sh` now asserts the clean body on the Rust side.
+  Dead per-block staging went with it -- `ProcessContext::sidechainBuffer` was only
+  ever written, never read, and the engine's `callbackContext` was assembled and
+  discarded. C++ 9668 -> 8389 (-1279).
 - The audio-buffer and range-edit native contracts run as Rust tests.
   `tests/audio_buffer_contract.cpp` and `tests/range_edit_contract.cpp` were
   assertion sequences over entry points Rust already owns -- every method of the

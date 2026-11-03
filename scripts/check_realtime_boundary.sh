@@ -6,23 +6,21 @@ set -euo pipefail
 # processBlock must be reviewed explicitly instead of silently entering the RT
 # path through a refactor.
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-chain_file="$root_dir/src/core/effect_chain.hpp"
+chain_host_file="$root_dir/hirari-core-bridge/src/effect_chain_host.rs"
 
 # The unified engine is split across *.inc parts, so search every part rather
 # than a single hardcoded file name. A guard that points at a stale path
-# silently stops guarding anything. The sandbox host is a Rust-owned type; the
-# C++ audio boundary that marshals around it is ProcessSandboxProcessor.
+# silently stops guarding anything.
 shopt -s nullglob
 engine_parts=("$root_dir"/src/core/hirari_unified_engine_part_*.inc)
 shopt -u nullglob
-sandbox_parts=("$root_dir/src/core/plugins/process_sandbox_processor.hpp")
 
 if [ "${#engine_parts[@]}" -eq 0 ]; then
     echo "realtime boundary check error: no unified engine sources found" >&2
     exit 2
 fi
-if [ "${#sandbox_parts[@]}" -eq 0 ]; then
-    echo "realtime boundary check error: no sandbox host sources found" >&2
+if [ ! -f "$chain_host_file" ]; then
+    echo "realtime boundary check error: Rust chain host not found" >&2
     exit 2
 fi
 
@@ -35,6 +33,9 @@ else
     search() { grep -En "$@"; }
     search_quiet() { grep -Eq "$@"; }
 fi
+
+# Patterns that must not appear inside a Rust-owned audio-path function.
+rust_forbidden='eprintln!|println!|print!|dbg!|format!|vec!|to_string\(\)|String::from|\.lock\(\)|std::fs|std::thread::sleep'
 
 # Extract a function body by counting braces. Matching a closing-brace pattern
 # truncates at the first early "}" and silently inspects only a fraction of the
@@ -76,7 +77,6 @@ assert_clean_body() {
 }
 
 forbidden='lock_guard|unique_lock|std::mutex|std::string|std::vector|make_shared|make_unique|new |delete |ifstream|ofstream|filesystem|sleep_for|condition_variable'
-sandbox_forbidden='lock_guard|unique_lock|std::mutex|std::string|std::vector|make_shared|make_unique|new |delete |ifstream|ofstream|filesystem|sleep_for|waitpid|kill\('
 
 callback_body="$(extract_function 'HirariUnifiedEngine::processBlock(' "${engine_parts[@]}")"
 assert_clean_body "$callback_body" "HirariUnifiedEngine::processBlock" "$forbidden"
@@ -88,32 +88,30 @@ if ! printf '%s\n' "$direct_callback_body" | search_quiet 'validInput' ||
     exit 1
 fi
 
-# The reader/mutation barrier now lives in the Rust-owned chain host:
-# EffectChain::process is one call into hirari_effect_chain_process, which
-# admits the callback as a reader, and every control-thread edit goes through a
-# Rust entry point that latches readers out before touching a processor.
-if ! search_quiet 'hirari_effect_chain_process' "$chain_file"; then
-    echo "realtime boundary violation: EffectChain realtime entry does not gate readers" >&2
+# The chain's realtime traversal is Rust-owned. The entry point admits the
+# callback as a reader against the published snapshot, and every control-thread
+# edit goes through a mutation entry that latches readers out first.
+if ! search_quiet 'hirari_effect_chain_runtime_enter_audio' "$chain_host_file"; then
+    echo "realtime boundary violation: chain realtime entry does not gate readers" >&2
     exit 1
 fi
 
-if ! search_quiet 'hirari_effect_chain_set_sample_rate' "$chain_file"; then
+if ! search_quiet 'fn begin_mutation' "$chain_host_file"; then
     echo "realtime boundary violation: control-thread mutation entry is missing" >&2
     exit 1
 fi
 
-# The sandbox process() path is also an audio-thread boundary. It may use
-# atomics and preallocated shared memory, but must not acquire locks, perform
-# filesystem/process control, or allocate while exchanging a block.
-sandbox_body="$(extract_function 'bool processBlock(Core::AudioBuffer& audio, Core::MidiBuffer& midi)' "${sandbox_parts[@]}")"
-assert_clean_body "$sandbox_body" "ProcessSandboxProcessor::processBlock" "$sandbox_forbidden"
+# The traversal body may use atomics and preallocated scratch planes, but a
+# lock, allocation or filesystem call there blocks the audio thread while a
+# control thread edits the graph.
+chain_process_body="$(extract_function 'fn hirari_effect_chain_process(' "$chain_host_file")"
+assert_clean_body "$chain_process_body" "hirari_effect_chain_process (Rust)" "$rust_forbidden"
 
 # The CoreAudio device callback is owned by Rust now, so the C++ guard above
 # cannot see it. Printing, formatting, allocating, or locking there blocks the
 # audio thread exactly like the C++ violations this script exists to catch.
 rust_driver="$root_dir/hirari-core-bridge/src/mac_audio_driver.rs"
 rust_callback_body="$(extract_function 'fn audio_unit_render_callback(' "$rust_driver")"
-rust_forbidden='eprintln!|println!|print!|dbg!|format!|vec!|to_string\(\)|String::from|\.lock\(\)|std::fs|std::thread::sleep'
 assert_clean_body "$rust_callback_body" "audio_unit_render_callback (Rust)" "$rust_forbidden"
 
 echo "realtime boundary checks passed"

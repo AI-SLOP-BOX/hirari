@@ -5,10 +5,8 @@ public:
         std::vector<Hirari::Core::ProjectPluginAutomationLane>;
 
     Track(uint32_t id, const std::string& n, Type t,
-          void* sidechainEngine = nullptr,
           std::shared_ptr<ProjectLayoutRevision> layoutRevision = {})
-        : m_layoutRevision(std::move(layoutRevision)), m_id(id), m_name(n), m_type(t),
-          m_effectChain(sidechainEngine) {
+        : m_layoutRevision(std::move(layoutRevision)), m_id(id), m_name(n), m_type(t) {
         if (t == Type::Midi || t == Type::Instrument) {
             m_builtInMidiState = hirari_builtin_midi_instrument_create();
         }
@@ -23,7 +21,7 @@ public:
         hirari_track_midi_articulation_destroy(m_articulationState);
         hirari_track_pdc_delay_destroy(m_pdcDelayState);
         hirari_track_automation_store_destroy(m_automationStore);
-        hirari_sandbox_slots_destroy(m_sandboxSlots);
+        hirari_effect_chain_destroy(m_chain);
         hirari_channel_strip_destroy(m_strip);
         hirari_track_holographic_panner_destroy(m_spatialPanner);
         hirari_track_frozen_store_destroy(m_frozenStore);
@@ -143,7 +141,7 @@ public:
     // This runs on the audio thread with fixed voice storage and no allocation.
     void renderBuiltInMidiInstrument(AudioBuffer& buffer, uint32_t frames) noexcept {
         if ((m_type != Type::Midi && m_type != Type::Instrument) ||
-            m_midiInstrumentPluginCount.load(std::memory_order_acquire) != 0 ||
+            hirari_effect_chain_midi_instrument_count(m_chain) != 0 ||
             buffer.getNumChannels() < 2 || buffer.getNumSamples() < frames || frames == 0) {
             return;
         }
@@ -179,15 +177,6 @@ public:
         return true;
     }
 
-    // Bus tracks have a second insert chain. Defer the shared channel output
-    // stage so their inserts, EQ, sends, and fader stay in serial order.
-    bool processAccumulatedDeferredOutput(uint32_t sz, uint64_t playhead) {
-        if (sz == 0 || m_activeBuffer.getNumChannels() < 2 ||
-            m_activeBuffer.getNumSamples() < sz) return false;
-        process(m_activeBuffer, sz, playhead, false, true);
-        return true;
-    }
-
     // Transport state is published once per audio block by the engine. The
     // processor context must never fall back to a fictional 120 BPM or claim
     // playback while the transport is stopped.
@@ -216,14 +205,12 @@ private:
         return result;
     }
 
-    void process(AudioBuffer& buffer, uint32_t sz, uint64_t playhead, bool clearInput,
-                 bool deferOutput = false) {
-        constexpr size_t kMaxPluginAutomationEventsPerBlock =
-            Hirari::Core::Plugins::SandboxProtocol::kMaxParameterChanges;
-        static_assert(sizeof(DSP::TimedParameterEvent) == 16);
-        static_assert(offsetof(DSP::TimedParameterEvent, sampleOffset) == 8);
+    void process(AudioBuffer& buffer, uint32_t sz, uint64_t playhead, bool clearInput) {
+        // Per-block plugin automation capacity. The Rust track-process request
+        // fills at most this many events and the chain applies them in order.
+        constexpr size_t kMaxPluginAutomationEventsPerBlock = 4096;
         static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) == 16);
-        std::array<DSP::TimedParameterEvent, kMaxPluginAutomationEventsPerBlock>
+        std::array<HirariTimedParameterEvent, kMaxPluginAutomationEventsPerBlock>
             pluginAutomationEvents{};
         size_t pluginAutomationEventCount = 0;
         const auto* regionInputs = m_regionInputs.load(std::memory_order_acquire);
@@ -274,27 +261,21 @@ private:
 
         // Queue chronological offsets for isolated plugin workers. Preserve
         // the existing native sort policy for equal-key event ordering.
-        m_effectChain.setParameterAutomationRealtime(
-            pluginAutomationEvents.data(), pluginAutomationEventCount);
+        static_assert(sizeof(HirariTimedParameterEvent) == 16);
+        static_assert(offsetof(HirariTimedParameterEvent, sample_offset) == 8);
+        hirari_effect_chain_parameter_automation(
+            m_chain, pluginAutomationEvents.data(), pluginAutomationEventCount);
         if (buffer.getNumChannels() >= 2 && sz > 0) {
-            DSP::ProcessContext context{};
-            context.playhead = playhead;
-            context.blockStart = playhead;
-            context.blockEnd = playhead <= std::numeric_limits<uint64_t>::max() - sz
-                ? playhead + sz
-                : std::numeric_limits<uint64_t>::max();
-            context.sampleRate = m_sampleRate;
-            context.bpm = m_transportBpm.load(std::memory_order_relaxed);
-            context.blockSize = sz;
-            context.isPlaying = m_transportPlaying.load(std::memory_order_relaxed);
-            context.anyoneSoloed = false;
-            context.numOutputChannels = buffer.getNumChannels();
-            m_effectChain.process(buffer, m_pluginMidi, context, m_id);
+            // The Rust traversal reads its own channel table from the buffer's
+            // storage and takes only the transport tempo the nodes consume.
+            hirari_effect_chain_process(m_chain, buffer.storageHandle(),
+                                        m_pluginMidi.stateHandle(),
+                                        m_transportBpm.load(std::memory_order_relaxed));
             // Processors share the mutable MIDI buffer for this one block.
             // Drop it before returning so alternate render paths cannot replay
             // events that were already consumed by the track chain.
             m_pluginMidi.clear();
         }
 
-        if (!deferOutput) finalizeTrackOutput(sz, playhead);
+        finalizeTrackOutput(sz, playhead);
     }

@@ -1,5 +1,6 @@
-    // DSP State (moved to pointer to decouple header)
-    std::unique_ptr<::Hirari::DSP::ProcessContext> m_context;
+    // Atomic so a control-thread device change can never be seen half-applied
+    // by Track preparation.
+    std::atomic<uint32_t> m_blockSize{512};
     // Both DSP objects are Rust-owned; the engine keeps only their handles.
     void* m_meterCore = hirari_master_meter_create(44'100.0);
     void* m_masterLimiter = hirari_master_limiter_create(44'100.0);

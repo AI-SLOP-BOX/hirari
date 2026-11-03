@@ -9,14 +9,10 @@
 #include <memory>
 #include <utility>
 #include <mutex>
-#include <thread>
-#include <chrono>
 #include "../rust_ffi.hpp"
 #include "../audio_buffer.hpp"
+#include "../midi_buffer.hpp"
 #include "../project_automation.hpp"
-#include "../effect_chain.hpp"
-#include "../plugin_host.hpp"
-#include "../plugins/process_sandbox_processor.hpp"
 
 namespace Hirari::Core::Engine {
 

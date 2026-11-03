@@ -48,7 +48,7 @@ void HirariUnifiedEngine::set_playing(bool p) {
 }
 bool HirariUnifiedEngine::is_playing() const { return m_isPlaying.load(); }
 uint32_t HirariUnifiedEngine::get_block_size() const noexcept {
-    return m_context ? m_context->blockSize : 0u;
+    return m_blockSize.load(std::memory_order_relaxed);
 }
 float HirariUnifiedEngine::get_latency_ms() const noexcept {
     uint32_t masterLatency = get_block_size();
@@ -135,10 +135,9 @@ void HirariUnifiedEngine::new_project() {
     // Start with one audio track so a new project is immediately usable for
     // importing or recording, instead of presenting a dead empty canvas.
     auto bootstrapTrack = std::make_shared<Track>(1, "Audio 1", Track::Audio,
-                                                  m_sidechainEngine, m_projectLayoutRevision);
-    if (m_context) {
-        bootstrapTrack->prepareToPlay(m_context->sampleRate, m_context->blockSize);
-    }
+                                                  m_projectLayoutRevision);
+    bootstrapTrack->prepareToPlay(m_sampleRate.load(std::memory_order_relaxed),
+                                  m_blockSize.load(std::memory_order_relaxed));
     Track* bootstrap = bootstrapTrack.get();
     (void)hirari_engine_track_insert(m_trackTable, 0, newTrackHandle(std::move(bootstrapTrack)),
                                        bootstrap);

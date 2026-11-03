@@ -57,7 +57,7 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
                 for (size_t slot = 0; slot < track->sandboxSlotCount(); ++slot) {
                     const auto path = track->sandboxSlotPath(slot);
                     if (!visit(context, track->getId(), static_cast<uint32_t>(slot),
-                               track->sandboxSlotIndex(slot),
+                               track->sandboxSlotChainIndex(slot),
                                reinterpret_cast<const uint8_t*>(path.data()), path.size()))
                         return false;
                 }
@@ -143,27 +143,18 @@ uint32_t HirariUnifiedEngine::get_plugin_parameter_count(uint32_t tid, uint32_t 
     return queryLockedTrack(tid, 0u,
                             [&](const Track& track) { return track.getPluginParameterCount(pluginIndex); });
 }
-bool HirariUnifiedEngine::has_plugin_native_editor(uint32_t tid, uint32_t pluginIndex) const {
-    const auto target = takeTrackHandle(tid);
-    // Plugin/editor calls can enter vendor UI code, so the Track stays alive
-    // while the project topology lock is already released.
-    return target && target->hasPluginNativeEditor(pluginIndex);
+// Native plugin editors require a processor that publishes a vendor UI. The
+// chain's built-in and sandbox nodes never did, so these answers are constant
+// and the whole API is a candidate for removal.
+bool HirariUnifiedEngine::has_plugin_native_editor(uint32_t, uint32_t) const { return false; }
+uint64_t HirariUnifiedEngine::open_plugin_native_editor(uint32_t, uint32_t, uintptr_t) const {
+    return 0;
 }
-uint64_t HirariUnifiedEngine::open_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
-                                                      uintptr_t parent) const {
-    const auto target = takeTrackHandle(tid);
-    return target ? target->openPluginNativeEditor(pluginIndex, parent) : 0;
+bool HirariUnifiedEngine::close_plugin_native_editor(uint32_t, uint32_t, uint64_t) const {
+    return false;
 }
-bool HirariUnifiedEngine::close_plugin_native_editor(uint32_t tid, uint32_t pluginIndex,
-                                                   uint64_t session) const {
-    const auto target = takeTrackHandle(tid);
-    return target && target->closePluginNativeEditor(pluginIndex, session);
-}
-std::string HirariUnifiedEngine::get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
-                                                         uint32_t parameterId) const {
-    return queryLockedTrack(tid, std::string{}, [&](const Track& track) -> std::string {
-        return track.getPluginParameterName(pluginIndex, parameterId);
-    });
+std::string HirariUnifiedEngine::get_plugin_parameter_name(uint32_t, uint32_t, uint32_t) const {
+    return {};
 }
 bool HirariUnifiedEngine::set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) {
     if (!hirari_plugin_edit_set_bypass(this, tid, pluginIndex, bypassed)) return false;

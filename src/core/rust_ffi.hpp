@@ -1393,27 +1393,6 @@ extern "C" void hirari_track_holographic_panner_set_sample_rate(const void* stat
 extern "C" bool hirari_track_holographic_panner_set_kernel(
     const void* state, const float* left, const float* right, uint32_t taps);
 extern "C" void hirari_track_holographic_panner_clear_kernel(const void* state);
-using HirariEffectNodeProcessWithHandle = bool (*)(
-    void*, uint32_t, void*, bool, float*);
-struct HirariEffectNodeOps {
-    void (*prepare)(void*, double, uint32_t);
-    void (*reset)(void*);
-    void (*set_parameter)(void*, uint32_t, float);
-    void (*set_parameter_at_sample)(void*, uint32_t, float, uint32_t);
-    uint32_t (*latency_samples)(void*);
-    size_t (*state_size)(void*);
-    size_t (*state_copy)(void*, uint8_t*, size_t);
-    bool (*state_restore)(void*, const uint8_t*, size_t);
-    size_t (*gui_state_size)(void*);
-    size_t (*gui_state_copy)(void*, uint8_t*, size_t);
-    bool (*gui_state_restore)(void*, const uint8_t*, size_t);
-    uint32_t (*num_parameters)(void*);
-    float (*parameter)(void*, uint32_t);
-    void* (*clone_owner)(void*);
-    void (*destroy_owner)(void*);
-    uint64_t (*read_metric)(void*, uint32_t);
-};
-static_assert(sizeof(HirariEffectNodeOps) == 16 * sizeof(void*));
 struct HirariTimedParameterEvent {
     uint32_t processor_index;
     uint32_t parameter_id;
@@ -1421,31 +1400,42 @@ struct HirariTimedParameterEvent {
     float normalized_value;
 };
 static_assert(sizeof(HirariTimedParameterEvent) == 16);
-extern "C" void* hirari_effect_chain_create(const HirariEffectNodeOps* ops);
+// Rust owns the whole effect chain: node instances, order, bypass/parallel
+// state, sandbox identity, latency and diagnostics. C++ holds only the handle.
+extern "C" void* hirari_effect_chain_create();
 extern "C" void hirari_effect_chain_destroy(void* state);
-extern "C" bool hirari_effect_chain_add(
-    void* state, void* owner, void* processor, bool parallel);
-extern "C" bool hirari_effect_chain_insert(
-    void* state, uint32_t index, void* owner, void* processor,
-    bool bypassed, bool parallel);
-extern "C" void* hirari_effect_chain_remove(
-    void* state, uint32_t index, bool* bypassed, bool* parallel);
+extern "C" bool hirari_effect_chain_add_builtin(
+    void* state, uint32_t plugin_type, bool bus, bool parallel);
+/// Adds an isolated worker and returns false with the failure text available
+/// through `hirari_effect_chain_last_sandbox_failure*` when it cannot start.
+extern "C" bool hirari_effect_chain_add_sandbox(
+    void* state, const uint8_t* path, size_t path_len);
+/// Removes one entry and issues a token addressing the detached node, which the
+/// chain keeps alive until it is restored or the chain is destroyed.
+extern "C" bool hirari_effect_chain_remove(
+    void* state, uint32_t index, bool* bypassed, bool* parallel,
+    uint32_t* kind, uint32_t* token);
+extern "C" bool hirari_effect_chain_restore(
+    void* state, uint32_t index, uint32_t token, bool bypassed, bool parallel);
 extern "C" bool hirari_effect_chain_move(void* state, uint32_t from, uint32_t to);
 extern "C" uint32_t hirari_effect_chain_count(const void* state);
 // Plugin identity travels with the chain entry so ordering, removal and
 // restoration cannot desynchronise the type table from the processors.
 extern "C" uint32_t hirari_effect_chain_node_kind(const void* state, uint32_t index);
-extern "C" bool hirari_effect_chain_set_node_kind(
-    const void* state, uint32_t index, uint32_t kind);
-extern "C" void hirari_effect_chain_clear(void* state);
+/// Note-generating instrument count, read by the built-in-voice gate.
+extern "C" uint32_t hirari_effect_chain_midi_instrument_count(const void* state);
+extern "C" uint8_t hirari_effect_chain_last_sandbox_failure(const void* state);
+extern "C" const char* hirari_effect_chain_last_sandbox_failure_text(const void* state);
 extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
-extern "C" void* hirari_effect_chain_owner_clone(const void* state, uint32_t index);
 extern "C" bool hirari_effect_chain_set_bypass(void* state, uint32_t index, bool bypassed);
 extern "C" bool hirari_effect_chain_set_sample_rate(
     void* state, double sample_rate, uint32_t block_size);
 extern "C" void hirari_effect_chain_reset(void* state);
 extern "C" bool hirari_effect_chain_set_parameter(
     void* state, uint32_t index, uint32_t parameter_id, float value);
+extern "C" float hirari_effect_chain_parameter(
+    const void* state, uint32_t index, uint32_t parameter_id);
+extern "C" uint32_t hirari_effect_chain_parameter_count(const void* state, uint32_t index);
 extern "C" void hirari_effect_chain_parameter_automation(
     void* state, const HirariTimedParameterEvent* events, size_t event_count);
 extern "C" uint8_t* hirari_effect_chain_processor_state(
@@ -1462,12 +1452,41 @@ extern "C" uint64_t hirari_effect_chain_metric(const void* state, uint32_t metri
 extern "C" bool hirari_effect_chain_metric_try(
     const void* state, uint32_t metric, uint64_t* out_value);
 extern "C" void hirari_effect_chain_reclaim(void* state);
+/// Runs the published node list over one block. The channel table and frame
+/// count come from the caller's own audio-buffer storage handle.
 extern "C" void hirari_effect_chain_process(
-    void* state, void* user_data,
-    float* const* channels, uint32_t channel_count,
-    float* const* parallel_channels, uint32_t parallel_channel_count,
-    uint32_t parallel_capacity, uint32_t frames,
-    HirariEffectNodeProcessWithHandle process_node);
+    void* state, void* audio_storage, void* midi_state, double bpm);
+struct HirariEffectChainSandboxStatus {
+    uint32_t plugin_index;
+    uint8_t alive;
+    uint8_t can_retry;
+    uint8_t failure;
+    uint8_t recovery_mode;
+    uint32_t dropped_output_midi;
+    uint32_t mailbox_overruns;
+    uint32_t input_midi_truncations;
+};
+static_assert(sizeof(HirariEffectChainSandboxStatus) == 20,
+    "sandbox status must match Rust's repr(C) layout");
+extern "C" size_t hirari_effect_chain_sandbox_slot_count(const void* state);
+extern "C" uint32_t hirari_effect_chain_sandbox_slot_index(const void* state, size_t slot);
+/// Copies one slot's plugin path; returns the bytes written, or 0 when it does
+/// not fit in `capacity`.
+extern "C" size_t hirari_effect_chain_sandbox_slot_path(
+    const void* state, size_t slot, uint8_t* out, size_t capacity);
+extern "C" bool hirari_effect_chain_sandbox_status(
+    const void* state, size_t slot, HirariEffectChainSandboxStatus* out);
+extern "C" bool hirari_effect_chain_sandbox_restart(
+    void* state, size_t slot, bool force, bool record_success);
+extern "C" uint32_t hirari_effect_chain_sandbox_maintain(void* state, bool auto_restart);
+extern "C" uint8_t hirari_effect_chain_sandbox_state_error(const void* state, size_t slot);
+extern "C" const char* hirari_effect_chain_sandbox_state_error_text(
+    const void* state, size_t slot);
+extern "C" bool hirari_effect_chain_process_sandbox_block(
+    void* state, size_t slot, float* left, float* right, uint32_t frames);
+extern "C" uint8_t* hirari_effect_chain_process_sandbox_midi_block(
+    void* state, size_t slot, uint32_t frames, const uint8_t* midi_data,
+    size_t midi_size, size_t* out_len);
 struct HirariPluginAutomationLaneView {
     uint32_t processor_index;
     uint32_t parameter_id;
@@ -1620,24 +1639,6 @@ extern "C" void hirari_expression_map_edit_host_install(
     const HirariExpressionMapEditHostOps* ops);
 extern "C" uint8_t hirari_plugin_admission_error(const char* path);
 extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bus);
-// Rust-owned sandboxed-plugin slot registry: chain index and plugin path are
-// stored together so removal/reordering keeps them aligned.
-extern "C" void* hirari_sandbox_slots_create();
-extern "C" void hirari_sandbox_slots_destroy(void* store);
-extern "C" size_t hirari_sandbox_slots_len(const void* store);
-extern "C" uint32_t hirari_sandbox_slots_index(const void* store, size_t slot);
-extern "C" size_t hirari_sandbox_slots_find(const void* store, uint32_t plugin_index);
-extern "C" size_t hirari_sandbox_slots_path_size(const void* store, size_t slot);
-extern "C" size_t hirari_sandbox_slots_path_copy(const void* store, size_t slot, uint8_t* out,
-                                                 size_t capacity);
-extern "C" bool hirari_sandbox_slots_contains_path(const void* store, const uint8_t* path,
-                                                   size_t length);
-extern "C" bool hirari_sandbox_slots_push(void* store, uint32_t plugin_index,
-                                          const uint8_t* path, size_t length);
-extern "C" size_t hirari_sandbox_slots_remove(void* store, uint32_t plugin_index);
-extern "C" bool hirari_sandbox_slots_insert(void* store, uint32_t plugin_index,
-                                            const uint8_t* path, size_t length);
-extern "C" void hirari_sandbox_slots_move(void* store, uint32_t from, uint32_t to);
 extern "C" const char* hirari_plugin_sandbox_failure_name(uint8_t code), *hirari_plugin_sandbox_state_error_name(uint8_t code);
 // Built-in effect parameter names; kind matches the Rust-builtin effect table.
 extern "C" uint32_t hirari_plugin_sandbox_block_outcome(

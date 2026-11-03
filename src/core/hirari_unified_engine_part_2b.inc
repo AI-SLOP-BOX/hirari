@@ -55,9 +55,7 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         m_audioConfigGeneration.fetch_add(1, std::memory_order_acq_rel);
         m_masterBuffer.setSize(2, bs);
         m_blockMidi.clear();
-        m_context->sampleRate = sr;
-        m_context->blockSize = bs;
-        m_context->audioConfigGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
+        m_blockSize.store(bs, std::memory_order_relaxed);
 
         hirari_master_limiter_prepare(m_masterLimiter, sr);
         hirari_master_meter_prepare(m_meterCore, sr);
@@ -162,8 +160,8 @@ std::shared_ptr<Track> HirariUnifiedEngine::detachTrackLocked(uint32_t tid, bool
 std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::string& name,
                                                      Track::Type type) {
     if (type != Track::Type::Bus)
-        return std::make_shared<Track>(id, name, type, m_sidechainEngine, m_projectLayoutRevision);
-    auto bus = std::make_shared<BusTrack>(id, name, id, m_sidechainEngine, m_projectLayoutRevision);
+        return std::make_shared<Track>(id, name, type, m_projectLayoutRevision);
+    auto bus = std::make_shared<BusTrack>(id, name, id, m_projectLayoutRevision);
     bus->resolveBus(hirari_bus_system_register(m_busSystem, id)
         ? hirari_bus_system_bus(m_busSystem, id) : nullptr);
     return bus;
@@ -204,8 +202,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
             const std::string trackName(reinterpret_cast<const char*>(name), nameLength);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
             auto created = engine->makeTrack(id, trackName, static_cast<Track::Type>(type));
-            if (engine->m_context)
-                created->prepareToPlay(engine->m_context->sampleRate, engine->m_context->blockSize);
+            created->prepareToPlay(engine->m_sampleRate.load(std::memory_order_relaxed),
+                                   engine->m_blockSize.load(std::memory_order_relaxed));
             Track* raw = created.get();
             const size_t appendIndex = engine->lockedTracks().size();
             (void)hirari_engine_track_insert(engine->m_trackTable, appendIndex,

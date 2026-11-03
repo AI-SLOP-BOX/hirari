@@ -117,6 +117,9 @@ public:
         return static_cast<MidiEvent*>(hirari_midi_buffer_event_data(m_state));
     }
     size_t size() const { return hirari_midi_buffer_event_count(m_state); }
+    // The chain host walks this same Rust-owned event table in place, so the
+    // realtime path hands over the handle instead of copying events.
+    void* stateHandle() const noexcept { return m_state; }
     const MidiEvent* begin() const { return getEvents(); }
     const MidiEvent* end() const { return getEvents() + size(); }
 

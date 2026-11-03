@@ -10,7 +10,7 @@ Advanced audio engineering rules for the Hirari DAW.
 
 ## 🥩 "Meat" Engineering (Professional Effects)
 - **Fades & Envelopes**: Use Bezier/S-Curves for musical transitions. Fades must be sample-accurate.
-- **Sidechaining**: Implement the `IProcessor` interface and use `processWithSidechain` for ducking/dynamic EQ.
+- **Sidechaining**: Links and route storage are Rust-owned (`sidechain_manager.rs`, `sidechain_route_store.rs`). No processor consumes a tap yet; one must read the link the engine registers for its slot, not a C++ processor virtual.
 - **Look-ahead Logic**: Use `DelayLine` for mastering processors (Limiters, De-essers) to catch transients before the gain envelope moves.
 
 ## 🛡️ DSP Safety
