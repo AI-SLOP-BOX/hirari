@@ -67,6 +67,17 @@ production support.
 
 ### Changed
 
+- The duplicate C++ plugin SDK is gone. `src/core/HirariPluginSDK.hpp` was a
+  second descriptor/automation implementation that no engine, plugin, host or
+  build included — only the native compile contract instantiated it. Its
+  guarantees are already Rust-owned and Rust-tested: parameter bounds and
+  unique ids in `plugin_parameters.rs`, component/channel and sidechain rules
+  in `project_contracts_validation.rs`, the `id@version:state-N:gui-M` state
+  identity in `plugin_catalog.rs`, and clamped linear interpolation in
+  `realtime_automation.rs`. The contract's SDK block, the contract scaffolding,
+  and the orphaned `sdk/` README and example that documented a header which
+  never existed in this repository are removed with it.
+
 - VST3 hosting is removed. The official-SDK sandbox adapter and the worker's
   real VST3 load/process/state path are deleted; the worker now exports
   fail-closed stubs, so a `.vst3` bundle is still inventoried and reported but
