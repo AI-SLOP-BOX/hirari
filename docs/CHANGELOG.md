@@ -67,6 +67,15 @@ production support.
 
 ### Changed
 
+- Importing media is decided in Rust. The engine no longer adapts a decode into
+  an audio buffer: the import-cache verdict, the frame and channel validation,
+  the planar build and the weak cache offer live in
+  `hirari-core-bridge/src/audio_import_cache.rs` next to the cache it already
+  owned, and the buffer it produces is Rust storage that `AudioBuffer` only
+  views. The host keeps the four handle-lifetime helpers that move a native
+  `AudioBuffer` shared/weak reference across the boundary, and the
+  `decodeAudio` callback the region host table used to answer is gone along
+  with the C++ prototypes no translation unit calls.
 - Project-load region hydration is driven from Rust. Opening a document no
   longer walks the decoded region table in the engine: media decoding, the
   pre-v28 region-id handout, the clamp to the frames that actually exist, the

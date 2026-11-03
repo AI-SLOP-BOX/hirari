@@ -123,19 +123,11 @@ fn region_path(
     Some(bytes)
 }
 
-fn decode(
-    ops: &HirariRegionHostOps,
-    host: *mut c_void,
-    path: &[u8],
-) -> Option<(RetainedAudio, f64)> {
-    let decode = ops.decode_audio?;
-    let mut handle = ptr::null_mut();
-    let mut sample_rate = 0.0;
-    if !unsafe { decode(host, path.as_ptr(), path.len(), &mut handle, &mut sample_rate) }
-        || handle.is_null()
-    {
-        return None;
-    }
+fn decode(ops: &HirariRegionHostOps, path: &[u8]) -> Option<(RetainedAudio, f64)> {
+    // The import cache owns decoding and the planar build; this only wraps the
+    // owned handle so the region can read it through the host callbacks.
+    let (handle, sample_rate, _channels, _frames) =
+        crate::audio_import_cache::import_audio_file(path)?;
     Some((
         RetainedAudio {
             ops: *ops,
@@ -152,7 +144,7 @@ fn opened_region(
     region_id: u32,
 ) -> Option<(RetainedAudio, f64)> {
     let path = region_path(ops, host, track_id, region_id)?;
-    decode(ops, host, &path)
+    decode(ops, &path)
 }
 
 fn channel_slices(pointers: &[*const f32], samples: u64) -> Vec<&[f32]> {
@@ -484,23 +476,6 @@ mod tests {
         path.len()
     }
 
-    unsafe extern "C" fn fake_decode(
-        host: *mut c_void,
-        _path: *const u8,
-        _length: usize,
-        out: *mut *mut c_void,
-        sample_rate: *mut f64,
-    ) -> bool {
-        let host = unsafe { &*host.cast::<FakeHost>() };
-        host.decodes.fetch_add(1, Ordering::AcqRel);
-        let channels = host.audio.clone();
-        unsafe {
-            *out = Box::into_raw(Box::new(channels)).cast();
-            *sample_rate = host.sample_rate;
-        }
-        true
-    }
-
     unsafe extern "C" fn fake_view(
         handle: *mut c_void,
         out: *mut *const f32,
@@ -523,10 +498,66 @@ mod tests {
         drop(unsafe { Box::from_raw(handle.cast::<Vec<Vec<f32>>>()) });
     }
 
+    // The import callbacks are keyed by media path, not by host, so the
+    // fixture publishes the host the current thread should read.
+    thread_local! {
+        static CURRENT_HOST: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    fn fake_import_acquire(
+        _path: *const u8,
+        _length: usize,
+        rate: *mut f64,
+        handle: *mut *mut c_void,
+    ) -> i32 {
+        let host = CURRENT_HOST.with(|entry| entry.get());
+        let host = unsafe { &*(host as *const FakeHost) };
+        host.decodes.fetch_add(1, Ordering::AcqRel);
+        let channels = host.audio.clone();
+        unsafe {
+            *rate = host.sample_rate;
+            *handle = Box::into_raw(Box::new(channels)).cast();
+        }
+        crate::audio_import_cache::HIRARI_IMPORT_CACHE_HIT
+    }
+
+    fn fake_import_decode(
+        _path: *const u8,
+        _length: usize,
+    ) -> crate::preview_audio_runtime::NativeDecodedAudio {
+        crate::preview_audio_runtime::NativeDecodedAudio {
+            samples: ptr::null_mut(),
+            sample_count: 0,
+            channels: 0,
+            sample_rate: 0.0,
+            bits_per_sample: 0,
+            status: 3,
+        }
+    }
+
+    /// Every import the region audio path makes is served as a cache hit from
+    /// the host fixture; the planar data is still owned by Rust.
+    fn fake_import() -> crate::audio_import_cache::ImportOps {
+        crate::audio_import_cache::ImportOps {
+            acquire: fake_import_acquire,
+            store: |_, _, _, _| true,
+            create: |_| ptr::null_mut(),
+            storage: |handle| handle,
+            channels: |handle| unsafe { &*handle.cast::<Vec<Vec<f32>>>() }.len() as u32,
+            frames: |handle| {
+                unsafe { &*handle.cast::<Vec<Vec<f32>>>() }
+                    .first()
+                    .map_or(0, |channel| channel.len() as u64)
+            },
+            weak: |_| ptr::null_mut(),
+            release: |_| {},
+            decode: fake_import_decode,
+        }
+    }
+
     fn fake_ops() -> HirariRegionHostOps {
         HirariRegionHostOps {
             region_path: Some(fake_region_path),
-            decode_audio: Some(fake_decode),
             audio_view: Some(fake_view),
             release_audio: Some(fake_release),
             ..Default::default()
@@ -536,12 +567,15 @@ mod tests {
     // The peak cache is keyed by host address; leak the fixture so a later
     // test cannot allocate a host at the same address and inherit its entries.
     fn fake_host(audio: Vec<Vec<f32>>, sample_rate: f64) -> *mut c_void {
-        Box::into_raw(Box::new(FakeHost {
+        let host = Box::into_raw(Box::new(FakeHost {
             audio,
             sample_rate,
             decodes: AtomicUsize::new(0),
         }))
-        .cast()
+        .cast();
+        CURRENT_HOST.with(|entry| entry.set(host as usize));
+        crate::audio_import_cache::set_import_ops(Some(fake_import()));
+        host
     }
 
     fn decode_count(host: *mut c_void) -> usize {

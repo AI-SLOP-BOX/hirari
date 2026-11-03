@@ -31,10 +31,6 @@
     void* m_midiLearnState = hirari_midi_learn_create();
     // Rust (forensic_journaler.rs) owns the journal and writer thread.
     void* m_forensicJournal = hirari_forensic_journaler_create();
-    // Decoding and import-cache policy live in Rust; this only adapts the
-    // interleaved decode result into the engine's AudioBuffer ownership.
-    std::shared_ptr<AudioBuffer> importAudioFile(const std::string& path,
-                                                 double* sampleRateOut = nullptr);
 
     // Engine Infrastructure
 
@@ -67,8 +63,6 @@ public:
     static void* regionHostTempoState(void* host);
     static void* regionHostUndoState(void* host);
     static double regionHostSampleRate(void* host);
-    static bool regionHostDecodeAudio(void* host, const uint8_t* path, size_t length,
-                                      void** outHandle, double* outRate);
     static size_t regionHostTrackIdentity(void* host, uint32_t trackId);
     static void* regionHostRetainTrack(void* host, uint32_t trackId);
     static void regionHostReleaseTrack(void* handle);

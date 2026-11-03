@@ -272,17 +272,6 @@ pub type HirariRegionSampleRateFn = unsafe extern "C" fn(*mut c_void) -> f64;
 /// null or short buffer reports the length without writing.
 pub type HirariRegionPathFn =
     unsafe extern "C" fn(*mut c_void, u32, u32, *mut u8, usize) -> usize;
-/// Decodes a media file through the native decoder and returns an owned audio
-/// handle plus the source sample rate captured during the import. The handle
-/// is read through `HirariRegionAudioViewFn` and freed by
-/// `HirariRegionReleaseAudioFn`.
-pub type HirariRegionDecodeAudioFn = unsafe extern "C" fn(
-    *mut c_void,
-    *const u8,
-    usize,
-    *mut *mut c_void,
-    *mut f64,
-) -> bool;
 /// Inserts a freshly decoded region under the id the caller allocated. The
 /// audio handle is consumed on every path. Returns the new region id, or 0 on
 /// failure.
@@ -349,7 +338,6 @@ pub struct HirariRegionHostOps {
     pub undo_state: Option<HirariRegionUndoStateFn>,
     pub sample_rate: Option<HirariRegionSampleRateFn>,
     pub region_path: Option<HirariRegionPathFn>,
-    pub decode_audio: Option<HirariRegionDecodeAudioFn>,
     pub insert_region: Option<HirariRegionInsertFn>,
     pub track_identity: Option<HirariRegionTrackIdentityFn>,
     pub retain_track: Option<HirariRegionRetainTrackFn>,
@@ -1790,10 +1778,9 @@ fn replace_audio_with(
     if path.is_empty() {
         return false;
     }
-    let (Some(find), Some(apply), Some(decode), Some(snapshot)) = (
+    let (Some(find), Some(apply), Some(snapshot)) = (
         ops.find_region,
         ops.apply_edit,
-        ops.decode_audio,
         ops.snapshot_region,
     ) else {
         return false;
@@ -1803,13 +1790,11 @@ fn replace_audio_with(
     };
     // Decode before the lookup, as the native setter did, so an unreadable
     // file fails the same way whether or not the region exists.
-    let mut handle = ptr::null_mut();
-    let mut source_sample_rate = 0.0;
-    if !unsafe { decode(host, path.as_ptr(), path.len(), &mut handle, &mut source_sample_rate) }
-        || handle.is_null()
-    {
+    let Some((handle, source_sample_rate, _, decoded_samples)) =
+        crate::audio_import_cache::import_audio_file(path)
+    else {
         return false;
-    }
+    };
     let audio = DecodedAudio { ops: *ops, handle };
     let mut state = HirariRegionState::default();
     if !unsafe { find(host, track_id, region_id, &mut state) } {
@@ -1828,15 +1813,6 @@ fn replace_audio_with(
             unsafe { release(host, handle) };
         }
     };
-    let Some(audio_view) = ops.audio_view else {
-        return false;
-    };
-    let mut decoded_samples = 0u64;
-    if unsafe { audio_view(handle, ptr::null_mut(), 0, &mut decoded_samples) } == 0
-        || decoded_samples == 0
-    {
-        return false;
-    }
     // The decoded length and the source/timeline mapping give the replacement
     // its timeline geometry, so the native setter only stores what is resolved
     // here. Rates are installed first: the mapping is derived from them.
@@ -3424,34 +3400,50 @@ use crate::audio_note_curve::{
     static FAKE_AUDIO_SAMPLES: std::sync::atomic::AtomicU64 =
         std::sync::atomic::AtomicU64::new(48_000);
 
-    unsafe extern "C" fn fake_audio_view(
-        _handle: *mut c_void,
-        _out: *mut *const f32,
-        _capacity: usize,
-        samples: *mut u64,
-    ) -> u32 {
-        if !samples.is_null() {
-            let count = FAKE_AUDIO_SAMPLES.load(std::sync::atomic::Ordering::SeqCst);
-            unsafe { samples.write(count) };
-        }
-        1
-    }
-
-    unsafe extern "C" fn fake_decode_audio(
-        _host: *mut c_void,
+    fn fake_acquire(
         _path: *const u8,
         _length: usize,
-        out: *mut *mut c_void,
-        sample_rate: *mut f64,
-    ) -> bool {
+        rate: *mut f64,
+        handle: *mut *mut c_void,
+    ) -> i32 {
         if FAIL_DECODE.load(std::sync::atomic::Ordering::SeqCst) {
-            return false;
+            return crate::audio_import_cache::HIRARI_IMPORT_NEEDS_DECODE;
         }
         unsafe {
-            out.write(&FAKE_AUDIO as *const u8 as *mut c_void);
-            sample_rate.write(44_100.0);
+            handle.write(&FAKE_AUDIO as *const u8 as *mut c_void);
+            rate.write(44_100.0);
         }
-        true
+        crate::audio_import_cache::HIRARI_IMPORT_CACHE_HIT
+    }
+
+    fn fake_import_decode(
+        _path: *const u8,
+        _length: usize,
+    ) -> crate::preview_audio_runtime::NativeDecodedAudio {
+        crate::preview_audio_runtime::NativeDecodedAudio {
+            samples: ptr::null_mut(),
+            sample_count: 0,
+            channels: 0,
+            sample_rate: 0.0,
+            bits_per_sample: 0,
+            status: 3,
+        }
+    }
+
+    /// The import seam the replace-audio path reads: a cached hit hands back
+    /// the marker handle, and a decode always reports an unusable file.
+    fn fake_import_ops() -> crate::audio_import_cache::ImportOps {
+        crate::audio_import_cache::ImportOps {
+            acquire: fake_acquire,
+            store: |_, _, _, _| true,
+            create: |_| ptr::null_mut(),
+            storage: |handle| handle,
+            channels: |_| 1,
+            frames: |_| FAKE_AUDIO_SAMPLES.load(std::sync::atomic::Ordering::SeqCst),
+            weak: |_| ptr::null_mut(),
+            release: |_| {},
+            decode: fake_import_decode,
+        }
     }
 
     unsafe extern "C" fn fake_release_audio(_handle: *mut c_void) {
@@ -3474,8 +3466,6 @@ use crate::audio_note_curve::{
             warp_markers: Some(fake_markers),
             range_edits: Some(fake_range_edits),
             sample_rate: Some(fake_sample_rate),
-            decode_audio: Some(fake_decode_audio),
-            audio_view: Some(fake_audio_view),
             release_audio: Some(fake_release_audio),
             clone_region: Some(fake_clone),
             comp_ranges: Some(fake_comp_ranges),
@@ -4325,6 +4315,7 @@ use crate::audio_note_curve::{
     fn replace_audio_decodes_and_records_the_snapshot_pair() {
         let _guard = TEST_LOCK.lock().unwrap();
         let ops = fake_ops();
+        crate::audio_import_cache::set_import_ops(Some(fake_import_ops()));
         let host = 1usize as *mut c_void;
         reset(HirariRegionState {
             len: 100,
@@ -4364,12 +4355,14 @@ use crate::audio_note_curve::{
         drop(guard);
         // The handle moved into the payload, so it is not released here.
         assert_eq!(RELEASED_AUDIO.load(std::sync::atomic::Ordering::SeqCst), 0);
+        crate::audio_import_cache::set_import_ops(None);
     }
 
     #[test]
     fn replace_audio_rejects_bad_paths_files_regions_and_rates() {
         let _guard = TEST_LOCK.lock().unwrap();
         let ops = fake_ops();
+        crate::audio_import_cache::set_import_ops(Some(fake_import_ops()));
         let host = 1usize as *mut c_void;
         reset(HirariRegionState {
             len: 100,
@@ -4395,6 +4388,7 @@ use crate::audio_note_curve::{
         assert_eq!(RELEASED_AUDIO.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(fake().lock().unwrap().applied.is_empty());
         FAKE_RATE_BITS.store(48_000f64.to_bits(), std::sync::atomic::Ordering::SeqCst);
+        crate::audio_import_cache::set_import_ops(None);
     }
 
     fn splittable_state() -> HirariRegionState {

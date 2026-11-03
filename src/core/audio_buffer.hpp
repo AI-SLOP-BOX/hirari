@@ -139,6 +139,10 @@ public:
         return hirari_audio_buffer_storage_array_write(m_storage);
     }
 
+    /// The Rust-owned storage this adapter views. Import builds a buffer from
+    /// Rust, so the handle is published rather than copied through the FFI.
+    void* storageHandle() const noexcept { return m_storage; }
+
 private:
     void* m_storage = nullptr;
 };

@@ -1,15 +1,17 @@
 #include "bridge_shims.hpp"
+#include "audio_buffer.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
 #include <cstring>
 
 using HirariAudioWeakHandle = std::weak_ptr<::Hirari::Core::AudioBuffer>;
+using HirariAudioStrongHandle = std::shared_ptr<::Hirari::Core::AudioBuffer>;
 
 // Import-cache weak handles. Rust stores the opaque pointer and asks for a
 // strong lock, liveness, or release; the buffer never crosses the FFI.
 extern "C" void* hirari_audio_import_weak_lock(void* weak_audio) {
     auto* weak = static_cast<HirariAudioWeakHandle*>(weak_audio);
     auto locked = weak ? weak->lock() : nullptr;
-    return locked ? new std::shared_ptr<::Hirari::Core::AudioBuffer>(std::move(locked)) : nullptr;
+    return locked ? new HirariAudioStrongHandle(std::move(locked)) : nullptr;
 }
 extern "C" bool hirari_audio_import_weak_alive(void* weak_audio) {
     auto* weak = static_cast<HirariAudioWeakHandle*>(weak_audio);
@@ -17,6 +19,26 @@ extern "C" bool hirari_audio_import_weak_alive(void* weak_audio) {
 }
 extern "C" void hirari_audio_import_weak_release(void* weak_audio) {
     delete static_cast<HirariAudioWeakHandle*>(weak_audio);
+}
+
+// Import buffers are built by Rust: the native type is a view over the
+// Rust-owned storage, so these helpers only move the handle's lifetime across
+// the boundary. `out_storage` receives the storage Rust resizes and fills.
+extern "C" void* hirari_audio_import_buffer_create(void** out_storage) {
+    auto audio = std::make_shared<::Hirari::Core::AudioBuffer>();
+    if (out_storage) *out_storage = audio->storageHandle();
+    return new HirariAudioStrongHandle(std::move(audio));
+}
+extern "C" void* hirari_audio_import_buffer_storage(void* strong_audio) {
+    auto* audio = static_cast<HirariAudioStrongHandle*>(strong_audio);
+    return audio && *audio ? (*audio)->storageHandle() : nullptr;
+}
+extern "C" void* hirari_audio_import_buffer_weak(void* strong_audio) {
+    auto* audio = static_cast<HirariAudioStrongHandle*>(strong_audio);
+    return audio && *audio ? new HirariAudioWeakHandle(*audio) : nullptr;
+}
+extern "C" void hirari_audio_import_buffer_release(void* strong_audio) {
+    delete static_cast<HirariAudioStrongHandle*>(strong_audio);
 }
 
 namespace Hirari::Core::Bridge {

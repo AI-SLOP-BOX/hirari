@@ -594,7 +594,6 @@ pub mod ffi {
         fn native_project_hydrate_regions(
             state: &mut NativeProjectState,
             tracks: &Vec<NativeTrackHandle>,
-            host: usize,
             project_sample_rate: f64,
         ) -> bool;
 

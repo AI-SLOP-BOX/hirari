@@ -422,19 +422,17 @@ pub fn hirari_region_note_store_load_native(
 /// (warp markers, range edits, processing history, note segments) into a draft
 /// through the flat ABI. Every one of those decisions is document policy over
 /// Rust-owned storage, so the walk lives here and the engine supplies only the
-/// provisional track handles plus the host callbacks that decode and free
-/// audio. Returns false when a region cannot be installed, which the caller
-/// treats as a hydration failure that must leave the previous project published.
+/// provisional track handles. Returns false when a region cannot be installed,
+/// which the caller treats as a hydration failure that must leave the previous
+/// project published.
 pub fn native_project_hydrate_regions(
     state: &mut NativeProjectState,
     tracks: &Vec<NativeTrackHandle>,
-    host: usize,
     project_sample_rate: f64,
 ) -> bool {
     let Some(ops) = crate::region_edit_host::host_ops() else {
         return false;
     };
-    let host = host as *mut std::ffi::c_void;
     let mut next_region_id = 1u32;
     for index in 0..state.regions.len() {
         let Some(track) = tracks
@@ -462,30 +460,11 @@ pub fn native_project_hydrate_regions(
         };
         // An empty or unreadable media path is a terminal decode rejection, so
         // the region stays visible as an unloaded region for Relink.
-        let mut audio = ptr::null_mut();
-        let mut source_rate = 0.0f64;
-        let mut decoded_samples = 0u64;
-        let decoded = ops.decode_audio.is_some_and(|decode| unsafe {
-            decode(
-                host,
-                path.as_ptr(),
-                path.len(),
-                &mut audio,
-                &mut source_rate,
-            )
-        });
-        if !decoded || audio.is_null() {
-            audio = ptr::null_mut();
-            decoded_samples = 0;
-        } else if let Some(view) = ops.audio_view {
-            let channels = unsafe { view(audio, ptr::null_mut(), 0, &mut decoded_samples) };
-            if channels == 0 || decoded_samples == 0 {
-                release_audio(&ops, audio);
-                audio = ptr::null_mut();
-                decoded_samples = 0;
-            }
-        }
-        let frames = decoded_samples;
+        let (audio, source_rate, frames) =
+            crate::audio_import_cache::import_audio_file(&path).map_or(
+                (ptr::null_mut(), 0.0f64, 0u64),
+                |(handle, rate, _channels, decoded_frames)| (handle, rate, decoded_frames),
+            );
         let mut hydrated = HirariRegionState::default();
         let code = unsafe {
             hirari_region_hydrate_decoded(

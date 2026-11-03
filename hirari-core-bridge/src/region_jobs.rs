@@ -76,15 +76,11 @@ unsafe impl Send for AudioHandle {}
 unsafe impl Sync for AudioHandle {}
 
 impl AudioHandle {
-    fn decode(ops: &HirariRegionHostOps, host: *mut c_void, path: &[u8]) -> Option<(Self, f64)> {
-        let decode = ops.decode_audio?;
-        let mut handle = ptr::null_mut();
-        let mut sample_rate = 0.0;
-        if !unsafe { decode(host, path.as_ptr(), path.len(), &mut handle, &mut sample_rate) }
-            || handle.is_null()
-        {
-            return None;
-        }
+    fn decode(ops: &HirariRegionHostOps, path: &[u8]) -> Option<(Self, f64)> {
+        // Decoding, the import cache and the planar build all live in Rust;
+        // the host only frees the handle when this guard goes out of scope.
+        let (handle, sample_rate, _channels, _frames) =
+            crate::audio_import_cache::import_audio_file(path)?;
         Some((
             Self {
                 ops: *ops,
@@ -428,7 +424,7 @@ pub unsafe extern "C" fn hirari_region_import_add(
         return IMPORT_TRACK_MISSING;
     }
     let path = unsafe { std::slice::from_raw_parts(path, path_len) };
-    let Some((audio, source_rate)) = AudioHandle::decode(&ops, host, path) else {
+    let Some((audio, source_rate)) = AudioHandle::decode(&ops, path) else {
         return IMPORT_DECODE_FAILED;
     };
     let start = if start_sample.is_nan() || start_sample < 0.0 {
@@ -516,8 +512,7 @@ pub unsafe extern "C" fn hirari_region_import_queue(
         .name("hirari-region-import".to_owned())
         .spawn(move || {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let HostPtr(host) = worker.host;
-                let decoded = AudioHandle::decode(&ops, host, &worker.path);
+                let decoded = AudioHandle::decode(&ops, &worker.path);
                 match decoded {
                     Some((audio, rate)) => {
                         if let Ok(mut slot) = worker.audio.lock() {

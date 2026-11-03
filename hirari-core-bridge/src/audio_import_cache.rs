@@ -1,16 +1,24 @@
 //! Import-time cache policy for decoded media.
 //!
 //! Path validation, file identity (size plus modification time), the hit/miss
-//! decision and eviction are owned here. The decoded buffers themselves stay
-//! native: the cache only holds an opaque weak handle to each `AudioBuffer`
-//! and asks the host to lock it, so a hit still returns the very same buffer
-//! the region already holds.
-//!
+//! decision and eviction are owned here, and so is the import itself: the
+//! decoder dispatch, the planar build and the weak entry that follows it. The
+//! decoded buffers stay native only in name - `AudioBuffer` is a view over the
+//! Rust storage, so the host contributes handle lifetimes and nothing else.
 //! Every entry point runs on the control thread. Nothing in this module is
 //! reachable from the audio callback.
 
+use crate::audio_buffer_ops::{
+    hirari_audio_buffer_deinterleave_interleaved, hirari_audio_buffer_storage_array_write,
+    hirari_audio_buffer_storage_channels, hirari_audio_buffer_storage_reserve_buffer,
+    hirari_audio_buffer_storage_resize, hirari_audio_buffer_storage_samples,
+};
+use crate::preview_audio_runtime::{
+    hirari_free_decoded_audio, hirari_import_audio_file, NativeDecodedAudio,
+};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
+use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
 
@@ -268,9 +276,203 @@ pub unsafe extern "C" fn hirari_audio_import_cache_store(
     true
 }
 
+/// Native handle helpers for one decoded import. The buffer is only a view
+/// over the Rust audio storage, so the host contributes the handle lifetimes
+/// and nothing else: sizing, channel planes and the de-interleave live here.
+type AcquireFn = fn(*const u8, usize, *mut f64, *mut *mut c_void) -> i32;
+type StoreFn = fn(*const u8, usize, f64, *mut c_void) -> bool;
+type CreateFn = fn(*mut *mut c_void) -> *mut c_void;
+type StorageFn = fn(*mut c_void) -> *mut c_void;
+type ChannelsFn = fn(*mut c_void) -> u32;
+type FramesFn = fn(*mut c_void) -> u64;
+type WeakFn = fn(*mut c_void) -> *mut c_void;
+type BufferReleaseFn = fn(*mut c_void);
+type DecodeFn = fn(*const u8, usize) -> NativeDecodedAudio;
+
+#[derive(Clone, Copy)]
+pub struct ImportOps {
+    pub acquire: AcquireFn,
+    pub store: StoreFn,
+    pub create: CreateFn,
+    pub storage: StorageFn,
+    pub channels: ChannelsFn,
+    pub frames: FramesFn,
+    pub weak: WeakFn,
+    pub release: BufferReleaseFn,
+    pub decode: DecodeFn,
+}
+
+extern "C" {
+    fn hirari_audio_import_buffer_create(out_storage: *mut *mut c_void) -> *mut c_void;
+    fn hirari_audio_import_buffer_storage(audio: *mut c_void) -> *mut c_void;
+    fn hirari_audio_import_buffer_weak(audio: *mut c_void) -> *mut c_void;
+    fn hirari_audio_import_buffer_release(audio: *mut c_void);
+}
+
+fn native_create(out_storage: *mut *mut c_void) -> *mut c_void {
+    unsafe { hirari_audio_import_buffer_create(out_storage) }
+}
+
+fn native_storage(audio: *mut c_void) -> *mut c_void {
+    unsafe { hirari_audio_import_buffer_storage(audio) }
+}
+
+fn native_channels(storage: *mut c_void) -> u32 {
+    unsafe { hirari_audio_buffer_storage_channels(storage) }
+}
+
+fn native_frames(storage: *mut c_void) -> u64 {
+    u64::from(unsafe { hirari_audio_buffer_storage_samples(storage) })
+}
+
+fn native_weak(audio: *mut c_void) -> *mut c_void {
+    unsafe { hirari_audio_import_buffer_weak(audio) }
+}
+
+fn native_buffer_release(audio: *mut c_void) {
+    unsafe { hirari_audio_import_buffer_release(audio) }
+}
+
+fn native_decode(path: *const u8, path_size: usize) -> NativeDecodedAudio {
+    unsafe { hirari_import_audio_file(path, path_size) }
+}
+
+fn native_acquire(path: *const u8, path_size: usize, rate: *mut f64, handle: *mut *mut c_void) -> i32 {
+    unsafe { hirari_audio_import_cache_acquire(path, path_size, rate, handle) }
+}
+
+fn native_store(path: *const u8, path_size: usize, rate: f64, weak: *mut c_void) -> bool {
+    unsafe { hirari_audio_import_cache_store(path, path_size, rate, weak) }
+}
+
+const NATIVE_IMPORT_OPS: ImportOps = ImportOps {
+    acquire: native_acquire,
+    store: native_store,
+    create: native_create,
+    storage: native_storage,
+    channels: native_channels,
+    frames: native_frames,
+    weak: native_weak,
+    release: native_buffer_release,
+    decode: native_decode,
+};
+
+/// Releases the interleaved block a decode returned, on every path.
+struct DecodedGuard {
+    samples: *mut f32,
+    sample_count: usize,
+}
+
+impl Drop for DecodedGuard {
+    fn drop(&mut self) {
+        unsafe { hirari_free_decoded_audio(self.samples, self.sample_count) };
+    }
+}
+
+fn usable_rate(rate: f64) -> f64 {
+    if rate.is_finite() && rate > 0.0 {
+        rate
+    } else {
+        0.0
+    }
+}
+
+/// Decodes `path`, or reuses the cached buffer, and builds the planar audio
+/// the region installs. Returns the owned native handle with its usable
+/// sample rate, channel count and frame count; `None` means the media is
+/// unusable and the region stays unloaded for Relink.
+pub fn import_audio_file(path: &[u8]) -> Option<(*mut c_void, f64, u32, u64)> {
+    import_with(&IMPORT_OPS.with(|ops| ops.get()).unwrap_or(NATIVE_IMPORT_OPS), path)
+}
+
+/// Test seam: replaces the native decode and buffer-handle callbacks for the
+/// calling thread. Clearing the override restores the native callbacks, and
+/// other threads keep using them.
+pub fn set_import_ops(ops: Option<ImportOps>) {
+    IMPORT_OPS.with(|slot| slot.set(ops));
+}
+
+thread_local! {
+    static IMPORT_OPS: std::cell::Cell<Option<ImportOps>> = const { std::cell::Cell::new(None) };
+}
+
+fn import_with(ops: &ImportOps, path: &[u8]) -> Option<(*mut c_void, f64, u32, u64)> {
+    let (path_ptr, path_len) = (path.as_ptr(), path.len());
+    let mut rate = 0.0;
+    let mut handle = std::ptr::null_mut();
+    let outcome = (ops.acquire)(path_ptr, path_len, &mut rate, &mut handle);
+    if outcome == HIRARI_IMPORT_CACHE_HIT {
+        // A hit hands over an owned strong handle. A buffer without samples or
+        // channels is not a usable import, so it is released and refused.
+        if handle.is_null() {
+            return None;
+        }
+        let storage = (ops.storage)(handle);
+        if storage.is_null() {
+            (ops.release)(handle);
+            return None;
+        }
+        let (channels, samples) = ((ops.channels)(storage), (ops.frames)(storage));
+        if channels == 0 || samples == 0 {
+            (ops.release)(handle);
+            return None;
+        }
+        return Some((handle, usable_rate(rate), channels, samples as u64));
+    }
+    // The cache only reports "needs decode" for a readable file; an empty or
+    // missing path is a terminal rejection that must not reach the decoder.
+    if outcome != HIRARI_IMPORT_NEEDS_DECODE {
+        return None;
+    }
+    let decoded = (ops.decode)(path_ptr, path_len);
+    let _guard = DecodedGuard {
+        samples: decoded.samples,
+        sample_count: decoded.sample_count,
+    };
+    if decoded.status != 0 || decoded.samples.is_null() || decoded.channels == 0 {
+        return None;
+    }
+    let Some(frames) = NonZeroUsize::new(decoded.sample_count / decoded.channels as usize) else {
+        return None;
+    };
+    let frames = frames.get() as u32;
+    let mut storage = std::ptr::null_mut();
+    let handle = (ops.create)(&mut storage);
+    if handle.is_null() {
+        return None;
+    }
+    let built = !storage.is_null()
+        && unsafe {
+            hirari_audio_buffer_storage_reserve_buffer(storage, decoded.channels, frames) == 0
+                && hirari_audio_buffer_storage_resize(storage, decoded.channels, frames)
+                && hirari_audio_buffer_deinterleave_interleaved(
+                    decoded.samples,
+                    decoded.sample_count,
+                    hirari_audio_buffer_storage_array_write(storage),
+                    decoded.channels,
+                    frames,
+                )
+        };
+    if !built {
+        (ops.release)(handle);
+        return None;
+    }
+    let rate = usable_rate(decoded.sample_rate);
+    // The cache holds only a weak reference; the region owns the buffer. A
+    // refused entry has already released the handle it was given.
+    let weak = (ops.weak)(handle);
+    if !weak.is_null() {
+        (ops.store)(path_ptr, path_len, rate, weak);
+    }
+    Some((handle, rate, decoded.channels, frames as u64))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+
+    const SEQ: Ordering = Ordering::SeqCst;
 
     fn test_lock(handle: *mut c_void) -> *mut c_void {
         if test_alive(handle) {
@@ -367,5 +569,202 @@ mod tests {
         assert_eq!(entries.len(), MAX_CACHED_IMPORTS);
         assert!(!entries.contains_key("00000.wav"));
         assert!(entries.contains_key("01024.wav"));
+    }
+
+    // --- import orchestration -------------------------------------------------
+    //
+    // The storages are real Rust audio storage, so the fixtures only replace the
+    // host handle helpers: acquire verdict, decoder result and cache offer.
+
+    use crate::audio_buffer_ops::{
+        hirari_audio_buffer_storage_create, hirari_audio_buffer_storage_destroy,
+        hirari_audio_buffer_storage_read_pointer, hirari_audio_buffer_storage_resize,
+    };
+
+    static IMPORT_LOCK: Mutex<()> = Mutex::new(());
+    static ACQUIRE_MODE: AtomicUsize = AtomicUsize::new(0);
+    static HIT_CHANNELS: AtomicU32 = AtomicU32::new(2);
+    static HIT_FRAMES: AtomicUsize = AtomicUsize::new(8);
+    static HIT_RATE_BITS: AtomicU64 = AtomicU64::new(48_000f64.to_bits());
+    static DECODE_STATUS: AtomicU32 = AtomicU32::new(0);
+    static DECODE_CHANNELS: AtomicU32 = AtomicU32::new(2);
+    static DECODE_FRAMES: AtomicUsize = AtomicUsize::new(4);
+    static DECODE_RATE_BITS: AtomicU64 = AtomicU64::new(44_100f64.to_bits());
+    static DECODES: AtomicUsize = AtomicUsize::new(0);
+    static RELEASES: AtomicUsize = AtomicUsize::new(0);
+    static STORED: AtomicUsize = AtomicUsize::new(0);
+
+    fn reset_import(decode_status: u32, frames: usize) {
+        ACQUIRE_MODE.store(0, SEQ);
+        HIT_CHANNELS.store(2, SEQ);
+        HIT_FRAMES.store(frames, SEQ);
+        HIT_RATE_BITS.store(48_000f64.to_bits(), SEQ);
+        DECODE_STATUS.store(decode_status, SEQ);
+        DECODE_CHANNELS.store(2, SEQ);
+        DECODE_FRAMES.store(frames, SEQ);
+        DECODE_RATE_BITS.store(44_100f64.to_bits(), SEQ);
+        DECODES.store(0, SEQ);
+        RELEASES.store(0, SEQ);
+        STORED.store(0, SEQ);
+    }
+
+    fn test_acquire(_path: *const u8, _length: usize, rate: *mut f64, out: *mut *mut c_void) -> i32 {
+        match ACQUIRE_MODE.load(SEQ) {
+            0 => {
+                let storage = unsafe { hirari_audio_buffer_storage_create() };
+                let frames = HIT_FRAMES.load(SEQ) as u32;
+                unsafe {
+                    hirari_audio_buffer_storage_reserve_buffer(storage, HIT_CHANNELS.load(SEQ), frames);
+                    hirari_audio_buffer_storage_resize(storage, HIT_CHANNELS.load(SEQ), frames)
+                };
+                unsafe {
+                    *rate = f64::from_bits(HIT_RATE_BITS.load(SEQ));
+                    *out = storage;
+                }
+                HIRARI_IMPORT_CACHE_HIT
+            }
+            1 => HIRARI_IMPORT_NEEDS_DECODE,
+            2 => HIRARI_IMPORT_FILE_NOT_FOUND,
+            _ => HIRARI_IMPORT_EMPTY_PATH,
+        }
+    }
+
+    /// An interleaved block of `(frame * 10 + channel)` samples, boxed the same
+    /// way the decoder hands one over so the guard can release it.
+    fn test_decode(_path: *const u8, _length: usize) -> NativeDecodedAudio {
+        DECODES.fetch_add(1, SEQ);
+        let channels = DECODE_CHANNELS.load(SEQ) as usize;
+        let frames = DECODE_FRAMES.load(SEQ);
+        let mut block = Vec::with_capacity(channels * frames);
+        for frame in 0..frames {
+            for channel in 0..channels {
+                block.push((frame * 10 + channel) as f32);
+            }
+        }
+        let mut block = block.into_boxed_slice();
+        let samples = block.as_mut_ptr();
+        let sample_count = block.len();
+        std::mem::forget(block);
+        NativeDecodedAudio {
+            samples,
+            sample_count,
+            channels: channels as u32,
+            sample_rate: f64::from_bits(DECODE_RATE_BITS.load(SEQ)),
+            bits_per_sample: 24,
+            status: DECODE_STATUS.load(SEQ),
+        }
+    }
+
+    /// Mirrors the native helper: the handle it returns publishes the storage
+    /// the import writes into.
+    fn test_create(out_storage: *mut *mut c_void) -> *mut c_void {
+        let storage = unsafe { hirari_audio_buffer_storage_create() };
+        if !out_storage.is_null() {
+            unsafe { *out_storage = storage };
+        }
+        storage
+    }
+
+    fn test_import_ops() -> ImportOps {
+        ImportOps {
+            acquire: test_acquire,
+            store: |_, _, _, weak| {
+                STORED.store(weak as usize, SEQ);
+                true
+            },
+            create: test_create,
+            storage: |handle| handle,
+            channels: |storage| unsafe { hirari_audio_buffer_storage_channels(storage) },
+            frames: |storage| u64::from(unsafe { hirari_audio_buffer_storage_samples(storage) }),
+            weak: |handle| handle,
+            release: |handle| {
+                RELEASES.fetch_add(1, SEQ);
+                unsafe { hirari_audio_buffer_storage_destroy(handle) };
+            },
+            decode: test_decode,
+        }
+    }
+
+    #[test]
+    fn import_hands_over_a_hit_and_refuses_an_unusable_one() {
+        let _guard = IMPORT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let ops = test_import_ops();
+
+        reset_import(0, 8);
+        let (handle, rate, channels, frames) =
+            import_with(&ops, b"cached.wav").expect("a hit is an import");
+        assert_eq!(rate, 48_000.0);
+        assert_eq!((channels, frames), (2, 8));
+        assert_eq!(RELEASES.load(SEQ), 0);
+        assert_eq!(DECODES.load(SEQ), 0);
+        unsafe { hirari_audio_buffer_storage_destroy(handle) };
+
+        // A cached entry with no samples is released back, not imported.
+        reset_import(0, 0);
+        assert!(import_with(&ops, b"cached.wav").is_none());
+        assert_eq!(RELEASES.load(SEQ), 1);
+
+        // An empty rate is not usable, but the buffer still is.
+        reset_import(0, 4);
+        HIT_RATE_BITS.store(f64::NAN.to_bits(), SEQ);
+        let (handle, rate, _, _) = import_with(&ops, b"cached.wav").unwrap();
+        assert_eq!(rate, 0.0);
+        unsafe { hirari_audio_buffer_storage_destroy(handle) };
+    }
+
+    #[test]
+    fn import_only_decodes_when_the_cache_asks_for_it() {
+        let _guard = IMPORT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let ops = test_import_ops();
+
+        // Mode 2 is a missing file and mode 3 an unrepresentable path; neither
+        // is a decode request.
+        for mode in [2usize, 3] {
+            reset_import(0, 4);
+            ACQUIRE_MODE.store(mode, SEQ);
+            assert!(import_with(&ops, b"gone.wav").is_none());
+            assert_eq!(DECODES.load(SEQ), 0);
+            assert_eq!(RELEASES.load(SEQ), 0);
+        }
+    }
+
+    #[test]
+    fn import_rejects_a_failed_or_empty_decode() {
+        let _guard = IMPORT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let ops = test_import_ops();
+
+        reset_import(3, 4);
+        ACQUIRE_MODE.store(1, SEQ);
+        assert!(import_with(&ops, b"broken.wav").is_none());
+        assert_eq!(DECODES.load(SEQ), 1);
+        assert_eq!(RELEASES.load(SEQ), 0);
+
+        // A zero-length decode never reaches the buffer at all.
+        reset_import(0, 0);
+        ACQUIRE_MODE.store(1, SEQ);
+        assert!(import_with(&ops, b"empty.wav").is_none());
+        assert_eq!(RELEASES.load(SEQ), 0);
+    }
+
+    #[test]
+    fn import_builds_planar_channels_and_offers_the_buffer_to_the_cache() {
+        let _guard = IMPORT_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        let ops = test_import_ops();
+        reset_import(0, 4);
+        ACQUIRE_MODE.store(1, SEQ);
+
+        let (handle, rate, channels, frames) =
+            import_with(&ops, b"fresh.wav").expect("a decode is an import");
+        assert_eq!(rate, 44_100.0);
+        assert_eq!((channels, frames), (2, 4));
+        let read = |channel: u32, offset: u32| unsafe {
+            *hirari_audio_buffer_storage_read_pointer(handle, channel, offset)
+        };
+        assert_eq!([read(0, 0), read(0, 1), read(0, 3)], [0.0, 10.0, 30.0]);
+        assert_eq!([read(1, 0), read(1, 2)], [1.0, 21.0]);
+        // The cache is offered the same buffer the region now owns.
+        assert_eq!(STORED.load(SEQ), handle as usize);
+        assert_eq!(RELEASES.load(SEQ), 0);
+        unsafe { hirari_audio_buffer_storage_destroy(handle) };
     }
 }

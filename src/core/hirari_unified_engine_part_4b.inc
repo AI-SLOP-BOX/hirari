@@ -29,7 +29,7 @@
                     reinterpret_cast<size_t>(track.get())});
         }
         if (!::Hirari::Core::Bridge::native_project_hydrate_regions(
-                state, regionTracks, reinterpret_cast<size_t>(this), projectSampleRate)) {
+                state, regionTracks, projectSampleRate)) {
             return false;
         }
 

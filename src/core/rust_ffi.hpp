@@ -219,25 +219,6 @@ extern "C" void hirari_audio_buffer_set_realtime_guard(bool is_realtime);
 extern "C" uint64_t hirari_audio_buffer_realtime_resize_attempts();
 extern "C" size_t hirari_audio_buffer_last_realtime_requested_capacity();
 extern "C" void hirari_audio_buffer_reset_realtime_resize_stats();
-extern "C" bool hirari_audio_buffer_deinterleave_interleaved(
-    const float* source, size_t source_sample_count,
-    float* const* channel_pointers, uint32_t channel_count, uint32_t frames);
-// Preview/import decoding and the import cache live in
-// hirari-core-bridge/src/preview_audio_runtime.rs and audio_import_cache.rs.
-struct HirariNativeDecodedAudio {
-    float* samples;
-    size_t sample_count;
-    uint32_t channels;
-    double sample_rate;
-    uint32_t bits_per_sample;
-    uint32_t status;
-};
-extern "C" HirariNativeDecodedAudio hirari_import_audio_file(const uint8_t* path, size_t path_size);
-extern "C" void hirari_free_decoded_audio(float* samples, size_t sample_count);
-extern "C" int32_t hirari_audio_import_cache_acquire(const uint8_t* path, size_t path_size,
-                                                     double* sample_rate, void** audio_handle);
-extern "C" bool hirari_audio_import_cache_store(const uint8_t* path, size_t path_size,
-                                                double sample_rate, void* weak_audio);
 extern "C" void* hirari_macro_mapping_create();
 extern "C" void hirari_macro_mapping_destroy(void* state);
 extern "C" void hirari_macro_control_set_value(
@@ -561,9 +542,6 @@ struct HirariRegionHostOps {
     // Copies a region's source path into `out`; returns its byte length.
     size_t (*regionPath)(void* host, uint32_t trackId, uint32_t regionId,
                          uint8_t* out, size_t capacity) = nullptr;
-    // Decodes a media file and returns an owned audio handle plus its rate.
-    bool (*decodeAudio)(void* host, const uint8_t* path, size_t length,
-                        void** outHandle, double* outRate) = nullptr;
     // Inserts a decoded region under the id the caller allocated. The audio
     // handle is consumed on every path.
     uint32_t (*insertRegion)(void* host, uint32_t trackId, size_t expectedTrack,
