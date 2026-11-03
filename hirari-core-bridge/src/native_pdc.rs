@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread::ThreadId;
 
-const MAX_TRACKS: usize = 512;
+pub const MAX_TRACKS: usize = 512;
 const MAX_BUSES: usize = 128;
 const MASTER_ID: u32 = u32::MAX;
 const ROUTED_NODE_COUNT: usize = MAX_TRACKS + MAX_BUSES;
@@ -644,24 +644,21 @@ pub unsafe extern "C" fn hirari_native_pdc_configuration_generation(handle: *con
         .unwrap_or(0)
 }
 
-/// Per-track graph input supplied by the engine: the latency is the only
-/// value the C++ side still owns.
-#[repr(C)]
-pub struct HirariPdcTrackConfig {
+/// One track's contribution to the PDC graph, gathered from the engine track
+/// table by the structural sync walk: the latency is the value C++ still owns.
+pub struct PdcTrackConfig {
     pub id: u32,
     pub latency_samples: u32,
 }
 
 /// Rebuild the control-side PDC graph from the published routing engine and
-/// publish the resulting offsets. `track_offsets` receives one offset per
-/// entry of `tracks`, in the same order; the return value is that count.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_sync_graph(
+/// publish the resulting offsets. `offsets` receives one entry per element of
+/// `tracks`, in the same order; the return value is that count.
+pub fn sync_graph(
     pdc: *const c_void,
     routing: *const c_void,
-    tracks: *const HirariPdcTrackConfig,
-    track_count: usize,
-    track_offsets: *mut u32,
+    tracks: &[PdcTrackConfig],
+    offsets: &mut [u32],
 ) -> usize {
     let Some(state) = (unsafe { state(pdc) }) else {
         return 0;
@@ -669,11 +666,6 @@ pub unsafe extern "C" fn hirari_native_pdc_sync_graph(
     if !state.clear_configuration() {
         return 0;
     }
-    let tracks = if tracks.is_null() || track_count == 0 {
-        &[][..]
-    } else {
-        unsafe { std::slice::from_raw_parts(tracks, track_count) }
-    };
     for track in tracks {
         if track.id as usize >= MAX_TRACKS {
             continue;
@@ -725,12 +717,12 @@ pub unsafe extern "C" fn hirari_native_pdc_sync_graph(
             connection_count,
         );
     }
-    if !track_offsets.is_null() {
-        for (index, track) in tracks.iter().enumerate() {
-            unsafe { *track_offsets.add(index) = state.track_offset(track.id) };
+    for (index, track) in tracks.iter().enumerate() {
+        if let Some(slot) = offsets.get_mut(index) {
+            *slot = state.track_offset(track.id);
         }
     }
-    track_count
+    tracks.len()
 }
 
 #[cfg(test)]

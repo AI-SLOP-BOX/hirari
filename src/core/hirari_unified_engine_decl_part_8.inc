@@ -6,10 +6,6 @@
     // configuration, solving, thread ownership, and atomic publication; this
     // member is only the handle the control thread edits and reads from.
     void* m_pdcState = hirari_native_pdc_create();
-    // Node limits checked before a value crosses into Rust. Rust keeps the
-    // authoritative copies (native_pdc.rs: MAX_TRACKS, MASTER_ID); these hold
-    // here so an out-of-range ID never reaches the FFI in the first place.
-    static constexpr uint32_t kPdcMaxTracks = 512;
     // Rust owns history, callback IDs, grouping, coalescing and eviction.
     // This is the single handle the engine keeps and hands to Rust callers.
     void* m_undoState = hirari_undo_manager_create(128, 300);

@@ -39,10 +39,8 @@
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;
         std::lock_guard<std::mutex> lock(m_tracksMutex);
-        return std::find_if(m_tracks.begin(), m_tracks.end(), [busTrackId](const auto& track) {
-            return track && track->getId() == busTrackId &&
-                   dynamic_cast<BusTrack*>(track.get()) != nullptr;
-        }) != m_tracks.end();
+        Track* track = findTrackLocked(busTrackId);
+        return track && dynamic_cast<BusTrack*>(track) != nullptr;
     }
     float get_master_gain() const noexcept;
     float get_track_volume(uint32_t tid) const;

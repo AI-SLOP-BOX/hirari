@@ -1,7 +1,13 @@
     // Tracks
     bool assign_track_to_vca(uint32_t track_id, uint32_t group_id);
     void new_project();
-    std::vector<std::shared_ptr<Track>> get_tracks_snapshot() const;
+    // Lock-free window onto the published graph, for read-only control scans
+    // such as the analysis bridge. The realtime callback traverses the same one.
+    HirariTrackSnapshot published_tracks() const noexcept {
+        HirariTrackSnapshot published{};
+        hirari_engine_track_snapshot(m_trackTable, &published);
+        return published;
+    }
 
     // Regions & Plugins
     bool add_region(uint32_t trackId, std::string_view path, double start_beat);

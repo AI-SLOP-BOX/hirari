@@ -207,7 +207,9 @@ pub unsafe extern "C" fn hirari_bus_accumulate_stereo(
     true
 }
 
-const MAX_BUSES: usize = 128;
+/// Matches `BusTrack::kMaxBuses`; the structural sync walk sizes its gather by
+/// this, so `hirari_bus_system_reconcile` always receives the full table.
+pub const MAX_BUSES: usize = 128;
 
 struct BusSystemState {
     buses: [usize; MAX_BUSES],

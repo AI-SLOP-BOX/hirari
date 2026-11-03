@@ -52,17 +52,18 @@ rust::String get_intelligence_dashboard_json(const Engine::HirariUnifiedEngine& 
 
 // Song structure JSON (sections -> analysis_song_structure_json payload).
 rust::String get_song_structure_json(const Engine::HirariUnifiedEngine& engine) {
-    const auto tracks = engine.get_tracks_snapshot();
+    const auto published = engine.published_tracks();
     std::vector<uint64_t> regionStarts;
     uint64_t maxLen = 0;
-    for (const auto& t : tracks) {
+    for (uint32_t i = 0; i < published.track_count; ++i) {
+        void* t = published.active_tracks[i];
         if (!t) continue;
-        const size_t regionCount = hirari_region_store_count(t.get());
-        for (size_t i = 0; i < regionCount; ++i) {
+        const size_t regionCount = hirari_region_store_count(t);
+        for (size_t index = 0; index < regionCount; ++index) {
             uint64_t start = 0;
             uint64_t length = 0;
             uint32_t loopCount = 0;
-            if (!hirari_region_store_span_at(t.get(), i, &start, &length, &loopCount)) {
+            if (!hirari_region_store_span_at(t, index, &start, &length, &loopCount)) {
                 continue;
             }
             regionStarts.push_back(start);

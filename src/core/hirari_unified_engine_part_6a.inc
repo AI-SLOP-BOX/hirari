@@ -1,13 +1,10 @@
 bool HirariUnifiedEngine::set_track_eq(uint32_t trackId, float lowBoostDb, float lowCutDb,
                                      float highBoostDb, float highCutDb) {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (auto& track : m_tracks) {
-        if (track->getId() == trackId) {
-            track->setEq(lowBoostDb, lowCutDb, highBoostDb, highCutDb);
-            return true;
-        }
-    }
-    return false;
+    Track* track = findTrackLocked(trackId);
+    if (!track) return false;
+    track->setEq(lowBoostDb, lowCutDb, highBoostDb, highCutDb);
+    return true;
 }
 
 // History control (undo, redo, transactions, counts) is Rust-owned; the C++
@@ -32,10 +29,6 @@ size_t layoutCopyBytes(const std::vector<uint8_t>& value, uint8_t* out, size_t c
 }
 }  // namespace
 
-Track* HirariUnifiedEngine::layoutTrackAt(size_t index) const {
-    return index < m_tracks.size() ? m_tracks[index].get() : nullptr;
-}
-
 // Exposes the live tracks to the Rust layout gather (layout_gather.rs). The
 // per-track rules — owned string copies, plug-in ordering, region rate
 // clamping, missing-file detection — all live there; these callbacks only read
@@ -47,7 +40,7 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         [](void* host) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             engine->m_tracksMutex.lock();
-            for (const auto& track : engine->m_tracks) {
+            for (Track* track : engine->lockedTracks()) {
                 if (!track) continue;
                 track->flushRecordedAutomation();
                 track->reclaimEffectChainRetiredMemory();
@@ -57,10 +50,10 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
             static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.unlock();
         },
         [](void* host) {
-            return static_cast<HirariUnifiedEngine*>(host)->m_tracks.size();
+            return static_cast<HirariUnifiedEngine*>(host)->lockedTracks().size();
         },
         [](void* host, size_t index, HirariLayoutTrackScalars* out) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             if (!track) return false;
             out->id = track->getId();
             out->type = static_cast<uint32_t>(track->getType());
@@ -80,7 +73,7 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
             return true;
         },
         [](void* host, size_t index, uint32_t kind, uint8_t* out, size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             if (!track) return size_t{0};
             switch (kind) {
                 case 0: return layoutCopyString(track->getName(), out, capacity);
@@ -91,7 +84,7 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         },
         [](void* host, size_t index, uint32_t kind, HirariLayoutAutomationPoint* out,
            size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             if (!track) return size_t{0};
             const std::vector<::Hirari::Core::ProjectAutomationPoint> points =
                 kind == 0 ? track->getVolumeAutomationPoints()
@@ -106,11 +99,11 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
             return points.size();
         },
         [](void* host, size_t index) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track ? track->getPluginAutomation().size() : size_t{0};
         },
         [](void* host, size_t index, size_t lane, HirariLayoutPluginLaneHeader* out) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             if (!track) return false;
             const auto lanes = track->getPluginAutomation();
             if (lane >= lanes.size()) return false;
@@ -121,7 +114,7 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         },
         [](void* host, size_t index, size_t lane, HirariLayoutAutomationPoint* out,
            size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             if (!track) return size_t{0};
             const auto lanes = track->getPluginAutomation();
             if (lane >= lanes.size()) return size_t{0};
@@ -135,39 +128,39 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
             return points.size();
         },
         [](void* host, size_t index) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track ? track->getPluginTypes().size() : size_t{0};
         },
         [](void* host, size_t index, size_t plugin) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             const auto types = track ? track->getPluginTypes() : std::vector<uint32_t>{};
             return plugin < types.size() ? types[plugin] : 0u;
         },
         [](void* host, size_t index, size_t plugin) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track && track->getPluginBypass(static_cast<uint32_t>(plugin));
         },
         [](void* host, size_t index, size_t plugin, uint8_t* out, size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             const auto states = track ? track->getPluginStates()
                                       : std::vector<std::vector<uint8_t>>{};
             if (plugin >= states.size()) return size_t{0};
             return layoutCopyBytes(states[plugin], out, capacity);
         },
         [](void* host, size_t index, size_t plugin, uint8_t* out, size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             const auto states = track ? track->getPluginGuiStates()
                                       : std::vector<std::vector<uint8_t>>{};
             if (plugin >= states.size()) return size_t{0};
             return layoutCopyBytes(states[plugin], out, capacity);
         },
         [](void* host, size_t index, size_t plugin) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track ? track->getPluginParameterCount(static_cast<uint32_t>(plugin))
                          : size_t{0};
         },
         [](void* host, size_t index, size_t plugin, float* out, size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             if (!track) return size_t{0};
             const uint32_t count =
                 track->getPluginParameterCount(static_cast<uint32_t>(plugin));
@@ -179,32 +172,32 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
             return static_cast<size_t>(count);
         },
         [](void* host, size_t index) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track ? track->getSandboxedPluginPaths().size() : size_t{0};
         },
         [](void* host, size_t index, size_t slot, uint8_t* out, size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             const auto paths = track ? track->getSandboxedPluginPaths()
                                      : std::vector<std::string>{};
             return slot < paths.size() ? layoutCopyString(paths[slot], out, capacity) : size_t{0};
         },
         [](void* host, size_t index, size_t slot, uint8_t* out, size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             const auto states = track ? track->getSandboxedPluginStates()
                                       : std::vector<std::vector<uint8_t>>{};
             return slot < states.size() ? layoutCopyBytes(states[slot], out, capacity) : size_t{0};
         },
         [](void* host, size_t index) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track ? hirari_region_store_count(const_cast<Track*>(track)) : size_t{0};
         },
         [](void* host, size_t index, size_t regionIndex, HirariLayoutRegionHeader* out) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track && hirari_region_store_layout_header(const_cast<Track*>(track), regionIndex, out);
         },
         [](void* host, size_t index, size_t regionIndex, uint32_t kind, uint8_t* out,
            size_t capacity) {
-            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->layoutTrackAt(index);
+            const Track* track = static_cast<const HirariUnifiedEngine*>(host)->lockedTrackAt(index);
             return track ? hirari_region_store_layout_string(const_cast<Track*>(track), regionIndex, kind,
                                                              out, capacity)
                          : size_t{0};
@@ -279,11 +272,6 @@ void HirariUnifiedEngine::installCommandHost() {
     hirari_command_host_install(&ops);
 }
 
-std::vector<std::shared_ptr<Track>> HirariUnifiedEngine::get_tracks_snapshot() const {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    return m_tracks;
-}
-
 void HirariUnifiedEngine::installTrackFreezeHost() {
     static const HirariTrackFreezeHostOps ops = {
         [](void* host, uint32_t tid, bool wait) -> void* {
@@ -291,8 +279,7 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
             if (!engine) return nullptr;
             if (wait) engine->waitForAudioCallbacks();
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            auto track = engine->findTrackSharedLocked(tid);
-            return track ? new std::shared_ptr<Track>(std::move(track)) : nullptr;
+            return newTrackHandle(engine->findTrackSharedLocked(tid));
         },
         [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
         [](void* handle, uint64_t totalSamples, uint32_t sampleRate) {

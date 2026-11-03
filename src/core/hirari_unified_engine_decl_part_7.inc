@@ -47,24 +47,49 @@
     std::shared_ptr<ProjectLayoutRevision> m_projectLayoutRevision =
         std::make_shared<ProjectLayoutRevision>();
     std::atomic<uint64_t> m_projectControlRevision{0};
-    std::vector<std::shared_ptr<Track>> m_tracks;
-    std::vector<std::shared_ptr<Track>> m_deferredDestructionTracks;
     mutable std::mutex m_tracksMutex;
 
-    // Id resolution shared by the region, routing, control and plugin host
-    // callbacks. Callers must already hold m_tracksMutex. The const views reuse
-    // the same single traversal rather than carrying a second copy of it.
-    Track* findTrackLocked(uint32_t tid);
-    std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid);
-    const Track* findTrackLocked(uint32_t tid) const {
-        return const_cast<HirariUnifiedEngine*>(this)->findTrackLocked(tid);
+    // The document graph lives in the Rust track table (engine_track_table.rs).
+    // Id resolution and every walk below go through it; callers must already hold
+    // m_tracksMutex, except findPublishedTrack, which reads the lock-free snapshot.
+    Track* findTrackLocked(uint32_t tid) const {
+        return reinterpret_cast<Track*>(hirari_engine_track_find(m_trackTable, tid));
     }
     std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid) const {
-        return const_cast<HirariUnifiedEngine*>(this)->findTrackSharedLocked(tid);
+        return adoptTrackHandle(hirari_engine_track_retain(m_trackTable, tid));
     }
-    // Track lookup in the published audio snapshot. Used by control callbacks
-    // that do not hold m_tracksMutex.
-    Track* findPublishedTrack(uint32_t tid) const;
+    Track* findPublishedTrack(uint32_t tid) const {
+        return tid < kMaxTrackMap ? trackView(m_trackTable).trackMap[tid] : nullptr;
+    }
+
+    // Borrowed window onto the graph in layout order, valid while the lock is held.
+    struct TrackRange {
+        Track* const* items;
+        size_t count;
+        size_t size() const noexcept { return count; }
+        Track* const* begin() const noexcept { return items; }
+        Track* const* end() const noexcept { return items + count; }
+    };
+    TrackRange lockedTracks() const noexcept {
+        return { reinterpret_cast<Track* const*>(hirari_engine_track_ptrs(m_trackTable)),
+                 hirari_engine_track_count(m_trackTable) };
+    }
+    Track* lockedTrackAt(size_t index) const noexcept {
+        const TrackRange tracks = lockedTracks();
+        return index < tracks.count ? tracks.items[index] : nullptr;
+    }
+
+    // The table stores heap `std::shared_ptr<Track>` handles as opaque owners, so
+    // adopting one is a cast into a unique_ptr and publishing one is a heap copy.
+    static std::shared_ptr<Track> adoptTrackHandle(void* owner) {
+        if (!owner) return nullptr;
+        auto handle = std::unique_ptr<std::shared_ptr<Track>>(
+            static_cast<std::shared_ptr<Track>*>(owner));
+        return std::move(*handle);
+    }
+    static void* newTrackHandle(std::shared_ptr<Track> track) {
+        return track ? new std::shared_ptr<Track>(std::move(track)) : nullptr;
+    }
 
     // Applies fn to the locked track and reports whether the id resolved, so a
     // control mutator is one call plus the Track method it forwards to.
@@ -97,18 +122,6 @@
         return track != nullptr ? fn(*track) : missing;
     }
 
-    // Reads through the published track snapshot and returns `missing` when the
-    // id is gone; each query keeps its own fallback instead of repeating the
-    // scan. The not-found messages themselves are decided in Rust.
-    template <typename Fn>
-    std::invoke_result_t<Fn, const Track&> querySnapshotTrack(
-        uint32_t tid, std::invoke_result_t<Fn, const Track&> missing, const Fn& fn) const {
-        for (const auto& track : get_tracks_snapshot()) {
-            if (track && track->getId() == tid) return fn(*track);
-        }
-        return missing;
-    }
-
     // Copies the owning handle out from under the lock so a call that can enter
     // vendor UI code holds the Track without the project topology lock.
     std::shared_ptr<Track> takeTrackHandle(uint32_t tid) const {
@@ -131,7 +144,6 @@
     // Rust owns the layout snapshot (layout_gather.rs); this only exposes the
     // live-track accessors it reads through.
     const HirariLayoutHostOps* layoutHostOps() const;
-    Track* layoutTrackAt(size_t index) const;
 
     void* m_midiSnapshotStore = nullptr;
 

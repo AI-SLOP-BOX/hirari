@@ -122,15 +122,8 @@
                         monitorLeft, monitorRight, sz, cueGain, cueClickEnabled);
                 }
             }
-            const float* talkback = nullptr;
-            if (m_talkbackInputPublished.load(std::memory_order_acquire)) {
-                const uint32_t publishedFrames =
-                    m_talkbackInputFrames.load(std::memory_order_acquire);
-                const uint32_t inputOffset = m_talkbackInputOffset;
-                if (inputOffset < publishedFrames && publishedFrames - inputOffset >= sz) {
-                    talkback = m_talkbackInput.data() + inputOffset;
-                }
-            }
+            const float* talkback = hirari_input_blocks_take_talkback(
+                m_inputBlocks, m_talkbackInputOffset, sz);
             if (cueUsesDedicatedPair) {
                 // Keep the Main control-room monitor live while a selected
                 // Cue feeds its own output pair.  Talkback is kept on that
@@ -184,8 +177,7 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
         // declared block size is invalid, writing even a bounded prefix could
         // overrun a shorter external buffer.  Fail closed without touching
         // memory whose extent cannot be proven at this boundary.
-        m_talkbackInputPublished.store(false, std::memory_order_release);
-        m_talkbackInputFrames.store(0, std::memory_order_release);
+        hirari_input_blocks_end_talkback(m_inputBlocks);
         return;
     }
     for (uint32_t channel = 0; channel < numChannels; ++channel) {
@@ -195,8 +187,7 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
         AudioBuffer silence;
         silence.wrapChannels(buffers, numChannels, numSamples);
         silence.clear(numSamples);
-        m_talkbackInputPublished.store(false, std::memory_order_release);
-        m_talkbackInputFrames.store(0, std::memory_order_release);
+        hirari_input_blocks_end_talkback(m_inputBlocks);
         return;
     }
     // Zero-Allocation Wrapper (Allocated on stack for absolute concurrency safety).
@@ -226,7 +217,6 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
         processBlock(wrap, offset, chunk);
         offset += chunk;
     }
-    m_inputMonitorBlockPublished.store(false, std::memory_order_release);
-    m_talkbackInputPublished.store(false, std::memory_order_release);
-    m_talkbackInputFrames.store(0, std::memory_order_release);
+    hirari_input_blocks_end_monitor(m_inputBlocks);
+    hirari_input_blocks_end_talkback(m_inputBlocks);
 }

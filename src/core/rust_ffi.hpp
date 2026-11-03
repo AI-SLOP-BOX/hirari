@@ -71,6 +71,78 @@ extern "C" bool hirari_engine_event_ring_pop(const void* rings, uint64_t* timest
                                              uint32_t* type, uint32_t* track_id, float* value,
                                              uint8_t* label, size_t label_capacity);
 
+// Engine track table (engine_track_table.rs): the live document graph, its
+// deferred-destruction list and the double-buffered snapshot the realtime
+// callback traverses. Tracks stay C++ objects; the table moves their handles
+// and reads the few scalars a control walk needs through these ops.
+struct HirariEngineTrackOps {
+    uint32_t (*id)(void*);
+    void* (*clone_owner)(void*);
+    void (*destroy_owner)(void*);
+    uint32_t (*trackType)(void*);
+    uint32_t (*busId)(void*);      // UINT32_MAX for a track that is not a bus
+    uint32_t (*latency)(void*);
+    void (*setPdcOffset)(void*, uint32_t);
+};
+static_assert(sizeof(HirariEngineTrackOps) == 7 * sizeof(void*));
+// The published graph. The buffers belong to the table, so the pointers stay
+// valid for its lifetime and only their contents change, under a publication.
+struct HirariTrackSnapshot {
+    void* const* active_tracks;
+    void* const* track_map;
+    uint32_t track_count;
+    uint64_t audio_config_generation;
+};
+extern "C" void* hirari_engine_track_table_create(const HirariEngineTrackOps* ops);
+extern "C" void hirari_engine_track_table_destroy(void* table);
+extern "C" size_t hirari_engine_track_count(void* table);
+extern "C" void* const* hirari_engine_track_ptrs(void* table);
+extern "C" void* hirari_engine_track_find(void* table, uint32_t track_id);
+extern "C" size_t hirari_engine_track_index_of(void* table, uint32_t track_id);
+extern "C" void* hirari_engine_track_retain(void* table, uint32_t track_id);
+extern "C" bool hirari_engine_track_insert(void* table, size_t index, void* owner,
+                                          void* track);
+extern "C" void* hirari_engine_track_detach(void* table, uint32_t track_id);
+extern "C" void hirari_engine_track_defer_all(void* table);
+extern "C" void hirari_engine_track_publish(void* table, uint64_t generation, bool stamp);
+extern "C" void hirari_engine_track_snapshot(void* table, HirariTrackSnapshot* out);
+// The ordered control walk over the graph: bus reconcile, routing rebuild,
+// snapshot publication, then delay compensation. See engine_track_table.rs.
+extern "C" void hirari_engine_sync_structure(void* table, void* bus_system, void* routing,
+                                             void* pdc, uint64_t generation);
+// The project-load commit point: the outgoing graph's sidechain entries, every
+// project-scoped manager and the graph itself, in the order Rust owns.
+extern "C" void hirari_engine_reset_project(void* table, void* rings, void* pdc,
+                                            void* sidechain, void* routing, void* bus_system,
+                                            void* control_room, void* sidechain_routes);
+
+// Live input staging (engine_input_block.rs): the driver callback copies the
+// monitored input pair and the Control Room talkback source into the planar
+// buffers Rust owns; the render callback reads one window of a chunk.
+struct HirariInputMonitorBlock {
+    uint32_t track_id;  // kNoInputMonitorTrack when nothing is monitorable
+    float* left;
+    float* right;
+};
+extern "C" void* hirari_input_blocks_create(size_t capacity_frames);
+extern "C" void hirari_input_blocks_destroy(void* blocks);
+extern "C" bool hirari_input_blocks_set_focus(void* blocks, uint32_t track_id,
+                                              uint32_t left_channel, uint32_t right_channel);
+extern "C" void hirari_input_blocks_clear_focus(void* blocks, uint32_t track_id);
+extern "C" void hirari_input_blocks_reset(void* blocks);
+extern "C" void hirari_input_blocks_publish_monitor(void* blocks, const float* const* inputs,
+                                                    uint32_t channel_count, uint32_t frames);
+extern "C" HirariInputMonitorBlock hirari_input_blocks_take_monitor(const void* blocks,
+                                                                    uint32_t offset,
+                                                                    uint32_t frames);
+extern "C" void hirari_input_blocks_end_monitor(void* blocks);
+extern "C" void hirari_input_blocks_publish_talkback(void* blocks, const float* const* inputs,
+                                                     uint32_t channel_count, uint32_t frames,
+                                                     const void* control_room);
+extern "C" const float* hirari_input_blocks_take_talkback(const void* blocks, uint32_t offset,
+                                                          uint32_t frames);
+extern "C" void hirari_input_blocks_end_talkback(void* blocks);
+
 struct HirariScheduledMidiNote {
     uint32_t track_id;
     uint8_t pitch;
@@ -1214,15 +1286,6 @@ extern "C" void* hirari_native_pdc_create();
 extern "C" void hirari_native_pdc_destroy(void* state);
 extern "C" bool hirari_native_pdc_bind_control_thread(const void* state);
 extern "C" void hirari_native_pdc_reset_for_project(const void* state);
-struct HirariPdcTrackConfig {
-    uint32_t id;
-    uint32_t latencySamples;
-};
-// Rebuilds the PDC graph from the published routing engine. Fills
-// trackOffsets with one entry per config, in input order.
-extern "C" size_t hirari_native_pdc_sync_graph(
-    const void* pdc, const void* routing, const HirariPdcTrackConfig* tracks,
-    size_t trackCount, uint32_t* trackOffsets);
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);

@@ -3,16 +3,28 @@ public:
     static constexpr uint32_t kMaxTrackMap = 2048;
 
 private:
-    // Audio engine state management (Linus-Grade: Cache-aligned cluster)
-    struct alignas(64) AudioThreadState {
-        Track* activeTracks[kMaxTracks];
-        Track* trackMap[kMaxTrackMap]; // INDUSTRIAL: O(1) Track Lookup by ID
-        uint32_t trackCount = 0;
-        uint64_t audioConfigGeneration = 0;
+    // The realtime window onto the Rust-owned track table (engine_track_table.rs).
+    // Publication fills the buffer the callback is not reading and only then
+    // flips the index, so these pointers are traversed without a lock.
+    struct TrackView {
+        Track* const* activeTracks;  // O(1) by slot, in graph order
+        Track* const* trackMap;      // O(1) Track lookup by id
+        uint32_t trackCount;
+        uint64_t audioConfigGeneration;
     };
 
-    AudioThreadState m_audioStates[2];
-    std::atomic<uint32_t> m_activeStateIdx{0};
+    static TrackView trackView(void* table) noexcept {
+        HirariTrackSnapshot published{};
+        hirari_engine_track_snapshot(table, &published);
+        return { reinterpret_cast<Track* const*>(published.active_tracks),
+                 reinterpret_cast<Track* const*>(published.track_map),
+                 published.track_count, published.audio_config_generation };
+    }
+
+    // Track identity plus the copy/free of the heap `std::shared_ptr<Track>`
+    // handles the table owns. Defined with the rest of the table plumbing.
+    static const HirariEngineTrackOps* trackOps() noexcept;
+    void* m_trackTable = hirari_engine_track_table_create(trackOps());
 
     std::atomic<bool> m_isPlaying{false};
     // Incremented around the complete direct callback. Control-side object
@@ -21,18 +33,13 @@ private:
     std::atomic<uint32_t> m_audioCallbacksInFlight{0};
     std::atomic<bool> m_testTone{false};
     static constexpr uint32_t kNoInputMonitorTrack = std::numeric_limits<uint32_t>::max();
-    std::atomic<uint32_t> m_inputMonitorTrackId{kNoInputMonitorTrack};
-    std::atomic<uint64_t> m_inputMonitorChannelPair{(uint64_t{1} << 32)};
-    std::array<float, kMaxAudioBlockSize> m_inputMonitorLeft{};
-    std::array<float, kMaxAudioBlockSize> m_inputMonitorRight{};
-    std::atomic<uint32_t> m_inputMonitorBlockFrames{0};
-    std::atomic<bool> m_inputMonitorBlockPublished{false};
+    // The monitored input pair, the talkback source and their publication
+    // ordering live in Rust (engine_input_block.rs); only the per-chunk read
+    // offsets are callback-local state the engine itself decides.
+    void* m_inputBlocks = hirari_input_blocks_create(kMaxAudioBlockSize);
     uint32_t m_inputMonitorBlockOffset = 0;
-    std::array<float, kMaxAudioBlockSize> m_talkbackInput{};
     std::array<float, kMaxAudioBlockSize> m_metronomeClickLeft{};
     std::array<float, kMaxAudioBlockSize> m_metronomeClickRight{};
-    std::atomic<uint32_t> m_talkbackInputFrames{0};
-    std::atomic<bool> m_talkbackInputPublished{false};
     uint32_t m_talkbackInputOffset = 0;
     std::atomic<uint64_t> m_playhead{0};
     // Sticky diagnostic: a saturated sample position or invalid callback

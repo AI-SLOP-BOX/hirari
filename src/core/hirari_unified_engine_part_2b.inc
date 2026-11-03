@@ -10,9 +10,7 @@ bool HirariUnifiedEngine::set_offline_render_target(uint32_t tid) {
     // cannot silently render an unrelated output.
     if (tid != 0) {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const bool exists = std::any_of(m_tracks.begin(), m_tracks.end(),
-            [tid](const auto& track) { return track && track->getId() == tid; });
-        if (!exists) return false;
+        if (!findTrackLocked(tid)) return false;
     }
     m_offlineTargetId.store(tid, std::memory_order_release);
     m_offlineTargetActive.store(true, std::memory_order_release);
@@ -58,7 +56,7 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
 
         // Deferred Track objects are intentionally retained until shutdown.
         // prepareToPlay may race with a device callback that still has the
-        // previous AudioThreadState, so transport state is not a reclamation
+        // previous published snapshot, so transport state is not a reclamation
         // proof.
         m_sampleRate.store(sr);
         m_audioConfigGeneration.fetch_add(1, std::memory_order_acq_rel);
@@ -71,7 +69,7 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         hirari_master_limiter_prepare(m_masterLimiter, sr);
         hirari_master_meter_prepare(m_meterCore, sr);
 
-        for (auto& t : m_tracks) {
+        for (Track* t : lockedTracks()) {
             // A frozen buffer is sample-rate dependent. Never continue using
             // a 44.1 kHz snapshot after a 48/96 kHz device transition; that
             // would silently change timing and invalidate the persisted
@@ -98,39 +96,11 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
 
 void HirariUnifiedEngine::syncStructuralChanges() {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
-    std::array<bool, BusTrack::kMaxBuses> activeBuses{};
-    for (const auto& track : m_tracks) {
-        auto* busTrack = track && track->getType() == Track::Type::Bus
-            ? dynamic_cast<BusTrack*>(track.get()) : nullptr;
-        if (busTrack && busTrack->busId() < activeBuses.size()) {
-            activeBuses[busTrack->busId()] = true;
-        }
-    }
-    hirari_bus_system_reconcile(
-        m_busSystem, activeBuses.data(), static_cast<uint32_t>(activeBuses.size()));
-    void* routing = m_routingEngine;
-    hirari_routing_engine_build(routing);
-    
-    publishTrackSnapshotLocked(true);
-
-    // Keep PDC on the same published routing graph as audio processing. Rust
-    // owns the full rebuild: topology, send routes, solve and offset publish.
-    // Track applies the resulting bounded offset with a preallocated delay
-    // line at block boundaries.
-    std::vector<HirariPdcTrackConfig> pdcTracks;
-    pdcTracks.reserve(m_tracks.size());
-    for (const auto& track : m_tracks) {
-        if (track && track->getId() < kPdcMaxTracks)
-            pdcTracks.push_back({track->getId(), track->getTotalLatencySamples()});
-    }
-    std::vector<uint32_t> pdcOffsets(pdcTracks.size());
-    hirari_native_pdc_sync_graph(m_pdcState, routing, pdcTracks.data(),
-                                 pdcTracks.size(), pdcOffsets.data());
-    for (size_t i = 0; i < pdcTracks.size(); ++i) {
-        if (Track* track = findTrackLocked(pdcTracks[i].id))
-            track->setPdcCompensationSamples(pdcOffsets[i]);
-    }
-
+    // One ordered control walk, owned by Rust: the bus slots the graph occupies,
+    // the routing rebuild, the snapshot publication and the solved PDC offsets.
+    // The engine supplies the per-track scalars and applies the result.
+    hirari_engine_sync_structure(m_trackTable, m_busSystem, m_routingEngine, m_pdcState,
+                                 m_audioConfigGeneration.load(std::memory_order_acquire));
     hirari_log_post(0, 0x1, "Structural Sync: Topology Rebuilt.");
 }
 
@@ -148,35 +118,52 @@ bool HirariUnifiedEngine::add_region(uint32_t tid, std::string_view path, double
     return result == 0;
 }
 
-
+// The Rust table owns the graph, so it only needs these reads from C++: the id
+// behind a Track*, the copy/free of the heap shared_ptr it stores, and the four
+// scalars its structural walk solves over.
+const HirariEngineTrackOps* HirariUnifiedEngine::trackOps() noexcept {
+    static const HirariEngineTrackOps ops = {
+        [](void* track) -> uint32_t { return static_cast<const Track*>(track)->getId(); },
+        [](void* owner) -> void* {
+            return new std::shared_ptr<Track>(
+                *static_cast<std::shared_ptr<Track>*>(owner));
+        },
+        [](void* owner) { delete static_cast<std::shared_ptr<Track>*>(owner); },
+        [](void* track) -> uint32_t {
+            return static_cast<uint32_t>(static_cast<const Track*>(track)->getType());
+        },
+        [](void* track) -> uint32_t {
+            const auto* bus = dynamic_cast<const BusTrack*>(static_cast<const Track*>(track));
+            return bus ? bus->busId() : UINT32_MAX;
+        },
+        [](void* track) -> uint32_t {
+            return static_cast<const Track*>(track)->getTotalLatencySamples();
+        },
+        [](void* track, uint32_t samples) {
+            static_cast<Track*>(track)->setPdcCompensationSamples(samples);
+        },
+    };
+    return &ops;
+}
 
 void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) {
-    uint32_t nextIdx = 1 - m_activeStateIdx.load(std::memory_order_acquire);
-    auto& state = m_audioStates[nextIdx];
-    if (stampAudioGeneration)
-        state.audioConfigGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
-    state.trackCount = 0;
-    std::memset(state.trackMap, 0, sizeof(state.trackMap));
-    for (const auto& track : m_tracks) {
-        if (state.trackCount >= kMaxTracks) break;
-        state.activeTracks[state.trackCount++] = track.get();
-        if (track->getId() < kMaxTrackMap)
-            state.trackMap[track->getId()] = track.get();
-    }
-    m_activeStateIdx.store(nextIdx, std::memory_order_release);
+    // Rust fills the buffer the callback is not reading, then flips the index.
+    hirari_engine_track_publish(
+        m_trackTable, m_audioConfigGeneration.load(std::memory_order_acquire),
+        stampAudioGeneration);
 }
 
 std::shared_ptr<Track> HirariUnifiedEngine::detachTrackLocked(uint32_t tid, bool stampGeneration) {
-    auto it = std::find_if(m_tracks.begin(), m_tracks.end(),
-                           [tid](const auto& track) { return track->getId() == tid; });
-    if (it == m_tracks.end()) return nullptr;
-    auto detached = *it;
-    hirari_region_store_forget_waveforms(this, detached.get());
-    m_deferredDestructionTracks.push_back(detached);
-    m_tracks.erase(it);
+    Track* detached = findTrackLocked(tid);
+    if (!detached) return nullptr;
+    hirari_region_store_forget_waveforms(this, detached);
+    // The table keeps its own reference in the deferred list, so the caller gets
+    // a second one while a device callback may still hold the raw pointer.
+    auto owned = adoptTrackHandle(hirari_engine_track_detach(m_trackTable, tid));
+    if (!owned) return nullptr;
     mark_project_layout_changed();
     publishTrackSnapshotLocked(stampGeneration);
-    return detached;
+    return owned;
 }
 
 std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::string& name,
@@ -191,10 +178,11 @@ std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::st
 
 void HirariUnifiedEngine::insertTrackLocked(const std::shared_ptr<Track>& track, size_t index,
                                             bool stampGeneration) {
-    const bool alreadyPresent = std::any_of(m_tracks.begin(), m_tracks.end(),
-        [&track](const auto& current) { return current->getId() == track->getId(); });
-    if (alreadyPresent) return;
-    m_tracks.insert(m_tracks.begin() + std::min(index, m_tracks.size()), track);
+    // Restoring an id that is already in the graph is a no-op, as it was when the
+    // vector lived here; the table clamps an out-of-range index to the end.
+    if (!track || findTrackLocked(track->getId())) return;
+    Track* raw = track.get();
+    if (!hirari_engine_track_insert(m_trackTable, index, newTrackHandle(track), raw)) return;
     mark_project_layout_changed();
     publishTrackSnapshotLocked(stampGeneration);
 }
@@ -225,8 +213,11 @@ void HirariUnifiedEngine::installTrackEditHost() {
             auto created = engine->makeTrack(id, trackName, static_cast<Track::Type>(type));
             if (engine->m_context)
                 created->prepareToPlay(engine->m_context->sampleRate, engine->m_context->blockSize);
-            auto* handle = new Handle{created, engine->m_tracks.size(), id};
-            engine->m_tracks.push_back(std::move(created));
+            Track* raw = created.get();
+            const size_t appendIndex = engine->lockedTracks().size();
+            (void)hirari_engine_track_insert(engine->m_trackTable, appendIndex,
+                                           newTrackHandle(std::move(created)), raw);
+            auto* handle = new Handle{engine->findTrackSharedLocked(id), appendIndex, id};
             engine->mark_project_layout_changed();
             engine->publishTrackSnapshotLocked(true);
             *outIndex = handle->index;
@@ -248,11 +239,9 @@ void HirariUnifiedEngine::installTrackEditHost() {
             std::vector<ProjectPluginAutomationLane> pluginAutomation;
             {
                 std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                auto source = std::find_if(engine->m_tracks.begin(), engine->m_tracks.end(),
-                                           [tid](const auto& track) { return track->getId() == tid; });
-                if (source == engine->m_tracks.end()) return nullptr;
-                const auto& original = *source;
-                if (hirari_region_store_count(original.get()) != regionIdCount) return nullptr;
+                Track* original = engine->findTrackLocked(tid);
+                if (!original) return nullptr;
+                if (hirari_region_store_count(original) != regionIdCount) return nullptr;
                 pluginTypes = original->getPluginTypes();
                 pluginStates = original->getPluginStates();
                 volumeAutomation = original->getVolumeAutomationPoints();
@@ -296,10 +285,11 @@ void HirariUnifiedEngine::installTrackEditHost() {
                     }
                 }
                 if (!pluginAutomation.empty()) copy->setPluginAutomation(pluginAutomation);
-                if (!hirari_region_store_copy_regions(original.get(), copy.get(), regionIds, regionIdCount))
+                if (!hirari_region_store_copy_regions(original, copy.get(), regionIds, regionIdCount))
                     return nullptr;
-                insertIndex = engine->m_tracks.size();
-                engine->m_tracks.push_back(copy);
+                insertIndex = engine->lockedTracks().size();
+                (void)hirari_engine_track_insert(engine->m_trackTable, insertIndex,
+                                               newTrackHandle(copy), copy.get());
                 engine->mark_project_layout_changed();
                 engine->publishTrackSnapshotLocked(false);
             }
@@ -319,10 +309,9 @@ void HirariUnifiedEngine::installTrackEditHost() {
             size_t originalIndex = 0;
             {
                 std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                auto it = std::find_if(engine->m_tracks.begin(), engine->m_tracks.end(),
-                                       [tid](const auto& track) { return track->getId() == tid; });
-                if (it == engine->m_tracks.end()) return nullptr;
-                originalIndex = static_cast<size_t>(it - engine->m_tracks.begin());
+                const size_t foundIndex = hirari_engine_track_index_of(engine->m_trackTable, tid);
+                if (foundIndex == std::numeric_limits<size_t>::max()) return nullptr;
+                originalIndex = foundIndex;
                 hirari_sidechain_engine_remove_track(engine->m_sidechainEngine, tid);
                 sidechainRouteBackup =
                     hirari_sidechain_routes_capture_track(engine->m_sidechainRoutes, tid);

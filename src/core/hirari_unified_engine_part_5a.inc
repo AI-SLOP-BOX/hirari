@@ -89,7 +89,7 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (engine->m_masterLimiter) hirari_master_limiter_reset(engine->m_masterLimiter);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            for (const auto& track : engine->m_tracks) {
+            for (Track* track : engine->lockedTracks()) {
                 if (track) track->resetForOfflineRender();
             }
         },
@@ -98,13 +98,13 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
             std::vector<HirariBounceRegionSpan> regionSpans;
             {
                 std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                for (const auto& track : engine->m_tracks) {
+                for (Track* track : engine->lockedTracks()) {
                     if (!track) continue;
-                    const size_t regionCount = hirari_region_store_count(track.get());
+                    const size_t regionCount = hirari_region_store_count(track);
                     for (size_t index = 0; index < regionCount; ++index) {
                         uint64_t start = 0, length = 0;
                         uint32_t loopCount = 0;
-                        if (hirari_region_store_span_at(track.get(), index, &start,
+                        if (hirari_region_store_span_at(track, index, &start,
                                                         &length, &loopCount))
                             regionSpans.push_back({start, length, loopCount});
                     }

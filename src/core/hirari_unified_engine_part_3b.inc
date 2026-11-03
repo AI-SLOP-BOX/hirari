@@ -139,23 +139,17 @@ void HirariUnifiedEngine::installControlEditHost() {
             if (!host) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!enabled) {
-                if (engine->m_inputMonitorTrackId.load(std::memory_order_acquire) == trackId) {
-                    engine->m_inputMonitorTrackId.store(kNoInputMonitorTrack,
-                                                       std::memory_order_release);
-                }
+                hirari_input_blocks_clear_focus(engine->m_inputBlocks, trackId);
                 return true;
             }
             {
                 std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
                 if (!engine->findTrackLocked(trackId)) return false;
             }
-            // One physical input is monitored at a time. Enabling another track
-            // atomically moves the monitor focus without touching record-arm state.
-            const uint64_t channelPair =
-                (static_cast<uint64_t>(rightChannel) << 32) | leftChannel;
-            engine->m_inputMonitorChannelPair.store(channelPair, std::memory_order_release);
-            engine->m_inputMonitorTrackId.store(trackId, std::memory_order_release);
-            return true;
+            // One physical input is monitored at a time, so enabling another
+            // track moves the focus without touching record-arm state.
+            return hirari_input_blocks_set_focus(engine->m_inputBlocks, trackId, leftChannel,
+                                                rightChannel);
         },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_macroControl; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_midiLearnState; },

@@ -41,8 +41,8 @@ void HirariUnifiedEngine::set_playing(bool p) {
         // immutable region generations on the control thread only.
         waitForAudioCallbacks();
         std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (auto& track : m_tracks) {
-            hirari_region_store_trim_retired(track.get());
+        for (Track* track : lockedTracks()) {
+            hirari_region_store_trim_retired(track);
         }
     }
 }
@@ -105,8 +105,7 @@ void HirariUnifiedEngine::new_project() {
     waitForAudioCallbacks();
     // Input monitoring is a live device assignment, not project data. Clear
     // it before reusing any track IDs in the new project.
-    m_inputMonitorTrackId.store(kNoInputMonitorTrack, std::memory_order_release);
-    m_inputMonitorBlockPublished.store(false, std::memory_order_release);
+    hirari_input_blocks_reset(m_inputBlocks);
     hirari_engine_command_ring_clear(m_engineRings);
     hirari_region_jobs_clear(this);
     set_test_tone(false);
@@ -129,11 +128,8 @@ void HirariUnifiedEngine::new_project() {
     std::lock_guard<std::mutex> lock(m_tracksMutex);
     hirari_sidechain_routes_clear(m_sidechainRoutes);
     // Keep old Track objects alive while a CoreAudio callback may still hold
-    // the previous active-state pointers; destruction is deferred safely.
-    m_deferredDestructionTracks.insert(m_deferredDestructionTracks.end(),
-                                       std::make_move_iterator(m_tracks.begin()),
-                                       std::make_move_iterator(m_tracks.end()));
-    m_tracks.clear();
+    // the previous published pointers; the table destroys them at shutdown.
+    hirari_engine_track_defer_all(m_trackTable);
     mark_project_layout_changed();
     hirari_ids_reset_project(this);
     // Start with one audio track so a new project is immediately usable for
@@ -143,7 +139,9 @@ void HirariUnifiedEngine::new_project() {
     if (m_context) {
         bootstrapTrack->prepareToPlay(m_context->sampleRate, m_context->blockSize);
     }
-    m_tracks.push_back(std::move(bootstrapTrack));
+    Track* bootstrap = bootstrapTrack.get();
+    (void)hirari_engine_track_insert(m_trackTable, 0, newTrackHandle(std::move(bootstrapTrack)),
+                                       bootstrap);
     mark_project_layout_changed();
     publishTrackSnapshotLocked(true);
 }

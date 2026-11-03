@@ -44,27 +44,26 @@
         }
         
         // Commit point: all validation and hydration above completed while
-        // the old project remained published.  Only now replace the graph,
-        // reset project-scoped managers, and publish fresh ID allocators.
-        for (const auto& track : m_tracks) {
-            hirari_sidechain_engine_remove_track(m_sidechainEngine, track->getId());
+        // the old project remained published.  The ordered teardown of the
+        // outgoing graph and of every project-scoped manager is Rust's decision
+        // (engine_track_table.rs); only the replacement graph is inserted here.
+        hirari_engine_reset_project(m_trackTable, m_engineRings, m_pdcState,
+                                    m_sidechainEngine, m_routingEngine, m_busSystem,
+                                    m_controlRoomState, m_sidechainRoutes);
+        for (auto& track : loadedTracks) {
+            Track* raw = track.get();
+            (void)hirari_engine_track_insert(m_trackTable, std::numeric_limits<size_t>::max(),
+                                   newTrackHandle(std::move(track)), raw);
         }
-        hirari_engine_command_ring_clear(m_engineRings);
-        hirari_native_pdc_reset_for_project(m_pdcState);
-        hirari_sidechain_engine_reset(m_sidechainEngine);
-        hirari_routing_engine_reset(m_routingEngine);
-        hirari_bus_system_reset(m_busSystem);
-        hirari_control_room_reset(m_controlRoomState);
-        hirari_sidechain_routes_clear(m_sidechainRoutes);
-        m_tracks = std::move(loadedTracks);
+        loadedTracks.clear();
         mark_project_layout_changed();
         for (const auto& route : state.routes) {
             hirari_routing_engine_add_connection(
                 m_routingEngine, route.sourceId, route.destinationId, route.gain,
                 route.send, route.preFader);
         }
-        for (const auto& track : m_tracks) {
-            if (auto* busTrack = dynamic_cast<BusTrack*>(track.get())) {
+        for (Track* track : lockedTracks()) {
+            if (auto* busTrack = dynamic_cast<BusTrack*>(track)) {
                 const uint32_t busId = busTrack->busId();
                 busTrack->resolveBus(hirari_bus_system_register(m_busSystem, busId)
                     ? hirari_bus_system_bus(m_busSystem, busId) : nullptr);

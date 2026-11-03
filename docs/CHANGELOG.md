@@ -74,6 +74,20 @@ production support.
 
 ### Changed
 
+- The engine's live document graph moved to Rust. `HirariUnifiedEngine` no
+  longer owns a `std::vector<std::shared_ptr<Track>>`, its deferred-destruction
+  list or the double-buffered snapshot the realtime callback traverses:
+  `hirari-core-bridge/src/engine_track_table.rs` holds the order, resolves ids,
+  retires tracks and publishes generations, and the engine only borrows handles
+  through it. The ordered control walks went with it -- bus reconcile, routing
+  rebuild, snapshot publication, the delay-compensation solve and the project
+  load commit reset are now Rust's decision, and `HirariEngineTrackOps` carries
+  the few per-track scalars they read. The monitored input pair and the Control
+  Room talkback source moved the same way to
+  `hirari-core-bridge/src/engine_input_block.rs`, which owns their validation,
+  bounded copies and publication ordering, leaving only the per-chunk read
+  offsets in the callback. `Track` itself stays C++ because its processing is
+  virtual; behaviour and reported values are unchanged.
 - Driver status, telemetry and the device catalog are read from Rust. Each value
   the UI polled travelled three hops -- `mac_audio_driver.rs` behind a C ABI
   entry point, a null-checking `MacAudioDriverHost` method, then an `AudioEngine`

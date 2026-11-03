@@ -6,30 +6,8 @@
 // own: the track registry, the handle lifetimes for imported audio and the
 // pitch-analysis gate on the Track itself.
 
-// Every host callback resolves ids through the same traversal while holding
-// m_tracksMutex; keeping it here means the lookup cannot drift between files.
-Track* HirariUnifiedEngine::findTrackLocked(uint32_t tid) {
-    for (auto& track : m_tracks) {
-        if (track && track->getId() == tid) return track.get();
-    }
-    return nullptr;
-}
-
-std::shared_ptr<Track> HirariUnifiedEngine::findTrackSharedLocked(uint32_t tid) {
-    for (auto& track : m_tracks) {
-        if (track && track->getId() == tid) return track;
-    }
-    return nullptr;
-}
-
-Track* HirariUnifiedEngine::findPublishedTrack(uint32_t tid) const {
-    const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
-    for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-        if (state.activeTracks[i] && state.activeTracks[i]->getId() == tid)
-            return state.activeTracks[i];
-    }
-    return nullptr;
-}
+// Id resolution and the published snapshot both read the Rust track table now,
+// so they live with the table accessors in the engine declaration.
 
 size_t HirariUnifiedEngine::regionHostListTracks(void* host, uint32_t* out,
                                                  size_t capacity) {
@@ -37,7 +15,7 @@ size_t HirariUnifiedEngine::regionHostListTracks(void* host, uint32_t* out,
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     size_t count = 0;
-    for (const auto& track : engine->m_tracks) {
+    for (Track* track : engine->lockedTracks()) {
         if (!track) continue;
         if (out && count < capacity) out[count] = track->getId();
         ++count;

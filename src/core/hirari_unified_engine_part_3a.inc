@@ -22,7 +22,8 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
         [](void* host, void* context, HirariPluginSandboxVisitorFn visit) -> bool {
             if (!host) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            for (const auto& track : engine->get_tracks_snapshot())
+            const std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (Track* track : engine->lockedTracks())
                 for (const auto& status : track->getSandboxStatuses())
                     if (!visit(context, track->getId(), &status)) return true;
             return true;
@@ -30,15 +31,14 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
         [](void* host, uint32_t trackId, bool autoRestart, void* context,
            HirariPluginSandboxVisitorFn visit) -> uint32_t {
             if (!host) return 0;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            for (const auto& track : engine->get_tracks_snapshot()) {
-                if (!track || track->getId() != trackId) continue;
-                const uint32_t recovered = track->maintainSandboxedPlugins(autoRestart);
-                for (const auto& status : track->getSandboxStatuses())
-                    if (!visit(context, trackId, &status)) break;
-                return recovered;
-            }
-            return 0;
+            // The restart can block on a worker process, so the Track is held
+            // by handle and the topology lock is already released around it.
+            const auto track = static_cast<HirariUnifiedEngine*>(host)->takeTrackHandle(trackId);
+            if (!track) return 0;
+            const uint32_t recovered = track->maintainSandboxedPlugins(autoRestart);
+            for (const auto& status : track->getSandboxStatuses())
+                if (!visit(context, trackId, &status)) break;
+            return recovered;
         },
         [](void* host, uint32_t type, uint32_t trackId, float value,
            const uint8_t* label, size_t labelLength) {
@@ -52,7 +52,8 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
         [](void* host, void* context, HirariPluginSandboxSlotVisitorFn visit) -> bool {
             if (!host) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            for (const auto& track : engine->get_tracks_snapshot())
+            const std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
+            for (Track* track : engine->lockedTracks())
                 for (size_t slot = 0; slot < track->sandboxSlotCount(); ++slot) {
                     const auto path = track->sandboxSlotPath(slot);
                     if (!visit(context, track->getId(), static_cast<uint32_t>(slot),
@@ -88,7 +89,7 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
         [](void* host, uint32_t trackId, uint8_t* code, uint8_t* text,
            size_t capacity) -> size_t {
             if (!host) return kSandboxQueryFailed;
-            return static_cast<HirariUnifiedEngine*>(host)->querySnapshotTrack(
+            return static_cast<HirariUnifiedEngine*>(host)->queryLockedTrack(
                 trackId, kSandboxQueryFailed, [&](const Track& track) -> size_t {
                     if (code) *code = track.lastSandboxFailure();
                     return copySandboxText(track.lastSandboxFailureText(), text, capacity);
@@ -97,7 +98,7 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
         [](void* host, uint32_t trackId, uint32_t slot, uint8_t* code, uint8_t* text,
            size_t capacity) -> size_t {
             if (!host) return kSandboxQueryFailed;
-            return static_cast<HirariUnifiedEngine*>(host)->querySnapshotTrack(
+            return static_cast<HirariUnifiedEngine*>(host)->queryLockedTrack(
                 trackId, kSandboxQueryFailed, [&](const Track& track) -> size_t {
                     if (code) *code = track.sandboxedPluginStateError(slot);
                     return copySandboxText(track.sandboxedPluginStateErrorText(slot),
@@ -120,17 +121,15 @@ bool HirariUnifiedEngine::restart_sandboxed_plugin(uint32_t trackId, uint32_t sa
 
 uint32_t HirariUnifiedEngine::take_watchdog_trips() {
     uint32_t trips = 0;
-    for (const auto& track : get_tracks_snapshot()) {
-        if (track) trips += track->takeWatchdogTrips();
-    }
+    const std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (Track* track : lockedTracks()) trips += track->takeWatchdogTrips();
     return trips;
 }
 
 uint64_t HirariUnifiedEngine::non_finite_plugin_samples() const {
     uint64_t count = 0;
-    for (const auto& track : get_tracks_snapshot()) {
-        if (track) count += track->nonFiniteSampleCount();
-    }
+    const std::lock_guard<std::mutex> lock(m_tracksMutex);
+    for (Track* track : lockedTracks()) count += track->nonFiniteSampleCount();
     return count;
 }
 

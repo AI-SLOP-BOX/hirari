@@ -1,9 +1,3 @@
-extern "C" void hirari_audio_publish_monitor_block(
-    const float* const*, uint32_t, uint32_t, const void*, const void*, void*, void*,
-    uint32_t, float*, float*);
-extern "C" void hirari_audio_publish_talkback_block(
-    const float* const*, uint32_t, uint32_t, const void*, void*, void*, float*);
-
 // A callback-safe thread identity.  std::hash<std::thread::id> may trigger
 // runtime machinery on some standard libraries; this monotonically assigned
 // token is allocation-free and is shared by realtime and offline callbacks.
@@ -104,20 +98,14 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
 void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
                                                     uint32_t numChannels,
                                                     uint32_t numSamples) noexcept {
-    hirari_audio_publish_monitor_block(
-        inputs, numChannels, numSamples, &m_inputMonitorTrackId,
-        &m_inputMonitorChannelPair, &m_inputMonitorBlockPublished,
-        &m_inputMonitorBlockFrames, kNoInputMonitorTrack,
-        m_inputMonitorLeft.data(), m_inputMonitorRight.data());
+    hirari_input_blocks_publish_monitor(m_inputBlocks, inputs, numChannels, numSamples);
 }
 
 void HirariUnifiedEngine::publish_talkback_input_block(const float* const* inputs,
                                                        uint32_t numChannels,
                                                        uint32_t numSamples) noexcept {
-    hirari_audio_publish_talkback_block(
-        inputs, numChannels, numSamples, m_controlRoomState,
-        &m_talkbackInputPublished, &m_talkbackInputFrames,
-        m_talkbackInput.data());
+    hirari_input_blocks_publish_talkback(m_inputBlocks, inputs, numChannels, numSamples,
+                                         m_controlRoomState);
 }
 
 void HirariUnifiedEngine::apply_config(const EngineConfig& cfg) {
@@ -143,12 +131,13 @@ void HirariUnifiedEngine::shutdown() {
     if (wasShutdown) return;
 
     std::lock_guard<std::mutex> lock(m_tracksMutex);
-    m_tracks.clear();
+    // Destroying the table releases every track handle, live and deferred, so a
+    // callback that has already been joined cannot be holding a dangling Track*.
+    hirari_engine_track_table_destroy(m_trackTable);
+    m_trackTable = nullptr;
+    hirari_input_blocks_destroy(m_inputBlocks);
+    m_inputBlocks = nullptr;
     mark_project_layout_changed();
-    m_deferredDestructionTracks.clear();
-    for(int i=0; i<2; ++i) {
-        m_audioStates[i].trackCount = 0;
-    }
 }
 
 HirariUnifiedEngine::HirariUnifiedEngine()
@@ -164,7 +153,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     m_context->blockSize = 512;
     m_context->bpm = 120.0;
     m_context->audioConfigGeneration = 1;
-    for (auto& state : m_audioStates) state.audioConfigGeneration = 1;
+    // Both published buffers start at generation one, matching the context.
     // All PDC graph edits originate from the engine/control owner. Binding
     // this instance prevents an audio callback from accidentally taking the
     // configuration mutex through a mutator.
@@ -225,7 +214,7 @@ HirariUnifiedEngine::HirariUnifiedEngine()
             m_playhead.store(cycleStart, std::memory_order_relaxed);
         }
         const uint64_t callbackGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
-        const auto& state = m_audioStates[m_activeStateIdx.load(std::memory_order_acquire)];
+        const auto state = trackView(m_trackTable);
         if (state.audioConfigGeneration != callbackGeneration && !hirari_offline_render_thread) {
             // Structural/configuration publication is double-buffered.  Do
             // not process a state prepared for a different device format;
@@ -422,25 +411,17 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         }
 
         // Feed the live driver input into the selected monitor track before
-        // graph processing. The fixed planar buffers were copied by the
-        // driver callback, so this path performs no allocation or locking.
-        if (m_inputMonitorBlockPublished.load(std::memory_order_acquire)) {
-            const uint32_t monitorTrackId =
-                m_inputMonitorTrackId.load(std::memory_order_acquire);
-            const uint32_t publishedFrames =
-                m_inputMonitorBlockFrames.load(std::memory_order_acquire);
-            const uint32_t inputOffset = m_inputMonitorBlockOffset;
-            if (monitorTrackId != kNoInputMonitorTrack && inputOffset < publishedFrames &&
-                publishedFrames - inputOffset >= sz) {
-                float* inputChannels[2] = {
-                    m_inputMonitorLeft.data() + inputOffset,
-                    m_inputMonitorRight.data() + inputOffset};
-                AudioBuffer input;
-                input.wrapChannels(inputChannels, 2, sz);
-                if (Track* monitorTrack = findTrack(monitorTrackId);
-                    monitorTrack && monitorTrack->canProcess(sz)) {
-                    monitorTrack->addInput(input, sz);
-                }
+        // graph processing. The staged planes were copied by the driver
+        // callback, so this path performs no allocation or locking.
+        const auto monitor = hirari_input_blocks_take_monitor(m_inputBlocks,
+                                                             m_inputMonitorBlockOffset, sz);
+        if (monitor.left) {
+            float* inputChannels[2] = { monitor.left, monitor.right };
+            AudioBuffer input;
+            input.wrapChannels(inputChannels, 2, sz);
+            if (Track* monitorTrack = findTrack(monitor.track_id);
+                monitorTrack && monitorTrack->canProcess(sz)) {
+                monitorTrack->addInput(input, sz);
             }
         }
 
