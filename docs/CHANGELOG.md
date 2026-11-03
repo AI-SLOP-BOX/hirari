@@ -37,6 +37,13 @@ production support.
 
 ### Fixed
 
+- Loading a plugin in the isolated worker no longer fails as a handshake
+  timeout on macOS. The worker sized the inherited shared-memory descriptor
+  with `lseek(fd, 0, SEEK_END)`, and macOS rejects that call on a `shm_open`
+  object, so a healthy descriptor was judged stale and the named fallback —
+  which repeated the same failing check — was rejected too. The mapping call
+  itself is now the size check, and the named object is opened only when
+  mapping the inherited descriptor fails.
 - Starting playback on a Mac whose default output device has no capture side
   (for example the built-in speakers) now composes a private aggregate device
   with the default input instead of rejecting the device. The aggregate stays
@@ -67,6 +74,18 @@ production support.
 
 ### Changed
 
+- The sandbox's CLAP test plugin is a Rust crate. `tests/fixtures/minimal_gain_clap.cpp`
+  is replaced by the workspace member `tests/fixtures/minimal-gain-clap`, a cdylib
+  that exports `clap_entry` and mirrors the same CLAP 1.x structures the worker
+  loads, so the ABI it exercises is guarded by compile-time layout asserts instead
+  of by the engine headers it used to include; `scripts/build_clap_fixture.sh`
+  builds it with cargo instead of invoking a C++ compiler. Porting it is what
+  makes the ignored worker end-to-end suite loadable again — the C++ fixture
+  stopped compiling once the duplicate CLAP ABI header it included was deleted,
+  so nothing had crossed the host↔worker boundary since — and running it for
+  real is what surfaced the descriptor-sizing bug fixed above. The smoke script
+  now also gives the test thread the stack the native sandbox call chain needs,
+  which the suite could not demonstrate while it could not load a plugin.
 - The plugin worker is Rust all the way down. Its launch translation unit was a
   C++ `main` that forwarded to the Rust worker and republished the mailbox's
   field addresses as an opaque 18-pointer table; the executable is now built from

@@ -2,8 +2,8 @@
 //!
 //! Plugin formats remain behind the narrow backend callbacks, while Rust owns
 //! mailbox sequencing, control commands, heartbeats, validation, and fault
-//! injection. The shared prefix below is intentionally kept byte-for-byte in
-//! sync with `SharedAudioBlock` in the C++ worker protocol header.
+//! injection. The mailbox itself is the single layout in `mailbox`, which the
+//! engine-side host maps as the same shared object.
 
 use core::ffi::{c_char, c_void};
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
@@ -22,7 +22,6 @@ unsafe extern "C" {
     fn getrlimit(resource: i32, limit: *mut WorkerRLimit) -> i32;
     fn setrlimit(resource: i32, limit: *const WorkerRLimit) -> i32;
     fn close(fd: i32) -> i32;
-    fn lseek(fd: i32, offset: i64, whence: i32) -> i64;
     fn shm_open(name: *const c_char, flags: i32, mode: u32) -> i32;
     fn mmap(
         address: *mut c_void,
@@ -102,42 +101,34 @@ pub unsafe extern "C" fn hirari_plugin_worker_map_shared(
 ) -> *mut c_void {
     #[cfg(unix)]
     unsafe {
-        if !error_kind.is_null() {
-            *error_kind = 1;
-        }
-        let mut selected_fd = fd;
-        // The inherited descriptor remains owned by the launcher. A descriptor
-        // opened here as a fallback belongs to this mapping operation and must
-        // be closed on every exit path after mmap has consumed it.
+        // A shared-memory descriptor reports ESPIPE to lseek, so the mapping
+        // itself is the size check: mmap refuses an object smaller than the
+        // mailbox. The inherited descriptor stays owned by the launcher, while
+        // a descriptor opened here belongs to this operation and must close
+        // once mmap has consumed it.
+        let mut attempted = false;
         let mut fallback_fd = -1;
-        let valid = selected_fd >= 0 && lseek(selected_fd, 0, 2) >= minimum_size as i64;
-        if !valid && !name.is_null() {
+        let mut mapped = core::ptr::null_mut();
+        if fd >= 0 {
+            attempted = true;
+            mapped = mmap(core::ptr::null_mut(), minimum_size, 1 | 2, 1, fd, 0);
+        }
+        if mapped as isize == -1 && !name.is_null() {
             let named_fd = shm_open(name, 2, 0);
             if named_fd >= 0 {
-                selected_fd = named_fd;
+                attempted = true;
                 fallback_fd = named_fd;
+                mapped = mmap(core::ptr::null_mut(), minimum_size, 1 | 2, 1, named_fd, 0);
             }
         }
-        if selected_fd < 0 || lseek(selected_fd, 0, 2) < minimum_size as i64 {
-            if fallback_fd >= 0 {
-                close(fallback_fd);
-            }
-            return core::ptr::null_mut();
-        }
-        let mapped = mmap(
-            core::ptr::null_mut(),
-            minimum_size,
-            1 | 2,
-            1,
-            selected_fd,
-            0,
-        );
         if fallback_fd >= 0 {
             close(fallback_fd);
         }
         if mapped as isize == -1 {
             if !error_kind.is_null() {
-                *error_kind = 2;
+                // Distinguish "nothing to map" from "the object is too small"
+                // so the worker can report which handshake stage failed.
+                *error_kind = if attempted { 2 } else { 1 };
             }
             core::ptr::null_mut()
         } else {

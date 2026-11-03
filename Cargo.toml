@@ -3,7 +3,8 @@ members = [
     "hirari-ui",
     "hirari-core-bridge",
     "hirari-moufu-adapter",
-    "hirari-plugin-protocol"
+    "hirari-plugin-protocol",
+    "tests/fixtures/minimal-gain-clap"
 ]
 resolver = "2"
 

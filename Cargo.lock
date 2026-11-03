@@ -2409,6 +2409,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hirari-minimal-gain-clap"
+version = "0.1.0"
+
+[[package]]
 name = "hirari-moufu-adapter"
 version = "0.1.0"
 dependencies = [

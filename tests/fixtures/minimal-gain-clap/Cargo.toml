@@ -1,0 +1,9 @@
+[package]
+name = "hirari-minimal-gain-clap"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal gain CLAP plugin the sandbox worker end-to-end tests load."
+
+[lib]
+name = "minimal_gain_clap"
+crate-type = ["cdylib"]

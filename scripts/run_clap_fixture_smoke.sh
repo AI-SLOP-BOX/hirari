@@ -2,6 +2,11 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# The engine-side sandbox call chain needs more than the 2 MiB default a Rust
+# test thread gets, so the worker handshake overflows it before the helper is
+# even spawned. Honour a caller-provided value.
+export RUST_MIN_STACK="${RUST_MIN_STACK:-8388608}"
+
 "$ROOT_DIR/scripts/build_plugin_worker.sh"
 "$ROOT_DIR/scripts/build_clap_fixture.sh"
 
