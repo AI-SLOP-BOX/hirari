@@ -78,6 +78,17 @@ production support.
 
 ### Changed
 
+- The audio driver host is Rust now. `AudioEngine` holds an opaque handle from
+  `hirari_audio_driver_host_create` and answers lifecycle, reconfiguration,
+  device selection, status and error code through the flat C ABI, so the C++
+  `MacAudioDriverHost` forwarder and the non-Apple `UnavailableAudioDriver` are
+  both deleted. On macOS the host drives `mac_audio_driver` and owns the bounded
+  input queue — the poll scratch, the interleave and `discard_pending_input`
+  moved into Rust, which retires `poll_audio_input` and
+  `discard_pending_audio_input` from the cxx bridge; the offline path keeps the
+  same callback boundary by dispatching a supplied stereo block itself and never
+  claims a running device. Startup failure now logs the unified
+  `status=%s error=%d` sentence on every platform. C++ 6237 -> 5971 (-266).
 - Freezing a track is rendered and published in Rust now. The freeze host walks
   the track's own realtime runtime block by block through `hirari_track_freeze_render`,
   streams the finished stereo buffer to the Float32 artifact, reads one back on

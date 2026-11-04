@@ -26,6 +26,7 @@ pub mod audio_buffer_ops;
 pub mod audio_config_rules;
 pub mod audio_import_cache;
 pub mod audio_device_mode;
+pub mod audio_driver_host;
 pub mod audio_driver_view;
 pub mod async_snapshots;
 pub mod audio_graph;

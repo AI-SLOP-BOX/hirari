@@ -1,9 +1,7 @@
 #include "audio_engine.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
-#include <array>
 #include <cstdio>
 #include <iostream>
-#include <vector>
 #include "status_queue.hpp"
 
 namespace Hirari::Core::BridgeFFI {
@@ -11,43 +9,25 @@ namespace Hirari::Core::BridgeFFI {
 AudioEngine::AudioEngine() : AudioEngine(true) {}
 
 AudioEngine::AudioEngine(bool startDevice)
-        : m_engine(std::make_shared<::Hirari::Core::Engine::HirariUnifiedEngine>()) {
-        m_driver = std::make_unique<AudioDriverHost>();
-        // The optional JACK host and the offline fallback both use this same
-        // callback boundary. The fallback stores the callback and dispatches
-        // it from process_audio_block without claiming hardware availability.
-        m_driver->set_process_callback(&AudioEngine::process_driver_block, this);
-        if (!startDevice) return;
+        : m_engine(std::make_shared<::Hirari::Core::Engine::HirariUnifiedEngine>()),
+          m_driver(hirari_audio_driver_host_create(&AudioEngine::process_driver_block, this)) {
         // Control-plane clients (CLI, offline render, project inspection and
         // isolated tests) must be able to construct an engine without taking
         // ownership of the user's hardware device. The mode gate is Rust-owned
         // (audio_device_mode.rs) and normal interactive startup is unchanged.
-        if (hirari_audio_device_mode_offline()) return;
-#if defined(__APPLE__)
-        // Native integration tests may create multiple independent session
-        // engines in one process.  The legacy CoreAudio host callback still
-        // targets the process-wide compatibility engine, so do not attach a
-        // real device in that explicitly isolated mode.  The session graph
-        // remains fully usable for offline/plugin sandbox validation.
-        if (!hirari_native_test_isolation()) {
-            const bool started = m_driver->start();
-            if (!started) {
-                char message[192];
-                std::snprintf(message, sizeof(message),
-                              "Audio device startup failed: status=%s error=%d",
-                              m_driver->status(),
-                              static_cast<int>(m_driver->last_error_code()));
-                ::Hirari::Core::pushEngineStatus(
-                    ::Hirari::Core::StatusSeverity::Warning, message);
-            }
-        }
-#else
-        if (!m_driver->start()) {
-            ::Hirari::Core::pushEngineStatus(
-            ::Hirari::Core::StatusSeverity::Warning,
-            "Audio backend unavailable on this platform; using offline backend.");
-        }
-#endif
+        if (!startDevice || hirari_audio_device_mode_offline()) return;
+        // Native integration tests create several independent session engines
+        // in one process and the device callback still targets the process-wide
+        // compatibility engine, so an isolated run builds the graph but never
+        // attaches a real device. A platform with no device at all reports the
+        // same failure from its silent host, which the engine logs and ignores.
+        if (hirari_native_test_isolation()) return;
+        if (hirari_audio_driver_host_start(m_driver)) return;
+        char message[192];
+        std::snprintf(message, sizeof(message), "Audio device startup failed: status=%s error=%d",
+                      hirari_audio_driver_host_status(m_driver),
+                      static_cast<int>(hirari_audio_driver_host_last_error_code(m_driver)));
+        ::Hirari::Core::pushEngineStatus(::Hirari::Core::StatusSeverity::Warning, message);
     }
 
     AudioEngine::~AudioEngine() {
@@ -56,13 +36,13 @@ AudioEngine::AudioEngine(bool startDevice)
         hirari_layout_snapshot_owner_release_host(m_engine.get());
         {
             std::lock_guard<std::mutex> lock(m_configMutex);
-            if (m_driver) {
-                m_driver->stop();
-            }
+            hirari_audio_driver_host_stop(m_driver);
             // AudioEngine owns its session engine, so teardown of the shared graph
             // cannot tear down another project's graph.
             if (m_engine) m_engine->shutdown();
         }
+        hirari_audio_driver_host_destroy(m_driver);
+        m_driver = nullptr;
         hirari_native_editor_sessions_destroy(m_nativeEditorSessions);
     }
 
@@ -71,45 +51,8 @@ AudioEngine::AudioEngine(bool startDevice)
         // semantics session-scoped: a handle stops only its own device and
         // graph.
         std::lock_guard<std::mutex> lock(m_configMutex);
-        if (m_driver) {
-            m_driver->stop();
-        }
+        if (m_driver) hirari_audio_driver_host_stop(m_driver);
         if (m_engine) m_engine->shutdown();
-    }
-
-    void AudioEngine::discard_pending_audio_input() const {
-        std::lock_guard<std::mutex> pollLock(m_inputPollMutex);
-        if (m_driver) m_driver->discard_pending_input_blocks();
-    }
-
-    rust::Vec<float> AudioEngine::poll_audio_input(
-        uint32_t& channelCount, uint64_t& droppedInputBlocks) const {
-        rust::Vec<float> result;
-        channelCount = 0;
-        droppedInputBlocks = 0;
-        if (!m_driver) return result;
-        std::lock_guard<std::mutex> pollLock(m_inputPollMutex);
-        using ::Hirari::Core::Driver::kAudioInputQueueChannels;
-        using ::Hirari::Core::Driver::kAudioInputQueueFrames;
-        const uint32_t channelCapacity = std::min(m_driver->input_channel_count(), kAudioInputQueueChannels);
-        if (channelCapacity == 0) return result;
-        const size_t requiredSamples = static_cast<size_t>(channelCapacity) * kAudioInputQueueFrames;
-        if (m_inputPollScratch.size() < requiredSamples)
-            m_inputPollScratch.resize(requiredSamples);
-        std::array<float*, kAudioInputQueueChannels> channels{};
-        for (uint32_t channel = 0; channel < channelCapacity; ++channel)
-            channels[channel] = m_inputPollScratch.data() + static_cast<size_t>(channel) * kAudioInputQueueFrames;
-        ::Hirari::Core::Driver::AudioInputBlockInfo info{};
-        uint64_t dropped = 0;
-        if (!m_driver->poll_input_block(channels.data(), channelCapacity, kAudioInputQueueFrames, info, dropped)) {
-            droppedInputBlocks = dropped;
-            return result;
-        }
-        droppedInputBlocks = dropped;
-        channelCount = info.channelCount;
-        return ::Hirari::Core::Bridge::interleave_planar_audio_input(
-            rust::Slice<const float>(m_inputPollScratch.data(), m_inputPollScratch.size()),
-            info.channelCount, info.frameCount, kAudioInputQueueFrames);
     }
 
 } // namespace Hirari::Core::BridgeFFI

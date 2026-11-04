@@ -3,9 +3,10 @@
 //! The engine publishes the host it constructed (`AudioEngine::audio_driver_host`)
 //! and every driver value the UI polls is answered here. On macOS that means
 //! reading `mac_audio_driver` through [`crate::mac_audio_driver::view_status`]
-//! and its siblings. Off macOS there is no host at all, so the answers are
-//! exactly what the deleted `UnavailableAudioDriver` reported: a permanently
-//! silent fallback with no channels, callbacks, peaks, error code or catalog.
+//! and its siblings. Off macOS the host is the silent construction in
+//! [`crate::audio_driver_host`], so the answers are exactly what the deleted
+//! `UnavailableAudioDriver` reported: a permanently silent fallback with no
+//! channels, callbacks, peaks, error code or catalog.
 
 /// The lifecycle state string the diagnostics envelope and health snapshot
 /// publish. A zero handle is the absent host the C++ null guard named

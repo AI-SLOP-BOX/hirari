@@ -680,35 +680,35 @@ impl HirariCore {
             .map_err(|error| anyhow::anyhow!("recording input rejected: {error:?}"))
     }
 
-    /// Polls one non-realtime input block from the CoreAudio queue and appends
-    /// it to the active recording session. No Rust code runs on the audio
-    /// callback; this method is intended for a worker/UI timer.
+    /// Polls one non-realtime input block from the driver queue and appends it
+    /// to the active recording session. No Rust code runs on the audio
+    /// callback; this method is intended for a worker/UI timer. The block comes
+    /// straight from `audio_driver_host`, which owns the planar scratch and the
+    /// interleaving, so no C++ buffer is involved.
     pub fn poll_recording_preview(&self) -> anyhow::Result<bool> {
         if self.is_silent_audio_fallback() {
             return Err(anyhow::anyhow!(
                 "native audio input is unavailable; use an audio device before polling recording"
             ));
         }
-        let mut block_channels = 0;
-        let mut dropped_blocks = 0;
-        let input = self.engine.as_ref().map_or_else(Vec::new, |engine| {
-            engine.poll_audio_input(&mut block_channels, &mut dropped_blocks)
-        });
-        if !input.is_empty() {
-            self.append_recording_preview_block(input.as_slice(), block_channels as u16)?;
+        let block = crate::audio_driver_host::poll_input(self.driver_handle());
+        if !block.interleaved.is_empty() {
+            self.append_recording_preview_block(
+                block.interleaved.as_slice(),
+                block.channel_count as u16,
+            )?;
         }
-        if dropped_blocks > 0 {
+        if block.dropped_blocks > 0 {
             anyhow::bail!(
-                "audio input queue dropped {dropped_blocks} block(s); capture stopped at the last contiguous input"
+                "audio input queue dropped {} block(s); capture stopped at the last contiguous input",
+                block.dropped_blocks
             );
         }
-        Ok(!input.is_empty())
+        Ok(!block.interleaved.is_empty())
     }
 
     fn discard_pending_recording_input(&self) {
-        if let Some(engine) = self.engine.as_ref() {
-            engine.discard_pending_audio_input();
-        }
+        crate::audio_driver_host::discard_pending_input(self.driver_handle());
     }
 
     fn append_recording_preview_block(

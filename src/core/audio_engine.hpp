@@ -15,55 +15,33 @@
 #include "hirari_unified_engine.hpp"
 #include "bridge_types.hpp"
 
-#include "driver/mac_audio_driver_host.hpp" // also provides the bounded input queue
+// The device host is Rust (`audio_driver_host.rs`). It owns the lifecycle
+// defaults, the bounded input queue and the platform split the two deleted C++
+// adapter classes carried, so the engine holds one opaque handle and the same
+// calls answer off macOS as a silent host that never claims a running device.
+using AudioDriverProcessCallback = void (*)(const float* const*, uint32_t,
+                                            float* const*, uint32_t, uint32_t,
+                                            void*) noexcept;
+
+extern "C" {
+void* hirari_audio_driver_host_create(AudioDriverProcessCallback process, void* context);
+void hirari_audio_driver_host_destroy(void* host);
+bool hirari_audio_driver_host_start(void* host);
+void hirari_audio_driver_host_stop(void* host);
+bool hirari_audio_driver_host_is_running(void* host);
+double hirari_audio_driver_host_sample_rate(void* host);
+uint32_t hirari_audio_driver_host_buffer_size(void* host);
+const char* hirari_audio_driver_host_status(void* host);
+int32_t hirari_audio_driver_host_last_error_code(void* host);
+void hirari_audio_driver_host_try_reconnect(void* host);
+bool hirari_audio_driver_host_reconfigure(void* host, double sampleRate, uint32_t bufferSize);
+bool hirari_audio_driver_host_select_device(void* host, uint32_t device,
+                                            double sampleRate, uint32_t bufferSize);
+bool hirari_audio_driver_host_dispatch_process(void* host, float* left, float* right,
+                                               uint32_t frames);
+}
 
 namespace Hirari::Core::BridgeFFI {
-
-#if defined(__APPLE__)
-using AudioDriverHost = ::Hirari::Core::Driver::MacAudioDriverHost;
-#else
-// Non-macOS builds currently have no native audio-device implementation.
-// Keep the bridge constructible for offline/UI use, but never report a fake
-// running device or fabricate callback/peak data. The telemetry the UI polls is
-// answered from Rust (`audio_driver_view`), so only the callback boundary and
-// the lifecycle calls the engine's own control flow needs live here.
-class UnavailableAudioDriver {
-public:
-    bool start() noexcept { return false; }
-    void stop() noexcept {}
-    bool is_running() const noexcept { return false; }
-    void try_reconnect() noexcept {}
-    using ProcessCallback = void (*)(const float* const*, uint32_t,
-                                     float* const*, uint32_t, uint32_t,
-                                     void*) noexcept;
-    void set_process_callback(ProcessCallback callback, void* context) noexcept {
-        m_callback = callback;
-        m_context = context;
-    }
-    // The fallback has no hardware callback, but offline/test callers still
-    // need the exact same callback boundary as JACK/CoreAudio. This explicit
-    // dispatcher never claims a running device; it only invokes a callback
-    // when the caller supplies a bounded output block.
-    bool dispatch_process_callback(float* left, float* right, uint32_t frames) const noexcept {
-        if (!m_callback || !left || !right || frames == 0) return false;
-        float* outputs[2] = {left, right};
-        m_callback(nullptr, 0, outputs, 2, frames, m_context);
-        return true;
-    }
-    using InputBlockInfo = ::Hirari::Core::Driver::AudioInputBlockInfo;
-    bool poll_input_block(float* const*, uint32_t, uint32_t, InputBlockInfo&, uint64_t& dropped) noexcept {
-        dropped = 0;
-        return false;
-    }
-    void discard_pending_input_blocks() noexcept {}
-    uint32_t input_channel_count() const noexcept { return 0; }
-private:
-    ProcessCallback m_callback = nullptr;
-    void* m_context = nullptr;
-};
-
-using AudioDriverHost = UnavailableAudioDriver;
-#endif
 
 /**
  * @class AudioEngine

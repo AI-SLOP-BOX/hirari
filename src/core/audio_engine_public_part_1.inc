@@ -8,7 +8,7 @@ public:
     }
     bool try_set_playing(bool playing) const {
         if (!m_engine) return false;
-        if (playing && (!m_driver || !m_driver->is_running())) return false;
+        if (playing && !is_driver_running()) return false;
         m_engine->set_playing(playing);
         return true;
     }
@@ -26,7 +26,7 @@ public:
     }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
-        const bool ready = m_driver && m_driver->is_running();
+        const bool ready = is_driver_running();
         if (!ready && m_engine && m_engine->is_playing()) {
             // Device loss is a transport safety boundary, not merely a UI
             // status change. Stop the graph even when no UI poll is running.
@@ -39,44 +39,31 @@ public:
         // is_audio_device_ready() inspects. Elected by the telemetry cluster
         // (get_runtime_health_v path) so the native health snapshot reports
         // the real connection state without driving any transport action.
-        return m_driver && m_driver->is_running();
+        return m_driver && hirari_audio_driver_host_is_running(m_driver);
     }
     // The status, telemetry and device catalog the UI polls are Rust-owned
     // (`mac_audio_driver.rs`) and read through `audio_driver_view` against this
     // handle, which the engine's lifetime bounds. A zero handle means "no host"
-    // and answers exactly as the deleted null-`m_driver` forwarders did; the
-    // non-macOS backend has no host at all and is permanently silent.
+    // and answers exactly as the deleted null-`m_driver` forwarders did.
     uintptr_t audio_driver_host() const noexcept {
-#if defined(__APPLE__)
-        return m_driver ? reinterpret_cast<uintptr_t>(m_driver->raw_handle()) : 0;
-#else
-        return 0;
-#endif
+        return reinterpret_cast<uintptr_t>(m_driver);
     }
-    void discard_pending_audio_input() const;
-    rust::Vec<float> poll_audio_input(uint32_t& channelCount,
-                                      uint64_t& droppedInputBlocks) const;
     void try_reconnect_audio_device() const {
-#if defined(__APPLE__)
         if (hirari_native_test_isolation()) return;
-#endif
         std::lock_guard<std::mutex> lock(m_configMutex);
         if (m_driver) {
-            m_driver->try_reconnect();
-            if (!m_driver->is_running() && m_engine) m_engine->set_playing(false);
+            hirari_audio_driver_host_try_reconnect(m_driver);
+            if (!is_driver_running() && m_engine) m_engine->set_playing(false);
         }
     }
     bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
-#if defined(__APPLE__)
         if (!m_driver || !m_engine ||
-            !m_driver->select_device(deviceId, sampleRate, bufferSize) ||
-            !m_driver->is_running()) return false;
+            !hirari_audio_driver_host_select_device(m_driver, deviceId, sampleRate, bufferSize) ||
+            !is_driver_running()) return false;
         applyNegotiatedDriverConfig();
-        return std::abs(m_engine->get_sample_rate() - m_driver->sample_rate()) < 0.5 &&
-               m_engine->get_block_size() == m_driver->buffer_size();
-#else
-        (void)deviceId; (void)sampleRate; (void)bufferSize; return false;
-#endif
+        return std::abs(m_engine->get_sample_rate() -
+                            hirari_audio_driver_host_sample_rate(m_driver)) < 0.5 &&
+               m_engine->get_block_size() == hirari_audio_driver_host_buffer_size(m_driver);
     }
     uint64_t get_audio_config_generation() const {
         return m_engine ? m_engine->get_audio_config_generation() : 0;
@@ -97,14 +84,14 @@ public:
             left.size() > ::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize) {
             return;
         }
-#if !defined(__APPLE__)
-        // Keep the non-hardware fallback on the same callback boundary as a
-        // real driver. The dispatcher invokes process_driver_block, which
-        // owns the single native graph render; do not render it a second time
-        // below.
-        if (m_driver && m_driver->dispatch_process_callback(
-                left.data(), right.data(), static_cast<uint32_t>(left.size()))) return;
-#endif
+        // A host with no device to drive its callback dispatches the block
+        // through the same boundary a real driver would use; a running device
+        // already drives it, so the dispatcher answers false and the graph
+        // renders here.
+        if (hirari_audio_driver_host_dispatch_process(
+                m_driver, left.data(), right.data(), static_cast<uint32_t>(left.size()))) {
+            return;
+        }
         float* channels[2] = {left.data(), right.data()};
         if (m_engine) m_engine->processBlockDirect(channels, 2, static_cast<uint32_t>(left.size()));
     }
@@ -132,31 +119,24 @@ public:
         if (m_engine->is_playing()) return false;
         ::Hirari::Core::Engine::EngineConfig cfg;
         cfg.tempo = tempo; cfg.sampleRate = sr; cfg.blockSize = bs;
-#if defined(__APPLE__)
-        // The graph and CoreAudio must be rebuilt as one transaction. Updating
+        // The graph and the device must be rebuilt as one transaction. Updating
         // only the graph leaves the device callback on the previous format.
-        if (!hirari_native_test_isolation() && m_driver && m_driver->is_running()) {
-            if (!m_driver->reconfigure(static_cast<double>(sr), bs)) {
+        if (!hirari_native_test_isolation() && is_driver_running()) {
+            if (!hirari_audio_driver_host_reconfigure(m_driver, static_cast<double>(sr), bs)) {
                 return false;
             }
         } else {
-            // A running CoreAudio host must be rebuilt as one transaction so
-            // the device callback never keeps the previous format. An engine
-            // that owns no device (CLI renders, automation, isolated tests)
-            // has nothing to reconfigure, and routing it through the driver
-            // made every reconfigure fail and silently leave the graph at its
-            // default 44100. Apply the config to the detached graph directly,
-            // the branch the HIRARI_NATIVE_TEST_ISOLATION sandbox already used.
+            // A running device host must be rebuilt together with the graph so
+            // the callback never keeps the previous format. An engine that owns
+            // no running device (CLI renders, automation, isolated tests, a
+            // platform with no backend) has nothing to reconfigure, and routing
+            // it through the driver made every reconfigure fail and silently
+            // leave the graph at its default 44100. Apply the config to the
+            // detached graph directly, the branch the HIRARI_NATIVE_TEST_ISOLATION
+            // sandbox already used.
             m_engine->waitForAudioCallbacks();
             m_engine->apply_config(cfg);
         }
-#else
-        // Device/sample-rate/block-size changes are control-thread events.
-        // Quiesce any callback that still owns the previous audio context
-        // before rebuilding track processors and PDC state.
-        m_engine->waitForAudioCallbacks();
-        m_engine->apply_config(cfg);
-#endif
         return true;
     }
     bool try_apply_config(float tempo, uint32_t sr, uint32_t bs) const {

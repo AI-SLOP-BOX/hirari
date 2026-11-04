@@ -20,7 +20,7 @@ pub use analysis_views::{
 };
 pub use command_host::engine_last_command_error;
 pub use plugin_sandbox_maintenance::sandbox_statuses_packed;
-pub use runtime_views::{interleave_planar_audio_input, runtime_health_vector};
+pub use runtime_views::runtime_health_vector;
 pub use waveform_cache::{analysis_waveform_peak_envelope, resample_waveform_peak_envelope};
 pub mod ara2_protocol;
 pub mod bridge_error;
@@ -167,12 +167,6 @@ pub mod ffi {
         );
         fn audio_driver_host(self: &AudioEngine) -> usize;
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
-        fn discard_pending_audio_input(self: &AudioEngine);
-        fn poll_audio_input(
-            self: &AudioEngine,
-            channel_count: &mut u32,
-            dropped_input_blocks: &mut u64,
-        ) -> Vec<f32>;
         fn try_reconnect_audio_device(self: &AudioEngine);
         fn select_audio_device(
             self: &AudioEngine,
@@ -603,13 +597,6 @@ pub mod ffi {
         ) -> bool;
 
         fn report_hirari_log(level: u32, msg: &str);
-
-        fn interleave_planar_audio_input(
-            planar: &[f32],
-            channels: u32,
-            frames: u32,
-            channel_stride: u32,
-        ) -> Vec<f32>;
 
         fn analysis_spectral_display(spectrum: &[f32], sample_rate: f64) -> Vec<f32>;
         fn analysis_phase_heatmap(spectrum: &[f32]) -> Vec<f32>;
