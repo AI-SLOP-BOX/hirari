@@ -26,6 +26,7 @@ pub const STORAGE_AUTOMATION: u32 = 2;
 pub const STORAGE_FROZEN: u32 = 3;
 pub const STORAGE_RUNTIME: u32 = 4;
 pub const STORAGE_ARTICULATION: u32 = 5;
+pub const STORAGE_NAME: u32 = 6;
 
 /// `Track::Type::Bus`.
 pub const TRACK_TYPE_BUS: u32 = 3;
@@ -116,6 +117,27 @@ impl TrackSession {
     /// The track's Rust frozen-render store.
     pub fn frozen(&self) -> *mut c_void {
         self.storage(STORAGE_FROZEN)
+    }
+
+    /// The track's Rust name store.
+    pub fn name_store(&self) -> *mut c_void {
+        self.storage(STORAGE_NAME)
+    }
+
+    /// The track's current name, read from its own store.
+    pub fn read_name(&self) -> Vec<u8> {
+        crate::track_name_store::read(self.name_store() as *const c_void)
+    }
+
+    /// Replaces the track's name in its own store.
+    pub fn write_name(&self, name: &[u8]) -> bool {
+        unsafe {
+            crate::track_name_store::hirari_track_name_store_set(
+                self.name_store(),
+                name.as_ptr(),
+                name.len(),
+            )
+        }
     }
 
     pub fn is_bus(&self) -> bool {

@@ -983,13 +983,9 @@ extern "C" bool hirari_routing_edit_set_sidechain_link(
     void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex, uint32_t tapPoint,
     bool enabled);
 
-// Control-thread edit policy (track naming, input monitoring, macro learn).
-// The engine only supplies storage adapters; admission and undo live in Rust.
+// Control-thread edit policy (input monitoring, macro learn). The names live in
+// each track's own Rust store, so the engine supplies no naming adapter.
 struct HirariControlEditHostOps {
-    intptr_t (*queryTrackName)(void*, uint32_t, uint8_t*, size_t) = nullptr;
-    bool (*applyTrackName)(void*, uint32_t, const uint8_t*, size_t) = nullptr;
-    void (*recordNameUndo)(void*, uint32_t, const uint8_t*, size_t,
-                           const uint8_t*, size_t) = nullptr;
     bool (*updateMonitorFocus)(void*, uint32_t, bool, uint32_t, uint32_t) = nullptr;
     void* (*macroControlStore)(void*) = nullptr;
     void* (*midiLearnStore)(void*) = nullptr;
@@ -1058,14 +1054,16 @@ struct HirariTrackEditHostOps {
 
 extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops);
 
-// Duplicating a track copies the store state of one track onto another. The
-// engine only supplies the two handle sets; the reads, the chain rebuild and
-// the per-node tolerance for a refused sandbox path all live in Rust.
+// Duplicating a track copies the store state of one track onto another, name
+// suffix included. The engine only supplies the two handle sets; the reads, the
+// chain rebuild and the per-node tolerance for a refused sandbox path all live
+// in Rust.
 extern "C" bool hirari_track_clone_state(void* sourceStrip, void* sourceRuntime,
                                         void* sourceAutomation, void* sourceChain,
+                                        void* sourceName,
                                         void* destStrip, void* destRuntime,
                                         void* destAutomation, void* destChain,
-                                        bool destIsBus);
+                                        void* destName, bool destIsBus);
 
 // Track and region id allocation lives in Rust (id_host.rs). An emptied
 // project restarts the counters; an installed document resumes them past the
@@ -1318,6 +1316,13 @@ struct HirariPluginAutomationLaneView {
 };
 static_assert(sizeof(HirariPluginAutomationLaneView) == 24,
     "plugin automation lane view must match Rust's repr(C) layout");
+// Per-track name storage. Rust validates and holds the bytes; the engine keeps
+// only the handle, created with the track and destroyed with it.
+extern "C" void* hirari_track_name_store_create();
+extern "C" void hirari_track_name_store_destroy(void* store);
+extern "C" bool hirari_track_name_store_set(void* store, const uint8_t* name,
+                                            size_t name_len);
+
 // Per-track automation list storage. Rust owns every published generation and
 // its sort order; C++ keeps only the opaque handle.
 extern "C" void* hirari_track_automation_store_create();
@@ -1562,14 +1567,14 @@ struct HirariLayoutHostOps {
     void (*end)(void* host) = nullptr;
     size_t (*trackCount)(void* host) = nullptr;
     void* (*trackHandle)(void* host, size_t index) = nullptr;
-    // The only two track fields that are C++ state beside the name.
+    // Every per-track field the layout needs is a Rust storage already.
     uint32_t (*trackId)(void* track) = nullptr;
     uint32_t (*trackType)(void* track) = nullptr;
     /// One of a track's own storages: 0 channel strip, 1 effect chain,
     /// 2 automation store, 3 freeze store, 4 realtime runtime,
-    /// 5 MIDI articulation state. Rust reads them with its own store API.
+    /// 5 MIDI articulation state, 6 name store. Rust reads them with its own
+    /// store API.
     void* (*trackStorage)(void* track, uint32_t kind) = nullptr;
-    size_t (*trackName)(void* track, uint8_t* out, size_t capacity) = nullptr;
     void* (*sidechainRoutesStore)(void* host) = nullptr;
     void* (*routingStore)(void* host) = nullptr;
     double (*sampleRate)(void* host) = nullptr;

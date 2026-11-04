@@ -6,7 +6,11 @@ public:
 
     Track(uint32_t id, const std::string& n, Type t,
           std::shared_ptr<ProjectLayoutRevision> layoutRevision = {})
-        : m_layoutRevision(std::move(layoutRevision)), m_id(id), m_name(n), m_type(t) {
+        : m_layoutRevision(std::move(layoutRevision)), m_id(id), m_type(t) {
+        // The name is Rust state, so the engine's own construction hands the
+        // initial value to the store the track keeps.
+        hirari_track_name_store_set(m_nameStore,
+                                    reinterpret_cast<const uint8_t*>(n.data()), n.size());
         if (t == Type::Midi || t == Type::Instrument) {
             m_builtInMidiState = hirari_builtin_midi_instrument_create();
         }
@@ -31,6 +35,7 @@ public:
         hirari_track_midi_articulation_destroy(m_articulationState);
         hirari_track_pdc_delay_destroy(m_pdcDelayState);
         hirari_track_automation_store_destroy(m_automationStore);
+        hirari_track_name_store_destroy(m_nameStore);
         hirari_effect_chain_destroy(m_chain);
         hirari_channel_strip_destroy(m_strip);
         hirari_track_holographic_panner_destroy(m_spatialPanner);

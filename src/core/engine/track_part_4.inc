@@ -16,7 +16,6 @@
 
     std::shared_ptr<ProjectLayoutRevision> m_layoutRevision;
     uint32_t m_id;
-    std::string m_name;
     Type m_type;
     // The Rust channel strip owns this track's fader, pan, solo, record arm and
     // sample rate; the track keeps only the handle it reads them through.
@@ -47,6 +46,9 @@
     static constexpr HirariTrackFrozenOps kFrozenOps = {&Track::destroyFrozenOwner};
     void* m_frozenStore = hirari_track_frozen_store_create(&kFrozenOps);
     void* m_automationStore = hirari_track_automation_store_create();
+    // The name is Rust state too, so the layout gather and the control edit host
+    // read and write it through this handle like every other track storage.
+    void* m_nameStore = hirari_track_name_store_create();
     // The spatial processor is Rust-owned; the track keeps only its handle.
     void* m_spatialPanner = hirari_track_holographic_panner_create();
     static constexpr uint32_t kMaxHrtfTaps = 128;

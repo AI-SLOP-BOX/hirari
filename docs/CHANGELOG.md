@@ -74,6 +74,16 @@ production support.
 
 ### Changed
 
+- The track name is Rust state now. Each track creates a `track_name_store.rs`
+  handle beside its strip, chain and freeze storages and the engine's
+  constructor hands the initial name to it, so `Track` no longer holds a
+  `std::string`, its two accessors, or the naming lambdas the control edit host
+  used to install. The layout gather reads the name through the track's own
+  storage kind like every other field — the last per-track C++ callback is gone
+  from the layout ops table — the `Rename Track` edit runs on a `TrackSession`
+  and replays through fresh sessions, and the duplicate's `<name> Copy` rule
+  moved into `hirari_track_clone_state`, which refuses the clone before any
+  storage is touched when the suffix would not fit. C++ 6895 -> 6874 (-21).
 - The track edit prologue is now one Rust session instead of a per-edit C++
   lambda. `track_session.rs` takes the engine's tracks lock, resolves the track,
   exposes the chain and frozen-render stores the track already owns, applies the

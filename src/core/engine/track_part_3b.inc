@@ -89,6 +89,7 @@
     void* effectChainHandle() const noexcept { return m_chain; }
     void* automationStoreHandle() const noexcept { return m_automationStore; }
     void* frozenStoreHandle() const noexcept { return m_frozenStore; }
+    void* nameStoreHandle() const noexcept { return m_nameStore; }
 
     /// The track's work block. The engine reads and writes its channels
     /// through the storage FFI rather than a C++ buffer type.

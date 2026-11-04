@@ -80,6 +80,24 @@ impl PluginEditEngine {
         unsafe { crate::track_frozen_store::hirari_track_frozen_store_is_frozen(session.frozen()) }
     }
 
+    /// The track's name, read from its own Rust store with the lock held.
+    fn name(&self, track_id: u32) -> Vec<u8> {
+        let session = crate::track_session::TrackSession::open(self.host(), track_id)
+            .expect("the fixture's track must resolve");
+        session.read_name()
+    }
+
+    fn edit_rename(&self, track_id: u32, name: &[u8]) -> bool {
+        unsafe {
+            crate::control_edit_host::hirari_control_edit_rename_track(
+                self.host(),
+                track_id,
+                name.as_ptr(),
+                name.len(),
+            )
+        }
+    }
+
     // The entry points take the raw engine host; these wrappers keep that pointer
     // handoff in one place so the assertions stay about the policy.
     fn edit_bypass(&self, track_id: u32, index: u32, bypassed: bool) -> bool {
@@ -432,4 +450,65 @@ fn preset_requests_reject_before_the_chain_is_read() {
     assert!(!fixture.edit_save_preset(track, 0, b""));
     assert!(!fixture.edit_save_preset(u32::MAX, 0, b"/tmp/hirari-preset-test.hiraripreset"));
     assert_eq!(fixture.engine().get_undo_count(), history);
+}
+
+#[test]
+fn renaming_a_track_records_one_entry_the_history_replays_it() {
+    let fixture = PluginEditEngine::new();
+    let track = fixture.audio_track;
+    let before = fixture.name(track);
+    assert!(!before.is_empty());
+    let history = fixture.engine().get_undo_count();
+
+    assert!(fixture.edit_rename(track, b"Drums"));
+    assert_eq!(fixture.name(track), b"Drums".to_vec());
+    assert_eq!(fixture.engine().get_undo_count(), history + 1);
+
+    fixture.engine().undo();
+    assert_eq!(fixture.name(track), before);
+    fixture.engine().redo();
+    assert_eq!(fixture.name(track), b"Drums".to_vec());
+}
+
+#[test]
+fn an_identical_name_is_a_no_op_and_a_bad_name_touches_nothing() {
+    let fixture = PluginEditEngine::new();
+    let track = fixture.audio_track;
+    let before = fixture.name(track);
+    let history = fixture.engine().get_undo_count();
+
+    // The name already matches, so the store is left alone and no entry lands.
+    assert!(fixture.edit_rename(track, &before));
+    assert_eq!(fixture.engine().get_undo_count(), history);
+
+    // Empty, NUL-bearing and oversized names are refused, and so is a track the
+    // engine does not have.
+    assert!(!fixture.edit_rename(track, b""));
+    assert!(!fixture.edit_rename(track, b"bad\0name"));
+    assert!(!fixture.edit_rename(track, &vec![b'a'; 257]));
+    assert!(!fixture.edit_rename(u32::MAX, b"Ghost"));
+    assert_eq!(fixture.name(track), before);
+    assert_eq!(fixture.engine().get_undo_count(), history);
+}
+
+#[test]
+fn the_layout_snapshot_reports_the_renamed_track_from_the_rust_store() {
+    let fixture = PluginEditEngine::new();
+    let track = fixture.audio_track;
+    assert!(fixture.edit_rename(track, b"Lead Vocal"));
+
+    let json = fixture.engine().project_layout_json();
+    assert!(json.contains("Lead Vocal"), "the gathered layout must carry the name");
+}
+
+#[test]
+fn duplicating_a_track_appends_the_suffix_in_the_copy_own_store() {
+    let fixture = PluginEditEngine::new();
+    let track = fixture.audio_track;
+    assert!(fixture.edit_rename(track, b"Guitar"));
+
+    let copy = fixture.engine().duplicate_track(track);
+    assert_ne!(copy, 0);
+    assert_eq!(fixture.name(copy), b"Guitar Copy".to_vec());
+    assert_eq!(fixture.name(track), b"Guitar".to_vec());
 }

@@ -227,15 +227,17 @@ void HirariUnifiedEngine::installTrackEditHost() {
                 Track* original = engine->findTrackLocked(tid);
                 if (!original) return nullptr;
                 if (hirari_region_store_count(original) != regionIdCount) return nullptr;
-                copy = engine->makeTrack(newId, original->getName() + " Copy",
-                                         original->getType());
-                // The copy's own storages are the destination: Rust reads the
-                // source stores and writes these, so no value crosses a C++ list.
+                copy = engine->makeTrack(newId, std::string(), original->getType());
+                // The copy's own storages are the destination, name included:
+                // Rust reads the source stores and writes these, so no value
+                // crosses a C++ list and the copy suffix is Rust's rule.
                 if (!hirari_track_clone_state(
                         original->channelStripHandle(), original->realtimeRuntime(),
                         original->automationStoreHandle(), original->effectChainHandle(),
+                        original->nameStoreHandle(),
                         copy->channelStripHandle(), copy->realtimeRuntime(),
                         copy->automationStoreHandle(), copy->effectChainHandle(),
+                        copy->nameStoreHandle(),
                         copy->getType() == Track::Type::Bus))
                     return nullptr;
                 if (!hirari_region_store_copy_regions(original, copy.get(), regionIds, regionIdCount))

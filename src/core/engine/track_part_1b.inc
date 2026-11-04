@@ -4,13 +4,6 @@ public:
         if (m_layoutRevision) m_layoutRevision->markChanged();
     }
 
-    const std::string& getName() const { return m_name; }
-    void setName(std::string name) {
-        if (!name.empty() && name != m_name) {
-            m_name = std::move(name);
-            markProjectLayoutChanged();
-        }
-    }
     Type getType() const { return m_type; }
     float getVolume() const noexcept { return hirari_channel_strip_gain(m_strip); }
     float getPan() const { return hirari_channel_strip_pan(m_strip); }

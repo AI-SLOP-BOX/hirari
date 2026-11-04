@@ -91,6 +91,7 @@ pub mod track_edit_host;
 pub mod id_host;
 pub mod track_freeze_host;
 pub mod track_frozen_store;
+pub mod track_name_store;
 pub mod track_session;
 pub mod master_edit_host;
 pub mod undo_edit_host;

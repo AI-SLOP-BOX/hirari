@@ -475,11 +475,12 @@ fn chain_sandbox_path(chain: *mut c_void, slot: usize) -> Vec<u8> {
 
 /// Copies the store state a duplicated track inherits.
 ///
-/// The engine builds the new track and hands over its storages; the fader, the
-/// mute and phase flags, the three automation lists, the plugin lanes and the
-/// chain in order are then read and written store-to-store here. A sandbox path
-/// the destination chain refuses is skipped like the engine's own walk did, so
-/// one rejected worker never aborts the duplicate.
+/// The engine builds the new track and hands over its storages; the name with
+/// the copy suffix, the fader, the mute and phase flags, the three automation
+/// lists, the plugin lanes and the chain in order are then read and written
+/// store-to-store here. A sandbox path the destination chain refuses is skipped
+/// like the engine's own walk did, so one rejected worker never aborts the
+/// duplicate.
 ///
 /// # Safety
 /// Every handle must be a live storage of its kind, and the two handle sets must
@@ -492,10 +493,12 @@ pub unsafe extern "C" fn hirari_track_clone_state(
     source_runtime: *mut c_void,
     source_automation: *mut c_void,
     source_chain: *mut c_void,
+    source_name: *mut c_void,
     dest_strip: *mut c_void,
     dest_runtime: *mut c_void,
     dest_automation: *mut c_void,
     dest_chain: *mut c_void,
+    dest_name: *mut c_void,
     dest_is_bus: bool,
 ) -> bool {
     if source_strip.is_null()
@@ -505,6 +508,15 @@ pub unsafe extern "C" fn hirari_track_clone_state(
         || dest_automation.is_null()
         || dest_chain.is_null()
     {
+        return false;
+    }
+    // A name that cannot carry the suffix aborts the duplicate before any other
+    // storage is touched.
+    if !crate::track_name_store::copy_with_suffix(
+        source_name as *const c_void,
+        dest_name,
+        b" Copy",
+    ) {
         return false;
     }
     unsafe {
@@ -978,6 +990,7 @@ mod tests {
         chain: *mut c_void,
         automation: *mut c_void,
         runtime: *mut c_void,
+        name: *mut c_void,
     }
 
     impl Stores {
@@ -985,6 +998,7 @@ mod tests {
             let strip = unsafe { hirari_channel_strip_create() };
             let chain = unsafe { hirari_effect_chain_create() };
             let automation = unsafe { hirari_track_automation_store_create() };
+            let name = unsafe { crate::track_name_store::hirari_track_name_store_create() };
             let runtime = unsafe {
                 hirari_track_runtime_create(
                     id, chain, strip, automation, std::ptr::null_mut(), std::ptr::null_mut(),
@@ -993,7 +1007,19 @@ mod tests {
                     std::ptr::null_mut(), None, std::ptr::null_mut(),
                 )
             };
-            Self { strip, chain, automation, runtime }
+            Self { strip, chain, automation, runtime, name }
+        }
+        fn set_name(&self, name: &[u8]) {
+            assert!(unsafe {
+                crate::track_name_store::hirari_track_name_store_set(
+                    self.name,
+                    name.as_ptr(),
+                    name.len(),
+                )
+            });
+        }
+        fn name(&self) -> Vec<u8> {
+            crate::track_name_store::read(self.name as *const c_void)
         }
     }
 
@@ -1004,6 +1030,7 @@ mod tests {
                 hirari_track_automation_store_destroy(self.automation);
                 hirari_effect_chain_destroy(self.chain);
                 hirari_channel_strip_destroy(self.strip);
+                crate::track_name_store::hirari_track_name_store_destroy(self.name);
             }
         }
     }
@@ -1054,6 +1081,7 @@ mod tests {
             assert!(hirari_effect_chain_add_builtin(source.chain, 1, false, false));
             assert!(hirari_effect_chain_add_builtin(source.chain, 4, false, false));
             assert!(hirari_effect_chain_set_bypass(source.chain, 1, true));
+            source.set_name(b"Guitar");
         }
         // The chain bypass and processor state follow the source node, so the
         // duplicate reports the same insert list and the same parameter values.
@@ -1063,13 +1091,17 @@ mod tests {
                 source.runtime,
                 source.automation,
                 source.chain,
+                source.name,
                 dest.strip,
                 dest.runtime,
                 dest.automation,
                 dest.chain,
+                dest.name,
                 false,
             ));
         }
+        assert_eq!(dest.name(), b"Guitar Copy".to_vec());
+        assert_eq!(source.name(), b"Guitar".to_vec());
         assert_eq!(unsafe { hirari_channel_strip_gain(dest.strip) }, 0.5);
         assert_eq!(unsafe { hirari_channel_strip_pan(dest.strip) }, -0.25);
         assert!(unsafe { hirari_track_runtime_is_muted(dest.runtime) });
@@ -1117,12 +1149,41 @@ mod tests {
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
+                std::ptr::null_mut(),
                 dest.strip,
                 dest.runtime,
                 dest.automation,
                 dest.chain,
+                dest.name,
                 false,
             )
         });
+    }
+
+    #[test]
+    fn a_name_that_cannot_take_the_suffix_aborts_the_clone() {
+        let source = Stores::new(1);
+        let dest = Stores::new(2);
+        source.set_name(&vec![b'a'; crate::track_name_store::MAX_TRACK_NAME_BYTES]);
+        dest.set_name(b"keep");
+        unsafe { hirari_channel_strip_set_gain(source.strip, 0.5) };
+        assert!(!unsafe {
+            hirari_track_clone_state(
+                source.strip,
+                source.runtime,
+                source.automation,
+                source.chain,
+                source.name,
+                dest.strip,
+                dest.runtime,
+                dest.automation,
+                dest.chain,
+                dest.name,
+                false,
+            )
+        });
+        // Nothing crossed, because the name is settled before the stores are.
+        assert_eq!(unsafe { hirari_channel_strip_gain(dest.strip) }, 1.0);
+        assert_eq!(dest.name(), b"keep".to_vec());
     }
 }

@@ -110,30 +110,11 @@ void HirariUnifiedEngine::installRoutingEditHost() {
     hirari_routing_edit_host_install(&ops);
 }
 
-// Control edit host callbacks. Rust validates every naming/monitor/macro edit
-// and decides the undo entry; these handlers only read or apply the mutation.
+// Control edit host callbacks. Rust validates every monitor/macro edit and
+// decides the undo entry; these handlers only read or apply the mutation. The
+// track name lives in each track's own Rust store, so naming needs no adapter.
 void HirariUnifiedEngine::installControlEditHost() {
     static const HirariControlEditHostOps ops = {
-        [](void* host, uint32_t trackId, uint8_t* out, size_t capacity) -> intptr_t {
-            return withHostTrack(host, trackId, intptr_t{-1}, [&](Track& track) {
-                const std::string& name = track.getName();
-                if (!out || capacity == 0) return static_cast<intptr_t>(name.size());
-                const size_t written = std::min(capacity, name.size());
-                std::memcpy(out, name.data(), written);
-                return static_cast<intptr_t>(written);
-            });
-        },
-        [](void* host, uint32_t trackId, const uint8_t* name, size_t nameLen) {
-            if (!name && nameLen > 0) return false;
-            const std::string value =
-                nameLen > 0 ? std::string(reinterpret_cast<const char*>(name), nameLen)
-                            : std::string();
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                track.setName(value);
-                return true;
-            });
-        },
-        nullptr,  // undo capture lives in the Rust control edit host.
         [](void* host, uint32_t trackId, bool enabled, uint32_t leftChannel,
            uint32_t rightChannel) -> bool {
             if (!host) return false;

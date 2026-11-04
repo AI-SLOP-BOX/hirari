@@ -49,6 +49,7 @@ const AUTOMATION: u32 = 2;
 const FROZEN: u32 = 3;
 const RUNTIME: u32 = 4;
 const ARTICULATION: u32 = 5;
+const NAME: u32 = 6;
 
 /// Region fields that have no owned strings. The borrowed pointers already
 /// refer to the region's own storage, exactly as before.
@@ -102,7 +103,6 @@ pub struct HirariLayoutHostOps {
     pub track_id: unsafe extern "C" fn(*mut c_void) -> u32,
     pub track_type: unsafe extern "C" fn(*mut c_void) -> u32,
     pub track_storage: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
-    pub track_name: unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> usize,
     /// The sidechain route table and the routing graph are Rust stores the
     /// engine only holds; Rust reads them through its own store API.
     pub sidechain_routes_store: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
@@ -324,20 +324,6 @@ impl LayoutOwned {
 }
 
 /// Reads a byte string from one of the host's own accessors in two passes.
-unsafe fn host_string(
-    read: unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> usize,
-    source: *mut c_void,
-) -> Vec<u8> {
-    let length = unsafe { read(source, std::ptr::null_mut(), 0) };
-    if length == 0 {
-        return Vec::new();
-    }
-    let mut data = vec![0u8; length];
-    let written = unsafe { read(source, data.as_mut_ptr(), length) };
-    data.truncate(written.min(length));
-    data
-}
-
 /// Asks a Rust store for one of its byte strings in two passes: length, then
 /// content.
 unsafe fn store_string(
@@ -524,7 +510,7 @@ unsafe fn gather_track(
     }
     let mut scratch = TrackScratch {
         scalars,
-        name: unsafe { host_string(ops.track_name, track) },
+        name: crate::track_name_store::read(storage(NAME) as *const c_void),
         frozen_path,
         expression_map: expression_map(articulation, 0),
         expression_map_pro: expression_map(articulation, 1),
@@ -927,7 +913,7 @@ fn ops_for(
 }
 
 /// The live project layout as JSON. The gather is Rust; C++ contributes the
-/// engine host, its ops table and the track names.
+/// engine host, its ops table and the tracks lock.
 pub fn project_layout_json(core: *const crate::ffi::HirariUnifiedEngine) -> String {
     let ops = ops_for(core);
     if ops.is_null() {
@@ -1103,7 +1089,7 @@ mod tests {
     struct MockTrack {
         id: u32,
         track_type: u32,
-        name: Vec<u8>,
+        name: *mut c_void,
         strip: *mut c_void,
         chain: *mut c_void,
         automation: *mut c_void,
@@ -1121,6 +1107,7 @@ mod tests {
                 hirari_track_automation_store_destroy(self.automation);
                 hirari_effect_chain_destroy(self.chain);
                 hirari_channel_strip_destroy(self.strip);
+                crate::track_name_store::hirari_track_name_store_destroy(self.name);
             }
         }
     }
@@ -1187,20 +1174,9 @@ mod tests {
             AUTOMATION => track.automation,
             FROZEN => track.frozen,
             RUNTIME => track.runtime,
-            _ => track.articulation,
+            ARTICULATION => track.articulation,
+            _ => track.name,
         }
-    }
-    unsafe extern "C" fn track_name(track: *mut c_void, out: *mut u8, capacity: usize) -> usize {
-        if track.is_null() {
-            return 0;
-        }
-        let name = &mock_track(track).name;
-        if !out.is_null() && capacity > 0 {
-            unsafe {
-                std::ptr::copy_nonoverlapping(name.as_ptr(), out, capacity.min(name.len()));
-            }
-        }
-        name.len()
     }
     unsafe extern "C" fn sidechain_routes_store(host: *mut c_void) -> *mut c_void {
         host_opaque(host).routes
@@ -1221,7 +1197,6 @@ mod tests {
             track_id,
             track_type,
             track_storage,
-            track_name,
             sidechain_routes_store,
             routing_store,
             sample_rate,
@@ -1238,6 +1213,7 @@ mod tests {
             crate::routing_engine_core::hirari_routing_engine_add_feedback(routing, 1, 2, 0.5);
         }
         let strip = hirari_channel_strip_create();
+        let name = unsafe { crate::track_name_store::hirari_track_name_store_create() };
         let chain = hirari_effect_chain_create();
         let automation = hirari_track_automation_store_create();
         let frozen_ops = TrackFrozenOps {
@@ -1278,6 +1254,11 @@ mod tests {
         let frozen_path = b"/tmp/hirari-frozen.wav";
         unsafe {
             hirari_channel_strip_set_gain(strip, 0.5);
+            assert!(crate::track_name_store::hirari_track_name_store_set(
+                name,
+                b"Bass".as_ptr(),
+                b"Bass".len()
+            ));
             hirari_channel_strip_set_pan(strip, -0.25);
             hirari_channel_strip_set_solo(strip, true);
             hirari_channel_strip_set_record_armed(strip, true);
@@ -1319,7 +1300,7 @@ mod tests {
             tracks: Mutex::new(vec![MockTrack {
                 id: 7,
                 track_type: 1,
-                name: b"Bass".to_vec(),
+                name,
                 strip,
                 chain,
                 automation,
