@@ -1,149 +1,21 @@
-        for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-            Track* track = state.activeTracks[i];
-            if (!track || !track->canProcess(sz)) continue;
-            const auto& work = track->getWorkBuffer(sz);
-            hirari_routing_engine_capture_feedback(
-                routing, track->getId(), work.getReadPointer(0),
-                work.getReadPointer(1), sz);
-        }
-
-        // Publish per-track post-FX peaks through the lock-free telemetry
-        // double buffer.  The UI expects linear amplitudes and adds the
-        // master channel separately from the master meter, so keep this
-        // payload strictly aligned with the active track order.
-        {
-            while (m_telemetryCopyLock.test_and_set(std::memory_order_acquire)) {
-            }
-            m_telemetrySequence.fetch_add(1, std::memory_order_acq_rel);
-            const uint32_t activeTelemetry =
-                m_activeTelemetryIdx.load(std::memory_order_relaxed);
-            const uint32_t nextTelemetry = activeTelemetry ^ 1u;
-            auto& telemetry = m_telemetryBuffers[nextTelemetry];
-            telemetry.count = std::min(state.trackCount, kMaxTracks);
-            std::array<uint32_t, kMaxTracks> telemetryTrackIds{};
-            std::array<const float*, kMaxTracks> trackPeaksLeft{};
-            std::array<const float*, kMaxTracks> trackPeaksRight{};
-            for (uint32_t i = 0; i < telemetry.count; ++i) {
-                Track* track = state.activeTracks[i];
-                if (track && track->canProcess(sz)) {
-                    telemetryTrackIds[i] = track->getId();
-                    const auto& work = track->getWorkBuffer(sz);
-                    trackPeaksLeft[i] = work.getReadPointer(0);
-                    trackPeaksRight[i] = work.getReadPointer(
-                        work.getNumChannels() > 1 ? 1u : 0u);
-                }
-            }
-            hirari_mixer_track_peaks(
-                m_mixerTelemetry, telemetryTrackIds.data(),
-                trackPeaksLeft.data(), trackPeaksRight.data(), telemetry.count, sz,
-                telemetry.peaksL, telemetry.peaksR);
-            telemetry.version++;
-            m_activeTelemetryIdx.store(nextTelemetry, std::memory_order_release);
-            m_telemetrySequence.fetch_add(1, std::memory_order_release);
-            m_telemetryCopyLock.clear(std::memory_order_release);
-        }
-
-        // The metronome is part of the rendered monitor signal, not a track
-        // node.  Inject it after graph/routing processing so it remains
-        // sample-accurate even when tracks are muted or an offline target is
-        // selected, and let the master limiter handle the final headroom.
-        float* clickLeft = m_metronomeClickLeft.data();
-        float* clickRight = m_metronomeClickRight.data();
-        std::fill_n(clickLeft, sz, 0.0f);
-        std::fill_n(clickRight, sz, 0.0f);
-        const bool renderMetronome =
-            m_isPlaying.load(std::memory_order_relaxed) && hirari_metronome_is_enabled(m_metronome);
-        if (renderMetronome) {
-            const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-            const double bpm = hirari_tempo_map_get_current_bpm(m_tempoState);
-            hirari_metronome_process(m_metronome, clickLeft, clickRight, sz, currentPlayhead, sampleRate, bpm);
-        }
-
-        float* dest_l = output.getWritePointer(0, off);
-        float* dest_r = output.getWritePointer(1, off);
-        const float masterGain = m_masterGain.load(std::memory_order_acquire);
-        hirari_master_output_process(
-            dest_l, dest_r, clickLeft, clickRight, sz, masterGain, renderMetronome);
-
-        // The master limiter is part of the rendered signal as well as the
-        // live monitor path. Offline bounces now append the configured tail,
-        // so its look-ahead history is flushed instead of being truncated at
-        // the content boundary.
-        if (m_masterLimiter) {
-            // Limit only the active [offset, offset+size) window. Passing the
-            // owning output buffer here would re-process stale samples when
-            // processBlockDirect() renders into a non-zero offset.
-            if (dest_l && dest_r) {
-                hirari_master_limiter_process(m_masterLimiter, dest_l, dest_r, sz, true);
-            }
-        }
-
-        // The public meter API measures the post-limiter master before
-        // monitor-only speaker trim and DIM are applied.
-        hirari_master_meter_process(m_meterCore, output.getReadPointer(0, off),
-                                    output.getReadPointer(1, off), sz);
-
-        // Control Room is strictly device-monitoring. Never bake speaker trim
-        // or DIM into an offline master/stem render.
-        if (!hirari_bounce_offline_active(m_bounceSession)) {
-            const uint32_t activeCueBus = hirari_control_room_active_cue_bus(m_controlRoomState);
-            uint32_t cueOutputChannel = hirari_control_room_active_cue_output(m_controlRoomState);
-            const bool cueUsesDedicatedPair = cueOutputChannel >= 2;
-            const bool cueOutputAvailable = cueOutputChannel + 1 < output.getNumChannels();
-            const bool cueClickEnabled = hirari_control_room_active_cue_click(m_controlRoomState);
-            if (!cueOutputAvailable) cueOutputChannel = 0;
-            if (activeCueBus != 0 && (!cueUsesDedicatedPair || cueOutputAvailable)) {
-                auto* cueBus = dynamic_cast<BusTrack*>(findTrack(activeCueBus));
-                if (cueBus && cueBus->canProcess(sz)) {
-                    const auto& cue = cueBus->getWorkBuffer(sz);
-                    const float* cueLeft = cue.getReadPointer(0);
-                    const float* cueRight = cue.getReadPointer(1);
-                    float* monitorLeft = output.getWritePointer(cueOutputChannel, off);
-                    float* monitorRight = output.getWritePointer(cueOutputChannel + 1, off);
-                    const float cueGain = hirari_control_room_active_cue_gain(m_controlRoomState);
-                    hirari_control_room_mix_cue(
-                        cueLeft, cueRight, m_metronomeClickLeft.data(), m_metronomeClickRight.data(),
-                        monitorLeft, monitorRight, sz, cueGain, cueClickEnabled);
-                }
-            }
-            const float* talkback = hirari_input_blocks_take_talkback(
-                m_inputBlocks, m_talkbackInputOffset, sz);
-            if (cueUsesDedicatedPair) {
-                // Keep the Main control-room monitor live while a selected
-                // Cue feeds its own output pair.  Talkback is kept on that
-                // Cue pair so it does not leak into the control-room mix.
-                hirari_control_room_process_monitor_state(m_controlRoomState, output.getWritePointer(0, off),
-                                              output.getWritePointer(1, off), nullptr, sz);
-                if (cueOutputAvailable) {
-                    hirari_control_room_process_monitor_state(m_controlRoomState, 
-                        output.getWritePointer(cueOutputChannel, off),
-                        output.getWritePointer(cueOutputChannel + 1, off), talkback, sz);
-                }
-            } else {
-                hirari_control_room_process_monitor_state(m_controlRoomState, 
-                    output.getWritePointer(cueOutputChannel, off),
-                    output.getWritePointer(cueOutputChannel + 1, off), talkback, sz);
-            }
-        }
-
-        // --- AUTOMATION RECORDING ---
-        if (m_isPlaying.load(std::memory_order_acquire) &&
-            m_autoRecordMode.load(std::memory_order_relaxed) > 0) {
-            for (uint32_t i = 0; i < state.trackCount; ++i) {
-                if (state.activeTracks[i] && state.activeTracks[i]->isRecordArmed()) {
-                    state.activeTracks[i]->recordCurrentState(currentPlayhead);
-                }
-            }
-        }
-
-        // (NaN/Inf sanitizer has already run before the limiter above)
-        if (m_isPlaying.load(std::memory_order_relaxed)) {
-            if (currentPlayhead <= std::numeric_limits<uint64_t>::max() - sz) {
-                m_playhead.fetch_add(sz, std::memory_order_relaxed);
-            } else {
-                m_audioRangeOverflow.store(true, std::memory_order_release);
-            }
-        }
+        // The whole post-graph tail is Rust-owned (engine_block_host.rs): routing
+        // feedback, metering publication, the metronome, the master gain/limiter/
+        // meter, the Control Room cue and automation recording. The playhead is an
+        // atomic the control thread also reads, so the tail reports its step and
+        // the callback applies it here.
+        uint32_t playheadAdvance = 0;
+        uint8_t rangeOverflow = 0;
+        hirari_engine_block_finish(
+            m_engineBlock, output.storageHandle(), off, sz, currentPlayhead,
+            m_sampleRate.load(std::memory_order_relaxed),
+            m_masterGain.load(std::memory_order_acquire),
+            m_isPlaying.load(std::memory_order_acquire) ? 1u : 0u,
+            m_autoRecordMode.load(std::memory_order_relaxed) > 0 ? 1u : 0u,
+            m_talkbackInputOffset,
+            reinterpret_cast<void* const*>(state.activeTracks), state.trackCount,
+            &playheadAdvance, &rangeOverflow);
+        if (playheadAdvance != 0) m_playhead.fetch_add(playheadAdvance, std::memory_order_relaxed);
+        if (rangeOverflow != 0) m_audioRangeOverflow.store(true, std::memory_order_release);
     }
 
 void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChannels, uint32_t numSamples) {

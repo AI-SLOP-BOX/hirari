@@ -38,8 +38,6 @@ private:
     // offsets are callback-local state the engine itself decides.
     void* m_inputBlocks = hirari_input_blocks_create(kMaxAudioBlockSize);
     uint32_t m_inputMonitorBlockOffset = 0;
-    std::array<float, kMaxAudioBlockSize> m_metronomeClickLeft{};
-    std::array<float, kMaxAudioBlockSize> m_metronomeClickRight{};
     uint32_t m_talkbackInputOffset = 0;
     std::atomic<uint64_t> m_playhead{0};
     // Sticky diagnostic: a saturated sample position or invalid callback

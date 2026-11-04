@@ -1534,6 +1534,40 @@ extern "C" void hirari_track_runtime_publish_regions(
     void* state, const uint8_t* inputs, size_t count, uint8_t published);
 extern "C" void hirari_track_runtime_reset_for_offline_render(void* state);
 
+/// Rust owns the engine's post-graph block tail (engine_block_host.rs): routing
+/// feedback, metering publication, the metronome, the master gain/limiter/meter,
+/// the Control Room cue and the playhead advance. The engine binds its handles
+/// once and hands each block to hirari_engine_block_finish().
+struct HirariEngineTelemetry {
+    float peaks_left[256];
+    float peaks_right[256];
+    uint32_t count;
+    float spectrum[512];
+    float correlation;
+    float dsp_load;
+    uint32_t active_voices;
+    uint64_t forensic_audit_hash;
+    uint64_t version;
+};
+struct HirariEngineBlockOps {
+    void* (*runtime)(void* track);
+    uint8_t (*is_bus)(void* track);
+    void (*record)(void* track, uint64_t playhead);
+};
+extern "C" void* hirari_engine_block_create(
+    void* routing, void* bounce, void* input_blocks, void* control_room,
+    void* mixer_telemetry, void* metronome, void* master_limiter, void* meter,
+    void* tempo, const HirariEngineBlockOps* ops);
+extern "C" void hirari_engine_block_destroy(void* state);
+extern "C" void hirari_engine_block_finish(
+    void* state, void* output, uint32_t off, uint32_t frames, uint64_t playhead,
+    double sample_rate, float master_gain, uint8_t playing, uint8_t auto_record,
+    uint32_t talkback_offset, void* const* active_tracks, uint32_t track_count,
+    uint32_t* advance_out, uint8_t* overflow_out);
+extern "C" uint32_t hirari_engine_telemetry_active_index(const void* state);
+extern "C" bool hirari_engine_telemetry_snapshot(
+    const void* state, uint32_t index, HirariEngineTelemetry* out);
+
 using HirariTrackFreezeResetCallback = bool (*)(void* context);
 using HirariTrackFreezeProcessCallback = bool (*)(void* context, float* left, float* right,
                                                    uint32_t frames, uint64_t playhead);

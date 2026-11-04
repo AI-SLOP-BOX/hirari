@@ -58,11 +58,11 @@ namespace Hirari::Core::Bridge {
     rust::Vec<float> get_track_peaks_l_owned(const Engine::HirariUnifiedEngine& engine) {
         rust::Vec<float> result;
         for (int attempt = 0; attempt < 4; ++attempt) {
-            Engine::HirariUnifiedEngine::TelemetryData snapshot{};
+            HirariEngineTelemetry snapshot{};
             if (!engine.copy_telemetry(engine.get_active_telemetry_idx(), snapshot)) continue;
             result.clear();
             result.reserve(snapshot.count);
-            for (uint32_t i = 0; i < snapshot.count; ++i) result.push_back(snapshot.peaksL[i]);
+            for (uint32_t i = 0; i < snapshot.count; ++i) result.push_back(snapshot.peaks_left[i]);
             return result;
         }
         return result;
@@ -71,11 +71,11 @@ namespace Hirari::Core::Bridge {
     rust::Vec<float> get_track_peaks_r_owned(const Engine::HirariUnifiedEngine& engine) {
         rust::Vec<float> result;
         for (int attempt = 0; attempt < 4; ++attempt) {
-            Engine::HirariUnifiedEngine::TelemetryData snapshot{};
+            HirariEngineTelemetry snapshot{};
             if (!engine.copy_telemetry(engine.get_active_telemetry_idx(), snapshot)) continue;
             result.clear();
             result.reserve(snapshot.count);
-            for (uint32_t i = 0; i < snapshot.count; ++i) result.push_back(snapshot.peaksR[i]);
+            for (uint32_t i = 0; i < snapshot.count; ++i) result.push_back(snapshot.peaks_right[i]);
             return result;
         }
         return result;

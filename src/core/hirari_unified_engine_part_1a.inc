@@ -39,6 +39,19 @@ void scheduleTimedKeySwitchOutputs(void* tempoState, Track* target, uint8_t arti
     else
         target->forEachTimedKeySwitchOutput(articulationId, emit);
 }
+
+// The three track reads the Rust block tail cannot make through a handle
+// (engine_block_host.rs). A bus is the track type, not a downcast.
+void* engineTrackRuntime(void* track) {
+    return static_cast<Track*>(track)->realtimeRuntime();
+}
+uint8_t engineTrackIsBus(void* track) {
+    return static_cast<Track*>(track)->getType() == Track::Bus ? 1u : 0u;
+}
+void engineTrackRecord(void* track, uint64_t playhead) {
+    auto* target = static_cast<Track*>(track);
+    if (target->isRecordArmed()) target->recordCurrentState(playhead);
+}
 }  // namespace
 
 HirariUnifiedEngine::~HirariUnifiedEngine() {
@@ -48,6 +61,9 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     // Rust keys cached peaks by engine address; a later engine may reuse it.
     hirari_region_waveform_clear(this);
     shutdown();
+    // The tail only borrows the handles below, so retire it before any of them.
+    hirari_engine_block_destroy(m_engineBlock);
+    m_engineBlock = nullptr;
     // Sandbox observed-health state is keyed by engine address for the same
     // reason. Drop it after shutdown() has joined the recovery thread.
     hirari_plugin_sandbox_maintenance_forget(this);
@@ -134,6 +150,12 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     // configuration mutex through a mutator.
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_masterLimiter = hirari_master_limiter_create(44'100.0);
+    static const HirariEngineBlockOps blockOps{&engineTrackRuntime, &engineTrackIsBus,
+                                               &engineTrackRecord};
+    m_engineBlock = hirari_engine_block_create(
+        m_routingEngine, m_bounceSession, m_inputBlocks, m_controlRoomState,
+        m_mixerTelemetry, m_metronome, m_masterLimiter, m_meterCore, m_tempoState,
+        &blockOps);
     hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 

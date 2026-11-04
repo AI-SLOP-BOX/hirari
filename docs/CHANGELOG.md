@@ -74,6 +74,22 @@ production support.
 
 ### Changed
 
+- Rust owns the engine's block tail. `EngineBlockState`
+  (`hirari-core-bridge/src/engine_block_host.rs`) now captures feedback, publishes
+  per-track metering, renders the metronome, scales and limits the master, measures
+  it, mixes the Control Room cue and talkback, records armed automation and decides
+  the playhead step; `HirariUnifiedEngine::processBlock` calls
+  `hirari_engine_block_finish` and applies only the two atomic write-backs it
+  returns. Tracks reach the tail through a three-entry host-ops table (runtime, bus,
+  record) instead of the C++ `Track` vtable, and the double-buffer owner fields --
+  `TelemetryData`, `m_telemetryBuffers`, `m_activeTelemetryIdx`,
+  `m_telemetrySequence`, `m_telemetryCopyLock` and both click scratch arrays -- left
+  `src/core` with them. The tail also dropped an unbounded realtime wait: the old
+  audio-side `while (test_and_set) {}` metering spin is replaced by writing the
+  non-active buffer, which a control-thread reader cannot tear.
+  `tests/engine_block_tail_contract.rs` pins metering alignment when a track cannot
+  hold the block, the saturated-playhead report and the over-cap block that must
+  write nothing. C++ 8249 -> 8164 (-85).
 - Rust owns a track's whole realtime block. `TrackRuntime`
   (`hirari-core-bridge/src/track_runtime.rs`) binds the DSP handles and every tap
   buffer once at construction and holds the atomics the audio thread reads, so

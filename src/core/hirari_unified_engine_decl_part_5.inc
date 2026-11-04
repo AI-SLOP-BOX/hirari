@@ -45,25 +45,13 @@
 
     void shutdown();
 
-    // Telemetry access (RT-Safe)
-    struct TelemetryData {
-        float peaksL[256]; 
-        float peaksR[256];
-        uint32_t count = 0;
-        float spectrum[512]; 
-        float correlation;
-        float dspLoad = 0.0f;
-        uint32_t activeVoices = 0;
-        uint64_t forensicAuditHash; // --- PHASE 50: CRYPTOGRAPHIC SOVEREIGNTY ---
-        uint64_t version = 0; 
-    };
-
-    uint32_t get_active_telemetry_idx() const { return m_activeTelemetryIdx.load(std::memory_order_acquire); }
-    bool copy_telemetry(uint32_t idx, TelemetryData& destination) const {
-        if (idx >= 2 || m_telemetryCopyLock.test_and_set(std::memory_order_acquire)) return false;
-        destination = m_telemetryBuffers[idx];
-        m_telemetryCopyLock.clear(std::memory_order_release);
-        return true;
+    // Telemetry access (RT-Safe). The double buffer and its publication live in
+    // Rust (engine_block_host.rs); these are the control-side reads.
+    uint32_t get_active_telemetry_idx() const {
+        return hirari_engine_telemetry_active_index(m_engineBlock);
     }
-    
+    bool copy_telemetry(uint32_t idx, HirariEngineTelemetry& destination) const {
+        return hirari_engine_telemetry_snapshot(m_engineBlock, idx, &destination);
+    }
+
     bool pop_event(::Hirari::Core::EngineEvent& e) const;

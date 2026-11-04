@@ -5,17 +5,14 @@
     void* m_meterCore = hirari_master_meter_create(44'100.0);
     void* m_masterLimiter = hirari_master_limiter_create(44'100.0);
 
-    TelemetryData m_telemetryBuffers[2];
+    // The block tail (feedback, metering publication, metronome, master chain,
+    // Control Room cue, playhead advance) is Rust-owned; the engine binds its
+    // handles once and keeps only this handle.
+    void* m_engineBlock = nullptr;
     // Per-engine Rust telemetry is allocated on the control thread and reused
     // by the audio callback; it must not lazily initialize on first process.
     void* m_mixerTelemetry = hirari_mixer_telemetry_create();
-    std::atomic<uint32_t> m_activeTelemetryIdx{0};
-    // Even values are stable snapshots; audio publication brackets writes
-    // with odd/even values so control-rate readers can retry instead of
-    // observing a buffer while the next audio block is overwriting it.
-    std::atomic<uint64_t> m_telemetrySequence{0};
-    mutable std::atomic_flag m_telemetryCopyLock = ATOMIC_FLAG_INIT;
-    
+
     std::atomic<bool> m_isShutdown{false};
     // Project hydration mutates tracks, routing and several process-wide
     // managers as one control-plane transaction.  Reject a concurrent load

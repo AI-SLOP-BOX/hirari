@@ -78,6 +78,10 @@
     }
     bool canProcess(uint32_t sz) const { return m_activeBuffer.getNumSamples() >= sz; }
 
+    /// The Rust runtime this track renders through; the engine's block tail
+    /// addresses the track's taps through it.
+    void* realtimeRuntime() const noexcept { return m_runtime; }
+
     AudioBuffer& getWorkBuffer(uint32_t) { return m_activeBuffer; }
     double getSampleRate() const noexcept { return m_sampleRate; }
 

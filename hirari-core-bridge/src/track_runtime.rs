@@ -88,6 +88,13 @@ pub struct TrackRuntime {
 unsafe impl Send for TrackRuntime {}
 unsafe impl Sync for TrackRuntime {}
 
+/// One track tap's writable stereo planes at a block length. A buffer the engine
+/// cannot address as stereo stays unpublished.
+pub(crate) struct Tap {
+    pub(crate) left: *mut f32,
+    pub(crate) right: *mut f32,
+}
+
 fn stored(value: f32) -> AtomicU32 {
     AtomicU32::new(value.to_bits())
 }
@@ -96,7 +103,7 @@ fn read(state: &AtomicU32) -> f32 {
     f32::from_bits(state.load(Ordering::Relaxed))
 }
 
-fn channels_of(handle: *mut c_void) -> (*const *mut f32, u32, u32) {
+pub(crate) fn channels_of(handle: *mut c_void) -> (*const *mut f32, u32, u32) {
     (
         unsafe { hirari_audio_buffer_storage_array_write(handle as *const _) },
         unsafe { hirari_audio_buffer_storage_channels(handle as *const _) },
@@ -116,6 +123,35 @@ fn clear_planes(channels: *const *mut f32, count: u32, frames: usize) {
 }
 
 impl TrackRuntime {
+    /// The engine's block walk addresses a track through its runtime, so the
+    /// identity and the tap buffers it publishes have to be readable natively.
+    pub(crate) fn track_id(&self) -> u32 {
+        self.track_id
+    }
+
+    /// The work buffer the graph-visible stages read at one block length. A
+    /// buffer that cannot be addressed as stereo at this length publishes
+    /// nothing, which is the same gate the C++ `canProcess` check applied.
+    pub(crate) fn work(&self, frames: u32) -> Option<Tap> {
+        self.window(self.work, frames)
+    }
+
+    fn window(&self, handle: *mut c_void, frames: u32) -> Option<Tap> {
+        let (planes, count, capacity) = channels_of(handle);
+        // A tap the finalise stage cannot address as stereo stays unpublished.
+        if planes.is_null() || count < 2 || capacity < frames {
+            return None;
+        }
+        let planes = unsafe { slice::from_raw_parts(planes, 2) };
+        if planes[0].is_null() || planes[1].is_null() {
+            return None;
+        }
+        Some(Tap {
+            left: planes[0],
+            right: planes[1],
+        })
+    }
+
     fn tap(&self, handle: *mut c_void, frames: u32) -> (*const *mut f32, u32) {
         let (planes, count, capacity) = channels_of(handle);
         // A tap the finalise stage cannot address as stereo stays unpublished.
@@ -326,7 +362,7 @@ impl TrackRuntime {
     }
 }
 
-fn runtime(state: *mut c_void) -> Option<&'static TrackRuntime> {
+pub(crate) fn runtime(state: *mut c_void) -> Option<&'static TrackRuntime> {
     unsafe { state.cast::<TrackRuntime>().as_ref() }
 }
 

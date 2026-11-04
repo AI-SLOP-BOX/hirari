@@ -21,7 +21,7 @@ uint32_t get_active_telemetry_idx(const Engine::HirariUnifiedEngine& engine) {
 }
 
 rust::Vec<float> get_spectrum(const Engine::HirariUnifiedEngine& engine, uint32_t idx) {
-    ::Hirari::Core::Engine::HirariUnifiedEngine::TelemetryData snapshot{};
+    HirariEngineTelemetry snapshot{};
     if (!engine.copy_telemetry(idx, snapshot)) return {};
     rust::Vec<float> result;
     result.reserve(512);
@@ -115,7 +115,7 @@ rust::Vec<float> get_runtime_telemetry(const BridgeFFI::AudioEngine& bridge) {
     // sourced from the engine's raw telemetry block so the UI snapshot keeps
     // its established index contract (0..9). The block publish is a thin
     // seqlock-style handoff in the audio callback; copy with retries.
-    Engine::HirariUnifiedEngine::TelemetryData telemetry{};
+    HirariEngineTelemetry telemetry{};
     for (int attempt = 0; attempt < 8; ++attempt) {
         if (engine->copy_telemetry(engine->get_active_telemetry_idx(), telemetry)) {
             break;
@@ -134,11 +134,11 @@ rust::Vec<float> get_runtime_telemetry(const BridgeFFI::AudioEngine& bridge) {
         }
         return best;
     };
-    out.push_back(telemetry.dspLoad);
-    out.push_back(peak(telemetry.peaksL, 256));
-    out.push_back(peak(telemetry.peaksR, 256));
+    out.push_back(telemetry.dsp_load);
+    out.push_back(peak(telemetry.peaks_left, 256));
+    out.push_back(peak(telemetry.peaks_right, 256));
     out.push_back(telemetry.correlation);
-    out.push_back(static_cast<float>(telemetry.activeVoices));
+    out.push_back(static_cast<float>(telemetry.active_voices));
     out.push_back(static_cast<float>(telemetry.count));
     out.push_back(static_cast<float>(telemetry.version & 0x00ffffff));
     out.push_back(bridge.is_driver_running() ? 1.0f : 0.0f);
