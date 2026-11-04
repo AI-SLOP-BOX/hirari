@@ -1381,18 +1381,20 @@ struct HirariEngineTelemetry {
     uint64_t forensic_audit_hash;
     uint64_t version;
 };
+/// The track storages the engine block reaches by kind (engine_block_host.rs).
+enum HirariEngineTrackStorageKind {
+    kHirariTrackStorageRuntime = 0,
+    kHirariTrackStorageStrip = 1,
+    kHirariTrackStorageArticulation = 2,
+    kHirariTrackStoragePluginMidi = 3,
+    kHirariTrackStorageBusState = 4,
+};
 struct HirariEngineBlockOps {
-    void* (*runtime)(void* track);
-    void* (*bus_state)(void* track);
-    uint8_t (*solo)(void* track);
+    void* (*storage)(void* track, uint32_t kind);
+    uint8_t (*type)(void* track);
+    void (*begin_edit)(void* track);
+    void (*end_edit)(void* track);
     void (*record)(void* track, uint64_t playhead);
-    uint8_t (*midi_input)(void* track);
-    void* (*articulation)(void* track);
-    void* (*plugin_midi)(void* track);
-    void (*set_volume)(void* track, float value);
-    void (*set_pan)(void* track, float value);
-    void (*set_mute)(void* track, uint8_t value);
-    void (*set_solo)(void* track, uint8_t value);
 };
 /// Every handle the block borrows; the engine owns each for the state's lifetime.
 struct HirariEngineBlockHandles {
@@ -1541,22 +1543,11 @@ extern "C" void* hirari_forensic_journaler_create();
 extern "C" void hirari_forensic_journaler_destroy(void* state);
 extern "C" void hirari_forensic_journaler_stop(void* state);
 
-using HirariSnapshotComputeCallback = bool (*)(void*, void**);
-using HirariSnapshotReadCallback = bool (*)(void*, uint64_t*, uint64_t*, const uint8_t**, size_t*);
 using HirariSnapshotDestroyCallback = void (*)(void*);
-using HirariSnapshotCancelCallback = void (*)(void*);
-using HirariSnapshotIsCancelledCallback = bool (*)(const void*);
-using HirariSnapshotBytesVisitor = void (*)(void*, const uint8_t*, size_t);
 using HirariWaveformComputeCallback = size_t (*)(void*, uint32_t, uint32_t, float*, size_t);
-extern "C" uint64_t hirari_layout_snapshot_request(
-    uint64_t owner, void* context, HirariSnapshotComputeCallback compute, HirariSnapshotReadCallback read,
-    HirariSnapshotDestroyCallback destroy_result, HirariSnapshotDestroyCallback destroy_context,
-    HirariSnapshotCancelCallback set_cancelled, HirariSnapshotIsCancelledCallback is_cancelled);
-extern "C" uint8_t hirari_layout_snapshot_poll(
-    uint64_t id, uint64_t owner, void* context, HirariSnapshotBytesVisitor visit);
-extern "C" bool hirari_layout_snapshot_cancel(uint64_t id, uint64_t owner);
-extern "C" uint64_t hirari_layout_snapshot_owner_create();
-extern "C" void hirari_layout_snapshot_owner_release(uint64_t owner);
+// Retires the Rust layout-snapshot session bound to this engine and joins its
+// worker, so a background save can never outlive the graph it reads.
+extern "C" void hirari_layout_snapshot_owner_release_host(void* host);
 extern "C" uint64_t hirari_waveform_snapshot_request(
     void* context, uint32_t track_id, uint32_t region_id,
     HirariWaveformComputeCallback compute, HirariSnapshotDestroyCallback destroy_context);

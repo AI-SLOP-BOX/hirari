@@ -19,13 +19,16 @@ use hirari_core_bridge::bus_audio::{
     hirari_bus_audio_read, hirari_bus_system_bus, hirari_bus_system_create,
     hirari_bus_system_destroy, hirari_bus_system_register,
 };
+use hirari_core_bridge::channel_strip::{
+    hirari_channel_strip_create, hirari_channel_strip_destroy, hirari_channel_strip_set_solo,
+};
 use hirari_core_bridge::control_room_runtime::{
     hirari_control_room_state_create, hirari_control_room_state_destroy,
 };
 use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_create, hirari_engine_block_destroy, hirari_engine_block_finish,
     hirari_engine_block_route, hirari_engine_block_set_playhead, hirari_engine_block_set_playing,
-    HirariEngineBlockHandles, HirariEngineBlockOps,
+    HirariEngineBlockHandles, HirariEngineBlockOps, TRACK_BUS_STATE, TRACK_RUNTIME, TRACK_STRIP,
 };
 use hirari_core_bridge::engine_input_block::{
     hirari_input_blocks_create, hirari_input_blocks_destroy,
@@ -84,13 +87,13 @@ unsafe extern "C" fn write_voice(
     }
 }
 
-/// Stand-in for a C++ `Track`: the ops tables are the only way the walk reaches
-/// it, exactly as the engine's own table reads them.
+/// Stand-in for a C++ `Track`: the walk reaches it only for its own storages,
+/// exactly as the engine's table does.
 struct FakeTrack {
     id: u32,
     runtime: *mut c_void,
     bus: *mut c_void,
-    solo: bool,
+    strip: *mut c_void,
 }
 
 unsafe extern "C" fn track_id_of(track: *mut c_void) -> u32 {
@@ -137,34 +140,25 @@ static TABLE_OPS: HirariEngineTrackOps = HirariEngineTrackOps {
     set_pdc_offset: Some(apply_pdc),
 };
 
-unsafe extern "C" fn runtime_of(track: *mut c_void) -> *mut c_void {
-    unsafe { &*track.cast::<FakeTrack>() }.runtime
+unsafe extern "C" fn storage_of(track: *mut c_void, kind: u32) -> *mut c_void {
+    let track = unsafe { &*track.cast::<FakeTrack>() };
+    match kind {
+        TRACK_RUNTIME => track.runtime,
+        TRACK_STRIP => track.strip,
+        TRACK_BUS_STATE => track.bus,
+        _ => ptr::null_mut(),
+    }
 }
 
-unsafe extern "C" fn midi_input_of(_track: *mut c_void) -> u8 {
-    0
+unsafe extern "C" fn block_type_of(track: *mut c_void) -> u8 {
+    if unsafe { &*track.cast::<FakeTrack>() }.bus.is_null() {
+        0
+    } else {
+        3
+    }
 }
 
-unsafe extern "C" fn articulation_of(_track: *mut c_void) -> *mut c_void {
-    ptr::null_mut()
-}
-
-unsafe extern "C" fn plugin_midi_of(_track: *mut c_void) -> *mut c_void {
-    ptr::null_mut()
-}
-
-unsafe extern "C" fn set_volume_of(_track: *mut c_void, _value: f32) {}
-unsafe extern "C" fn set_pan_of(_track: *mut c_void, _value: f32) {}
-unsafe extern "C" fn set_mute_of(_track: *mut c_void, _value: u8) {}
-unsafe extern "C" fn set_solo_of(_track: *mut c_void, _value: u8) {}
-
-unsafe extern "C" fn bus_state_of(track: *mut c_void) -> *mut c_void {
-    unsafe { &*track.cast::<FakeTrack>() }.bus
-}
-
-unsafe extern "C" fn solo_of(track: *mut c_void) -> u8 {
-    u8::from(unsafe { &*track.cast::<FakeTrack>() }.solo)
-}
+unsafe extern "C" fn edit_of(_track: *mut c_void) {}
 
 unsafe extern "C" fn record_of(_track: *mut c_void, _playhead: u64) {}
 
@@ -237,17 +231,11 @@ impl Engine {
 
     fn bind(&mut self) -> &mut Self {
         let ops = HirariEngineBlockOps {
-            runtime: Some(runtime_of),
-            bus_state: Some(bus_state_of),
-            solo: Some(solo_of),
+            storage: Some(storage_of),
+            track_type: Some(block_type_of),
+            begin_edit: Some(edit_of),
+            end_edit: Some(edit_of),
             record: Some(record_of),
-            midi_input: Some(midi_input_of),
-            articulation: Some(articulation_of),
-            plugin_midi: Some(plugin_midi_of),
-            set_volume: Some(set_volume_of),
-            set_pan: Some(set_pan_of),
-            set_mute: Some(set_mute_of),
-            set_solo: Some(set_solo_of),
         };
         self.borrowed = unsafe {
             [
@@ -340,11 +328,14 @@ impl Engine {
                 voice.cast(),
             )
         };
+        // Solo is strip state, exactly as the engine reads it.
+        let strip = unsafe { hirari_channel_strip_create() };
+        unsafe { hirari_channel_strip_set_solo(strip, solo) };
         let track = Box::into_raw(Box::new(FakeTrack {
             id,
             runtime,
             bus: ptr::null_mut(),
-            solo,
+            strip,
         }));
         self.work.push(work);
         self.send_pre.push(send_pre);
@@ -466,7 +457,8 @@ impl Drop for Engine {
                 hirari_audio_buffer_storage_destroy(handle);
             }
             for handle in self.tracks.drain(..) {
-                drop(Box::from_raw(handle.cast::<FakeTrack>()));
+                let track = Box::from_raw(handle.cast::<FakeTrack>());
+                hirari_channel_strip_destroy(track.strip);
             }
             for voice in self.voices.drain(..) {
                 drop(Box::from_raw(voice));

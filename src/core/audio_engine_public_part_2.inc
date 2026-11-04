@@ -70,34 +70,6 @@
                 delete static_cast<std::shared_ptr<::Hirari::Core::Engine::HirariUnifiedEngine>*>(opaque);
             });
     }
-    uint64_t request_project_layout_snapshot() const {
-        if (!m_engine) return 0;
-        auto* context = new (std::nothrow) ProjectLayoutSnapshotContext{m_engine};
-        if (!context) return 0;
-        return hirari_layout_snapshot_request(
-            m_layoutSnapshotOwnerId, context, &computeProjectLayoutSnapshot, &readProjectLayoutSnapshot,
-            &destroyProjectLayoutResult, &destroyProjectLayoutContext,
-            &cancelProjectLayoutSnapshot, &isProjectLayoutSnapshotCancelled);
-    }
-    rust::String poll_project_layout_snapshot(uint64_t requestId) const {
-        if (requestId == 0) return rust::String("ERROR");
-        std::string result;
-        const uint8_t status = hirari_layout_snapshot_poll(
-            requestId, m_layoutSnapshotOwnerId, &result,
-            +[](void* opaque, const uint8_t* bytes, size_t size) noexcept {
-                auto* output = static_cast<std::string*>(opaque);
-                if (!output || (!bytes && size != 0)) return;
-                try { output->assign(reinterpret_cast<const char*>(bytes), size); }
-                catch (...) { output->clear(); }
-            });
-        if (status == 0) return rust::String();
-        return rust::String(status == 1 ? result : "ERROR");
-    }
-    bool cancel_project_layout_snapshot(uint64_t requestId) const {
-        return requestId != 0 && hirari_layout_snapshot_cancel(requestId, m_layoutSnapshotOwnerId);
-    }
-
-    
     // Command Dispatch (admission lives in Rust; the engine keeps the queue)
     bool push_command(CommandType type, uint32_t tid, float val, uint64_t ts,
                       uint64_t expectedProjectGeneration,

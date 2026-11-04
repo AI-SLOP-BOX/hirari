@@ -51,7 +51,9 @@ AudioEngine::AudioEngine(bool startDevice)
     }
 
     AudioEngine::~AudioEngine() {
-        hirari_layout_snapshot_owner_release(m_layoutSnapshotOwnerId);
+        // Rust joins the layout snapshot worker for this graph here, so the
+        // background save can never read an engine that is being released.
+        hirari_layout_snapshot_owner_release_host(m_engine.get());
         {
             std::lock_guard<std::mutex> lock(m_configMutex);
             if (m_driver) {

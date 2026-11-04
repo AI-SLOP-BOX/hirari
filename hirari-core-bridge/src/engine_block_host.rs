@@ -14,11 +14,14 @@
 //! [`hirari_engine_block_begin`], [`hirari_engine_block_route`] and
 //! [`hirari_engine_block_finish`] around the device buffer it is rendering.
 //!
-//! Tracks stay C++ objects, so what this state cannot reach through a handle --
-//! a track's runtime, solo flag, bus stage and armed recorder, plus the MIDI
-//! input and fader writes the head makes -- travels as a published operations
-//! table. Every tap buffer the walk reads is already bound in the track's
-//! [`TrackRuntime`].
+//! Tracks stay C++ objects, but every read and write the block makes on one is
+//! now a Rust call on a storage handle it asks for by kind -- the runtime, the
+//! channel strip, the articulation state, the MIDI input buffer and a bus's
+//! stage. What stays in the published operations table is the handle selection,
+//! the track's role, the armed recorder and the control-edit protocol (the
+//! frozen-render drop and the layout-revision bump) that a drained command keeps
+//! around its store write. Every tap buffer the walk reads is already bound in
+//! the track's [`TrackRuntime`].
 
 use crate::audio_buffer_ops::hirari_audio_add_sanitized_stereo;
 use crate::audio_test_tone::hirari_audio_test_tone_render;
@@ -31,7 +34,14 @@ use crate::bus_audio::{
     hirari_bus_audio_accumulate, hirari_bus_audio_read, hirari_bus_audio_replace_post,
     hirari_bus_system_clear,
 };
-use crate::command_host::hirari_engine_audio_command;
+use crate::channel_strip::{
+    hirari_channel_strip_is_solo, hirari_channel_strip_set_gain, hirari_channel_strip_set_pan,
+    hirari_channel_strip_set_solo,
+};
+use crate::command_host::{
+    hirari_engine_audio_command, AUDIO_COMMAND_MUTE, AUDIO_COMMAND_PAN, AUDIO_COMMAND_SOLO,
+    AUDIO_COMMAND_VOLUME,
+};
 use crate::control_room_audio::hirari_control_room_mix_cue;
 use crate::control_room_runtime::{
     hirari_control_room_active_cue_bus, hirari_control_room_active_cue_click,
@@ -84,7 +94,9 @@ use crate::track_midi_articulation::{
     hirari_track_midi_schedule_note_off, hirari_track_midi_timed_outputs, GeneratedMidiEvent,
     TimedKeySwitchOutput,
 };
-use crate::track_runtime::{self, TrackRuntime};
+use crate::track_runtime::{
+    self, hirari_track_runtime_set_muted, TrackRuntime,
+};
 use std::ffi::c_void;
 use std::ptr;
 use std::slice;
@@ -143,29 +155,38 @@ impl Default for HirariEngineTelemetry {
     }
 }
 
-/// The per-track operations the engine block needs from C++.
+/// The track storages [`HirariEngineBlockOps::storage`] reaches, mirroring
+/// `HirariEngineTrackStorageKind`.
+pub const TRACK_RUNTIME: u32 = 0;
+pub const TRACK_STRIP: u32 = 1;
+pub const TRACK_ARTICULATION: u32 = 2;
+pub const TRACK_PLUGIN_MIDI: u32 = 3;
+pub const TRACK_BUS_STATE: u32 = 4;
+
+/// `Track::Type`, so the block decides a track's role from the same byte the
+/// C++ model stores.
+const TRACK_TYPE_MIDI: u8 = 1;
+const TRACK_TYPE_INSTRUMENT: u8 = 2;
+const TRACK_TYPE_BUS: u8 = 3;
+
+/// The per-track operations the engine block needs from C++. Every read the
+/// block makes on a track is now a Rust call on a handle it supplies, so what
+/// stays here is the handle selection, the track's role and the control-side
+/// edit protocol.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct HirariEngineBlockOps {
-    /// The track's bound [`TrackRuntime`] handle.
-    pub runtime: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
-    /// The track's AUX/BUS stage, or null when the track is not a bus.
-    pub bus_state: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
-    /// Non-zero while the track carries solo.
-    pub solo: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
+    /// The track's own storage selected by one of the `TRACK_*` kinds, or null
+    /// when the track has none of that kind.
+    pub storage: Option<unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void>,
+    /// The track's `Type` as a byte.
+    pub track_type: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
+    /// Drops the frozen render before a store write, as a control edit does.
+    pub begin_edit: Option<unsafe extern "C" fn(*mut c_void)>,
+    /// Bumps the layout revision after a store write.
+    pub end_edit: Option<unsafe extern "C" fn(*mut c_void)>,
     /// Captures the fader and pan of one armed recorder.
     pub record: Option<unsafe extern "C" fn(*mut c_void, u64)>,
-    /// Non-zero while the track takes timeline MIDI (MIDI or Instrument).
-    pub midi_input: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
-    /// The track's Rust articulation runtime.
-    pub articulation: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
-    /// The track's Rust MIDI input buffer.
-    pub plugin_midi: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
-    /// Applies one drained command to the track's fader, pan, mute or solo.
-    pub set_volume: Option<unsafe extern "C" fn(*mut c_void, f32)>,
-    pub set_pan: Option<unsafe extern "C" fn(*mut c_void, f32)>,
-    pub set_mute: Option<unsafe extern "C" fn(*mut c_void, u8)>,
-    pub set_solo: Option<unsafe extern "C" fn(*mut c_void, u8)>,
 }
 
 /// Every handle the block borrows from the engine, bound once at creation. The
@@ -316,23 +337,33 @@ fn block(state: *const c_void) -> Option<&'static EngineBlockState> {
 }
 
 impl EngineBlockState {
-    fn runtime(&self, track: *mut c_void) -> Option<&'static TrackRuntime> {
-        let op = self.ops.runtime?;
-        track_runtime::runtime(unsafe { op(track) })
+    fn storage(&self, track: *mut c_void, kind: u32) -> *mut c_void {
+        let Some(op) = self.ops.storage else {
+            return ptr::null_mut();
+        };
+        unsafe { op(track, kind) }
     }
 
-    fn bus_state(&self, track: *mut c_void) -> *mut c_void {
-        let Some(op) = self.ops.bus_state else {
-            return ptr::null_mut();
+    fn track_type(&self, track: *mut c_void) -> u8 {
+        let Some(op) = self.ops.track_type else {
+            return 0;
         };
         unsafe { op(track) }
     }
 
+    fn runtime(&self, track: *mut c_void) -> Option<&'static TrackRuntime> {
+        track_runtime::runtime(self.storage(track, TRACK_RUNTIME))
+    }
+
+    fn bus_state(&self, track: *mut c_void) -> *mut c_void {
+        if self.track_type(track) != TRACK_TYPE_BUS {
+            return ptr::null_mut();
+        }
+        self.storage(track, TRACK_BUS_STATE)
+    }
+
     fn solo(&self, track: *mut c_void) -> bool {
-        let Some(op) = self.ops.solo else {
-            return false;
-        };
-        unsafe { op(track) != 0 }
+        unsafe { hirari_channel_strip_is_solo(self.storage(track, TRACK_STRIP)) }
     }
 
     fn record(&self, track: *mut c_void, playhead: u64) {
@@ -402,24 +433,15 @@ impl EngineBlockState {
     }
 
     fn midi_input(&self, track: *mut c_void) -> bool {
-        let Some(op) = self.ops.midi_input else {
-            return false;
-        };
-        unsafe { op(track) != 0 }
+        matches!(self.track_type(track), TRACK_TYPE_MIDI | TRACK_TYPE_INSTRUMENT)
     }
 
     fn articulation(&self, track: *mut c_void) -> *mut c_void {
-        let Some(op) = self.ops.articulation else {
-            return ptr::null_mut();
-        };
-        unsafe { op(track) }
+        self.storage(track, TRACK_ARTICULATION)
     }
 
     fn plugin_midi(&self, track: *mut c_void) -> *mut c_void {
-        let Some(op) = self.ops.plugin_midi else {
-            return ptr::null_mut();
-        };
-        unsafe { op(track) }
+        self.storage(track, TRACK_PLUGIN_MIDI)
     }
 
     /// One slot of the held preview-voice table, or null when the pair is out of
@@ -614,19 +636,38 @@ impl EngineBlockState {
                 continue;
             }
             let mut value = 0.0_f32;
-            match unsafe { hirari_engine_audio_command(record.type_, record.val, &mut value) } {
-                1 => self.ops.set_volume.map(|op| unsafe { op(track, value) }),
-                2 => self.ops.set_pan.map(|op| unsafe { op(track, value) }),
-                3 => self
-                    .ops
-                    .set_mute
-                    .map(|op| unsafe { op(track, u8::from(value >= 0.5)) }),
-                4 => self
-                    .ops
-                    .set_solo
-                    .map(|op| unsafe { op(track, u8::from(value >= 0.5)) }),
-                _ => None,
-            };
+            let command = unsafe { hirari_engine_audio_command(record.type_, record.val, &mut value) };
+            if matches!(
+                command,
+                AUDIO_COMMAND_VOLUME | AUDIO_COMMAND_PAN | AUDIO_COMMAND_MUTE | AUDIO_COMMAND_SOLO
+            ) {
+                self.apply_scalar(track, command, value);
+            }
+        }
+    }
+
+    /// Writes one drained command to the track's own storage under the control
+    /// edit protocol the C++ setter applied around it: the fader, pan and solo
+    /// live on the channel strip, mute on the runtime.
+    fn apply_scalar(&self, track: *mut c_void, command: u32, value: f32) {
+        let Some(op) = self.ops.begin_edit else {
+            return;
+        };
+        unsafe { op(track) };
+        let strip = self.storage(track, TRACK_STRIP);
+        match command {
+            AUDIO_COMMAND_VOLUME => unsafe { hirari_channel_strip_set_gain(strip, value) },
+            AUDIO_COMMAND_PAN => unsafe { hirari_channel_strip_set_pan(strip, value) },
+            AUDIO_COMMAND_MUTE => unsafe {
+                hirari_track_runtime_set_muted(
+                    self.storage(track, TRACK_RUNTIME),
+                    u8::from(value >= 0.5),
+                )
+            },
+            _ => unsafe { hirari_channel_strip_set_solo(strip, value >= 0.5) },
+        }
+        if let Some(op) = self.ops.end_edit {
+            unsafe { op(track) };
         }
     }
 

@@ -753,6 +753,272 @@ pub unsafe extern "C" fn hirari_layout_json_from_host(
     written
 }
 
+/// One background layout snapshot: the engine the worker reads, the table it
+/// reads it through, and the flag the UI raises when it loses interest.
+struct LayoutSession {
+    engine: *mut crate::ffi::HirariUnifiedEngine,
+    ops: *const HirariLayoutHostOps,
+    cancelled: std::sync::atomic::AtomicBool,
+}
+
+// Only the snapshot worker dereferences the engine, and the owning
+// `AudioEngine` joins that worker before its graph can be destroyed.
+unsafe impl Send for LayoutSession {}
+
+struct RecordedLayout {
+    before: u64,
+    after: u64,
+    layout: Vec<u8>,
+}
+
+extern "C" fn session_cancelled(context: *const c_void) -> bool {
+    let session = context.cast::<LayoutSession>();
+    !session.is_null() && unsafe { (*session).cancelled.load(std::sync::atomic::Ordering::Acquire) }
+}
+
+extern "C" fn session_set_cancelled(context: *mut c_void) {
+    let session = context.cast::<LayoutSession>();
+    if !session.is_null() {
+        unsafe { (*session).cancelled.store(true, std::sync::atomic::Ordering::Release) };
+    }
+}
+
+/// Gathers and serializes the layout, bracketing it with the project state
+/// revision so the poller can tell a snapshot that aged out from a usable one.
+extern "C" fn session_compute(context: *mut c_void, output: *mut *mut c_void) -> bool {
+    let (Some(session), Some(output)) = (unsafe {
+        context.cast::<LayoutSession>().as_mut()
+    }, unsafe { output.as_mut() })
+    else {
+        return false;
+    };
+    if session.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+        return false;
+    }
+    let before = unsafe { (*session.engine).get_project_state_revision() };
+    let mut data: *mut u8 = std::ptr::null_mut();
+    let mut length = 0;
+    if !unsafe {
+        hirari_layout_json_from_host(
+            session.engine.cast::<c_void>(),
+            session.ops,
+            Some(session_cancelled),
+            (session as *mut LayoutSession).cast::<c_void>(),
+            &mut data,
+            &mut length,
+        )
+    } {
+        return false;
+    }
+    let layout = if data.is_null() || length == 0 {
+        Vec::new()
+    } else {
+        unsafe { Vec::from_raw_parts(data, length, length) }
+    };
+    let after = unsafe { (*session.engine).get_project_state_revision() };
+    *output = Box::into_raw(Box::new(RecordedLayout {
+        before,
+        after,
+        layout,
+    }))
+    .cast();
+    true
+}
+
+extern "C" fn session_read(
+    result: *mut c_void,
+    before: *mut u64,
+    after: *mut u64,
+    data: *mut *const u8,
+    length: *mut usize,
+) -> bool {
+    let Some(recorded) = (unsafe { result.cast::<RecordedLayout>().as_ref() }) else {
+        return false;
+    };
+    if before.is_null() || after.is_null() || data.is_null() || length.is_null() {
+        return false;
+    }
+    unsafe {
+        *before = recorded.before;
+        *after = recorded.after;
+        *data = recorded.layout.as_ptr();
+        *length = recorded.layout.len();
+    }
+    true
+}
+
+extern "C" fn session_destroy_result(result: *mut c_void) {
+    if !result.is_null() {
+        drop(unsafe { Box::from_raw(result.cast::<RecordedLayout>()) });
+    }
+}
+
+extern "C" fn session_destroy_context(context: *mut c_void) {
+    if !context.is_null() {
+        drop(unsafe { Box::from_raw(context.cast::<LayoutSession>()) });
+    }
+}
+
+extern "C" fn visit_snapshot_bytes(context: *mut c_void, bytes: *const u8, length: usize) {
+    let Some(output) = (unsafe { context.cast::<Vec<u8>>().as_mut() }) else {
+        return;
+    };
+    if bytes.is_null() && length != 0 {
+        return;
+    }
+    output.clear();
+    if length != 0 {
+        output.extend_from_slice(unsafe { std::slice::from_raw_parts(bytes, length) });
+    }
+}
+
+/// Snapshot owners are keyed by engine address, so a session belongs to exactly
+/// one engine and a reused address starts a clean owner.
+static LAYOUT_OWNERS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<usize, u64>>,
+> = std::sync::OnceLock::new();
+
+fn layout_owners() -> &'static std::sync::Mutex<std::collections::HashMap<usize, u64>> {
+    LAYOUT_OWNERS.get_or_init(std::sync::Mutex::default)
+}
+
+fn owner_for(host: usize) -> u64 {
+    let mut owners = layout_owners().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(owner) = owners.get(&host) {
+        return *owner;
+    }
+    let owner = crate::async_snapshots::hirari_layout_snapshot_owner_create();
+    owners.insert(host, owner);
+    owner
+}
+
+fn existing_owner(host: usize) -> Option<u64> {
+    layout_owners()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&host)
+        .copied()
+}
+
+/// Retires the snapshots of one engine and joins its worker. The native
+/// `AudioEngine` destructor calls this before its graph can be released.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_layout_snapshot_owner_release_host(host: *mut c_void) {
+    let owner = (!host.is_null())
+        .then(|| {
+            layout_owners()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&(host as usize))
+        })
+        .flatten();
+    if let Some(owner) = owner {
+        crate::async_snapshots::release_layout_owner(owner);
+    }
+}
+
+fn ops_for(
+    engine: *const crate::ffi::HirariUnifiedEngine,
+) -> *const HirariLayoutHostOps {
+    if engine.is_null() {
+        return std::ptr::null();
+    }
+    unsafe { (*engine).layout_ops_handle() as *const HirariLayoutHostOps }
+}
+
+/// The live project layout as JSON. The gather is Rust; C++ contributes the
+/// engine host, its ops table and the track names.
+pub fn project_layout_json(core: *const crate::ffi::HirariUnifiedEngine) -> String {
+    let ops = ops_for(core);
+    if ops.is_null() {
+        return String::new();
+    }
+    let mut data: *mut u8 = std::ptr::null_mut();
+    let mut length = 0;
+    if !unsafe {
+        hirari_layout_json_from_host(
+            core.cast_mut().cast::<c_void>(),
+            ops,
+            None,
+            std::ptr::null(),
+            &mut data,
+            &mut length,
+        )
+    } || data.is_null()
+        || length == 0
+    {
+        return String::new();
+    }
+    let bytes = unsafe { Vec::from_raw_parts(data, length, length) };
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Starts the background save's layout snapshot and returns its request id.
+pub fn request_layout_snapshot(engine: *mut crate::ffi::HirariUnifiedEngine) -> u64 {
+    let ops = ops_for(engine);
+    if ops.is_null() {
+        return 0;
+    }
+    let owner = owner_for(engine as usize);
+    let session = Box::into_raw(Box::new(LayoutSession {
+        engine,
+        ops,
+        cancelled: std::sync::atomic::AtomicBool::new(false),
+    }))
+    .cast::<c_void>();
+    unsafe {
+        crate::async_snapshots::hirari_layout_snapshot_request(
+            owner,
+            session,
+            Some(session_compute),
+            Some(session_read),
+            Some(session_destroy_result),
+            Some(session_destroy_context),
+            Some(session_set_cancelled),
+            Some(session_cancelled),
+        )
+    }
+}
+
+/// Empty while the snapshot is still being prepared, otherwise
+/// `READY <revision>\n<layout-json>` or a failure marker.
+pub fn poll_layout_snapshot(
+    engine: *const crate::ffi::HirariUnifiedEngine,
+    request_id: u64,
+) -> String {
+    if request_id == 0 {
+        return "ERROR".to_owned();
+    }
+    let owner = existing_owner(engine as usize).unwrap_or(0);
+    let mut bytes = Vec::new();
+    let status = unsafe {
+        crate::async_snapshots::hirari_layout_snapshot_poll(
+            request_id,
+            owner,
+            (&mut bytes as *mut Vec<u8>).cast::<c_void>(),
+            Some(visit_snapshot_bytes),
+        )
+    };
+    match status {
+        0 => String::new(),
+        1 => String::from_utf8_lossy(&bytes).into_owned(),
+        _ => "ERROR".to_owned(),
+    }
+}
+
+pub fn cancel_layout_snapshot(
+    engine: *const crate::ffi::HirariUnifiedEngine,
+    request_id: u64,
+) -> bool {
+    if request_id == 0 {
+        return false;
+    }
+    let Some(owner) = existing_owner(engine as usize) else {
+        return false;
+    };
+    unsafe { crate::async_snapshots::hirari_layout_snapshot_cancel(request_id, owner) }
+}
+
 /// The saver path: gathers with the save-only fields and encodes the project
 /// container directly, without a C++ snapshot in between.
 #[no_mangle]

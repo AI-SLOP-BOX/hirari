@@ -23,7 +23,7 @@ use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_playhead, hirari_engine_block_range_overflowed,
     hirari_engine_block_set_playhead, hirari_engine_block_set_playing,
     hirari_engine_telemetry_active_index, hirari_engine_telemetry_snapshot,
-    HirariEngineBlockHandles, HirariEngineBlockOps, HirariEngineTelemetry,
+    HirariEngineBlockHandles, HirariEngineBlockOps, HirariEngineTelemetry, TRACK_RUNTIME,
 };
 use hirari_core_bridge::engine_input_block::{
     hirari_input_blocks_create, hirari_input_blocks_destroy,
@@ -55,26 +55,25 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const FRAMES: u32 = 4;
 
-/// Stand-in for a C++ `Track`: the ops table is the only way the block reaches it.
+/// Stand-in for a C++ `Track`: the block reaches it only for its own storages.
 struct FakeTrack {
     id: u32,
     runtime: *mut c_void,
-    bus: *mut c_void,
-    solo: bool,
     records: AtomicUsize,
 }
 
-unsafe extern "C" fn runtime_of(track: *mut c_void) -> *mut c_void {
-    unsafe { &*track.cast::<FakeTrack>() }.runtime
+unsafe extern "C" fn storage_of(track: *mut c_void, kind: u32) -> *mut c_void {
+    match kind {
+        TRACK_RUNTIME => unsafe { &*track.cast::<FakeTrack>() }.runtime,
+        _ => std::ptr::null_mut(),
+    }
 }
 
-unsafe extern "C" fn bus_state_of(track: *mut c_void) -> *mut c_void {
-    unsafe { &*track.cast::<FakeTrack>() }.bus
+unsafe extern "C" fn block_type_of(_track: *mut c_void) -> u8 {
+    0
 }
 
-unsafe extern "C" fn solo_of(track: *mut c_void) -> u8 {
-    u8::from(unsafe { &*track.cast::<FakeTrack>() }.solo)
-}
+unsafe extern "C" fn edit_of(_track: *mut c_void) {}
 
 unsafe extern "C" fn record_of(track: *mut c_void, _playhead: u64) {
     unsafe { &*track.cast::<FakeTrack>() }
@@ -117,21 +116,6 @@ static TABLE_OPS: HirariEngineTrackOps = HirariEngineTrackOps {
     latency: Some(latency_of),
     set_pdc_offset: Some(apply_pdc),
 };
-
-unsafe extern "C" fn midi_input_of(_track: *mut c_void) -> u8 {
-    0
-}
-
-unsafe extern "C" fn articulation_of(_track: *mut c_void) -> *mut c_void {
-    std::ptr::null_mut()
-}
-
-unsafe extern "C" fn plugin_midi_of(_track: *mut c_void) -> *mut c_void {
-    std::ptr::null_mut()
-}
-
-unsafe extern "C" fn set_scalar(_track: *mut c_void, _value: f32) {}
-unsafe extern "C" fn set_flag(_track: *mut c_void, _value: u8) {}
 
 fn storage(channels: u32, frames: u32) -> *mut c_void {
     unsafe {
@@ -187,17 +171,11 @@ impl Engine {
 
     fn bind(&mut self) -> &mut Self {
         let ops = HirariEngineBlockOps {
-            runtime: Some(runtime_of),
-            bus_state: Some(bus_state_of),
-            solo: Some(solo_of),
+            storage: Some(storage_of),
+            track_type: Some(block_type_of),
+            begin_edit: Some(edit_of),
+            end_edit: Some(edit_of),
             record: Some(record_of),
-            midi_input: Some(midi_input_of),
-            articulation: Some(articulation_of),
-            plugin_midi: Some(plugin_midi_of),
-            set_volume: Some(set_scalar),
-            set_pan: Some(set_scalar),
-            set_mute: Some(set_flag),
-            set_solo: Some(set_flag),
         };
         self.borrowed = unsafe {
             [
@@ -250,8 +228,6 @@ impl Engine {
         let track = Box::into_raw(Box::new(FakeTrack {
             id,
             runtime,
-            bus: std::ptr::null_mut(),
-            solo: false,
             records: AtomicUsize::new(0),
         }));
         self.work.push(work);

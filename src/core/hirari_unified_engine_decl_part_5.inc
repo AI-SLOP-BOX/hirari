@@ -13,9 +13,11 @@
     };
     MeterData getMasterMeterData() const;
     bool execute_auto_arrangement();
-    rust::String get_project_layout_json() const;
-    rust::String get_project_layout_json_cancellable(
-        const std::atomic<bool>* cancellation) const;
+    // The Rust layout gather (layout_gather.rs) owns the snapshot, its JSON and
+    // the background save session; this hands it the host table it reads.
+    uintptr_t layout_ops_handle() const noexcept {
+        return reinterpret_cast<uintptr_t>(layoutHostOps());
+    }
     // Stable generation token for UI/CLI snapshots. Commands must echo this
     // value back through push_command; a changed layout makes the token stale.
     uint64_t get_project_generation() const;

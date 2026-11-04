@@ -74,6 +74,17 @@ production support.
 
 ### Changed
 
+- The background project-layout snapshot is now a Rust session. The save path's
+  worker, its cancellation flag, the revision bracket that turns a finished
+  gather into `READY <revision>`, and the owned JSON buffer all live in
+  `layout_gather.rs`; `AudioEngine` contributes only the engine host and the ops
+  table Rust reads through, and the C++ destructor releases the host's owner,
+  which joins the worker before the graph can be freed — a stronger guarantee
+  than the `shared_ptr` pin the C++ session used. C++ 7075 -> 6955 (-120).
+- The engine block pipeline now reaches track state through five host ops
+  instead of a per-field C++ surface. Rust's `engine_block_host` reads the
+  track's own channel strip, runtime, bus state, solo and MIDI-articulation
+  storage and applies the drained scalars itself.
 - Duplicating a track now copies its state store-to-store. The engine's
   duplicate handler builds the new track and hands both tracks' channel-strip,
   runtime, automation and effect-chain storage handles to one Rust entry point,

@@ -304,10 +304,9 @@ pub mod ffi {
             high_cut_db: f32,
         ) -> bool;
         fn get_track_correlation(self: &HirariUnifiedEngine, tid: u32) -> f32;
-        fn get_project_layout_json(self: &HirariUnifiedEngine) -> String;
-        fn request_project_layout_snapshot(self: &AudioEngine) -> u64;
-        fn poll_project_layout_snapshot(self: &AudioEngine, request_id: u64) -> String;
-        fn cancel_project_layout_snapshot(self: &AudioEngine, request_id: u64) -> bool;
+        // The Rust layout gather (layout_gather.rs) walks the live tracks
+        // through this table; C++ no longer runs a snapshot session.
+        fn layout_ops_handle(self: &HirariUnifiedEngine) -> usize;
         fn get_project_generation(self: &HirariUnifiedEngine) -> u64;
         fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
         fn get_project_state_revision(self: &HirariUnifiedEngine) -> u64;

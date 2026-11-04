@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread;
 
 type ComputeLayout = unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> bool;
@@ -34,7 +34,13 @@ struct LayoutState {
     active: HashMap<u64, ActiveLayout>,
     results: HashMap<u64, (u64, String)>,
     released_owners: HashSet<u64>,
+    /// Requests whose worker has published its final outcome. Owner release
+    /// waits on this so an engine can never be destroyed under a worker that
+    /// still reads it.
+    finished: HashSet<u64>,
 }
+
+static LAYOUT_COMPLETION: Condvar = Condvar::new();
 
 #[derive(Default)]
 struct WaveformState {
@@ -155,12 +161,16 @@ pub unsafe extern "C" fn hirari_layout_snapshot_request(
                 state.results.insert(id, (active.owner, result));
             }
         }
+        state.finished.insert(id);
+        LAYOUT_COMPLETION.notify_all();
     });
     if worker.is_err() {
         let mut state = layouts().lock().unwrap_or_else(|e| e.into_inner());
         if let Some(active) = state.active.remove(&id) {
             unsafe { destroy_context(active.context as *mut c_void) };
         }
+        state.finished.insert(id);
+        LAYOUT_COMPLETION.notify_all();
         return 0;
     }
     id
@@ -203,15 +213,39 @@ pub extern "C" fn hirari_layout_snapshot_owner_create() -> u64 {
 
 #[no_mangle]
 pub unsafe extern "C" fn hirari_layout_snapshot_owner_release(owner: u64) {
-    if owner == 0 { return; }
+    release_layout_owner(owner);
+}
+
+/// Retires an owner and waits for the worker it still has in flight. The C++
+/// session calls this before its engine can die, so the worker's reads of the
+/// engine host are bounded by the owner's lifetime.
+pub(crate) fn release_layout_owner(owner: u64) {
+    if owner == 0 {
+        return;
+    }
     let mut state = layouts().lock().unwrap_or_else(|e| e.into_inner());
     state.results.retain(|_, (result_owner, _)| *result_owner != owner);
-    let active = state.active.values().find(|active| active.owner == owner)
-        .map(|active| (active.context, active.cancel));
-    if let Some((context, cancel)) = active {
+    let active = state
+        .active
+        .iter()
+        .find(|(_, active)| active.owner == owner)
+        .map(|(id, active)| (*id, active.context, active.cancel));
+    if let Some((id, context, cancel)) = active {
         state.released_owners.insert(owner);
         unsafe { cancel(context as *mut c_void) };
+        drop(wait_for_layout_worker(state, id));
     }
+}
+
+fn wait_for_layout_worker(
+    mut state: MutexGuard<'static, LayoutState>,
+    id: u64,
+) -> MutexGuard<'static, LayoutState> {
+    while !state.finished.contains(&id) {
+        state = LAYOUT_COMPLETION.wait(state).unwrap_or_else(|e| e.into_inner());
+    }
+    state.finished.remove(&id);
+    state
 }
 
 #[no_mangle]

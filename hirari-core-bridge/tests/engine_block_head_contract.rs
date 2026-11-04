@@ -11,13 +11,16 @@ use hirari_core_bridge::audio_buffer_ops::{
     hirari_audio_buffer_storage_destroy, hirari_audio_buffer_storage_reserve_buffer,
     hirari_audio_buffer_storage_resize,
 };
+use hirari_core_bridge::channel_strip::{
+    hirari_channel_strip_create, hirari_channel_strip_destroy, hirari_channel_strip_gain,
+};
 use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_begin, hirari_engine_block_create, hirari_engine_block_cycle_start,
     hirari_engine_block_destroy, hirari_engine_block_playhead,
     hirari_engine_block_range_overflowed, hirari_engine_block_set_config_transition,
     hirari_engine_block_set_cycle, hirari_engine_block_set_loop, hirari_engine_block_set_playhead,
     hirari_engine_block_set_playing, hirari_engine_block_set_test_tone, HirariEngineBlockHandles,
-    HirariEngineBlockOps,
+    HirariEngineBlockOps, TRACK_PLUGIN_MIDI, TRACK_RUNTIME, TRACK_STRIP,
 };
 use hirari_core_bridge::engine_rings::{
     hirari_engine_command_ring_push, hirari_engine_rings_create, hirari_engine_rings_destroy,
@@ -31,6 +34,9 @@ use hirari_core_bridge::midi_buffer_ops::{
     hirari_midi_buffer_add_note_on, hirari_midi_buffer_create, hirari_midi_buffer_destroy,
     hirari_midi_buffer_event_count,
 };
+use hirari_core_bridge::track_runtime::{
+    hirari_track_runtime_create, hirari_track_runtime_destroy, hirari_track_runtime_is_muted,
+};
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -41,14 +47,15 @@ const SAMPLE_RATE: f64 = 44_100.0;
 /// carries, matching the one `hirari_engine_block_create` starts the transport at.
 const GENERATION: u64 = 1;
 
-/// Stand-in for a C++ `Track`: the head reaches it only through the ops table,
-/// so the counters there are the assertions.
+/// Stand-in for a C++ `Track`: the block reaches it only for a storage handle,
+/// so the fader, pan and mute the head writes land in the real Rust storages and
+/// the edit counter is the assertion for the control protocol around them.
 struct FakeTrack {
     id: u32,
     midi: *mut c_void,
-    volumes: AtomicUsize,
-    last_volume: AtomicUsize,
-    mutes: AtomicUsize,
+    strip: *mut c_void,
+    runtime: *mut c_void,
+    edits: AtomicUsize,
 }
 
 unsafe extern "C" fn track_id_of(track: *mut c_void) -> u32 {
@@ -87,51 +94,29 @@ static TABLE_OPS: HirariEngineTrackOps = HirariEngineTrackOps {
     set_pdc_offset: Some(apply_pdc),
 };
 
-unsafe extern "C" fn runtime_of(_track: *mut c_void) -> *mut c_void {
-    ptr::null_mut()
-}
-
-unsafe extern "C" fn bus_state_of(_track: *mut c_void) -> *mut c_void {
-    ptr::null_mut()
-}
-
-unsafe extern "C" fn solo_of(_track: *mut c_void) -> u8 {
-    0
-}
-
-unsafe extern "C" fn record_of(_track: *mut c_void, _playhead: u64) {}
-
-unsafe extern "C" fn midi_input_of(_track: *mut c_void) -> u8 {
-    0
-}
-
-unsafe extern "C" fn articulation_of(_track: *mut c_void) -> *mut c_void {
-    ptr::null_mut()
-}
-
-unsafe extern "C" fn plugin_midi_of(track: *mut c_void) -> *mut c_void {
-    unsafe { &*track.cast::<FakeTrack>() }.midi
-}
-
-unsafe extern "C" fn set_volume_of(track: *mut c_void, value: f32) {
+unsafe extern "C" fn storage_of(track: *mut c_void, kind: u32) -> *mut c_void {
     let track = unsafe { &*track.cast::<FakeTrack>() };
-    track.volumes.fetch_add(1, Ordering::Relaxed);
-    track
-        .last_volume
-        .store(value.to_bits() as usize, Ordering::Relaxed);
-}
-
-unsafe extern "C" fn set_pan_of(_track: *mut c_void, _value: f32) {}
-
-unsafe extern "C" fn set_mute_of(track: *mut c_void, value: u8) {
-    if value != 0 {
-        unsafe { &*track.cast::<FakeTrack>() }
-            .mutes
-            .fetch_add(1, Ordering::Relaxed);
+    match kind {
+        TRACK_RUNTIME => track.runtime,
+        TRACK_STRIP => track.strip,
+        TRACK_PLUGIN_MIDI => track.midi,
+        _ => ptr::null_mut(),
     }
 }
 
-unsafe extern "C" fn set_solo_of(_track: *mut c_void, _value: u8) {}
+unsafe extern "C" fn type_of(_track: *mut c_void) -> u8 {
+    0
+}
+
+unsafe extern "C" fn begin_edit_of(track: *mut c_void) {
+    unsafe { &*track.cast::<FakeTrack>() }
+        .edits
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+unsafe extern "C" fn end_edit_of(_track: *mut c_void) {}
+
+unsafe extern "C" fn record_of(_track: *mut c_void, _playhead: u64) {}
 
 fn storage(channels: u32, frames: u32) -> *mut c_void {
     unsafe {
@@ -179,17 +164,11 @@ struct Engine {
 impl Engine {
     fn new() -> Self {
         let ops = HirariEngineBlockOps {
-            runtime: Some(runtime_of),
-            bus_state: Some(bus_state_of),
-            solo: Some(solo_of),
+            storage: Some(storage_of),
+            track_type: Some(type_of),
+            begin_edit: Some(begin_edit_of),
+            end_edit: Some(end_edit_of),
             record: Some(record_of),
-            midi_input: Some(midi_input_of),
-            articulation: Some(articulation_of),
-            plugin_midi: Some(plugin_midi_of),
-            set_volume: Some(set_volume_of),
-            set_pan: Some(set_pan_of),
-            set_mute: Some(set_mute_of),
-            set_solo: Some(set_solo_of),
         };
         let table = unsafe { hirari_engine_track_table_create(&TABLE_OPS) };
         let rings = hirari_engine_rings_create();
@@ -212,12 +191,19 @@ impl Engine {
     /// Adds one published track, the same double-buffered snapshot the engine
     /// hands the head after a structural edit.
     fn track(&mut self, id: u32) -> usize {
+        let null = ptr::null_mut::<c_void>();
+        let runtime = unsafe {
+            hirari_track_runtime_create(
+                id, null, null, null, null, null, null, null, null, null, null, null, null, None,
+                null,
+            )
+        };
         let track = Box::into_raw(Box::new(FakeTrack {
             id,
             midi: hirari_midi_buffer_create(),
-            volumes: AtomicUsize::new(0),
-            last_volume: AtomicUsize::new(0),
-            mutes: AtomicUsize::new(0),
+            strip: unsafe { hirari_channel_strip_create() },
+            runtime,
+            edits: AtomicUsize::new(0),
         }));
         self.tracks.push(track.cast());
         let slot = self.tracks.len() - 1;
@@ -233,23 +219,24 @@ impl Engine {
         slot
     }
 
-    fn volumes(&self, slot: usize) -> usize {
+    /// How many control edits the head ran, counting only the protocol around a
+    /// command it actually applied.
+    fn edits(&self, slot: usize) -> usize {
         unsafe { &*self.tracks[slot].cast::<FakeTrack>() }
-            .volumes
+            .edits
             .load(Ordering::Relaxed)
     }
 
-    fn last_volume(&self, slot: usize) -> f32 {
-        let bits = unsafe { &*self.tracks[slot].cast::<FakeTrack>() }
-            .last_volume
-            .load(Ordering::Relaxed) as u32;
-        f32::from_bits(bits)
+    fn gain(&self, slot: usize) -> f32 {
+        unsafe {
+            hirari_channel_strip_gain(
+                (*self.tracks[slot].cast::<FakeTrack>()).strip as *const c_void,
+            )
+        }
     }
 
-    fn mutes(&self, slot: usize) -> usize {
-        unsafe { &*self.tracks[slot].cast::<FakeTrack>() }
-            .mutes
-            .load(Ordering::Relaxed)
+    fn muted(&self, slot: usize) -> bool {
+        unsafe { hirari_track_runtime_is_muted((*self.tracks[slot].cast::<FakeTrack>()).runtime) }
     }
 
     fn midi_events(&self, slot: usize) -> usize {
@@ -310,6 +297,8 @@ impl Drop for Engine {
             for handle in self.tracks.drain(..) {
                 let track = Box::from_raw(handle.cast::<FakeTrack>());
                 hirari_midi_buffer_destroy(track.midi);
+                hirari_channel_strip_destroy(track.strip);
+                hirari_track_runtime_destroy(track.runtime);
             }
             hirari_audio_buffer_storage_destroy(self.output);
         }
@@ -413,12 +402,12 @@ fn only_commands_for_the_published_generation_apply() {
 
     assert_eq!(admitted, 1);
     assert_eq!(
-        engine.volumes(slot),
+        engine.edits(slot),
         1,
         "a command that waited through a rebuild never applies"
     );
-    assert_eq!(engine.last_volume(slot), 0.25, "and the value is clamped");
-    assert_eq!(engine.mutes(slot), 0);
+    assert_eq!(engine.gain(slot), 0.25, "and the value is clamped");
+    assert!(!engine.muted(slot), "no mute command applied");
 }
 
 #[test]

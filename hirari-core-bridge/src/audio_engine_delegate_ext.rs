@@ -6,8 +6,8 @@
 use std::ffi::c_void;
 
 use crate::{
-    control_edit_host, ffi, plugin_edit_host, plugin_sandbox_maintenance, region_edit_host,
-    region_jobs,
+    control_edit_host, ffi, layout_gather, plugin_edit_host, plugin_sandbox_maintenance,
+    region_edit_host, region_jobs,
 };
 
 use crate::realtime_vca_manager::{
@@ -593,6 +593,26 @@ impl ffi::AudioEngine {
 
     pub fn get_region_waveform(&self, tid: u32, rid: u32) -> Vec<f32> {
         take_float_buffer(unsafe { hirari_region_waveform(host(self), tid, rid, 128) })
+    }
+
+    /// Background layout snapshots. The session, its cancellation flag and the
+    /// revisions around the gather all live in `layout_gather`; C++ contributes
+    /// only the engine host and the ops table it reads through.
+    pub fn request_project_layout_snapshot(&self) -> u64 {
+        layout_gather::request_layout_snapshot(core_mut(self))
+    }
+
+    pub fn poll_project_layout_snapshot(&self, request_id: u64) -> String {
+        layout_gather::poll_layout_snapshot(core_mut(self) as *const _, request_id)
+    }
+
+    pub fn cancel_project_layout_snapshot(&self, request_id: u64) -> bool {
+        layout_gather::cancel_layout_snapshot(core_mut(self) as *const _, request_id)
+    }
+
+    /// The live project layout as JSON, gathered without a C++ wrapper.
+    pub fn project_layout_json(&self) -> String {
+        layout_gather::project_layout_json(core_mut(self) as *const _)
     }
 
     pub fn get_region_audio_interleaved_range(

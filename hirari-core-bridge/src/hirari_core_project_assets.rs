@@ -13,7 +13,7 @@ impl HirariCore {
     pub fn poll_project_layout_snapshot(&self, request_id: u64) -> String {
         self.engine.as_ref().map_or_else(
             String::new,
-            |engine| engine.poll_project_layout_snapshot(request_id).to_string(),
+            |engine| engine.poll_project_layout_snapshot(request_id),
         )
     }
 
@@ -56,7 +56,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return String::new();
         };
-        let raw = engine.get_core().get_project_layout_json();
+        let raw = engine.project_layout_json();
         Self::normalize_project_layout_json(raw, &self.aux_track_ids_json())
     }
 
@@ -67,7 +67,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return (String::new(), 0, aux_track_ids);
         };
-        let raw = engine.get_core().get_project_layout_json();
+        let raw = engine.project_layout_json();
         let native_fingerprint = crate::command_api::snapshot_generation(raw.as_bytes());
         let layout = Self::normalize_project_layout_json(raw, &aux_track_ids);
         (layout, native_fingerprint, aux_track_ids)

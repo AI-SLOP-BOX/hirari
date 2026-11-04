@@ -21,44 +21,34 @@ std::vector<RoutingEngine::FeedbackConnection> takeRoutingFeedback(void* records
 }
 
 // The track reads the Rust engine block cannot make through a handle
-// (engine_block_host.rs). A bus is the track type, not a downcast.
-void* engineTrackRuntime(void* track) {
-    return static_cast<Track*>(track)->realtimeRuntime();
-}
-void* engineTrackBusState(void* track) {
+// (engine_block_host.rs). Kind selects the track's own storage, and a bus stage
+// only exists on a bus track, so the downcast is the one thing kept here.
+void* engineTrackStorage(void* track, uint32_t kind) {
     auto* target = static_cast<Track*>(track);
-    return target->getType() == Track::Bus
-        ? static_cast<BusTrack*>(target)->busStateHandle() : nullptr;
+    switch (kind) {
+        case kHirariTrackStorageRuntime: return target->realtimeRuntime();
+        case kHirariTrackStorageStrip: return target->channelStripHandle();
+        case kHirariTrackStorageArticulation: return target->articulationStateHandle();
+        case kHirariTrackStoragePluginMidi: return target->pluginMidiHandle();
+        case kHirariTrackStorageBusState:
+            return target->getType() == Track::Bus
+                ? static_cast<BusTrack*>(target)->busStateHandle() : nullptr;
+    }
+    return nullptr;
 }
-uint8_t engineTrackSolo(void* track) {
-    return static_cast<Track*>(track)->isSolo() ? 1u : 0u;
+uint8_t engineTrackType(void* track) {
+    return static_cast<uint8_t>(static_cast<Track*>(track)->getType());
 }
 void engineTrackRecord(void* track, uint64_t playhead) {
     auto* target = static_cast<Track*>(track);
     if (target->isRecordArmed()) target->recordCurrentState(playhead);
 }
-uint8_t engineTrackMidiInput(void* track) {
-    const auto type = static_cast<const Track*>(track)->getType();
-    return type == Track::Midi || type == Track::Instrument ? 1u : 0u;
+// The control protocol a drained command keeps on the track: the frozen render
+// is dropped before the store write and the layout revision bumped after it.
+void engineTrackBeginEdit(void* track) {
+    static_cast<Track*>(track)->invalidateFrozenForEdit();
 }
-void* engineTrackArticulation(void* track) {
-    return static_cast<Track*>(track)->articulationStateHandle();
-}
-void* engineTrackPluginMidi(void* track) {
-    return static_cast<Track*>(track)->pluginMidiHandle();
-}
-void engineTrackSetVolume(void* track, float value) {
-    static_cast<Track*>(track)->setVolume(value);
-}
-void engineTrackSetPan(void* track, float value) {
-    static_cast<Track*>(track)->setPan(value);
-}
-void engineTrackSetMute(void* track, uint8_t value) {
-    static_cast<Track*>(track)->setMuted(value != 0);
-}
-void engineTrackSetSolo(void* track, uint8_t value) {
-    static_cast<Track*>(track)->setSolo(value != 0);
-}
+void engineTrackEndEdit(void* track) { static_cast<Track*>(track)->markProjectLayoutChanged(); }
 }  // namespace
 
 HirariUnifiedEngine::~HirariUnifiedEngine() {
@@ -154,12 +144,11 @@ HirariUnifiedEngine::HirariUnifiedEngine() {
     // configuration mutex through a mutator.
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_masterLimiter = hirari_master_limiter_create(44'100.0);
-    static const HirariEngineBlockOps blockOps{
-        &engineTrackRuntime,     &engineTrackBusState, &engineTrackSolo,
-        &engineTrackRecord,      &engineTrackMidiInput,
-        &engineTrackArticulation, &engineTrackPluginMidi,
-        &engineTrackSetVolume,   &engineTrackSetPan,
-        &engineTrackSetMute,     &engineTrackSetSolo};
+    static const HirariEngineBlockOps blockOps{&engineTrackStorage,
+                                               &engineTrackType,
+                                               &engineTrackBeginEdit,
+                                               &engineTrackEndEdit,
+                                               &engineTrackRecord};
     const HirariEngineBlockHandles blockHandles{
         m_routingEngine, m_trackTable, m_bounceSession, m_inputBlocks,
         m_controlRoomState, m_mixerTelemetry, m_metronome, m_masterLimiter,

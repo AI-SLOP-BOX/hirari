@@ -14,10 +14,6 @@ extern "C" void hirari_engine_sync_structural_changes(void* host) {
     if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
 }
 
-rust::String HirariUnifiedEngine::get_project_layout_json() const {
-    return get_project_layout_json_cancellable(nullptr);
-}
-
 namespace {
 size_t layoutCopyString(const std::string& value, uint8_t* out, size_t capacity) {
     if (out && capacity > 0) std::memcpy(out, value.data(), std::min(capacity, value.size()));
@@ -84,31 +80,20 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
     return &ops;
 }
 
-rust::String HirariUnifiedEngine::get_project_layout_json_cancellable(
-    const std::atomic<bool>* cancellation) const {
-    // The gather, snapshot and serializer are all Rust-owned; this only holds
-    // the returned JSON buffer for the length of the copy below.
-    if (cancellation && cancellation->load(std::memory_order_acquire)) return rust::String();
-    const auto isCancelled = [](const void* context) -> bool {
-        const auto* flag = static_cast<const std::atomic<bool>*>(context);
-        return flag && flag->load(std::memory_order_acquire);
-    };
+// The command admission check hashes the live layout, so this gathers and
+// serializes in Rust and fingerprints the buffer without materialising a
+// string. The background snapshot session lives entirely in Rust.
+uint64_t HirariUnifiedEngine::get_project_generation() const {
     uint8_t* jsonData = nullptr;
     size_t jsonSize = 0;
     const bool written = hirari_layout_json_from_host(
         const_cast<HirariUnifiedEngine*>(this), layoutHostOps(),
-        cancellation ? isCancelled : nullptr, cancellation, &jsonData, &jsonSize);
-    rust::String result(written && jsonData ? reinterpret_cast<const char*>(jsonData) : "",
-                        written ? jsonSize : 0);
-    hirari_project_layout_json_free(jsonData, jsonSize);
-    return result;
-}
-
-uint64_t HirariUnifiedEngine::get_project_generation() const {
-    const auto layout = get_project_layout_json();
+        nullptr, nullptr, &jsonData, &jsonSize);
     uint64_t hash = 0xcbf29ce484222325ull;
-    hirari_project_layout_fingerprint_update(
-        &hash, reinterpret_cast<const uint8_t*>(layout.data()), layout.size());
+    if (written && jsonData) {
+        hirari_project_layout_fingerprint_update(&hash, jsonData, jsonSize);
+    }
+    hirari_project_layout_json_free(jsonData, jsonSize);
     return hash;
 }
 
