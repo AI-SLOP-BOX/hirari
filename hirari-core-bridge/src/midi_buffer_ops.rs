@@ -644,10 +644,6 @@ fn append_chord_event(state: &mut MidiBufferState, event: OwnedMidiEvent) {
 mod owned_state_tests {
     use super::*;
 
-    unsafe extern "C" {
-        fn hirari_midi_buffer_cpp_wrapper_smoke() -> bool;
-    }
-
     #[test]
     fn rust_owned_fixed_storage_sorts_events_and_reports_overflow() {
         let bytes = std::mem::size_of::<MidiBufferState>();
@@ -727,8 +723,43 @@ mod owned_state_tests {
     }
 
     #[test]
-    fn cpp_compatibility_wrapper_uses_rust_owned_storage_and_accounting() {
-        assert!(unsafe { hirari_midi_buffer_cpp_wrapper_smoke() });
+    fn the_heap_handle_the_engine_holds_sorts_reports_capacity_and_clears() {
+        // A track's MIDI input is this handle: the block head clears it, the
+        // chain reads it in place, and overflow is counted, never truncated.
+        let state = hirari_midi_buffer_create();
+        assert!(!state.is_null());
+        let note_on = [0x90_u8, 60, 100];
+        let note_off = [0x80_u8, 60, 0];
+        unsafe {
+            hirari_midi_buffer_add(state, 12, note_on.as_ptr(), 3, 3);
+            hirari_midi_buffer_add(state, 12, note_off.as_ptr(), 3, 0);
+        }
+        assert_eq!(unsafe { hirari_midi_buffer_event_count(state) }, 2);
+        assert_eq!(
+            unsafe { hirari_midi_buffer_remaining_capacity(state) },
+            MIDI_EVENT_CAPACITY - 2
+        );
+        unsafe { hirari_midi_buffer_sort_owned(state) };
+        let events = unsafe { hirari_midi_buffer_event_data(state).cast::<MidiEvent>() };
+        assert_eq!(unsafe { (*events).data[0] }, 0x80, "a release sorts first");
+        assert_eq!(unsafe { (*events.add(1)).data[0] }, 0x90);
+        assert_eq!(unsafe { (*events.add(1))._articulation_id }, 3);
+
+        for index in 0..MIDI_EVENT_CAPACITY {
+            unsafe { hirari_midi_buffer_add(state, index as u64, note_on.as_ptr(), 3, 0) };
+        }
+        assert!(unsafe { hirari_midi_buffer_overflowed(state) });
+        assert_eq!(unsafe { hirari_midi_buffer_event_count(state) }, MIDI_EVENT_CAPACITY);
+        assert_ne!(unsafe { hirari_midi_buffer_dropped_count(state) }, 0);
+        assert_ne!(unsafe { hirari_midi_buffer_take_dropped(state) }, 0);
+        assert_eq!(unsafe { hirari_midi_buffer_dropped_count(state) }, 0);
+
+        unsafe { hirari_midi_buffer_clear(state) };
+        assert_eq!(unsafe { hirari_midi_buffer_event_count(state) }, 0);
+        assert!(!unsafe { hirari_midi_buffer_overflowed(state) });
+        assert_eq!(unsafe { hirari_midi_buffer_take_oversize(state) }, 0);
+        assert_eq!(unsafe { hirari_midi_buffer_take_extended(state) }, 0);
+        unsafe { hirari_midi_buffer_destroy(state) };
     }
 
 }

@@ -7,7 +7,6 @@
 #include <string_view>
 #include <array>
 #include "audio_buffer.hpp"
-#include "midi_buffer.hpp"
 #include "bridge_types.hpp"
 #include "concurrency/audio_task_manager.hpp"
 #include <optional>

@@ -92,8 +92,13 @@ int main() {
 
     // Payloads beyond the bounded SysEx/MIDI2 envelope must be observable at
     // ingress rather than silently becoming a truncated channel-voice event.
-    Hirari::Core::MidiBuffer midiIngress;
+    void* midiIngress = hirari_midi_buffer_create();
     const uint8_t oversizedMidi[257] = {};
-    midiIngress.addEvent(0, oversizedMidi, sizeof(oversizedMidi));
-    if (!midiIngress.overflowed() || midiIngress.takeOversizeEvents() != 1 ||
-        midiIngress.takeExtendedEvents() != 1 || midiIngress.size() != 0) return 15;
+    hirari_midi_buffer_add(midiIngress, 0, oversizedMidi, sizeof(oversizedMidi), 0);
+    const bool ingressReports =
+        hirari_midi_buffer_overflowed(midiIngress) &&
+        hirari_midi_buffer_take_oversize(midiIngress) == 1 &&
+        hirari_midi_buffer_take_extended(midiIngress) == 1 &&
+        hirari_midi_buffer_event_count(midiIngress) == 0;
+    hirari_midi_buffer_destroy(midiIngress);
+    if (!ingressReports) return 15;

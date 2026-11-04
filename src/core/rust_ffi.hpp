@@ -293,6 +293,23 @@ extern "C" void hirari_channel_strip_set_sample_rate(const void* state, double s
 extern "C" void hirari_channel_strip_reset(const void* state);
 extern "C" void hirari_channel_strip_set_gain(const void* state, float gain);
 extern "C" void hirari_channel_strip_set_pan(const void* state, float pan);
+// One block's MIDI event, mirrored field for field from the Rust owner's
+// `#[repr(C)]` layout. 256 payload bytes cover MIDI 2.0 UMP packets and bounded
+// SysEx chunks; anything larger is rejected and counted, never truncated.
+struct HirariMidiEvent {
+    uint64_t sampleOffset;
+    uint32_t size;
+    uint8_t data[256];
+    uint8_t articulationId = 0;  // 0 = default, 1+ = technique id
+};
+static_assert(offsetof(HirariMidiEvent, sampleOffset) == 0);
+static_assert(offsetof(HirariMidiEvent, size) == 8);
+static_assert(offsetof(HirariMidiEvent, data) == 12);
+static_assert(offsetof(HirariMidiEvent, articulationId) == 268);
+static_assert(sizeof(HirariMidiEvent) == 272);
+// `MidiBufferState::kMaxEvents` in the Rust owner.
+constexpr size_t kHirariMidiMaxEventsPerBlock = 1024;
+
 extern "C" void* hirari_midi_buffer_create();
 extern "C" void hirari_midi_buffer_destroy(void* state);
 extern "C" void hirari_midi_buffer_add(

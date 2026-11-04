@@ -11,7 +11,6 @@
 #include <mutex>
 #include "../rust_ffi.hpp"
 #include "../audio_buffer.hpp"
-#include "../midi_buffer.hpp"
 #include "../project_automation.hpp"
 
 namespace Hirari::Core::Engine {

@@ -74,6 +74,15 @@ production support.
 
 ### Changed
 
+- The C++ `MidiBuffer` wrapper is gone; the Rust event table is the only owner.
+  A track's MIDI input (`Track::m_pluginMidi`) is now the `hirari_midi_buffer_*`
+  handle the block head stages into and the chain reads in place, created with
+  the track and released by its destructor, and the two C++ contract tests drive
+  the same FFI directly. The event layout and the 1024-event block cap moved to
+  `src/core/rust_ffi.hpp` with their `static_assert`s, and the wrapper's
+  behaviour smoke test is a Rust test over the heap handle instead of a C++
+  callback. C++ 7738 -> 7639 (-99).
+
 - Rust owns the engine's block head and its transport. `hirari_engine_block_begin`
   (`hirari-core-bridge/src/engine_block_host.rs`) now runs every gate that decides
   whether a device callback renders at all -- buffer and block-size validity, the

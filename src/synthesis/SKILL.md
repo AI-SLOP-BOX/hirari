@@ -7,7 +7,7 @@ Virtual Instrument engineering rules for the Hirari Library.
 
 ## 🎹 Instrument Directives
 - **POLYPHONIC VOICE MANAGEMENT**: All instruments must support at least 32 concurrent voices.
-- **SAMPLE-ACCURATE MIDI**: Keep events in the fixed-capacity `MidiBuffer`, sort by `sampleOffset`, and trigger voices at each event's sample position.
+- **SAMPLE-ACCURATE MIDI**: Keep events in the Rust-owned fixed-capacity MIDI event table (`hirari_midi_buffer_*`), sort by `sampleOffset`, and trigger voices at each event's sample position.
 - **MULTI-ZONE MAPPING**: Samplers must support root key mapping and velocity layer selection.
 - **AHDSR ENVELOPES**: Always use the `AHDSR` utility for amplitude (and filter) modulation to ensure musical, logarithmic decay.
 

@@ -3,7 +3,7 @@
 #include "hirari-core-bridge/src/lib.rs.h"
 #include "src/core/project_automation.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"
-#include "src/core/midi_buffer.hpp"
+#include "src/core/rust_ffi.hpp"
 #include <atomic>
 #include <array>
 #include <chrono>

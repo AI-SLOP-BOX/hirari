@@ -12,7 +12,6 @@ void HIRARI_LOG(uint32_t level, const std::string& msg) {
 
 } // namespace Hirari::Core::BridgeFFI
 
-#include "core/midi_buffer.hpp"
 #include "core/status_queue.hpp"
 
 namespace Hirari::Core::Bridge {
@@ -56,26 +55,6 @@ extern "C" void hirari_analog_saturator_frozen_reference(
         output_left[i] = std::isfinite(out_l) ? out_l : 0.0f;
         output_right[i] = std::isfinite(out_r) ? out_r : 0.0f;
     }
-}
-
-extern "C" bool hirari_midi_buffer_cpp_wrapper_smoke() {
-    Hirari::Core::MidiBuffer buffer;
-    const uint8_t noteOn[] = {0x90, 60, 100};
-    const uint8_t noteOff[] = {0x80, 60, 0};
-    buffer.addEvent(12, noteOn, sizeof(noteOn), 3);
-    buffer.addEvent(12, noteOff, sizeof(noteOff), 0);
-    if (buffer.size() != 2 || buffer.remainingCapacity() !=
-            Hirari::Core::MidiBuffer::kMaxEventsPerBlock - 2) return false;
-    buffer.sort();
-    if (buffer.getEvents()[0].data[0] != 0x80 ||
-        buffer.getEvents()[1].data[0] != 0x90) return false;
-    for (size_t index = 0; index < Hirari::Core::MidiBuffer::kMaxEventsPerBlock; ++index)
-        buffer.addEvent(index, noteOn, sizeof(noteOn), 0);
-    if (!buffer.overflowed() || buffer.droppedEvents() == 0 ||
-        buffer.takeDroppedEvents() == 0 || buffer.droppedEvents() != 0) return false;
-    buffer.clear();
-    return buffer.size() == 0 && !buffer.overflowed() &&
-        buffer.takeOversizeEvents() == 0 && buffer.takeExtendedEvents() == 0;
 }
 
 extern "C" bool hirari_status_queue_cpp_wrapper_smoke() {

@@ -18,13 +18,14 @@ public:
             id, m_chain, m_strip, m_automationStore, m_frozenStore, m_spatialPanner,
             m_pdcDelayState, m_activeBuffer.storageHandle(), m_preInsertBuffer.storageHandle(),
             m_preFaderBuffer.storageHandle(), m_sendPreFaderBuffer.storageHandle(),
-            m_sendPostFaderBuffer.storageHandle(), m_pluginMidi.stateHandle(),
+            m_sendPostFaderBuffer.storageHandle(), m_pluginMidi,
             &Track::prepareMidiBlock, this);
         hirari_region_store_install(this, m_id);
     }
 
     virtual ~Track() {
         hirari_track_runtime_destroy(m_runtime);
+        hirari_midi_buffer_destroy(m_pluginMidi);
         hirari_region_store_forget(this);
         hirari_builtin_midi_instrument_destroy(m_builtInMidiState);
         hirari_track_midi_articulation_destroy(m_articulationState);
@@ -53,7 +54,7 @@ public:
     // resolves it by track id instead of going through the track wrapper.
     void* articulationStateHandle() const noexcept { return m_articulationState; }
     // The Rust block head stages timeline MIDI straight into this buffer.
-    void* pluginMidiHandle() const noexcept { return m_pluginMidi.stateHandle(); }
+    void* pluginMidiHandle() const noexcept { return m_pluginMidi; }
     void setExpressionMapJson(std::string json) {
         (void)hirari_track_midi_expression_map_set(
             m_articulationState, 0, reinterpret_cast<const uint8_t*>(json.data()), json.size());
@@ -75,13 +76,14 @@ public:
         static_assert(sizeof(HirariGeneratedMidiEvent) == 16);
         for (size_t index = 0; index < count; ++index) {
             const auto& event = events[index];
-            m_pluginMidi.addEvent(event.sample_offset, event.data, event.size,
-                                  event.articulation_id);
+            hirari_midi_buffer_add(m_pluginMidi, event.sample_offset, event.data,
+                                   event.size, event.articulation_id);
         }
     }
     void flushExpressionNoteOffs(uint64_t playhead, uint32_t blockSize) noexcept {
-        std::array<HirariGeneratedMidiEvent, MidiBuffer::kMaxEventsPerBlock> generated{};
-        const size_t capacity = std::min(m_pluginMidi.remainingCapacity(), generated.size());
+        std::array<HirariGeneratedMidiEvent, kHirariMidiMaxEventsPerBlock> generated{};
+        const size_t capacity =
+            std::min(hirari_midi_buffer_remaining_capacity(m_pluginMidi), generated.size());
         const size_t count = hirari_track_midi_flush_scheduled_note_offs(
             m_articulationState, playhead, blockSize,
             capacity ? generated.data() : nullptr, capacity);
@@ -100,8 +102,9 @@ public:
         }
         if (left && right) {
             hirari_builtin_midi_instrument_process(
-                m_builtInMidiState, m_pluginMidi.getEvents(), m_pluginMidi.size(),
-                left, right, frames, m_sampleRate);
+                m_builtInMidiState, hirari_midi_buffer_event_data(m_pluginMidi),
+                hirari_midi_buffer_event_count(m_pluginMidi), left, right, frames,
+                m_sampleRate);
         }
     }
 
@@ -162,7 +165,7 @@ private:
                                  float* left, float* right) noexcept {
         auto& track = *static_cast<Track*>(context);
         track.flushExpressionNoteOffs(playhead, frames);
-        track.m_pluginMidi.sort();
+        hirari_midi_buffer_sort_owned(track.m_pluginMidi);
         track.renderBuiltInMidiInstrument(left, right, frames);
     }
 

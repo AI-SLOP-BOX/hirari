@@ -25,7 +25,9 @@
     void* m_chain = hirari_effect_chain_create();
     // Last sampled non-finite count, so a polled diagnostic never blocks.
     mutable std::atomic<uint64_t> m_lastNonFiniteSamples{0};
-    MidiBuffer m_pluginMidi;
+    // Rust owns the block's event table; the head stages into it and the chain
+    // reads it in place, so the track keeps only the handle.
+    void* m_pluginMidi = hirari_midi_buffer_create();
     void* m_articulationState = nullptr;
     void* m_builtInMidiState = nullptr;
     double m_sampleRate = 44100.0;
