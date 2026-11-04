@@ -9,13 +9,18 @@
 use crate::audio_buffer_ops::{
     hirari_audio_buffer_render_frozen, hirari_audio_buffer_storage_add_channels_from,
     hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_channels,
+    hirari_audio_buffer_storage_reserve_buffer, hirari_audio_buffer_storage_resize,
     hirari_audio_buffer_storage_samples,
 };
 use crate::built_in_midi_instrument::hirari_builtin_midi_instrument_process;
-use crate::channel_strip::{hirari_channel_strip_reset, hirari_channel_strip_sample_rate};
+use crate::channel_strip::{
+    hirari_channel_strip_reset, hirari_channel_strip_sample_rate,
+    hirari_channel_strip_set_sample_rate,
+};
 use crate::effect_chain_host::{
     hirari_effect_chain_midi_instrument_count, hirari_effect_chain_parameter_automation,
-    hirari_effect_chain_process, hirari_effect_chain_reset, TimedParameterEvent,
+    hirari_effect_chain_process, hirari_effect_chain_reset, hirari_effect_chain_set_sample_rate,
+    TimedParameterEvent,
 };
 use crate::midi_buffer_ops::{
     hirari_midi_buffer_add, hirari_midi_buffer_clear, hirari_midi_buffer_event_count,
@@ -26,6 +31,7 @@ use crate::realtime_automation::{
     hirari_plugin_automation_render_block, hirari_realtime_automation_evaluate,
     NativeTimedParameterEvent,
 };
+use crate::region_store::hirari_region_store_prepare;
 use crate::track_automation_store::{
     hirari_track_automation_store_hint, hirari_track_automation_store_plugin_lane_views,
     hirari_track_automation_store_points, hirari_track_automation_store_reset_hints,
@@ -34,6 +40,7 @@ use crate::track_frozen_store::{
     hirari_track_frozen_store_current, hirari_track_frozen_store_is_frozen,
     hirari_track_frozen_store_total_samples,
 };
+use crate::track_holographic_panner::hirari_track_holographic_panner_set_sample_rate;
 use crate::track_midi_articulation::{
     hirari_track_midi_flush_scheduled_note_offs, GeneratedMidiEvent,
 };
@@ -813,6 +820,95 @@ pub unsafe extern "C" fn hirari_track_runtime_reset_for_offline_render(state: *m
         hirari_track_automation_store_reset_hints(runtime.automation_store);
         hirari_track_pdc_delay_reset(runtime.pdc_delay, bounded);
     }
+}
+
+/// Why one stereo block of a track could not be grown to a new device format.
+/// A growth the realtime guard refused leaves the previous size in place, so
+/// only an impossible size or an exhausted allocation is a failure the host has
+/// to report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackPrepare {
+    Ready,
+    Declined,
+    InvalidSize,
+    OutOfMemory,
+}
+
+impl TrackPrepare {
+    const fn status(self) -> u8 {
+        match self {
+            Self::Ready => 0,
+            Self::Declined => 1,
+            Self::InvalidSize => 2,
+            Self::OutOfMemory => 3,
+        }
+    }
+
+    /// The `reserve_buffer` status of one block growth, read as this enum.
+    const fn from_reserve(status: u8) -> Self {
+        match status {
+            0 => Self::Ready,
+            1 | 5 => Self::Declined,
+            2 => Self::InvalidSize,
+            _ => Self::OutOfMemory,
+        }
+    }
+}
+
+/// Rebuilds a track for a new device format: the region store learns the rate
+/// and block length, the strip and the panner retune, the smoothed strip state
+/// snaps to its targets, every block the track renders through grows to the new
+/// length, and the plug-in chain is prepared last so it sees the finished
+/// buffers. The host keeps the allocation policy: a refused growth is silent, an
+/// impossible size or an exhausted allocation is its own failure.
+///
+/// # Safety
+/// `state` is a live runtime, and `region_key` is the handle the region store
+/// knows this track by, or null.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_track_runtime_prepare(
+    state: *mut c_void,
+    region_key: *mut c_void,
+    sample_rate: f64,
+    block_frames: u32,
+) -> u8 {
+    let Some(runtime) = runtime(state) else {
+        return TrackPrepare::Ready.status();
+    };
+    if !sample_rate.is_finite() || sample_rate <= 0.0 || block_frames == 0 {
+        return TrackPrepare::Ready.status();
+    }
+    unsafe {
+        hirari_region_store_prepare(region_key, sample_rate, block_frames);
+        hirari_channel_strip_set_sample_rate(runtime.channel_strip, sample_rate);
+        hirari_track_holographic_panner_set_sample_rate(runtime.panner, sample_rate);
+        hirari_channel_strip_reset(runtime.channel_strip);
+    }
+    // The order the track's own preparation used: the work block first, so a
+    // declined growth still leaves the taps the callback addresses consistent.
+    for storage in [
+        runtime.work,
+        runtime.pre_fader,
+        runtime.send_pre,
+        runtime.send_post,
+        runtime.pre_insert,
+    ] {
+        if storage.is_null() {
+            continue;
+        }
+        let status =
+            unsafe { hirari_audio_buffer_storage_reserve_buffer(storage, 2, block_frames) };
+        let outcome = TrackPrepare::from_reserve(status);
+        if outcome == TrackPrepare::Ready {
+            unsafe { hirari_audio_buffer_storage_resize(storage, 2, block_frames) };
+            continue;
+        }
+        if outcome != TrackPrepare::Declined {
+            return outcome.status();
+        }
+    }
+    unsafe { hirari_effect_chain_set_sample_rate(runtime.chain, sample_rate, block_frames) };
+    TrackPrepare::Ready.status()
 }
 
 #[cfg(test)]

@@ -227,8 +227,6 @@ extern "C" void* hirari_macro_mapping_create();
 extern "C" void hirari_macro_mapping_destroy(void* state);
 extern "C" void* hirari_channel_strip_create();
 extern "C" void hirari_channel_strip_destroy(void* state);
-extern "C" void hirari_channel_strip_set_sample_rate(const void* state, double sample_rate);
-extern "C" void hirari_channel_strip_reset(const void* state);
 // The strip is the single owner of a track's fader, solo and record-arm state.
 // Each setter applies the admitted value and each getter reads that same value
 // back, so no C++ track keeps a shadow copy of it.
@@ -769,8 +767,6 @@ extern "C" bool hirari_region_store_draft_add(
 // the host's `trackIdentity` callback before reaching the store.
 extern "C" void hirari_region_store_install(void* track, uint32_t trackId);
 extern "C" void hirari_region_store_forget(void* track);
-extern "C" bool hirari_region_store_prepare(void* track, double sampleRate,
-                                            uint32_t blockSize);
 extern "C" void hirari_region_store_trim_retired(void* track);
 extern "C" size_t hirari_region_store_count(void* track);
 extern "C" size_t hirari_region_store_list_regions(void* host, uint32_t trackId,
@@ -1169,7 +1165,6 @@ extern "C" void* hirari_track_pdc_delay_create();
 extern "C" void hirari_track_pdc_delay_destroy(void* state);
 extern "C" void* hirari_track_holographic_panner_create();
 extern "C" void hirari_track_holographic_panner_destroy(void* state);
-extern "C" void hirari_track_holographic_panner_set_sample_rate(const void* state, double sample_rate);
 extern "C" bool hirari_track_holographic_panner_set_kernel(
     const void* state, const float* left, const float* right, uint32_t taps);
 extern "C" void hirari_track_holographic_panner_clear_kernel(const void* state);
@@ -1196,8 +1191,6 @@ extern "C" uint32_t hirari_effect_chain_count(const void* state);
 extern "C" uint8_t hirari_effect_chain_last_sandbox_failure(const void* state);
 extern "C" const char* hirari_effect_chain_last_sandbox_failure_text(const void* state);
 extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
-extern "C" bool hirari_effect_chain_set_sample_rate(
-    void* state, double sample_rate, uint32_t block_size);
 extern "C" bool hirari_effect_chain_set_parameter(
     void* state, uint32_t index, uint32_t parameter_id, float value);
 extern "C" float hirari_effect_chain_parameter(
@@ -1281,6 +1274,13 @@ extern "C" void hirari_track_runtime_set_eq(void* state, float low, float high);
 extern "C" void hirari_track_runtime_publish_regions(
     void* state, const uint8_t* inputs, size_t count, uint8_t published);
 extern "C" void hirari_track_runtime_reset_for_offline_render(void* state);
+/// Retunes the track for a new device format and returns why a block growth
+/// could not happen: 0 is prepared or a realtime guard declined it, 2 an
+/// impossible size and 3 an exhausted allocation, which the host reports as a
+/// failed preparation.
+extern "C" uint8_t hirari_track_runtime_prepare(void* state, void* region_key,
+                                                double sample_rate,
+                                                uint32_t block_frames);
 
 /// Rust owns the engine's whole block (engine_block_host.rs): the admission
 /// head, the graph walk and the post-graph tail. The engine binds its handles

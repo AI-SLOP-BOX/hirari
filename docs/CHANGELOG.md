@@ -78,6 +78,15 @@ production support.
 
 ### Changed
 
+- A track now rebuilds itself for a new device format inside its Rust runtime.
+  `hirari_track_runtime_prepare` retunes the region store, the channel strip and
+  the holographic panner, snaps the smoothed strip state to its targets, grows
+  the work, pre-insert, pre-fader and both send-tap blocks to the new length and
+  prepares the plug-in chain last, so `Track::prepareToPlay` is
+  left with only the allocation policy it can express as a C++ exception: a
+  growth the realtime guard refused stays silent, an impossible size or an
+  exhausted allocation is reported by status. The five FFI entry points the
+  per-field preparation used are gone. C++ 5903 -> 5896 (-7).
 - The track runtime prepares each block's MIDI in Rust now.
   `hirari_track_runtime_create` takes the track type together with the
   articulation state, the built-in voice and the track's MIDI buffer, so the

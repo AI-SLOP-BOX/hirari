@@ -3,21 +3,14 @@
             m_runtime, hirari_track_eq_gain(lowBoostDb, lowCutDb),
             hirari_track_eq_gain(highBoostDb, highCutDb));
     }
+    // The Rust runtime retunes the region store, the strip and the panner,
+    // grows every block the track renders through and prepares the plug-in
+    // chain. Only the allocation policy stays here because it is a C++
+    // exception, so the status only has to name it.
     virtual void prepareToPlay(double sr, uint32_t blockSize) {
-        if (!std::isfinite(sr) || sr <= 0.0 || blockSize == 0) return;
-        (void)hirari_region_store_prepare(this, sr, blockSize);
-        hirari_channel_strip_set_sample_rate(m_strip, sr);
-        hirari_track_holographic_panner_set_sample_rate(m_spatialPanner, sr);
-        // Preparing a track is also the boundary used by offline renders and
-        // device reinitialisation. Snap smoothed channel-strip state to its
-        // current targets so the first block is deterministic after reload.
-        hirari_channel_strip_reset(m_strip);
-        prepareAudioStorage(m_activeBuffer, 2, blockSize);
-        prepareAudioStorage(m_preFaderBuffer, 2, blockSize);
-        prepareAudioStorage(m_sendPreFaderBuffer, 2, blockSize);
-        prepareAudioStorage(m_sendPostFaderBuffer, 2, blockSize);
-        prepareAudioStorage(m_preInsertBuffer, 2, blockSize);
-        (void)hirari_effect_chain_set_sample_rate(m_chain, sr, blockSize);
+        const uint8_t status = hirari_track_runtime_prepare(m_runtime, this, sr, blockSize);
+        if (status == 2) throw std::bad_array_new_length();
+        if (status == 3) throw std::bad_alloc();
     }
     void resetForOfflineRender() noexcept {
         hirari_track_runtime_reset_for_offline_render(m_runtime);

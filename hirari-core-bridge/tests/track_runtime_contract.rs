@@ -1,10 +1,13 @@
 use hirari_core_bridge::audio_buffer_ops::{
     hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_create,
     hirari_audio_buffer_storage_destroy, hirari_audio_buffer_storage_reserve_buffer,
-    hirari_audio_buffer_storage_resize,
+    hirari_audio_buffer_storage_resize, hirari_audio_buffer_storage_samples,
 };
 use hirari_core_bridge::built_in_midi_instrument::{
     hirari_builtin_midi_instrument_create, hirari_builtin_midi_instrument_destroy,
+};
+use hirari_core_bridge::channel_strip::{
+    hirari_channel_strip_create, hirari_channel_strip_destroy, hirari_channel_strip_sample_rate,
 };
 use hirari_core_bridge::midi_buffer_ops::{
     hirari_midi_buffer_add_note_on, hirari_midi_buffer_create, hirari_midi_buffer_destroy,
@@ -19,7 +22,7 @@ use hirari_core_bridge::track_midi_articulation::{
 };
 use hirari_core_bridge::track_runtime::{
     hirari_track_process_block, hirari_track_runtime_create, hirari_track_runtime_destroy,
-    hirari_track_runtime_eq, hirari_track_runtime_pdc_requested,
+    hirari_track_runtime_eq, hirari_track_runtime_pdc_requested, hirari_track_runtime_prepare,
     hirari_track_runtime_publish_regions, hirari_track_runtime_set_delays,
     hirari_track_runtime_set_eq, hirari_track_runtime_set_muted, hirari_track_runtime_set_spatial,
     hirari_track_runtime_set_transport, hirari_track_runtime_spatial,
@@ -298,5 +301,64 @@ fn transport_spatial_and_eq_state_round_trips() {
         hirari_track_runtime_set_eq(fixture.runtime, 1.5, 0.5);
         assert_eq!(hirari_track_runtime_eq(fixture.runtime, 0), 1.5);
         assert_eq!(hirari_track_runtime_eq(fixture.runtime, 1), 0.5);
+    }
+}
+
+#[test]
+fn preparing_for_a_new_format_rebuilds_the_blocks_and_rates() {
+    let null = std::ptr::null_mut::<c_void>();
+    unsafe {
+        let work = block();
+        let pre_insert = block();
+        let strip = hirari_channel_strip_create();
+        let runtime = hirari_track_runtime_create(
+            7,
+            TRACK_TYPE_INSTRUMENT,
+            null,
+            strip,
+            null,
+            null,
+            null,
+            null,
+            work,
+            pre_insert,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+        );
+        assert_eq!(hirari_audio_buffer_storage_samples(work), FRAMES as u32);
+
+        assert_eq!(hirari_track_runtime_prepare(runtime, null, 48_000.0, 8), 0);
+        assert_eq!(
+            hirari_audio_buffer_storage_samples(work),
+            8,
+            "the work block grows to the new device buffer"
+        );
+        assert_eq!(
+            hirari_audio_buffer_storage_samples(pre_insert),
+            8,
+            "every tap the callback addresses grows with it"
+        );
+        assert_eq!(
+            hirari_channel_strip_sample_rate(strip),
+            48_000.0,
+            "the strip retunes to the new rate"
+        );
+
+        assert_eq!(hirari_track_runtime_prepare(runtime, null, f64::NAN, 16), 0);
+        assert_eq!(
+            hirari_audio_buffer_storage_samples(work),
+            8,
+            "a format the device cannot have prepares nothing"
+        );
+        assert_eq!(hirari_channel_strip_sample_rate(strip), 48_000.0);
+
+        hirari_track_runtime_destroy(runtime);
+        hirari_channel_strip_destroy(strip);
+        hirari_audio_buffer_storage_destroy(pre_insert);
+        hirari_audio_buffer_storage_destroy(work);
     }
 }
