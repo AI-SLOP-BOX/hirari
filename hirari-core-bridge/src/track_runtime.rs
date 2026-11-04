@@ -37,8 +37,9 @@ use crate::track_automation_store::{
     hirari_track_automation_store_points, hirari_track_automation_store_reset_hints,
 };
 use crate::track_frozen_store::{
-    hirari_track_frozen_store_current, hirari_track_frozen_store_is_frozen,
-    hirari_track_frozen_store_total_samples,
+    hirari_track_frozen_store_clear, hirari_track_frozen_store_current,
+    hirari_track_frozen_store_is_frozen, hirari_track_frozen_store_retire,
+    hirari_track_frozen_store_sample_rate, hirari_track_frozen_store_total_samples,
 };
 use crate::track_holographic_panner::hirari_track_holographic_panner_set_sample_rate;
 use crate::track_midi_articulation::{
@@ -231,6 +232,67 @@ impl TrackRuntime {
             return false;
         }
         unsafe { self.process(self.work, frames, playhead, false) }
+    }
+
+    /// Retunes the track for a new device format and returns why a block growth
+    /// could not happen; see [`hirari_track_runtime_prepare`].
+    pub(crate) fn prepare(&self, region_key: *mut c_void, sample_rate: f64, block_frames: u32) -> u8 {
+        if !sample_rate.is_finite() || sample_rate <= 0.0 || block_frames == 0 {
+            return TrackPrepare::Ready.status();
+        }
+        unsafe {
+            hirari_region_store_prepare(region_key, sample_rate, block_frames);
+            hirari_channel_strip_set_sample_rate(self.channel_strip, sample_rate);
+            hirari_track_holographic_panner_set_sample_rate(self.panner, sample_rate);
+            hirari_channel_strip_reset(self.channel_strip);
+        }
+        // The order the track's own preparation used: the work block first, so a
+        // declined growth still leaves the taps the callback addresses
+        // consistent.
+        for storage in [
+            self.work,
+            self.pre_fader,
+            self.send_pre,
+            self.send_post,
+            self.pre_insert,
+        ] {
+            if storage.is_null() {
+                continue;
+            }
+            let outcome = TrackPrepare::from_reserve(unsafe {
+                hirari_audio_buffer_storage_reserve_buffer(storage, 2, block_frames)
+            });
+            if outcome == TrackPrepare::Ready {
+                unsafe { hirari_audio_buffer_storage_resize(storage, 2, block_frames) };
+                continue;
+            }
+            if outcome != TrackPrepare::Declined {
+                return outcome.status();
+            }
+        }
+        unsafe { hirari_effect_chain_set_sample_rate(self.chain, sample_rate, block_frames) };
+        TrackPrepare::Ready.status()
+    }
+
+    /// Drops a freeze the new device rate cannot replay and retires its render.
+    /// A 44.1 kHz snapshot must not survive a 48/96 kHz transition: it would
+    /// silently change timing and keep a stale persisted render identity. The
+    /// answer says whether the layout changed, which the host reports.
+    pub(crate) fn invalidate_stale_freeze(&self, sample_rate: u32) -> bool {
+        if !unsafe { hirari_track_frozen_store_is_frozen(self.frozen_store) }
+            || unsafe { hirari_track_frozen_store_sample_rate(self.frozen_store) } == sample_rate
+        {
+            return false;
+        }
+        unsafe {
+            hirari_track_frozen_store_clear(self.frozen_store);
+            hirari_track_frozen_store_retire(self.frozen_store);
+        }
+        true
+    }
+
+    pub(crate) fn work_storage(&self) -> *mut c_void {
+        self.work
     }
 
     fn window(&self, handle: *mut c_void, frames: u32) -> Option<Tap> {
@@ -875,40 +937,7 @@ pub unsafe extern "C" fn hirari_track_runtime_prepare(
     let Some(runtime) = runtime(state) else {
         return TrackPrepare::Ready.status();
     };
-    if !sample_rate.is_finite() || sample_rate <= 0.0 || block_frames == 0 {
-        return TrackPrepare::Ready.status();
-    }
-    unsafe {
-        hirari_region_store_prepare(region_key, sample_rate, block_frames);
-        hirari_channel_strip_set_sample_rate(runtime.channel_strip, sample_rate);
-        hirari_track_holographic_panner_set_sample_rate(runtime.panner, sample_rate);
-        hirari_channel_strip_reset(runtime.channel_strip);
-    }
-    // The order the track's own preparation used: the work block first, so a
-    // declined growth still leaves the taps the callback addresses consistent.
-    for storage in [
-        runtime.work,
-        runtime.pre_fader,
-        runtime.send_pre,
-        runtime.send_post,
-        runtime.pre_insert,
-    ] {
-        if storage.is_null() {
-            continue;
-        }
-        let status =
-            unsafe { hirari_audio_buffer_storage_reserve_buffer(storage, 2, block_frames) };
-        let outcome = TrackPrepare::from_reserve(status);
-        if outcome == TrackPrepare::Ready {
-            unsafe { hirari_audio_buffer_storage_resize(storage, 2, block_frames) };
-            continue;
-        }
-        if outcome != TrackPrepare::Declined {
-            return outcome.status();
-        }
-    }
-    unsafe { hirari_effect_chain_set_sample_rate(runtime.chain, sample_rate, block_frames) };
-    TrackPrepare::Ready.status()
+    runtime.prepare(region_key, sample_rate, block_frames)
 }
 
 #[cfg(test)]

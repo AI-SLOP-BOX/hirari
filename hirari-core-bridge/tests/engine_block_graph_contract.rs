@@ -10,7 +10,7 @@
 use hirari_core_bridge::audio_buffer_ops::{
     hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_create,
     hirari_audio_buffer_storage_destroy, hirari_audio_buffer_storage_reserve_buffer,
-    hirari_audio_buffer_storage_resize,
+    hirari_audio_buffer_storage_resize, hirari_audio_buffer_storage_samples,
 };
 use hirari_core_bridge::bounce_driver::{
     hirari_bounce_session_create, hirari_bounce_session_destroy,
@@ -30,8 +30,9 @@ use hirari_core_bridge::control_room_runtime::{
 };
 use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_create, hirari_engine_block_destroy, hirari_engine_block_finish,
-    hirari_engine_block_route, hirari_engine_block_set_playhead, hirari_engine_block_set_playing,
-    HirariEngineBlockHandles, HirariEngineBlockOps, TRACK_BUS_STATE, TRACK_RUNTIME, TRACK_STRIP,
+    hirari_engine_block_prepare_tracks, hirari_engine_block_route,
+    hirari_engine_block_set_playhead, hirari_engine_block_set_playing, HirariEngineBlockHandles,
+    HirariEngineBlockOps, TRACK_BUS_STATE, TRACK_RUNTIME, TRACK_STRIP,
 };
 use hirari_core_bridge::engine_input_block::{
     hirari_input_blocks_create, hirari_input_blocks_destroy,
@@ -60,6 +61,11 @@ use hirari_core_bridge::sidechain_manager::{
     hirari_sidechain_engine_create, hirari_sidechain_engine_destroy,
 };
 use hirari_core_bridge::tempo::{hirari_tempo_map_create, hirari_tempo_map_destroy};
+use hirari_core_bridge::track_frozen_store::{
+    hirari_track_frozen_store_create, hirari_track_frozen_store_destroy,
+    hirari_track_frozen_store_is_frozen, hirari_track_frozen_store_publish,
+    hirari_track_frozen_store_sample_rate,
+};
 use hirari_core_bridge::track_runtime::{
     hirari_track_runtime_create, hirari_track_runtime_destroy, hirari_track_runtime_publish_regions,
 };
@@ -83,6 +89,7 @@ struct FakeTrack {
     runtime: *mut c_void,
     bus: *mut c_void,
     strip: *mut c_void,
+    marks: AtomicUsize,
 }
 
 unsafe extern "C" fn track_id_of(track: *mut c_void) -> u32 {
@@ -149,6 +156,14 @@ unsafe extern "C" fn block_type_of(track: *mut c_void) -> u8 {
 
 unsafe extern "C" fn edit_of(_track: *mut c_void) {}
 
+/// Counts the layout marks the walk raises on one track, which is how the
+/// preparation contract tells a dropped freeze from one it left alone.
+unsafe extern "C" fn end_edit_of(track: *mut c_void) {
+    unsafe { &*track.cast::<FakeTrack>() }
+        .marks
+        .fetch_add(1, Ordering::Relaxed);
+}
+
 unsafe extern "C" fn record_of(_track: *mut c_void, _playhead: u64) {}
 
 fn storage(channels: u32, frames: u32) -> *mut c_void {
@@ -191,6 +206,7 @@ struct Engine {
     output: *mut c_void,
     tracks: Vec<*mut c_void>,
     work: Vec<*mut c_void>,
+    frozen: Vec<*mut c_void>,
     send_pre: Vec<*mut c_void>,
     send_post: Vec<*mut c_void>,
     runtime: Vec<*mut c_void>,
@@ -210,6 +226,7 @@ impl Engine {
             output: storage(2, 8192),
             tracks: Vec::new(),
             work: Vec::new(),
+            frozen: Vec::new(),
             send_pre: Vec::new(),
             send_post: Vec::new(),
             runtime: Vec::new(),
@@ -225,7 +242,7 @@ impl Engine {
             storage: Some(storage_of),
             track_type: Some(block_type_of),
             begin_edit: Some(edit_of),
-            end_edit: Some(edit_of),
+            end_edit: Some(end_edit_of),
             record: Some(record_of),
         };
         self.borrowed = unsafe {
@@ -300,6 +317,7 @@ impl Engine {
         // consumes the buffer when the block reaches its chain stage. That is
         // how these contracts tell a walked track from a skipped one.
         unsafe { hirari_midi_buffer_add_note_on(midi, 1, 69, 100, 0, 0) };
+        let frozen = unsafe { hirari_track_frozen_store_create() };
         let runtime = unsafe {
             hirari_track_runtime_create(
                 id,
@@ -311,7 +329,7 @@ impl Engine {
                 null,
                 null,
                 null,
-                null,
+                frozen,
                 null,
                 null,
                 work,
@@ -332,8 +350,10 @@ impl Engine {
             runtime,
             bus: ptr::null_mut(),
             strip,
+            marks: AtomicUsize::new(0),
         }));
         self.work.push(work);
+        self.frozen.push(frozen);
         self.send_pre.push(send_pre);
         self.send_post.push(send_post);
         self.runtime.push(runtime);
@@ -430,6 +450,36 @@ impl Engine {
         });
         (left, right)
     }
+
+    /// Publishes a rendered snapshot taken at `sample_rate` on one track.
+    fn publish_freeze(&self, slot: usize, sample_rate: u32) {
+        let source = storage(2, FRAMES);
+        fill(source, &[[1.0; FRAMES as usize], [-1.0; FRAMES as usize]]);
+        assert!(
+            unsafe {
+                hirari_track_frozen_store_publish(
+                    self.frozen[slot],
+                    source,
+                    2,
+                    FRAMES as u64,
+                    FRAMES as u64,
+                    sample_rate,
+                    0,
+                    0,
+                    ptr::null(),
+                    0,
+                )
+            },
+            "the test freeze must publish"
+        );
+    }
+
+    /// How many times the engine marked this track's layout changed.
+    fn marks(&self, slot: usize) -> usize {
+        unsafe { &*self.tracks[slot].cast::<FakeTrack>() }
+            .marks
+            .load(Ordering::Relaxed)
+    }
 }
 
 impl Drop for Engine {
@@ -440,6 +490,9 @@ impl Drop for Engine {
             hirari_engine_track_table_destroy(self.table);
             for handle in self.runtime.drain(..) {
                 hirari_track_runtime_destroy(handle);
+            }
+            for handle in self.frozen.drain(..) {
+                hirari_track_frozen_store_destroy(handle);
             }
             for handle in self.work.drain(..) {
                 hirari_audio_buffer_storage_destroy(handle);
@@ -603,5 +656,53 @@ fn a_feedback_edge_is_captured_one_block_before_it_is_injected() {
     assert!(
         !engine.rendered(destination),
         "the destination has no voice"
+    );
+}
+
+/// The device-format change is one Rust walk: it judges every track's freeze
+/// against the new rate, retunes and grows the track's blocks and re-offers the
+/// work taps to the sidechain graph. A 44.1 kHz snapshot cannot play at 48 kHz,
+/// so it must not survive the walk, while a matching one must.
+#[test]
+fn preparing_the_graph_drops_a_freeze_the_new_rate_cannot_replay() {
+    let mut engine = Engine::new();
+    engine.bind();
+    let stale = engine.track(11, FRAMES, -1.0);
+    let usable = engine.track(12, FRAMES, -1.0);
+    engine.publish_freeze(stale, 44_100);
+    engine.publish_freeze(usable, 48_000);
+
+    assert_eq!(
+        unsafe { hirari_engine_block_prepare_tracks(engine.state, 48_000.0, 8) },
+        0,
+        "every track prepared"
+    );
+
+    assert!(
+        !unsafe { hirari_track_frozen_store_is_frozen(engine.frozen[stale]) },
+        "a snapshot taken at the old rate is dropped"
+    );
+    assert_eq!(
+        engine.marks(stale),
+        1,
+        "the dropped snapshot is retired and the layout marked"
+    );
+    assert!(
+        unsafe { hirari_track_frozen_store_is_frozen(engine.frozen[usable]) },
+        "a snapshot the new rate can replay is kept"
+    );
+    assert_eq!(
+        unsafe { hirari_track_frozen_store_sample_rate(engine.frozen[usable]) },
+        48_000
+    );
+    assert_eq!(engine.marks(usable), 0, "a kept freeze edits nothing");
+    assert_eq!(
+        unsafe { hirari_audio_buffer_storage_samples(engine.work[stale]) },
+        8,
+        "every track's block grows to the new device size"
+    );
+    assert_eq!(
+        unsafe { hirari_audio_buffer_storage_samples(engine.work[usable]) },
+        8
     );
 }

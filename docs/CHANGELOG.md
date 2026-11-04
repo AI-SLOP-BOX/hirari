@@ -78,6 +78,16 @@ production support.
 
 ### Changed
 
+- A device-format change now prepares the whole graph from one Rust walk.
+  `hirari_engine_block_prepare_tracks` walks the engine's own track table,
+  drops and retires a freeze the new rate cannot replay while marking the
+  layout, retunes and grows every track's blocks through its runtime and
+  re-offers a work block that reached the new length to the sidechain graph at
+  the current generation. The C++ callback keeps only the allocation policy
+  that has to surface as an exception, so `Track::isFrozen`,
+  `Track::frozenSampleRate`, `Track::collectRetiredFrozenAudio` and the freeze
+  and sidechain declarations the walk no longer reaches are gone.
+  C++ 5896 -> 5871 (-25).
 - A track now rebuilds itself for a new device format inside its Rust runtime.
   `hirari_track_runtime_prepare` retunes the region store, the channel strip and
   the holographic panner, snaps the smoothed strip state to its targets, grows

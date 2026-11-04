@@ -59,28 +59,14 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         hirari_master_limiter_prepare(m_masterLimiter, sr);
         hirari_master_meter_prepare(m_meterCore, sr);
 
-        for (Track* t : lockedTracks()) {
-            // A frozen buffer is sample-rate dependent. Never continue using
-            // a 44.1 kHz snapshot after a 48/96 kHz device transition; that
-            // would silently change timing and invalidate the persisted
-            // render identity. The UI can issue a new freeze explicitly.
-            if (t->isFrozen() && t->frozenSampleRate() != static_cast<uint32_t>(sr)) {
-                t->clearFrozenAudio();
-                t->collectRetiredFrozenAudio();
-            }
-            t->prepareToPlay(sr, bs);
-            if (t->canProcess(bs)) {
-                void* work = t->workBufferStorage();
-                const uint32_t channels = hirari_audio_buffer_storage_channels(work);
-                hirari_sidechain_engine_refresh_source(
-                    m_sidechainEngine, t->getId(),
-                    hirari_audio_buffer_storage_read_pointer(work, 0, 0),
-                    channels > 1 ? hirari_audio_buffer_storage_read_pointer(work, 1, 0)
-                                 : hirari_audio_buffer_storage_read_pointer(work, 0, 0),
-                    bs, static_cast<uint32_t>(sr),
-                    hirari_engine_block_generation(m_engineBlock));
-            }
-        }
+        // One Rust walk over the track table: a freeze the new rate cannot
+        // replay is dropped and retired with the layout marked, the track's
+        // blocks and DSP retune, and a work block that reached the new length
+        // re-offers its taps to the sidechain graph at this generation. Only
+        // the allocation policy stays here because it is a C++ exception.
+        const uint8_t status = hirari_engine_block_prepare_tracks(m_engineBlock, sr, bs);
+        if (status == 2) throw std::bad_array_new_length();
+        if (status == 3) throw std::bad_alloc();
     }
     // syncStructuralChanges() acquires m_tracksMutex itself. Never call it
     // while the preparation lock is held.

@@ -23,7 +23,10 @@
 //! around its store write. Every tap buffer the walk reads is already bound in
 //! the track's [`TrackRuntime`].
 
-use crate::audio_buffer_ops::hirari_audio_add_sanitized_stereo;
+use crate::audio_buffer_ops::{
+    hirari_audio_add_sanitized_stereo, hirari_audio_buffer_storage_channels,
+    hirari_audio_buffer_storage_read_pointer, hirari_audio_buffer_storage_samples,
+};
 use crate::audio_test_tone::hirari_audio_test_tone_render;
 use crate::bounce_driver::{
     hirari_bounce_offline_active, hirari_bounce_offline_blocks, hirari_bounce_offline_engaged,
@@ -51,7 +54,10 @@ use crate::control_room_runtime::{
 use crate::engine_input_block::{hirari_input_blocks_take_monitor, hirari_input_blocks_take_talkback};
 use crate::engine_rings::{hirari_engine_command_ring_pop, CommandRecord, EngineRings};
 use crate::engine_clock::{hirari_engine_chunk_plan, CHUNK_RESTART_PLAYHEAD};
-use crate::engine_track_table::{hirari_engine_track_snapshot, HirariTrackSnapshot};
+use crate::engine_track_table::{
+    hirari_engine_track_count, hirari_engine_track_ptrs, hirari_engine_track_snapshot,
+    HirariTrackSnapshot,
+};
 use crate::forensic_scratchpad::hirari_forensic_scratchpad_reset;
 use crate::hot_swap_state::{
     hirari_hot_swap_default_acknowledge, hirari_hot_swap_default_quiesce_requested,
@@ -84,7 +90,9 @@ use crate::routing_engine_core::{
     hirari_routing_engine_should_process,
 };
 use crate::routing_fanout::{BusPreFxAdd, RoutingTrackDestination};
-use crate::sidechain_manager::hirari_sidechain_engine_publish_source;
+use crate::sidechain_manager::{
+    hirari_sidechain_engine_publish_source, hirari_sidechain_engine_refresh_source,
+};
 use crate::tempo::{
     hirari_tempo_map_beats_to_samples, hirari_tempo_map_get_current_bpm,
     hirari_tempo_map_samples_to_beats,
@@ -94,9 +102,7 @@ use crate::track_midi_articulation::{
     hirari_track_midi_schedule_note_off, hirari_track_midi_timed_outputs, GeneratedMidiEvent,
     TimedKeySwitchOutput,
 };
-use crate::track_runtime::{
-    self, hirari_track_runtime_set_muted, TrackRuntime,
-};
+use crate::track_runtime::{self, hirari_track_runtime_set_muted, TrackRuntime};
 use std::ffi::c_void;
 use std::ptr;
 use std::slice;
@@ -1761,6 +1767,72 @@ pub unsafe extern "C" fn hirari_engine_block_bump_generation(state: *mut c_void)
     block(state).map_or(0, |state| {
         state.generation.fetch_add(1, Ordering::AcqRel)
     })
+}
+
+/// Prepares every live track for a new device format. A freeze the new rate
+/// cannot replay is dropped and retired, taking the layout revision with it, the
+/// track's blocks and DSP retune, and a work block that reached the new length
+/// re-offers its taps to the sidechain graph at this generation.
+///
+/// Returns 0 once the graph is prepared, or the first allocation status a block
+/// growth could not satisfy — 2 an impossible size, 3 an exhausted allocation —
+/// which stops the walk so the host can report a failed preparation.
+///
+/// # Safety
+/// `state` must be a pointer from [`hirari_engine_block_create`] and the caller
+/// must hold the engine's tracks lock, so the table is one graph for the walk.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_prepare_tracks(
+    state: *mut c_void,
+    sample_rate: f64,
+    block_frames: u32,
+) -> u8 {
+    let Some(state) = block(state) else {
+        return 0;
+    };
+    let rate = sample_rate as u32;
+    let generation = state.generation.load(Ordering::Acquire);
+    let count = unsafe { hirari_engine_track_count(state.track_table) };
+    let pointers = unsafe { hirari_engine_track_ptrs(state.track_table) };
+    for &track in unsafe { slice::from_raw_parts(pointers, count) } {
+        if track.is_null() {
+            continue;
+        }
+        let Some(runtime) = state.runtime(track) else {
+            continue;
+        };
+        if runtime.invalidate_stale_freeze(rate) {
+            if let Some(op) = state.ops.end_edit {
+                unsafe { op(track) };
+            }
+        }
+        let status = runtime.prepare(track, sample_rate, block_frames);
+        if status != 0 {
+            return status;
+        }
+        let work = runtime.work_storage();
+        if unsafe { hirari_audio_buffer_storage_samples(work) } < block_frames {
+            continue;
+        }
+        let left = unsafe { hirari_audio_buffer_storage_read_pointer(work, 0, 0) };
+        let right = if unsafe { hirari_audio_buffer_storage_channels(work) } > 1 {
+            unsafe { hirari_audio_buffer_storage_read_pointer(work, 1, 0) }
+        } else {
+            left
+        };
+        unsafe {
+            hirari_sidechain_engine_refresh_source(
+                state.sidechain,
+                runtime.track_id(),
+                left,
+                right,
+                block_frames,
+                rate,
+                generation,
+            )
+        };
+    }
+    0
 }
 
 /// Closes callback admission while the control thread replaces the buffers a

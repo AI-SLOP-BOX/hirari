@@ -841,9 +841,6 @@ extern "C" void* hirari_sidechain_routes_capture_track(const void* state, uint32
 extern "C" void hirari_sidechain_routes_release(void* captured);
 extern "C" void hirari_sidechain_routes_restore(
     const void* state, void* routing, void* captured);
-extern "C" bool hirari_sidechain_engine_refresh_source(
-    const void* state, uint32_t source_track, const float* left, const float* right,
-    uint32_t frames, uint32_t sample_rate, uint64_t source_generation);
 extern "C" void* hirari_sidechain_engine_capture_links(const void* state, uint32_t track);
 extern "C" bool hirari_sidechain_engine_restore_links(const void* state, const void* handle);
 extern "C" void hirari_sidechain_engine_free_captured_links(void* handle);
@@ -1360,6 +1357,13 @@ extern "C" uint8_t hirari_engine_block_set_cycle(
 extern "C" void hirari_engine_block_set_test_tone(void* state, uint8_t enabled);
 extern "C" uint64_t hirari_engine_block_generation(const void* state);
 extern "C" uint64_t hirari_engine_block_bump_generation(void* state);
+/// Prepare every track in the engine's table for a new device format: drop a
+/// freeze the rate cannot replay, retune and grow the track's blocks, then
+/// re-offer its work taps to the sidechain graph. The caller holds the tracks
+/// lock. Returns the first allocation status the walk cannot swallow: 2 an
+/// impossible size, 3 an exhausted allocation, 0 otherwise.
+extern "C" uint8_t hirari_engine_block_prepare_tracks(
+    void* state, double sample_rate, uint32_t block_frames);
 extern "C" void hirari_engine_block_set_config_transition(
     void* state, uint8_t transition);
 extern "C" uint8_t hirari_engine_block_range_overflowed(const void* state);
@@ -1373,9 +1377,6 @@ extern "C" bool hirari_engine_telemetry_snapshot(
 extern "C" void* hirari_track_frozen_store_create();
 extern "C" void hirari_track_frozen_store_destroy(void* state);
 extern "C" void hirari_track_frozen_store_clear(const void* state);
-extern "C" void hirari_track_frozen_store_retire(const void* state);
-extern "C" bool hirari_track_frozen_store_is_frozen(const void* state);
-extern "C" uint32_t hirari_track_frozen_store_sample_rate(const void* state);
 extern "C" bool hirari_status_queue_push_default(
     uint32_t severity, const uint8_t* text, size_t text_size);
 extern "C" bool hirari_status_queue_pop_default(void* output_message);

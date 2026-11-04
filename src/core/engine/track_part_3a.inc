@@ -16,26 +16,14 @@
         hirari_track_runtime_reset_for_offline_render(m_runtime);
     }
 
-    // The audio thread only observes the raw pointer the Rust freeze host
-    // published and copies bounded samples from it. Replacing a freeze cannot
-    // invalidate a callback already in flight because the store keeps the
-    // replaced render alive until the control side retires it after quiescing.
-    void clearFrozenAudio() noexcept {
+    // Live edits invalidate the rendered snapshot so stale audio cannot
+    // survive a parameter, region, or automation mutation. The audio thread
+    // only observes the raw pointer the Rust freeze host published, and the
+    // store keeps the replaced render alive until the control side retires it
+    // after quiescing, so dropping one here cannot invalidate a live callback.
+    void invalidateFrozenForEdit() noexcept {
         hirari_track_frozen_store_clear(m_frozenStore);
         markProjectLayoutChanged();
-    }
-
-    // Control side only, after the audio callback has been quiesced.
-    void collectRetiredFrozenAudio() { hirari_track_frozen_store_retire(m_frozenStore); }
-
-    bool isFrozen() const noexcept { return hirari_track_frozen_store_is_frozen(m_frozenStore); }
-    // Live edits invalidate the rendered snapshot so stale audio cannot
-    // survive a parameter, region, or automation mutation.
-    void invalidateFrozenForEdit() noexcept {
-        clearFrozenAudio();
-    }
-    uint32_t frozenSampleRate() const noexcept {
-        return hirari_track_frozen_store_sample_rate(m_frozenStore);
     }
 
     // Offline render taps are prepared on the control thread and only copied
