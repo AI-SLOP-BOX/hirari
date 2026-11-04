@@ -12,13 +12,13 @@ public:
         }
     }
     Type getType() const { return m_type; }
-    float getVolume() const noexcept { return m_volume.load(std::memory_order_acquire); }
-    float getPan() const { return m_pan.load(std::memory_order_acquire); }
-    bool isRecordArmed() const noexcept { return m_recordArmed.load(std::memory_order_acquire); }
+    float getVolume() const noexcept { return hirari_channel_strip_gain(m_strip); }
+    float getPan() const { return hirari_channel_strip_pan(m_strip); }
+    bool isRecordArmed() const noexcept {
+        return hirari_channel_strip_is_record_armed(m_strip);
+    }
     void setRecordArmed(bool armed) noexcept {
-        if (m_recordArmed.exchange(armed, std::memory_order_acq_rel) != armed) {
-            markProjectLayoutChanged();
-        }
+        if (hirari_channel_strip_set_record_armed(m_strip, armed)) markProjectLayoutChanged();
     }
     virtual uint32_t getTotalLatencySamples() const noexcept {
         return hirari_effect_chain_total_latency_samples(m_chain);

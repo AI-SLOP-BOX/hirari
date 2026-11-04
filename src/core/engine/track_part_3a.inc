@@ -5,7 +5,6 @@
     }
     virtual void prepareToPlay(double sr, uint32_t blockSize) {
         if (!std::isfinite(sr) || sr <= 0.0 || blockSize == 0) return;
-        m_sampleRate = sr;
         (void)hirari_region_store_prepare(this, sr, blockSize);
         hirari_channel_strip_set_sample_rate(m_strip, sr);
         hirari_track_holographic_panner_set_sample_rate(m_spatialPanner, sr);
@@ -67,9 +66,6 @@
     void invalidateFrozenForEdit() noexcept {
         clearFrozenAudio();
     }
-    uint64_t frozenTotalSamples() const noexcept {
-        return hirari_track_frozen_store_total_samples(m_frozenStore);
-    }
     uint32_t frozenSampleRate() const noexcept {
         return hirari_track_frozen_store_sample_rate(m_frozenStore);
     }
@@ -78,12 +74,6 @@
     }
     uint64_t frozenAudioGeneration() const noexcept {
         return hirari_track_frozen_store_audio_generation(m_frozenStore);
-    }
-    std::string frozenPath() const {
-        std::string path(hirari_track_frozen_store_path_len(m_frozenStore), '\0');
-        (void)hirari_track_frozen_store_path_copy(
-            m_frozenStore, reinterpret_cast<uint8_t*>(path.data()), path.size());
-        return path;
     }
     bool setFrozenCachePath(std::string_view path) {
         if (!hirari_track_frozen_store_set_path(
@@ -107,9 +97,6 @@
             hirari_track_runtime_set_spatial(m_runtime, sanitize(x), sanitize(y), sanitize(z));
         });
     }
-    float getSpatialX() const { return hirari_track_runtime_spatial(m_runtime, 0); }
-    float getSpatialY() const { return hirari_track_runtime_spatial(m_runtime, 1); }
-    float getSpatialZ() const { return hirari_track_runtime_spatial(m_runtime, 2); }
     bool setHrtfKernel(const float* left, const float* right, uint32_t taps) {
         if (!left || !right || taps == 0 || taps > kMaxHrtfTaps) return false;
         invalidateFrozenForEdit();
@@ -133,9 +120,9 @@
         });
     }
     void setSolo(bool solo) {
-        editControl([&] { m_solo.store(solo, std::memory_order_relaxed); });
+        editControl([&] { hirari_channel_strip_set_solo(m_strip, solo); });
     }
-    bool isSolo() const { return m_solo.load(std::memory_order_relaxed); }
+    bool isSolo() const { return hirari_channel_strip_is_solo(m_strip); }
     // The Rust region store owns the table; the runtime publishes its render
     // inputs to the audio callback.
     void installRegionInputs(const HirariTrackRegionRenderInput* inputs,
@@ -186,15 +173,13 @@
         &Track::regionHostInvalidateFrozen, &Track::regionHostMarkLayout,
         &Track::regionHostPitchRunning};
     bool beginAudioPitchAnalysis() noexcept {
-        bool expected = false;
-        return m_audioPitchAnalysisRunning.compare_exchange_strong(
-            expected, true, std::memory_order_acq_rel);
+        return hirari_channel_strip_begin_pitch_analysis(m_strip);
     }
     void finishAudioPitchAnalysis() noexcept {
-        m_audioPitchAnalysisRunning.store(false, std::memory_order_release);
+        hirari_channel_strip_finish_pitch_analysis(m_strip);
     }
     bool audioPitchAnalysisRunning() const noexcept {
-        return m_audioPitchAnalysisRunning.load(std::memory_order_acquire);
+        return hirari_channel_strip_is_pitch_analysis_running(m_strip);
     }
 
     // Audio-thread producer for write automation. The queue is deliberately

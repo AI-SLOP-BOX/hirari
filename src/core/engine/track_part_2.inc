@@ -25,18 +25,10 @@
     }
 
     void setVolume(float v) {
-        editControl([&] {
-            const float next = std::isfinite(v) ? std::clamp(v, 0.0f, 2.0f) : 1.0f;
-            m_volume.store(next, std::memory_order_release);
-            hirari_channel_strip_set_gain(m_strip, v);
-        });
+        editControl([&] { hirari_channel_strip_set_gain(m_strip, v); });
     }
     void setPan(float p) {
-        editControl([&] {
-            const float next = std::isfinite(p) ? std::clamp(p, -1.0f, 1.0f) : 0.0f;
-            m_pan.store(next, std::memory_order_release);
-            hirari_channel_strip_set_pan(m_strip, next);
-        });
+        editControl([&] { hirari_channel_strip_set_pan(m_strip, p); });
     }
 
     // One removed insert, addressed by the token the chain issued for it. The
@@ -127,20 +119,12 @@
         std::vector<std::vector<uint8_t>> states;
         states.reserve(count);
         for (uint32_t index = 0; index < count; ++index)
-            states.push_back(readChainState(index, false));
+            states.push_back(readChainState(index));
         return states;
     }
     bool setPluginState(size_t pluginIndex, const std::vector<uint8_t>& state) {
         return commitEditChange(hirari_effect_chain_processor_state_restore(
             m_chain, static_cast<uint32_t>(pluginIndex), state.data(), state.size()));
-    }
-    std::vector<std::vector<uint8_t>> getPluginGuiStates() const {
-        const uint32_t count = hirari_effect_chain_count(m_chain);
-        std::vector<std::vector<uint8_t>> states;
-        states.reserve(count);
-        for (uint32_t index = 0; index < count; ++index)
-            states.push_back(readChainState(index, true));
-        return states;
     }
     bool setPluginGuiState(size_t pluginIndex, const std::vector<uint8_t>& state) {
         return commitLayoutChange(hirari_effect_chain_processor_gui_state_restore(
@@ -168,13 +152,6 @@
         for (size_t slot = 0; slot < sandboxSlotCount(); ++slot)
             paths.push_back(sandboxSlotPath(slot));
         return paths;
-    }
-    std::vector<std::vector<uint8_t>> getSandboxedPluginStates() const {
-        std::vector<std::vector<uint8_t>> states;
-        states.reserve(sandboxSlotCount());
-        for (size_t slot = 0; slot < sandboxSlotCount(); ++slot)
-            states.push_back(readChainState(sandboxSlotChainIndex(slot), false));
-        return states;
     }
     uint8_t sandboxedPluginStateError(size_t sandboxIndex) const noexcept {
         return hirari_effect_chain_sandbox_state_error(m_chain, sandboxIndex);
@@ -245,10 +222,9 @@
     }
 
 private:
-    std::vector<uint8_t> readChainState(uint32_t index, bool gui) const {
+    std::vector<uint8_t> readChainState(uint32_t index) const {
         size_t length = 0;
-        uint8_t* data = gui ? hirari_effect_chain_processor_gui_state(m_chain, index, &length)
-                             : hirari_effect_chain_processor_state(m_chain, index, &length);
+        uint8_t* data = hirari_effect_chain_processor_state(m_chain, index, &length);
         if (!data) return {};
         std::vector<uint8_t> state(data, data + length);
         hirari_effect_chain_buffer_free(data, length);

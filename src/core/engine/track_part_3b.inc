@@ -4,8 +4,7 @@
         const bool recorded = hirari_track_automation_store_record(
             m_automationStore, hirari_automation_recorder_instance(),
             m_id, samplePosition,
-            m_volume.load(std::memory_order_relaxed),
-            m_pan.load(std::memory_order_relaxed));
+            hirari_channel_strip_gain(m_strip), hirari_channel_strip_pan(m_strip));
         if (recorded && m_layoutRevision) {
             m_layoutRevision->realtimeAutomationDirty.store(true, std::memory_order_release);
         }
@@ -84,9 +83,15 @@
     /// addresses the track's taps through it.
     void* realtimeRuntime() const noexcept { return m_runtime; }
 
+    /// The other Rust storages the track owns. A Rust control walk reads the
+    /// track model through these handles instead of a per-field C++ forwarder.
+    void* channelStripHandle() const noexcept { return m_strip; }
+    void* effectChainHandle() const noexcept { return m_chain; }
+    void* automationStoreHandle() const noexcept { return m_automationStore; }
+    void* frozenStoreHandle() const noexcept { return m_frozenStore; }
+
     /// The track's work block. The engine reads and writes its channels
     /// through the storage FFI rather than a C++ buffer type.
     void* workBufferStorage() noexcept { return m_activeBuffer; }
-    double getSampleRate() const noexcept { return m_sampleRate; }
 
 private:

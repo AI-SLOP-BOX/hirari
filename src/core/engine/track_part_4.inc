@@ -18,7 +18,8 @@
     uint32_t m_id;
     std::string m_name;
     Type m_type;
-    // Channel-strip gain/pan/solo state is Rust-owned; this is its handle.
+    // The Rust channel strip owns this track's fader, pan, solo, record arm and
+    // sample rate; the track keeps only the handle it reads them through.
     void* m_strip = hirari_channel_strip_create();
     // Rust owns every insert: node instances, order, sandbox identity and the
     // built-in-instrument count. The track keeps only the chain handle.
@@ -30,12 +31,6 @@
     void* m_pluginMidi = hirari_midi_buffer_create();
     void* m_articulationState = nullptr;
     void* m_builtInMidiState = nullptr;
-    double m_sampleRate = 44100.0;
-    std::atomic<float> m_volume{1.0f};
-    std::atomic<float> m_pan{0.0f};
-    std::atomic<bool> m_solo{false};
-    std::atomic<bool> m_recordArmed{false};
-    std::atomic<bool> m_audioPitchAnalysisRunning{false};
     // The block pipeline and its taps are Rust-owned storages; the track only
     // holds their handles and their lifetime.
     void* m_activeBuffer = hirari_audio_buffer_storage_create();

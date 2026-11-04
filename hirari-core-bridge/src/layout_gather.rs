@@ -1,10 +1,11 @@
 //! Project-layout gathering.
 //!
-//! C++ owns the live tracks, so it exposes them through this ops table; every
-//! snapshot rule — string ownership, automation copying, plug-in ordering,
-//! region rate clamping, missing-file detection — lives here. The result owns
-//! all borrowed blocks and stays valid until the JSON writer or the project
-//! saver has consumed it.
+//! Every field of a track already lives in a Rust storage; C++ contributes only
+//! the track's identity, its name and handles to those storages, so this module
+//! owns every snapshot rule — string ownership, automation copying, plug-in
+//! ordering, region rate clamping, missing-file detection. The result owns all
+//! copied blocks and stays valid until the JSON writer or the project saver has
+//! consumed it.
 
 use crate::project_layout::{
     hirari_project_layout_write_json, HirariLayoutAutomationPoint, HirariLayoutByteBlock,
@@ -19,7 +20,8 @@ use crate::region_warp::HirariWarpMarker;
 use crate::vari_audio::{HirariRegionVariAudioStore, HirariVariAudioFrozen};
 use std::ffi::c_void;
 
-/// Track fields that have no nested storage. Copied out in one call.
+/// The scalars a track reports, gathered from its channel strip, realtime
+/// runtime and freeze store.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct HirariLayoutTrackScalars {
@@ -40,13 +42,13 @@ pub struct HirariLayoutTrackScalars {
     pub spatial_z: f32,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct HirariLayoutPluginLaneHeader {
-    pub plugin_index: u32,
-    pub parameter_id: u32,
-    pub point_count: usize,
-}
+/// The track's own Rust storages, read here through the `track_storage` op.
+const STRIP: u32 = 0;
+const CHAIN: u32 = 1;
+const AUTOMATION: u32 = 2;
+const FROZEN: u32 = 3;
+const RUNTIME: u32 = 4;
+const ARTICULATION: u32 = 5;
 
 /// Region fields that have no owned strings. The borrowed pointers already
 /// refer to the region's own storage, exactly as before.
@@ -84,51 +86,23 @@ impl Default for HirariLayoutRegionHeader {
     }
 }
 
-type CopyBytes = unsafe extern "C" fn(*mut c_void, usize, u32, *mut u8, usize) -> usize;
-type CopyPoints =
-    unsafe extern "C" fn(*mut c_void, usize, u32, *mut HirariLayoutAutomationPoint, usize) -> usize;
-
 /// Host accessors. `begin` flushes recorded automation and takes the tracks
 /// lock so the borrowed region pointers stay stable for the whole gather;
-/// `end` always runs, including on cancellation.
+/// `end` always runs, including on cancellation. `track_handle` is the identity
+/// every other read keys on — the region table lives in a Rust store C++ keys
+/// by that same pointer — and `track_storage` hands out the Rust storages that
+/// hold the rest of the snapshot.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct HirariLayoutHostOps {
     pub begin: unsafe extern "C" fn(*mut c_void),
     pub end: unsafe extern "C" fn(*mut c_void),
     pub track_count: unsafe extern "C" fn(*mut c_void) -> usize,
-    pub track_at:
-        unsafe extern "C" fn(*mut c_void, usize, *mut HirariLayoutTrackScalars) -> bool,
-    pub track_string: CopyBytes,
-    pub automation: CopyPoints,
-    pub plugin_lane_count: unsafe extern "C" fn(*mut c_void, usize) -> usize,
-    pub plugin_lane_at:
-        unsafe extern "C" fn(*mut c_void, usize, usize, *mut HirariLayoutPluginLaneHeader) -> bool,
-    pub plugin_lane_points: unsafe extern "C" fn(
-        *mut c_void,
-        usize,
-        usize,
-        *mut HirariLayoutAutomationPoint,
-        usize,
-    ) -> usize,
-    pub plugin_count: unsafe extern "C" fn(*mut c_void, usize) -> usize,
-    pub plugin_type: unsafe extern "C" fn(*mut c_void, usize, usize) -> u32,
-    pub plugin_bypass: unsafe extern "C" fn(*mut c_void, usize, usize) -> bool,
-    pub plugin_state:
-        unsafe extern "C" fn(*mut c_void, usize, usize, *mut u8, usize) -> usize,
-    pub plugin_gui_state:
-        unsafe extern "C" fn(*mut c_void, usize, usize, *mut u8, usize) -> usize,
-    pub plugin_parameter_count: unsafe extern "C" fn(*mut c_void, usize, usize) -> usize,
-    pub plugin_parameters:
-        unsafe extern "C" fn(*mut c_void, usize, usize, *mut f32, usize) -> usize,
-    pub sandbox_count: unsafe extern "C" fn(*mut c_void, usize) -> usize,
-    pub sandbox_path: unsafe extern "C" fn(*mut c_void, usize, usize, *mut u8, usize) -> usize,
-    pub sandbox_state: unsafe extern "C" fn(*mut c_void, usize, usize, *mut u8, usize) -> usize,
-    pub region_count: unsafe extern "C" fn(*mut c_void, usize) -> usize,
-    pub region_at: unsafe extern "C" fn(*mut c_void, usize, usize, *mut HirariLayoutRegionHeader)
-        -> bool,
-    pub region_string:
-        unsafe extern "C" fn(*mut c_void, usize, usize, u32, *mut u8, usize) -> usize,
+    pub track_handle: unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void,
+    pub track_id: unsafe extern "C" fn(*mut c_void) -> u32,
+    pub track_type: unsafe extern "C" fn(*mut c_void) -> u32,
+    pub track_storage: unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void,
+    pub track_name: unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> usize,
     /// The sidechain route table and the routing graph are Rust stores the
     /// engine only holds; Rust reads them through its own store API.
     pub sidechain_routes_store: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
@@ -349,59 +323,139 @@ impl LayoutOwned {
     }
 }
 
-unsafe fn copy_bytes(
-    copy: unsafe extern "C" fn(*mut c_void, usize, u32, *mut u8, usize) -> usize,
-    host: *mut c_void,
-    index: usize,
-    kind: u32,
+/// Reads a byte string from one of the host's own accessors in two passes.
+unsafe fn host_string(
+    read: unsafe extern "C" fn(*mut c_void, *mut u8, usize) -> usize,
+    source: *mut c_void,
 ) -> Vec<u8> {
-    let length = unsafe { copy(host, index, kind, std::ptr::null_mut(), 0) };
+    let length = unsafe { read(source, std::ptr::null_mut(), 0) };
     if length == 0 {
         return Vec::new();
     }
     let mut data = vec![0u8; length];
-    let written = unsafe { copy(host, index, kind, data.as_mut_ptr(), length) };
+    let written = unsafe { read(source, data.as_mut_ptr(), length) };
     data.truncate(written.min(length));
     data
 }
 
-unsafe fn copy_region_bytes(
-    copy: unsafe extern "C" fn(*mut c_void, usize, usize, u32, *mut u8, usize) -> usize,
-    host: *mut c_void,
+/// Asks a Rust store for one of its byte strings in two passes: length, then
+/// content.
+unsafe fn store_string(
+    read: unsafe extern "C" fn(*mut c_void, usize, u32, *mut u8, usize) -> usize,
+    key: *mut c_void,
     index: usize,
-    region: usize,
     kind: u32,
 ) -> Vec<u8> {
-    let length = unsafe { copy(host, index, region, kind, std::ptr::null_mut(), 0) };
+    let length = unsafe { read(key, index, kind, std::ptr::null_mut(), 0) };
     if length == 0 {
         return Vec::new();
     }
     let mut data = vec![0u8; length];
-    let written = unsafe { copy(host, index, region, kind, data.as_mut_ptr(), length) };
+    let written = unsafe { read(key, index, kind, data.as_mut_ptr(), length) };
     data.truncate(written.min(length));
     data
 }
 
-unsafe fn copy_points(
-    copy: unsafe extern "C" fn(
-        *mut c_void,
-        usize,
-        u32,
-        *mut HirariLayoutAutomationPoint,
-        usize,
-    ) -> usize,
-    host: *mut c_void,
-    index: usize,
-    kind: u32,
+/// Reads a plug-in state buffer, which the chain allocates and this frees.
+fn chain_bytes(chain: *mut c_void, index: u32, gui: bool) -> Vec<u8> {
+    let mut length = 0usize;
+    let data = unsafe {
+        if gui {
+            crate::effect_chain_host::hirari_effect_chain_processor_gui_state(
+                chain, index, &mut length,
+            )
+        } else {
+            crate::effect_chain_host::hirari_effect_chain_processor_state(
+                chain, index, &mut length,
+            )
+        }
+    };
+    if data.is_null() || length == 0 {
+        return Vec::new();
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, length).to_vec() };
+    unsafe { crate::effect_chain_host::hirari_effect_chain_buffer_free(data, length) };
+    bytes
+}
+
+/// Copies one sandbox slot's bundle path out of the chain.
+fn sandbox_path(chain: *mut c_void, slot: usize) -> Vec<u8> {
+    let length =
+        unsafe { crate::effect_chain_host::hirari_effect_chain_sandbox_slot_path(chain, slot, std::ptr::null_mut(), 0) };
+    if length == 0 {
+        return Vec::new();
+    }
+    let mut data = vec![0u8; length];
+    let written = unsafe {
+        crate::effect_chain_host::hirari_effect_chain_sandbox_slot_path(
+            chain,
+            slot,
+            data.as_mut_ptr(),
+            length,
+        )
+    };
+    data.truncate(written.min(length));
+    data
+}
+
+/// Copies one expression map, which the articulation runtime clones for the
+/// caller and this releases.
+fn expression_map(articulation: *mut c_void, kind: u8) -> Vec<u8> {
+    let mut length = 0usize;
+    let data = unsafe {
+        crate::track_midi_articulation::hirari_track_midi_expression_map_take(
+            articulation, kind, &mut length,
+        )
+    };
+    if data.is_null() || length == 0 {
+        return Vec::new();
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, length).to_vec() };
+    unsafe {
+        crate::track_midi_articulation::hirari_track_midi_expression_map_take_free(data, length)
+    };
+    bytes
+}
+
+fn owned_points(
+    raw: *const crate::track_automation_store::AutomationPoint,
+    count: usize,
 ) -> Vec<HirariLayoutAutomationPoint> {
-    let count = unsafe { copy(host, index, kind, std::ptr::null_mut(), 0) };
-    if count == 0 {
+    if raw.is_null() || count == 0 {
         return Vec::new();
     }
-    let mut points = vec![HirariLayoutAutomationPoint::default(); count];
-    let written = unsafe { copy(host, index, kind, points.as_mut_ptr(), count) };
-    points.truncate(written.min(count));
-    points
+    unsafe { std::slice::from_raw_parts(raw, count) }
+        .iter()
+        .map(|point| HirariLayoutAutomationPoint {
+            time: point.time,
+            value: point.value,
+            curve: point.curve,
+        })
+        .collect()
+}
+
+fn track_points(store: *mut c_void, kind: u32) -> Vec<HirariLayoutAutomationPoint> {
+    let mut count = 0usize;
+    let raw =
+        unsafe { crate::track_automation_store::hirari_track_automation_store_points(store, kind, &mut count) };
+    owned_points(raw, count)
+}
+
+fn plugin_lanes(store: *mut c_void) -> Vec<LaneScratch> {
+    let mut count = 0usize;
+    let views =
+        unsafe { crate::track_automation_store::hirari_track_automation_store_plugin_lane_views(store, &mut count) };
+    if views.is_null() || count == 0 {
+        return Vec::new();
+    }
+    unsafe { std::slice::from_raw_parts(views, count) }
+        .iter()
+        .map(|lane| LaneScratch {
+            plugin_index: lane.processor_index,
+            parameter_id: lane.parameter_id,
+            points: owned_points(lane.points, lane.point_count),
+        })
+        .collect()
 }
 
 fn clamped_source_rate(raw: f64, timeline: f64) -> u32 {
@@ -417,17 +471,67 @@ unsafe fn gather_track(
     save_only: bool,
     timeline_sample_rate: f64,
 ) -> Option<TrackScratch> {
-    let copy = |kind: u32| unsafe { copy_bytes(ops.track_string, host, index, kind) };
+    let track = unsafe { (ops.track_handle)(host, index) };
+    if track.is_null() {
+        return None;
+    }
+    let storage = |kind: u32| unsafe { (ops.track_storage)(track, kind) };
+    let strip = storage(STRIP);
+    let chain = storage(CHAIN);
+    let automation = storage(AUTOMATION);
+    let frozen = storage(FROZEN);
+    let runtime = storage(RUNTIME);
+    let articulation = storage(ARTICULATION);
+    let scalars = HirariLayoutTrackScalars {
+        id: unsafe { (ops.track_id)(track) },
+        track_type: unsafe { (ops.track_type)(track) },
+        volume: unsafe { crate::channel_strip::hirari_channel_strip_gain(strip) },
+        pan: unsafe { crate::channel_strip::hirari_channel_strip_pan(strip) },
+        muted: unsafe { crate::track_runtime::hirari_track_runtime_is_muted(runtime) },
+        solo: unsafe { crate::channel_strip::hirari_channel_strip_is_solo(strip) },
+        record_armed: unsafe {
+            crate::channel_strip::hirari_channel_strip_is_record_armed(strip)
+        },
+        phase_inverted: unsafe {
+            crate::track_runtime::hirari_track_runtime_is_phase_inverted(runtime)
+        },
+        track_delay_samples: unsafe {
+            crate::track_runtime::hirari_track_runtime_track_delay_samples(runtime)
+        } as u64,
+        frozen: unsafe { crate::track_frozen_store::hirari_track_frozen_store_is_frozen(frozen) },
+        frozen_total_samples: unsafe {
+            crate::track_frozen_store::hirari_track_frozen_store_total_samples(frozen)
+        },
+        frozen_sample_rate: unsafe {
+            crate::track_frozen_store::hirari_track_frozen_store_sample_rate(frozen)
+        },
+        spatial_x: unsafe { crate::track_runtime::hirari_track_runtime_spatial(runtime, 0) },
+        spatial_y: unsafe { crate::track_runtime::hirari_track_runtime_spatial(runtime, 1) },
+        spatial_z: unsafe { crate::track_runtime::hirari_track_runtime_spatial(runtime, 2) },
+    };
+    let frozen_length =
+        unsafe { crate::track_frozen_store::hirari_track_frozen_store_path_len(frozen) };
+    let mut frozen_path = vec![0u8; frozen_length];
+    if frozen_length > 0 {
+        let written = unsafe {
+            crate::track_frozen_store::hirari_track_frozen_store_path_copy(
+                frozen,
+                frozen_path.as_mut_ptr(),
+                frozen_length,
+            )
+        };
+        frozen_path.truncate(written.min(frozen_length));
+    }
     let mut scratch = TrackScratch {
-        scalars: HirariLayoutTrackScalars::default(),
-        name: copy(0),
-        frozen_path: copy(1),
-        expression_map: copy(2),
-        expression_map_pro: copy(3),
-        volume_automation: unsafe { copy_points(ops.automation, host, index, 0) },
-        pan_automation: unsafe { copy_points(ops.automation, host, index, 1) },
-        track_delay_automation: unsafe { copy_points(ops.automation, host, index, 2) },
-        lane_storage: Vec::new(),
+        scalars,
+        name: unsafe { host_string(ops.track_name, track) },
+        frozen_path,
+        expression_map: expression_map(articulation, 0),
+        expression_map_pro: expression_map(articulation, 1),
+        volume_automation: track_points(automation, 0),
+        pan_automation: track_points(automation, 1),
+        track_delay_automation: track_points(automation, 2),
+        lane_storage: plugin_lanes(automation),
         lanes: Vec::new(),
         plugin_types: Vec::new(),
         plugin_bypass: Vec::new(),
@@ -445,81 +549,75 @@ unsafe fn gather_track(
         regions: Vec::new(),
         view: HirariLayoutTrack::default(),
     };
-    if !unsafe { (ops.track_at)(host, index, &mut scratch.scalars) } {
-        return None;
-    }
-
-    let lane_count = unsafe { (ops.plugin_lane_count)(host, index) };
-    scratch.lane_storage.reserve(lane_count);
-    for lane in 0..lane_count {
-        let mut header = HirariLayoutPluginLaneHeader::default();
-        if !unsafe { (ops.plugin_lane_at)(host, index, lane, &mut header) } {
-            continue;
-        }
-        let mut points = vec![HirariLayoutAutomationPoint::default(); header.point_count];
-        if header.point_count > 0 {
-            let written = unsafe {
-                (ops.plugin_lane_points)(host, index, lane, points.as_mut_ptr(), points.len())
-            };
-            points.truncate(written.min(points.len()));
-        }
-        scratch.lane_storage.push(LaneScratch {
-            plugin_index: header.plugin_index,
-            parameter_id: header.parameter_id,
-            points,
-        });
-    }
-
-    let plugin_count = unsafe { (ops.plugin_count)(host, index) };
-    scratch.plugin_types.reserve(plugin_count);
-    scratch.plugin_bypass.reserve(plugin_count);
+    let plugin_count = unsafe { crate::effect_chain_host::hirari_effect_chain_count(chain) };
+    scratch.plugin_types.reserve(plugin_count as usize);
+    scratch.plugin_bypass.reserve(plugin_count as usize);
     for plugin in 0..plugin_count {
         scratch
             .plugin_types
-            .push(unsafe { (ops.plugin_type)(host, index, plugin) });
+            .push(unsafe { crate::effect_chain_host::hirari_effect_chain_node_kind(chain, plugin) });
         scratch.plugin_bypass.push(
-            if unsafe { (ops.plugin_bypass)(host, index, plugin) } {
+            if unsafe { crate::effect_chain_host::hirari_effect_chain_bypass(chain, plugin) } {
                 1
             } else {
                 0
             },
         );
-        let state = unsafe { copy_plugin_bytes(ops.plugin_state, host, index, plugin) };
-        scratch.plugin_states.push(state);
+        scratch.plugin_states.push(chain_bytes(chain, plugin, false));
         if save_only {
-            let gui = unsafe { copy_plugin_bytes(ops.plugin_gui_state, host, index, plugin) };
-            scratch.plugin_gui_states.push(gui);
+            scratch.plugin_gui_states.push(chain_bytes(chain, plugin, true));
         } else {
-            let count = unsafe { (ops.plugin_parameter_count)(host, index, plugin) };
-            let mut values = vec![0.0f32; count];
-            if count > 0 {
-                let written = unsafe {
-                    (ops.plugin_parameters)(host, index, plugin, values.as_mut_ptr(), count)
-                };
-                values.truncate(written.min(count));
-            }
-            scratch.plugin_parameters.push(values);
+            let count =
+                unsafe { crate::effect_chain_host::hirari_effect_chain_parameter_count(chain, plugin) };
+            scratch.plugin_parameters.push(
+                (0..count)
+                    .map(|parameter| {
+                        unsafe {
+                            crate::effect_chain_host::hirari_effect_chain_parameter(
+                                chain, plugin, parameter,
+                            )
+                        }
+                    })
+                    .collect(),
+            );
         }
     }
 
-    let sandbox_count = unsafe { (ops.sandbox_count)(host, index) };
-    for slot in 0..sandbox_count {
-        let path = unsafe { copy_plugin_bytes(ops.sandbox_path, host, index, slot) };
-        scratch.sandbox_paths.push(path);
-        let state = unsafe { copy_plugin_bytes(ops.sandbox_state, host, index, slot) };
-        scratch.sandbox_states.push(state);
+    let slot_count =
+        unsafe { crate::effect_chain_host::hirari_effect_chain_sandbox_slot_count(chain) };
+    for slot in 0..slot_count {
+        scratch.sandbox_paths.push(sandbox_path(chain, slot));
+        let plugin =
+            unsafe { crate::effect_chain_host::hirari_effect_chain_sandbox_slot_index(chain, slot) };
+        scratch.sandbox_states.push(chain_bytes(chain, plugin, false));
     }
 
-    let region_count = unsafe { (ops.region_count)(host, index) };
+    let region_count = crate::region_store::hirari_region_store_count(track);
     scratch.regions.reserve(region_count);
     scratch.region_strings.reserve(region_count * 2);
     for region_index in 0..region_count {
         let mut header = HirariLayoutRegionHeader::default();
-        if !unsafe { (ops.region_at)(host, index, region_index, &mut header) } {
+        if !unsafe {
+            crate::region_store::hirari_region_store_layout_header(track, region_index, &mut header)
+        } {
             continue;
         }
-        let name = unsafe { copy_region_bytes(ops.region_string, host, index, region_index, 0) };
-        let path = unsafe { copy_region_bytes(ops.region_string, host, index, region_index, 1) };
+        let name = unsafe {
+            store_string(
+                crate::region_store::hirari_region_store_layout_string,
+                track,
+                region_index,
+                0,
+            )
+        };
+        let path = unsafe {
+            store_string(
+                crate::region_store::hirari_region_store_layout_string,
+                track,
+                region_index,
+                1,
+            )
+        };
         let missing = path.is_empty() || std::fs::metadata(path_bytes(&path)).is_err();
         scratch.region_strings.push(name);
         scratch.region_strings.push(path);
@@ -546,22 +644,6 @@ unsafe fn gather_track(
 
     scratch.link(save_only);
     Some(scratch)
-}
-
-unsafe fn copy_plugin_bytes(
-    copy: unsafe extern "C" fn(*mut c_void, usize, usize, *mut u8, usize) -> usize,
-    host: *mut c_void,
-    index: usize,
-    plugin: usize,
-) -> Vec<u8> {
-    let length = unsafe { copy(host, index, plugin, std::ptr::null_mut(), 0) };
-    if length == 0 {
-        return Vec::new();
-    }
-    let mut data = vec![0u8; length];
-    let written = unsafe { copy(host, index, plugin, data.as_mut_ptr(), length) };
-    data.truncate(written.min(length));
-    data
 }
 
 fn path_bytes(path: &[u8]) -> &std::path::Path {
@@ -720,15 +802,61 @@ pub unsafe extern "C" fn hirari_layout_release(storage: *mut c_void) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channel_strip::{
+        hirari_channel_strip_create, hirari_channel_strip_destroy, hirari_channel_strip_set_gain,
+        hirari_channel_strip_set_pan, hirari_channel_strip_set_record_armed,
+        hirari_channel_strip_set_solo,
+    };
+    use crate::effect_chain_host::{
+        hirari_effect_chain_add_builtin, hirari_effect_chain_create, hirari_effect_chain_destroy,
+        hirari_effect_chain_parameter, hirari_effect_chain_parameter_count,
+        hirari_effect_chain_set_bypass,
+    };
+    use crate::track_automation_store::{
+        hirari_track_automation_store_create, hirari_track_automation_store_destroy,
+        hirari_track_automation_store_set_plugin_lanes, hirari_track_automation_store_set_points,
+        AutomationPoint, PluginLaneView,
+    };
+    use crate::track_frozen_store::{
+        hirari_track_frozen_store_create, hirari_track_frozen_store_destroy,
+        hirari_track_frozen_store_publish, TrackFrozenOps,
+    };
+    use crate::track_midi_articulation::{
+        hirari_track_midi_articulation_create, hirari_track_midi_articulation_destroy,
+        hirari_track_midi_expression_map_set,
+    };
+    use crate::track_runtime::{
+        hirari_track_runtime_create, hirari_track_runtime_destroy, hirari_track_runtime_set_delays,
+        hirari_track_runtime_set_muted, hirari_track_runtime_set_phase_invert,
+        hirari_track_runtime_set_spatial,
+    };
     use std::sync::Mutex;
 
+    /// A track assembled from the same Rust storages the engine hands over, so
+    /// the gather is tested against the reads it really performs.
     struct MockTrack {
-        scalars: HirariLayoutTrackScalars,
+        id: u32,
+        track_type: u32,
         name: Vec<u8>,
-        states: Vec<Vec<u8>>,
-        parameters: Vec<Vec<f32>>,
-        gui: Vec<Vec<u8>>,
-        region_path: Vec<u8>,
+        strip: *mut c_void,
+        chain: *mut c_void,
+        automation: *mut c_void,
+        frozen: *mut c_void,
+        runtime: *mut c_void,
+        articulation: *mut c_void,
+    }
+
+    impl Drop for MockTrack {
+        fn drop(&mut self) {
+            unsafe {
+                hirari_track_runtime_destroy(self.runtime);
+                hirari_track_midi_articulation_destroy(self.articulation);
+                hirari_track_frozen_store_destroy(self.frozen);
+                hirari_track_automation_store_destroy(self.automation);
+                hirari_effect_chain_destroy(self.chain);
+                hirari_channel_strip_destroy(self.strip);
+            }
+        }
     }
 
     struct MockHost {
@@ -751,6 +879,10 @@ mod tests {
         unsafe { &*host.cast::<MockHost>() }
     }
 
+    fn mock_track(track: *mut c_void) -> &'static MockTrack {
+        unsafe { &*track.cast::<MockTrack>() }
+    }
+
     unsafe extern "C" fn begin(host: *mut c_void) {
         host_opaque(host).gauge.lock().unwrap().0 += 1;
     }
@@ -760,185 +892,49 @@ mod tests {
     unsafe extern "C" fn track_count(host: *mut c_void) -> usize {
         host_opaque(host).tracks.lock().unwrap().len()
     }
-    unsafe extern "C" fn track_at(
-        host: *mut c_void,
-        index: usize,
-        out: *mut HirariLayoutTrackScalars,
-    ) -> bool {
+    unsafe extern "C" fn track_handle(host: *mut c_void, index: usize) -> *mut c_void {
         let tracks = host_opaque(host).tracks.lock().unwrap();
-        let Some(track) = tracks.get(index) else {
-            return false;
-        };
-        unsafe { *out = track.scalars };
-        true
+        tracks
+            .get(index)
+            .map_or(std::ptr::null_mut(), |track| track as *const MockTrack as *mut c_void)
     }
-    fn copy(out: *mut u8, capacity: usize, bytes: &[u8]) -> usize {
-        if !out.is_null() && capacity > 0 {
-            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, capacity.min(bytes.len())) };
-        }
-        bytes.len()
-    }
-    unsafe extern "C" fn track_string(
-        host: *mut c_void,
-        index: usize,
-        kind: u32,
-        out: *mut u8,
-        capacity: usize,
-    ) -> usize {
-        let tracks = host_opaque(host).tracks.lock().unwrap();
-        let Some(track) = tracks.get(index) else {
+    unsafe extern "C" fn track_id(track: *mut c_void) -> u32 {
+        if track.is_null() {
             return 0;
-        };
+        }
+        mock_track(track).id
+    }
+    unsafe extern "C" fn track_type(track: *mut c_void) -> u32 {
+        if track.is_null() {
+            return 0;
+        }
+        mock_track(track).track_type
+    }
+    unsafe extern "C" fn track_storage(track: *mut c_void, kind: u32) -> *mut c_void {
+        if track.is_null() {
+            return std::ptr::null_mut();
+        }
+        let track = mock_track(track);
         match kind {
-            0 => copy(out, capacity, &track.name),
-            _ => 0,
+            STRIP => track.strip,
+            CHAIN => track.chain,
+            AUTOMATION => track.automation,
+            FROZEN => track.frozen,
+            RUNTIME => track.runtime,
+            _ => track.articulation,
         }
     }
-    unsafe extern "C" fn automation(
-        _: *mut c_void,
-        _: usize,
-        _: u32,
-        _: *mut HirariLayoutAutomationPoint,
-        _: usize,
-    ) -> usize {
-        0
-    }
-    unsafe extern "C" fn plugin_lane_count(_: *mut c_void, _: usize) -> usize {
-        0
-    }
-    unsafe extern "C" fn plugin_lane_at(
-        _: *mut c_void,
-        _: usize,
-        _: usize,
-        _: *mut HirariLayoutPluginLaneHeader,
-    ) -> bool {
-        false
-    }
-    unsafe extern "C" fn plugin_lane_points(
-        _: *mut c_void,
-        _: usize,
-        _: usize,
-        _: *mut HirariLayoutAutomationPoint,
-        _: usize,
-    ) -> usize {
-        0
-    }
-    unsafe extern "C" fn plugin_count(host: *mut c_void, index: usize) -> usize {
-        host_opaque(host)
-            .tracks
-            .lock()
-            .unwrap()
-            .get(index)
-            .map_or(0, |track| track.states.len())
-    }
-    unsafe extern "C" fn plugin_type(_: *mut c_void, _: usize, _: usize) -> u32 {
-        1
-    }
-    unsafe extern "C" fn plugin_bypass(_: *mut c_void, _: usize, plugin: usize) -> bool {
-        plugin == 0
-    }
-    unsafe extern "C" fn plugin_state(
-        host: *mut c_void,
-        index: usize,
-        plugin: usize,
-        out: *mut u8,
-        capacity: usize,
-    ) -> usize {
-        let tracks = host_opaque(host).tracks.lock().unwrap();
-        let Some(track) = tracks.get(index) else {
+    unsafe extern "C" fn track_name(track: *mut c_void, out: *mut u8, capacity: usize) -> usize {
+        if track.is_null() {
             return 0;
-        };
-        track
-            .states
-            .get(plugin)
-            .map_or(0, |state| copy(out, capacity, state))
-    }
-    unsafe extern "C" fn plugin_gui_state(
-        host: *mut c_void,
-        index: usize,
-        plugin: usize,
-        out: *mut u8,
-        capacity: usize,
-    ) -> usize {
-        let tracks = host_opaque(host).tracks.lock().unwrap();
-        let Some(track) = tracks.get(index) else {
-            return 0;
-        };
-        track
-            .gui
-            .get(plugin)
-            .map_or(0, |state| copy(out, capacity, state))
-    }
-    unsafe extern "C" fn plugin_parameter_count(host: *mut c_void, index: usize, plugin: usize) -> usize {
-        host_opaque(host)
-            .tracks
-            .lock()
-            .unwrap()
-            .get(index)
-            .and_then(|track| track.parameters.get(plugin))
-            .map_or(0, Vec::len)
-    }
-    unsafe extern "C" fn plugin_parameters(
-        host: *mut c_void,
-        index: usize,
-        plugin: usize,
-        out: *mut f32,
-        capacity: usize,
-    ) -> usize {
-        let tracks = host_opaque(host).tracks.lock().unwrap();
-        let Some(values) = tracks
-            .get(index)
-            .and_then(|track| track.parameters.get(plugin))
-        else {
-            return 0;
-        };
+        }
+        let name = &mock_track(track).name;
         if !out.is_null() && capacity > 0 {
-            let count = capacity.min(values.len());
-            unsafe { std::ptr::copy_nonoverlapping(values.as_ptr(), out, count) };
+            unsafe {
+                std::ptr::copy_nonoverlapping(name.as_ptr(), out, capacity.min(name.len()));
+            }
         }
-        values.len()
-    }
-    unsafe extern "C" fn sandbox_count(_: *mut c_void, _: usize) -> usize {
-        0
-    }
-    unsafe extern "C" fn sandbox_path(
-        _: *mut c_void,
-        _: usize,
-        _: usize,
-        _: *mut u8,
-        _: usize,
-    ) -> usize {
-        0
-    }
-    unsafe extern "C" fn sandbox_state(
-        _: *mut c_void,
-        _: usize,
-        _: usize,
-        _: *mut u8,
-        _: usize,
-    ) -> usize {
-        0
-    }
-    unsafe extern "C" fn region_count(_: *mut c_void, _: usize) -> usize {
-        0
-    }
-    unsafe extern "C" fn region_at(
-        _: *mut c_void,
-        _: usize,
-        _: usize,
-        _: *mut HirariLayoutRegionHeader,
-    ) -> bool {
-        false
-    }
-    unsafe extern "C" fn region_string(
-        _: *mut c_void,
-        _: usize,
-        _: usize,
-        _: u32,
-        _: *mut u8,
-        _: usize,
-    ) -> usize {
-        0
+        name.len()
     }
     unsafe extern "C" fn sidechain_routes_store(host: *mut c_void) -> *mut c_void {
         host_opaque(host).routes
@@ -955,30 +951,18 @@ mod tests {
             begin,
             end,
             track_count,
-            track_at,
-            track_string,
-            automation,
-            plugin_lane_count,
-            plugin_lane_at,
-            plugin_lane_points,
-            plugin_count,
-            plugin_type,
-            plugin_bypass,
-            plugin_state,
-            plugin_gui_state,
-            plugin_parameter_count,
-            plugin_parameters,
-            sandbox_count,
-            sandbox_path,
-            sandbox_state,
-            region_count,
-            region_at,
-            region_string,
+            track_handle,
+            track_id,
+            track_type,
+            track_storage,
+            track_name,
             sidechain_routes_store,
             routing_store,
             sample_rate,
         }
     }
+
+    unsafe extern "C" fn release_frozen_owner(_: *mut c_void) {}
 
     fn fixture() -> Box<MockHost> {
         let routes = crate::sidechain_route_store::hirari_sidechain_routes_create();
@@ -987,20 +971,95 @@ mod tests {
             crate::sidechain_route_store::hirari_sidechain_routes_set(routes, 1, 2, 3, 1);
             crate::routing_engine_core::hirari_routing_engine_add_feedback(routing, 1, 2, 0.5);
         }
+        let strip = hirari_channel_strip_create();
+        let chain = hirari_effect_chain_create();
+        let automation = hirari_track_automation_store_create();
+        let frozen_ops = TrackFrozenOps {
+            destroy_owner: release_frozen_owner,
+        };
+        let frozen = unsafe { hirari_track_frozen_store_create(&frozen_ops) };
+        let articulation = hirari_track_midi_articulation_create();
+        let null = std::ptr::null_mut();
+        let runtime = unsafe {
+            hirari_track_runtime_create(
+                7, chain, strip, automation, frozen, null, null, null, null, null, null, null,
+                null, None, null,
+            )
+        };
+        let volume_points = [
+            AutomationPoint {
+                time: 1.0,
+                value: 0.25,
+                curve: 0.0,
+            },
+            AutomationPoint {
+                time: 2.0,
+                value: 0.75,
+                curve: 0.5,
+            },
+        ];
+        let lane_points = [AutomationPoint {
+            time: 3.0,
+            value: 0.5,
+            curve: 0.0,
+        }];
+        let lanes = [PluginLaneView {
+            processor_index: 1,
+            parameter_id: 2,
+            points: lane_points.as_ptr(),
+            point_count: lane_points.len(),
+        }];
+        let frozen_path = b"/tmp/hirari-frozen.wav";
+        unsafe {
+            hirari_channel_strip_set_gain(strip, 0.5);
+            hirari_channel_strip_set_pan(strip, -0.25);
+            hirari_channel_strip_set_solo(strip, true);
+            hirari_channel_strip_set_record_armed(strip, true);
+            hirari_track_runtime_set_muted(runtime, 1);
+            hirari_track_runtime_set_phase_invert(runtime, 1);
+            hirari_track_runtime_set_delays(runtime, 12, 34);
+            hirari_track_runtime_set_spatial(runtime, 0.1, 0.2, 0.3);
+            hirari_track_automation_store_set_points(
+                automation,
+                0,
+                volume_points.as_ptr(),
+                volume_points.len(),
+            );
+            hirari_track_automation_store_set_plugin_lanes(automation, lanes.as_ptr(), lanes.len());
+            assert!(hirari_effect_chain_add_builtin(chain, 1, false, false));
+            assert!(hirari_effect_chain_add_builtin(chain, 4, false, false));
+            assert!(hirari_effect_chain_set_bypass(chain, 0, true));
+            assert!(hirari_track_frozen_store_publish(
+                frozen,
+                1 as *mut c_void,
+                2 as *mut c_void,
+                2,
+                4,
+                4,
+                48_000,
+                7,
+                3,
+                frozen_path.as_ptr(),
+                frozen_path.len(),
+            ));
+            assert!(hirari_track_midi_expression_map_set(
+                articulation,
+                0,
+                b"{}".as_ptr(),
+                2
+            ));
+        }
         Box::new(MockHost {
             tracks: Mutex::new(vec![MockTrack {
-                scalars: HirariLayoutTrackScalars {
-                    id: 7,
-                    track_type: 1,
-                    volume: 0.5,
-                    record_armed: true,
-                    ..Default::default()
-                },
+                id: 7,
+                track_type: 1,
                 name: b"Bass".to_vec(),
-                states: vec![vec![1, 2], vec![3]],
-                parameters: vec![vec![0.25, 0.75], vec![]],
-                gui: vec![vec![9], vec![8]],
-                region_path: b"/nonexistent/hirari-region.wav".to_vec(),
+                strip,
+                chain,
+                automation,
+                frozen,
+                runtime,
+                articulation,
             }]),
             routes,
             routing,
@@ -1025,9 +1084,17 @@ mod tests {
         (snapshot, storage)
     }
 
+    fn text(value: &HirariLayoutString) -> &[u8] {
+        if value.len == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(value.data, value.len) }
+    }
+
     #[test]
-    fn gather_copies_scalars_strings_and_plugins() {
+    fn gather_reads_the_tracks_own_rust_storages() {
         let host = fixture();
+        let chain = host.tracks.lock().unwrap()[0].chain;
         let (snapshot, storage) = unsafe { snapshot_of(&host) };
         assert_eq!(snapshot.track_count, 1);
         assert_eq!(snapshot.sidechain_route_count, 1);
@@ -1035,24 +1102,76 @@ mod tests {
         assert_eq!(snapshot.timeline_sample_rate, 48_000.0);
         let track = unsafe { &*snapshot.tracks };
         assert_eq!(track.id, 7);
+        assert_eq!(track.track_type, 1);
         assert_eq!(track.volume, 0.5);
+        assert_eq!(track.pan, -0.25);
+        assert!(track.solo);
         assert!(track.record_armed);
-        let name = unsafe { std::slice::from_raw_parts(track.name.data, track.name.len) };
-        assert_eq!(name, b"Bass");
-        assert_eq!(track.plugin_type_count, 2);
-        assert_eq!(unsafe { *track.plugin_bypass }, 1);
-        assert_eq!(track.plugin_state_count, 2);
-        let state = unsafe { &*track.plugin_states.add(1) };
-        assert_eq!(unsafe { std::slice::from_raw_parts(state.bytes, state.count) }, &[3]);
-        // The JSON path fills parameters (plug-in order) and no GUI blobs.
-        let values = unsafe { &*track.plugin_parameters.add(1) };
-        assert_eq!(values.count, 0);
-        let first = unsafe { &*track.plugin_parameters };
+        // Mute, phase and timing are the runtime's; freeze is the store's.
+        assert!(track.muted);
+        assert!(track.phase_inverted);
+        assert_eq!(track.track_delay_samples, 34);
         assert_eq!(
-            unsafe { std::slice::from_raw_parts(first.values, first.count) },
-            &[0.25, 0.75]
+            (track.spatial_x, track.spatial_y, track.spatial_z),
+            (0.1, 0.2, 0.3)
         );
+        assert!(track.frozen);
+        assert_eq!(track.frozen_total_samples, 4);
+        assert_eq!(track.frozen_sample_rate, 48_000);
+        assert_eq!(text(&track.name), b"Bass");
+        assert_eq!(text(&track.frozen_path), b"/tmp/hirari-frozen.wav");
+        assert_eq!(text(&track.expression_map_json), b"{}");
+        assert_eq!(text(&track.expression_map_pro_json), b"null");
+        let volume =
+            unsafe { std::slice::from_raw_parts(track.volume_automation, track.volume_automation_count) };
+        assert_eq!(
+            volume
+                .iter()
+                .map(|point| (point.time, point.value, point.curve))
+                .collect::<Vec<_>>(),
+            vec![(1.0, 0.25, 0.0), (2.0, 0.75, 0.5)]
+        );
+        assert_eq!(track.pan_automation_count, 0);
+        assert_eq!(track.plugin_automation_count, 1);
+        let lane = unsafe { &*track.plugin_automation };
+        assert_eq!((lane.plugin_index, lane.parameter_id, lane.point_count), (1, 2, 1));
+        let lane_point = unsafe { &*lane.points };
+        assert_eq!((lane_point.time, lane_point.value), (3.0, 0.5));
+        assert_eq!(track.plugin_type_count, 2);
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(track.plugin_types, track.plugin_type_count) },
+            &[1, 4]
+        );
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(track.plugin_bypass, track.plugin_type_count) },
+            &[1, 0]
+        );
+        assert_eq!(track.plugin_state_count, 2);
+        assert_eq!(track.sandbox_plugin_path_count, 0);
         assert!(track.plugin_gui_states.is_null());
+        for plugin in 0..2 {
+            let state = unsafe { &*track.plugin_states.add(plugin) };
+            assert_eq!(
+                unsafe { std::slice::from_raw_parts(state.bytes, state.count) },
+                chain_bytes(chain, plugin as u32, false)
+            );
+            // The JSON path reports the plug-in's parameters in id order.
+            let block = unsafe { &*track.plugin_parameters.add(plugin) };
+            let values =
+                unsafe { std::slice::from_raw_parts(block.values, block.count) };
+            assert_eq!(
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(id, value)| (id as u32, *value))
+                    .collect::<Vec<_>>(),
+                (0..unsafe { hirari_effect_chain_parameter_count(chain, plugin as u32) })
+                    .map(|id| (id, unsafe {
+                        hirari_effect_chain_parameter(chain, plugin as u32, id)
+                    }))
+                    .collect::<Vec<_>>()
+            );
+        }
         unsafe { hirari_layout_release(storage) };
         assert_eq!(*host.gauge.lock().unwrap(), (1, 1));
     }
@@ -1060,6 +1179,7 @@ mod tests {
     #[test]
     fn save_only_gather_fills_gui_states_instead_of_parameters() {
         let host = fixture();
+        let chain = host.tracks.lock().unwrap()[0].chain;
         let ops = ops();
         let storage = unsafe {
             hirari_layout_gather(
@@ -1075,10 +1195,13 @@ mod tests {
         let track = unsafe { &*snapshot.tracks };
         assert!(track.plugin_parameters.is_null());
         assert_eq!(track.plugin_gui_state_count, 2);
-        let gui = unsafe { &*track.plugin_gui_states };
-        assert_eq!(unsafe { std::slice::from_raw_parts(gui.bytes, gui.count) }, &[9]);
-        let second = unsafe { &*track.plugin_gui_states.add(1) };
-        assert_eq!(unsafe { std::slice::from_raw_parts(second.bytes, second.count) }, &[8]);
+        for plugin in 0..2 {
+            let gui = unsafe { &*track.plugin_gui_states.add(plugin) };
+            assert_eq!(
+                unsafe { std::slice::from_raw_parts(gui.bytes, gui.count) },
+                chain_bytes(chain, plugin as u32, true)
+            );
+        }
         unsafe { hirari_layout_release(storage) };
     }
 
@@ -1111,6 +1234,31 @@ mod tests {
         .is_null());
         assert!(!unsafe { hirari_layout_snapshot(std::ptr::null(), std::ptr::null_mut()) });
         unsafe { hirari_layout_release(std::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn retired_track_slots_are_skipped() {
+        unsafe extern "C" fn retired_handle(_: *mut c_void, _: usize) -> *mut c_void {
+            std::ptr::null_mut()
+        }
+        let host = fixture();
+        let mut table = ops();
+        table.track_handle = retired_handle;
+        let storage = unsafe {
+            hirari_layout_gather(
+                (&*host as *const MockHost).cast_mut().cast(),
+                &table,
+                false,
+                None,
+                std::ptr::null(),
+            )
+        };
+        assert!(!storage.is_null());
+        let mut snapshot = HirariProjectLayoutSnapshot::default();
+        assert!(unsafe { hirari_layout_snapshot(storage, &mut snapshot) });
+        assert_eq!(snapshot.track_count, 0);
+        unsafe { hirari_layout_release(storage) };
+        assert_eq!(*host.gauge.lock().unwrap(), (1, 1));
     }
 
     #[test]

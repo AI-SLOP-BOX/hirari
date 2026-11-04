@@ -60,16 +60,10 @@ public:
             m_articulationState, 0, reinterpret_cast<const uint8_t*>(json.data()), json.size());
         markProjectLayoutChanged();
     }
-    std::string getExpressionMapJson() const {
-        return copyExpressionMapJson(0);
-    }
     void setExpressionMapProJson(std::string json) {
         (void)hirari_track_midi_expression_map_set(
             m_articulationState, 1, reinterpret_cast<const uint8_t*>(json.data()), json.size());
         markProjectLayoutChanged();
-    }
-    std::string getExpressionMapProJson() const {
-        return copyExpressionMapJson(1);
     }
     void addGeneratedMidiEvents(const HirariGeneratedMidiEvent* events,
                                 size_t count) noexcept {
@@ -104,7 +98,7 @@ public:
             hirari_builtin_midi_instrument_process(
                 m_builtInMidiState, hirari_midi_buffer_event_data(m_pluginMidi),
                 hirari_midi_buffer_event_count(m_pluginMidi), left, right, frames,
-                m_sampleRate);
+                hirari_channel_strip_sample_rate(m_strip));
         }
     }
 
@@ -139,15 +133,6 @@ public:
     }
 
 private:
-    std::string copyExpressionMapJson(uint8_t mapKind) const {
-        size_t size = 0;
-        auto* json = hirari_track_midi_expression_map_take(m_articulationState, mapKind, &size);
-        if (!json) return {};
-        std::string result(reinterpret_cast<const char*>(json), size);
-        hirari_track_midi_expression_map_take_free(json, size);
-        return result;
-    }
-
     // One block's MIDI input is fully prepared before the chain runs: expired
     // expression note-offs are queued, the generated events are put in
     // chronological order, and a track without an instrument gets its built-in

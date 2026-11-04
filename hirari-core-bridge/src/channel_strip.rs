@@ -7,8 +7,9 @@ pub struct ChannelStripEngine;
 struct NativeChannelStrip {
     gain: AtomicParameterState,
     pan: AtomicParameterState,
-    muted: AtomicBool,
     solo: AtomicBool,
+    record_armed: AtomicBool,
+    pitch_analysis: AtomicBool,
     sample_rate: AtomicU64,
 }
 
@@ -21,8 +22,9 @@ impl NativeChannelStrip {
         Self {
             gain,
             pan,
-            muted: AtomicBool::new(false),
             solo: AtomicBool::new(false),
+            record_armed: AtomicBool::new(false),
+            pitch_analysis: AtomicBool::new(false),
             sample_rate: AtomicU64::new(44100.0_f64.to_bits()),
         }
     }
@@ -56,31 +58,6 @@ impl NativeChannelStrip {
             std::ptr::null_mut()
         };
         if left.is_null() {
-            return;
-        }
-        if self.muted.load(Ordering::Relaxed) {
-            for channel in 0..channel_count {
-                let samples = *channels.add(channel);
-                if samples.is_null() {
-                    continue;
-                }
-                let samples = samples.add(offset);
-                for index in 0..frames {
-                    samples.add(index).write(0.0);
-                }
-            }
-            if !mirror_channels.is_null() {
-                for channel in 0..mirror_channel_count {
-                    let samples = *mirror_channels.add(channel);
-                    if samples.is_null() {
-                        continue;
-                    }
-                    let samples = samples.add(offset);
-                    for index in 0..frames {
-                        samples.add(index).write(0.0);
-                    }
-                }
-            }
             return;
         }
 
@@ -180,25 +157,56 @@ pub unsafe extern "C" fn hirari_channel_strip_reset(state: *const c_void) {
     }
 }
 
+/// The track fader policy lives here: a control-plane value is admitted only
+/// when finite and inside the fader range, and the smoothed parameter ramps to
+/// that same target the UI reads back. Mute is not strip state — the Rust track
+/// runtime owns it.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_channel_strip_set_gain(state: *const c_void, gain: f32) {
     if let Some(state) = state.cast::<NativeChannelStrip>().as_ref() {
-        state.gain.set_target(gain);
+        let next = if gain.is_finite() {
+            gain.clamp(0.0, 2.0)
+        } else {
+            1.0
+        };
+        state.gain.set_target(next);
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_channel_strip_gain(state: *const c_void) -> f32 {
+    state
+        .cast::<NativeChannelStrip>()
+        .as_ref()
+        .map_or(1.0, |state| state.gain.target())
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn hirari_channel_strip_set_pan(state: *const c_void, pan: f32) {
     if let Some(state) = state.cast::<NativeChannelStrip>().as_ref() {
-        state.pan.set_target(pan);
+        let next = if pan.is_finite() {
+            pan.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+        state.pan.set_target(next);
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_channel_strip_set_mute(state: *const c_void, muted: bool) {
-    if let Some(state) = state.cast::<NativeChannelStrip>().as_ref() {
-        state.muted.store(muted, Ordering::Release);
-    }
+pub unsafe extern "C" fn hirari_channel_strip_pan(state: *const c_void) -> f32 {
+    state
+        .cast::<NativeChannelStrip>()
+        .as_ref()
+        .map_or(0.0, |state| state.pan.target())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_channel_strip_is_solo(state: *const c_void) -> bool {
+    state
+        .cast::<NativeChannelStrip>()
+        .as_ref()
+        .is_some_and(|state| state.solo.load(Ordering::Relaxed))
 }
 
 #[no_mangle]
@@ -206,6 +214,61 @@ pub unsafe extern "C" fn hirari_channel_strip_set_solo(state: *const c_void, sol
     if let Some(state) = state.cast::<NativeChannelStrip>().as_ref() {
         state.solo.store(solo, Ordering::Release);
     }
+}
+
+/// Record arm is the strip's only transport-state flag, and the setter reports
+/// whether the value actually changed so the caller bumps the layout revision
+/// once per real edit.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_channel_strip_is_record_armed(state: *const c_void) -> bool {
+    state
+        .cast::<NativeChannelStrip>()
+        .as_ref()
+        .is_some_and(|state| state.record_armed.load(Ordering::Acquire))
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_channel_strip_set_record_armed(
+    state: *const c_void,
+    armed: bool,
+) -> bool {
+    let Some(state) = state.cast::<NativeChannelStrip>().as_ref() else {
+        return false;
+    };
+    state
+        .record_armed
+        .swap(armed, Ordering::AcqRel)
+        != armed
+}
+
+/// Only one pitch-analysis request per track may be in flight; the claim is the
+/// CAS, so a second poller backs off instead of queueing work.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_channel_strip_begin_pitch_analysis(state: *const c_void) -> bool {
+    let Some(state) = state.cast::<NativeChannelStrip>().as_ref() else {
+        return false;
+    };
+    state
+        .pitch_analysis
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_channel_strip_finish_pitch_analysis(state: *const c_void) {
+    if let Some(state) = state.cast::<NativeChannelStrip>().as_ref() {
+        state.pitch_analysis.store(false, Ordering::Release);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn hirari_channel_strip_is_pitch_analysis_running(
+    state: *const c_void,
+) -> bool {
+    state
+        .cast::<NativeChannelStrip>()
+        .as_ref()
+        .is_some_and(|state| state.pitch_analysis.load(Ordering::Acquire))
 }
 
 #[no_mangle]

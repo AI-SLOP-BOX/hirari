@@ -199,6 +199,12 @@ impl AtomicParameterState {
         }
     }
 
+    /// The admitted target, not the smoothed value: this is what a control-plane
+    /// reader gets back after `set_target`.
+    pub(crate) fn target(&self) -> f32 {
+        self.load_f32(&self.target, Ordering::Acquire)
+    }
+
     pub(crate) fn set_sample_rate(&self, sample_rate: f64) {
         if sample_rate.is_finite() && sample_rate > 0.0 {
             self.sample_rate

@@ -74,6 +74,23 @@ production support.
 
 ### Changed
 
+- The project-layout gather now reads the track's own Rust storages. The host
+  table shrank from 26 accessors to 11 (`begin`/`end`/count/handle/id/type/
+  storage-kind/name plus the route stores and sample rate): automation lists and
+  plug-in lanes come from `hirari_track_automation_store_*`, plug-in kinds,
+  bypass, states, parameters and sandbox slots from `hirari_effect_chain_*`,
+  freeze flags and path from `hirari_track_frozen_store_*`, mute, phase, delay
+  and spatial position from `hirari_track_runtime_*`, expression maps from
+  `hirari_track_midi_expression_map_*` and regions from `hirari_region_store_*`,
+  all keyed by the track handle C++ already used. The Rust channel strip is now
+  the single owner of fader, pan, solo, record arm and the pitch-analysis flag --
+  the duplicated `Track` shadow atomics, the never-set strip mute and the
+  gather-only track getters (`frozenPath`, `getPluginGuiStates`,
+  `getSandboxedPluginStates`, `getExpressionMap*Json`, `getSpatial*`,
+  `getSampleRate`) were deleted, and `setVolume` now ramps the same clamped value
+  it reports. The FFI prototypes C++ stopped calling went with them.
+  C++ 7357 -> 7113 (-244).
+
 - `src/core/rust_ffi.hpp` now declares only the ABI C++ actually calls. 104
   `hirari_*` prototypes left over from the migrated subsystems -- bounce state
   queries, the native plugin host, preview voices, metronome, mixer telemetry,

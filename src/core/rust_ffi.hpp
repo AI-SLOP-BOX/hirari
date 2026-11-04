@@ -229,9 +229,22 @@ extern "C" void hirari_macro_mapping_destroy(void* state);
 extern "C" void* hirari_channel_strip_create();
 extern "C" void hirari_channel_strip_destroy(void* state);
 extern "C" void hirari_channel_strip_set_sample_rate(const void* state, double sample_rate);
+extern "C" double hirari_channel_strip_sample_rate(const void* state);
 extern "C" void hirari_channel_strip_reset(const void* state);
+// The strip is the single owner of a track's fader, solo and record-arm state.
+// Each setter applies the admitted value and each getter reads that same value
+// back, so no C++ track keeps a shadow copy of it.
 extern "C" void hirari_channel_strip_set_gain(const void* state, float gain);
+extern "C" float hirari_channel_strip_gain(const void* state);
 extern "C" void hirari_channel_strip_set_pan(const void* state, float pan);
+extern "C" float hirari_channel_strip_pan(const void* state);
+extern "C" void hirari_channel_strip_set_solo(const void* state, bool solo);
+extern "C" bool hirari_channel_strip_is_solo(const void* state);
+extern "C" bool hirari_channel_strip_set_record_armed(const void* state, bool armed);
+extern "C" bool hirari_channel_strip_is_record_armed(const void* state);
+extern "C" bool hirari_channel_strip_begin_pitch_analysis(const void* state);
+extern "C" void hirari_channel_strip_finish_pitch_analysis(const void* state);
+extern "C" bool hirari_channel_strip_is_pitch_analysis_running(const void* state);
 // One block's MIDI event, mirrored field for field from the Rust owner's
 // `#[repr(C)]` layout. 256 payload bytes cover MIDI 2.0 UMP packets and bounded
 // SysEx chunks; anything larger is rejected and counted, never truncated.
@@ -796,12 +809,6 @@ extern "C" void* hirari_region_store_note_snapshot(void* track, uint32_t regionI
 extern "C" bool hirari_region_store_copy_regions(void* sourceTrack,
                                                  void* destinationTrack,
                                                  const uint32_t* regionIds, size_t count);
-struct HirariLayoutRegionHeader;
-extern "C" bool hirari_region_store_layout_header(void* track, size_t index,
-                                                  HirariLayoutRegionHeader* out);
-extern "C" size_t hirari_region_store_layout_string(void* track, size_t index,
-                                                    uint32_t kind, uint8_t* out,
-                                                    size_t capacity);
 extern "C" bool hirari_region_store_project_end(void* track, uint64_t* out);
 extern "C" bool hirari_region_store_span_at(void* track, size_t index, uint64_t* start,
                                             uint64_t* length, uint32_t* loopCount);
@@ -1195,9 +1202,6 @@ extern "C" void* hirari_track_midi_articulation_create();
 extern "C" void hirari_track_midi_articulation_destroy(void* state);
 extern "C" bool hirari_track_midi_expression_map_set(
     const void* state, uint8_t map_kind, const uint8_t* data, size_t length);
-extern "C" uint8_t* hirari_track_midi_expression_map_take(
-    const void* state, uint8_t map_kind, size_t* size);
-extern "C" void hirari_track_midi_expression_map_take_free(uint8_t*, size_t);
 extern "C" size_t hirari_track_midi_flush_scheduled_note_offs(
     const void* state, uint64_t playhead, uint32_t block_size,
     HirariGeneratedMidiEvent* output, size_t capacity);
@@ -1255,8 +1259,6 @@ extern "C" float hirari_effect_chain_parameter(
     const void* state, uint32_t index, uint32_t parameter_id);
 extern "C" uint32_t hirari_effect_chain_parameter_count(const void* state, uint32_t index);
 extern "C" uint8_t* hirari_effect_chain_processor_state(
-    void* state, uint32_t index, size_t* out_len);
-extern "C" uint8_t* hirari_effect_chain_processor_gui_state(
     void* state, uint32_t index, size_t* out_len);
 extern "C" bool hirari_effect_chain_processor_state_restore(
     void* state, uint32_t index, const uint8_t* data, size_t length);
@@ -1351,7 +1353,6 @@ extern "C" void hirari_track_runtime_set_delays(void* state, uint32_t pdc, uint3
 extern "C" uint32_t hirari_track_runtime_pdc_requested(void* state);
 extern "C" uint32_t hirari_track_runtime_track_delay_samples(void* state);
 extern "C" void hirari_track_runtime_set_spatial(void* state, float x, float y, float z);
-extern "C" float hirari_track_runtime_spatial(void* state, uint32_t axis);
 extern "C" void hirari_track_runtime_set_eq(void* state, float low, float high);
 extern "C" void hirari_track_runtime_publish_regions(
     void* state, const uint8_t* inputs, size_t count, uint8_t published);
@@ -1469,13 +1470,9 @@ extern "C" bool hirari_track_frozen_store_publish(
 extern "C" void hirari_track_frozen_store_clear(const void* state);
 extern "C" void hirari_track_frozen_store_retire(const void* state);
 extern "C" bool hirari_track_frozen_store_is_frozen(const void* state);
-extern "C" uint64_t hirari_track_frozen_store_total_samples(const void* state);
 extern "C" uint32_t hirari_track_frozen_store_sample_rate(const void* state);
 extern "C" uint64_t hirari_track_frozen_store_project_generation(const void* state);
 extern "C" uint64_t hirari_track_frozen_store_audio_generation(const void* state);
-extern "C" size_t hirari_track_frozen_store_path_len(const void* state);
-extern "C" size_t hirari_track_frozen_store_path_copy(
-    const void* state, uint8_t* out, size_t capacity);
 extern "C" bool hirari_track_frozen_store_set_path(
     const void* state, const uint8_t* path, size_t path_len);
 extern "C" bool hirari_status_queue_push_default(
@@ -1558,82 +1555,23 @@ extern "C" uint64_t hirari_waveform_snapshot_request(
 // Project-layout gathering. Rust walks the live engine model through this
 // table (layout_gather.rs), owns the snapshot and its backing blocks, and
 // serializes or saves it in the same call. `begin` takes the tracks lock and
-// drains recorded automation; `end` releases it on every path.
-struct HirariLayoutAutomationPoint {
-    double time = 0.0;
-    float value = 0.0f;
-    float curve = 0.0f;
-};
-struct HirariLayoutTrackScalars {
-    uint32_t id = 0;
-    uint32_t type = 0;
-    float volume = 0.0f;
-    float pan = 0.0f;
-    bool muted = false;
-    bool solo = false;
-    bool recordArmed = false;
-    bool phaseInverted = false;
-    uint64_t trackDelaySamples = 0;
-    bool frozen = false;
-    uint64_t frozenTotalSamples = 0;
-    uint32_t frozenSampleRate = 0;
-    float spatialX = 0.0f;
-    float spatialY = 0.0f;
-    float spatialZ = 0.0f;
-};
-struct HirariLayoutPluginLaneHeader {
-    uint32_t pluginIndex = 0;
-    uint32_t parameterId = 0;
-    size_t pointCount = 0;
-};
-struct HirariLayoutRegionHeader {
-    uint32_t id = 0;
-    HirariRegionState state;
-    double sourceSampleRate = 0.0;
-    bool audioLoaded = false;
-    const HirariWarpMarker* warpMarkers = nullptr;
-    size_t warpMarkerCount = 0;
-    const HirariRegionRangeEdit* rangeEdits = nullptr;
-    size_t rangeEditCount = 0;
-    const HirariRegionVariAudioStore* noteStore = nullptr;
-    const HirariVariAudioFrozen* noteFrozen = nullptr;
-    const HirariRegionProcessingHistoryStore* processingStore = nullptr;
-};
+// drains recorded automation; `end` releases it on every path. The gather then
+// addresses each live track and reads its model through the Rust stores the
+// track owns; only the track name is C++ state.
 using HirariLayoutIsCancelledCallback = bool (*)(const void*);
 struct HirariLayoutHostOps {
     void (*begin)(void* host) = nullptr;
     void (*end)(void* host) = nullptr;
     size_t (*trackCount)(void* host) = nullptr;
-    bool (*trackAt)(void* host, size_t index, HirariLayoutTrackScalars* out) = nullptr;
-    size_t (*trackString)(void* host, size_t index, uint32_t kind, uint8_t* out,
-                          size_t capacity) = nullptr;
-    size_t (*automation)(void* host, size_t index, uint32_t kind,
-                         HirariLayoutAutomationPoint* out, size_t capacity) = nullptr;
-    size_t (*pluginLaneCount)(void* host, size_t index) = nullptr;
-    bool (*pluginLaneAt)(void* host, size_t index, size_t lane,
-                         HirariLayoutPluginLaneHeader* out) = nullptr;
-    size_t (*pluginLanePoints)(void* host, size_t index, size_t lane,
-                               HirariLayoutAutomationPoint* out, size_t capacity) = nullptr;
-    size_t (*pluginCount)(void* host, size_t index) = nullptr;
-    uint32_t (*pluginType)(void* host, size_t index, size_t plugin) = nullptr;
-    bool (*pluginBypass)(void* host, size_t index, size_t plugin) = nullptr;
-    size_t (*pluginState)(void* host, size_t index, size_t plugin, uint8_t* out,
-                          size_t capacity) = nullptr;
-    size_t (*pluginGuiState)(void* host, size_t index, size_t plugin, uint8_t* out,
-                             size_t capacity) = nullptr;
-    size_t (*pluginParameterCount)(void* host, size_t index, size_t plugin) = nullptr;
-    size_t (*pluginParameters)(void* host, size_t index, size_t plugin, float* out,
-                               size_t capacity) = nullptr;
-    size_t (*sandboxCount)(void* host, size_t index) = nullptr;
-    size_t (*sandboxPath)(void* host, size_t index, size_t slot, uint8_t* out,
-                          size_t capacity) = nullptr;
-    size_t (*sandboxState)(void* host, size_t index, size_t slot, uint8_t* out,
-                           size_t capacity) = nullptr;
-    size_t (*regionCount)(void* host, size_t index) = nullptr;
-    bool (*regionAt)(void* host, size_t index, size_t region,
-                     HirariLayoutRegionHeader* out) = nullptr;
-    size_t (*regionString)(void* host, size_t index, size_t region, uint32_t kind,
-                           uint8_t* out, size_t capacity) = nullptr;
+    void* (*trackHandle)(void* host, size_t index) = nullptr;
+    // The only two track fields that are C++ state beside the name.
+    uint32_t (*trackId)(void* track) = nullptr;
+    uint32_t (*trackType)(void* track) = nullptr;
+    /// One of a track's own storages: 0 channel strip, 1 effect chain,
+    /// 2 automation store, 3 freeze store, 4 realtime runtime,
+    /// 5 MIDI articulation state. Rust reads them with its own store API.
+    void* (*trackStorage)(void* track, uint32_t kind) = nullptr;
+    size_t (*trackName)(void* track, uint8_t* out, size_t capacity) = nullptr;
     void* (*sidechainRoutesStore)(void* host) = nullptr;
     void* (*routingStore)(void* host) = nullptr;
     double (*sampleRate)(void* host) = nullptr;
