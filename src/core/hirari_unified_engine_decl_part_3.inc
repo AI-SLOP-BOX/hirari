@@ -38,6 +38,8 @@
     static void installRoutingEditHost();
     static void installControlEditHost();
     static void installPluginEditHost();
+    // Installs the shared track-edit session (track_session.rs); see part_3b.
+    static void installTrackSessionHost();
     static void installTrackEditHost();
     static void installTrackFreezeHost();
     static void installCommandHost();

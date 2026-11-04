@@ -127,6 +127,10 @@
     // live-track accessors it reads through.
     const HirariLayoutHostOps* layoutHostOps() const;
 
+    // One of a track's own storages, by the kind the layout gather and the
+    // shared track-edit session both address it with.
+    static void* trackStorageHandle(void* track, uint32_t kind) noexcept;
+
     void* m_midiSnapshotStore = nullptr;
 
     std::atomic<uint32_t> m_autoRecordMode{0};

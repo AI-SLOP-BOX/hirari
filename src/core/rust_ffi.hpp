@@ -998,36 +998,34 @@ struct HirariControlEditHostOps {
 
 extern "C" void hirari_control_edit_host_install(const HirariControlEditHostOps* ops);
 
-// Plugin-chain edit policy (bypass, reordering, parameters and presets).
+// One control-thread session over a live track (track_session.rs). Rust owns
+// the edit protocol — resolve the track, mutate its own Rust stores, drop the
+// frozen render, bump the layout revision — so an edit host needs no callbacks
+// of its own. These are the only steps that are genuinely engine code: the lock
+// the tracks live behind, the handles a Track physically owns, re-preparing a
+// chain for playback and marking the project layout dirty.
+struct HirariTrackSessionOps {
+    void (*lockTracks)(void*) = nullptr;
+    void (*unlockTracks)(void*) = nullptr;
+    // Resolves a live track under the held lock; null when it is gone.
+    void* (*liveTrack)(void*, uint32_t) = nullptr;
+    /// One of a track's own storages: 0 channel strip, 1 effect chain,
+    /// 2 automation store, 3 freeze store, 4 realtime runtime,
+    /// 5 MIDI articulation state — the numbering the layout gather uses.
+    void* (*trackStorage)(void*, uint32_t) = nullptr;
+    uint32_t (*trackType)(void*) = nullptr;
+    void (*markTrackLayout)(void*) = nullptr;
+    // Re-prepares the track at the engine's current rate and block size.
+    void (*prepareTrack)(void*, void*) = nullptr;
+};
+
+extern "C" void hirari_track_session_install(const HirariTrackSessionOps* ops);
+
+// Plugin-chain edit policy (bypass, reordering, parameters and presets). The
+// chain, the frozen render and the layout revision are read and written by Rust
+// through the track session above; only these two steps are engine code.
 struct HirariPluginEditHostOps {
-    int32_t (*queryBypass)(void*, uint32_t, uint32_t) = nullptr;
-    bool (*applyBypass)(void*, uint32_t, uint32_t, bool) = nullptr;
-    bool (*movePlugin)(void*, uint32_t, uint32_t, uint32_t) = nullptr;
-    void (*recordBypassUndo)(void*, uint32_t, uint32_t, bool, bool) = nullptr;
-    void (*recordMoveUndo)(void*, uint32_t, uint32_t, uint32_t) = nullptr;
-    bool (*queryParameter)(void*, uint32_t, uint32_t, uint32_t, float*) = nullptr;
-    bool (*applyParameter)(void*, uint32_t, uint32_t, uint32_t, float) = nullptr;
-    void (*recordParameterUndo)(void*, uint32_t, uint32_t, uint32_t, float, float) = nullptr;
-    // Reads a plugin's type and state; returns SIZE_MAX when it is missing,
-    // otherwise the state length.
-    size_t (*readPlugin)(void*, uint32_t, uint32_t, uint32_t*, uint8_t*, size_t) = nullptr;
-    // Stores a plugin state and, when `record` is set, records the preset
-    // undo entry from `before` and `state`.
-    bool (*applyPluginState)(void*, uint32_t, uint32_t, const uint8_t*, size_t,
-                             const uint8_t*, size_t, bool) = nullptr;
-    // Appends a built-in plugin (`path` null) or a sandboxed bundle and writes
-    // the new index. `prepare` re-prepares the track, as the initial insert did.
-    bool (*appendPlugin)(void*, uint32_t, uint32_t, const uint8_t*, size_t, bool,
-                         uint32_t*) = nullptr;
-    // Removes a plugin; a non-null `outSnapshot` captures it into a handle the
-    // caller must release.
-    bool (*removePlugin)(void*, uint32_t, uint32_t, void**) = nullptr;
-    bool (*restorePlugin)(void*, uint32_t, uint32_t, void*) = nullptr;
-    void (*releasePluginSnapshot)(void*) = nullptr;
-    // Records an add/remove undo entry whose undo and redo replay `edit`.
-    using ReplayFn = void (*)(void*);
-    void (*recordPluginReplay)(void*, const uint8_t*, size_t, void*, ReplayFn, ReplayFn,
-                               ReplayFn) = nullptr;
+    // Re-publishes the track snapshot after the chain changed.
     void (*syncStructuralChanges)(void*) = nullptr;
     // Returns the engine's Rust undo history handle.
     void* (*undoState)(void*) = nullptr;

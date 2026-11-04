@@ -21,11 +21,24 @@ size_t layoutCopyString(const std::string& value, uint8_t* out, size_t capacity)
 }
 }  // namespace
 
-// Exposes the live tracks to the Rust layout gather (layout_gather.rs). Every
-// per-track field it needs — faders, automation, plug-ins, freeze, regions —
-// already lives in a Rust storage the gather reads through the engine track
-// ops, so this table only holds the tracks lock and the one C++ field, the
-// track name.
+void* HirariUnifiedEngine::trackStorageHandle(void* track, uint32_t kind) noexcept {
+    if (!track) return nullptr;
+    auto* typed = static_cast<Track*>(track);
+    switch (kind) {
+        case 0: return typed->channelStripHandle();
+        case 1: return typed->effectChainHandle();
+        case 2: return typed->automationStoreHandle();
+        case 3: return typed->frozenStoreHandle();
+        case 4: return typed->realtimeRuntime();
+        default: return typed->articulationStateHandle();
+    }
+}
+
+// Exposes the live tracks to the Rust layout gather (layout_gather.rs) and the
+// shared track-edit session (track_session.rs). Every per-track field they need
+// — faders, automation, plug-ins, freeze, regions — already lives in a Rust
+// storage addressed through this function, so these tables only hold the tracks
+// lock and the one C++ field, the track name.
 const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
     static const HirariLayoutHostOps ops = {
         // Drain queued write-automation before taking the lock, so UI, CLI
@@ -54,18 +67,7 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         [](void* track) -> uint32_t {
             return track ? static_cast<uint32_t>(static_cast<Track*>(track)->getType()) : 0u;
         },
-        [](void* track, uint32_t kind) -> void* {
-            if (!track) return nullptr;
-            auto* typed = static_cast<Track*>(track);
-            switch (kind) {
-                case 0: return typed->channelStripHandle();
-                case 1: return typed->effectChainHandle();
-                case 2: return typed->automationStoreHandle();
-                case 3: return typed->frozenStoreHandle();
-                case 4: return typed->realtimeRuntime();
-                default: return typed->articulationStateHandle();
-            }
-        },
+        &HirariUnifiedEngine::trackStorageHandle,
         [](void* track, uint8_t* out, size_t capacity) {
             const auto* typed = static_cast<const Track*>(track);
             return typed ? layoutCopyString(typed->getName(), out, capacity) : size_t{0};

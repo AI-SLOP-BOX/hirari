@@ -160,114 +160,47 @@ void HirariUnifiedEngine::installControlEditHost() {
     hirari_control_edit_host_install(&ops);
 }
 
-// Plugin-chain edit host callbacks. Rust decides whether an edit is admitted
-// and which undo entry is recorded; these handlers only read or apply.
+// Plugin-chain edit host callbacks. Rust decides whether an edit is admitted,
+// applies it to the track's own effect chain and records the undo entry; only
+// the graph resync and the history handle are the engine's.
 void HirariUnifiedEngine::installPluginEditHost() {
     static const HirariPluginEditHostOps ops = {
-        [](void* host, uint32_t trackId, uint32_t pluginIndex) -> int32_t {
-            return withHostTrack(host, trackId, -1, [&](Track& track) {
-                return track.getPluginBypass(pluginIndex) ? 1 : 0;
-            });
-        },
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed) {
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                return track.setPluginBypass(pluginIndex, bypassed);
-            });
-        },
-        [](void* host, uint32_t trackId, uint32_t fromIndex, uint32_t toIndex) {
-            return withHostTrack(
-                host, trackId, false,
-                [&](Track& track) { return track.movePlugin(fromIndex, toIndex); });
-        },
-        nullptr,  // undo capture lives in the Rust plugin edit host.
-        nullptr,  // undo capture lives in the Rust plugin edit host.
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
-           float* out) -> bool {
-            if (!out) return false;
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                *out = track.getPluginParameter(pluginIndex, parameterId);
-                return true;
-            });
-        },
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t parameterId,
-           float value) -> bool {
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                return track.setPluginParameter(pluginIndex, parameterId, value);
-            });
-        },
-        nullptr,  // undo capture lives in the Rust plugin edit host.
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, uint32_t* type,
-           uint8_t* out, size_t capacity) -> size_t {
-            return withHostTrack(
-                host, trackId, std::numeric_limits<size_t>::max(), [&](Track& track) {
-                    const auto types = track.getPluginTypes();
-                    const auto states = track.getPluginStates();
-                    if (pluginIndex >= types.size() || pluginIndex >= states.size())
-                        return std::numeric_limits<size_t>::max();
-                    const auto& state = states[pluginIndex];
-                    if (type) *type = types[pluginIndex];
-                    if (out && capacity >= state.size() && !state.empty()) {
-                        std::memcpy(out, state.data(), state.size());
-                    }
-                    return state.size();
-                });
-        },
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, const uint8_t* state,
-           size_t size, const uint8_t*, size_t, bool) -> bool {
-            if (size != 0 && !state) return false;
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                std::vector<uint8_t> replacement;
-                if (size != 0) replacement.assign(state, state + size);
-                return track.setPluginState(pluginIndex, replacement);
-            });
-        },
-        [](void* host, uint32_t trackId, uint32_t pluginType, const uint8_t* path, size_t pathLength,
-           bool prepare, uint32_t* outIndex) -> bool {
-            if (!host || !outIndex || (pathLength != 0 && !path)) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            const bool sandboxed = path != nullptr;
-            const bool inserted =
-                sandboxed ? track->addSandboxedPlugin(std::string(
-                                reinterpret_cast<const char*>(path), pathLength))
-                          : track->addPlugin(pluginType);
-            if (!inserted) return false;
-            if (prepare) {
-                track->prepareToPlay(engine->m_sampleRate.load(std::memory_order_relaxed),
-                                     engine->m_blockSize.load(std::memory_order_relaxed));
-            }
-            *outIndex = static_cast<uint32_t>(track->getPluginCount() - 1);
-            return true;
-        },
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, void** outSnapshot) -> bool {
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                if (!outSnapshot) return track.removePlugin(pluginIndex);
-                auto* snapshot = new Track::PluginSnapshot();
-                if (track.removePlugin(pluginIndex, snapshot)) {
-                    *outSnapshot = snapshot;
-                    return true;
-                }
-                delete snapshot;
-                return false;
-            });
-        },
-        [](void* host, uint32_t trackId, uint32_t pluginIndex, void* snapshot) -> bool {
-            if (!snapshot) return false;
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                return track.restorePlugin(
-                    pluginIndex, *static_cast<const Track::PluginSnapshot*>(snapshot));
-            });
-        },
-        [](void* snapshot) { delete static_cast<Track::PluginSnapshot*>(snapshot); },
-        nullptr,  // undo capture lives in the Rust plugin edit host.
         &HirariUnifiedEngine::syncNative,
         [](void* host) -> void* {
             return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
         },
     };
     hirari_plugin_edit_host_install(&ops);
+}
+
+// The one track-edit session every control-side host shares (track_session.rs).
+// Rust holds the tracks lock for the edit, writes the stores the track owns and
+// keeps the frozen-render/layout-revision protocol; these callbacks are the
+// pieces that physically cannot leave C++: the lock, the live track table, the
+// handles a Track holds, and re-preparing it for playback.
+void HirariUnifiedEngine::installTrackSessionHost() {
+    static const HirariTrackSessionOps ops = {
+        [](void* host) { static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.lock(); },
+        [](void* host) { static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.unlock(); },
+        [](void* host, uint32_t trackId) -> void* {
+            return static_cast<HirariUnifiedEngine*>(host)->findTrackLocked(trackId);
+        },
+        &HirariUnifiedEngine::trackStorageHandle,
+        [](void* track) -> uint32_t {
+            return track ? static_cast<uint32_t>(static_cast<Track*>(track)->getType()) : 0u;
+        },
+        [](void* track) {
+            if (track) static_cast<Track*>(track)->markProjectLayoutChanged();
+        },
+        [](void* host, void* track) {
+            if (!host || !track) return;
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            static_cast<Track*>(track)->prepareToPlay(
+                engine->m_sampleRate.load(std::memory_order_relaxed),
+                engine->m_blockSize.load(std::memory_order_relaxed));
+        },
+    };
+    hirari_track_session_install(&ops);
 }
 
 

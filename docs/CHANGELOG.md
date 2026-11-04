@@ -74,6 +74,19 @@ production support.
 
 ### Changed
 
+- The track edit prologue is now one Rust session instead of a per-edit C++
+  lambda. `track_session.rs` takes the engine's tracks lock, resolves the track,
+  exposes the chain and frozen-render stores the track already owns, applies the
+  drop-the-freeze and bump-the-layout protocol, and releases the lock on `Drop`;
+  the native engine contributes only the ops table (lock, lookup, storage handle,
+  track type, layout mark, re-prepare). `plugin_edit_host.rs` runs its whole
+  policy — admission, the one-entry undo record, replay closures and the
+  token-addressed restore — through that session, so the boxed `PluginEdit`, the
+  raw replay function pointer and the `new/delete Track::PluginSnapshot` pair are
+  gone, and the remaining host callbacks are just the graph resync and the undo
+  handle. Its tests now drive a real engine under the native-engine guard rather
+  than swapping the process-global host tables, which is what made the old fake
+  fixtures race the engine's own tests. C++ 6955 -> 6895 (-60).
 - The background project-layout snapshot is now a Rust session. The save path's
   worker, its cancellation flag, the revision bracket that turns a finished
   gather into `READY <revision>`, and the owned JSON buffer all live in
