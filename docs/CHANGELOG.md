@@ -74,6 +74,13 @@ production support.
 
 ### Changed
 
+- Automation edits no longer call into C++. Every curve a track carries already
+  lives in that track's Rust `track_automation_store`, so the edit host reads
+  and replaces the volume, pan, delay and plugin-parameter lanes through a
+  `TrackSession` and the store's own FFI. The engine's two host callbacks, the
+  point-transfer payload struct, the edit-kind enum, the `Track` read wrappers
+  and the `fillSpan` helper are deleted, and the ops table shrinks to the one
+  thing Rust cannot reach alone: the undo history. C++ 6874 -> 6733 (-141).
 - The track name is Rust state now. Each track creates a `track_name_store.rs`
   handle beside its strip, chain and freeze storages and the engine's
   constructor hands the initial name to it, so `Track` no longer holds a

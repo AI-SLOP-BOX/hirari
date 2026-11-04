@@ -66,14 +66,6 @@ public:
     static void regionHostPitchFinish(void* trackHandle);
     static void* regionHostNoteSnapshot(void* trackHandle, uint32_t regionId);
 
-    // Automation edit host callbacks. Rust drives the curve edits; see
-    // hirari_unified_engine_part_6b.inc.
-    static size_t automationHostRead(void* host, uint32_t trackId, int32_t kind,
-                                     uint32_t pluginIndex, uint32_t parameterId,
-                                     Hirari::Core::ProjectAutomationPoint* out, size_t capacity,
-                                     bool* targetFound);
-    static bool automationHostApply(void* host, const HirariAutomationEditPayload* payload);
-
 private:
 
 };

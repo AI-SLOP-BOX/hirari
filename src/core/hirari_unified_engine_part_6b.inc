@@ -21,66 +21,11 @@ float HirariUnifiedEngine::get_master_gain() const noexcept {
     return m_masterGain.load(std::memory_order_acquire);
 }
 
-size_t HirariUnifiedEngine::automationHostRead(void* host, uint32_t trackId, int32_t kind,
-                                               uint32_t pluginIndex, uint32_t parameterId,
-                                               Hirari::Core::ProjectAutomationPoint* out,
-                                               size_t capacity, bool* targetFound) {
-    if (targetFound) *targetFound = false;
-    return withHostTrack(host, trackId, size_t{0}, [&](Track& track) {
-        std::vector<Hirari::Core::ProjectAutomationPoint> points;
-        if (kind == kHirariAutomationPlugin) {
-            if (pluginIndex >= track.getPluginTypes().size()) return size_t{0};
-            for (const auto& lane : track.getPluginAutomation()) {
-                if (lane.pluginIndex == pluginIndex && lane.parameterId == parameterId) {
-                    points = lane.points;
-                    break;
-                }
-            }
-        } else if (kind == kHirariAutomationTrackDelay) {
-            points = track.getTrackDelayAutomationPoints();
-        } else if (kind == kHirariAutomationPan) {
-            points = track.getPanAutomationPoints();
-        } else {
-            points = track.getVolumeAutomationPoints();
-        }
-        if (targetFound) *targetFound = true;
-        return fillSpan(points.data(), points.size(), out, capacity);
-    });
-}
-
-bool HirariUnifiedEngine::automationHostApply(void* host,
-                                              const HirariAutomationEditPayload* payload) {
-    if (!payload) return false;
-    if (payload->pointCount != 0 && payload->points == nullptr) return false;
-    const std::vector<Hirari::Core::ProjectAutomationPoint> points(
-        payload->points, payload->points + payload->pointCount);
-    return withHostTrack(host, payload->trackId, false, [&](Track& track) {
-        switch (payload->kind) {
-            case kHirariAutomationVolume:
-                track.setVolumeAutomation(points);
-                return true;
-            case kHirariAutomationPan:
-                track.setPanAutomation(points);
-                return true;
-            case kHirariAutomationTrackDelay:
-                track.setTrackDelayAutomation(points);
-                return true;
-            case kHirariAutomationPlugin:
-                track.replacePluginAutomationLane(payload->pluginIndex,
-                                                  payload->parameterId, points);
-                return true;
-            default:
-                return false;
-        }
-    });
-}
-
 namespace {
 
+// The curves live in each track's own Rust automation store, so an edit needs
+// exactly one thing from the engine: the undo history to record it in.
 const HirariAutomationHostOps kAutomationEditHostOps = {
-    &HirariUnifiedEngine::automationHostRead,
-    &HirariUnifiedEngine::automationHostApply,
-    nullptr,  // undo capture lives in the Rust automation edit host.
     [](void* host) -> void* {
         return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
     },

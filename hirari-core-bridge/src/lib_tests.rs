@@ -14,6 +14,7 @@ include!("lib_tests_sandbox.rs");
 include!("lib_tests_composition.rs");
 include!("lib_tests_rendering.rs");
 include!("lib_tests_automation.rs");
+include!("lib_tests_automation_edit.rs");
 include!("lib_tests_note_edits.rs");
 include!("lib_tests_plugin_edit.rs");
 }

@@ -1,20 +1,28 @@
-//! Host-driven automation edits.
+//! Automation curve edits.
 //!
-//! Automation storage stays in the C++ engine because it owns the track list
-//! and the immutable curve snapshots the audio callback reads. This module owns
-//! the edit policy: it validates the packed curve, reads the previous curve
-//! through a host callback, asks the host to apply, and records exactly one undo
-//! entry. The C++ side keeps no per-kind edit code.
+//! Every curve a track carries lives in that track's own Rust automation store,
+//! so reading and replacing one needs no host callback at all: this module opens
+//! a track session, validates the packed curve, writes the store and records
+//! exactly one undo entry. The engine contributes the tracks lock, the storage
+//! handle behind it, and the undo history.
 //!
-//! Every callback here runs on the control thread. Nothing in this module is
+//! Every entry point here runs on the control thread. Nothing in this module is
 //! reachable from the audio callback.
 
-use std::ffi::c_char;
 use std::os::raw::c_void;
-use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use crate::plugin_edit_host::{register_replay, UndoStateFn};
+use crate::track_automation_store::{
+    hirari_track_automation_store_plugin_lane_views, hirari_track_automation_store_points,
+    hirari_track_automation_store_replace_plugin_lane, hirari_track_automation_store_set_points,
+    AutomationPoint,
+};
+use crate::track_session::TrackSession;
+
+/// An automation point is the store's own type; the edit host has no separate
+/// mirror of it any more.
+pub type HirariAutomationPoint = AutomationPoint;
 
 /// Target kind: the track's volume curve.
 pub const HIRARI_AUTOMATION_VOLUME: i32 = 1;
@@ -30,71 +38,15 @@ const MAX_DELAY_POINTS: usize = 8192;
 /// The largest sample index a plugin lane accepts; larger values lose integer
 /// precision in the automation renderer.
 const MAX_PLUGIN_TIME: f64 = 9_007_199_254_740_992.0;
-/// Upper bound for a host-reported curve so a broken host cannot make the
-/// control thread allocate without limit.
+/// The largest curve the editor will copy into one undo entry.
 const MAX_READ_POINTS: usize = 1_000_000;
 
-/// One automation point. Mirrors `ProjectAutomationPoint` byte for byte.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct HirariAutomationPoint {
-    pub time: f64,
-    pub value: f32,
-    pub curve: f32,
-}
-
-/// One reversible edit. The host copies `points` before returning from the
-/// apply or undo capture call.
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct HirariAutomationEditPayload {
-    pub track_id: u32,
-    pub kind: i32,
-    pub plugin_index: u32,
-    pub parameter_id: u32,
-    pub points: *const HirariAutomationPoint,
-    pub point_count: usize,
-}
-
-// The payload only borrows a point buffer for the duration of one host call;
-// Rust never dereferences it.
-unsafe impl Send for HirariAutomationEditPayload {}
-unsafe impl Sync for HirariAutomationEditPayload {}
-
-/// Copies a target's current curve into `out` and reports whether the target
-/// exists (the track, and for plugin lanes the plugin slot too). Returns the
-/// total point count so callers can size `out` with a second call.
-///
-/// # Safety
-/// `host` must be the opaque handle the native host expects; `out` must hold
-/// `capacity` points when non-null, and `targetFound` must be valid or null.
-pub type HirariAutomationReadFn = unsafe extern "C" fn(
-    *mut c_void,
-    u32,
-    i32,
-    u32,
-    u32,
-    *mut HirariAutomationPoint,
-    usize,
-    *mut bool,
-) -> usize;
-pub type HirariAutomationApplyFn =
-    unsafe extern "C" fn(*mut c_void, *const HirariAutomationEditPayload) -> bool;
-/// Records one applied edit. The host copies both point buffers before
-/// returning.
-pub type HirariAutomationRecordUndoFn = unsafe extern "C" fn(
-    *mut c_void,
-    *const c_char,
-    *const HirariAutomationEditPayload,
-    *const HirariAutomationEditPayload,
-);
-
+/// The one thing an automation edit cannot do alone: reach the engine's undo
+/// history. Reading and writing the curves is Rust talking to the track's own
+/// store.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct HirariAutomationHostOps {
-    pub read_points: Option<HirariAutomationReadFn>,
-    pub apply: Option<HirariAutomationApplyFn>,
-    pub record_undo: Option<HirariAutomationRecordUndoFn>,
     pub undo_state: Option<UndoStateFn>,
 }
 
@@ -120,7 +72,7 @@ pub unsafe extern "C" fn hirari_automation_host_install(ops: *const HirariAutoma
     let value = if ops.is_null() {
         None
     } else {
-        Some(unsafe { ptr::read(ops) })
+        Some(unsafe { std::ptr::read(ops) })
     };
     if let Ok(mut guard) = slot.lock() {
         *guard = value;
@@ -201,55 +153,117 @@ fn action_name(kind: i32, track_id: u32) -> Vec<u8> {
     name.into_bytes()
 }
 
+/// The store kind a track-level curve lives under. A kind that is neither pan
+/// nor delay reads and writes the volume curve, which is how the engine's host
+/// callback treated its own default branch.
+fn track_store_kind(kind: i32) -> u32 {
+    match kind {
+        HIRARI_AUTOMATION_PAN => 1,
+        HIRARI_AUTOMATION_TRACK_DELAY => 2,
+        _ => 0,
+    }
+}
+
+/// The lane addressed to `(plugin_index, parameter_id)`. No matching lane is the
+/// empty curve, which is what clearing one looks like in the store.
+fn lane_points(
+    store: *mut c_void,
+    plugin_index: u32,
+    parameter_id: u32,
+) -> Vec<HirariAutomationPoint> {
+    let mut count = 0usize;
+    let views = unsafe { hirari_track_automation_store_plugin_lane_views(store, &mut count) };
+    if views.is_null() {
+        return Vec::new();
+    }
+    let lanes = unsafe { std::slice::from_raw_parts(views, count) };
+    lanes
+        .iter()
+        .find(|lane| lane.processor_index == plugin_index && lane.parameter_id == parameter_id)
+        .map_or(Vec::new(), |lane| {
+            if lane.points.is_null() || lane.point_count == 0 {
+                return Vec::new();
+            }
+            unsafe { std::slice::from_raw_parts(lane.points, lane.point_count) }.to_vec()
+        })
+}
+
+/// Reads the target's current curve out of the track's own store while the
+/// engine lock is held for it. A missing track, or a plugin slot the chain does
+/// not have, is the rejection the host callback used to report as
+/// `targetFound == false`.
 fn read_points(
-    ops: &HirariAutomationHostOps,
     host: *mut c_void,
     track_id: u32,
     kind: i32,
     plugin_index: u32,
     parameter_id: u32,
 ) -> Option<Vec<HirariAutomationPoint>> {
-    let read = ops.read_points?;
-    let mut found = false;
-    let total = unsafe {
-        read(
-            host,
-            track_id,
-            kind,
-            plugin_index,
-            parameter_id,
-            ptr::null_mut(),
-            0,
-            &mut found,
-        )
+    let session = TrackSession::open(host, track_id)?;
+    let store = session.automation();
+    let points = if kind == HIRARI_AUTOMATION_PLUGIN {
+        let slots = unsafe {
+            crate::effect_chain_host::hirari_effect_chain_count(session.chain() as *const c_void)
+        };
+        if plugin_index >= slots {
+            return None;
+        }
+        lane_points(store, plugin_index, parameter_id)
+    } else {
+        let mut count = 0usize;
+        let raw =
+            unsafe { hirari_track_automation_store_points(store, track_store_kind(kind), &mut count) };
+        if raw.is_null() {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(raw, count) }.to_vec()
+        }
     };
-    if !found || total > MAX_READ_POINTS {
-        return None;
-    }
-    if total == 0 {
-        return Some(Vec::new());
-    }
-    let mut points = vec![HirariAutomationPoint::default(); total];
-    let copied = unsafe {
-        read(
-            host,
-            track_id,
-            kind,
-            plugin_index,
-            parameter_id,
-            points.as_mut_ptr(),
-            points.len(),
-            &mut found,
-        )
-    };
-    if !found || copied > points.len() {
-        return None;
-    }
-    points.truncate(copied);
-    Some(points)
+    (points.len() <= MAX_READ_POINTS).then_some(points)
 }
 
+/// Replaces the target's curve in the track's store, then runs the track's own
+/// drop-the-frozen-render and bump-the-layout protocol, which is what makes an
+/// automation edit audible and visible to the layout snapshot.
+fn apply(
+    host: *mut c_void,
+    track_id: u32,
+    kind: i32,
+    plugin_index: u32,
+    parameter_id: u32,
+    points: &[HirariAutomationPoint],
+) -> bool {
+    let Some(session) = TrackSession::open(host, track_id) else {
+        return false;
+    };
+    let store = session.automation();
+    match kind {
+        HIRARI_AUTOMATION_VOLUME | HIRARI_AUTOMATION_PAN | HIRARI_AUTOMATION_TRACK_DELAY => unsafe {
+            hirari_track_automation_store_set_points(
+                store,
+                track_store_kind(kind),
+                points.as_ptr(),
+                points.len(),
+            );
+        },
+        HIRARI_AUTOMATION_PLUGIN => unsafe {
+            hirari_track_automation_store_replace_plugin_lane(
+                store,
+                plugin_index,
+                parameter_id,
+                points.as_ptr(),
+                points.len(),
+            );
+        },
+        _ => return false,
+    }
+    session.commit_edit(true)
+}
+
+/// One edit kept by the undo history. The point buffers are owned so a replay
+/// can run long after the caller's arrays are gone.
 struct OwnedAutomationEdit {
+    host: *mut c_void,
     track_id: u32,
     kind: i32,
     plugin_index: u32,
@@ -258,71 +272,59 @@ struct OwnedAutomationEdit {
 }
 
 impl OwnedAutomationEdit {
-    fn capture(payload: &HirariAutomationEditPayload) -> Self {
-        let points = if payload.point_count == 0 || payload.points.is_null() {
-            Vec::new()
-        } else {
-            unsafe { std::slice::from_raw_parts(payload.points, payload.point_count) }.to_vec()
-        };
+    fn new(
+        host: *mut c_void,
+        track_id: u32,
+        kind: i32,
+        plugin_index: u32,
+        parameter_id: u32,
+        points: &[HirariAutomationPoint],
+    ) -> Self {
         Self {
-            track_id: payload.track_id,
-            kind: payload.kind,
-            plugin_index: payload.plugin_index,
-            parameter_id: payload.parameter_id,
-            points,
+            host,
+            track_id,
+            kind,
+            plugin_index,
+            parameter_id,
+            points: points.to_vec(),
         }
+    }
+
+    fn replay(&self) {
+        apply(
+            self.host,
+            self.track_id,
+            self.kind,
+            self.plugin_index,
+            self.parameter_id,
+            &self.points,
+        );
     }
 }
 
-unsafe fn replay_owned(
-    host: *mut c_void,
-    apply: HirariAutomationApplyFn,
-    entry: &OwnedAutomationEdit,
-) {
-    let payload = HirariAutomationEditPayload {
-        track_id: entry.track_id,
-        kind: entry.kind,
-        plugin_index: entry.plugin_index,
-        parameter_id: entry.parameter_id,
-        points: entry.points.as_ptr(),
-        point_count: entry.points.len(),
-    };
-    unsafe { apply(host, &payload) };
-}
+// `host` is the engine the edit was made against, which outlives the undo
+// entries recorded in its history.
+unsafe impl Send for OwnedAutomationEdit {}
 
 fn record(
     ops: &HirariAutomationHostOps,
     host: *mut c_void,
     name: &[u8],
-    undo: &HirariAutomationEditPayload,
-    redo: &HirariAutomationEditPayload,
+    undo: OwnedAutomationEdit,
+    redo: OwnedAutomationEdit,
 ) {
-    if let Some(record_undo) = ops.record_undo {
-        unsafe {
-            record_undo(host, name.as_ptr().cast(), undo, redo);
-        }
-        return;
-    }
-    let (Some(read_state), Some(apply)) = (ops.undo_state, ops.apply) else {
+    let Some(read_state) = ops.undo_state else {
         return;
     };
     let state = unsafe { read_state(host) };
     if state.is_null() {
         return;
     }
-    let undo_copy = OwnedAutomationEdit::capture(undo);
-    let redo_copy = OwnedAutomationEdit::capture(redo);
-    let undo_id = register_replay(
-        state,
-        Box::new(move || unsafe { replay_owned(host, apply, &undo_copy) }),
-    );
+    let undo_id = register_replay(state, Box::new(move || undo.replay()));
     if undo_id == 0 {
         return;
     }
-    let redo_id = register_replay(
-        state,
-        Box::new(move || unsafe { replay_owned(host, apply, &redo_copy) }),
-    );
+    let redo_id = register_replay(state, Box::new(move || redo.replay()));
     if redo_id == 0 {
         unsafe {
             crate::undo_transaction::hirari_undo_manager_discard_native_callback(state, undo_id)
@@ -357,39 +359,16 @@ fn edit_with(
     let Some(points) = packed_points(packed, packed_len, kind, parameter_id) else {
         return false;
     };
-    let Some(before) = read_points(ops, host, track_id, kind, plugin_index, parameter_id) else {
+    let Some(before) = read_points(host, track_id, kind, plugin_index, parameter_id) else {
         return false;
     };
-    let Some(apply) = ops.apply else {
-        return false;
-    };
-    let redo = HirariAutomationEditPayload {
-        track_id,
-        kind,
-        plugin_index,
-        parameter_id,
-        points: points.as_ptr(),
-        point_count: points.len(),
-    };
-    if !unsafe { apply(host, &redo) } {
+    if !apply(host, track_id, kind, plugin_index, parameter_id, &points) {
         return false;
     }
-    let undo = HirariAutomationEditPayload {
-        track_id,
-        kind,
-        plugin_index,
-        parameter_id,
-        points: before.as_ptr(),
-        point_count: before.len(),
-    };
-    // The host already applied the edit, so only the undo entry is recorded.
-    record(
-        ops,
-        host,
-        &action_name(kind, track_id),
-        &undo,
-        &redo,
-    );
+    let undo = OwnedAutomationEdit::new(host, track_id, kind, plugin_index, parameter_id, &before);
+    let redo = OwnedAutomationEdit::new(host, track_id, kind, plugin_index, parameter_id, &points);
+    // The edit is already applied, so only the undo entry is recorded.
+    record(ops, host, &action_name(kind, track_id), undo, redo);
     true
 }
 
@@ -452,437 +431,4 @@ pub unsafe extern "C" fn hirari_automation_edit_plugin(
         packed,
         packed_len,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ffi::CStr;
-
-    #[derive(Default)]
-    struct FakeTrack {
-        id: u32,
-        plugin_slots: u32,
-        volume: Vec<HirariAutomationPoint>,
-        pan: Vec<HirariAutomationPoint>,
-        delay: Vec<HirariAutomationPoint>,
-        lanes: Vec<(u32, u32, Vec<HirariAutomationPoint>)>,
-    }
-
-    #[derive(Default)]
-    struct FakeHost {
-        tracks: Vec<FakeTrack>,
-        undo: Option<(String, Vec<HirariAutomationPoint>, Vec<HirariAutomationPoint>)>,
-    }
-
-    fn point(time: f64, value: f32) -> HirariAutomationPoint {
-        HirariAutomationPoint {
-            time,
-            value,
-            curve: 0.0,
-        }
-    }
-
-    fn packed(points: &[(f64, f64, f64)]) -> Vec<f64> {
-        points.iter().flat_map(|&(t, v, c)| [t, v, c]).collect()
-    }
-
-    unsafe extern "C" fn fake_read(
-        host: *mut c_void,
-        track_id: u32,
-        kind: i32,
-        plugin_index: u32,
-        parameter_id: u32,
-        out: *mut HirariAutomationPoint,
-        capacity: usize,
-        found: *mut bool,
-    ) -> usize {
-        // SAFETY: tests pass a live FakeHost pointer.
-        let fake = unsafe { &mut *(host as *mut FakeHost) };
-        if !found.is_null() {
-            unsafe { *found = false };
-        }
-        let Some(track) = fake.tracks.iter().find(|track| track.id == track_id) else {
-            return 0;
-        };
-        let none: &[HirariAutomationPoint] = &[];
-        let points: &[HirariAutomationPoint] = match kind {
-            HIRARI_AUTOMATION_VOLUME => &track.volume,
-            HIRARI_AUTOMATION_PAN => &track.pan,
-            HIRARI_AUTOMATION_TRACK_DELAY => &track.delay,
-            HIRARI_AUTOMATION_PLUGIN => {
-                if plugin_index >= track.plugin_slots {
-                    return 0;
-                }
-                track
-                    .lanes
-                    .iter()
-                    .find(|(plugin, parameter, _)| {
-                        *plugin == plugin_index && *parameter == parameter_id
-                    })
-                    .map_or(none, |(_, _, points)| points)
-            }
-            _ => return 0,
-        };
-        if !found.is_null() {
-            unsafe { *found = true };
-        }
-        if !out.is_null() && capacity >= points.len() {
-            unsafe { ptr::copy_nonoverlapping(points.as_ptr(), out, points.len()) };
-        }
-        points.len()
-    }
-
-    unsafe extern "C" fn fake_apply(
-        host: *mut c_void,
-        payload: *const HirariAutomationEditPayload,
-    ) -> bool {
-        let payload = unsafe { &*payload };
-        // SAFETY: tests pass a live FakeHost pointer.
-        let fake = unsafe { &mut *(host as *mut FakeHost) };
-        let points = if payload.point_count == 0 {
-            Vec::new()
-        } else if payload.points.is_null() {
-            return false;
-        } else {
-            unsafe { std::slice::from_raw_parts(payload.points, payload.point_count) }.to_vec()
-        };
-        let Some(track) = fake
-            .tracks
-            .iter_mut()
-            .find(|track| track.id == payload.track_id)
-        else {
-            return false;
-        };
-        match payload.kind {
-            HIRARI_AUTOMATION_VOLUME => track.volume = points,
-            HIRARI_AUTOMATION_PAN => track.pan = points,
-            HIRARI_AUTOMATION_TRACK_DELAY => track.delay = points,
-            HIRARI_AUTOMATION_PLUGIN => {
-                if payload.plugin_index >= track.plugin_slots {
-                    return false;
-                }
-                track.lanes.retain(|(plugin, parameter, _)| {
-                    !(*plugin == payload.plugin_index && *parameter == payload.parameter_id)
-                });
-                if !points.is_empty() {
-                    track.lanes
-                        .push((payload.plugin_index, payload.parameter_id, points));
-                }
-            }
-            _ => return false,
-        }
-        true
-    }
-
-    unsafe extern "C" fn fake_record_undo(
-        host: *mut c_void,
-        name: *const c_char,
-        undo: *const HirariAutomationEditPayload,
-        redo: *const HirariAutomationEditPayload,
-    ) {
-        let label = unsafe { CStr::from_ptr(name) }
-            .to_string_lossy()
-            .into_owned();
-        let copy = |payload: *const HirariAutomationEditPayload| {
-            if payload.is_null() {
-                return Vec::new();
-            }
-            let payload = unsafe { &*payload };
-            if payload.point_count == 0 {
-                return Vec::new();
-            }
-            unsafe { std::slice::from_raw_parts(payload.points, payload.point_count) }.to_vec()
-        };
-        // SAFETY: tests pass a live FakeHost pointer.
-        let fake = unsafe { &mut *(host as *mut FakeHost) };
-        fake.undo = Some((label, copy(undo), copy(redo)));
-    }
-
-    fn fake_ops() -> HirariAutomationHostOps {
-        HirariAutomationHostOps {
-            read_points: Some(fake_read),
-            apply: Some(fake_apply),
-            record_undo: Some(fake_record_undo),
-            undo_state: None,
-        }
-    }
-
-    fn host() -> FakeHost {
-        FakeHost {
-            tracks: vec![FakeTrack {
-                id: 7,
-                plugin_slots: 2,
-                ..FakeTrack::default()
-            }],
-            ..FakeHost::default()
-        }
-    }
-
-    #[test]
-    fn volume_edit_applies_the_curve_and_records_one_undo_entry() {
-        let mut fake = host();
-        fake.tracks[0].volume = vec![point(10.0, 0.4)];
-        let input = packed(&[(20.0, 0.75, 0.5), (30.0, 1.0, -0.25)]);
-        let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
-        assert!(unsafe {
-            edit_with(
-                &fake_ops(),
-                host_ptr,
-                7,
-                HIRARI_AUTOMATION_VOLUME,
-                0,
-                0,
-                input.as_ptr(),
-                input.len(),
-            )
-        });
-        assert_eq!(
-            fake.tracks[0].volume,
-            vec![
-                HirariAutomationPoint {
-                    time: 20.0,
-                    value: 0.75,
-                    curve: 0.5
-                },
-                HirariAutomationPoint {
-                    time: 30.0,
-                    value: 1.0,
-                    curve: -0.25
-                },
-            ]
-        );
-        let (label, undo, redo) = fake.undo.expect("undo recorded");
-        assert_eq!(label, "Volume Automation Track 7");
-        assert_eq!(undo, vec![point(10.0, 0.4)]);
-        assert_eq!(redo, fake.tracks[0].volume);
-    }
-
-    #[test]
-    fn point_layout_matches_the_native_project_type() {
-        assert_eq!(std::mem::size_of::<HirariAutomationPoint>(), 16);
-        assert_eq!(std::mem::offset_of!(HirariAutomationPoint, value), 8);
-        assert_eq!(std::mem::offset_of!(HirariAutomationPoint, curve), 12);
-    }
-
-    #[test]
-    fn delay_and_pan_edits_use_their_own_labels() {
-        for (kind, label) in [
-            (HIRARI_AUTOMATION_TRACK_DELAY, "Track Delay Automation 7"),
-            (HIRARI_AUTOMATION_PAN, "Pan Automation Track 7"),
-        ] {
-            let mut fake = host();
-            let input = packed(&[(0.0, 0.5, 0.0)]);
-            let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
-            assert!(unsafe {
-                edit_with(
-                    &fake_ops(),
-                    host_ptr,
-                    7,
-                    kind,
-                    0,
-                    0,
-                    input.as_ptr(),
-                    input.len(),
-                )
-            });
-            assert_eq!(fake.undo.expect("undo recorded").0, label);
-        }
-    }
-
-    #[test]
-    fn plugin_edit_replaces_only_the_matching_lane() {
-        let mut fake = host();
-        fake.tracks[0].lanes = vec![
-            (0, 1, vec![point(5.0, 0.2)]),
-            (1, 2, vec![point(6.0, 0.3)]),
-        ];
-        let input = packed(&[(7.0, 0.9, 0.0)]);
-        let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
-        assert!(unsafe {
-            edit_with(
-                &fake_ops(),
-                host_ptr,
-                7,
-                HIRARI_AUTOMATION_PLUGIN,
-                0,
-                1,
-                input.as_ptr(),
-                input.len(),
-            )
-        });
-        assert_eq!(
-            fake.tracks[0].lanes,
-            vec![
-                (1, 2, vec![point(6.0, 0.3)]),
-                (
-                    0,
-                    1,
-                    vec![HirariAutomationPoint {
-                        time: 7.0,
-                        value: 0.9,
-                        curve: 0.0
-                    }]
-                ),
-            ]
-        );
-        let (label, undo, redo) = fake.undo.expect("undo recorded");
-        assert_eq!(label, "Plugin Parameter Automation Track 7");
-        assert_eq!(undo, vec![point(5.0, 0.2)]);
-        assert_eq!(redo.len(), 1);
-    }
-
-    #[test]
-    fn plugin_clear_removes_the_lane() {
-        let mut fake = host();
-        fake.tracks[0].lanes = vec![(0, 1, vec![point(5.0, 0.2)])];
-        let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
-        assert!(unsafe {
-            edit_with(
-                &fake_ops(),
-                host_ptr,
-                7,
-                HIRARI_AUTOMATION_PLUGIN,
-                0,
-                1,
-                ptr::null(),
-                0,
-            )
-        });
-        assert!(fake.tracks[0].lanes.is_empty());
-    }
-
-    #[test]
-    fn unknown_track_or_plugin_slot_is_rejected() {
-        let mut fake = host();
-        let input = packed(&[(0.0, 0.5, 0.0)]);
-        let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
-        assert!(!unsafe {
-            edit_with(
-                &fake_ops(),
-                host_ptr,
-                99,
-                HIRARI_AUTOMATION_VOLUME,
-                0,
-                0,
-                input.as_ptr(),
-                input.len(),
-            )
-        });
-        assert!(!unsafe {
-            edit_with(
-                &fake_ops(),
-                host_ptr,
-                7,
-                HIRARI_AUTOMATION_PLUGIN,
-                5,
-                0,
-                input.as_ptr(),
-                input.len(),
-            )
-        });
-        assert!(fake.undo.is_none());
-    }
-
-    #[test]
-    fn malformed_points_are_rejected() {
-        let cases: &[&[(f64, f64, f64)]] = &[
-            &[(0.0, f64::NAN, 0.0)],
-            &[(0.0, 0.5, 0.0), (0.0, 0.5, 0.0)],
-            &[(-1.0, 0.5, 0.0)],
-            &[(1.5, 0.5, 0.0)],
-            &[(0.0, 1.5, 0.0)],
-            &[(0.0, -0.1, 0.0)],
-            &[(0.0, 0.5, 1.5)],
-        ];
-        for case in cases {
-            let packed = packed(case);
-            assert!(packed_points(packed.as_ptr(), packed.len(), HIRARI_AUTOMATION_VOLUME, 0)
-                .is_none());
-        }
-        let odd = [0.0, 0.5];
-        assert!(packed_points(odd.as_ptr(), odd.len(), HIRARI_AUTOMATION_VOLUME, 0).is_none());
-        let ok = packed(&[(0.0, 0.5, 0.0)]);
-        assert!(packed_points(ok.as_ptr(), ok.len(), HIRARI_AUTOMATION_VOLUME, 2).is_none());
-        assert!(packed_points(ok.as_ptr(), ok.len(), 9, 0).is_none());
-    }
-
-    #[test]
-    fn point_limits_match_the_previous_engine() {
-        assert!(packed_points(ptr::null(), MAX_DELAY_POINTS * 3 + 3, 3, 0).is_none());
-        assert!(packed_points(ptr::null(), MAX_PLUGIN_POINTS * 3 + 3, 4, 0).is_none());
-        // Empty curves are valid for every kind.
-        assert!(packed_points(ptr::null(), 0, 1, 0).is_some());
-        assert!(packed_points(ptr::null(), 0, 4, 0).is_some());
-        let too_far = packed(&[(MAX_PLUGIN_TIME * 2.0, 0.5, 0.0)]);
-        assert!(packed_points(too_far.as_ptr(), too_far.len(), 4, 0).is_none());
-        assert!(packed_points(too_far.as_ptr(), too_far.len(), 1, 0).is_some());
-    }
-
-    #[test]
-    fn edits_require_a_read_callback() {
-        let mut fake = host();
-        let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
-        let input = packed(&[(0.0, 0.5, 0.0)]);
-        let ops = HirariAutomationHostOps {
-            read_points: None,
-            apply: Some(fake_apply),
-            record_undo: Some(fake_record_undo),
-            undo_state: None,
-        };
-        assert!(!unsafe {
-            edit_with(
-                &ops,
-                host_ptr,
-                7,
-                HIRARI_AUTOMATION_VOLUME,
-                0,
-                0,
-                input.as_ptr(),
-                input.len(),
-            )
-        });
-        assert!(fake.undo.is_none());
-    }
-
-    static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =
-        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
-
-    unsafe extern "C" fn fake_undo_state(_host: *mut c_void) -> *mut c_void {
-        FAKE_UNDO.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    #[test]
-    fn edit_without_native_recorder_uses_the_rust_history() {
-        let mut fake = host();
-        fake.tracks[0].volume = vec![point(10.0, 0.4)];
-        let input = packed(&[(20.0, 0.75, 0.5)]);
-        let host_ptr = &mut fake as *mut FakeHost as *mut c_void;
-        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
-        FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
-        let mut ops = fake_ops();
-        ops.record_undo = None;
-        ops.undo_state = Some(fake_undo_state);
-        assert!(unsafe {
-            edit_with(
-                &ops,
-                host_ptr,
-                7,
-                HIRARI_AUTOMATION_VOLUME,
-                0,
-                0,
-                input.as_ptr(),
-                input.len(),
-            )
-        });
-        assert_eq!(fake.tracks[0].volume.len(), 1);
-        assert_eq!(
-            unsafe { crate::undo_transaction::hirari_undo_manager_undo_count(state) },
-            1
-        );
-        assert!(unsafe { crate::undo_transaction::hirari_undo_manager_apply(state, false) });
-        assert_eq!(fake.tracks[0].volume, vec![point(10.0, 0.4)]);
-        unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
-        FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
-    }
 }

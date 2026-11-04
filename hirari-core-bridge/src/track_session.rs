@@ -114,6 +114,12 @@ impl TrackSession {
         self.storage(STORAGE_CHAIN)
     }
 
+    /// The track's Rust automation store: the volume, pan and delay curves and
+    /// the plugin parameter lanes.
+    pub fn automation(&self) -> *mut c_void {
+        self.storage(STORAGE_AUTOMATION)
+    }
+
     /// The track's Rust frozen-render store.
     pub fn frozen(&self) -> *mut c_void {
         self.storage(STORAGE_FROZEN)

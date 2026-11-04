@@ -624,35 +624,9 @@ extern "C" void hirari_region_waveform_clear(void* host);
 // Decodes `path`, swaps it into the region and records the undo pair. Rust
 // owns the path/rate policy and the snapshots; C++ performs the swap.
 
-// Automation edit host. Rust owns the validation and the undo capture; the
-// engine keeps the curves and publishes the immutable snapshots.
-
-enum HirariAutomationEditKind : int32_t {
-    kHirariAutomationVolume = 1,
-    kHirariAutomationPan = 2,
-    kHirariAutomationTrackDelay = 3,
-    kHirariAutomationPlugin = 4,
-};
-
-struct HirariAutomationEditPayload {
-    uint32_t trackId = 0;
-    int32_t kind = 0;
-    uint32_t pluginIndex = 0;
-    uint32_t parameterId = 0;
-    const Hirari::Core::ProjectAutomationPoint* points = nullptr;
-    size_t pointCount = 0;
-};
-
+// Automation edit host. Rust reads and writes the curves in each track's own
+// store, so the engine contributes only the undo history.
 struct HirariAutomationHostOps {
-    // Copies the target's current curve into `out` and sets `targetFound`.
-    // Returns the total point count.
-    size_t (*readPoints)(void* host, uint32_t trackId, int32_t kind, uint32_t pluginIndex,
-                         uint32_t parameterId, Hirari::Core::ProjectAutomationPoint* out,
-                         size_t capacity, bool* targetFound) = nullptr;
-    bool (*apply)(void* host, const HirariAutomationEditPayload* payload) = nullptr;
-    void (*recordUndo)(void* host, const char* name,
-                       const HirariAutomationEditPayload* undo,
-                       const HirariAutomationEditPayload* redo) = nullptr;
     void* (*undoState)(void* host) = nullptr;
 };
 
@@ -1333,17 +1307,8 @@ extern "C" bool hirari_track_automation_store_record(
 extern "C" uint32_t hirari_track_automation_store_flush_recorded(void* store);
 extern "C" void hirari_track_automation_store_set_points(
     void* store, uint32_t kind, const void* points, size_t count);
-extern "C" const void* hirari_track_automation_store_points(
-    const void* store, uint32_t kind, size_t* count);
 extern "C" void hirari_track_automation_store_set_plugin_lanes(
     void* store, const HirariPluginAutomationLaneView* lanes, size_t count);
-extern "C" void hirari_track_automation_store_replace_plugin_lane(
-    void* store, uint32_t plugin_index, uint32_t parameter_id,
-    const void* points, size_t count);
-extern "C" size_t hirari_track_automation_store_plugin_lane_count(const void* store);
-extern "C" const void* hirari_track_automation_store_plugin_lane(
-    const void* store, size_t index, uint32_t* plugin_index,
-    uint32_t* parameter_id, size_t* count);
 /// The Rust runtime holds a track's realtime state and renders whole blocks.
 /// C++ binds the DSP handles once and keeps only the returned handle.
 using HirariTrackMidiPrepare = void (*)(void*, uint64_t, uint32_t, float*, float*);

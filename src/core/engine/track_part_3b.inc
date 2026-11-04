@@ -28,15 +28,6 @@
     void setVolumeAutomation(const AutomationList& points) { setAutomationPoints(0, points); }
     void setPanAutomation(const AutomationList& points) { setAutomationPoints(1, points); }
     void setTrackDelayAutomation(const AutomationList& points) { setAutomationPoints(2, points); }
-    AutomationList automationPoints(uint32_t kind) const {
-        size_t count = 0;
-        const auto* points = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
-            hirari_track_automation_store_points(m_automationStore, kind, &count));
-        return points && count != 0 ? AutomationList(points, points + count) : AutomationList{};
-    }
-    AutomationList getVolumeAutomationPoints() const { return automationPoints(0); }
-    AutomationList getPanAutomationPoints() const { return automationPoints(1); }
-    AutomationList getTrackDelayAutomationPoints() const { return automationPoints(2); }
     void setPluginAutomation(const PluginAutomationList& lanes) {
         invalidateFrozenForEdit();
         std::vector<HirariPluginAutomationLaneView> views;
@@ -48,32 +39,6 @@
         hirari_track_automation_store_set_plugin_lanes(
             m_automationStore, views.data(), views.size());
         markProjectLayoutChanged();
-    }
-    // Replaces (or removes, for an empty list) the lane for one plugin
-    // parameter; Rust owns the merge.
-    void replacePluginAutomationLane(uint32_t pluginIndex, uint32_t parameterId,
-                                     const AutomationList& points) {
-        invalidateFrozenForEdit();
-        hirari_track_automation_store_replace_plugin_lane(
-            m_automationStore, pluginIndex, parameterId, points.data(), points.size());
-        markProjectLayoutChanged();
-    }
-    PluginAutomationList getPluginAutomation() const {
-        PluginAutomationList lanes;
-        const size_t laneCount =
-            hirari_track_automation_store_plugin_lane_count(m_automationStore);
-        for (size_t index = 0; index < laneCount; ++index) {
-            uint32_t pluginIndex = 0;
-            uint32_t parameterId = 0;
-            size_t pointCount = 0;
-            const auto* points = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
-                hirari_track_automation_store_plugin_lane(
-                    m_automationStore, index, &pluginIndex, &parameterId, &pointCount));
-            lanes.push_back({pluginIndex, parameterId,
-                             pointCount != 0 ? AutomationList(points, points + pointCount)
-                                             : AutomationList{}});
-        }
-        return lanes;
     }
     bool canProcess(uint32_t sz) const {
         return hirari_audio_buffer_storage_samples(m_activeBuffer) >= sz;

@@ -111,14 +111,6 @@
         return findTrackSharedLocked(tid);
     }
 
-    // Variable-length host reads answer "how many" when the caller's buffer is
-    // missing or too small, and fill it otherwise.
-    template <typename T>
-    static size_t fillSpan(const T* items, size_t count, T* out, size_t capacity) {
-        if (out && capacity >= count && count != 0) std::copy(items, items + count, out);
-        return count;
-    }
-
     // Sidechain route bookkeeping is project state owned by Rust
     // (sidechain_route_store.rs); the engine keeps only the opaque handle.
     void* m_sidechainRoutes = hirari_sidechain_routes_create();
