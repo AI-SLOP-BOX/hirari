@@ -74,6 +74,15 @@ production support.
 
 ### Changed
 
+- `src/core/rust_ffi.hpp` now declares only the ABI C++ actually calls. 104
+  `hirari_*` prototypes left over from the migrated subsystems -- bounce state
+  queries, the native plugin host, preview voices, metronome, mixer telemetry,
+  region clip-edit tables, sidechain and tempo-map helpers, the old engine
+  command/chunk surface -- were deleted; their behaviour stays Rust-owned behind
+  the `#[no_mangle]` exports in `hirari-core-bridge`. The two log-ring prototypes
+  and the bounce tail query were kept because the header's inline helpers and the
+  bounce host op still call them. C++ 7534 -> 7357 (-177).
+
 - The C++ `AudioBuffer` wrapper class is gone; `hirari_audio_buffer_storage_*` is
   the only buffer surface. Track work blocks, freeze snapshots and the device
   callback's channel wrap are plain Rust storage handles (`void*`) created,

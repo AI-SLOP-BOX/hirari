@@ -61,8 +61,6 @@ static_assert(sizeof(HirariEngineCommandRecord) == 32,
               "HirariEngineCommandRecord must match the Rust CommandRecord layout");
 extern "C" void* hirari_engine_rings_create();
 extern "C" void hirari_engine_rings_destroy(void* rings);
-extern "C" bool hirari_engine_command_ring_pop(const void* rings,
-                                               HirariEngineCommandRecord* record);
 extern "C" void hirari_engine_command_ring_clear(const void* rings);
 extern "C" bool hirari_engine_event_ring_push(const void* rings, uint64_t timestamp,
                                               uint32_t type, uint32_t track_id, float value,
@@ -132,15 +130,10 @@ extern "C" void hirari_input_blocks_clear_focus(void* blocks, uint32_t track_id)
 extern "C" void hirari_input_blocks_reset(void* blocks);
 extern "C" void hirari_input_blocks_publish_monitor(void* blocks, const float* const* inputs,
                                                     uint32_t channel_count, uint32_t frames);
-extern "C" HirariInputMonitorBlock hirari_input_blocks_take_monitor(const void* blocks,
-                                                                    uint32_t offset,
-                                                                    uint32_t frames);
 extern "C" void hirari_input_blocks_end_monitor(void* blocks);
 extern "C" void hirari_input_blocks_publish_talkback(void* blocks, const float* const* inputs,
                                                      uint32_t channel_count, uint32_t frames,
                                                      const void* control_room);
-extern "C" const float* hirari_input_blocks_take_talkback(const void* blocks, uint32_t offset,
-                                                          uint32_t frames);
 extern "C" void hirari_input_blocks_end_talkback(void* blocks);
 
 struct HirariScheduledMidiNote {
@@ -169,12 +162,6 @@ using HirariScheduledMidiEventCallback = void (*)(
 using HirariMidiPanicCallback = void (*)(void* context);
 extern "C" void* hirari_midi_playback_clock_create();
 extern "C" void hirari_midi_playback_clock_destroy(void* clock);
-extern "C" void hirari_midi_playback_request_panic(void* clock);
-extern "C" bool hirari_midi_playback_panic_pending(const void* clock);
-extern "C" uint8_t hirari_midi_playback_prepare_block(
-    void* clock, const void* store, uint64_t playhead, uint32_t frames,
-    uint8_t playback_active, void* context, HirariMidiPanicCallback panic_callback,
-    HirariScheduledMidiEventCallback callback);
 // Preview-sample playback (storage, trigger, cursor) lives in Rust
 // (preview_sampler.rs); the audio callback only renders through the handle.
 extern "C" void* hirari_preview_sampler_create();
@@ -183,15 +170,6 @@ extern "C" void hirari_preview_sampler_set(
     void* state, const float* samples, size_t count, double source_rate);
 extern "C" void hirari_preview_sampler_clear(void* state);
 extern "C" void hirari_preview_sampler_reclaim(void* state);
-extern "C" bool hirari_preview_sampler_is_active(const void* state);
-extern "C" void hirari_preview_sampler_render(
-    const void* state, double target_rate, float* left, float* right, uint32_t frames);
-extern "C" void hirari_mixer_track_peaks(
-    const void* telemetry_state, const uint32_t* track_ids,
-    const float* const* left_channels, const float* const* right_channels,
-    uint32_t track_count, uint32_t frames, float* peaks_left, float* peaks_right);
-extern "C" bool hirari_audio_test_tone_render(
-    float* left, float* right, uint32_t frames, uint64_t playhead, double sample_rate);
 extern "C" void* hirari_external_sync_create();
 extern "C" void hirari_external_sync_destroy(void* state);
 extern "C" void hirari_external_sync_set_rate(void* state, double bpm);
@@ -199,9 +177,6 @@ extern "C" double hirari_external_sync_rate(const void* state);
 extern "C" void hirari_external_sync_tick(void* state, uint64_t timestamp);
 extern "C" uint64_t hirari_external_sync_ticks(const void* state);
 extern "C" uint64_t hirari_external_sync_last_tick(const void* state);
-extern "C" void hirari_audio_add_sanitized_stereo(
-    float* destination_left, float* destination_right,
-    const float* source_left, const float* source_right, uint32_t frames);
 extern "C" void hirari_project_layout_fingerprint_update(
     uint64_t* state, const uint8_t* data, size_t length);
 extern "C" uint64_t hirari_project_state_revision_mix(
@@ -209,35 +184,15 @@ extern "C" uint64_t hirari_project_state_revision_mix(
 extern "C" float hirari_samples_to_milliseconds(uint64_t samples, double sample_rate);
 extern "C" void* hirari_preview_synth_create();
 extern "C" void hirari_preview_synth_destroy(void* state);
-extern "C" void hirari_preview_synth_reset(void* state);
-extern "C" void hirari_preview_synth_process(
-    void* state, const void* events, size_t event_count, float* left, float* right,
-    uint32_t frames, uint64_t playhead, double sample_rate, const void* macros);
 extern "C" void* hirari_master_limiter_create(double sample_rate);
 extern "C" void hirari_master_limiter_destroy(void* state);
 extern "C" void hirari_master_limiter_prepare(void* state, double sample_rate);
 extern "C" void hirari_master_limiter_reset(void* state);
-extern "C" void hirari_master_limiter_process(
-    void* state, float* left, float* right, size_t frames, bool has_right);
 extern "C" uint32_t hirari_master_limiter_latency(const void* state);
 extern "C" uint32_t hirari_master_limiter_tail(const void* state);
-extern "C" void hirari_master_output_process(
-    float* left, float* right, float* click_left, float* click_right,
-    uint32_t frames, float master_gain, bool include_click);
-extern "C" void hirari_control_room_mix_cue(
-    const float* source_left, const float* source_right,
-    const float* click_left, const float* click_right,
-    float* output_left, float* output_right, uint32_t frames,
-    float cue_gain, bool click_enabled);
 extern "C" void* hirari_control_room_state_create();
 extern "C" void hirari_control_room_state_destroy(void* state);
 extern "C" void hirari_control_room_reset(void* state);
-extern "C" void hirari_control_room_process_monitor_state(
-    const void* state, float* left, float* right, const float* talkback, uint32_t frames);
-extern "C" uint32_t hirari_control_room_active_cue_bus(const void* state);
-extern "C" float hirari_control_room_active_cue_gain(const void* state);
-extern "C" uint32_t hirari_control_room_active_cue_output(const void* state);
-extern "C" bool hirari_control_room_active_cue_click(const void* state);
 extern "C" bool hirari_bus_audio_accumulate(
     void* state, const float* input_left, const float* input_right,
     uint32_t frames, float gain);
@@ -245,14 +200,10 @@ extern "C" bool hirari_bus_audio_replace_post(
     void* state, const float* left, const float* right, uint32_t frames);
 extern "C" bool hirari_bus_audio_read(
     void* state, float* left, float* right, uint32_t frames, bool post);
-extern "C" bool hirari_hot_swap_default_quiesce_requested();
-extern "C" void hirari_hot_swap_default_acknowledge();
 extern "C" void* hirari_bus_system_create();
 extern "C" void hirari_bus_system_destroy(void* state);
 extern "C" void* hirari_bus_system_bus(const void* state, uint32_t bus_id);
 extern "C" bool hirari_bus_system_register(void* state, uint32_t bus_id);
-extern "C" bool hirari_bus_system_reconcile(
-    void* state, const bool* active, uint32_t count);
 extern "C" void hirari_bus_system_reset(void* state);
 extern "C" void* hirari_audio_buffer_storage_create();
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
@@ -264,27 +215,15 @@ extern "C" bool hirari_audio_buffer_storage_wrap_channels(
     void* storage, float** channels, uint32_t channel_count, uint32_t sample_count);
 extern "C" uint32_t hirari_audio_buffer_storage_channels(const void* storage);
 extern "C" uint32_t hirari_audio_buffer_storage_samples(const void* storage);
-extern "C" const float* const* hirari_audio_buffer_storage_array_read(const void* storage);
-extern "C" float** hirari_audio_buffer_storage_array_write(const void* storage);
 extern "C" float* hirari_audio_buffer_storage_write_pointer(
     const void* storage, uint32_t channel);
 extern "C" const float* hirari_audio_buffer_storage_read_pointer(
     const void* storage, uint32_t channel, uint32_t offset);
-extern "C" float* hirari_audio_buffer_storage_write_pointer_at(
-    const void* storage, uint32_t channel, uint32_t offset);
 extern "C" void hirari_audio_buffer_storage_clear(
     const void* storage, uint32_t offset, uint32_t samples);
 extern "C" uint32_t hirari_audio_buffer_storage_sanitize(const void* storage);
-extern "C" void hirari_audio_buffer_storage_apply_gain(const void* storage, float gain);
-extern "C" void hirari_audio_buffer_storage_add_from(
-    const void* storage, const void* source, uint32_t sample_count);
-extern "C" void hirari_audio_buffer_storage_add_channels_from(
-    const void* storage, const float* source_left, const float* source_right,
-    uint32_t sample_count);
 extern "C" void hirari_audio_buffer_set_realtime_guard(bool is_realtime);
 extern "C" uint64_t hirari_audio_buffer_realtime_resize_attempts();
-extern "C" size_t hirari_audio_buffer_last_realtime_requested_capacity();
-extern "C" void hirari_audio_buffer_reset_realtime_resize_stats();
 extern "C" void* hirari_macro_mapping_create();
 extern "C" void hirari_macro_mapping_destroy(void* state);
 extern "C" void* hirari_channel_strip_create();
@@ -317,11 +256,9 @@ extern "C" void hirari_midi_buffer_add(
     uint8_t articulation_id);
 // Channel validation and status-byte construction are Rust-owned.
 extern "C" void hirari_midi_buffer_add_note_on(void* state, uint8_t channel, uint8_t pitch, uint8_t velocity, uint64_t sampleOffset, uint8_t articulationId);
-extern "C" void hirari_midi_buffer_add_note_off(void* state, uint8_t channel, uint8_t pitch, uint64_t sampleOffset);
 extern "C" void* hirari_mixer_telemetry_create();
 extern "C" void hirari_mixer_telemetry_destroy(void* state);
 extern "C" bool hirari_midi_buffer_copy(void* state, const void* event);
-extern "C" void hirari_midi_buffer_clear(void* state);
 extern "C" void hirari_midi_buffer_sort_owned(void* state);
 extern "C" void* hirari_midi_buffer_event_data(const void* state);
 extern "C" size_t hirari_midi_buffer_event_count(const void* state);
@@ -333,16 +270,7 @@ extern "C" uint64_t hirari_midi_buffer_dropped_count(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_oversize(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_extended(const void* state);
 
-extern "C" bool hirari_plugin_scan_cache_record_failure(const uint8_t* path, size_t pathSize,
-                                                        uint32_t reason);
-extern "C" bool hirari_plugin_scan_cache_record_success(const uint8_t* path, size_t pathSize);
 
-extern "C" bool hirari_processor_state_encode(
-    bool bypassed, float mix, uint32_t sidechain_bus,
-    uint8_t* output, size_t output_len);
-extern "C" bool hirari_processor_state_decode(
-    const uint8_t* input, size_t input_len, uint8_t* bypassed_out,
-    float* mix_out, uint32_t* sidechain_bus_out);
 struct HirariRegionRangeEdit {
     uint64_t start;
     uint64_t end;
@@ -409,16 +337,6 @@ struct HirariRegionClipEditsView {
     size_t warpMarkerCount = 0;
     uint8_t compManaged = 0;
 };
-extern "C" HirariRegionClipEdits* hirari_region_clip_edits_create();
-extern "C" void hirari_region_clip_edits_destroy(HirariRegionClipEdits* store);
-extern "C" bool hirari_region_clip_edits_replace_range_edits(
-    HirariRegionClipEdits* store, const HirariRegionRangeEdit* edits, size_t count,
-    uint64_t region_length, bool validate);
-extern "C" HirariRegionClipEditsFrozen* hirari_region_clip_edits_freeze(
-    const HirariRegionClipEdits* store);
-extern "C" const HirariRegionClipEditsView* hirari_region_clip_edits_frozen_view(
-    const HirariRegionClipEditsFrozen* frozen);
-extern "C" void hirari_region_clip_edits_frozen_free(HirariRegionClipEditsFrozen* frozen);
 // Region edit host bridge.
 //
 // The region table lives in Rust (region_store.rs); the engine keeps only the
@@ -524,15 +442,8 @@ extern "C" bool hirari_bounce_start_async(
 extern "C" void hirari_bounce_join(void* session);
 extern "C" bool hirari_bounce_cancel(void* session), hirari_bounce_pause(void* session),
     hirari_bounce_resume(void* session);
-extern "C" uint8_t hirari_bounce_offline_thread(), hirari_bounce_offline_active(void* session),
-    hirari_bounce_offline_engaged(void* session), hirari_bounce_target_active(void* session),
-    hirari_bounce_pre_fader(void* session), hirari_bounce_include_inserts(void* session);
-extern "C" uint8_t hirari_bounce_offline_blocks(void* session, uint64_t thread_token);
-// Callback-safe thread identity shared by the realtime callback and the
-// offline render worker (bounce_driver.rs).
-extern "C" uint64_t hirari_callback_thread_token();
-extern "C" uint32_t hirari_bounce_target_id(void* session), hirari_bounce_tail_millis(void* session);
 extern "C" uint32_t hirari_bounce_state(void* session);
+extern "C" uint32_t hirari_bounce_tail_millis(void* session);
 extern "C" float hirari_bounce_progress(void* session);
 extern "C" void hirari_bounce_set_offline_target(void* session, uint32_t track_id);
 extern "C" void hirari_bounce_clear_offline_target(void* session);
@@ -867,7 +778,6 @@ struct HirariRegionDraft;
 extern "C" HirariRegionDraft* hirari_region_store_draft_new(
     uint32_t id, const uint8_t* path, size_t pathLength, const uint8_t* name,
     size_t nameLength, const HirariRegionState* state);
-extern "C" HirariRegionClipEdits* hirari_region_store_draft_clip(HirariRegionDraft* draft);
 extern "C" bool hirari_region_store_draft_add(
     HirariRegionDraft* draft, void* track, void* audio);
 // The region table is keyed by the live Track, not by the track id: ids are
@@ -880,9 +790,6 @@ extern "C" bool hirari_region_store_prepare(void* track, double sampleRate,
                                             uint32_t blockSize);
 extern "C" void hirari_region_store_trim_retired(void* track);
 extern "C" size_t hirari_region_store_count(void* track);
-extern "C" size_t hirari_region_store_range_edits(void* track,
-                                                  uint32_t regionId,
-                                                  HirariRegionRangeEdit* out, size_t capacity);
 extern "C" size_t hirari_region_store_list_regions(void* host, uint32_t trackId,
                                                    uint32_t* out, size_t capacity);
 extern "C" void* hirari_region_store_note_snapshot(void* track, uint32_t regionId);
@@ -899,8 +806,6 @@ extern "C" bool hirari_region_store_project_end(void* track, uint64_t* out);
 extern "C" bool hirari_region_store_span_at(void* track, size_t index, uint64_t* start,
                                             uint64_t* length, uint32_t* loopCount);
 extern "C" void hirari_region_store_forget_waveforms(void* host, void* track);
-extern "C" bool hirari_region_store_apply_edit(void* host, void* track,
-                                               const HirariRegionEditPayload* payload);
 extern "C" bool hirari_region_store_append_processing(void* track, uint32_t regionId,
                                                       HirariEventStep step);
 extern "C" bool hirari_region_store_clear_processing(void* track, uint32_t regionId);
@@ -909,29 +814,9 @@ extern "C" bool hirari_region_store_clear_processing(void* track, uint32_t regio
 // Rust instead of appearing as a C++ ABI.
 // Host-side policy for the built-in catalog: parameter mirror, dirty dispatch
 // and state markers. Every entry is null-safe so a failed load stays inert.
-extern "C" void* hirari_native_plugin_host_create(const uint8_t* path, size_t path_size);
-extern "C" void hirari_native_plugin_host_destroy(void* host);
-extern "C" void hirari_native_plugin_host_prepare(void* host, double sample_rate,
-                                                  uint32_t block_size);
-extern "C" void hirari_native_plugin_host_reset(void* host);
-extern "C" void hirari_native_plugin_host_process(
-    void* host, float* const* channels, uint32_t channel_count, uint32_t frames, double bpm);
-extern "C" uint32_t hirari_native_plugin_host_latency_samples(const void* host);
-extern "C" uint32_t hirari_native_plugin_host_tail_samples(const void* host);
-extern "C" uint32_t hirari_native_plugin_host_parameter_count(const void* host);
-extern "C" void hirari_native_plugin_host_set_parameter(void* host, uint32_t id, float value);
-extern "C" float hirari_native_plugin_host_parameter(const void* host, uint32_t id);
-extern "C" size_t hirari_native_plugin_host_state_save(
-    const void* host, uint8_t bypassed, float mix, uint32_t sidechain_bus_id,
-    uint8_t* output, size_t capacity);
-extern "C" bool hirari_native_plugin_host_state_restore(
-    void* host, const uint8_t* bytes, size_t size, uint8_t* bypassed, float* mix,
-    uint32_t* sidechain_bus_id);
 extern "C" void* hirari_master_meter_create(double sample_rate);
 extern "C" void hirari_master_meter_destroy(void* state);
 extern "C" void hirari_master_meter_prepare(void* state, double sample_rate);
-extern "C" void hirari_master_meter_process(
-    void* state, const float* left, const float* right, size_t frames);
 extern "C" float hirari_master_meter_get(const void* state, uint32_t field);
 extern "C" void hirari_master_meter_analysis_stats(const void* state, float* output);
 
@@ -939,19 +824,11 @@ struct HirariMpeState;
 extern "C" HirariMpeState* hirari_mpe_state_create();
 extern "C" void hirari_mpe_state_free(HirariMpeState* state);
 extern "C" void hirari_mpe_state_reset(HirariMpeState* state);
-extern "C" void hirari_midi_process_mpe(
-    HirariMpeState* state, const void* events, size_t event_count);
-extern "C" void hirari_midi_apply_articulations_from_state(
-    const HirariMpeState* state, void* events, size_t event_count);
 extern "C" void* hirari_tempo_map_create();
 extern "C" void hirari_tempo_map_destroy(void* state);
 extern "C" bool hirari_tempo_map_add_tempo(
     void* state, uint64_t sample_pos, double bpm, double sample_rate, bool ramp);
 extern "C" bool hirari_tempo_map_clear(void* state, double sample_rate, double initial_bpm);
-extern "C" double hirari_tempo_map_samples_to_beats(
-    const void* state, uint64_t samples, double sample_rate);
-extern "C" uint64_t hirari_tempo_map_beats_to_samples(
-    const void* state, double beats, double sample_rate);
 extern "C" float hirari_tempo_map_get_current_bpm(const void* state);
 extern "C" void hirari_tempo_map_set_current_bpm(void* state, float bpm);
 // The engine's set_tempo entry point, implemented in Rust like every other
@@ -967,7 +844,6 @@ extern "C" bool hirari_tempo_edit_set_tempo(void* tempo, void* undo, const void*
 // One handle owns the publication gate, the writer lock and the captured
 // undo snapshot; C++ keeps only the pointer and calls these entry points.
 extern "C" void* hirari_sidechain_engine_create();
-extern "C" void* hirari_sidechain_engine_default();
 extern "C" void hirari_sidechain_engine_destroy(void* state);
 extern "C" bool hirari_sidechain_engine_register_link(
     void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track,
@@ -992,16 +868,9 @@ extern "C" void* hirari_sidechain_routes_capture_track(const void* state, uint32
 extern "C" void hirari_sidechain_routes_release(void* captured);
 extern "C" void hirari_sidechain_routes_restore(
     const void* state, void* routing, void* captured);
-extern "C" uint32_t hirari_sidechain_engine_copy_link(
-    const void* state, uint32_t destination_track, uint32_t plugin_index, float* output_left,
-    float* output_right, uint32_t capacity, uint64_t* metadata);
 extern "C" bool hirari_sidechain_engine_refresh_source(
     const void* state, uint32_t source_track, const float* left, const float* right,
     uint32_t frames, uint32_t sample_rate, uint64_t source_generation);
-extern "C" void hirari_sidechain_engine_publish_source(
-    const void* state, uint32_t source_track, const float* pre_left, const float* pre_right,
-    const float* post_left, const float* post_right, const float* fader_left,
-    const float* fader_right, uint32_t frames, uint32_t sample_rate, uint64_t source_generation);
 extern "C" void* hirari_sidechain_engine_capture_links(const void* state, uint32_t track);
 extern "C" bool hirari_sidechain_engine_restore_links(const void* state, const void* handle);
 extern "C" void hirari_sidechain_engine_free_captured_links(void* handle);
@@ -1023,7 +892,6 @@ extern "C" void* hirari_routing_engine_remove_feedback_for_node(
 extern "C" void hirari_routing_feedback_array_free(void* records, size_t count);
 extern "C" bool hirari_routing_engine_add_feedback(
     void* state, uint32_t source, uint32_t destination, float gain);
-extern "C" bool hirari_routing_engine_build(void* state);
 extern "C" void hirari_routing_engine_enter_send_pdc_read(void* state);
 extern "C" void hirari_routing_engine_leave_send_pdc_read(void* state);
 
@@ -1225,11 +1093,6 @@ extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t t
                                            float value, uint64_t timestamp,
                                            uint64_t expectedProjectGeneration,
                                            uint64_t expectedAudioGeneration);
-extern "C" uint32_t hirari_engine_audio_command(
-    uint32_t commandType, float value, float* outValue);
-extern "C" uint64_t hirari_engine_chunk_plan(
-    uint32_t remaining, bool playing, bool loopEnabled,
-    uint64_t cycleStart, uint64_t cycleEnd, uint64_t playhead);
 
 // Track control policy (spatial validation, HRTF admission, auto-mix curve).
 struct HirariTrackControlHostOps {
@@ -1335,21 +1198,6 @@ extern "C" bool hirari_track_midi_expression_map_set(
 extern "C" uint8_t* hirari_track_midi_expression_map_take(
     const void* state, uint8_t map_kind, size_t* size);
 extern "C" void hirari_track_midi_expression_map_take_free(uint8_t*, size_t);
-extern "C" size_t hirari_track_midi_timed_outputs(
-    const void* state, uint8_t articulation_id, bool transitions,
-    HirariTimedKeySwitchOutput* output, size_t capacity);
-extern "C" bool hirari_track_midi_schedule_note_off(
-    const void* state, uint8_t channel, uint8_t pitch, uint64_t sample);
-extern "C" size_t hirari_track_midi_note_on(
-    const void* state, uint8_t channel, uint8_t pitch, uint8_t velocity,
-    uint64_t sample_offset, uint8_t articulation_id,
-    HirariGeneratedMidiEvent* output, size_t capacity);
-extern "C" size_t hirari_track_midi_note_off(
-    const void* state, uint8_t channel, uint8_t pitch, uint64_t sample_offset,
-    uint8_t articulation_id, HirariGeneratedMidiEvent* output, size_t capacity);
-extern "C" size_t hirari_track_midi_all_notes_off(
-    const void* state, uint64_t sample_offset,
-    HirariGeneratedMidiEvent* output, size_t capacity);
 extern "C" size_t hirari_track_midi_flush_scheduled_note_offs(
     const void* state, uint64_t playhead, uint32_t block_size,
     HirariGeneratedMidiEvent* output, size_t capacity);
@@ -1358,7 +1206,6 @@ extern "C" uint32_t hirari_automation_record_mode_apply(uint32_t mode);
 extern "C" float hirari_track_eq_gain(float boost_db, float cut_db);
 extern "C" void* hirari_track_pdc_delay_create();
 extern "C" void hirari_track_pdc_delay_destroy(void* state);
-extern "C" void hirari_track_pdc_delay_reset(void* state, uint32_t requested);
 extern "C" void* hirari_track_holographic_panner_create();
 extern "C" void hirari_track_holographic_panner_destroy(void* state);
 extern "C" void hirari_track_holographic_panner_set_sample_rate(const void* state, double sample_rate);
@@ -1402,14 +1249,11 @@ extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
 extern "C" bool hirari_effect_chain_set_bypass(void* state, uint32_t index, bool bypassed);
 extern "C" bool hirari_effect_chain_set_sample_rate(
     void* state, double sample_rate, uint32_t block_size);
-extern "C" void hirari_effect_chain_reset(void* state);
 extern "C" bool hirari_effect_chain_set_parameter(
     void* state, uint32_t index, uint32_t parameter_id, float value);
 extern "C" float hirari_effect_chain_parameter(
     const void* state, uint32_t index, uint32_t parameter_id);
 extern "C" uint32_t hirari_effect_chain_parameter_count(const void* state, uint32_t index);
-extern "C" void hirari_effect_chain_parameter_automation(
-    void* state, const HirariTimedParameterEvent* events, size_t event_count);
 extern "C" uint8_t* hirari_effect_chain_processor_state(
     void* state, uint32_t index, size_t* out_len);
 extern "C" uint8_t* hirari_effect_chain_processor_gui_state(
@@ -1426,8 +1270,6 @@ extern "C" bool hirari_effect_chain_metric_try(
 extern "C" void hirari_effect_chain_reclaim(void* state);
 /// Runs the published node list over one block. The channel table and frame
 /// count come from the caller's own audio-buffer storage handle.
-extern "C" void hirari_effect_chain_process(
-    void* state, void* audio_storage, void* midi_state, double bpm);
 struct HirariEffectChainSandboxStatus {
     uint32_t plugin_index;
     uint8_t alive;
@@ -1479,15 +1321,11 @@ extern "C" void hirari_track_automation_store_set_points(
     void* store, uint32_t kind, const void* points, size_t count);
 extern "C" const void* hirari_track_automation_store_points(
     const void* store, uint32_t kind, size_t* count);
-extern "C" size_t* hirari_track_automation_store_hint(const void* store, uint32_t kind);
-extern "C" void hirari_track_automation_store_reset_hints(const void* store);
 extern "C" void hirari_track_automation_store_set_plugin_lanes(
     void* store, const HirariPluginAutomationLaneView* lanes, size_t count);
 extern "C" void hirari_track_automation_store_replace_plugin_lane(
     void* store, uint32_t plugin_index, uint32_t parameter_id,
     const void* points, size_t count);
-extern "C" const HirariPluginAutomationLaneView*
-hirari_track_automation_store_plugin_lane_views(const void* store, size_t* count);
 extern "C" size_t hirari_track_automation_store_plugin_lane_count(const void* store);
 extern "C" const void* hirari_track_automation_store_plugin_lane(
     const void* store, size_t index, uint32_t* plugin_index,
@@ -1515,7 +1353,6 @@ extern "C" uint32_t hirari_track_runtime_track_delay_samples(void* state);
 extern "C" void hirari_track_runtime_set_spatial(void* state, float x, float y, float z);
 extern "C" float hirari_track_runtime_spatial(void* state, uint32_t axis);
 extern "C" void hirari_track_runtime_set_eq(void* state, float low, float high);
-extern "C" float hirari_track_runtime_eq(void* state, uint32_t side);
 extern "C" void hirari_track_runtime_publish_regions(
     void* state, const uint8_t* inputs, size_t count, uint8_t published);
 extern "C" void hirari_track_runtime_reset_for_offline_render(void* state);
@@ -1593,14 +1430,12 @@ extern "C" uint64_t hirari_engine_block_cycle_start(const void* state);
 extern "C" uint64_t hirari_engine_block_cycle_end(const void* state);
 extern "C" uint8_t hirari_engine_block_set_cycle(
     void* state, uint64_t start_sample, uint64_t end_sample, uint8_t enabled);
-extern "C" uint8_t hirari_engine_block_test_tone(const void* state);
 extern "C" void hirari_engine_block_set_test_tone(void* state, uint8_t enabled);
 extern "C" uint64_t hirari_engine_block_generation(const void* state);
 extern "C" uint64_t hirari_engine_block_bump_generation(void* state);
 extern "C" void hirari_engine_block_set_config_transition(
     void* state, uint8_t transition);
 extern "C" uint8_t hirari_engine_block_range_overflowed(const void* state);
-extern "C" void hirari_engine_block_request_preview_voice_reset(void* state);
 extern "C" void hirari_engine_block_clear_midi_events(void* state);
 extern "C" uint32_t hirari_engine_telemetry_active_index(const void* state);
 extern "C" bool hirari_engine_telemetry_snapshot(
@@ -1633,7 +1468,6 @@ extern "C" bool hirari_track_frozen_store_publish(
     uint64_t audio_generation, const uint8_t* path, size_t path_len);
 extern "C" void hirari_track_frozen_store_clear(const void* state);
 extern "C" void hirari_track_frozen_store_retire(const void* state);
-extern "C" const void* hirari_track_frozen_store_current(const void* state);
 extern "C" bool hirari_track_frozen_store_is_frozen(const void* state);
 extern "C" uint64_t hirari_track_frozen_store_total_samples(const void* state);
 extern "C" uint32_t hirari_track_frozen_store_sample_rate(const void* state);
@@ -1644,17 +1478,12 @@ extern "C" size_t hirari_track_frozen_store_path_copy(
     const void* state, uint8_t* out, size_t capacity);
 extern "C" bool hirari_track_frozen_store_set_path(
     const void* state, const uint8_t* path, size_t path_len);
-extern "C" void hirari_forensic_scratchpad_reset();
 extern "C" bool hirari_status_queue_push_default(
     uint32_t severity, const uint8_t* text, size_t text_size);
 extern "C" bool hirari_status_queue_pop_default(void* output_message);
 extern "C" uint64_t hirari_status_queue_take_dropped_default();
 extern "C" void* hirari_metronome_create(double sample_rate);
 extern "C" void hirari_metronome_destroy(void* state);
-extern "C" bool hirari_metronome_is_enabled(const void* state);
-extern "C" void hirari_metronome_process(
-    void* state, float* left, float* right, uint32_t sample_count,
-    uint64_t playhead, double sample_rate, double bpm);
 extern "C" void* hirari_undo_manager_create(size_t max_depth, uint64_t coalesce_window_ms);
 extern "C" uint64_t hirari_undo_manager_register_native_callback(
     void* state, void* context, void (*invoke)(void*), void (*destroy)(void*));
@@ -1684,13 +1513,7 @@ struct HirariExpressionMapEditHostOps {
 };
 extern "C" void hirari_expression_map_edit_host_install(
     const HirariExpressionMapEditHostOps* ops);
-extern "C" uint8_t hirari_plugin_admission_error(const char* path);
-extern "C" const char* hirari_internal_plugin_path(uint32_t plugin_type, bool bus);
-extern "C" const char* hirari_plugin_sandbox_failure_name(uint8_t code), *hirari_plugin_sandbox_state_error_name(uint8_t code);
 // Built-in effect parameter names; kind matches the Rust-builtin effect table.
-extern "C" uint32_t hirari_plugin_sandbox_block_outcome(
-    bool produced, uint32_t overruns, uint8_t failure_code, bool failed);
-extern "C" uint32_t hirari_plugin_sandbox_transport_retry_delay(uint32_t attempt, uint8_t failure);
 extern "C" void* hirari_midi_learn_create();
 extern "C" void hirari_midi_learn_destroy(void* state);
 // Macro bindings are added by Rust directly against the learn and macro-control
