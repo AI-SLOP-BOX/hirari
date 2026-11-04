@@ -18,5 +18,6 @@ include!("lib_tests_automation_edit.rs");
 include!("lib_tests_note_edits.rs");
 include!("lib_tests_plugin_edit.rs");
 include!("lib_tests_plugin_hydration.rs");
+include!("lib_tests_routing.rs");
 include!("lib_tests_track_freeze.rs");
 }

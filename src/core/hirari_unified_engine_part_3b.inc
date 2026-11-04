@@ -7,29 +7,16 @@ uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
                             [&](const Track& track) { return track.getTrackDelaySamples(); });
 }
 
-// Routing edit host callbacks. Rust owns the routing graph and the sidechain
-// route table — both are Rust stores the engine only holds — so it reads and
-// mutates them directly. These handlers remain only where C++ state is
-// involved: the live Track objects and the lock that guards them.
+// Routing edit host callbacks. Rust owns the routing graph, the sidechain route
+// table and every track sub-state a routing edit reads or writes — all of them
+// are Rust stores the engine only holds — so it reads and mutates them through
+// the shared track session. These handlers remain only where C++ state is
+// involved: the sidechain gate's live registration and the locks around it.
 void HirariUnifiedEngine::installRoutingEditHost() {
     static const HirariRoutingHostOps ops = {
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainEngine; },
-        [](void* host, uint32_t trackId, HirariRoutingTrackState* out) {
-            if (!out) return false;
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                out->armed = track.isRecordArmed();
-                out->phaseInverted = track.isPhaseInverted();
-                out->delaySamples = track.getTrackDelaySamples();
-                out->isBus = dynamic_cast<const BusTrack*>(&track) != nullptr;
-                out->volume = track.getVolume();
-                out->pan = track.getPan();
-                out->muted = track.isMuted();
-                out->solo = track.isSolo();
-                return true;
-            });
-        },
         [](void* host, uint32_t sourceId, uint32_t destId,
            HirariRoutingSidechainContext* out) {
             if (!out) return false;
@@ -48,16 +35,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             out->destinationFound = destination != nullptr;
             out->sourcePrepared = source && destination && source->canProcess(out->blockSize);
             return true;
-        },
-        [](void* host, uint32_t trackId, int32_t op, bool enabled, uint32_t samples) {
-            return withHostTrack(host, trackId, false, [&](Track& track) {
-                if (op == kHirariRoutingEditArm) track.setRecordArmed(enabled);
-                else if (op == kHirariRoutingEditPhase) track.setPhaseInverted(enabled);
-                else if (op == kHirariRoutingEditMute) track.setMuted(enabled);
-                else if (op == kHirariRoutingEditSolo) track.setSolo(enabled);
-                else track.setTrackDelaySamples(samples);
-                return true;
-            });
         },
         [](void* host, uint32_t destId, uint32_t pluginIndex, uint32_t sourceId,
            const HirariRoutingSidechainContext* context, uint32_t tapPoint, bool silent) {
@@ -93,16 +70,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
         },
         nullptr,  // undo capture lives in the Rust routing edit host.
-        [](void* host, uint32_t trackId, int32_t op, float value) {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            Track* track = engine->findTrackLocked(trackId);
-            if (!track) return false;
-            if (op == kHirariRoutingEditVolume) track->setVolume(value);
-            else if (op == kHirariRoutingEditPan) track->setPan(value);
-            else return false;
-            return true;
-        },
         [](void* host) -> void* {
             return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
         },

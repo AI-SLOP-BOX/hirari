@@ -4,9 +4,11 @@
 //! engine only holds, so this module reads and mutates them through its own
 //! store API. It owns the edit policy: decide whether an edit is legal, apply
 //! the resolved mutation, and record exactly one undo entry whose payloads
-//! replay through this same module. Host callbacks remain only for the C++
-//! state the engine really owns — the live Track objects and the lock guarding
-//! them.
+//! replay through this same module. Track state arrives the same way every other
+//! control-side edit reads it — through the shared `TrackSession`, which writes
+//! the track's own Rust channel strip and runtime while the engine lock is held.
+//! Host callbacks remain only for the C++ state the engine really owns: the
+//! sidechain gate's live registration and the locks guarding the graph.
 //!
 //! Every callback runs on the control thread. Nothing here is reachable from
 //! the audio callback.
@@ -15,13 +17,25 @@ use std::ffi::{c_char, c_void};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
+use crate::channel_strip::{
+    hirari_channel_strip_gain, hirari_channel_strip_is_record_armed, hirari_channel_strip_is_solo,
+    hirari_channel_strip_pan, hirari_channel_strip_set_gain, hirari_channel_strip_set_pan,
+    hirari_channel_strip_set_record_armed, hirari_channel_strip_set_solo,
+};
 use crate::plugin_edit_host::{register_replay, UndoStateFn};
+use crate::track_runtime::{
+    hirari_track_runtime_is_muted, hirari_track_runtime_is_phase_inverted,
+    hirari_track_runtime_pdc_requested, hirari_track_runtime_set_delays,
+    hirari_track_runtime_set_muted, hirari_track_runtime_set_phase_invert,
+    hirari_track_runtime_track_delay_samples,
+};
+use crate::track_session::TrackSession;
 
 /// Matches `RoutingEngine::kMaxNodes`; ids at or above it are not routable.
 const MAX_ROUTING_NODES: u32 = 128;
 
-/// Payload ops. The numeric values are shared with
-/// `rust_ffi.hpp::HirariRoutingEditOp`.
+/// Payload ops. `src/core/rust_ffi.hpp` declares the payload layout the undo
+/// journal stores, but only Rust interprets these values.
 pub const HIRARI_ROUTING_EDIT_ROUTE: i32 = 1;
 pub const HIRARI_ROUTING_EDIT_ROUTE_GAIN: i32 = 2;
 pub const HIRARI_ROUTING_EDIT_SEND: i32 = 3;
@@ -108,12 +122,8 @@ pub struct HirariRoutingSidechainContext {
     pub source_prepared: bool,
 }
 
-pub type QueryTrackFn =
-    unsafe extern "C" fn(*mut c_void, u32, *mut HirariRoutingTrackState) -> bool;
 pub type SidechainContextFn =
     unsafe extern "C" fn(*mut c_void, u32, u32, *mut HirariRoutingSidechainContext) -> bool;
-pub type ApplyTrackScalarFn = unsafe extern "C" fn(*mut c_void, u32, i32, bool, u32) -> bool;
-pub type ApplyTrackMixFn = unsafe extern "C" fn(*mut c_void, u32, i32, f32) -> bool;
 /// `silent` selects the manager's silent registration path for sources that
 /// are not prepared yet.
 pub type RegisterSidechainFn = unsafe extern "C" fn(
@@ -149,14 +159,12 @@ pub struct HirariRoutingHostOps {
     pub routing_store: Option<StoreFn>,
     pub sidechain_routes_store: Option<StoreFn>,
     pub sidechain_engine_store: Option<StoreFn>,
-    pub query_track: Option<QueryTrackFn>,
     pub sidechain_context: Option<SidechainContextFn>,
-    pub apply_track_scalar: Option<ApplyTrackScalarFn>,
     pub register_sidechain: Option<RegisterSidechainFn>,
     pub mark_layout_changed: Option<HostFn>,
+    /// Rebuilds the published track/PDC graph; takes the tracks lock itself.
     pub sync_structural: Option<HostFn>,
     pub record_undo: Option<RecordUndoFn>,
-    pub apply_track_mix: Option<ApplyTrackMixFn>,
     pub undo_state: Option<UndoStateFn>,
 }
 
@@ -181,15 +189,6 @@ pub unsafe extern "C" fn hirari_routing_edit_host_install(ops: *const HirariRout
     };
     if let Ok(mut guard) = slot.lock() {
         *guard = value;
-    }
-}
-
-fn payload(op: i32, source_id: u32, dest_id: u32) -> HirariRoutingEditPayload {
-    HirariRoutingEditPayload {
-        op,
-        source_id,
-        dest_id,
-        ..Default::default()
     }
 }
 
@@ -309,14 +308,103 @@ fn query_edge(
     })
 }
 
-fn query_track(
-    ops: &HirariRoutingHostOps,
+/// One track's routing-relevant state, read from the stores the track owns:
+/// the fader, pan, solo and record-arm live in its channel strip, mute, phase
+/// and the manual timing offset in its runtime, and the bus flag is the
+/// engine's own track type.
+fn track_state(host: *mut c_void, track_id: u32) -> Option<HirariRoutingTrackState> {
+    let session = TrackSession::open(host, track_id)?;
+    let strip = session.strip();
+    let runtime = session.runtime();
+    Some(HirariRoutingTrackState {
+        armed: unsafe { hirari_channel_strip_is_record_armed(strip) },
+        phase_inverted: unsafe { hirari_track_runtime_is_phase_inverted(runtime) },
+        is_bus: session.is_bus(),
+        delay_samples: unsafe { hirari_track_runtime_track_delay_samples(runtime) },
+        volume: unsafe { hirari_channel_strip_gain(strip) },
+        pan: unsafe { hirari_channel_strip_pan(strip) },
+        muted: unsafe { hirari_track_runtime_is_muted(runtime) },
+        solo: unsafe { hirari_channel_strip_is_solo(strip) },
+    })
+}
+
+/// Applies one track-state mutation. A gate change — mute, solo, phase — drops
+/// the frozen render because it changes what the track outputs; record-arm only
+/// bumps the layout revision since nothing audible moves; any other op is the
+/// manual timing offset, which bumps the layout only when the runtime accepted
+/// a different value than it held.
+fn apply_track_scalar(
     host: *mut c_void,
     track_id: u32,
-) -> Option<HirariRoutingTrackState> {
-    let query = ops.query_track?;
-    let mut state = HirariRoutingTrackState::default();
-    unsafe { query(host, track_id, &mut state) }.then_some(state)
+    op: i32,
+    enabled: bool,
+    samples: u32,
+) -> bool {
+    let Some(session) = TrackSession::open(host, track_id) else {
+        return false;
+    };
+    let (strip, runtime) = (session.strip(), session.runtime());
+    match op {
+        HIRARI_ROUTING_EDIT_ARM => {
+            session.commit_layout(unsafe { hirari_channel_strip_set_record_armed(strip, enabled) })
+        }
+        HIRARI_ROUTING_EDIT_PHASE => {
+            session.invalidate_frozen();
+            unsafe { hirari_track_runtime_set_phase_invert(runtime, enabled as u8) };
+            session.mark_layout();
+            true
+        }
+        HIRARI_ROUTING_EDIT_MUTE => {
+            session.invalidate_frozen();
+            unsafe { hirari_track_runtime_set_muted(runtime, enabled as u8) };
+            session.mark_layout();
+            true
+        }
+        HIRARI_ROUTING_EDIT_SOLO => {
+            session.invalidate_frozen();
+            unsafe { hirari_channel_strip_set_solo(strip, enabled) };
+            session.mark_layout();
+            true
+        }
+        _ => {
+            let previous = unsafe { hirari_track_runtime_track_delay_samples(runtime) };
+            unsafe {
+                hirari_track_runtime_set_delays(
+                    runtime,
+                    hirari_track_runtime_pdc_requested(runtime),
+                    samples,
+                )
+            };
+            // The runtime bounds the offset to its shared delay line, so the
+            // accepted value is what decides whether the graph has to move.
+            session.commit_layout(
+                unsafe { hirari_track_runtime_track_delay_samples(runtime) } != previous,
+            );
+            true
+        }
+    }
+}
+
+/// Applies one fader or pan edit, dropping the frozen render first because the
+/// mix the track renders changes with it.
+fn apply_track_mix(host: *mut c_void, track_id: u32, op: i32, value: f32) -> bool {
+    let Some(session) = TrackSession::open(host, track_id) else {
+        return false;
+    };
+    let strip = session.strip();
+    match op {
+        HIRARI_ROUTING_EDIT_VOLUME => {
+            session.invalidate_frozen();
+            unsafe { hirari_channel_strip_set_gain(strip, value) };
+        }
+        HIRARI_ROUTING_EDIT_PAN => {
+            session.invalidate_frozen();
+            unsafe { hirari_channel_strip_set_pan(strip, value) };
+        }
+        _ => return false,
+    }
+    session.mark_layout();
+    true
 }
 
 fn list_sidechain(
@@ -708,10 +796,10 @@ fn set_send_route_with(
         return false;
     }
     if enabled {
-        if query_track(ops, host, source_id).is_none() {
+        if track_state(host, source_id).is_none() {
             return false;
         }
-        let Some(destination) = query_track(ops, host, dest_id) else {
+        let Some(destination) = track_state(host, dest_id) else {
             return false;
         };
         // Sends resolve to buses only; a track-to-track edge is an insert.
@@ -1012,17 +1100,14 @@ fn set_track_armed_with(
     armed: bool,
     record: bool,
 ) -> bool {
-    let Some(track) = query_track(ops, host, track_id) else {
+    let Some(track) = track_state(host, track_id) else {
         return false;
     };
     // An already-correct value is a valid idempotent application.
     if track.armed == armed {
         return true;
     }
-    let Some(apply) = ops.apply_track_scalar else {
-        return false;
-    };
-    if !unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_ARM, armed, 0) } {
+    if !apply_track_scalar(host, track_id, HIRARI_ROUTING_EDIT_ARM, armed, 0) {
         return false;
     }
     if record {
@@ -1046,16 +1131,13 @@ fn set_phase_invert_with(
     inverted: bool,
     record: bool,
 ) -> bool {
-    let Some(track) = query_track(ops, host, track_id) else {
+    let Some(track) = track_state(host, track_id) else {
         return false;
     };
     if track.phase_inverted == inverted {
         return true;
     }
-    let Some(apply) = ops.apply_track_scalar else {
-        return false;
-    };
-    if !unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_PHASE, inverted, 0) } {
+    if !apply_track_scalar(host, track_id, HIRARI_ROUTING_EDIT_PHASE, inverted, 0) {
         return false;
     }
     if record {
@@ -1094,13 +1176,10 @@ fn set_track_delay_with(
     if samples > MAX_TRACK_DELAY_SAMPLES {
         return false;
     }
-    let Some(track) = query_track(ops, host, track_id) else {
+    let Some(track) = track_state(host, track_id) else {
         return false;
     };
-    let Some(apply) = ops.apply_track_scalar else {
-        return false;
-    };
-    if !unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_DELAY, false, samples) } {
+    if !apply_track_scalar(host, track_id, HIRARI_ROUTING_EDIT_DELAY, false, samples) {
         return false;
     }
     if record {
@@ -1129,25 +1208,12 @@ fn set_track_delay_with(
         );
         // The redo replay is allowed to be a no-op; keep the live value
         // explicit so coalescing cannot leave it stale.
-        unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_DELAY, false, samples) };
+        apply_track_scalar(host, track_id, HIRARI_ROUTING_EDIT_DELAY, false, samples);
     }
     true
 }
 
 const MAX_TRACK_VOLUME: f32 = 2.0;
-
-fn apply_track_mix(
-    ops: &HirariRoutingHostOps,
-    host: *mut c_void,
-    track_id: u32,
-    op: i32,
-    value: f32,
-) -> bool {
-    match ops.apply_track_mix {
-        Some(apply) => unsafe { apply(host, track_id, op, value) },
-        None => false,
-    }
-}
 
 /// Mix edits record even when the value already matches: the previous engine
 /// pushed an undo entry per call and control surfaces rely on that cadence.
@@ -1161,10 +1227,10 @@ fn set_track_volume_with(
     if !value.is_finite() || !(0.0..=MAX_TRACK_VOLUME).contains(&value) {
         return false;
     }
-    let Some(track) = query_track(ops, host, track_id) else {
+    let Some(track) = track_state(host, track_id) else {
         return false;
     };
-    if !apply_track_mix(ops, host, track_id, HIRARI_ROUTING_EDIT_VOLUME, value) {
+    if !apply_track_mix(host, track_id, HIRARI_ROUTING_EDIT_VOLUME, value) {
         return false;
     }
     if record {
@@ -1201,10 +1267,10 @@ fn set_track_pan_with(
     if !value.is_finite() || !(-1.0..=1.0).contains(&value) {
         return false;
     }
-    let Some(track) = query_track(ops, host, track_id) else {
+    let Some(track) = track_state(host, track_id) else {
         return false;
     };
-    if !apply_track_mix(ops, host, track_id, HIRARI_ROUTING_EDIT_PAN, value) {
+    if !apply_track_mix(host, track_id, HIRARI_ROUTING_EDIT_PAN, value) {
         return false;
     }
     if record {
@@ -1230,13 +1296,10 @@ fn set_track_mute_with(
     muted: bool,
     record: bool,
 ) -> bool {
-    let Some(track) = query_track(ops, host, track_id) else {
+    let Some(track) = track_state(host, track_id) else {
         return false;
     };
-    let Some(apply) = ops.apply_track_scalar else {
-        return false;
-    };
-    if !unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_MUTE, muted, 0) } {
+    if !apply_track_scalar(host, track_id, HIRARI_ROUTING_EDIT_MUTE, muted, 0) {
         return false;
     }
     if record {
@@ -1267,13 +1330,10 @@ fn set_track_solo_with(
     solo: bool,
     record: bool,
 ) -> bool {
-    let Some(track) = query_track(ops, host, track_id) else {
+    let Some(track) = track_state(host, track_id) else {
         return false;
     };
-    let Some(apply) = ops.apply_track_scalar else {
-        return false;
-    };
-    if !unsafe { apply(host, track_id, HIRARI_ROUTING_EDIT_SOLO, solo, 0) } {
+    if !apply_track_scalar(host, track_id, HIRARI_ROUTING_EDIT_SOLO, solo, 0) {
         return false;
     }
     if record {
@@ -1331,14 +1391,10 @@ fn apply_payload_with(
         | HIRARI_ROUTING_EDIT_DELAY
         | HIRARI_ROUTING_EDIT_MUTE
         | HIRARI_ROUTING_EDIT_SOLO => {
-            if let Some(apply) = ops.apply_track_scalar {
-                unsafe { apply(host, edit.source_id, edit.op, edit.enabled, edit.samples) };
-            }
+            apply_track_scalar(host, edit.source_id, edit.op, edit.enabled, edit.samples);
         }
         HIRARI_ROUTING_EDIT_VOLUME | HIRARI_ROUTING_EDIT_PAN => {
-            if let Some(apply) = ops.apply_track_mix {
-                unsafe { apply(host, edit.source_id, edit.op, edit.gain) };
-            }
+            apply_track_mix(host, edit.source_id, edit.op, edit.gain);
         }
         _ => {}
     }
@@ -1515,31 +1571,17 @@ pub unsafe extern "C" fn hirari_routing_edit_apply_payloads(
 mod tests {
     use super::*;
 
-    #[derive(Clone, Copy, Default)]
-    struct TestTrack {
-        armed: bool,
-        phase: bool,
-        delay: u32,
-        is_bus: bool,
-        volume: f32,
-        pan: f32,
-        muted: bool,
-        solo: bool,
-    }
-
     struct UndoRecord {
         name: String,
         undo: Vec<HirariRoutingEditPayload>,
-        redo: Vec<HirariRoutingEditPayload>,
-        perform: bool,
-        coalesce: bool,
     }
 
-    /// The routing graph and sidechain route table are the real Rust stores the
-    /// edit host now drives directly; only track state and the C++ sidechain
-    /// manager registration are faked here.
+    /// The routing graph and the sidechain route table are the real Rust
+    /// stores, so the host only fakes the C++ pieces: the sidechain manager
+    /// registration and the undo recorder. Track-state edits are covered by
+    /// the engine-backed tests in lib_tests_routing.rs, because the session
+    /// table those paths use is process-global and can't be swapped here.
     struct TestHost {
-        tracks: Vec<(u32, TestTrack)>,
         routing: *mut c_void,
         routes: *mut c_void,
         gate: *mut c_void,
@@ -1556,7 +1598,6 @@ mod tests {
     impl TestHost {
         fn new() -> Self {
             TestHost {
-                tracks: Vec::new(),
                 routing: crate::routing_engine_core::hirari_routing_engine_create(),
                 routes: crate::sidechain_route_store::hirari_sidechain_routes_create(),
                 gate: crate::sidechain_manager::hirari_sidechain_engine_create(),
@@ -1579,28 +1620,6 @@ mod tests {
                 crate::sidechain_manager::hirari_sidechain_engine_destroy(self.gate);
             }
         }
-    }
-
-    unsafe extern "C" fn test_query_track(
-        host: *mut c_void,
-        track_id: u32,
-        out: *mut HirariRoutingTrackState,
-    ) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        let Some((_, track)) = host.tracks.iter().find(|(id, _)| *id == track_id) else {
-            return false;
-        };
-        *out = HirariRoutingTrackState {
-            armed: track.armed,
-            phase_inverted: track.phase,
-            is_bus: track.is_bus,
-            delay_samples: track.delay,
-            volume: track.volume,
-            pan: track.pan,
-            muted: track.muted,
-            solo: track.solo,
-        };
-        true
     }
 
     unsafe extern "C" fn test_routing_store(host: *mut c_void) -> *mut c_void {
@@ -1626,46 +1645,6 @@ mod tests {
             destination_found: host.destination_found,
             source_prepared: host.source_prepared,
         };
-        true
-    }
-
-    unsafe extern "C" fn test_apply_track_scalar(
-        host: *mut c_void,
-        track_id: u32,
-        op: i32,
-        enabled: bool,
-        samples: u32,
-    ) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        let Some((_, track)) = host.tracks.iter_mut().find(|(id, _)| *id == track_id) else {
-            return false;
-        };
-        match op {
-            HIRARI_ROUTING_EDIT_ARM => track.armed = enabled,
-            HIRARI_ROUTING_EDIT_PHASE => track.phase = enabled,
-            HIRARI_ROUTING_EDIT_DELAY => track.delay = samples,
-            HIRARI_ROUTING_EDIT_MUTE => track.muted = enabled,
-            HIRARI_ROUTING_EDIT_SOLO => track.solo = enabled,
-            _ => return false,
-        }
-        true
-    }
-
-    unsafe extern "C" fn test_apply_track_mix(
-        host: *mut c_void,
-        track_id: u32,
-        op: i32,
-        value: f32,
-    ) -> bool {
-        let host = &mut *(host as *mut TestHost);
-        let Some((_, track)) = host.tracks.iter_mut().find(|(id, _)| *id == track_id) else {
-            return false;
-        };
-        match op {
-            HIRARI_ROUTING_EDIT_VOLUME => track.volume = value,
-            HIRARI_ROUTING_EDIT_PAN => track.pan = value,
-            _ => return false,
-        }
         true
     }
 
@@ -1707,7 +1686,7 @@ mod tests {
         redo: *const HirariRoutingEditPayload,
         redo_count: usize,
         perform: bool,
-        coalesce: bool,
+        _coalesce: bool,
     ) {
         let host = &mut *(host as *mut TestHost);
         let name = if name.is_null() {
@@ -1730,13 +1709,7 @@ mod tests {
         if perform {
             apply_payloads_with(&test_ops(), host as *mut TestHost as *mut c_void, &redo);
         }
-        host.undo.push(UndoRecord {
-            name,
-            undo,
-            redo,
-            perform,
-            coalesce,
-        });
+        host.undo.push(UndoRecord { name, undo });
     }
 
     fn test_ops() -> HirariRoutingHostOps {
@@ -1744,14 +1717,11 @@ mod tests {
             routing_store: Some(test_routing_store),
             sidechain_routes_store: Some(test_sidechain_routes_store),
             sidechain_engine_store: Some(test_sidechain_engine_store),
-            query_track: Some(test_query_track),
             sidechain_context: Some(test_sidechain_context),
-            apply_track_scalar: Some(test_apply_track_scalar),
             register_sidechain: Some(test_register_sidechain),
             mark_layout_changed: Some(test_mark_layout_changed),
             sync_structural: Some(test_sync_structural),
             record_undo: Some(test_record_undo),
-            apply_track_mix: Some(test_apply_track_mix),
             undo_state: None,
         }
     }
@@ -1844,28 +1814,6 @@ mod tests {
     }
 
     #[test]
-    fn arm_and_phase_are_idempotent_and_record_only_real_changes() {
-        let ops = test_ops();
-        let mut host = TestHost::new();
-        host.tracks.push((7, TestTrack::default()));
-        let host_ptr = host_ptr(&host);
-        // Already disarmed: success without an undo entry.
-        assert!(set_track_armed_with(&ops, host_ptr, 7, false, true));
-        assert!(host.undo.is_empty());
-        assert!(set_track_armed_with(&ops, host_ptr, 7, true, true));
-        assert_eq!(host.undo.len(), 1);
-        assert_eq!(host.undo[0].name, "Record Arm");
-        assert!(set_track_armed_with(&ops, host_ptr, 7, true, true));
-        assert_eq!(host.undo.len(), 1);
-        // Same for phase inversion.
-        assert!(set_phase_invert_with(&ops, host_ptr, 7, false, true));
-        assert_eq!(host.undo.len(), 1);
-        assert!(set_phase_invert_with(&ops, host_ptr, 7, true, true));
-        assert_eq!(host.undo.len(), 2);
-        assert_eq!(host.undo[1].name, "Phase Invert");
-    }
-
-    #[test]
     fn undo_payload_restores_the_previous_sidechain_link() {
         let ops = test_ops();
         let mut host = TestHost::new();
@@ -1899,28 +1847,6 @@ mod tests {
     }
 
     #[test]
-    fn send_route_requires_bus_destination_and_existing_tracks() {
-        let ops = test_ops();
-        let mut host = TestHost::new();
-        host.tracks.push((1, TestTrack::default()));
-        host.tracks.push((
-            2,
-            TestTrack {
-                is_bus: false,
-                ..Default::default()
-            },
-        ));
-        let host_ptr = host_ptr(&host);
-        assert!(!set_send_route_with(&ops, host_ptr, 1, 2, 1.0, false, true));
-        host.tracks[1].1.is_bus = true;
-        assert!(set_send_route_with(&ops, host_ptr, 1, 2, 1.0, false, true));
-        assert_eq!(host.undo.len(), 1);
-        assert_eq!(host.undo[0].name, "Audio Send");
-        // Missing source is rejected even after the destination becomes valid.
-        assert!(!set_send_route_with(&ops, host_ptr, 9, 2, 1.0, false, true));
-    }
-
-    #[test]
     fn feedback_route_rejects_non_finite_and_missing_remove() {
         let ops = test_ops();
         let host = TestHost::new();
@@ -1931,79 +1857,6 @@ mod tests {
         assert_eq!(edge(&host, 1, 2).feedback_gain, 1.5);
         assert!(set_feedback_route_with(&ops, host_ptr, 1, 2, 0.0, false));
         assert!(edge(&host, 1, 2).feedback_gain < 0.0);
-    }
-
-    #[test]
-    fn mix_edits_apply_and_restore_the_previous_value() {
-        let ops = test_ops();
-        let mut host = TestHost::new();
-        host.tracks.push((
-            3,
-            TestTrack {
-                volume: 1.0,
-                pan: -0.25,
-                ..Default::default()
-            },
-        ));
-        let host_ptr = host_ptr(&host);
-        assert!(set_track_volume_with(&ops, host_ptr, 3, 0.5, true));
-        assert!(set_track_pan_with(&ops, host_ptr, 3, 0.75, true));
-        assert_eq!(host.tracks[0].1.volume, 0.5);
-        assert_eq!(host.tracks[0].1.pan, 0.75);
-        assert_eq!(host.undo.len(), 2);
-        assert_eq!(host.undo[0].name, "Track Volume 3");
-        assert_eq!(host.undo[1].name, "Track Pan 3");
-        assert_eq!(host.undo[0].undo[0].gain, 1.0);
-        assert_eq!(host.undo[1].undo[0].gain, -0.25);
-        let volume_undo = host.undo[0].undo.clone();
-        let pan_undo = host.undo[1].undo.clone();
-        apply_payloads_with(&ops, host_ptr, &volume_undo);
-        apply_payloads_with(&ops, host_ptr, &pan_undo);
-        assert_eq!(host.tracks[0].1.volume, 1.0);
-        assert_eq!(host.tracks[0].1.pan, -0.25);
-    }
-
-    #[test]
-    fn mix_ranges_reject_out_of_domain_values() {
-        let ops = test_ops();
-        let mut host = TestHost::new();
-        host.tracks.push((
-            4,
-            TestTrack {
-                volume: 1.0,
-                ..Default::default()
-            },
-        ));
-        let host_ptr = host_ptr(&host);
-        assert!(!set_track_volume_with(&ops, host_ptr, 4, 2.5, true));
-        assert!(!set_track_volume_with(&ops, host_ptr, 4, -0.1, true));
-        assert!(!set_track_volume_with(&ops, host_ptr, 4, f32::NAN, true));
-        assert!(set_track_volume_with(&ops, host_ptr, 4, 2.0, true));
-        assert!(!set_track_pan_with(&ops, host_ptr, 4, 1.5, true));
-        assert!(!set_track_pan_with(&ops, host_ptr, 4, f32::INFINITY, true));
-        assert!(set_track_pan_with(&ops, host_ptr, 4, -1.0, true));
-        assert!(!set_track_mute_with(&ops, host_ptr, 9, true, true));
-        assert_eq!(host.undo.len(), 2);
-    }
-
-    #[test]
-    fn mute_and_solo_record_unchanged_values_like_the_previous_engine() {
-        let ops = test_ops();
-        let mut host = TestHost::new();
-        host.tracks.push((5, TestTrack::default()));
-        let host_ptr = host_ptr(&host);
-        assert!(set_track_mute_with(&ops, host_ptr, 5, false, true));
-        assert!(set_track_solo_with(&ops, host_ptr, 5, true, true));
-        assert!(set_track_solo_with(&ops, host_ptr, 5, true, true));
-        assert_eq!(host.undo.len(), 3);
-        assert_eq!(host.undo[0].name, "Track Mute 5");
-        assert_eq!(host.undo[1].name, "Track Solo 5");
-        assert!(!host.undo[0].undo[0].enabled);
-        assert!(!host.undo[1].undo[0].enabled);
-        assert!(host.tracks[0].1.solo);
-        let undo = host.undo[1].undo.clone();
-        apply_payloads_with(&ops, host_ptr, &undo);
-        assert!(!host.tracks[0].1.solo);
     }
 
     static FAKE_UNDO: std::sync::atomic::AtomicPtr<c_void> =

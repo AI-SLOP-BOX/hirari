@@ -109,6 +109,11 @@ impl TrackSession {
             .map_or(std::ptr::null_mut(), |resolve| unsafe { resolve(self.track, kind) })
     }
 
+    /// The track's Rust channel strip: fader, pan, solo and record-arm state.
+    pub fn strip(&self) -> *mut c_void {
+        self.storage(STORAGE_STRIP)
+    }
+
     /// The track's Rust effect chain.
     pub fn chain(&self) -> *mut c_void {
         self.storage(STORAGE_CHAIN)

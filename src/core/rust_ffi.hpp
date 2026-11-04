@@ -884,17 +884,6 @@ struct HirariRoutingEditPayload {
     bool preFader = false;
 };
 
-struct HirariRoutingTrackState {
-    bool armed = false;
-    bool phaseInverted = false;
-    bool isBus = false;
-    uint32_t delaySamples = 0;
-    float volume = 1.0f;
-    float pan = 0.0f;
-    bool muted = false;
-    bool solo = false;
-};
-
 struct HirariRoutingSidechainContext {
     uint32_t blockSize = 0;
     uint32_t sampleRate = 0;
@@ -904,21 +893,6 @@ struct HirariRoutingSidechainContext {
     bool sourcePrepared = false;
 };
 
-enum HirariRoutingEditOp : int32_t {
-    kHirariRoutingEditRoute = 1,
-    kHirariRoutingEditRouteGain = 2,
-    kHirariRoutingEditSend = 3,
-    kHirariRoutingEditFeedback = 4,
-    kHirariRoutingEditSidechain = 5,
-    kHirariRoutingEditArm = 6,
-    kHirariRoutingEditPhase = 7,
-    kHirariRoutingEditDelay = 8,
-    kHirariRoutingEditVolume = 9,
-    kHirariRoutingEditPan = 10,
-    kHirariRoutingEditMute = 11,
-    kHirariRoutingEditSolo = 12,
-};
-
 struct HirariRoutingHostOps {
     // The routing graph, the sidechain route table and the sidechain gate are
     // Rust objects the engine only holds, so Rust reads and edits them through
@@ -926,10 +900,8 @@ struct HirariRoutingHostOps {
     void* (*routingStore)(void*) = nullptr;
     void* (*sidechainRoutesStore)(void*) = nullptr;
     void* (*sidechainEngineStore)(void*) = nullptr;
-    bool (*queryTrack)(void*, uint32_t, HirariRoutingTrackState*) = nullptr;
     bool (*sidechainContext)(void*, uint32_t, uint32_t,
                              HirariRoutingSidechainContext*) = nullptr;
-    bool (*applyTrackScalar)(void*, uint32_t, int32_t, bool, uint32_t) = nullptr;
     bool (*registerSidechain)(void*, uint32_t, uint32_t, uint32_t,
                               const HirariRoutingSidechainContext*, uint32_t, bool) = nullptr;
     void (*markLayoutChanged)(void*) = nullptr;
@@ -937,7 +909,6 @@ struct HirariRoutingHostOps {
     void (*syncStructural)(void*) = nullptr;
     void (*recordUndo)(void*, const char*, const HirariRoutingEditPayload*, size_t,
                        const HirariRoutingEditPayload*, size_t, bool, bool) = nullptr;
-    bool (*applyTrackMix)(void*, uint32_t, int32_t, float) = nullptr;
     void* (*undoState)(void*) = nullptr;
 };
 

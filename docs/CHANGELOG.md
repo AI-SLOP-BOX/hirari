@@ -78,6 +78,19 @@ production support.
 
 ### Changed
 
+- The routing edit host now reads and writes track state from Rust.
+  `routing_edit_host.rs` opens the shared `TrackSession` for every
+  arm/phase/mute/solo/volume/pan/delay edit and a send-route validation, so the
+  record-arm CAS, the bounded manual delay offset, the frozen-render invalidation
+  and the layout-revision bump all happen against the track's own channel-strip
+  and runtime stores while the engine lock is held — no C++ callback interprets
+  them. The routing host-op table shrinks to the accessors only the engine can
+  supply (routing/sidechain stores, gate context and registration, layout sync
+  and the undo recorder), `HirariRoutingTrackState` and the shared edit-op enum
+  leave `rust_ffi.hpp`, and the `queryTrack`, `applyTrackScalar` and
+  `applyTrackMix` lambdas leave `installRoutingEditHost()`. Track-state routing
+  coverage moves to engine-backed tests in `lib_tests_routing.rs`, since the
+  session table is process-global. C++ 5490 -> 5428 (-62).
 - The plugin sandbox query surface now reads the graph from Rust.
   `plugin_sandbox_maintenance.rs` reaches each track's plug-in chain through the
   layout host operations (kind `CHAIN`) and calls the chain's own sandbox FFI,
