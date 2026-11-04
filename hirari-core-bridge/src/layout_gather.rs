@@ -1219,8 +1219,8 @@ mod tests {
         let null = std::ptr::null_mut();
         let runtime = unsafe {
             hirari_track_runtime_create(
-                7, chain, strip, automation, frozen, null, null, null, null, null, null, null,
-                null, None, null,
+                7, 0, chain, strip, automation, frozen, null, null, null, null, null, null, null,
+                null, articulation, null,
             )
         };
         let volume_points = [

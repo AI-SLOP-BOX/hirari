@@ -11,12 +11,17 @@ use crate::audio_buffer_ops::{
     hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_channels,
     hirari_audio_buffer_storage_samples,
 };
-use crate::channel_strip::hirari_channel_strip_reset;
+use crate::built_in_midi_instrument::hirari_builtin_midi_instrument_process;
+use crate::channel_strip::{hirari_channel_strip_reset, hirari_channel_strip_sample_rate};
 use crate::effect_chain_host::{
-    hirari_effect_chain_parameter_automation, hirari_effect_chain_process, hirari_effect_chain_reset,
-    TimedParameterEvent,
+    hirari_effect_chain_midi_instrument_count, hirari_effect_chain_parameter_automation,
+    hirari_effect_chain_process, hirari_effect_chain_reset, TimedParameterEvent,
 };
-use crate::midi_buffer_ops::hirari_midi_buffer_clear;
+use crate::midi_buffer_ops::{
+    hirari_midi_buffer_add, hirari_midi_buffer_clear, hirari_midi_buffer_event_count,
+    hirari_midi_buffer_event_data, hirari_midi_buffer_remaining_capacity,
+    hirari_midi_buffer_sort_owned,
+};
 use crate::realtime_automation::{
     hirari_plugin_automation_render_block, hirari_realtime_automation_evaluate,
     NativeTimedParameterEvent,
@@ -28,6 +33,9 @@ use crate::track_automation_store::{
 use crate::track_frozen_store::{
     hirari_track_frozen_store_current, hirari_track_frozen_store_is_frozen,
     hirari_track_frozen_store_total_samples,
+};
+use crate::track_midi_articulation::{
+    hirari_track_midi_flush_scheduled_note_offs, GeneratedMidiEvent,
 };
 use crate::track_output::{finalize_track_output, TrackFinalizeInput};
 use crate::track_pdc_delay::hirari_track_pdc_delay_reset;
@@ -44,13 +52,18 @@ const PLUGIN_EVENTS_PER_BLOCK: usize = 4096;
 /// The bound delay line both the manual offset and plugin PDC share.
 const MAX_DELAY_SAMPLES: u32 = 8192;
 
-/// Prepares one block's MIDI: expression note-offs, the sort and the built-in
-/// voice. The channel pointers are the block Rust already resolved, so the host
-/// callback needs no buffer handle of its own.
-pub type TrackMidiPrepare = unsafe extern "C" fn(*mut c_void, u64, u32, *mut f32, *mut f32);
+/// The note-off events one block may schedule, matching the bound the C++
+/// track used to size its stack scratch with.
+const MIDI_EVENTS_PER_BLOCK: usize = 1024;
+
+/// The `Track::Type` values that get a built-in voice when no instrument
+/// plugin is loaded.
+const TRACK_TYPE_MIDI: u32 = 1;
+const TRACK_TYPE_INSTRUMENT: u32 = 2;
 
 pub struct TrackRuntime {
     track_id: u32,
+    track_type: u32,
     chain: *mut c_void,
     channel_strip: *mut c_void,
     automation_store: *mut c_void,
@@ -63,8 +76,9 @@ pub struct TrackRuntime {
     send_pre: *mut c_void,
     send_post: *mut c_void,
     midi: *mut c_void,
-    midi_prepare: Option<TrackMidiPrepare>,
-    midi_context: *mut c_void,
+    articulation: *mut c_void,
+    built_in_instrument: *mut c_void,
+    midi_events: *mut GeneratedMidiEvent,
     plugin_events: *mut NativeTimedParameterEvent,
     muted: AtomicBool,
     phase_invert: AtomicBool,
@@ -334,10 +348,7 @@ impl TrackRuntime {
             };
         }
 
-        let Some(prepare) = self.midi_prepare else {
-            return false;
-        };
-        unsafe { prepare(self.midi_context, playhead, frames, planes[0], planes[1]) };
+        self.prepare_midi_block(playhead, frames, planes[0], planes[1]);
 
         let (pre_insert, pre_insert_count, pre_insert_capacity) = channels_of(self.pre_insert);
         if pre_insert_count >= 2 && pre_insert_capacity >= frames && !pre_insert.is_null() {
@@ -373,6 +384,59 @@ impl TrackRuntime {
         }
         self.finalize(frames, playhead);
         true
+    }
+
+    /// Prepares one block's MIDI before the chain runs: expired expression
+    /// note-offs are queued, the generated events are put in chronological
+    /// order, and a track without an instrument gets its built-in voice. The
+    /// scratch is bound at creation, so the audio thread never allocates.
+    fn prepare_midi_block(&self, playhead: u64, frames: u32, left: *mut f32, right: *mut f32) {
+        let capacity =
+            unsafe { hirari_midi_buffer_remaining_capacity(self.midi) }.min(MIDI_EVENTS_PER_BLOCK);
+        let count = unsafe {
+            hirari_track_midi_flush_scheduled_note_offs(
+                self.articulation,
+                playhead,
+                frames,
+                if capacity == 0 {
+                    ptr::null_mut()
+                } else {
+                    self.midi_events
+                },
+                capacity,
+            )
+        };
+        for event in unsafe { slice::from_raw_parts(self.midi_events, count) } {
+            unsafe {
+                hirari_midi_buffer_add(
+                    self.midi,
+                    event.sample_offset,
+                    event.data.as_ptr(),
+                    u32::from(event.size),
+                    event.articulation_id,
+                );
+            }
+        }
+        unsafe { hirari_midi_buffer_sort_owned(self.midi) };
+        if !matches!(self.track_type, TRACK_TYPE_MIDI | TRACK_TYPE_INSTRUMENT)
+            || unsafe { hirari_effect_chain_midi_instrument_count(self.chain) } != 0
+            || frames == 0
+            || left.is_null()
+            || right.is_null()
+        {
+            return;
+        }
+        unsafe {
+            hirari_builtin_midi_instrument_process(
+                self.built_in_instrument,
+                hirari_midi_buffer_event_data(self.midi),
+                hirari_midi_buffer_event_count(self.midi),
+                left,
+                right,
+                frames,
+                hirari_channel_strip_sample_rate(self.channel_strip),
+            )
+        };
     }
 
     fn finalize(&self, frames: u32, playhead: u64) {
@@ -451,6 +515,7 @@ pub(crate) fn runtime(state: *mut c_void) -> Option<&'static TrackRuntime> {
 #[no_mangle]
 pub unsafe extern "C" fn hirari_track_runtime_create(
     track_id: u32,
+    track_type: u32,
     chain: *mut c_void,
     channel_strip: *mut c_void,
     automation_store: *mut c_void,
@@ -463,16 +528,20 @@ pub unsafe extern "C" fn hirari_track_runtime_create(
     send_pre: *mut c_void,
     send_post: *mut c_void,
     midi: *mut c_void,
-    midi_prepare: Option<TrackMidiPrepare>,
-    midi_context: *mut c_void,
+    articulation: *mut c_void,
+    built_in_instrument: *mut c_void,
 ) -> *mut c_void {
     let mut scratch = vec![NativeTimedParameterEvent::default(); PLUGIN_EVENTS_PER_BLOCK];
     let plugin_events = scratch.as_mut_ptr();
     // The runtime owns the scratch from here; destroy rebuilds the Vec so the
     // block pipeline can write through a stable pointer with no per-block alloc.
     std::mem::forget(scratch);
+    let mut midi_scratch = vec![GeneratedMidiEvent::default(); MIDI_EVENTS_PER_BLOCK];
+    let midi_events = midi_scratch.as_mut_ptr();
+    std::mem::forget(midi_scratch);
     Box::into_raw(Box::new(TrackRuntime {
         track_id,
+        track_type,
         chain,
         channel_strip,
         automation_store,
@@ -485,8 +554,9 @@ pub unsafe extern "C" fn hirari_track_runtime_create(
         send_pre,
         send_post,
         midi,
-        midi_prepare,
-        midi_context,
+        articulation,
+        built_in_instrument,
+        midi_events,
         plugin_events,
         muted: AtomicBool::new(false),
         phase_invert: AtomicBool::new(false),
@@ -520,6 +590,9 @@ pub unsafe extern "C" fn hirari_track_runtime_destroy(state: *mut c_void) {
     // through the shared track handle.
     drop(unsafe {
         Vec::from_raw_parts(runtime.plugin_events, PLUGIN_EVENTS_PER_BLOCK, PLUGIN_EVENTS_PER_BLOCK)
+    });
+    drop(unsafe {
+        Vec::from_raw_parts(runtime.midi_events, MIDI_EVENTS_PER_BLOCK, MIDI_EVENTS_PER_BLOCK)
     });
 }
 

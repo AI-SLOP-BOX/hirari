@@ -15,6 +15,9 @@ use hirari_core_bridge::audio_buffer_ops::{
 use hirari_core_bridge::bounce_driver::{
     hirari_bounce_session_create, hirari_bounce_session_destroy,
 };
+use hirari_core_bridge::built_in_midi_instrument::{
+    hirari_builtin_midi_instrument_create, hirari_builtin_midi_instrument_destroy,
+};
 use hirari_core_bridge::bus_audio::{
     hirari_bus_audio_read, hirari_bus_system_bus, hirari_bus_system_create,
     hirari_bus_system_destroy, hirari_bus_system_register,
@@ -42,6 +45,10 @@ use hirari_core_bridge::master_limiter::{
 };
 use hirari_core_bridge::master_meter::{hirari_master_meter_create, hirari_master_meter_destroy};
 use hirari_core_bridge::metronome_renderer::{hirari_metronome_create, hirari_metronome_destroy};
+use hirari_core_bridge::midi_buffer_ops::{
+    hirari_midi_buffer_add_note_on, hirari_midi_buffer_create, hirari_midi_buffer_destroy,
+    hirari_midi_buffer_event_count,
+};
 use hirari_core_bridge::mixer_telemetry::{
     hirari_mixer_telemetry_create, hirari_mixer_telemetry_destroy,
 };
@@ -63,29 +70,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const FRAMES: u32 = 4;
 const BUS_ID: u32 = 0;
 
-/// The built-in voice stand-in: the runtime writes it into the block the graph
-/// then routes, so a walk assertion never depends on plugin DSP.
-struct Voice {
-    calls: AtomicUsize,
-    level: f32,
-}
-
-unsafe extern "C" fn write_voice(
-    context: *mut c_void,
-    _playhead: u64,
-    frames: u32,
-    left: *mut f32,
-    right: *mut f32,
-) {
-    let voice = unsafe { &*context.cast::<Voice>() };
-    voice.calls.fetch_add(1, Ordering::Relaxed);
-    for frame in 0..frames as usize {
-        unsafe {
-            *left.add(frame) = voice.level;
-            *right.add(frame) = -voice.level;
-        }
-    }
-}
+/// `Track::Type::Instrument`: the kind whose block the runtime renders with the
+/// built-in voice. Any other kind stands for a bus or an audio track with
+/// nothing to generate.
+const TRACK_TYPE_INSTRUMENT: u32 = 2;
+const TRACK_TYPE_AUDIO: u32 = 0;
 
 /// Stand-in for a C++ `Track`: the walk reaches it only for its own storages,
 /// exactly as the engine's table does.
@@ -205,7 +194,8 @@ struct Engine {
     send_pre: Vec<*mut c_void>,
     send_post: Vec<*mut c_void>,
     runtime: Vec<*mut c_void>,
-    voices: Vec<*mut Voice>,
+    midi: Vec<*mut c_void>,
+    instruments: Vec<*mut c_void>,
     /// `[routing, bounce, input blocks, control room, mixer telemetry,
     /// metronome, limiter, meter, tempo, bus system, sidechain engine]`.
     borrowed: [*mut c_void; 11],
@@ -223,7 +213,8 @@ impl Engine {
             send_pre: Vec::new(),
             send_post: Vec::new(),
             runtime: Vec::new(),
-            voices: Vec::new(),
+            midi: Vec::new(),
+            instruments: Vec::new(),
             borrowed: [ptr::null_mut(); 11],
             table: ptr::null_mut(),
         }
@@ -282,10 +273,11 @@ impl Engine {
         self.borrowed[9]
     }
 
-    /// Adds a track that renders one voice into a work buffer holding `frames`
-    /// samples. A negative level publishes a track with no voice stage at all,
-    /// which is how the walk reaches a bus or an audio track with nothing to
-    /// render.
+    /// Adds a track whose work buffer holds `frames` samples. A non-negative
+    /// level makes it an instrument track, so the runtime renders its built-in
+    /// voice into the block the graph then routes; a negative level publishes a
+    /// track with nothing to generate, which is how a bus or an audio track with
+    /// no instrument reaches the walk.
     fn track(&mut self, id: u32, frames: u32, level: f32) -> usize {
         self.staged_track(id, frames, level, false)
     }
@@ -297,17 +289,25 @@ impl Engine {
         let send_pre = storage(2, frames);
         let send_post = storage(2, frames);
         let null = ptr::null_mut::<c_void>();
-        let voice = if level < 0.0 {
-            ptr::null_mut()
+        let voiced = level >= 0.0;
+        let midi = unsafe { hirari_midi_buffer_create() };
+        let instrument = if voiced {
+            unsafe { hirari_builtin_midi_instrument_create() }
         } else {
-            Box::into_raw(Box::new(Voice {
-                calls: AtomicUsize::new(0),
-                level,
-            }))
+            ptr::null_mut()
         };
+        // One held note gives the voice something to render, and the runtime
+        // consumes the buffer when the block reaches its chain stage. That is
+        // how these contracts tell a walked track from a skipped one.
+        unsafe { hirari_midi_buffer_add_note_on(midi, 1, 69, 100, 0, 0) };
         let runtime = unsafe {
             hirari_track_runtime_create(
                 id,
+                if voiced {
+                    TRACK_TYPE_INSTRUMENT
+                } else {
+                    TRACK_TYPE_AUDIO
+                },
                 null,
                 null,
                 null,
@@ -319,13 +319,9 @@ impl Engine {
                 null,
                 send_pre,
                 send_post,
+                midi,
                 null,
-                if voice.is_null() {
-                    None
-                } else {
-                    Some(write_voice)
-                },
-                voice.cast(),
+                instrument,
             )
         };
         // Solo is strip state, exactly as the engine reads it.
@@ -341,9 +337,8 @@ impl Engine {
         self.send_pre.push(send_pre);
         self.send_post.push(send_post);
         self.runtime.push(runtime);
-        if !voice.is_null() {
-            self.voices.push(voice);
-        }
+        self.midi.push(midi);
+        self.instruments.push(instrument);
         self.tracks.push(track.cast());
         let slot = self.tracks.len() - 1;
         // The engine publishes the graph after every structural edit; the walk
@@ -365,11 +360,10 @@ impl Engine {
         unsafe { hirari_track_runtime_publish_regions(self.runtime[slot], ptr::null(), 0, 1) };
     }
 
-    fn calls(&self, slot: usize) -> usize {
-        if slot >= self.voices.len() {
-            return 0;
-        }
-        unsafe { (*self.voices[slot]).calls.load(Ordering::Relaxed) }
+    /// True once the walk has run this track's block: the runtime hands the
+    /// staged note to its chain stage, which consumes the MIDI buffer.
+    fn rendered(&self, slot: usize) -> bool {
+        slot < self.midi.len() && unsafe { hirari_midi_buffer_event_count(self.midi[slot]) } == 0
     }
 
     /// Turns one slot into an AUX/BUS track fed by the engine's bus system.
@@ -460,8 +454,11 @@ impl Drop for Engine {
                 let track = Box::from_raw(handle.cast::<FakeTrack>());
                 hirari_channel_strip_destroy(track.strip);
             }
-            for voice in self.voices.drain(..) {
-                drop(Box::from_raw(voice));
+            for handle in self.instruments.drain(..) {
+                hirari_builtin_midi_instrument_destroy(handle);
+            }
+            for handle in self.midi.drain(..) {
+                hirari_midi_buffer_destroy(handle);
             }
             if !self.borrowed[0].is_null() {
                 let [routing, bounce, input, control_room, mixer, metronome, limiter, meter, tempo, bus_system, sidechain] =
@@ -494,7 +491,7 @@ fn the_walk_clears_each_track_and_fans_its_block_into_the_master() {
 
     engine.route(0);
 
-    assert_eq!(engine.calls(slot), 1, "the node ran once");
+    assert!(engine.rendered(slot), "the node ran once");
     assert_eq!(engine.master().0, samples(engine.work[slot]));
     assert_eq!(engine.master().1, right_samples(engine.work[slot]));
     assert_ne!(
@@ -515,10 +512,9 @@ fn a_solo_track_is_the_only_node_the_walk_reaches() {
 
     engine.route(0);
 
-    assert_eq!(engine.calls(soloed), 1);
-    assert_eq!(
-        engine.calls(silent),
-        0,
+    assert!(engine.rendered(soloed));
+    assert!(
+        !engine.rendered(silent),
         "a muted-by-solo node never renders"
     );
     assert_eq!(samples(engine.work[silent]), [0.0; 4]);
@@ -535,7 +531,7 @@ fn a_track_that_cannot_hold_the_block_is_never_staged_or_walked() {
 
     engine.route(0);
 
-    assert_eq!(engine.calls(short), 0, "the destination table skipped it");
+    assert!(!engine.rendered(short), "the destination table skipped it");
     assert_eq!(samples(engine.work[short]), [7.0; 4]);
     assert_eq!(engine.master().0, [0.0; 4]);
 }
@@ -559,9 +555,8 @@ fn a_pre_fader_send_reaches_the_bus_stage_from_its_own_tap() {
     let (stage_left, stage_right) = engine.bus_stage(bus);
     assert_eq!(stage_left, [0.25; 4], "half of the pre-fader tap");
     assert_eq!(stage_right, [-0.25; 4]);
-    assert_eq!(
-        engine.calls(source_slot),
-        0,
+    assert!(
+        !engine.rendered(source_slot),
         "a Send is not a dry-path route"
     );
 }
@@ -605,5 +600,8 @@ fn a_feedback_edge_is_captured_one_block_before_it_is_injected() {
         captured,
         "block two starts with block one's captured signal"
     );
-    assert_eq!(engine.calls(destination), 0, "the destination has no voice");
+    assert!(
+        !engine.rendered(destination),
+        "the destination has no voice"
+    );
 }

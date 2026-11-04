@@ -16,11 +16,10 @@ public:
         // The Rust runtime renders whole blocks, so it is bound to every DSP
         // handle and tap buffer the track owns. It is destroyed first.
         m_runtime = hirari_track_runtime_create(
-            id, m_chain, m_strip, m_automationStore, m_frozenStore, m_spatialPanner,
-            m_pdcDelayState, m_activeBuffer, m_preInsertBuffer,
-            m_preFaderBuffer, m_sendPreFaderBuffer,
-            m_sendPostFaderBuffer, m_pluginMidi,
-            &Track::prepareMidiBlock, this);
+            id, static_cast<uint32_t>(t), m_chain, m_strip, m_automationStore, m_frozenStore,
+            m_spatialPanner, m_pdcDelayState, m_activeBuffer, m_preInsertBuffer,
+            m_preFaderBuffer, m_sendPreFaderBuffer, m_sendPostFaderBuffer, m_pluginMidi,
+            m_articulationState, m_builtInMidiState);
         hirari_region_store_install(this, m_id);
     }
 
@@ -67,43 +66,6 @@ public:
             m_articulationState, 1, reinterpret_cast<const uint8_t*>(json.data()), json.size());
         markProjectLayoutChanged();
     }
-    void addGeneratedMidiEvents(const HirariGeneratedMidiEvent* events,
-                                size_t count) noexcept {
-        static_assert(sizeof(HirariGeneratedMidiEvent) == 16);
-        for (size_t index = 0; index < count; ++index) {
-            const auto& event = events[index];
-            hirari_midi_buffer_add(m_pluginMidi, event.sample_offset, event.data,
-                                   event.size, event.articulation_id);
-        }
-    }
-    void flushExpressionNoteOffs(uint64_t playhead, uint32_t blockSize) noexcept {
-        std::array<HirariGeneratedMidiEvent, kHirariMidiMaxEventsPerBlock> generated{};
-        const size_t capacity =
-            std::min(hirari_midi_buffer_remaining_capacity(m_pluginMidi), generated.size());
-        const size_t count = hirari_track_midi_flush_scheduled_note_offs(
-            m_articulationState, playhead, blockSize,
-            capacity ? generated.data() : nullptr, capacity);
-        addGeneratedMidiEvents(generated.data(), count);
-    }
-
-    // Render a small built-in voice for MIDI tracks without an instrument
-    // plug-in. It is generated into the block the runtime is rendering so the
-    // normal channel strip, inserts, fader, pan, sends, and routing all process
-    // it. This runs on the audio thread with fixed voice storage and no
-    // allocation.
-    void renderBuiltInMidiInstrument(float* left, float* right, uint32_t frames) noexcept {
-        if ((m_type != Type::Midi && m_type != Type::Instrument) ||
-            hirari_effect_chain_midi_instrument_count(m_chain) != 0 || frames == 0) {
-            return;
-        }
-        if (left && right) {
-            hirari_builtin_midi_instrument_process(
-                m_builtInMidiState, hirari_midi_buffer_event_data(m_pluginMidi),
-                hirari_midi_buffer_event_count(m_pluginMidi), left, right, frames,
-                hirari_channel_strip_sample_rate(m_strip));
-        }
-    }
-
     enum class OfflineRenderTap : uint8_t { PostFader = 0, PreInsert = 1, PreFader = 2 };
 
     // Process the already accumulated work buffer without clearing it first.
@@ -135,18 +97,6 @@ public:
     }
 
 private:
-    // One block's MIDI input is fully prepared before the chain runs: expired
-    // expression note-offs are queued, the generated events are put in
-    // chronological order, and a track without an instrument gets its built-in
-    // voice. The runtime hands over the block channels it already resolved.
-    static void prepareMidiBlock(void* context, uint64_t playhead, uint32_t frames,
-                                 float* left, float* right) noexcept {
-        auto& track = *static_cast<Track*>(context);
-        track.flushExpressionNoteOffs(playhead, frames);
-        hirari_midi_buffer_sort_owned(track.m_pluginMidi);
-        track.renderBuiltInMidiInstrument(left, right, frames);
-    }
-
     void process(void* buffer, uint32_t sz, uint64_t playhead, bool clearInput) {
         hirari_track_process_block(m_runtime, buffer, sz, playhead,
                                    static_cast<uint8_t>(clearInput));

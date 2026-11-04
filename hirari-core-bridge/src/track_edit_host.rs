@@ -1001,10 +1001,10 @@ mod tests {
             let name = unsafe { crate::track_name_store::hirari_track_name_store_create() };
             let runtime = unsafe {
                 hirari_track_runtime_create(
-                    id, chain, strip, automation, std::ptr::null_mut(), std::ptr::null_mut(),
+                    id, 0, chain, strip, automation, std::ptr::null_mut(), std::ptr::null_mut(),
                     std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
                     std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
-                    std::ptr::null_mut(), None, std::ptr::null_mut(),
+                    std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
                 )
             };
             Self { strip, chain, automation, runtime, name }

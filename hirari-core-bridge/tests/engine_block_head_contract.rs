@@ -194,8 +194,8 @@ impl Engine {
         let null = ptr::null_mut::<c_void>();
         let runtime = unsafe {
             hirari_track_runtime_create(
-                id, null, null, null, null, null, null, null, null, null, null, null, null, None,
-                null,
+                id, 0, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null,
             )
         };
         let track = Box::into_raw(Box::new(FakeTrack {

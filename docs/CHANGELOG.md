@@ -78,6 +78,17 @@ production support.
 
 ### Changed
 
+- The track runtime prepares each block's MIDI in Rust now.
+  `hirari_track_runtime_create` takes the track type together with the
+  articulation state, the built-in voice and the track's MIDI buffer, so the
+  pipeline flushes expired expression note-offs into a scratch bound at
+  creation, sorts the buffer and renders the built-in sine voice into the block
+  before the pre-insert tap snapshots it. The C++ `Track::prepareMidiBlock`
+  callback, `addGeneratedMidiEvents`, `flushExpressionNoteOffs` and
+  `renderBuiltInMidiInstrument` go with it, along with the
+  `HirariTrackMidiPrepare` typedef, so no per-block array of a thousand
+  generated events is stacked on the audio thread any more.
+  C++ 5971 -> 5903 (-68).
 - The audio driver host is Rust now. `AudioEngine` holds an opaque handle from
   `hirari_audio_driver_host_create` and answers lifecycle, reconfiguration,
   device selection, status and error code through the flat C ABI, so the C++

@@ -221,8 +221,8 @@ impl Engine {
         let runtime = unsafe {
             let null = std::ptr::null_mut::<c_void>();
             hirari_track_runtime_create(
-                id, null, null, null, null, null, null, work, null, null, null, null, null, None,
-                null,
+                id, 0, null, null, null, null, null, null, work, null, null, null, null, null,
+                null, null,
             )
         };
         let track = Box::into_raw(Box::new(FakeTrack {
