@@ -43,14 +43,6 @@
         return track && dynamic_cast<BusTrack*>(track) != nullptr;
     }
     float get_master_gain() const noexcept;
-    float get_track_volume(uint32_t tid) const;
-    // Offline render target selection is control-side state. When active,
-    // the audio graph keeps only the target and its upstream route closure,
-    // then publishes the target output to the master buffer.
-    bool set_offline_render_target(uint32_t tid);
-    void clear_offline_render_target();
-    void set_offline_render_tail_seconds(float seconds);
-    void set_offline_render_options(bool pre_fader, bool include_inserts);
     uint32_t get_track_delay_samples(uint32_t tid) const;
     double get_sample_rate() const { return m_sampleRate.load(std::memory_order_relaxed); }
     uint64_t get_audio_config_generation() const noexcept {

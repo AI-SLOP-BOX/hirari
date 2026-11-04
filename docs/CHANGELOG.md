@@ -78,6 +78,16 @@ production support.
 
 ### Changed
 
+- Offline render-target selection and the track fader read now run from Rust.
+  `engine_analysis_reads.rs` walks the live graph through the layout host ops —
+  the same locked table walk the save gather already owns — to resolve a track
+  id to its channel-strip storage for the fader read (keeping the -1.0
+  not-found fallback) and to validate a non-master target id, then writes the
+  bounce session directly through Rust's own store API. `HirariUnifiedEngine`
+  sheds `get_track_volume`, the four offline-render forwarders and their
+  declarations, keeping one `bounce_session_state()` handle getter, and an
+  engine-backed test in `lib_tests_offline_bounce.rs` covers rejection,
+  activation, clearing, the tail and the volume fallback. C++ 5152 -> 5119 (-33).
 - The engine's analysis reads now run entirely from Rust.
   `engine_analysis_reads.rs` samples every store the C++ analysis accessors used
   to reach through the engine: the telemetry double buffer (spectrum, track peak

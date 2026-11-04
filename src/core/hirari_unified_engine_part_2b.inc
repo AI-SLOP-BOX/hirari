@@ -1,35 +1,4 @@
 
-
-float HirariUnifiedEngine::get_track_volume(uint32_t tid) const {
-    return queryLockedTrack(tid, -1.0f, [](const Track& track) { return track.getVolume(); });
-}
-
-bool HirariUnifiedEngine::set_offline_render_target(uint32_t tid) {
-    // 0 is reserved for the master target. Track/bus IDs are validated
-    // against the current graph before activation so a stale CLI target
-    // cannot silently render an unrelated output.
-    if (tid != 0) {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        if (!findTrackLocked(tid)) return false;
-    }
-    hirari_bounce_set_offline_target(m_bounceSession, tid);
-    return true;
-}
-
-void HirariUnifiedEngine::clear_offline_render_target() {
-    hirari_bounce_clear_offline_target(m_bounceSession);
-}
-
-void HirariUnifiedEngine::set_offline_render_tail_seconds(float seconds) {
-    // Bounds and non-finite rejection are enforced by the bridge; the session
-    // stores the millisecond value the render plan consumes.
-    hirari_bounce_set_tail_seconds(m_bounceSession, seconds);
-}
-
-void HirariUnifiedEngine::set_offline_render_options(bool preFader, bool includeInserts) {
-    hirari_bounce_set_render_options(m_bounceSession, preFader, includeInserts);
-}
-
 void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
     // A failed device negotiation must not advance the audio configuration
     // generation or partially replace the currently valid preparation state.

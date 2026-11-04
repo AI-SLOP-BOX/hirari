@@ -9,6 +9,12 @@
     uintptr_t meter_state() const noexcept {
         return reinterpret_cast<uintptr_t>(m_meterCore);
     }
+    // The bounce session and the live track table are Rust-owned stores too;
+    // the Rust offline-target and volume reads use the layout host ops
+    // (layout_gather.rs) plus this session handle, so no C++ forwarder is left.
+    uintptr_t bounce_session_state() const noexcept {
+        return reinterpret_cast<uintptr_t>(m_bounceSession);
+    }
     bool execute_auto_arrangement();
     // The Rust layout gather (layout_gather.rs) owns the snapshot, its JSON and
     // the background save session; this hands it the host table it reads.

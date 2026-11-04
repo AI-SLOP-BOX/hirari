@@ -1,11 +1,14 @@
 //! Engine-side analysis reads that the deleted C++ analysis accessors used to
 //! serve. Every store behind them — the telemetry double buffer, the master
-//! meter core, the track table and the region store — is Rust-owned, so these
-//! reads go straight to those stores through the engine's store-handle getters
-//! instead of a C++ field-by-field copy across the bridge.
+//! meter core, the track table, the region store and the bounce session — is
+//! Rust-owned, so these reads and the offline-target writes go straight to
+//! those stores through the engine's store-handle getters instead of a C++
+//! field-by-field copy across the bridge.
 
 use crate::analysis_views;
 use crate::audio_driver_host;
+use crate::bounce_driver;
+use crate::channel_strip;
 use crate::engine_block_host::{
     HirariEngineTelemetry, hirari_engine_block_track_table, hirari_engine_telemetry_active_index,
     hirari_engine_telemetry_snapshot,
@@ -13,6 +16,7 @@ use crate::engine_block_host::{
 use crate::engine_track_table::{self, HirariTrackSnapshot};
 use crate::ffi::{AudioEngine, BridgeLoudness, HirariUnifiedEngine};
 use crate::harmonic_context;
+use crate::layout_gather;
 use crate::master_meter;
 use crate::region_store;
 use crate::tempo;
@@ -215,4 +219,80 @@ pub fn runtime_telemetry(engine: &AudioEngine, core: &HirariUnifiedEngine) -> Ve
         f32::from(core.is_playing()),
         core.get_playhead() as f32,
     ]
+}
+
+fn bounce_session(core: &HirariUnifiedEngine) -> *mut c_void {
+    core.bounce_session_state() as *mut c_void
+}
+
+/// The track's fader, or -1.0 when the id is not in the graph — the same
+/// fallback the deleted C++ getter returned.
+pub fn track_volume(core: &HirariUnifiedEngine, tid: u32) -> f32 {
+    with_track_storage(core, tid, 0, |storage| {
+        storage.map_or(-1.0, |strip| unsafe {
+            channel_strip::hirari_channel_strip_gain(strip)
+        })
+    })
+}
+
+/// Activates an offline render target. Zero is the master; any other id is
+/// validated against the current graph first, so a stale CLI target cannot
+/// silently render an unrelated output.
+pub fn set_offline_target(core: &HirariUnifiedEngine, tid: u32) -> bool {
+    if tid != 0 && !with_track_storage(core, tid, 0, |storage| storage.is_some()) {
+        return false;
+    }
+    unsafe { bounce_driver::hirari_bounce_set_offline_target(bounce_session(core), tid) };
+    true
+}
+
+pub fn clear_offline_target(core: &HirariUnifiedEngine) {
+    unsafe { bounce_driver::hirari_bounce_clear_offline_target(bounce_session(core)) };
+}
+
+/// Bounds and non-finite rejection are enforced by the caller; the session
+/// stores the millisecond value the render plan consumes.
+pub fn set_offline_tail_seconds(core: &HirariUnifiedEngine, seconds: f32) {
+    unsafe { bounce_driver::hirari_bounce_set_tail_seconds(bounce_session(core), seconds) };
+}
+
+pub fn set_offline_options(core: &HirariUnifiedEngine, pre_fader: bool, include_inserts: bool) {
+    unsafe {
+        bounce_driver::hirari_bounce_set_render_options(
+            bounce_session(core),
+            u8::from(pre_fader),
+            u8::from(include_inserts),
+        )
+    };
+}
+
+/// Takes the tracks lock through the layout host ops, finds the id's track and
+/// hands one of its storages (kind 0 is the channel strip) to `read`.
+fn with_track_storage<R>(
+    core: &HirariUnifiedEngine,
+    tid: u32,
+    kind: u32,
+    read: impl FnOnce(Option<*mut c_void>) -> R,
+) -> R {
+    let raw = layout_gather::ops_for(core) as *const layout_gather::HirariLayoutHostOps;
+    if raw.is_null() {
+        return read(None);
+    }
+    let ops = unsafe { &*raw };
+    let host = core as *const HirariUnifiedEngine as *mut c_void;
+    unsafe { (ops.begin)(host) };
+    let found = (|| {
+        let count = unsafe { (ops.track_count)(host) };
+        for index in 0..count {
+            let track = unsafe { (ops.track_handle)(host, index) };
+            if track.is_null() || unsafe { (ops.track_id)(track) } != tid {
+                continue;
+            }
+            return Some(unsafe { (ops.track_storage)(track, kind) });
+        }
+        None
+    })();
+    let result = read(found);
+    unsafe { (ops.end)(host) };
+    result
 }

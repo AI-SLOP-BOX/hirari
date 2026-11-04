@@ -155,16 +155,8 @@ pub mod ffi {
         fn mark_project_state_changed(self: Pin<&mut HirariUnifiedEngine>);
         fn bus_track_exists(self: &HirariUnifiedEngine, bus_track_id: u32) -> bool;
         fn get_master_gain(self: &HirariUnifiedEngine) -> f32;
-        fn get_track_volume(self: &HirariUnifiedEngine, tid: u32) -> f32;
+        fn bounce_session_state(self: &HirariUnifiedEngine) -> usize;
         fn get_track_delay_samples(self: &HirariUnifiedEngine, tid: u32) -> u32;
-        fn set_offline_render_target(self: Pin<&mut HirariUnifiedEngine>, tid: u32) -> bool;
-        fn clear_offline_render_target(self: Pin<&mut HirariUnifiedEngine>);
-        fn set_offline_render_tail_seconds(self: Pin<&mut HirariUnifiedEngine>, seconds: f32);
-        fn set_offline_render_options(
-            self: Pin<&mut HirariUnifiedEngine>,
-            pre_fader: bool,
-            include_inserts: bool,
-        );
         fn audio_driver_host(self: &AudioEngine) -> usize;
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
         fn try_reconnect_audio_device(self: &AudioEngine);

@@ -730,7 +730,7 @@ impl ffi::AudioEngine {
     }
 
     pub fn get_track_volume(&self, tid: u32) -> f32 {
-        self.get_core().get_track_volume(tid)
+        crate::engine_analysis_reads::track_volume(self.get_core(), tid)
     }
 }
 
@@ -959,16 +959,20 @@ impl ffi::AudioEngine {
         true
     }
     pub fn set_offline_render_target(&self, tid: u32) -> bool {
-        pinned(self).set_offline_render_target(tid)
+        crate::engine_analysis_reads::set_offline_target(self.get_core(), tid)
     }
     pub fn clear_offline_render_target(&self) {
-        pinned(self).clear_offline_render_target()
+        crate::engine_analysis_reads::clear_offline_target(self.get_core());
     }
     pub fn set_offline_render_tail_seconds(&self, seconds: f32) {
-        pinned(self).set_offline_render_tail_seconds(seconds)
+        crate::engine_analysis_reads::set_offline_tail_seconds(self.get_core(), seconds);
     }
     pub fn set_offline_render_options(&self, pre_fader: bool, include_inserts: bool) {
-        pinned(self).set_offline_render_options(pre_fader, include_inserts)
+        crate::engine_analysis_reads::set_offline_options(
+            self.get_core(),
+            pre_fader,
+            include_inserts,
+        );
     }
     pub fn get_project_layout_revision(&self) -> u64 {
         self.get_core().get_project_layout_revision()
