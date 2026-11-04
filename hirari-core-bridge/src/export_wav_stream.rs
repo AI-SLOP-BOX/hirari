@@ -1100,14 +1100,15 @@ impl Drop for StreamHandle {
 mod bounce_stream_tests {
     use super::*;
 
+    /// A distinct output path per call. Tests run in parallel threads and the
+    /// stream refuses to share a path with a live publication lock, so a clock
+    /// read that two threads share would fail one of them for no reason.
     fn temp_path(extension: &str) -> std::path::PathBuf {
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         std::env::temp_dir().join(format!(
             "hirari-bounce-stream-{}-{}.{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
+            SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             extension
         ))
     }

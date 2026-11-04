@@ -11,7 +11,6 @@
 #include <mutex>
 #include <new>
 #include "../rust_ffi.hpp"
-#include "../project_automation.hpp"
 
 namespace Hirari::Core::Engine {
 

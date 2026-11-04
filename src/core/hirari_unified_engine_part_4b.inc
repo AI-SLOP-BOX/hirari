@@ -1,18 +1,11 @@
-                if (stateIndex >= t->getPluginTypes().size()) break;
-                // Missing sandbox binaries intentionally leave a hole in the
-                // live chain; their state is retained in the serialized
-                // document but cannot be applied until the plugin is relinked.
-                (void)t->setPluginState(stateIndex, toBlob(ts.pluginStates[stateIndex].bytes));
-            }
-            for (size_t guiIndex = 0; guiIndex < ts.pluginGuiStates.size(); ++guiIndex) {
-                if (guiIndex >= t->getPluginTypes().size()) break;
-                (void)t->setPluginGuiState(guiIndex, toBlob(ts.pluginGuiStates[guiIndex].bytes));
-            }
-            for (size_t bypassIndex = 0; bypassIndex < ts.pluginBypass.size(); ++bypassIndex) {
-                if (bypassIndex >= t->getPluginTypes().size()) break;
-                (void)t->setPluginBypass(bypassIndex, ts.pluginBypass[bypassIndex] != 0);
-            }
             loadedTracks.push_back(t);
+        }
+
+        // Rust rebuilds each chain and curve set from the decoded document now
+        // that every provisional track has its stores. An insert the engine
+        // cannot create fails hydration, leaving the previous project published.
+        if (!::Hirari::Core::Bridge::native_project_hydrate_plugins(state, pluginTargets)) {
+            return false;
         }
         
         // 2. Hydrate Regions.

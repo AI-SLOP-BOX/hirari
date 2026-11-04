@@ -10,7 +10,6 @@
 #include <string_view>
 #include <type_traits>
 
-#include "project_automation.hpp"
 
 // Physical limits shared by the C++ engine and the Rust core. These mirror
 // `crate::dsp_limits` exactly; the two sides have to agree because a clamp on
@@ -1206,12 +1205,6 @@ static_assert(sizeof(HirariTimedParameterEvent) == 16);
 // state, sandbox identity, latency and diagnostics. C++ holds only the handle.
 extern "C" void* hirari_effect_chain_create();
 extern "C" void hirari_effect_chain_destroy(void* state);
-extern "C" bool hirari_effect_chain_add_builtin(
-    void* state, uint32_t plugin_type, bool bus, bool parallel);
-/// Adds an isolated worker and returns false with the failure text available
-/// through `hirari_effect_chain_last_sandbox_failure*` when it cannot start.
-extern "C" bool hirari_effect_chain_add_sandbox(
-    void* state, const uint8_t* path, size_t path_len);
 /// Removes one entry and issues a token addressing the detached node, which the
 /// chain keeps alive until it is restored or the chain is destroyed.
 extern "C" bool hirari_effect_chain_remove(
@@ -1221,15 +1214,11 @@ extern "C" bool hirari_effect_chain_restore(
     void* state, uint32_t index, uint32_t token, bool bypassed, bool parallel);
 extern "C" bool hirari_effect_chain_move(void* state, uint32_t from, uint32_t to);
 extern "C" uint32_t hirari_effect_chain_count(const void* state);
-// Plugin identity travels with the chain entry so ordering, removal and
-// restoration cannot desynchronise the type table from the processors.
-extern "C" uint32_t hirari_effect_chain_node_kind(const void* state, uint32_t index);
 /// Note-generating instrument count, read by the built-in-voice gate.
 extern "C" uint32_t hirari_effect_chain_midi_instrument_count(const void* state);
 extern "C" uint8_t hirari_effect_chain_last_sandbox_failure(const void* state);
 extern "C" const char* hirari_effect_chain_last_sandbox_failure_text(const void* state);
 extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
-extern "C" bool hirari_effect_chain_set_bypass(void* state, uint32_t index, bool bypassed);
 extern "C" bool hirari_effect_chain_set_sample_rate(
     void* state, double sample_rate, uint32_t block_size);
 extern "C" bool hirari_effect_chain_set_parameter(
@@ -1237,12 +1226,6 @@ extern "C" bool hirari_effect_chain_set_parameter(
 extern "C" float hirari_effect_chain_parameter(
     const void* state, uint32_t index, uint32_t parameter_id);
 extern "C" uint32_t hirari_effect_chain_parameter_count(const void* state, uint32_t index);
-extern "C" uint8_t* hirari_effect_chain_processor_state(
-    void* state, uint32_t index, size_t* out_len);
-extern "C" bool hirari_effect_chain_processor_state_restore(
-    void* state, uint32_t index, const uint8_t* data, size_t length);
-extern "C" bool hirari_effect_chain_processor_gui_state_restore(
-    void* state, uint32_t index, const uint8_t* data, size_t length);
 extern "C" void hirari_effect_chain_buffer_free(uint8_t* pointer, size_t length);
 extern "C" uint32_t hirari_effect_chain_total_latency_samples(const void* state);
 extern "C" uint64_t hirari_effect_chain_metric(const void* state, uint32_t metric);
@@ -1282,14 +1265,6 @@ extern "C" bool hirari_effect_chain_process_sandbox_block(
 extern "C" uint8_t* hirari_effect_chain_process_sandbox_midi_block(
     void* state, size_t slot, uint32_t frames, const uint8_t* midi_data,
     size_t midi_size, size_t* out_len);
-struct HirariPluginAutomationLaneView {
-    uint32_t processor_index;
-    uint32_t parameter_id;
-    const void* points;
-    size_t point_count;
-};
-static_assert(sizeof(HirariPluginAutomationLaneView) == 24,
-    "plugin automation lane view must match Rust's repr(C) layout");
 // Per-track name storage. Rust validates and holds the bytes; the engine keeps
 // only the handle, created with the track and destroyed with it.
 extern "C" void* hirari_track_name_store_create();
@@ -1305,10 +1280,6 @@ extern "C" bool hirari_track_automation_store_record(
     void* store, const void* recorder, uint32_t track_id,
     uint64_t sample_position, float volume, float pan);
 extern "C" uint32_t hirari_track_automation_store_flush_recorded(void* store);
-extern "C" void hirari_track_automation_store_set_points(
-    void* store, uint32_t kind, const void* points, size_t count);
-extern "C" void hirari_track_automation_store_set_plugin_lanes(
-    void* store, const HirariPluginAutomationLaneView* lanes, size_t count);
 /// The Rust runtime holds a track's realtime state and renders whole blocks.
 /// C++ binds the DSP handles once and keeps only the returned handle.
 using HirariTrackMidiPrepare = void (*)(void*, uint64_t, uint32_t, float*, float*);

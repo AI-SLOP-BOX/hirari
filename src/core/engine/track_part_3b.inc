@@ -18,28 +18,6 @@
         if (drained != 0) markProjectLayoutChanged();
         return drained;
     }
-    void setAutomationPoints(uint32_t kind, const AutomationList& points) {
-        static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) == 16);
-        invalidateFrozenForEdit();
-        hirari_track_automation_store_set_points(
-            m_automationStore, kind, points.data(), points.size());
-        markProjectLayoutChanged();
-    }
-    void setVolumeAutomation(const AutomationList& points) { setAutomationPoints(0, points); }
-    void setPanAutomation(const AutomationList& points) { setAutomationPoints(1, points); }
-    void setTrackDelayAutomation(const AutomationList& points) { setAutomationPoints(2, points); }
-    void setPluginAutomation(const PluginAutomationList& lanes) {
-        invalidateFrozenForEdit();
-        std::vector<HirariPluginAutomationLaneView> views;
-        views.reserve(lanes.size());
-        for (const auto& lane : lanes) {
-            views.push_back({lane.pluginIndex, lane.parameterId,
-                             lane.points.data(), lane.points.size()});
-        }
-        hirari_track_automation_store_set_plugin_lanes(
-            m_automationStore, views.data(), views.size());
-        markProjectLayoutChanged();
-    }
     bool canProcess(uint32_t sz) const {
         return hirari_audio_buffer_storage_samples(m_activeBuffer) >= sz;
     }

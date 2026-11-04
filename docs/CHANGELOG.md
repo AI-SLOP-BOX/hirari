@@ -37,6 +37,10 @@ production support.
 
 ### Fixed
 
+- The streaming WAV export tests no longer fail at random. Each call now takes
+  its own numbered temporary path; two tests running in parallel could draw the
+  same clock reading and one of them then tripped the stream's publication-lock
+  check against a path the other still held.
 - Loading a plugin in the isolated worker no longer fails as a handshake
   timeout on macOS. The worker sized the inherited shared-memory descriptor
   with `lseek(fd, 0, SEEK_END)`, and macOS rejects that call on a `shm_open`
@@ -74,6 +78,18 @@ production support.
 
 ### Changed
 
+- Rebuilding a saved project's inserts and curves is Rust's job now. The loader
+  hands `project_plugin_hydration.rs` each provisional track's own chain and
+  automation-store handles, and Rust walks the document's positional insert list
+  from them: `u32::MAX` marks the sandbox slot and consumes a path whether or not
+  the binary loads, paths left over after the markers are appended, a builtin the
+  engine cannot create fails the whole hydration, and per-insert state, GUI state
+  and bypass are applied only as far as the live chain reaches. The volume, pan
+  and delay curves and the plugin parameter lanes are published as one generation
+  each. The `toAutomation`, `toBlob` and `toPluginAutomation` conversions,
+  `Track`'s five curve setters and its add/get/set plugin wrappers, the chain and
+  store FFI declarations they called and the `ProjectAutomationPoint` transfer
+  header they existed to feed are deleted. C++ 6733 -> 6549 (-184).
 - Automation edits no longer call into C++. Every curve a track carries already
   lives in that track's Rust `track_automation_store`, so the edit host reads
   and replaces the volume, pan, delay and plugin-parameter lanes through a

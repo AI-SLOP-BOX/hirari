@@ -305,6 +305,7 @@ pub mod region_clip_edits;
 pub mod region_comp_ranges;
 pub mod region_edit_host;
 pub mod region_hydration;
+pub mod project_plugin_hydration;
 pub mod region_jobs;
 pub mod region_processing_history;
 pub mod region_mutations;

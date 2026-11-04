@@ -1,7 +1,6 @@
 // The ARUA project codec is Rust-owned; this generated header exposes the cxx
 // bridge types the contract uses to round-trip a project container.
 #include "hirari-core-bridge/src/lib.rs.h"
-#include "src/core/project_automation.hpp"
 #include "src/core/engine/track_freeze_manager.hpp"
 #include "src/core/rust_ffi.hpp"
 #include <atomic>

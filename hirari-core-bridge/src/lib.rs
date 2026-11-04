@@ -561,6 +561,18 @@ pub mod ffi {
         pub track: usize,
     }
 
+    /// One provisional track the loader rebuilds its plugin chain and curves
+    /// on: the document id and type plus the Rust stores the engine created for
+    /// it, opaque here.
+    #[allow(non_snake_case)]
+    #[derive(Clone, Copy, Default)]
+    pub struct NativeTrackStorages {
+        pub id: u32,
+        pub trackType: u32,
+        pub chain: usize,
+        pub automation: usize,
+    }
+
     extern "Rust" {
         /// Decodes an `ARUA` container. An unreadable or malformed file yields
         /// a default state with `valid == false`.
@@ -581,6 +593,13 @@ pub mod ffi {
             state: &mut NativeProjectState,
             tracks: &Vec<NativeTrackHandle>,
             project_sample_rate: f64,
+        ) -> bool;
+        /// Rebuilds each provisional track's plugin chain, curves and per-insert
+        /// state from the decoded document. False means the engine could not
+        /// create one of the saved inserts and hydration must abort.
+        fn native_project_hydrate_plugins(
+            state: &NativeProjectState,
+            tracks: &Vec<NativeTrackStorages>,
         ) -> bool;
 
         fn report_hirari_log(level: u32, msg: &str);
@@ -688,6 +707,7 @@ pub fn analysis_structure_sections(
 pub use native_project::{
     native_project_load, native_project_save, native_project_save_with_arrangement,
 };
+pub use project_plugin_hydration::native_project_hydrate_plugins;
 pub use region_hydration::native_project_hydrate_regions;
 
 include!("lib_runtime.rs");

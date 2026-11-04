@@ -41,13 +41,6 @@
         bool parallel = false;
     };
 
-    bool addPlugin(uint32_t pluginType) {
-        // Catalog lookup, construction and the operational check are all inside
-        // the Rust chain; an unknown type fails without touching the list.
-        // Buses share this chain and select the bus-side DSP variants.
-        return commitEditChange(
-            hirari_effect_chain_add_builtin(m_chain, pluginType, m_type == Type::Bus, false));
-    }
     bool removePlugin(uint32_t pluginIndex, PluginSnapshot* snapshot = nullptr) {
         bool bypassed = false;
         bool parallel = false;
@@ -65,12 +58,6 @@
     }
     bool movePlugin(uint32_t from, uint32_t to) {
         return commitEditChange(hirari_effect_chain_move(m_chain, from, to));
-    }
-    bool addSandboxedPlugin(const std::string& pluginPath) {
-        // Admission, duplicate-path rejection, the transport-retry budget and
-        // the scan-cache record all live in the Rust chain host.
-        return commitEditChange(hirari_effect_chain_add_sandbox(
-            m_chain, reinterpret_cast<const uint8_t*>(pluginPath.data()), pluginPath.size()));
     }
 
     // Control/test boundary for validating an isolated worker with a
@@ -107,30 +94,6 @@
         return m_lastNonFiniteSamples.load(std::memory_order_relaxed);
     }
     size_t getPluginCount() const { return hirari_effect_chain_count(m_chain); }
-    std::vector<uint32_t> getPluginTypes() const {
-        const uint32_t count = hirari_effect_chain_count(m_chain);
-        std::vector<uint32_t> types(count);
-        for (uint32_t index = 0; index < count; ++index)
-            types[index] = hirari_effect_chain_node_kind(m_chain, index);
-        return types;
-    }
-    std::vector<std::vector<uint8_t>> getPluginStates() const {
-        const uint32_t count = hirari_effect_chain_count(m_chain);
-        std::vector<std::vector<uint8_t>> states;
-        states.reserve(count);
-        for (uint32_t index = 0; index < count; ++index)
-            states.push_back(readChainState(index));
-        return states;
-    }
-    bool setPluginState(size_t pluginIndex, const std::vector<uint8_t>& state) {
-        return commitEditChange(hirari_effect_chain_processor_state_restore(
-            m_chain, static_cast<uint32_t>(pluginIndex), state.data(), state.size()));
-    }
-    bool setPluginGuiState(size_t pluginIndex, const std::vector<uint8_t>& state) {
-        return commitLayoutChange(hirari_effect_chain_processor_gui_state_restore(
-            m_chain, static_cast<uint32_t>(pluginIndex), state.data(), state.size()));
-    }
-
     std::string sandboxSlotPath(size_t slot) const {
         const size_t length = hirari_effect_chain_sandbox_slot_path(m_chain, slot, nullptr, 0);
         std::string path(length, '\0');
@@ -207,21 +170,8 @@
     virtual uint32_t getPluginParameterCount(uint32_t pluginIndex) const noexcept {
         return hirari_effect_chain_parameter_count(m_chain, pluginIndex);
     }
-    bool setPluginBypass(uint32_t pluginIndex, bool bypassed) {
-        return commitEditChange(hirari_effect_chain_set_bypass(m_chain, pluginIndex, bypassed));
-    }
     bool getPluginBypass(uint32_t pluginIndex) const {
         return hirari_effect_chain_bypass(m_chain, pluginIndex);
-    }
-
-private:
-    std::vector<uint8_t> readChainState(uint32_t index) const {
-        size_t length = 0;
-        uint8_t* data = hirari_effect_chain_processor_state(m_chain, index, &length);
-        if (!data) return {};
-        std::vector<uint8_t> state(data, data + length);
-        hirari_effect_chain_buffer_free(data, length);
-        return state;
     }
 
 public:

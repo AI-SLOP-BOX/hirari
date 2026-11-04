@@ -6,7 +6,6 @@
 #include "concurrency/audio_task_manager.hpp"
 
 #include <thread>
-#include "project_automation.hpp"
 #include <cstring>
 #include <cstdio>
 #include <algorithm>

@@ -17,4 +17,5 @@ include!("lib_tests_automation.rs");
 include!("lib_tests_automation_edit.rs");
 include!("lib_tests_note_edits.rs");
 include!("lib_tests_plugin_edit.rs");
+include!("lib_tests_plugin_hydration.rs");
 }
