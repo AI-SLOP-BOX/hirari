@@ -7,8 +7,9 @@
 //! block behind a single call.
 
 use crate::audio_buffer_ops::{
-    hirari_audio_buffer_render_frozen, hirari_audio_buffer_storage_array_write,
-    hirari_audio_buffer_storage_channels, hirari_audio_buffer_storage_samples,
+    hirari_audio_buffer_render_frozen, hirari_audio_buffer_storage_add_channels_from,
+    hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_channels,
+    hirari_audio_buffer_storage_samples,
 };
 use crate::channel_strip::hirari_channel_strip_reset;
 use crate::effect_chain_host::{
@@ -134,6 +135,81 @@ impl TrackRuntime {
     /// nothing, which is the same gate the C++ `canProcess` check applied.
     pub(crate) fn work(&self, frames: u32) -> Option<Tap> {
         self.window(self.work, frames)
+    }
+
+    /// The pre-fader tap: one Send edge's pre-fader source and the same buffer
+    /// the post-FX sidechain reads.
+    pub(crate) fn pre_fader(&self, frames: u32) -> Option<Tap> {
+        self.window(self.pre_fader, frames)
+    }
+
+    /// The pre-insert tap: the offline render tap and the pre-FX sidechain.
+    pub(crate) fn pre_insert(&self, frames: u32) -> Option<Tap> {
+        self.window(self.pre_insert, frames)
+    }
+
+    pub(crate) fn send_pre(&self, frames: u32) -> Option<Tap> {
+        self.window(self.send_pre, frames)
+    }
+
+    pub(crate) fn send_post(&self, frames: u32) -> Option<Tap> {
+        self.window(self.send_post, frames)
+    }
+
+    /// The work-buffer channel table one routing destination publishes.
+    pub(crate) fn work_channels(&self, frames: u32) -> (*const *mut f32, u32) {
+        self.tap(self.work, frames)
+    }
+
+    /// The manual timing offset the fanout delays this track's master route by.
+    pub(crate) fn delay_samples(&self) -> u32 {
+        self.track_delay_samples.load(Ordering::Relaxed)
+    }
+
+    /// Publishes this block's tempo and playback flag, then empties the work
+    /// buffer so upstream tracks can accumulate into it. A non-finite tempo
+    /// keeps the previous block's value instead of inventing 120 BPM.
+    pub(crate) fn stage(&self, frames: u32, bpm: f64, playing: bool) {
+        let bpm = if bpm.is_finite() && bpm > 0.0 {
+            bpm.clamp(1.0, 999.0)
+        } else {
+            f64::from_bits(self.transport_bpm.load(Ordering::Relaxed))
+        };
+        self.transport_bpm.store(bpm.to_bits(), Ordering::Relaxed);
+        self.transport_playing.store(playing, Ordering::Relaxed);
+        let (channels, channel_count, capacity) = channels_of(self.work);
+        if frames == 0 || channel_count == 0 {
+            return;
+        }
+        clear_planes(channels, channel_count, (frames as usize).min(capacity as usize));
+    }
+
+    /// Sums the live driver input into the track the monitor is routed to.
+    pub(crate) fn add_input(&self, left: *const f32, right: *const f32, frames: u32) -> bool {
+        let (channels, channel_count, capacity) = channels_of(self.work);
+        if frames == 0
+            || channels.is_null()
+            || left.is_null()
+            || right.is_null()
+            || channel_count == 0
+            || capacity < frames
+        {
+            return false;
+        }
+        unsafe {
+            hirari_audio_buffer_storage_add_channels_from(self.work.cast_const(), left, right, frames)
+        };
+        true
+    }
+
+    /// Runs the insert chain and output stage over the block that upstream
+    /// tracks already accumulated, without clearing it first.
+    pub(crate) fn process_accumulated(&self, frames: u32, playhead: u64) -> bool {
+        let (channels, channel_count, capacity) = channels_of(self.work);
+        if channels.is_null() || frames == 0 || channel_count < 2 || capacity < frames {
+            return false;
+        }
+        unsafe { self.process(self.work, frames, playhead, false) }
     }
 
     fn window(&self, handle: *mut c_void, frames: u32) -> Option<Tap> {

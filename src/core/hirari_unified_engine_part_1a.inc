@@ -45,8 +45,13 @@ void scheduleTimedKeySwitchOutputs(void* tempoState, Track* target, uint8_t arti
 void* engineTrackRuntime(void* track) {
     return static_cast<Track*>(track)->realtimeRuntime();
 }
-uint8_t engineTrackIsBus(void* track) {
-    return static_cast<Track*>(track)->getType() == Track::Bus ? 1u : 0u;
+void* engineTrackBusState(void* track) {
+    auto* target = static_cast<Track*>(track);
+    return target->getType() == Track::Bus
+        ? static_cast<BusTrack*>(target)->busStateHandle() : nullptr;
+}
+uint8_t engineTrackSolo(void* track) {
+    return static_cast<Track*>(track)->isSolo() ? 1u : 0u;
 }
 void engineTrackRecord(void* track, uint64_t playhead) {
     auto* target = static_cast<Track*>(track);
@@ -150,12 +155,12 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     // configuration mutex through a mutator.
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_masterLimiter = hirari_master_limiter_create(44'100.0);
-    static const HirariEngineBlockOps blockOps{&engineTrackRuntime, &engineTrackIsBus,
-                                               &engineTrackRecord};
+    static const HirariEngineBlockOps blockOps{&engineTrackRuntime, &engineTrackBusState,
+                                               &engineTrackSolo, &engineTrackRecord};
     m_engineBlock = hirari_engine_block_create(
         m_routingEngine, m_bounceSession, m_inputBlocks, m_controlRoomState,
         m_mixerTelemetry, m_metronome, m_masterLimiter, m_meterCore, m_tempoState,
-        &blockOps);
+        m_busSystem, m_sidechainEngine, &blockOps);
     hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 
@@ -355,175 +360,13 @@ HirariUnifiedEngine::HirariUnifiedEngine()
         // we would typically use an internal FIFO here. For the industrial foundation,
         // we ensure the processing logic is decoupled from the 'sz' parameter.
 
-        bool anySolo = false;
-        for (uint32_t i = 0; i < state.trackCount; ++i) {
-            if (state.activeTracks[i] && state.activeTracks[i]->isSolo()) {
-                anySolo = true;
-                break;
-            }
-        }
-        const bool offlineTargetActive = hirari_bounce_target_active(m_bounceSession) != 0;
-        const uint32_t offlineTargetId = hirari_bounce_target_id(m_bounceSession);
-        void* routing = m_routingEngine;
-        hirari_bus_system_clear(m_busSystem, sz);
-        for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-            if (state.activeTracks[i] && state.activeTracks[i]->canProcess(sz)) {
-                state.activeTracks[i]->setTransportState(
-                    hirari_tempo_map_get_current_bpm(m_tempoState),
-                    m_isPlaying.load(std::memory_order_relaxed));
-                state.activeTracks[i]->clearWorkBuffer(sz);
-            }
-        }
-
-        auto findTrack = [&](uint32_t id) -> Track* {
-            for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-                if (state.activeTracks[i] && state.activeTracks[i]->getId() == id) {
-                    return state.activeTracks[i];
-                }
-            }
-            return nullptr;
-        };
-
-        auto shouldProcess = [&](Track* track) noexcept {
-            if (!track) return false;
-            return hirari_routing_engine_should_process(
-                routing, track->getId(), offlineTargetActive, offlineTargetId, anySolo,
-                track->isSolo());
-        };
-
-        // Feedback edges are explicitly delayed by one engine block. They are
-        // injected before any graph node runs, so a cycle cannot recurse on
-        // the current block or allocate on the audio thread.
-        for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-            Track* track = state.activeTracks[i];
-            if (!track || !track->canProcess(sz)) continue;
-            auto& work = track->getWorkBuffer(sz);
-            hirari_routing_engine_inject_feedback(
-                routing, track->getId(), work.getWritePointer(0),
-                work.getWritePointer(1), sz);
-        }
-
-        // Feed the live driver input into the selected monitor track before
-        // graph processing. The staged planes were copied by the driver
-        // callback, so this path performs no allocation or locking.
-        const auto monitor = hirari_input_blocks_take_monitor(m_inputBlocks,
-                                                             m_inputMonitorBlockOffset, sz);
-        if (monitor.left) {
-            float* inputChannels[2] = { monitor.left, monitor.right };
-            AudioBuffer input;
-            input.wrapChannels(inputChannels, 2, sz);
-            if (Track* monitorTrack = findTrack(monitor.track_id);
-                monitorTrack && monitorTrack->canProcess(sz)) {
-                monitorTrack->addInput(input, sz);
-            }
-        }
-
-        // One callback-local scratch pair is reused for each sequential Send
-        // edge. Delay histories live in RoutingEngine and no buffer is
-        // allocated while the audio callback is running.
-        std::array<float, BusTrack::kMaxSamples> sendPdcLeft;
-        std::array<float, BusTrack::kMaxSamples> sendPdcRight;
-        std::array<HirariRoutingTrackDestination, kMaxTracks> routingDestinations{};
-        size_t routingDestinationCount = 0;
-        for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-            Track* track = state.activeTracks[i];
-            if (!track || !track->canProcess(sz)) continue;
-            auto& work = track->getWorkBuffer(sz);
-            auto* busTrack = dynamic_cast<BusTrack*>(track);
-            routingDestinations[routingDestinationCount++] = {
-                track->getId(),
-                static_cast<uint8_t>(shouldProcess(track)),
-                static_cast<uint8_t>(busTrack != nullptr),
-                work.getNumChannels(),
-                work.getArrayOfWritePointers(),
-                busTrack};
-        }
-        const auto addBusPreFx = +[](void* context, const float* left, const float* right,
-                                     uint32_t frames, float gain) -> bool {
-            auto* bus = static_cast<BusTrack*>(context);
-            return bus && bus->addPreFxInput(left, right, frames, gain);
-        };
-        auto routeToNextStages = [&](Track* source) {
-            if (!source || !source->canProcess(sz)) return;
-            auto& sourceBuffer = source->getWorkBuffer(sz);
-            // Cue buses are isolated monitor sources. Their Send inputs and
-            // insert chain run normally, but their signal is selected only at
-            // the Control Room boundary, never summed into the Main mix.
-            if (!offlineTargetActive && hirari_control_room_is_cue_bus(m_controlRoomState, source->getId())) return;
-            if (offlineTargetActive && offlineTargetId != 0 &&
-                source->getId() == offlineTargetId) {
-                const auto& targetBuffer = hirari_bounce_pre_fader(m_bounceSession)
-                    ? source->offlinePreFaderBuffer()
-                    : (!hirari_bounce_include_inserts(m_bounceSession)
-                        ? source->offlinePreInsertBuffer() : sourceBuffer);
-                if (targetBuffer.getNumSamples() < sz || targetBuffer.getNumChannels() < 2) return;
-                const float* sourceL = targetBuffer.getReadPointer(0, 0);
-                const float* sourceR = targetBuffer.getReadPointer(1, 0);
-                float* destL = output.getWritePointer(0, off);
-                float* destR = output.getWritePointer(1, off);
-                hirari_audio_add_sanitized_stereo(destL, destR, sourceL, sourceR, sz);
-                return;
-            }
-            const auto& sendPre = source->sendPreFaderBuffer();
-            const auto& sendPost = source->sendPostFaderBuffer();
-            const float* sendPreLeft = sendPre.getNumChannels() >= 2 && sendPre.getNumSamples() >= sz
-                ? sendPre.getReadPointer(0, 0) : nullptr;
-            const float* sendPreRight = sendPre.getNumChannels() >= 2 && sendPre.getNumSamples() >= sz
-                ? sendPre.getReadPointer(1, 0) : nullptr;
-            const float* sendPostLeft = sendPost.getNumChannels() >= 2 && sendPost.getNumSamples() >= sz
-                ? sendPost.getReadPointer(0, 0) : nullptr;
-            const float* sendPostRight = sendPost.getNumChannels() >= 2 && sendPost.getNumSamples() >= sz
-                ? sendPost.getReadPointer(1, 0) : nullptr;
-            hirari_routing_engine_process_track_fanout(
-                routing, source->getId(),
-                sourceBuffer.getArrayOfReadPointers(), sourceBuffer.getNumChannels(),
-                sendPreLeft, sendPreRight, sendPostLeft, sendPostRight,
-                source->getTrackDelaySamples(), routingDestinations.data(),
-                routingDestinationCount, output.getWritePointer(0, off),
-                output.getWritePointer(1, off), sendPdcLeft.data(), sendPdcRight.data(),
-                sz, BusTrack::kMaxSamples, addBusPreFx);
-        };
-
-        auto publishBusIfNeeded = [&](Track* track) {
-            if (auto* busTrack = dynamic_cast<BusTrack*>(track)) {
-                busTrack->publishPostFx(sz);
-            }
-        };
-
-        std::array<uint32_t, kMaxTracks> activeTrackIds{};
-        size_t activeTrackCount = 0;
-        for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-            if (state.activeTracks[i]) activeTrackIds[activeTrackCount++] = state.activeTracks[i]->getId();
-        }
-        std::array<uint32_t, kMaxTracks + Hirari::Core::Engine::RoutingEngine::kMaxNodes>
-            processOrder{};
-        uint32_t processOrderCount = 0;
-        if (!hirari_routing_engine_resolve_process_order(
-                routing, activeTrackIds.data(), activeTrackCount,
-                processOrder.data(), processOrder.size(), &processOrderCount)) {
-            processOrderCount = static_cast<uint32_t>(activeTrackCount);
-            std::copy_n(activeTrackIds.begin(), activeTrackCount, processOrder.begin());
-        }
-        for (uint32_t n = 0; n < processOrderCount; ++n) {
-            Track* track = findTrack(processOrder[n]);
-            if (!shouldProcess(track) || !track->canProcess(sz)) continue;
-            if (auto* busTrack = dynamic_cast<BusTrack*>(track)) {
-                busTrack->loadPreFxIntoWork(sz);
-            }
-            track->processAccumulated(sz, currentPlayhead);
-            publishBusIfNeeded(track);
-            {
-                const auto& source = track->getWorkBuffer(sz);
-                const auto& preFx = track->preFxSidechainBuffer();
-                const auto& postFx = track->postFxSidechainBuffer();
-                hirari_sidechain_engine_publish_source(
-                    m_sidechainEngine,
-                    track->getId(), preFx.getReadPointer(0), preFx.getReadPointer(1),
-                    postFx.getReadPointer(0), postFx.getReadPointer(1),
-                    source.getReadPointer(0), source.getReadPointer(1),
-                    sz, static_cast<uint32_t>(std::max(
-                        1.0, m_sampleRate.load(std::memory_order_acquire))),
-                    callbackGeneration);
-            }
-            routeToNextStages(track);
-        }
+        // Rust owns the graph half of the block: transport staging, the one
+        // block delayed feedback edges, the live driver input, the routing
+        // destination table and the process-order walk that fans every eligible
+        // track into its buses and the master window. The table and the Send PDC
+        // scratch are bound once with the block state, so no block allocates.
+        hirari_engine_block_route(
+            m_engineBlock, output.storageHandle(), off, sz, currentPlayhead,
+            m_sampleRate.load(std::memory_order_relaxed), m_inputMonitorBlockOffset,
+            callbackGeneration, m_isPlaying.load(std::memory_order_relaxed) ? 1u : 0u,
+            reinterpret_cast<void* const*>(state.activeTracks), state.trackCount);

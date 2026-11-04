@@ -8,6 +8,7 @@ const MAX_CHANNELS: usize = 32;
 const MAX_TRACK_DESTINATIONS: usize = 256;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct RoutingTrackDestination {
     pub id: u32,
     pub can_process: u8,

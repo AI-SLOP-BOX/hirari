@@ -14,6 +14,7 @@ use hirari_core_bridge::audio_buffer_ops::{
 use hirari_core_bridge::bounce_driver::{
     hirari_bounce_session_create, hirari_bounce_session_destroy,
 };
+use hirari_core_bridge::bus_audio::{hirari_bus_system_create, hirari_bus_system_destroy};
 use hirari_core_bridge::control_room_runtime::{
     hirari_control_room_state_create, hirari_control_room_state_destroy,
 };
@@ -36,6 +37,9 @@ use hirari_core_bridge::mixer_telemetry::{
 use hirari_core_bridge::routing_engine_core::{
     hirari_routing_engine_create, hirari_routing_engine_destroy,
 };
+use hirari_core_bridge::sidechain_manager::{
+    hirari_sidechain_engine_create, hirari_sidechain_engine_destroy,
+};
 use hirari_core_bridge::tempo::{hirari_tempo_map_create, hirari_tempo_map_destroy};
 use hirari_core_bridge::track_runtime::{
     hirari_track_runtime_create, hirari_track_runtime_destroy,
@@ -45,10 +49,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const FRAMES: u32 = 4;
 
-/// Stand-in for a C++ `Track`: the ops table is the only way the tail reaches it.
+/// Stand-in for a C++ `Track`: the ops table is the only way the block reaches it.
 struct FakeTrack {
     runtime: *mut c_void,
-    bus: bool,
+    bus: *mut c_void,
+    solo: bool,
     records: AtomicUsize,
 }
 
@@ -56,12 +61,12 @@ unsafe extern "C" fn runtime_of(track: *mut c_void) -> *mut c_void {
     unsafe { &*track.cast::<FakeTrack>() }.runtime
 }
 
-unsafe extern "C" fn is_bus_of(track: *mut c_void) -> u8 {
-    if unsafe { &*track.cast::<FakeTrack>() }.bus {
-        1
-    } else {
-        0
-    }
+unsafe extern "C" fn bus_state_of(track: *mut c_void) -> *mut c_void {
+    unsafe { &*track.cast::<FakeTrack>() }.bus
+}
+
+unsafe extern "C" fn solo_of(track: *mut c_void) -> u8 {
+    u8::from(unsafe { &*track.cast::<FakeTrack>() }.solo)
 }
 
 unsafe extern "C" fn record_of(track: *mut c_void, _playhead: u64) {
@@ -103,8 +108,8 @@ struct Engine {
     work: Vec<*mut c_void>,
     runtime: Vec<*mut c_void>,
     /// `[routing, bounce, input blocks, control room, mixer telemetry,
-    /// metronome, limiter, meter, tempo]`.
-    borrowed: [*mut c_void; 9],
+    /// metronome, limiter, meter, tempo, bus system, sidechain engine]`.
+    borrowed: [*mut c_void; 11],
 }
 
 impl Engine {
@@ -115,14 +120,15 @@ impl Engine {
             tracks: Vec::new(),
             work: Vec::new(),
             runtime: Vec::new(),
-            borrowed: [std::ptr::null_mut(); 9],
+            borrowed: [std::ptr::null_mut(); 11],
         }
     }
 
     fn bind(&mut self) -> &mut Self {
         let ops = HirariEngineBlockOps {
             runtime: Some(runtime_of),
-            is_bus: Some(is_bus_of),
+            bus_state: Some(bus_state_of),
+            solo: Some(solo_of),
             record: Some(record_of),
         };
         self.borrowed = unsafe {
@@ -136,6 +142,8 @@ impl Engine {
                 hirari_master_limiter_create(44_100.0),
                 hirari_master_meter_create(44_100.0),
                 hirari_tempo_map_create(),
+                hirari_bus_system_create(),
+                hirari_sidechain_engine_create(),
             ]
         };
         let borrowed = self.borrowed;
@@ -150,6 +158,8 @@ impl Engine {
                 borrowed[6],
                 borrowed[7],
                 borrowed[8],
+                borrowed[9],
+                borrowed[10],
                 &ops,
             )
         };
@@ -170,7 +180,8 @@ impl Engine {
         };
         let track = Box::into_raw(Box::new(FakeTrack {
             runtime,
-            bus: false,
+            bus: std::ptr::null_mut(),
+            solo: false,
             records: AtomicUsize::new(0),
         }));
         self.work.push(work);
@@ -237,9 +248,9 @@ impl Drop for Engine {
             for handle in self.tracks.drain(..) {
                 drop(Box::from_raw(handle.cast::<FakeTrack>()));
             }
-            // The tail borrowed all of these, so it is already retired.
+            // The block state borrowed all of these, so it is already retired.
             if !self.state.is_null() {
-                let [routing, bounce, input, control_room, mixer, metronome, limiter, meter, tempo] =
+                let [routing, bounce, input, control_room, mixer, metronome, limiter, meter, tempo, bus_system, sidechain] =
                     self.borrowed;
                 hirari_routing_engine_destroy(routing);
                 hirari_bounce_session_destroy(bounce);
@@ -250,6 +261,8 @@ impl Drop for Engine {
                 hirari_master_limiter_destroy(limiter);
                 hirari_master_meter_destroy(meter);
                 hirari_tempo_map_destroy(tempo);
+                hirari_bus_system_destroy(bus_system);
+                hirari_sidechain_engine_destroy(sidechain);
             }
             hirari_audio_buffer_storage_destroy(self.output);
         }

@@ -25,6 +25,10 @@ public:
     void resolveBus(void* busState) noexcept { m_busState = busState; }
     uint32_t busId() const noexcept { return m_busId; }
 
+    /// The Rust engine walk stages this bus's pre-FX input and post-FX output
+    /// through the bus handle directly, so it needs the pointer, not the type.
+    void* busStateHandle() const noexcept { return m_busState; }
+
     bool addPreFxInput(const float* left, const float* right,
                        uint32_t len, float gain) noexcept {
         if (!m_busState || len == 0 || len > kMaxSamples) return false;

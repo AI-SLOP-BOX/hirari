@@ -238,7 +238,6 @@ extern "C" uint32_t hirari_control_room_active_cue_bus(const void* state);
 extern "C" float hirari_control_room_active_cue_gain(const void* state);
 extern "C" uint32_t hirari_control_room_active_cue_output(const void* state);
 extern "C" bool hirari_control_room_active_cue_click(const void* state);
-extern "C" bool hirari_control_room_is_cue_bus(const void* state, uint32_t id);
 extern "C" bool hirari_bus_audio_accumulate(
     void* state, const float* input_left, const float* input_right,
     uint32_t frames, float gain);
@@ -255,7 +254,6 @@ extern "C" bool hirari_bus_system_register(void* state, uint32_t bus_id);
 extern "C" bool hirari_bus_system_reconcile(
     void* state, const bool* active, uint32_t count);
 extern "C" void hirari_bus_system_reset(void* state);
-extern "C" void hirari_bus_system_clear(const void* state, uint32_t frames);
 extern "C" void* hirari_audio_buffer_storage_create();
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
 extern "C" uint8_t hirari_audio_buffer_storage_reserve_buffer(
@@ -944,18 +942,9 @@ extern "C" void hirari_tempo_map_set_current_bpm(void* state, float bpm);
 // that method straight off the engine singleton.
 extern "C" bool hirari_tempo_edit_set_tempo(void* tempo, void* undo, const void* log,
                                              uint64_t playhead, double sample_rate, float bpm);
-// Fanout descriptors consumed by the routing engine handle. The graph, gain,
-// feedback, send-PDC and topology stores are reached only through
-// hirari_routing_engine_* (routing_engine_core.rs).
-struct HirariRoutingTrackDestination {
-    uint32_t id;
-    uint8_t can_process;
-    uint8_t is_bus;
-    uint32_t channel_count;
-    float* const* work_channels;
-    void* bus_context;
-};
-using HirariBusPreFxAdd = bool (*)(void*, const float*, const float*, uint32_t, float);
+// The graph, gain, feedback, send-PDC and topology stores are reached only
+// through hirari_routing_engine_* (routing_engine_core.rs). The block walk and
+// its fanout descriptors live in Rust (engine_block_host.rs).
 
 // Sidechain engine handle (hirari-core-bridge/src/sidechain_manager.rs).
 // One handle owns the publication gate, the writer lock and the captured
@@ -1015,31 +1004,11 @@ extern "C" void hirari_routing_connection_array_free(void* records, size_t count
 extern "C" void* hirari_routing_engine_remove_feedback_for_node(
     void* state, uint32_t node, size_t* count);
 extern "C" void hirari_routing_feedback_array_free(void* records, size_t count);
-extern "C" bool hirari_routing_engine_should_process(
-    const void* state, uint32_t source, bool offline_target_active, uint32_t offline_target,
-    bool any_solo, bool source_solo);
 extern "C" bool hirari_routing_engine_add_feedback(
     void* state, uint32_t source, uint32_t destination, float gain);
 extern "C" bool hirari_routing_engine_build(void* state);
-extern "C" void hirari_routing_engine_inject_feedback(
-    const void* state, uint32_t destination, float* left, float* right, uint32_t frames);
-extern "C" void hirari_routing_engine_capture_feedback(
-    void* state, uint32_t source, const float* left, const float* right, uint32_t frames);
 extern "C" void hirari_routing_engine_enter_send_pdc_read(void* state);
 extern "C" void hirari_routing_engine_leave_send_pdc_read(void* state);
-extern "C" bool hirari_routing_engine_resolve_process_order(
-    const void* state, const uint32_t* active_ids, size_t active_count,
-    uint32_t* output, size_t output_capacity, uint32_t* count_out);
-extern "C" void hirari_routing_engine_process_track_fanout(
-    const void* state, uint32_t source_id,
-    const float* const* source_channels, uint32_t source_channel_count,
-    const float* source_send_pre_left, const float* source_send_pre_right,
-    const float* source_send_post_left, const float* source_send_post_right,
-    uint32_t source_track_delay_samples,
-    const HirariRoutingTrackDestination* destinations, size_t destination_count,
-    float* master_left, float* master_right, float* send_pdc_left,
-    float* send_pdc_right, uint32_t frames, uint32_t max_send_frames,
-    HirariBusPreFxAdd bus_add);
 
 // Routing edit host bridge.
 //
@@ -1551,14 +1520,20 @@ struct HirariEngineTelemetry {
 };
 struct HirariEngineBlockOps {
     void* (*runtime)(void* track);
-    uint8_t (*is_bus)(void* track);
+    void* (*bus_state)(void* track);
+    uint8_t (*solo)(void* track);
     void (*record)(void* track, uint64_t playhead);
 };
 extern "C" void* hirari_engine_block_create(
     void* routing, void* bounce, void* input_blocks, void* control_room,
     void* mixer_telemetry, void* metronome, void* master_limiter, void* meter,
-    void* tempo, const HirariEngineBlockOps* ops);
+    void* tempo, void* bus_system, void* sidechain,
+    const HirariEngineBlockOps* ops);
 extern "C" void hirari_engine_block_destroy(void* state);
+extern "C" void hirari_engine_block_route(
+    void* state, void* output, uint32_t off, uint32_t frames, uint64_t playhead,
+    double sample_rate, uint32_t monitor_offset, uint64_t generation,
+    uint8_t playing, void* const* active_tracks, uint32_t track_count);
 extern "C" void hirari_engine_block_finish(
     void* state, void* output, uint32_t off, uint32_t frames, uint64_t playhead,
     double sample_rate, float master_gain, uint8_t playing, uint8_t auto_record,

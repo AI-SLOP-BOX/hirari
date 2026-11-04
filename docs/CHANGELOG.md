@@ -74,6 +74,18 @@ production support.
 
 ### Changed
 
+- Rust owns the engine's graph walk. `hirari_engine_block_route`
+  (`hirari-core-bridge/src/engine_block_host.rs`) now stages every track's block,
+  injects the one-block delayed feedback edges, feeds the live driver input,
+  publishes the routing destination table and walks the resolved process order --
+  loading each bus's pre-FX stage, running the track runtime, publishing its
+  post-FX and sidechain taps and fanning it into its buses and the master window.
+  The Send-PDC scratch, destination table and process-order buffer bind once with
+  the block state, so the walk allocates nothing; `HirariUnifiedEngine` keeps only
+  the call and the four operations a `Track` handle cannot expose (runtime, bus
+  state, solo, armed recorder). `tests/engine_block_graph_contract.rs` pins
+  staging, solo gating, capacity skipping, feedback timing and that a pre-fader
+  and a post-fader Send read their own taps. C++ 8164 -> 7986 (-178).
 - Rust owns the engine's block tail. `EngineBlockState`
   (`hirari-core-bridge/src/engine_block_host.rs`) now captures feedback, publishes
   per-track metering, renders the metronome, scales and limits the master, measures
