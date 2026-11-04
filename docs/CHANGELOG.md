@@ -91,7 +91,7 @@ production support.
   getters; `analysis_bridge_accessors.cpp`, the C++ `HirariEngineTelemetry`
   mirror and the peaks-owned forwarders are deleted, and
   `lib_tests_analysis_reads.rs` covers the reads and the song-structure fallback
-  against a real engine. C++ 5384 -> 5145 (-239).
+  against a real engine. C++ 5384 -> 5152 (-232).
 - Sidechain link registration now runs entirely from Rust.
   `routing_edit_host.rs` derives the registration inputs itself: the engine block
   state records the device format inside `hirari_engine_block_prepare_tracks`
