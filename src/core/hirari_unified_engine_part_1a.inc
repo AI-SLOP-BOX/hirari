@@ -20,27 +20,7 @@ std::vector<RoutingEngine::FeedbackConnection> takeRoutingFeedback(void* records
     return out;
 }
 
-// Emits one articulation's timed key-switch events as scheduled note-offs.
-// `transition` selects the pre-note-on transition set; the tempo mapping stays
-// here because the Rust side has no access to the owned tempo state.
-void scheduleTimedKeySwitchOutputs(void* tempoState, Track* target, uint8_t articulationId,
-                                   bool transition, double startBeat, double sampleRate,
-                                   uint64_t offset) {
-    const auto emit = [tempoState, target, startBeat, sampleRate, offset](
-                          uint8_t outputChannel, uint8_t outputPitch,
-                          uint32_t lengthTicks) {
-        const double endBeat = startBeat + static_cast<double>(lengthTicks) / 960.0;
-        const uint64_t endSample = hirari_tempo_map_beats_to_samples(
-            tempoState, endBeat, sampleRate);
-        (void)target->scheduleExpressionNoteOff(outputChannel, outputPitch, endSample, offset);
-    };
-    if (transition)
-        target->forEachTimedTransitionKeySwitchOutput(articulationId, emit);
-    else
-        target->forEachTimedKeySwitchOutput(articulationId, emit);
-}
-
-// The three track reads the Rust block tail cannot make through a handle
+// The track reads the Rust engine block cannot make through a handle
 // (engine_block_host.rs). A bus is the track type, not a downcast.
 void* engineTrackRuntime(void* track) {
     return static_cast<Track*>(track)->realtimeRuntime();
@@ -56,6 +36,28 @@ uint8_t engineTrackSolo(void* track) {
 void engineTrackRecord(void* track, uint64_t playhead) {
     auto* target = static_cast<Track*>(track);
     if (target->isRecordArmed()) target->recordCurrentState(playhead);
+}
+uint8_t engineTrackMidiInput(void* track) {
+    const auto type = static_cast<const Track*>(track)->getType();
+    return type == Track::Midi || type == Track::Instrument ? 1u : 0u;
+}
+void* engineTrackArticulation(void* track) {
+    return static_cast<Track*>(track)->articulationStateHandle();
+}
+void* engineTrackPluginMidi(void* track) {
+    return static_cast<Track*>(track)->pluginMidiHandle();
+}
+void engineTrackSetVolume(void* track, float value) {
+    static_cast<Track*>(track)->setVolume(value);
+}
+void engineTrackSetPan(void* track, float value) {
+    static_cast<Track*>(track)->setPan(value);
+}
+void engineTrackSetMute(void* track, uint8_t value) {
+    static_cast<Track*>(track)->setMuted(value != 0);
+}
+void engineTrackSetSolo(void* track, uint8_t value) {
+    static_cast<Track*>(track)->setSolo(value != 0);
 }
 }  // namespace
 
@@ -121,7 +123,7 @@ void HirariUnifiedEngine::apply_config(const EngineConfig& cfg) {
 
 void HirariUnifiedEngine::shutdown() {
     const bool wasShutdown = m_isShutdown.exchange(true, std::memory_order_acq_rel);
-    m_isPlaying.store(false, std::memory_order_release);
+    hirari_engine_block_set_playing(m_engineBlock, 0);
     waitForAudioCallbacks();
     // Shutdown must cancel offline work before joining it.  Joining a render
     // that is still publishing blocks can otherwise keep app teardown alive
@@ -141,9 +143,7 @@ void HirariUnifiedEngine::shutdown() {
     mark_project_layout_changed();
 }
 
-HirariUnifiedEngine::HirariUnifiedEngine()
-    : m_playhead(0)
-    , m_loopEnabled(false) {
+HirariUnifiedEngine::HirariUnifiedEngine() {
     m_midiSnapshotStore = hirari_midi_snapshot_store_create();
     m_midiPlaybackClock = hirari_midi_playback_clock_create();
     m_engineRings = hirari_engine_rings_create();
@@ -155,218 +155,43 @@ HirariUnifiedEngine::HirariUnifiedEngine()
     // configuration mutex through a mutator.
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_masterLimiter = hirari_master_limiter_create(44'100.0);
-    static const HirariEngineBlockOps blockOps{&engineTrackRuntime, &engineTrackBusState,
-                                               &engineTrackSolo, &engineTrackRecord};
-    m_engineBlock = hirari_engine_block_create(
-        m_routingEngine, m_bounceSession, m_inputBlocks, m_controlRoomState,
-        m_mixerTelemetry, m_metronome, m_masterLimiter, m_meterCore, m_tempoState,
-        m_busSystem, m_sidechainEngine, &blockOps);
+    static const HirariEngineBlockOps blockOps{
+        &engineTrackRuntime,     &engineTrackBusState, &engineTrackSolo,
+        &engineTrackRecord,      &engineTrackMidiInput,
+        &engineTrackArticulation, &engineTrackPluginMidi,
+        &engineTrackSetVolume,   &engineTrackSetPan,
+        &engineTrackSetMute,     &engineTrackSetSolo};
+    const HirariEngineBlockHandles blockHandles{
+        m_routingEngine, m_trackTable, m_bounceSession, m_inputBlocks,
+        m_controlRoomState, m_mixerTelemetry, m_metronome, m_masterLimiter,
+        m_meterCore, m_tempoState, m_busSystem, m_sidechainEngine,
+        m_engineRings, m_midiPlaybackClock, m_midiSnapshotStore,
+        m_previewSynthState, m_previewSampler, m_mpeState, m_macroControl};
+    m_engineBlock = hirari_engine_block_create(blockHandles, &blockOps);
     hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 
     void HirariUnifiedEngine::processBlock(AudioBuffer& output, uint32_t off, uint32_t sz) {
-        if (sz == 0 || output.getNumChannels() < 2 || off >= output.getNumSamples()) {
-            if (sz != 0 && off < output.getNumSamples())
-                output.clear(off, std::min(sz, output.getNumSamples() - off));
-            return;
-        }
-        if (sz > HirariUnifiedEngine::kMaxAudioBlockSize) {
-            output.clear(off, std::min(sz, output.getNumSamples() - off));
-            return;
-        }
-    sz = std::min(sz, output.getNumSamples() - off);
-    if (m_audioConfigTransition.load(std::memory_order_acquire) &&
-        !hirari_bounce_offline_thread()) {
-        output.clear(off, sz);
-        return;
-    }
-        const uint64_t threadToken = hirari_callback_thread_token();
-        RoutingEngine::SendPdcReadGuard sendPdcReadGuard(m_routingEngine);
-        if (hirari_bounce_offline_blocks(m_bounceSession, threadToken)) {
-            output.clear(off, sz);
-            return;
-        }
+        // Rust owns the whole block around this device buffer: the gates that
+        // decide whether it renders at all, the cycle wrap, the command drain,
+        // the timeline MIDI staging into each track and the built-in preview
+        // voices; then the graph walk and the post-graph tail that advances the
+        // playhead it holds. Only the FPU denormal mode and the two scalars that
+        // stay control-side are the engine's own.
         ScopedDenormalGuard guard;
-        if (m_isShutdown.load(std::memory_order_acquire)) {
-            output.clear(off, sz);
+        uint32_t frames = 0;
+        if (hirari_engine_block_begin(
+                m_engineBlock, output.storageHandle(), off, sz,
+                m_sampleRate.load(std::memory_order_relaxed),
+                m_isShutdown.load(std::memory_order_acquire) ? 1u : 0u,
+                &frames) == 0)
             return;
-        }
-        // Hot-swap quiesce: bounded backoff (max 200 x 50µs = 10ms)
-        // Tight spin avoided: background daemon clears flag in <5ms by design.
-        if (hirari_hot_swap_default_quiesce_requested()) {
-            hirari_hot_swap_default_acknowledge();
-            // Never sleep or spin on the audio thread. The next block will see
-            // the request again if the structural transaction is still active.
-            output.clear(off, sz);
-            return;
-        }
+        hirari_engine_block_route(m_engineBlock, output.storageHandle(), off, frames,
+                                  m_sampleRate.load(std::memory_order_relaxed));
+        hirari_engine_block_finish(
+            m_engineBlock, output.storageHandle(), off, frames,
+            m_sampleRate.load(std::memory_order_relaxed),
+            m_masterGain.load(std::memory_order_acquire),
+            m_autoRecordMode.load(std::memory_order_relaxed) > 0 ? 1u : 0u);
+    }
 
-        // INDUSTRIAL: Sovereign Memory Reset
-        hirari_forensic_scratchpad_reset();
-
-        uint64_t currentPlayhead = m_playhead.load(std::memory_order_relaxed);
-        const uint64_t cycleStart = m_cycleStart.load(std::memory_order_acquire);
-        const uint64_t cycleEnd = m_cycleEnd.load(std::memory_order_acquire);
-        if (m_loopEnabled.load(std::memory_order_acquire)
-            && cycleEnd > cycleStart
-            && currentPlayhead >= cycleEnd) {
-            currentPlayhead = cycleStart;
-            m_playhead.store(cycleStart, std::memory_order_relaxed);
-        }
-        const uint64_t callbackGeneration = m_audioConfigGeneration.load(std::memory_order_acquire);
-        const auto state = trackView(m_trackTable);
-        if (state.audioConfigGeneration != callbackGeneration && !hirari_bounce_offline_thread()) {
-            // Structural/configuration publication is double-buffered.  Do
-            // not process a state prepared for a different device format;
-            // the next published state will carry the current generation.
-            output.clear(off, sz);
-            return;
-        }
-        if (m_previewVoicesNeedReset.exchange(false, std::memory_order_acq_rel)) {
-            hirari_preview_synth_reset(m_previewSynthState);
-            for (auto& channel : m_previewFallbackActiveNotes)
-                std::fill(std::begin(channel), std::end(channel), 0u);
-        }
-        for (uint32_t i = 0; i < state.trackCount && i < kMaxTracks; ++i) {
-            if (state.activeTracks[i]) state.activeTracks[i]->clearMidiInput();
-        }
-        HirariEngineCommandRecord command{};
-        while (hirari_engine_command_ring_pop(m_engineRings, &command)) {
-            // A command may have waited in the lock-free queue while the
-            // control thread rebuilt the audio state. Never apply it to a
-            // different device configuration.
-            if (command.expectedAudioGeneration != callbackGeneration) continue;
-            if (command.tid >= kMaxTrackMap) continue;
-            Track* target = state.trackMap[command.tid];
-            if (!target) continue;
-            float value = 0.0f;
-            switch (hirari_engine_audio_command(
-                        static_cast<uint32_t>(command.type), command.val, &value)) {
-                case 1: target->setVolume(value); break;   // SetVolume
-                case 2: target->setPan(value); break;      // SetPan
-                case 3: target->setMuted(value >= 0.5f); break;  // SetMute
-                case 4: target->setSolo(value >= 0.5f); break;   // SetSolo
-                default: break;
-            }
-        }
-        // Keep the device callback primed while stopped, but do not traverse
-        // the full graph when no preview or offline render owns the path.
-        // Command mutations are deliberately drained first so fader, pan,
-        // mute, and solo edits remain visible immediately while stopped.
-        const bool previewActive = hirari_preview_sampler_is_active(m_previewSampler);
-        const bool midiPanicPending =
-            hirari_midi_playback_panic_pending(m_midiPlaybackClock);
-        if (!hirari_bounce_offline_engaged(m_bounceSession) &&
-            !m_isPlaying.load(std::memory_order_acquire) &&
-            !m_testTone.load(std::memory_order_relaxed) &&
-            !previewActive && !midiPanicPending) {
-            output.clear(off, sz);
-            return;
-        }
-        output.clear(off, sz);
-        m_blockMidi.clear();
-        {
-            const bool midiPlaybackActive = hirari_bounce_offline_engaged(m_bounceSession) ||
-                m_isPlaying.load(std::memory_order_acquire);
-            if (currentPlayhead > std::numeric_limits<uint64_t>::max() - sz) {
-                output.clear(off, sz);
-                m_audioRangeOverflow.store(true, std::memory_order_release);
-                return;
-            }
-            using AudioState = std::remove_reference_t<decltype(state)>;
-            struct MidiBlockContext {
-                HirariUnifiedEngine* engine;
-                AudioState* state;
-            } midiContext{this, &state};
-            (void)hirari_midi_playback_prepare_block(
-                m_midiPlaybackClock, m_midiSnapshotStore, currentPlayhead, sz,
-                midiPlaybackActive ? 1 : 0, &midiContext,
-                +[](void* opaque) {
-                    auto& context = *static_cast<MidiBlockContext*>(opaque);
-                    hirari_preview_synth_reset(context.engine->m_previewSynthState);
-                    for (auto& channel : context.engine->m_previewFallbackActiveNotes)
-                        std::fill(std::begin(channel), std::end(channel), 0u);
-                    for (uint32_t i = 0; i < context.state->trackCount && i < kMaxTracks; ++i) {
-                        Track* track = context.state->activeTracks[i];
-                        if (track && (track->getType() == Track::Midi ||
-                                      track->getType() == Track::Instrument))
-                            track->addMidiInputAllNotesOff(0);
-                    }
-                },
-                +[](void* opaque, const HirariScheduledMidiNote* rawNote,
-                    uint64_t offset, uint8_t noteOff) {
-                    auto& context = *static_cast<MidiBlockContext*>(opaque);
-                    auto& engine = *context.engine;
-                    const auto& note = *reinterpret_cast<const ScheduledMidiNote*>(rawNote);
-                    const auto channel = static_cast<uint8_t>(note.midiChannel + 1);
-                    Track* target = note.trackId < kMaxTrackMap
-                        ? context.state->trackMap[note.trackId] : nullptr;
-                    if (noteOff != 0) {
-                        if (target)
-                            target->addMidiInputNoteOff(channel, note.pitch, offset,
-                                                        note.articulationId);
-                        auto& fallback = engine.m_previewFallbackActiveNotes
-                            [note.midiChannel][note.pitch];
-                        if (fallback > 0 && engine.m_blockMidi.remainingCapacity() > 0) {
-                            engine.m_blockMidi.addNoteOff(channel, note.pitch, offset);
-                            --fallback;
-                        }
-                        return;
-                    }
-                    if (target) {
-                        const double sampleRate = std::max(
-                            1.0, engine.m_sampleRate.load(std::memory_order_relaxed));
-                        const double startBeat = hirari_tempo_map_samples_to_beats(
-                            engine.m_tempoState, note.startSample, sampleRate);
-                        scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
-                                                      note.articulationId, true, startBeat,
-                                                      sampleRate, offset);
-                        target->addMidiInputNoteOn(channel, note.pitch, note.velocity,
-                                                   offset, note.articulationId);
-                        scheduleTimedKeySwitchOutputs(engine.m_tempoState, target,
-                                                      note.articulationId, false, startBeat,
-                                                      sampleRate, offset);
-                    } else if (engine.m_blockMidi.remainingCapacity() > 0) {
-                        engine.m_blockMidi.addNoteOn(channel, note.pitch, note.velocity, offset);
-                        ++engine.m_previewFallbackActiveNotes[note.midiChannel][note.pitch];
-                    }
-                });
-            m_blockMidi.sort();
-        }
-        hirari_midi_process_mpe(m_mpeState, m_blockMidi.getEvents(), m_blockMidi.size());
-        hirari_midi_apply_articulations_from_state(
-            m_mpeState, m_blockMidi.getMutableEvents(), m_blockMidi.size());
-
-        // Deterministic built-in preview instrument. This is intentionally a
-        // small built-in voice so MIDI playback can be verified without plugins.
-        const double sr = std::max(1.0, m_sampleRate.load(std::memory_order_relaxed));
-        hirari_preview_synth_process(m_previewSynthState, m_blockMidi.getEvents(),
-            m_blockMidi.size(), output.getWritePointer(0, off),
-            output.getWritePointer(1, off), sz, currentPlayhead, sr, m_macroControl);
-        // One-shot preview sampler. Rust owns the published buffer, the
-        // trigger/playing flags and the cursor; the callback only renders.
-        hirari_preview_sampler_render(m_previewSampler, sr, output.getWritePointer(0, off),
-                                      output.getWritePointer(1, off), sz);
-
-        if (m_testTone.load(std::memory_order_relaxed)) {
-            const double sr = m_sampleRate.load(std::memory_order_relaxed);
-            (void)hirari_audio_test_tone_render(
-                output.getWritePointer(0, off), output.getWritePointer(1, off),
-                sz, currentPlayhead, sr);
-        }
-
-        // INDUSTRIAL: HYBRID BUFFERING LOOP
-        // If the hardware buffer (sz) is smaller than the optimized engine block (1024),
-        // we would typically use an internal FIFO here. For the industrial foundation,
-        // we ensure the processing logic is decoupled from the 'sz' parameter.
-
-        // Rust owns the graph half of the block: transport staging, the one
-        // block delayed feedback edges, the live driver input, the routing
-        // destination table and the process-order walk that fans every eligible
-        // track into its buses and the master window. The table and the Send PDC
-        // scratch are bound once with the block state, so no block allocates.
-        hirari_engine_block_route(
-            m_engineBlock, output.storageHandle(), off, sz, currentPlayhead,
-            m_sampleRate.load(std::memory_order_relaxed), m_inputMonitorBlockOffset,
-            callbackGeneration, m_isPlaying.load(std::memory_order_relaxed) ? 1u : 0u,
-            reinterpret_cast<void* const*>(state.activeTracks), state.trackCount);

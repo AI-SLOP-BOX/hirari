@@ -41,7 +41,7 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             out->sampleRate = static_cast<uint32_t>(std::max(
                 1.0, engine->m_sampleRate.load(std::memory_order_acquire)));
             out->generation = std::max<uint64_t>(
-                1, engine->m_audioConfigGeneration.load(std::memory_order_acquire));
+                1, hirari_engine_block_generation(engine->m_engineBlock));
             Track* source = engine->findTrackLocked(sourceId);
             Track* destination = engine->findTrackLocked(destId);
             out->sourceFound = source != nullptr;

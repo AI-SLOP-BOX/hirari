@@ -100,13 +100,13 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
         },
         [](void* host, uint64_t* playhead, uint8_t* playing) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            *playhead = engine->m_playhead.load(std::memory_order_acquire);
-            *playing = engine->m_isPlaying.load(std::memory_order_acquire) ? 1 : 0;
+            *playhead = hirari_engine_block_playhead(engine->m_engineBlock);
+            *playing = hirari_engine_block_is_playing(engine->m_engineBlock);
         },
         [](void* host, uint64_t playhead, uint8_t playing) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            engine->m_playhead.store(playhead, std::memory_order_release);
-            engine->m_isPlaying.store(playing != 0, std::memory_order_release);
+            hirari_engine_block_set_playhead(engine->m_engineBlock, playhead);
+            hirari_engine_block_set_playing(engine->m_engineBlock, playing);
         },
     };
     return &ops;

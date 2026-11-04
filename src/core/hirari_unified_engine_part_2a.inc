@@ -14,7 +14,7 @@ void HirariUnifiedEngine::set_preview_sample(const float* samples, size_t count,
     }
     // Retired generations are reclaimed only while the callback is quiescent,
     // so a running preview never has its buffer freed underneath it.
-    if (!m_isPlaying.load(std::memory_order_acquire)) {
+    if (!hirari_engine_block_is_playing(m_engineBlock)) {
         hirari_preview_sampler_clear(m_previewSampler);
         waitForAudioCallbacks();
         hirari_preview_sampler_reclaim(m_previewSampler);
@@ -24,19 +24,17 @@ void HirariUnifiedEngine::set_preview_sample(const float* samples, size_t count,
 
 void HirariUnifiedEngine::clear_preview_sample() {
     hirari_preview_sampler_clear(m_previewSampler);
-    if (!m_isPlaying.load(std::memory_order_acquire)) {
+    if (!hirari_engine_block_is_playing(m_engineBlock)) {
         waitForAudioCallbacks();
         hirari_preview_sampler_reclaim(m_previewSampler);
     }
 }
 
 void HirariUnifiedEngine::set_playing(bool p) {
-    m_isPlaying.store(p, std::memory_order_release);
+    // The voice release and the playback panic are part of stopping; Rust's
+    // set_playing asks the callback to perform them on its next block.
+    hirari_engine_block_set_playing(m_engineBlock, p ? 1u : 0u);
     if (!p) {
-        // Voice state is owned by the callback. Ask that thread to release
-        // preview/fallback voices on its next block instead of racing it here.
-        m_previewVoicesNeedReset.store(true, std::memory_order_release);
-        hirari_midi_playback_request_panic(m_midiPlaybackClock);
         // The callback is quiescent once transport is stopped. Reclaim old
         // immutable region generations on the control thread only.
         waitForAudioCallbacks();
@@ -46,7 +44,9 @@ void HirariUnifiedEngine::set_playing(bool p) {
         }
     }
 }
-bool HirariUnifiedEngine::is_playing() const { return m_isPlaying.load(); }
+bool HirariUnifiedEngine::is_playing() const {
+    return hirari_engine_block_is_playing(m_engineBlock) != 0;
+}
 uint32_t HirariUnifiedEngine::get_block_size() const noexcept {
     return m_blockSize.load(std::memory_order_relaxed);
 }
@@ -73,22 +73,18 @@ float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noe
     });
 }
 
-void HirariUnifiedEngine::set_playhead(uint64_t p) { m_playhead.store(p); }
-uint64_t HirariUnifiedEngine::get_playhead() const { return m_playhead.load(); }
-void HirariUnifiedEngine::set_loop(bool enabled) { m_loopEnabled.store(enabled); }
+void HirariUnifiedEngine::set_playhead(uint64_t p) { hirari_engine_block_set_playhead(m_engineBlock, p); }
+uint64_t HirariUnifiedEngine::get_playhead() const { return hirari_engine_block_playhead(m_engineBlock); }
+void HirariUnifiedEngine::set_loop(bool enabled) { hirari_engine_block_set_loop(m_engineBlock, enabled); }
 bool HirariUnifiedEngine::set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) {
-    if (start_sample >= end_sample) return false;
-    m_cycleStart.store(start_sample, std::memory_order_release);
-    m_cycleEnd.store(end_sample, std::memory_order_release);
-    m_loopEnabled.store(enabled, std::memory_order_release);
-    return true;
+    return hirari_engine_block_set_cycle(m_engineBlock, start_sample, end_sample, enabled) != 0;
 }
 bool HirariUnifiedEngine::is_loop_enabled() const noexcept {
-    return m_loopEnabled.load(std::memory_order_acquire);
+    return hirari_engine_block_loop_enabled(m_engineBlock) != 0;
 }
-uint64_t HirariUnifiedEngine::cycle_start() const noexcept { return m_cycleStart.load(std::memory_order_acquire); }
-uint64_t HirariUnifiedEngine::cycle_end() const noexcept { return m_cycleEnd.load(std::memory_order_acquire); }
-void HirariUnifiedEngine::set_test_tone(bool enabled) { m_testTone.store(enabled, std::memory_order_release); }
+uint64_t HirariUnifiedEngine::cycle_start() const noexcept { return hirari_engine_block_cycle_start(m_engineBlock); }
+uint64_t HirariUnifiedEngine::cycle_end() const noexcept { return hirari_engine_block_cycle_end(m_engineBlock); }
+void HirariUnifiedEngine::set_test_tone(bool enabled) { hirari_engine_block_set_test_tone(m_engineBlock, enabled); }
 
 bool HirariUnifiedEngine::assign_track_to_vca(uint32_t trackId, uint32_t groupId) {
     if (trackId == 0 || groupId == 0) return false;

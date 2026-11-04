@@ -1,23 +1,3 @@
-        // The whole post-graph tail is Rust-owned (engine_block_host.rs): routing
-        // feedback, metering publication, the metronome, the master gain/limiter/
-        // meter, the Control Room cue and automation recording. The playhead is an
-        // atomic the control thread also reads, so the tail reports its step and
-        // the callback applies it here.
-        uint32_t playheadAdvance = 0;
-        uint8_t rangeOverflow = 0;
-        hirari_engine_block_finish(
-            m_engineBlock, output.storageHandle(), off, sz, currentPlayhead,
-            m_sampleRate.load(std::memory_order_relaxed),
-            m_masterGain.load(std::memory_order_acquire),
-            m_isPlaying.load(std::memory_order_acquire) ? 1u : 0u,
-            m_autoRecordMode.load(std::memory_order_relaxed) > 0 ? 1u : 0u,
-            m_talkbackInputOffset,
-            reinterpret_cast<void* const*>(state.activeTracks), state.trackCount,
-            &playheadAdvance, &rangeOverflow);
-        if (playheadAdvance != 0) m_playhead.fetch_add(playheadAdvance, std::memory_order_relaxed);
-        if (rangeOverflow != 0) m_audioRangeOverflow.store(true, std::memory_order_release);
-    }
-
 void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChannels, uint32_t numSamples) {
     m_audioCallbacksInFlight.fetch_add(1, std::memory_order_acquire);
     struct CallbackGuard {
@@ -54,22 +34,12 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
     AudioBuffer wrap;
     wrap.wrapChannels(buffers, numChannels, numSamples);
     for (uint32_t offset = 0; offset < numSamples;) {
-        // Rust owns the engine block cap and the cycle-boundary split so a
-        // hardware callback never feeds a playhead past the loop end.
-        const uint64_t plan = hirari_engine_chunk_plan(
-            numSamples - offset, m_isPlaying.load(std::memory_order_acquire),
-            m_loopEnabled.load(std::memory_order_acquire),
-            m_cycleStart.load(std::memory_order_acquire),
-            m_cycleEnd.load(std::memory_order_acquire),
-            m_playhead.load(std::memory_order_relaxed));
-        if ((plan >> 32) != 0) {
-            m_playhead.store(m_cycleStart.load(std::memory_order_acquire), std::memory_order_relaxed);
-            continue;
-        }
+        // Rust owns the engine block cap, the transport and the cycle-boundary
+        // split, including the rewind a playhead that reached the loop end needs.
+        const uint64_t plan = hirari_engine_block_chunk_plan(m_engineBlock, numSamples - offset);
+        if ((plan >> 32) != 0) continue;
         const uint32_t chunk = static_cast<uint32_t>(plan);
         if (chunk == 0) continue;
-        m_inputMonitorBlockOffset = offset;
-        m_talkbackInputOffset = offset;
         processBlock(wrap, offset, chunk);
         offset += chunk;
     }

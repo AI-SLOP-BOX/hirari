@@ -46,7 +46,7 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             (void)hirari_engine_event_ring_push(
                 engine->m_engineRings,
-                engine->m_playhead.load(std::memory_order_relaxed), type, trackId, value,
+                hirari_engine_block_playhead(engine->m_engineBlock), type, trackId, value,
                 label, labelLength);
         },
         [](void* host, void* context, HirariPluginSandboxSlotVisitorFn visit) -> bool {

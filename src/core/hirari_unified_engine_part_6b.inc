@@ -6,7 +6,7 @@ bool HirariUnifiedEngine::set_tempo(float bpm) const {
     return hirari_tempo_edit_set_tempo(
         m_tempoState, m_undoState,
         hirari_log_state(),
-        m_playhead.load(std::memory_order_relaxed),
+        hirari_engine_block_playhead(m_engineBlock),
         m_sampleRate.load(std::memory_order_relaxed), bpm);
 }
 

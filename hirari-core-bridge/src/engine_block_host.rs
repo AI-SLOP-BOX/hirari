@@ -1,29 +1,37 @@
-//! Rust owns the engine's block: the graph walk and the signal that leaves it.
+//! Rust owns the engine's block: the admission head, the graph walk and the
+//! signal that leaves it.
 //!
-//! The C++ callback used to stage every track, inject feedback, feed the live
-//! driver input, publish the routing destination table, walk the graph in
-//! process order and fan each track out to its sends and the master, then
-//! capture feedback, publish metering, render the metronome, scale and limit
-//! the master, measure it, mix the Control Room cue and advance the playhead --
-//! 300 lines of realtime policy inlined in `processBlock`, plus its click
-//! scratch and the double-buffered telemetry handoff. The engine binds its
-//! handles once into this state and calls [`hirari_engine_block_route`] and
+//! The C++ callback used to gate the block, wrap the playhead over the cycle,
+//! drain the track commands, stage the timeline's MIDI into every track, render
+//! the built-in preview voices, then stage each track's block, inject feedback,
+//! feed the live driver input, publish the routing destination table, walk the
+//! graph in process order fanning each track into its buses and the master, and
+//! finally capture feedback, publish metering, render the metronome, scale and
+//! limit the master, measure it, mix the Control Room cue and advance the
+//! playhead -- 500 lines of realtime policy inlined in `processBlock`, plus the
+//! transport atomics, the click scratch and the double-buffered telemetry
+//! handoff. The engine binds its handles once into this state and calls
+//! [`hirari_engine_block_begin`], [`hirari_engine_block_route`] and
 //! [`hirari_engine_block_finish`] around the device buffer it is rendering.
 //!
-//! Tracks stay C++ objects, so the four things this state cannot reach through
-//! a handle -- a track's runtime, its solo flag, its bus stage and its armed
-//! recorder -- travel as a published operations table. Every tap buffer the walk
-//! reads is already bound in the track's [`TrackRuntime`].
+//! Tracks stay C++ objects, so what this state cannot reach through a handle --
+//! a track's runtime, solo flag, bus stage and armed recorder, plus the MIDI
+//! input and fader writes the head makes -- travels as a published operations
+//! table. Every tap buffer the walk reads is already bound in the track's
+//! [`TrackRuntime`].
 
 use crate::audio_buffer_ops::hirari_audio_add_sanitized_stereo;
+use crate::audio_test_tone::hirari_audio_test_tone_render;
 use crate::bounce_driver::{
-    hirari_bounce_include_inserts, hirari_bounce_offline_active, hirari_bounce_pre_fader,
-    hirari_bounce_target_active, hirari_bounce_target_id,
+    hirari_bounce_offline_active, hirari_bounce_offline_blocks, hirari_bounce_offline_engaged,
+    hirari_bounce_offline_thread, hirari_bounce_include_inserts, hirari_bounce_pre_fader,
+    hirari_bounce_target_active, hirari_bounce_target_id, hirari_callback_thread_token,
 };
 use crate::bus_audio::{
     hirari_bus_audio_accumulate, hirari_bus_audio_read, hirari_bus_audio_replace_post,
     hirari_bus_system_clear,
 };
+use crate::command_host::hirari_engine_audio_command;
 use crate::control_room_audio::hirari_control_room_mix_cue;
 use crate::control_room_runtime::{
     hirari_control_room_active_cue_bus, hirari_control_room_active_cue_click,
@@ -31,11 +39,34 @@ use crate::control_room_runtime::{
     hirari_control_room_is_cue_bus, hirari_control_room_process_monitor_state,
 };
 use crate::engine_input_block::{hirari_input_blocks_take_monitor, hirari_input_blocks_take_talkback};
+use crate::engine_rings::{hirari_engine_command_ring_pop, CommandRecord, EngineRings};
+use crate::engine_clock::{hirari_engine_chunk_plan, CHUNK_RESTART_PLAYHEAD};
+use crate::engine_track_table::{hirari_engine_track_snapshot, HirariTrackSnapshot};
+use crate::forensic_scratchpad::hirari_forensic_scratchpad_reset;
+use crate::hot_swap_state::{
+    hirari_hot_swap_default_acknowledge, hirari_hot_swap_default_quiesce_requested,
+};
 use crate::master_limiter::hirari_master_limiter_process;
 use crate::master_meter::hirari_master_meter_process;
 use crate::master_output::hirari_master_output_process;
 use crate::metronome_renderer::{hirari_metronome_is_enabled, hirari_metronome_process};
+use crate::midi_buffer_ops::{
+    hirari_midi_buffer_add, hirari_midi_buffer_add_note_off, hirari_midi_buffer_add_note_on,
+    hirari_midi_buffer_clear, hirari_midi_buffer_create, hirari_midi_buffer_destroy,
+    hirari_midi_buffer_event_count, hirari_midi_buffer_event_data,
+    hirari_midi_buffer_remaining_capacity, hirari_midi_buffer_sort_owned,
+};
+use crate::midi_note_edit::ScheduledMidiNoteFfi;
+use crate::midi_orchestration::{
+    hirari_midi_apply_articulations_from_state, hirari_midi_process_mpe, MpeState,
+};
+use crate::midi_playback_clock::{
+    hirari_midi_playback_panic_pending, hirari_midi_playback_prepare_block,
+    hirari_midi_playback_request_panic,
+};
 use crate::mixer_telemetry::hirari_mixer_track_peaks;
+use crate::preview_sampler::{hirari_preview_sampler_is_active, hirari_preview_sampler_render};
+use crate::preview_synth::{hirari_preview_synth_process, hirari_preview_synth_reset};
 use crate::routing_engine_core::{
     hirari_routing_engine_capture_feedback, hirari_routing_engine_enter_send_pdc_read,
     hirari_routing_engine_inject_feedback, hirari_routing_engine_leave_send_pdc_read,
@@ -44,15 +75,25 @@ use crate::routing_engine_core::{
 };
 use crate::routing_fanout::{BusPreFxAdd, RoutingTrackDestination};
 use crate::sidechain_manager::hirari_sidechain_engine_publish_source;
-use crate::tempo::hirari_tempo_map_get_current_bpm;
+use crate::tempo::{
+    hirari_tempo_map_beats_to_samples, hirari_tempo_map_get_current_bpm,
+    hirari_tempo_map_samples_to_beats,
+};
+use crate::track_midi_articulation::{
+    hirari_track_midi_all_notes_off, hirari_track_midi_note_off, hirari_track_midi_note_on,
+    hirari_track_midi_schedule_note_off, hirari_track_midi_timed_outputs, GeneratedMidiEvent,
+    TimedKeySwitchOutput,
+};
 use crate::track_runtime::{self, TrackRuntime};
 use std::ffi::c_void;
 use std::ptr;
 use std::slice;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 /// `HirariUnifiedEngine::kMaxTracks`, and the width of one metering payload.
 const MAX_TRACKS: usize = 256;
+/// `HirariUnifiedEngine::kMaxTrackMap`; the width of the id-indexed track map.
+const MAX_TRACK_MAP: usize = 2_048;
 /// `HirariUnifiedEngine::TelemetryData::spectrum` bins.
 const SPECTRUM_BINS: usize = 512;
 /// `HirariUnifiedEngine::kMaxAudioBlockSize`; the click scratch holds one block.
@@ -61,6 +102,13 @@ const MAX_BLOCK_FRAMES: usize = 16_384;
 const MAX_BUS_FRAMES: usize = 8_192;
 /// `RoutingEngine::kMaxNodes`, on top of the tracks a graph order can insert.
 const MAX_GRAPH_NODES: usize = MAX_TRACKS + 128;
+/// `MidiBuffer::kMaxEventsPerBlock`, the cap one track's MIDI input can hold.
+const MAX_MIDI_EVENTS: usize = 1_024;
+/// `Track`'s generated-event scratch, the cap on one note's expansion.
+const MAX_GENERATED_EVENTS: usize = 128;
+/// The preview fallback table's MIDI channels and pitches.
+const FALLBACK_CHANNELS: usize = 16;
+const FALLBACK_PITCHES: usize = 128;
 
 /// Mirrors `HirariUnifiedEngine::TelemetryData` field for field. The audio
 /// callback writes only `count`, the two peak arrays and `version`; every other
@@ -107,6 +155,43 @@ pub struct HirariEngineBlockOps {
     pub solo: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
     /// Captures the fader and pan of one armed recorder.
     pub record: Option<unsafe extern "C" fn(*mut c_void, u64)>,
+    /// Non-zero while the track takes timeline MIDI (MIDI or Instrument).
+    pub midi_input: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
+    /// The track's Rust articulation runtime.
+    pub articulation: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
+    /// The track's Rust MIDI input buffer.
+    pub plugin_midi: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
+    /// Applies one drained command to the track's fader, pan, mute or solo.
+    pub set_volume: Option<unsafe extern "C" fn(*mut c_void, f32)>,
+    pub set_pan: Option<unsafe extern "C" fn(*mut c_void, f32)>,
+    pub set_mute: Option<unsafe extern "C" fn(*mut c_void, u8)>,
+    pub set_solo: Option<unsafe extern "C" fn(*mut c_void, u8)>,
+}
+
+/// Every handle the block borrows from the engine, bound once at creation. The
+/// engine owns each of them for at least as long as the returned state.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct HirariEngineBlockHandles {
+    pub routing: *mut c_void,
+    pub track_table: *mut c_void,
+    pub bounce: *mut c_void,
+    pub input_blocks: *mut c_void,
+    pub control_room: *mut c_void,
+    pub mixer_telemetry: *mut c_void,
+    pub metronome: *mut c_void,
+    pub master_limiter: *mut c_void,
+    pub meter: *mut c_void,
+    pub tempo: *mut c_void,
+    pub bus_system: *mut c_void,
+    pub sidechain: *mut c_void,
+    pub rings: *mut c_void,
+    pub midi_clock: *mut c_void,
+    pub midi_snapshots: *mut c_void,
+    pub preview_synth: *mut c_void,
+    pub preview_sampler: *mut c_void,
+    pub mpe: *mut c_void,
+    pub macro_control: *mut c_void,
 }
 
 /// The graph eligibility the whole block shares: an offline target isolates one
@@ -140,11 +225,17 @@ unsafe extern "C" fn add_bus_pre_fx(
 #[derive(Clone, Copy, Default)]
 struct View {
     tracks: *const *mut c_void,
+    map: *const *mut c_void,
     count: u32,
+    /// The device generation this snapshot was published for.
+    generation: u64,
 }
 
 impl View {
     fn active(self) -> &'static [*mut c_void] {
+        if self.tracks.is_null() {
+            return &[];
+        }
         unsafe {
             slice::from_raw_parts(
                 self.tracks,
@@ -152,11 +243,21 @@ impl View {
             )
         }
     }
+
+    /// The id-indexed track map the published snapshot carries, or null when the
+    /// window was handed over without one.
+    fn track_id(self, id: u32) -> *mut c_void {
+        if self.map.is_null() || id as usize >= MAX_TRACK_MAP {
+            return ptr::null_mut();
+        }
+        unsafe { *self.map.add(id as usize) }
+    }
 }
 
 pub struct EngineBlockState {
     ops: HirariEngineBlockOps,
     routing: *mut c_void,
+    track_table: *mut c_void,
     bounce: *mut c_void,
     input_blocks: *mut c_void,
     control_room: *mut c_void,
@@ -167,6 +268,31 @@ pub struct EngineBlockState {
     tempo: *mut c_void,
     bus_system: *mut c_void,
     sidechain: *mut c_void,
+    rings: *mut c_void,
+    midi_clock: *mut c_void,
+    midi_snapshots: *mut c_void,
+    preview_synth: *mut c_void,
+    preview_sampler: *mut c_void,
+    mpe: *mut c_void,
+    macro_control: *mut c_void,
+    playhead: AtomicU64,
+    playing: AtomicBool,
+    loop_enabled: AtomicBool,
+    cycle_start: AtomicU64,
+    cycle_end: AtomicU64,
+    test_tone: AtomicBool,
+    generation: AtomicU64,
+    config_transition: AtomicBool,
+    range_overflow: AtomicBool,
+    preview_voices_need_reset: AtomicBool,
+    monitor_offset: AtomicU32,
+    talkback_offset: AtomicU32,
+    /// The callback's own event collection between timeline scheduling and the
+    /// preview voices; a track's input is its own Rust MIDI buffer.
+    block_midi: *mut c_void,
+    /// Held preview notes per MIDI channel and pitch, so a Note Off released by
+    /// a track that no longer exists still closes the fallback voice.
+    fallback_notes: *mut [[u32; FALLBACK_PITCHES]; FALLBACK_CHANNELS],
     telemetry: *mut HirariEngineTelemetry,
     telemetry_active: AtomicU32,
     telemetry_lock: AtomicBool,
@@ -245,10 +371,430 @@ impl EngineBlockState {
         ))
     }
 
+    // ---- the block head: what the callback reads from a Track ----------
+
+    /// The graph window the callback traverses: the published snapshot the Rust
+    /// track table double-buffers, read without a lock exactly as the C++
+    /// `trackView()` did. Publication only fills the buffer this is not reading.
+    fn view(&self) -> View {
+        let mut published = HirariTrackSnapshot::default();
+        unsafe { hirari_engine_track_snapshot(self.track_table, &mut published) };
+        View {
+            tracks: published.active_tracks,
+            map: published.track_map,
+            count: published.track_count,
+            generation: published.audio_config_generation,
+        }
+    }
+
+    /// Silences the window the device callback owns, the whole buffer's
+    /// channel set, exactly as `output.clear(off, frames)` did.
+    fn clear_window(planes: *const *mut f32, count: u32, off: usize, frames: usize) {
+        if planes.is_null() || frames == 0 {
+            return;
+        }
+        for index in 0..count as usize {
+            let plane = unsafe { *planes.add(index) };
+            if !plane.is_null() {
+                unsafe { ptr::write_bytes(plane.add(off), 0, frames) };
+            }
+        }
+    }
+
+    fn midi_input(&self, track: *mut c_void) -> bool {
+        let Some(op) = self.ops.midi_input else {
+            return false;
+        };
+        unsafe { op(track) != 0 }
+    }
+
+    fn articulation(&self, track: *mut c_void) -> *mut c_void {
+        let Some(op) = self.ops.articulation else {
+            return ptr::null_mut();
+        };
+        unsafe { op(track) }
+    }
+
+    fn plugin_midi(&self, track: *mut c_void) -> *mut c_void {
+        let Some(op) = self.ops.plugin_midi else {
+            return ptr::null_mut();
+        };
+        unsafe { op(track) }
+    }
+
+    /// One slot of the held preview-voice table, or null when the pair is out of
+    /// range for a malformed scheduled note.
+    fn held_note(&self, channel: u8, pitch: u8) -> *mut u32 {
+        let channel = usize::from(channel);
+        let pitch = usize::from(pitch);
+        if channel >= FALLBACK_CHANNELS || pitch >= FALLBACK_PITCHES {
+            return ptr::null_mut();
+        }
+        let table = unsafe { &mut *self.fallback_notes };
+        unsafe { table[channel].as_mut_ptr().add(pitch) }
+    }
+
+    /// Copies one note's generated events into the track's own input buffer, the
+    /// same expansion the C++ wrapper performed for every MIDI input.
+    fn push_generated(&self, midi: *mut c_void, events: &[GeneratedMidiEvent]) {
+        if midi.is_null() {
+            return;
+        }
+        for event in events {
+            unsafe {
+                hirari_midi_buffer_add(
+                    midi,
+                    event.sample_offset,
+                    event.data.as_ptr(),
+                    u32::from(event.size),
+                    event.articulation_id,
+                )
+            };
+        }
+    }
+
+    fn clear_midi(&self, track: *mut c_void) {
+        let midi = self.plugin_midi(track);
+        if !midi.is_null() {
+            unsafe { hirari_midi_buffer_clear(midi) };
+        }
+    }
+
+    fn note_on(
+        &self,
+        track: *mut c_void,
+        channel: u8,
+        pitch: u8,
+        velocity: u8,
+        offset: u64,
+        articulation: u8,
+    ) {
+        let state = self.articulation(track);
+        if state.is_null() {
+            return;
+        }
+        let mut events = [GeneratedMidiEvent::default(); MAX_GENERATED_EVENTS];
+        let count = unsafe {
+            hirari_track_midi_note_on(
+                state,
+                channel,
+                pitch,
+                velocity,
+                offset,
+                articulation,
+                events.as_mut_ptr(),
+                events.len(),
+            )
+        };
+        self.push_generated(self.plugin_midi(track), &events[..count]);
+    }
+
+    fn note_off(
+        &self,
+        track: *mut c_void,
+        channel: u8,
+        pitch: u8,
+        offset: u64,
+        articulation: u8,
+    ) {
+        let state = self.articulation(track);
+        if state.is_null() {
+            return;
+        }
+        let mut events = [GeneratedMidiEvent::default(); MAX_GENERATED_EVENTS];
+        let count = unsafe {
+            hirari_track_midi_note_off(
+                state,
+                channel,
+                pitch,
+                offset,
+                articulation,
+                events.as_mut_ptr(),
+                events.len(),
+            )
+        };
+        self.push_generated(self.plugin_midi(track), &events[..count]);
+    }
+
+    fn all_notes_off(&self, track: *mut c_void, offset: u64) {
+        let state = self.articulation(track);
+        let midi = self.plugin_midi(track);
+        if state.is_null() || midi.is_null() {
+            return;
+        }
+        let mut events = [GeneratedMidiEvent::default(); MAX_MIDI_EVENTS];
+        let capacity = unsafe { hirari_midi_buffer_remaining_capacity(midi) }.min(events.len());
+        let count = unsafe {
+            hirari_track_midi_all_notes_off(
+                state,
+                offset,
+                if capacity == 0 {
+                    ptr::null_mut()
+                } else {
+                    events.as_mut_ptr()
+                },
+                capacity,
+            )
+        };
+        self.push_generated(midi, &events[..count]);
+    }
+
+    /// Emits one articulation's timed key-switch note-offs, mapped through the
+    /// engine's tempo map at the block's sample rate. `transition` selects the
+    /// pre-Note-On set, which the instrument must release before the key switch
+    /// itself sounds.
+    fn schedule_key_switches(
+        &self,
+        track: *mut c_void,
+        articulation: u8,
+        transition: bool,
+        start_beat: f64,
+        sample_rate: f64,
+        offset: u64,
+    ) {
+        let state = self.articulation(track);
+        if state.is_null() {
+            return;
+        }
+        let mut outputs = [TimedKeySwitchOutput::default(); 16];
+        let count = unsafe {
+            hirari_track_midi_timed_outputs(
+                state,
+                articulation,
+                transition,
+                outputs.as_mut_ptr(),
+                outputs.len(),
+            )
+        };
+        let midi = self.plugin_midi(track);
+        for output in &outputs[..count] {
+            let end_beat = start_beat + f64::from(output.length_ticks) / 960.0;
+            let end_sample =
+                unsafe { hirari_tempo_map_beats_to_samples(self.tempo, end_beat, sample_rate) };
+            if !unsafe {
+                hirari_track_midi_schedule_note_off(state, output.channel, output.pitch, end_sample)
+            } {
+                // An overloaded schedule must still release the physical key.
+                if !midi.is_null() {
+                    unsafe {
+                        hirari_midi_buffer_add_note_off(midi, output.channel + 1, output.pitch, offset)
+                    };
+                }
+            }
+        }
+    }
+
+    /// Releases every voice the callback held: the built-in synth, the fallback
+    /// counts and each instrument's held keys.
+    fn reset_preview_voices(&self, view: View) {
+        unsafe { hirari_preview_synth_reset(self.preview_synth) };
+        let table = unsafe { &mut *self.fallback_notes };
+        for channel in table.iter_mut() {
+            channel.fill(0);
+        }
+        for &track in view.active() {
+            if !track.is_null() && self.midi_input(track) {
+                self.all_notes_off(track, 0);
+            }
+        }
+    }
+
+    /// Applies the commands that arrived while the callback was rendering. A
+    /// command that waited in the queue through a device rebuild never applies
+    /// to a different audio configuration.
+    fn drain_commands(&self, generation: u64, view: View) {
+        let rings = self.rings.cast::<EngineRings>();
+        let mut record = CommandRecord::default();
+        while unsafe { hirari_engine_command_ring_pop(rings, &mut record) } {
+            if record.expected_audio_generation != generation {
+                continue;
+            }
+            let track = view.track_id(record.tid);
+            if track.is_null() {
+                continue;
+            }
+            let mut value = 0.0_f32;
+            match unsafe { hirari_engine_audio_command(record.type_, record.val, &mut value) } {
+                1 => self.ops.set_volume.map(|op| unsafe { op(track, value) }),
+                2 => self.ops.set_pan.map(|op| unsafe { op(track, value) }),
+                3 => self
+                    .ops
+                    .set_mute
+                    .map(|op| unsafe { op(track, u8::from(value >= 0.5)) }),
+                4 => self
+                    .ops
+                    .set_solo
+                    .map(|op| unsafe { op(track, u8::from(value >= 0.5)) }),
+                _ => None,
+            };
+        }
+    }
+
+    /// Hands the timeline's scheduled notes to the graph: a note addressed to a
+    /// live track enters that track's input, an orphan note feeds the built-in
+    /// preview, and a transport discontinuity releases every held voice.
+    unsafe fn stage_midi(
+        &self,
+        frames: u32,
+        playhead: u64,
+        sample_rate: f64,
+        playback_active: bool,
+        view: View,
+    ) {
+        let mut stage = MidiStage {
+            state: self,
+            view,
+            sample_rate,
+        };
+        let context = ptr::from_mut(&mut stage).cast();
+        unsafe {
+            hirari_midi_playback_prepare_block(
+                self.midi_clock,
+                self.midi_snapshots,
+                playhead,
+                frames,
+                u8::from(playback_active),
+                context,
+                Some(stage_panic),
+                Some(stage_note),
+            )
+        };
+        // Preview dispatch reads the block in timestamp order, same-sample events
+        // in the order they were scheduled.
+        unsafe { hirari_midi_buffer_sort_owned(self.block_midi) };
+    }
+
+    /// Runs the native MIDI policy over the staged block, then the built-in
+    /// voices that make playback audible without a plug-in.
+    unsafe fn render_preview(
+        &self,
+        left: *mut f32,
+        right: *mut f32,
+        frames: u32,
+        playhead: u64,
+        sample_rate: f64,
+    ) {
+        let events = unsafe { hirari_midi_buffer_event_data(self.block_midi) };
+        let count = unsafe { hirari_midi_buffer_event_count(self.block_midi) };
+        let mpe = self.mpe.cast::<MpeState>();
+        unsafe {
+            hirari_midi_process_mpe(mpe, events, count);
+            hirari_midi_apply_articulations_from_state(mpe.cast_const(), events, count);
+        }
+        let rate = sample_rate.max(1.0);
+        unsafe {
+            hirari_preview_synth_process(
+                self.preview_synth,
+                events,
+                count,
+                left,
+                right,
+                frames,
+                playhead,
+                rate,
+                self.macro_control,
+            );
+            hirari_preview_sampler_render(self.preview_sampler, rate, left, right, frames);
+        }
+        if self.test_tone.load(Ordering::Relaxed) {
+            unsafe { hirari_audio_test_tone_render(left, right, frames, playhead, sample_rate) };
+        }
+    }
+}
+
+/// The one-block context the playback clock's two callbacks need.
+#[derive(Clone, Copy)]
+struct MidiStage {
+    state: *const EngineBlockState,
+    view: View,
+    sample_rate: f64,
+}
+
+unsafe extern "C" fn stage_panic(opaque: *mut c_void) {
+    let Some(stage) = (unsafe { opaque.cast::<MidiStage>().as_ref() }) else {
+        return;
+    };
+    unsafe { (*stage.state).reset_preview_voices(stage.view) };
+}
+
+unsafe extern "C" fn stage_note(
+    opaque: *mut c_void,
+    raw: *const ScheduledMidiNoteFfi,
+    offset: u64,
+    note_off: u8,
+) {
+    let (Some(stage), Some(note)) = (
+        unsafe { opaque.cast::<MidiStage>().as_ref() },
+        unsafe { raw.as_ref() },
+    ) else {
+        return;
+    };
+    let state = unsafe { &*stage.state };
+    let channel = note.midi_channel + 1;
+    let target = stage.view.track_id(note.track_id);
+    if note_off != 0 {
+        if !target.is_null() {
+            state.note_off(target, channel, note.pitch, offset, note.articulation_id);
+        }
+        let held = state.held_note(note.midi_channel, note.pitch);
+        if !held.is_null() && unsafe { *held } > 0
+            && unsafe { hirari_midi_buffer_remaining_capacity(state.block_midi) } > 0
+        {
+            unsafe { hirari_midi_buffer_add_note_off(state.block_midi, channel, note.pitch, offset) };
+            unsafe { *held -= 1 };
+        }
+        return;
+    }
+    if !target.is_null() {
+        let start_beat = unsafe {
+            hirari_tempo_map_samples_to_beats(state.tempo, note.start_sample, stage.sample_rate)
+        };
+        state.schedule_key_switches(
+            target,
+            note.articulation_id,
+            true,
+            start_beat,
+            stage.sample_rate,
+            offset,
+        );
+        state.note_on(
+            target,
+            channel,
+            note.pitch,
+            note.velocity,
+            offset,
+            note.articulation_id,
+        );
+        state.schedule_key_switches(
+            target,
+            note.articulation_id,
+            false,
+            start_beat,
+            stage.sample_rate,
+            offset,
+        );
+    } else if unsafe { hirari_midi_buffer_remaining_capacity(state.block_midi) } > 0 {
+        unsafe {
+            hirari_midi_buffer_add_note_on(
+                state.block_midi,
+                channel,
+                note.pitch,
+                note.velocity,
+                offset,
+                0,
+            )
+        };
+        let held = state.held_note(note.midi_channel, note.pitch);
+        if !held.is_null() {
+            unsafe { *held += 1 };
+        }
+    }
+}
+
+impl EngineBlockState {
     /// Feeds each track's post-graph block into its one-block delayed routing
     /// edges, in published graph order.
-    unsafe fn capture_feedback(&self, frames: u32, view: View) {
-        for &track in view.active() {
+    unsafe fn capture_feedback(&self, frames: u32, view: View) {        for &track in view.active() {
             if track.is_null() {
                 continue;
             }
@@ -736,38 +1282,191 @@ impl EngineBlockState {
     }
 }
 
-/// Runs the post-graph tail of one engine block.
+/// Runs the admission head of one engine block.
+///
+/// The gates that decide whether a block renders at all, the cycle wrap, the
+/// snapshot-generation check, the command drain, the timeline MIDI staging into
+/// every track and the built-in preview voices are all here. `frames_out`
+/// receives the block length the rest of the callback must use -- the head
+/// clamps it to the buffer it was handed -- and the return value is zero when
+/// the head already silenced the window, so the caller neither routes nor
+/// finishes.
 ///
 /// # Safety
 /// `state` comes from [`hirari_engine_block_create`], `output` is that engine's
-/// block storage, and `active_tracks`/`track_count` is the graph window the
-/// callback resolved at the head of the block.
+/// block storage, `sample_rate` is the device's, `shutdown` is the engine's
+/// shutdown flag, and `frames_out` is writable when non-null.
+#[no_mangle]
 #[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn hirari_engine_block_begin(
+    state: *mut c_void,
+    output: *mut c_void,
+    off: u32,
+    frames: u32,
+    sample_rate: f64,
+    shutdown: u8,
+    frames_out: *mut u32,
+) -> u8 {
+    let Some(state) = block(state) else {
+        return 0;
+    };
+    let (planes, channel_count, capacity) = track_runtime::channels_of(output);
+    let capacity = capacity as usize;
+    let off = off as usize;
+    let frames = frames as usize;
+    // The head silences the range the caller asked for, clamped to what the
+    // buffer actually holds, before it reports the block as handled.
+    let in_range = channel_count >= 2 && off < capacity;
+    let prefix = frames.min(capacity.saturating_sub(off));
+    if frames == 0 || !in_range {
+        if frames != 0 && in_range {
+            EngineBlockState::clear_window(planes, channel_count, off, prefix);
+        }
+        return 0;
+    }
+    if frames > MAX_BLOCK_FRAMES {
+        EngineBlockState::clear_window(planes, channel_count, off, prefix);
+        return 0;
+    }
+    let frames = prefix as u32;
+    let offline_thread = hirari_bounce_offline_thread() != 0;
+    if state.config_transition.load(Ordering::Acquire) && !offline_thread {
+        EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
+        return 0;
+    }
+    if hirari_bounce_offline_blocks(state.bounce, hirari_callback_thread_token()) != 0 {
+        EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
+        return 0;
+    }
+    if shutdown != 0 {
+        EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
+        return 0;
+    }
+    // Hot-swap quiesce: never sleep or spin here. The next block sees the
+    // request again while the structural transaction is still active.
+    if hirari_hot_swap_default_quiesce_requested() {
+        hirari_hot_swap_default_acknowledge();
+        EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
+        return 0;
+    }
+    hirari_forensic_scratchpad_reset();
+    let mut playhead = state.playhead.load(Ordering::Relaxed);
+    let cycle_start = state.cycle_start.load(Ordering::Acquire);
+    let cycle_end = state.cycle_end.load(Ordering::Acquire);
+    if state.loop_enabled.load(Ordering::Acquire) && cycle_end > cycle_start && playhead >= cycle_end
+    {
+        playhead = cycle_start;
+        state.playhead.store(cycle_start, Ordering::Relaxed);
+    }
+    // The per-chunk read offset travels with the window this callback renders:
+    // the live driver input is addressed at the same offset as the master.
+    state.monitor_offset.store(off as u32, Ordering::Relaxed);
+    state.talkback_offset.store(off as u32, Ordering::Relaxed);
+    let view = state.view();
+    // Structural publication is double-buffered. Never process a state prepared
+    // for a different device format; the next publication carries this one.
+    if view.generation != state.generation.load(Ordering::Acquire) && !offline_thread {
+        EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
+        return 0;
+    }
+    if state
+        .preview_voices_need_reset
+        .swap(false, Ordering::AcqRel)
+    {
+        state.reset_preview_voices(view);
+    }
+    // A track's MIDI input is its own buffer: it only ever holds the events
+    // addressed to it during this block, so the walk cannot replay the last.
+    for &track in view.active() {
+        if !track.is_null() {
+            state.clear_midi(track);
+        }
+    }
+    state.drain_commands(view.generation, view);
+    // Keep the device callback primed while stopped, but do not traverse the
+    // full graph unless a preview voice, a panic or an offline render owns the
+    // path. Commands drain first so fader, pan, mute and solo edits stay
+    // visible immediately while stopped.
+    let offline_engaged =
+        hirari_bounce_offline_engaged(state.bounce) != 0;
+    let playing = state.playing.load(Ordering::Acquire);
+    if !offline_engaged
+        && !playing
+        && !state.test_tone.load(Ordering::Relaxed)
+        && !hirari_preview_sampler_is_active(state.preview_sampler)
+        && !hirari_midi_playback_panic_pending(state.midi_clock)
+    {
+        EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
+        return 0;
+    }
+    EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
+    unsafe { hirari_midi_buffer_clear(state.block_midi) };
+    if playhead > u64::MAX - u64::from(frames) {
+        // A saturated sample position is reported, never wrapped around.
+        state.range_overflow.store(true, Ordering::Release);
+        return 0;
+    }
+    state.stage_midi(
+        frames,
+        playhead,
+        sample_rate.max(1.0),
+        offline_engaged || playing,
+        view,
+    );
+    let Some((left, right, _, _)) = state.window(output, off as u32, frames) else {
+        return 0;
+    };
+    state.render_preview(left, right, frames, playhead, sample_rate);
+    if !frames_out.is_null() {
+        unsafe { *frames_out = frames };
+    }
+    1
+}
+
+/// Chooses the next engine chunk for a hardware callback and rewinds the
+/// playhead when it sits on the cycle end. The low 32 bits of the result hold
+/// the frames to process; [`CHUNK_RESTART_PLAYHEAD`] means the caller retries
+/// after the rewind this function already applied.
+///
+/// # Safety
+/// `state` comes from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_chunk_plan(state: *mut c_void, remaining: u32) -> u64 {
+    let Some(state) = block(state) else {
+        return u64::from(remaining);
+    };
+    let plan = hirari_engine_chunk_plan(
+        remaining,
+        state.playing.load(Ordering::Acquire),
+        state.loop_enabled.load(Ordering::Acquire),
+        state.cycle_start.load(Ordering::Acquire),
+        state.cycle_end.load(Ordering::Acquire),
+        state.playhead.load(Ordering::Relaxed),
+    );
+    if plan & CHUNK_RESTART_PLAYHEAD != 0 {
+        state
+            .playhead
+            .store(state.cycle_start.load(Ordering::Acquire), Ordering::Relaxed);
+    }
+    plan
+}
+
+/// Runs the post-graph tail of one engine block and advances the playhead the
+/// head resolved.
+///
+/// # Safety
+/// `state` comes from [`hirari_engine_block_create`] and `output` is that
+/// engine's block storage.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_block_finish(
     state: *mut c_void,
     output: *mut c_void,
     off: u32,
     frames: u32,
-    playhead: u64,
     sample_rate: f64,
     master_gain: f32,
-    playing: u8,
     auto_record: u8,
-    talkback_offset: u32,
-    active_tracks: *const *mut c_void,
-    track_count: u32,
-    advance_out: *mut u32,
-    overflow_out: *mut u8,
 ) {
-    let advance = unsafe { advance_out.as_mut() };
-    let overflow = unsafe { overflow_out.as_mut() };
-    if let Some(value) = advance {
-        *value = 0;
-    }
-    if let Some(value) = overflow {
-        *value = 0;
-    }
     // The click scratch holds one kMaxAudioBlockSize block; the engine's head
     // gate clamps the block length before it reaches the tail.
     let Some(state) = block(state).filter(|_| frames as usize <= MAX_BLOCK_FRAMES) else {
@@ -776,11 +1475,10 @@ pub unsafe extern "C" fn hirari_engine_block_finish(
     let Some((left, right, planes, channel_count)) = state.window(output, off, frames) else {
         return;
     };
-    let view = View {
-        tracks: active_tracks,
-        count: track_count,
-    };
-    let playing = playing != 0;
+    let view = state.view();
+    let playhead = state.playhead.load(Ordering::Relaxed);
+    let playing = state.playing.load(Ordering::Acquire);
+    let talkback_offset = state.talkback_offset.load(Ordering::Relaxed);
     unsafe {
         state.capture_feedback(frames, view);
         state.publish_peaks(frames, view);
@@ -815,12 +1513,10 @@ pub unsafe extern "C" fn hirari_engine_block_finish(
     if !playing {
         return;
     }
-    if playhead > u64::MAX - frames as u64 {
-        if let Some(value) = unsafe { overflow_out.as_mut() } {
-            *value = 1;
-        }
-    } else if let Some(value) = unsafe { advance_out.as_mut() } {
-        *value = frames;
+    if playhead > u64::MAX - u64::from(frames) {
+        state.range_overflow.store(true, Ordering::Release);
+    } else {
+        state.playhead.fetch_add(u64::from(frames), Ordering::Relaxed);
     }
 }
 
@@ -829,23 +1525,15 @@ pub unsafe extern "C" fn hirari_engine_block_finish(
 /// that fills the master window and every bus stage.
 ///
 /// # Safety
-/// `state` comes from [`hirari_engine_block_create`], `output` is that engine's
-/// block storage, and `active_tracks`/`track_count` is the graph window the
-/// callback resolved at the head of the block.
-#[allow(clippy::too_many_arguments)]
+/// `state` comes from [`hirari_engine_block_create`] and `output` is that
+/// engine's block storage.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_block_route(
     state: *mut c_void,
     output: *mut c_void,
     off: u32,
     frames: u32,
-    playhead: u64,
     sample_rate: f64,
-    monitor_offset: u32,
-    generation: u64,
-    playing: u8,
-    active_tracks: *const *mut c_void,
-    track_count: u32,
 ) {
     let Some(state) = block(state).filter(|_| frames as usize <= MAX_BLOCK_FRAMES) else {
         return;
@@ -853,10 +1541,11 @@ pub unsafe extern "C" fn hirari_engine_block_route(
     let Some((master_left, master_right, _, _)) = state.window(output, off, frames) else {
         return;
     };
-    let view = View {
-        tracks: active_tracks,
-        count: track_count,
-    };
+    let monitor_offset = state.monitor_offset.load(Ordering::Relaxed);
+    let generation = state.generation.load(Ordering::Acquire);
+    let playing = state.playing.load(Ordering::Acquire);
+    let playhead = state.playhead.load(Ordering::Relaxed);
+    let view = state.view();
     let gating = Gating {
         offline_target_active: hirari_bounce_target_active(state.bounce) != 0,
         offline_target_id: hirari_bounce_target_id(state.bounce),
@@ -869,7 +1558,7 @@ pub unsafe extern "C" fn hirari_engine_block_route(
     };
     unsafe {
         hirari_bus_system_clear(state.bus_system.cast_const(), frames);
-        state.stage_tracks(frames, view, playing != 0);
+        state.stage_tracks(frames, view, playing);
         state.inject_feedback(frames, view);
         state.feed_monitor_input(frames, monitor_offset, view);
         let destination_count = state.publish_destinations(frames, view, &gating);
@@ -892,23 +1581,204 @@ pub unsafe extern "C" fn hirari_engine_block_route(
     }
 }
 
-/// Binds an engine's block tail. Every handle must outlive the returned state.
+/// The transport position the callback last advanced.
 ///
 /// # Safety
-/// `ops` is read once; the handles belong to this one engine.
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_playhead(state: *const c_void) -> u64 {
+    block(state).map_or(0, |state| state.playhead.load(Ordering::Relaxed))
+}
+
+/// Seeks the transport.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_playhead(state: *mut c_void, playhead: u64) {
+    if let Some(state) = block(state) {
+        state.playhead.store(playhead, Ordering::Relaxed);
+    }
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_is_playing(state: *const c_void) -> u8 {
+    block(state).map_or(0, |state| u8::from(state.playing.load(Ordering::Acquire)))
+}
+
+/// Starts or stops the transport. Stopping asks the callback to release every
+/// voice it holds and requests the playback panic, because the voice state is
+/// owned by that thread and must not be raced from the control side.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_playing(state: *mut c_void, playing: u8) {
+    let Some(state) = block(state) else {
+        return;
+    };
+    let playing = playing != 0;
+    state.playing.store(playing, Ordering::Release);
+    if !playing {
+        state.preview_voices_need_reset.store(true, Ordering::Release);
+        hirari_midi_playback_request_panic(state.midi_clock);
+    }
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_loop_enabled(state: *const c_void) -> u8 {
+    block(state).map_or(0, |state| {
+        u8::from(state.loop_enabled.load(Ordering::Acquire))
+    })
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_loop(state: *mut c_void, enabled: u8) {
+    if let Some(state) = block(state) {
+        state
+            .loop_enabled
+            .store(enabled != 0, Ordering::Release);
+    }
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_cycle_start(state: *const c_void) -> u64 {
+    block(state).map_or(0, |state| state.cycle_start.load(Ordering::Acquire))
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_cycle_end(state: *const c_void) -> u64 {
+    block(state).map_or(0, |state| state.cycle_end.load(Ordering::Acquire))
+}
+
+/// Adopts a cycle, or refuses an empty one. Returns zero when the range was
+/// rejected and nothing changed.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_cycle(
+    state: *mut c_void,
+    start_sample: u64,
+    end_sample: u64,
+    enabled: u8,
+) -> u8 {
+    let Some(state) = block(state) else {
+        return 0;
+    };
+    if start_sample >= end_sample {
+        return 0;
+    }
+    state.cycle_start.store(start_sample, Ordering::Release);
+    state.cycle_end.store(end_sample, Ordering::Release);
+    state.loop_enabled.store(enabled != 0, Ordering::Release);
+    1
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_test_tone(state: *const c_void) -> u8 {
+    block(state).map_or(0, |state| u8::from(state.test_tone.load(Ordering::Relaxed)))
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_test_tone(state: *mut c_void, enabled: u8) {
+    if let Some(state) = block(state) {
+        state.test_tone.store(enabled != 0, Ordering::Release);
+    }
+}
+
+/// The device configuration generation the callbacks and queued commands are
+/// tagged with.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_generation(state: *const c_void) -> u64 {
+    block(state).map_or(1, |state| state.generation.load(Ordering::Acquire))
+}
+
+/// Moves to the next device configuration generation.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_bump_generation(state: *mut c_void) -> u64 {
+    block(state).map_or(0, |state| {
+        state.generation.fetch_add(1, Ordering::AcqRel)
+    })
+}
+
+/// Closes callback admission while the control thread replaces the buffers a
+/// callback traverses.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_config_transition(
+    state: *mut c_void,
+    transition: u8,
+) {
+    if let Some(state) = block(state) {
+        state.config_transition.store(transition != 0, Ordering::Release);
+    }
+}
+
+/// Reports whether a callback observed a saturated sample position.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_range_overflowed(state: *const c_void) -> u8 {
+    block(state).map_or(0, |state| {
+        u8::from(state.range_overflow.load(Ordering::Acquire))
+    })
+}
+
+/// Asks the next callback to release every preview voice it holds.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_request_preview_voice_reset(state: *mut c_void) {
+    if let Some(state) = block(state) {
+        state
+            .preview_voices_need_reset
+            .store(true, Ordering::Release);
+    }
+}
+
+/// Empties the callback's own event collection, as a device re-preparation does.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_clear_midi_events(state: *mut c_void) {
+    if let Some(state) = block(state) {
+        unsafe { hirari_midi_buffer_clear(state.block_midi) };
+    }
+}
+
+/// Binds an engine's block. Every handle must outlive the returned state.
+///
+/// # Safety
+/// `ops` and `handles` are read once; the handles belong to this one engine.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_block_create(
-    routing: *mut c_void,
-    bounce: *mut c_void,
-    input_blocks: *mut c_void,
-    control_room: *mut c_void,
-    mixer_telemetry: *mut c_void,
-    metronome: *mut c_void,
-    master_limiter: *mut c_void,
-    meter: *mut c_void,
-    tempo: *mut c_void,
-    bus_system: *mut c_void,
-    sidechain: *mut c_void,
+    handles: HirariEngineBlockHandles,
     ops: *const HirariEngineBlockOps,
 ) -> *mut c_void {
     // The walk writes these from the audio callback only, so they are bound once
@@ -936,13 +1806,15 @@ pub unsafe extern "C" fn hirari_engine_block_create(
         work_channels: ptr::null(),
         bus_context: ptr::null_mut(),
     };
-    let mut destinations: Box<[RoutingTrackDestination]> =
-        vec![seed; MAX_TRACKS].into();
+    let mut destinations: Box<[RoutingTrackDestination]> = vec![seed; MAX_TRACKS].into();
     let destinations_ptr = destinations.as_mut_ptr();
     let mut graph_ids: Box<[u32]> = vec![0u32; MAX_TRACKS].into();
     let graph_ids_ptr = graph_ids.as_mut_ptr();
     let mut process_order: Box<[u32]> = vec![0u32; MAX_GRAPH_NODES].into();
     let process_order_ptr = process_order.as_mut_ptr();
+    let fallback_notes: Box<[[u32; FALLBACK_PITCHES]; FALLBACK_CHANNELS]> =
+        Box::new([[0u32; FALLBACK_PITCHES]; FALLBACK_CHANNELS]);
+    let fallback_notes_ptr = Box::into_raw(fallback_notes);
     std::mem::forget(telemetry);
     std::mem::forget(ids);
     std::mem::forget(lefts);
@@ -956,17 +1828,39 @@ pub unsafe extern "C" fn hirari_engine_block_create(
         } else {
             unsafe { *ops }
         },
-        routing,
-        bounce,
-        input_blocks,
-        control_room,
-        mixer_telemetry,
-        metronome,
-        master_limiter,
-        meter,
-        tempo,
-        bus_system,
-        sidechain,
+        routing: handles.routing,
+        track_table: handles.track_table,
+        bounce: handles.bounce,
+        input_blocks: handles.input_blocks,
+        control_room: handles.control_room,
+        mixer_telemetry: handles.mixer_telemetry,
+        metronome: handles.metronome,
+        master_limiter: handles.master_limiter,
+        meter: handles.meter,
+        tempo: handles.tempo,
+        bus_system: handles.bus_system,
+        sidechain: handles.sidechain,
+        rings: handles.rings,
+        midi_clock: handles.midi_clock,
+        midi_snapshots: handles.midi_snapshots,
+        preview_synth: handles.preview_synth,
+        preview_sampler: handles.preview_sampler,
+        mpe: handles.mpe,
+        macro_control: handles.macro_control,
+        playhead: AtomicU64::new(0),
+        playing: AtomicBool::new(false),
+        loop_enabled: AtomicBool::new(false),
+        cycle_start: AtomicU64::new(0),
+        cycle_end: AtomicU64::new(0),
+        test_tone: AtomicBool::new(false),
+        generation: AtomicU64::new(1),
+        config_transition: AtomicBool::new(false),
+        range_overflow: AtomicBool::new(false),
+        preview_voices_need_reset: AtomicBool::new(false),
+        monitor_offset: AtomicU32::new(0),
+        talkback_offset: AtomicU32::new(0),
+        block_midi: hirari_midi_buffer_create(),
+        fallback_notes: fallback_notes_ptr,
         telemetry: telemetry_ptr,
         telemetry_active: AtomicU32::new(0),
         telemetry_lock: AtomicBool::new(false),
@@ -991,6 +1885,8 @@ pub unsafe extern "C" fn hirari_engine_block_destroy(state: *mut c_void) {
     }
     let state = unsafe { Box::from_raw(state.cast::<EngineBlockState>()) };
     unsafe {
+        hirari_midi_buffer_destroy(state.block_midi);
+        drop(Box::from_raw(state.fallback_notes));
         drop(Box::from_raw(slice::from_raw_parts_mut(
             state.telemetry,
             2,

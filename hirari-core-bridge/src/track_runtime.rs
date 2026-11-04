@@ -112,7 +112,7 @@ pub(crate) fn channels_of(handle: *mut c_void) -> (*const *mut f32, u32, u32) {
     )
 }
 
-fn clear_planes(channels: *const *mut f32, count: u32, frames: usize) {
+pub(crate) fn clear_planes(channels: *const *mut f32, count: u32, frames: usize) {
     if channels.is_null() || frames == 0 {
         return;
     }

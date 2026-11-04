@@ -39,7 +39,9 @@
         return adoptTrackHandle(hirari_engine_track_retain(m_trackTable, tid));
     }
     Track* findPublishedTrack(uint32_t tid) const {
-        return tid < kMaxTrackMap ? trackView(m_trackTable).trackMap[tid] : nullptr;
+        const auto published = published_tracks();
+        if (published.track_map == nullptr || tid >= kMaxTrackMap) return nullptr;
+        return reinterpret_cast<Track*>(published.track_map[tid]);
     }
 
     // Borrowed window onto the graph in layout order, valid while the lock is held.

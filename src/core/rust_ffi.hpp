@@ -1503,10 +1503,9 @@ extern "C" void hirari_track_runtime_publish_regions(
     void* state, const uint8_t* inputs, size_t count, uint8_t published);
 extern "C" void hirari_track_runtime_reset_for_offline_render(void* state);
 
-/// Rust owns the engine's post-graph block tail (engine_block_host.rs): routing
-/// feedback, metering publication, the metronome, the master gain/limiter/meter,
-/// the Control Room cue and the playhead advance. The engine binds its handles
-/// once and hands each block to hirari_engine_block_finish().
+/// Rust owns the engine's whole block (engine_block_host.rs): the admission
+/// head, the graph walk and the post-graph tail. The engine binds its handles
+/// once, then calls begin, route and finish around the device buffer.
 struct HirariEngineTelemetry {
     float peaks_left[256];
     float peaks_right[256];
@@ -1523,22 +1522,69 @@ struct HirariEngineBlockOps {
     void* (*bus_state)(void* track);
     uint8_t (*solo)(void* track);
     void (*record)(void* track, uint64_t playhead);
+    uint8_t (*midi_input)(void* track);
+    void* (*articulation)(void* track);
+    void* (*plugin_midi)(void* track);
+    void (*set_volume)(void* track, float value);
+    void (*set_pan)(void* track, float value);
+    void (*set_mute)(void* track, uint8_t value);
+    void (*set_solo)(void* track, uint8_t value);
+};
+/// Every handle the block borrows; the engine owns each for the state's lifetime.
+struct HirariEngineBlockHandles {
+    void* routing;
+    void* track_table;
+    void* bounce;
+    void* input_blocks;
+    void* control_room;
+    void* mixer_telemetry;
+    void* metronome;
+    void* master_limiter;
+    void* meter;
+    void* tempo;
+    void* bus_system;
+    void* sidechain;
+    void* rings;
+    void* midi_clock;
+    void* midi_snapshots;
+    void* preview_synth;
+    void* preview_sampler;
+    void* mpe;
+    void* macro_control;
 };
 extern "C" void* hirari_engine_block_create(
-    void* routing, void* bounce, void* input_blocks, void* control_room,
-    void* mixer_telemetry, void* metronome, void* master_limiter, void* meter,
-    void* tempo, void* bus_system, void* sidechain,
-    const HirariEngineBlockOps* ops);
+    HirariEngineBlockHandles handles, const HirariEngineBlockOps* ops);
 extern "C" void hirari_engine_block_destroy(void* state);
+/// Zero when the head already silenced the window. `frames_out` receives the
+/// block length the rest of the callback must use.
+extern "C" uint8_t hirari_engine_block_begin(
+    void* state, void* output, uint32_t off, uint32_t frames, double sample_rate,
+    uint8_t shutdown, uint32_t* frames_out);
+extern "C" uint64_t hirari_engine_block_chunk_plan(void* state, uint32_t remaining);
 extern "C" void hirari_engine_block_route(
-    void* state, void* output, uint32_t off, uint32_t frames, uint64_t playhead,
-    double sample_rate, uint32_t monitor_offset, uint64_t generation,
-    uint8_t playing, void* const* active_tracks, uint32_t track_count);
+    void* state, void* output, uint32_t off, uint32_t frames, double sample_rate);
 extern "C" void hirari_engine_block_finish(
-    void* state, void* output, uint32_t off, uint32_t frames, uint64_t playhead,
-    double sample_rate, float master_gain, uint8_t playing, uint8_t auto_record,
-    uint32_t talkback_offset, void* const* active_tracks, uint32_t track_count,
-    uint32_t* advance_out, uint8_t* overflow_out);
+    void* state, void* output, uint32_t off, uint32_t frames, double sample_rate,
+    float master_gain, uint8_t auto_record);
+extern "C" uint64_t hirari_engine_block_playhead(const void* state);
+extern "C" void hirari_engine_block_set_playhead(void* state, uint64_t playhead);
+extern "C" uint8_t hirari_engine_block_is_playing(const void* state);
+extern "C" void hirari_engine_block_set_playing(void* state, uint8_t playing);
+extern "C" uint8_t hirari_engine_block_loop_enabled(const void* state);
+extern "C" void hirari_engine_block_set_loop(void* state, uint8_t enabled);
+extern "C" uint64_t hirari_engine_block_cycle_start(const void* state);
+extern "C" uint64_t hirari_engine_block_cycle_end(const void* state);
+extern "C" uint8_t hirari_engine_block_set_cycle(
+    void* state, uint64_t start_sample, uint64_t end_sample, uint8_t enabled);
+extern "C" uint8_t hirari_engine_block_test_tone(const void* state);
+extern "C" void hirari_engine_block_set_test_tone(void* state, uint8_t enabled);
+extern "C" uint64_t hirari_engine_block_generation(const void* state);
+extern "C" uint64_t hirari_engine_block_bump_generation(void* state);
+extern "C" void hirari_engine_block_set_config_transition(
+    void* state, uint8_t transition);
+extern "C" uint8_t hirari_engine_block_range_overflowed(const void* state);
+extern "C" void hirari_engine_block_request_preview_voice_reset(void* state);
+extern "C" void hirari_engine_block_clear_midi_events(void* state);
 extern "C" uint32_t hirari_engine_telemetry_active_index(const void* state);
 extern "C" bool hirari_engine_telemetry_snapshot(
     const void* state, uint32_t index, HirariEngineTelemetry* out);

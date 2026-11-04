@@ -38,11 +38,11 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
     // Close callback admission before waiting for in-flight callbacks. The
     // generation check alone cannot make master/track buffer reallocation
     // safe while a callback still traverses the previous buffers.
-    m_audioConfigTransition.store(true, std::memory_order_release);
+    hirari_engine_block_set_config_transition(m_engineBlock, 1);
     struct ConfigTransitionGuard {
-        std::atomic<bool>& flag;
-        ~ConfigTransitionGuard() { flag.store(false, std::memory_order_release); }
-    } transitionGuard{m_audioConfigTransition};
+        void* state;
+        ~ConfigTransitionGuard() { hirari_engine_block_set_config_transition(state, 0); }
+    } transitionGuard{m_engineBlock};
     waitForAudioCallbacks();
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
@@ -52,9 +52,9 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         // previous published snapshot, so transport state is not a reclamation
         // proof.
         m_sampleRate.store(sr);
-        m_audioConfigGeneration.fetch_add(1, std::memory_order_acq_rel);
+        hirari_engine_block_bump_generation(m_engineBlock);
         m_masterBuffer.setSize(2, bs);
-        m_blockMidi.clear();
+        hirari_engine_block_clear_midi_events(m_engineBlock);
         m_blockSize.store(bs, std::memory_order_relaxed);
 
         hirari_master_limiter_prepare(m_masterLimiter, sr);
@@ -76,7 +76,7 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
                     m_sidechainEngine, t->getId(), work.getReadPointer(0),
                     work.getNumChannels() > 1 ? work.getReadPointer(1) : work.getReadPointer(0),
                     bs, static_cast<uint32_t>(sr),
-                    m_audioConfigGeneration.load(std::memory_order_acquire));
+                    hirari_engine_block_generation(m_engineBlock));
             }
         }
     }
@@ -91,7 +91,7 @@ void HirariUnifiedEngine::syncStructuralChanges() {
     // the routing rebuild, the snapshot publication and the solved PDC offsets.
     // The engine supplies the per-track scalars and applies the result.
     hirari_engine_sync_structure(m_trackTable, m_busSystem, m_routingEngine, m_pdcState,
-                                 m_audioConfigGeneration.load(std::memory_order_acquire));
+                                 hirari_engine_block_generation(m_engineBlock));
     hirari_log_post(0, 0x1, "Structural Sync: Topology Rebuilt.");
 }
 
@@ -140,7 +140,7 @@ const HirariEngineTrackOps* HirariUnifiedEngine::trackOps() noexcept {
 void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) {
     // Rust fills the buffer the callback is not reading, then flips the index.
     hirari_engine_track_publish(
-        m_trackTable, m_audioConfigGeneration.load(std::memory_order_acquire),
+        m_trackTable, hirari_engine_block_generation(m_engineBlock),
         stampAudioGeneration);
 }
 

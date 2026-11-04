@@ -1,7 +1,7 @@
     // Transport
     bool is_playing() const;
     bool audio_range_overflowed() const noexcept {
-        return m_audioRangeOverflow.load(std::memory_order_acquire);
+        return hirari_engine_block_range_overflowed(m_engineBlock) != 0;
     }
     uint32_t get_block_size() const noexcept;
     float get_latency_ms() const noexcept;
@@ -54,7 +54,7 @@
     uint32_t get_track_delay_samples(uint32_t tid) const;
     double get_sample_rate() const { return m_sampleRate.load(std::memory_order_relaxed); }
     uint64_t get_audio_config_generation() const noexcept {
-        return m_audioConfigGeneration.load(std::memory_order_acquire);
+        return hirari_engine_block_generation(m_engineBlock);
     }
     void set_loop(bool enabled);
     bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled);

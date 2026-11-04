@@ -74,6 +74,20 @@ production support.
 
 ### Changed
 
+- Rust owns the engine's block head and its transport. `hirari_engine_block_begin`
+  (`hirari-core-bridge/src/engine_block_host.rs`) now runs every gate that decides
+  whether a device callback renders at all -- buffer and block-size validity, the
+  configuration-transition and bounce holds, shutdown, hot-swap quiesce, the
+  double-buffered snapshot generation check -- then wraps the playhead over the
+  cycle, drains the queued fader/pan/mute/solo commands against the published
+  generation, empties each track's own MIDI input, stages the timeline's notes and
+  renders the built-in preview voices. The sample position, loop, cycle, test tone,
+  generation and overflow state moved out of `HirariUnifiedEngine` into that state,
+  so `processBlock` is now a denormal guard around three calls and every transport
+  reader in the engine goes through the same FFI. `hirari_engine_block_create`
+  takes the engine's whole handle set at once instead of receiving the track view
+  window per call. C++ 7986 -> 7738 (-248).
+
 - Rust owns the engine's graph walk. `hirari_engine_block_route`
   (`hirari-core-bridge/src/engine_block_host.rs`) now stages every track's block,
   injects the one-block delayed feedback edges, feeds the live driver input,
