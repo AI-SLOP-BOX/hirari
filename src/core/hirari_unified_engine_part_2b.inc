@@ -101,19 +101,6 @@ void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) 
         stampAudioGeneration);
 }
 
-std::shared_ptr<Track> HirariUnifiedEngine::detachTrackLocked(uint32_t tid, bool stampGeneration) {
-    Track* detached = findTrackLocked(tid);
-    if (!detached) return nullptr;
-    hirari_region_store_forget_waveforms(this, detached);
-    // The table keeps its own reference in the deferred list, so the caller gets
-    // a second one while a device callback may still hold the raw pointer.
-    auto owned = adoptTrackHandle(hirari_engine_track_detach(m_trackTable, tid));
-    if (!owned) return nullptr;
-    mark_project_layout_changed();
-    publishTrackSnapshotLocked(stampGeneration);
-    return owned;
-}
-
 std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::string& name,
                                                      Track::Type type) {
     if (type != Track::Type::Bus)
@@ -124,177 +111,40 @@ std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::st
     return bus;
 }
 
-void HirariUnifiedEngine::insertTrackLocked(const std::shared_ptr<Track>& track, size_t index,
-                                            bool stampGeneration) {
-    // Restoring an id that is already in the graph is a no-op, as it was when the
-    // vector lived here; the table clamps an out-of-range index to the end.
-    if (!track || findTrackLocked(track->getId())) return;
-    Track* raw = track.get();
-    if (!hirari_engine_track_insert(m_trackTable, index, newTrackHandle(track), raw)) return;
-    mark_project_layout_changed();
-    publishTrackSnapshotLocked(stampGeneration);
-}
-
 void HirariUnifiedEngine::syncNative(void* host) {
     if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
 }
 
+// The lifecycle walk itself is Rust's (track_edit_host.rs): it holds the tracks
+// lock, moves the Rust track table, publishes the audio snapshot and replays the
+// sidechain, route and routing captures through the shared track session. Only
+// building the C++ Track and naming the stores it walks stay here.
 void HirariUnifiedEngine::installTrackEditHost() {
-    struct Handle {
-        std::shared_ptr<Track> track;
-        size_t index = 0;
-        uint32_t id = 0;
-        void* sidechainLinks = nullptr;
-        void* sidechainRoutes = nullptr;
-        std::vector<RoutingEngine::Connection> routing;
-        std::vector<RoutingEngine::FeedbackConnection> feedback;
-    };
     static const HirariTrackEditHostOps ops = {
         &HirariUnifiedEngine::regionHostListTracks,
         &hirari_region_store_list_regions,
         [](void* host, uint32_t type, uint32_t id, const uint8_t* name, size_t nameLength,
-           size_t* outIndex) -> void* {
-            if (!host || !name || !outIndex) return nullptr;
+           void** outTrack) -> void* {
+            if (!host || !name || !outTrack) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            const std::string trackName(reinterpret_cast<const char*>(name), nameLength);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            auto created = engine->makeTrack(id, trackName, static_cast<Track::Type>(type));
+            auto created = engine->makeTrack(
+                id, std::string(reinterpret_cast<const char*>(name), nameLength),
+                static_cast<Track::Type>(type));
             created->prepareToPlay(engine->m_sampleRate.load(std::memory_order_relaxed),
                                    engine->m_blockSize.load(std::memory_order_relaxed));
-            Track* raw = created.get();
-            const size_t appendIndex = engine->lockedTracks().size();
-            (void)hirari_engine_track_insert(engine->m_trackTable, appendIndex,
-                                           newTrackHandle(std::move(created)), raw);
-            auto* handle = new Handle{engine->findTrackSharedLocked(id), appendIndex, id};
-            engine->mark_project_layout_changed();
-            engine->publishTrackSnapshotLocked(true);
-            *outIndex = handle->index;
-            return handle;
+            *outTrack = created.get();
+            return newTrackHandle(std::move(created));
         },
-        [](void* host, uint32_t tid, uint32_t newId, const uint32_t* regionIds,
-           size_t regionIdCount, size_t* outIndex) -> void* {
-            if (!host || !outIndex || (!regionIds && regionIdCount != 0)) return nullptr;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::shared_ptr<Track> copy;
-            size_t insertIndex = 0;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                Track* original = engine->findTrackLocked(tid);
-                if (!original) return nullptr;
-                if (hirari_region_store_count(original) != regionIdCount) return nullptr;
-                copy = engine->makeTrack(newId, std::string(), original->getType());
-                // The copy's own storages are the destination, name included:
-                // Rust reads the source stores and writes these, so no value
-                // crosses a C++ list and the copy suffix is Rust's rule.
-                if (!hirari_track_clone_state(
-                        original->channelStripHandle(), original->realtimeRuntime(),
-                        original->automationStoreHandle(), original->effectChainHandle(),
-                        original->nameStoreHandle(),
-                        copy->channelStripHandle(), copy->realtimeRuntime(),
-                        copy->automationStoreHandle(), copy->effectChainHandle(),
-                        copy->nameStoreHandle(),
-                        copy->getType() == Track::Type::Bus))
-                    return nullptr;
-                if (!hirari_region_store_copy_regions(original, copy.get(), regionIds, regionIdCount))
-                    return nullptr;
-                insertIndex = engine->lockedTracks().size();
-                (void)hirari_engine_track_insert(engine->m_trackTable, insertIndex,
-                                               newTrackHandle(copy), copy.get());
-                engine->mark_project_layout_changed();
-                engine->publishTrackSnapshotLocked(false);
-            }
-            auto* handle = new Handle{copy, insertIndex, newId};
-            *outIndex = insertIndex;
-            return handle;
-        },
-        [](void* host, uint32_t tid) -> void* {
+        [](void* host, uint32_t kind) -> void* {
             if (!host) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            void* sidechainBackup = hirari_sidechain_engine_capture_links(
-                engine->m_sidechainEngine, tid);
-            std::shared_ptr<Track> removed;
-            void* sidechainRouteBackup = nullptr;
-            std::vector<RoutingEngine::Connection> routingBackup;
-            std::vector<RoutingEngine::FeedbackConnection> feedbackBackup;
-            size_t originalIndex = 0;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                const size_t foundIndex = hirari_engine_track_index_of(engine->m_trackTable, tid);
-                if (foundIndex == std::numeric_limits<size_t>::max()) return nullptr;
-                originalIndex = foundIndex;
-                hirari_sidechain_engine_remove_track(engine->m_sidechainEngine, tid);
-                sidechainRouteBackup =
-                    hirari_sidechain_routes_capture_track(engine->m_sidechainRoutes, tid);
-                void* routingHandle = engine->m_routingEngine;
-                hirari_routing_engine_remove_dependencies_for_node(routingHandle, tid);
-                size_t routingCount = 0;
-                size_t feedbackCount = 0;
-                void* removedRouting = hirari_routing_engine_remove_connections_for_node(
-                    routingHandle, tid, &routingCount);
-                void* removedFeedback = hirari_routing_engine_remove_feedback_for_node(
-                    routingHandle, tid, &feedbackCount);
-                routingBackup = takeRoutingConnections(removedRouting, routingCount);
-                feedbackBackup = takeRoutingFeedback(removedFeedback, feedbackCount);
-                removed = engine->detachTrackLocked(tid, false);
+            switch (kind) {
+                case kHirariTrackEditStoreTrackTable: return engine->m_trackTable;
+                case kHirariTrackEditStoreEngineBlock: return engine->m_engineBlock;
+                case kHirariTrackEditStoreSidechain: return engine->m_sidechainEngine;
+                case kHirariTrackEditStoreSidechainRoutes: return engine->m_sidechainRoutes;
+                default: return engine->m_routingEngine;
             }
-            return new Handle{std::move(removed), originalIndex, tid, sidechainBackup,
-                              sidechainRouteBackup, std::move(routingBackup),
-                              std::move(feedbackBackup)};
-        },
-        [](void* host, void* raw, bool dropSidechainLinks, bool dropRouting) -> bool {
-            if (!host || !raw) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            auto* handle = static_cast<Handle*>(raw);
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                if (dropSidechainLinks)
-                    hirari_sidechain_engine_remove_track(engine->m_sidechainEngine, handle->id);
-                if (dropRouting) {
-                    hirari_sidechain_routes_erase_track(engine->m_sidechainRoutes, handle->id);
-                    hirari_routing_engine_remove_dependencies_for_node(
-                        engine->m_routingEngine, handle->id);
-                }
-                engine->detachTrackLocked(handle->id, false);
-            }
-            if (!dropRouting) return true;
-            size_t discardedRouteCount = 0;
-            size_t discardedFeedbackCount = 0;
-            void* discardedRouteRecords = hirari_routing_engine_remove_connections_for_node(
-                engine->m_routingEngine, handle->id, &discardedRouteCount);
-            void* discardedFeedbackRecords = hirari_routing_engine_remove_feedback_for_node(
-                engine->m_routingEngine, handle->id, &discardedFeedbackCount);
-            takeRoutingConnections(discardedRouteRecords, discardedRouteCount);
-            takeRoutingFeedback(discardedFeedbackRecords, discardedFeedbackCount);
-            return true;
-        },
-        [](void* host, void* raw, bool stampGeneration) -> bool {
-            if (!host || !raw) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            auto* handle = static_cast<Handle*>(raw);
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                engine->insertTrackLocked(handle->track, handle->index, stampGeneration);
-                hirari_sidechain_routes_restore(engine->m_sidechainRoutes,
-                                                engine->m_routingEngine,
-                                                handle->sidechainRoutes);
-            }
-            (void)hirari_sidechain_engine_restore_links(engine->m_sidechainEngine,
-                                                        handle->sidechainLinks);
-            for (const auto& connection : handle->routing)
-                hirari_routing_engine_add_connection(
-                    engine->m_routingEngine, connection.sourceId, connection.destId,
-                    connection.gain, connection.send, connection.preFader);
-            for (const auto& connection : handle->feedback)
-                hirari_routing_engine_add_feedback(
-                    engine->m_routingEngine, connection.sourceId, connection.destId,
-                    connection.gain);
-            return true;
-        },
-        [](void* raw) {
-            auto* handle = static_cast<Handle*>(raw);
-            hirari_sidechain_engine_free_captured_links(handle->sidechainLinks);
-            hirari_sidechain_routes_release(handle->sidechainRoutes);
-            delete handle;
         },
         nullptr,  // undo capture lives in the Rust track edit host.
         &HirariUnifiedEngine::syncNative,

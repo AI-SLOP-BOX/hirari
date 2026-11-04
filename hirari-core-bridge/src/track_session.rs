@@ -63,6 +63,55 @@ fn host_ops() -> Option<HirariTrackSessionOps> {
     HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
 }
 
+/// The engine contributions for a caller that runs a longer protocol than one
+/// track edit: the lifecycle host walks the whole graph while holding the same
+/// lock, so it resolves tracks and storages itself instead of opening a session.
+pub fn engine_ops() -> Option<HirariTrackSessionOps> {
+    host_ops()
+}
+
+impl HirariTrackSessionOps {
+    pub fn lock_tracks(&self, host: *mut c_void) {
+        if let Some(lock) = self.lock {
+            unsafe { lock(host) };
+        }
+    }
+
+    pub fn unlock_tracks(&self, host: *mut c_void) {
+        if let Some(unlock) = self.unlock {
+            unsafe { unlock(host) };
+        }
+    }
+
+    /// Resolves a track id in the live graph; null when it is not there.
+    pub fn find(&self, host: *mut c_void, track_id: u32) -> *mut c_void {
+        self.track
+            .map_or(std::ptr::null_mut(), |find| unsafe { find(host, track_id) })
+    }
+
+    pub fn storage(&self, track: *mut c_void, kind: u32) -> *mut c_void {
+        self.storage
+            .map_or(std::ptr::null_mut(), |resolve| unsafe { resolve(track, kind) })
+    }
+
+    pub fn track_type(&self, track: *mut c_void) -> u32 {
+        self.track_type
+            .map_or(0, |kind| unsafe { kind(track) })
+    }
+
+    pub fn mark_layout(&self, track: *mut c_void) {
+        if let Some(mark) = self.mark_layout {
+            unsafe { mark(track) };
+        }
+    }
+
+    pub fn prepare_track(&self, host: *mut c_void, track: *mut c_void) {
+        if let Some(prepare) = self.prepare {
+            unsafe { prepare(host, track) };
+        }
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn hirari_track_session_install(ops: *const HirariTrackSessionOps) {
     let slot = HOST_OPS.get_or_init(|| Mutex::new(None));

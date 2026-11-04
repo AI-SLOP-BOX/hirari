@@ -78,6 +78,20 @@ production support.
 
 ### Changed
 
+- The track create / duplicate / remove lifecycle now runs from Rust.
+  `track_edit_host.rs` walks the graph itself over the shared track session: it
+  takes the engine's tracks lock, names the new track, appends the handle the C++
+  factory returns, publishes the audio snapshot at the engine block's generation,
+  and captures the sidechain links, routes and routing connections a removal takes
+  with it, so undo puts the track back at the index it left with its sends
+  re-added. `HirariUnifiedEngine::installTrackEditHost` collapses to a track
+  factory plus one `store(kind)` handle getter; `detachTrackLocked`,
+  `insertTrackLocked`, the routing take helpers and the record header
+  `engine/routing_engine.hpp` are gone with the FFI declarations only that walk
+  called. An owner is released through the table's deleter function rather than
+  the table itself, so an undo entry dropped after its engine still frees the
+  track, and `undo_workflow.rs` covers the add / duplicate / remove round trip
+  including the route restore. C++ 5119 -> 4872 (-247).
 - Offline render-target selection and the track fader read now run from Rust.
   `engine_analysis_reads.rs` walks the live graph through the layout host ops —
   the same locked table walk the save gather already owns — to resolve a track

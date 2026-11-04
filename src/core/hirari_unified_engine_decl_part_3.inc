@@ -47,9 +47,6 @@
     static void syncNative(void* host);
     std::shared_ptr<Track> makeTrack(uint32_t id, const std::string& name, Track::Type type);
     void publishTrackSnapshotLocked(bool stampAudioGeneration);
-    std::shared_ptr<Track> detachTrackLocked(uint32_t tid, bool stampAudioGeneration);
-    void insertTrackLocked(const std::shared_ptr<Track>& track, size_t index,
-                           bool stampAudioGeneration);
     // Installs the sandbox maintenance callbacks Rust drives; see part_3a.
     static void installSandboxMaintenanceHost();
 

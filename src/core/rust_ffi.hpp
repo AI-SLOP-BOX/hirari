@@ -95,11 +95,9 @@ extern "C" void hirari_engine_track_table_destroy(void* table);
 extern "C" size_t hirari_engine_track_count(void* table);
 extern "C" void* const* hirari_engine_track_ptrs(void* table);
 extern "C" void* hirari_engine_track_find(void* table, uint32_t track_id);
-extern "C" size_t hirari_engine_track_index_of(void* table, uint32_t track_id);
 extern "C" void* hirari_engine_track_retain(void* table, uint32_t track_id);
 extern "C" bool hirari_engine_track_insert(void* table, size_t index, void* owner,
                                           void* track);
-extern "C" void* hirari_engine_track_detach(void* table, uint32_t track_id);
 extern "C" void hirari_engine_track_defer_all(void* table);
 extern "C" void hirari_engine_track_publish(void* table, uint64_t generation, bool stamp);
 extern "C" void hirari_engine_track_snapshot(void* table, HirariTrackSnapshot* out);
@@ -814,7 +812,6 @@ extern "C" void hirari_sidechain_engine_destroy(void* state);
 // either entry point.
 extern "C" bool hirari_sidechain_engine_has_link(
     const void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track);
-extern "C" void hirari_sidechain_engine_remove_track(void* state, uint32_t track);
 extern "C" void hirari_sidechain_engine_reset(void* state);
 // Rust owns the sidechain route list (sidechain_route_store.rs). The engine
 // only allocates, clears and replays whole tables; per-route reads and edits
@@ -822,34 +819,15 @@ extern "C" void hirari_sidechain_engine_reset(void* state);
 extern "C" void* hirari_sidechain_routes_create();
 extern "C" void hirari_sidechain_routes_destroy(void* state);
 extern "C" void hirari_sidechain_routes_clear(const void* state);
-extern "C" bool hirari_sidechain_routes_erase_track(const void* state, uint32_t track);
-extern "C" void* hirari_sidechain_routes_capture_track(const void* state, uint32_t track);
-extern "C" void hirari_sidechain_routes_release(void* captured);
-extern "C" void hirari_sidechain_routes_restore(
-    const void* state, void* routing, void* captured);
-extern "C" void* hirari_sidechain_engine_capture_links(const void* state, uint32_t track);
-extern "C" bool hirari_sidechain_engine_restore_links(const void* state, const void* handle);
-extern "C" void hirari_sidechain_engine_free_captured_links(void* handle);
 // Routing engine composition root (hirari-core-bridge/src/routing_engine_core.rs).
-// One opaque handle owns the graph/gain/feedback/send-PDC/topology stores.
+// One opaque handle owns the graph/gain/feedback/send-PDC/topology stores; the
+// track lifecycle, edge reads and dependency bookkeeping all run in Rust
+// against that same handle, so only the composition entries are declared here.
 extern "C" void* hirari_routing_engine_create();
 extern "C" void hirari_routing_engine_destroy(void* state);
 extern "C" void hirari_routing_engine_reset(void* state);
 extern "C" bool hirari_routing_engine_add_connection(
     void* state, uint32_t source, uint32_t destination, float gain, bool send, bool pre_fader);
-// The edge reads, mutations and dependency bookkeeping the routing edit policy
-// needs run in Rust against this same handle, so they are not declared here.
-extern "C" void hirari_routing_engine_remove_dependencies_for_node(void* state, uint32_t node);
-extern "C" void* hirari_routing_engine_remove_connections_for_node(
-    void* state, uint32_t node, size_t* count);
-extern "C" void hirari_routing_connection_array_free(void* records, size_t count);
-extern "C" void* hirari_routing_engine_remove_feedback_for_node(
-    void* state, uint32_t node, size_t* count);
-extern "C" void hirari_routing_feedback_array_free(void* records, size_t count);
-extern "C" bool hirari_routing_engine_add_feedback(
-    void* state, uint32_t source, uint32_t destination, float gain);
-extern "C" void hirari_routing_engine_enter_send_pdc_read(void* state);
-extern "C" void hirari_routing_engine_leave_send_pdc_read(void* state);
 
 // Routing edit host bridge.
 //
@@ -955,22 +933,31 @@ struct HirariPluginEditHostOps {
 
 extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* ops);
 
-// Track lifecycle edit policy (create, duplicate, remove and their undo).
+// Track lifecycle edit policy (create, duplicate, remove and their undo). The
+// graph walk, the captures and the replay are Rust's (track_edit_host.rs): it
+// takes the tracks lock, moves the Rust track table, publishes the audio
+// snapshot and restores the sidechain links, routes and routing connections.
+// C++ contributes only what a C++ object makes impossible from Rust — building
+// a Track, whose constructor binds the layout revision and registers a bus slot
+// — and the handles of the stores the walk visits.
+enum HirariTrackEditStore : uint32_t {
+    kHirariTrackEditStoreTrackTable = 0,
+    kHirariTrackEditStoreEngineBlock = 1,
+    kHirariTrackEditStoreSidechain = 2,
+    kHirariTrackEditStoreSidechainRoutes = 3,
+    kHirariTrackEditStoreRouting = 4,
+};
+
 struct HirariTrackEditHostOps {
     // Lists track ids / one track's region ids in storage order. The Rust id
     // allocator reads the project through these before it hands out an id.
     size_t (*listTracks)(void*, uint32_t*, size_t) = nullptr;
     size_t (*listRegions)(void*, uint32_t, uint32_t*, size_t) = nullptr;
-    void* (*create)(void*, uint32_t, uint32_t, const uint8_t*, size_t, size_t*) = nullptr;
-    // Deep-clones a track under the id the caller allocated, giving each copied
-    // region the matching id from the caller's batch.
-    void* (*duplicate)(void*, uint32_t, uint32_t, const uint32_t*, size_t, size_t*) = nullptr;
-    void* (*take)(void*, uint32_t) = nullptr;
-    // The flags drop sidechain links and routing; created and removed tracks
-    // take different paths. Restore replays the captured links and routes.
-    bool (*remove)(void*, void*, bool, bool) = nullptr;
-    bool (*restore)(void*, void*, bool) = nullptr;
-    void (*releaseHandle)(void*) = nullptr;
+    // Builds one track of the given kind and id, named by the caller, and
+    // prepares it for the engine's current device format. Writes its address and
+    // returns the owning handle the caller inserts into the graph.
+    void* (*createTrack)(void*, uint32_t, uint32_t, const uint8_t*, size_t, void**) = nullptr;
+    void* (*store)(void*, uint32_t) = nullptr;
     using ReplayFn = void (*)(void*);
     void (*recordReplay)(void*, const uint8_t*, size_t, void*, ReplayFn, ReplayFn,
                          ReplayFn) = nullptr;

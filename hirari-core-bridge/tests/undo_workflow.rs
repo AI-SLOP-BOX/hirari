@@ -683,3 +683,77 @@ fn expression_map_edits_undo_through_the_rust_edit_host() {
     core.redo();
     assert_eq!(map_json(&core), both);
 }
+
+#[test]
+fn track_lifecycle_edits_round_trip_through_the_native_history() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let layout = || -> Vec<u32> {
+        let json: serde_json::Value =
+            serde_json::from_str(&core.get_project_layout_json()).expect("layout must be JSON");
+        json.as_array()
+            .map(|tracks| {
+                tracks
+                    .iter()
+                    .filter_map(|track| track.get("id").and_then(serde_json::Value::as_u64))
+                    .map(|id| id as u32)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let routes = || -> Vec<(u32, u32)> {
+        let json: serde_json::Value =
+            serde_json::from_str(&core.audio_routes_json()).expect("routes must be JSON");
+        json.as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|route| {
+                        let source = route.get("source_id")?.as_u64()?;
+                        let destination = route.get("destination_id")?.as_u64()?;
+                        Some((source as u32, destination as u32))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let source = core.add_track(0);
+    let destination = core.add_track(0);
+    assert!(core.set_route_gain(source, destination, 0.5, true));
+    let index = layout()
+        .iter()
+        .position(|id| *id == destination)
+        .expect("a new track must be in the graph");
+
+    // Removing a track captures its send, so undo returns both the track at the
+    // index it left and the route it took with it.
+    assert!(core.remove_track(destination));
+    assert!(!layout().contains(&destination));
+    assert!(!routes().contains(&(source, destination)));
+    core.undo();
+    assert_eq!(
+        layout().iter().position(|id| *id == destination),
+        Some(index)
+    );
+    assert!(routes().contains(&(source, destination)));
+    core.redo();
+    assert!(!layout().contains(&destination));
+    assert!(!routes().contains(&(source, destination)));
+
+    // An add records one entry: its undo drops the track, its redo puts it back.
+    let added = core.add_track(0);
+    core.undo();
+    assert!(!layout().contains(&added));
+    core.redo();
+    assert!(layout().contains(&added));
+
+    // A duplicate is a separate id, and removing it again is one undo step.
+    let copy = core.duplicate_track(source);
+    assert!(copy != 0 && copy != source);
+    assert!(layout().contains(&copy));
+    core.undo();
+    assert!(!layout().contains(&copy));
+    core.redo();
+    assert!(layout().contains(&copy));
+}

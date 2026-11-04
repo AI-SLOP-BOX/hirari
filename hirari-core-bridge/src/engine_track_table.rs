@@ -406,6 +406,37 @@ pub unsafe extern "C" fn hirari_engine_track_insert(
     })
 }
 
+/// Clones one owning handle, so a track can sit in the graph and be held by an
+/// edit at the same time. Null when `owner` is null.
+///
+/// # Safety
+/// `table` must come from [`hirari_engine_track_table_create`] and `owner` must
+/// be a handle that table or one of its callers owns.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_track_owner_retain(
+    table: *const c_void,
+    owner: *mut c_void,
+) -> *mut c_void {
+    if owner.is_null() {
+        return std::ptr::null_mut();
+    }
+    as_table(table).map_or(std::ptr::null_mut(), |table| table.clone_owner(owner))
+}
+
+/// The deleter this table releases owning handles with. An undo capture can
+/// outlive the engine that built the track, so it keeps this pointer — the ops
+/// table it is read from has static storage — instead of the table itself. Null
+/// when `table` is not a live table or has no deleter.
+///
+/// # Safety
+/// `table` must come from [`hirari_engine_track_table_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_track_owner_deleter(
+    table: *const c_void,
+) -> Option<unsafe extern "C" fn(*mut c_void)> {
+    as_table(table).and_then(|table| unsafe { (*table.ops).destroy_owner })
+}
+
 /// Removes the track from the graph and keeps it alive in the deferred list.
 /// Returns a handle owned by the caller; the deferred list keeps its own so the
 /// object survives until the engine releases it. Null when the id is gone.

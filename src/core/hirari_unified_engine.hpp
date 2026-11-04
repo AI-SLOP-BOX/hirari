@@ -9,7 +9,6 @@
 #include "bridge_types.hpp"
 #include "concurrency/audio_task_manager.hpp"
 #include <optional>
-#include "engine/routing_engine.hpp"
 #include "engine/bus_track.hpp"
 #include <unordered_map>
 #include <unordered_set>

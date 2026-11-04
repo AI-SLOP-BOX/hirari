@@ -1,25 +1,6 @@
 using ScopedDenormalGuard = ::Hirari::Core::Concurrency::ScopedDenormalGuard;
 
 namespace {
-// Rust hands back an owned array for every routing snapshot. Copy the records
-// once, then release the Rust allocation through the matching free entry so
-// no control path has to remember the take/cast/free sequence.
-std::vector<RoutingEngine::Connection> takeRoutingConnections(void* records, size_t count) {
-    if (!records) return {};
-    const auto* typed = static_cast<const RoutingEngine::Connection*>(records);
-    std::vector<RoutingEngine::Connection> out(typed, typed + count);
-    hirari_routing_connection_array_free(records, count);
-    return out;
-}
-
-std::vector<RoutingEngine::FeedbackConnection> takeRoutingFeedback(void* records, size_t count) {
-    if (!records) return {};
-    const auto* typed = static_cast<const RoutingEngine::FeedbackConnection*>(records);
-    std::vector<RoutingEngine::FeedbackConnection> out(typed, typed + count);
-    hirari_routing_feedback_array_free(records, count);
-    return out;
-}
-
 // The track reads the Rust engine block cannot make through a handle
 // (engine_block_host.rs). Kind selects the track's own storage, and a bus stage
 // only exists on a bus track, so the downcast is the one thing kept here.
