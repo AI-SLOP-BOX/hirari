@@ -88,9 +88,10 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
         // graph renders straight into the caller's block buffers.
         [](void* host, float* left, float* right, uint32_t frames) {
             float* channels[2] = {left, right};
-            ::Hirari::Core::AudioBuffer view;
-            view.wrapChannels(channels, 2, frames);
+            void* view = hirari_audio_buffer_storage_create();
+            (void)hirari_audio_buffer_storage_wrap_channels(view, channels, 2, frames);
             static_cast<HirariUnifiedEngine*>(host)->processBlock(view, 0, frames);
+            hirari_audio_buffer_storage_destroy(view);
         },
         // Tracks size their buffers to the engine block size and silently
         // skip larger blocks; never render past the prepared block.

@@ -74,6 +74,19 @@ production support.
 
 ### Changed
 
+- The C++ `AudioBuffer` wrapper class is gone; `hirari_audio_buffer_storage_*` is
+  the only buffer surface. Track work blocks, freeze snapshots and the device
+  callback's channel wrap are plain Rust storage handles (`void*`) created,
+  prepared and destroyed where they are owned, with `SharedAudioStorage` keeping
+  only a lifetime for a published freeze; the allocation policy that the wrapper
+  used to enforce -- decline a realtime growth, reject an impossible size, keep
+  the prepared view otherwise -- now lives entirely in Rust, which also publishes
+  the Critical notification where it rejects the growth. `Track::process`,
+  `publishFrozenAudio` and `HirariUnifiedEngine::processBlock` take the handle
+  instead of a C++ type, the engine's unread `m_masterBuffer` was deleted, and the
+  realtime-guard contract moved from a C++ translation unit to a Rust test.
+  C++ 7639 -> 7534 (-105).
+
 - The C++ `MidiBuffer` wrapper is gone; the Rust event table is the only owner.
   A track's MIDI input (`Track::m_pluginMidi`) is now the `hirari_midi_buffer_*`
   handle the block head stages into and the chain reads in place, created with

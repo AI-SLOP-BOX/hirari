@@ -37,9 +37,11 @@ public:
 
     bool loadPreFxIntoWork(uint32_t len) noexcept {
         if (!m_busState || len == 0 || len > kMaxSamples || !canProcess(len)) return false;
-        auto& work = getWorkBuffer(len);
-        return hirari_bus_audio_read(m_busState, work.getWritePointer(0),
-                                     work.getWritePointer(1), len, false);
+        void* work = workBufferStorage();
+        return hirari_bus_audio_read(m_busState,
+                                     hirari_audio_buffer_storage_write_pointer(work, 0),
+                                     hirari_audio_buffer_storage_write_pointer(work, 1),
+                                     len, false);
     }
 
     // BusTrack processing boundary: pre-FX bus input is placed in the Track
@@ -47,9 +49,10 @@ public:
     // is published as the bus post-FX stage. No allocation is performed here.
     bool publishPostFx(uint32_t len) noexcept {
         if (!m_busState || len == 0 || len > kMaxSamples || !canProcess(len)) return false;
-        auto& work = getWorkBuffer(len);
-        return hirari_bus_audio_replace_post(m_busState, work.getReadPointer(0),
-                                             work.getReadPointer(1), len);
+        void* work = workBufferStorage();
+        return hirari_bus_audio_replace_post(
+            m_busState, hirari_audio_buffer_storage_read_pointer(work, 0, 0),
+            hirari_audio_buffer_storage_read_pointer(work, 1, 0), len);
     }
 
 private:

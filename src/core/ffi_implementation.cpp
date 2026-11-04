@@ -1,10 +1,10 @@
 #include "bridge_shims.hpp"
-#include "audio_buffer.hpp"
+#include "engine/track.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
 #include <cstring>
 
-using HirariAudioWeakHandle = std::weak_ptr<::Hirari::Core::AudioBuffer>;
-using HirariAudioStrongHandle = std::shared_ptr<::Hirari::Core::AudioBuffer>;
+using HirariAudioWeakHandle = std::weak_ptr<void>;
+using HirariAudioStrongHandle = Hirari::Core::Engine::SharedAudioStorage;
 
 // Import-cache weak handles. Rust stores the opaque pointer and asks for a
 // strong lock, liveness, or release; the buffer never crosses the FFI.
@@ -21,17 +21,18 @@ extern "C" void hirari_audio_import_weak_release(void* weak_audio) {
     delete static_cast<HirariAudioWeakHandle*>(weak_audio);
 }
 
-// Import buffers are built by Rust: the native type is a view over the
-// Rust-owned storage, so these helpers only move the handle's lifetime across
-// the boundary. `out_storage` receives the storage Rust resizes and fills.
+// Import buffers are built by Rust: the handle is the Rust-owned storage
+// itself, so these helpers only move its lifetime across the boundary.
+// `out_storage` receives the storage Rust resizes and fills.
 extern "C" void* hirari_audio_import_buffer_create(void** out_storage) {
-    auto audio = std::make_shared<::Hirari::Core::AudioBuffer>();
-    if (out_storage) *out_storage = audio->storageHandle();
-    return new HirariAudioStrongHandle(std::move(audio));
+    auto storage = Hirari::Core::Engine::shareAudioStorage(
+        hirari_audio_buffer_storage_create());
+    if (out_storage) *out_storage = storage.get();
+    return new HirariAudioStrongHandle(std::move(storage));
 }
 extern "C" void* hirari_audio_import_buffer_storage(void* strong_audio) {
     auto* audio = static_cast<HirariAudioStrongHandle*>(strong_audio);
-    return audio && *audio ? (*audio)->storageHandle() : nullptr;
+    return audio ? audio->get() : nullptr;
 }
 extern "C" void* hirari_audio_import_buffer_weak(void* strong_audio) {
     auto* audio = static_cast<HirariAudioStrongHandle*>(strong_audio);

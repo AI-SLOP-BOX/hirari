@@ -72,10 +72,11 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             }
             Track* source = engine->findTrackLocked(sourceId);
             if (!source) return false;
-            auto& sourceBuffer = source->getWorkBuffer(context->blockSize);
-            const float* left = sourceBuffer.getReadPointer(0);
-            const float* right = sourceBuffer.getNumChannels() > 1
-                ? sourceBuffer.getReadPointer(1) : left;
+            void* sourceBuffer = source->workBufferStorage();
+            const uint32_t channels = hirari_audio_buffer_storage_channels(sourceBuffer);
+            const float* left = hirari_audio_buffer_storage_read_pointer(sourceBuffer, 0, 0);
+            const float* right = channels > 1
+                ? hirari_audio_buffer_storage_read_pointer(sourceBuffer, 1, 0) : left;
             // Registration copies one prepared block into Rust-owned storage;
             // supplying the frame count is part of that contract.
             return hirari_sidechain_engine_register_link(

@@ -1,6 +1,5 @@
 #include <cassert>
 
-#include "../src/core/audio_buffer.hpp"
 #include "../src/core/rust_ffi.hpp"
 #include "../src/core/status_queue.hpp"
 
@@ -36,15 +35,18 @@ int main() {
     hirari_midi_buffer_destroy(midi);
     hirari_midi_buffer_destroy(emptyPayload);
 
-    AudioBuffer buffer(1, 16);
-    const auto attemptsBefore = AudioBuffer::realtimeResizeAttempts();
-    AudioBuffer::setRTThread(true);
-    buffer.reserve(2, 64);
-    AudioBuffer::setRTThread(false);
+    void* buffer = hirari_audio_buffer_storage_create();
+    assert(hirari_audio_buffer_storage_reserve_buffer(buffer, 1, 16) == 0);
+    assert(hirari_audio_buffer_storage_resize(buffer, 1, 16));
+    const auto attemptsBefore = hirari_audio_buffer_realtime_resize_attempts();
+    hirari_audio_buffer_set_realtime_guard(true);
+    assert(hirari_audio_buffer_storage_reserve_buffer(buffer, 2, 64) == 1);
+    hirari_audio_buffer_set_realtime_guard(false);
 
-    assert(AudioBuffer::realtimeResizeAttempts() == attemptsBefore + 1);
+    assert(hirari_audio_buffer_realtime_resize_attempts() == attemptsBefore + 1);
     assert(popEngineStatus(message));
     assert(message.severity == StatusSeverity::Critical);
+    hirari_audio_buffer_storage_destroy(buffer);
 
     return 0;
 }

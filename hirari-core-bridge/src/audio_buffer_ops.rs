@@ -1,4 +1,4 @@
-//! Allocation-free sample operations for the native AudioBuffer adapter.
+//! Allocation-free sample operations for the engine's audio blocks.
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::c_void;
@@ -407,6 +407,14 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve_buffer(
         AUDIO_BUFFER_RESIZE_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         AUDIO_BUFFER_LAST_REQUESTED_CAPACITY.store(required, Ordering::Relaxed);
         AUDIO_BUFFER_LAST_CAPACITY.store(storage.capacity, Ordering::Relaxed);
+        // A realtime growth is reported where it is rejected: the caller holds
+        // only this status code, so the notification has no C++ wrapper left.
+        let text: &[u8] = if needs_data {
+            b"AUDIO_BUFFER_RESIZE_ATTEMPTED"
+        } else {
+            b"AUDIO_BUFFER_POINTER_RESIZE_ATTEMPTED"
+        };
+        unsafe { crate::status_queue::hirari_status_queue_push_default(3, text.as_ptr(), text.len()) };
         return if needs_data { 1 } else { 5 };
     }
     if needs_data
@@ -1332,5 +1340,69 @@ mod storage_contract_tests {
         // An invalid wrap releases the owned block and leaves an empty view.
         assert!(!unsafe { hirari_audio_buffer_storage_wrap_channels(wrapped.0, ptr::null_mut(), 0, 0) });
         assert_eq!(wrapped.dimensions(), (0, 0));
+    }
+
+    #[test]
+    fn the_realtime_guard_declines_growth_and_reports_why() {
+        use super::{
+            hirari_audio_buffer_last_realtime_requested_capacity,
+            hirari_audio_buffer_realtime_resize_attempts, hirari_audio_buffer_set_realtime_guard,
+            AUDIO_BUFFER_INLINE_CHANNELS,
+        };
+        use crate::status_queue::{hirari_status_queue_pop_default, StatusMessage};
+
+        let stereo = Storage::owned(2, 16);
+        // A wide channel table inside this sample block is declined by the
+        // pointer rule rather than the sample rule.
+        let wide = Storage::owned(1, 512);
+        let attempts = unsafe { hirari_audio_buffer_realtime_resize_attempts() };
+        hirari_audio_buffer_set_realtime_guard(true);
+        let sample_status =
+            unsafe { hirari_audio_buffer_storage_reserve_buffer(stereo.0, 2, 128) };
+        let sample_capacity = unsafe { hirari_audio_buffer_last_realtime_requested_capacity() };
+        let pointer_status =
+            unsafe { hirari_audio_buffer_storage_reserve_buffer(wide.0, 18, 16) };
+        hirari_audio_buffer_set_realtime_guard(false);
+
+        // Both growth plans are declined without touching the block, so the
+        // prepared realtime view stays exactly as the callback left it.
+        assert_eq!(sample_status, 1);
+        assert_eq!(pointer_status, 5);
+        assert_eq!(stereo.dimensions(), (2, 16));
+        assert_eq!(wide.dimensions(), (1, 512));
+        assert_eq!(
+            unsafe { hirari_audio_buffer_realtime_resize_attempts() },
+            attempts + 2
+        );
+        assert!(sample_capacity >= 2 * 128);
+
+        // The rejection is published as a Critical notification by the same
+        // code that declines it; nothing has to report it on the caller side.
+        let mut reasons = [String::new(), String::new()];
+        for reason in &mut reasons {
+            let mut message = StatusMessage::default();
+            assert!(unsafe { hirari_status_queue_pop_default(&mut message) });
+            assert_eq!(message.severity, 3);
+            let end = message
+                .text
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(message.text.len());
+            *reason = String::from_utf8_lossy(&message.text[..end]).into_owned();
+        }
+        assert!(reasons.iter().any(|text| text == "AUDIO_BUFFER_RESIZE_ATTEMPTED"));
+        assert!(reasons
+            .iter()
+            .any(|text| text == "AUDIO_BUFFER_POINTER_RESIZE_ATTEMPTED"));
+
+        // Off the realtime thread the same growth is admitted, and a table
+        // beyond the inline channels is allocated then.
+        assert_eq!(unsafe { hirari_audio_buffer_storage_reserve_buffer(stereo.0, 2, 128) }, 0);
+        assert!(unsafe { hirari_audio_buffer_storage_resize(stereo.0, 2, 128) });
+        assert_eq!(stereo.dimensions(), (2, 128));
+        assert!(unsafe { AUDIO_BUFFER_INLINE_CHANNELS < 18 });
+        assert_eq!(unsafe { hirari_audio_buffer_storage_reserve_buffer(wide.0, 18, 16) }, 0);
+        assert!(unsafe { hirari_audio_buffer_storage_resize(wide.0, 18, 16) });
+        assert_eq!(wide.dimensions(), (18, 16));
     }
 }

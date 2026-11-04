@@ -76,13 +76,17 @@
         }
         return lanes;
     }
-    bool canProcess(uint32_t sz) const { return m_activeBuffer.getNumSamples() >= sz; }
+    bool canProcess(uint32_t sz) const {
+        return hirari_audio_buffer_storage_samples(m_activeBuffer) >= sz;
+    }
 
     /// The Rust runtime this track renders through; the engine's block tail
     /// addresses the track's taps through it.
     void* realtimeRuntime() const noexcept { return m_runtime; }
 
-    AudioBuffer& getWorkBuffer(uint32_t) { return m_activeBuffer; }
+    /// The track's work block. The engine reads and writes its channels
+    /// through the storage FFI rather than a C++ buffer type.
+    void* workBufferStorage() noexcept { return m_activeBuffer; }
     double getSampleRate() const noexcept { return m_sampleRate; }
 
 private:

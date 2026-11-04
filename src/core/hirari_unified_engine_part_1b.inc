@@ -20,9 +20,11 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
         if (buffers[channel] == nullptr) return;
     }
     if (m_isShutdown.load(std::memory_order_acquire)) {
-        AudioBuffer silence;
-        silence.wrapChannels(buffers, numChannels, numSamples);
-        silence.clear(numSamples);
+        void* silence = hirari_audio_buffer_storage_create();
+        (void)hirari_audio_buffer_storage_wrap_channels(
+            silence, buffers, numChannels, numSamples);
+        hirari_audio_buffer_storage_clear(silence, 0, numSamples);
+        hirari_audio_buffer_storage_destroy(silence);
         hirari_input_blocks_end_talkback(m_inputBlocks);
         return;
     }
@@ -31,8 +33,9 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
     // engine blocks.  A host/device callback may legally be larger than that
     // bound, so feed the same external buffer in bounded slices rather than
     // silently skipping every track whose prepared buffer is smaller.
-    AudioBuffer wrap;
-    wrap.wrapChannels(buffers, numChannels, numSamples);
+    void* wrap = hirari_audio_buffer_storage_create();
+    (void)hirari_audio_buffer_storage_wrap_channels(
+        wrap, buffers, numChannels, numSamples);
     for (uint32_t offset = 0; offset < numSamples;) {
         // Rust owns the engine block cap, the transport and the cycle-boundary
         // split, including the rewind a playhead that reached the loop end needs.
@@ -43,6 +46,7 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
         processBlock(wrap, offset, chunk);
         offset += chunk;
     }
+    hirari_audio_buffer_storage_destroy(wrap);
     hirari_input_blocks_end_monitor(m_inputBlocks);
     hirari_input_blocks_end_talkback(m_inputBlocks);
 }

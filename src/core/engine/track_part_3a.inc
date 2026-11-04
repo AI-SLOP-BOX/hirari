@@ -13,11 +13,11 @@
         // device reinitialisation. Snap smoothed channel-strip state to its
         // current targets so the first block is deterministic after reload.
         hirari_channel_strip_reset(m_strip);
-        m_activeBuffer.resize(2, blockSize);
-        m_preFaderBuffer.resize(2, blockSize);
-        m_sendPreFaderBuffer.resize(2, blockSize);
-        m_sendPostFaderBuffer.resize(2, blockSize);
-        m_preInsertBuffer.resize(2, blockSize);
+        prepareAudioStorage(m_activeBuffer, 2, blockSize);
+        prepareAudioStorage(m_preFaderBuffer, 2, blockSize);
+        prepareAudioStorage(m_sendPreFaderBuffer, 2, blockSize);
+        prepareAudioStorage(m_sendPostFaderBuffer, 2, blockSize);
+        prepareAudioStorage(m_preInsertBuffer, 2, blockSize);
         (void)hirari_effect_chain_set_sample_rate(m_chain, sr, blockSize);
     }
     void resetForOfflineRender() noexcept {
@@ -31,17 +31,19 @@
     // freeze cannot invalidate a callback already in flight.
     // The freeze store retains the owner handles, so a replaced buffer stays
     // alive until the control side explicitly retires it after quiescing.
-    bool publishFrozenAudio(std::shared_ptr<AudioBuffer> rendered,
+    bool publishFrozenAudio(SharedAudioStorage rendered,
                             uint64_t totalSamples,
                             uint32_t sampleRate,
                             uint64_t projectGeneration = 0,
                             uint64_t audioGeneration = 0,
                             std::string_view cachePath = {}) {
         if (!rendered) return false;
-        auto* owner = new std::shared_ptr<AudioBuffer>(std::move(rendered));
+        auto* owner = new SharedAudioStorage(std::move(rendered));
+        void* storage = owner->get();
         if (!hirari_track_frozen_store_publish(
-                m_frozenStore, owner, (*owner)->storageHandle(), (*owner)->getNumChannels(),
-                (*owner)->getNumSamples(), totalSamples, sampleRate,
+                m_frozenStore, owner, storage,
+                hirari_audio_buffer_storage_channels(storage),
+                hirari_audio_buffer_storage_samples(storage), totalSamples, sampleRate,
                 projectGeneration, audioGeneration,
                 reinterpret_cast<const uint8_t*>(cachePath.data()), cachePath.size())) {
             delete owner;
@@ -93,14 +95,8 @@
     }
 
     // Offline render taps are prepared on the control thread and only copied
-    // on the audio side. They let the render graph select a real pre-fader or
-    // pre-insert signal without changing the interactive mix state.
-    const AudioBuffer& offlinePreFaderBuffer() const noexcept { return m_preFaderBuffer; }
-    const AudioBuffer& sendPreFaderBuffer() const noexcept { return m_sendPreFaderBuffer; }
-    const AudioBuffer& sendPostFaderBuffer() const noexcept { return m_sendPostFaderBuffer; }
-    const AudioBuffer& offlinePreInsertBuffer() const noexcept { return m_preInsertBuffer; }
-    const AudioBuffer& preFxSidechainBuffer() const noexcept { return m_preInsertBuffer; }
-    const AudioBuffer& postFxSidechainBuffer() const noexcept { return m_preFaderBuffer; }
+    // on the audio side. The runtime addresses them through the handles bound
+    // at construction, so no C++ accessor exposes the storage type.
     void setSpatialPosition(float x, float y, float z) {
         // Spatial coordinates are control-thread input. Never publish a
         // non-finite value to the real-time panner.
@@ -150,23 +146,26 @@
     static uint32_t regionHostAudioView(void* handle, const float** out,
                                         size_t capacity, uint64_t* samples) {
         if (handle == nullptr) return 0;
-        const auto audio = *static_cast<const std::shared_ptr<AudioBuffer>*>(handle);
-        if (!audio) return 0;
-        const uint32_t channels = static_cast<uint32_t>(audio->getNumChannels());
-        if (samples) *samples = static_cast<uint64_t>(audio->getNumSamples());
+        const auto storage = *static_cast<const SharedAudioStorage*>(handle);
+        void* buffer = storage.get();
+        if (!buffer) return 0;
+        const uint32_t channels = hirari_audio_buffer_storage_channels(buffer);
+        if (samples) {
+            *samples = static_cast<uint64_t>(hirari_audio_buffer_storage_samples(buffer));
+        }
         if (out && capacity >= channels) {
             for (uint32_t channel = 0; channel < channels; ++channel) {
-                out[channel] = audio->getReadPointer(channel);
+                out[channel] = hirari_audio_buffer_storage_read_pointer(buffer, channel, 0);
             }
         }
         return channels;
     }
     static void* regionHostRetainHandle(void* handle) {
-        return new std::shared_ptr<AudioBuffer>(
-            *static_cast<std::shared_ptr<AudioBuffer>*>(handle));
+        return new SharedAudioStorage(
+            *static_cast<SharedAudioStorage*>(handle));
     }
     static void regionHostReleaseHandle(void* handle) {
-        delete static_cast<std::shared_ptr<AudioBuffer>*>(handle);
+        delete static_cast<SharedAudioStorage*>(handle);
     }
     static void regionHostInstall(void* track, const HirariTrackRegionRenderInput* inputs,
                                   size_t length, uint8_t published) {

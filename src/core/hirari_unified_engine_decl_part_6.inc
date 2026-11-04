@@ -34,7 +34,6 @@ private:
     void* m_engineRings = nullptr;
 
     // Internal components (using PIMPL principles where possible)
-    ::Hirari::Core::AudioBuffer m_masterBuffer;
     // Callback-owned transport continuity (block end, snapshot revision,
     // playback pass, panic request) is Rust-owned; it reconciles held MIDI
     // notes after a seek, loop wrap, or transport restart without retriggering

@@ -9,7 +9,7 @@ public:
     ~HirariUnifiedEngine();
 
     void apply_config(const EngineConfig& cfg);
-    void processBlock(::Hirari::Core::AudioBuffer& output, uint32_t offset, uint32_t size);
+    void processBlock(void* output, uint32_t offset, uint32_t size);
     void processBlockDirect(float** buffers, uint32_t numChannels, uint32_t numSamples);
     // Publishes the hardware input block for the realtime input-monitor path.
     // The caller owns the input buffers; this method copies into fixed storage

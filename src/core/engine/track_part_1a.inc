@@ -16,9 +16,9 @@ public:
         // handle and tap buffer the track owns. It is destroyed first.
         m_runtime = hirari_track_runtime_create(
             id, m_chain, m_strip, m_automationStore, m_frozenStore, m_spatialPanner,
-            m_pdcDelayState, m_activeBuffer.storageHandle(), m_preInsertBuffer.storageHandle(),
-            m_preFaderBuffer.storageHandle(), m_sendPreFaderBuffer.storageHandle(),
-            m_sendPostFaderBuffer.storageHandle(), m_pluginMidi,
+            m_pdcDelayState, m_activeBuffer, m_preInsertBuffer,
+            m_preFaderBuffer, m_sendPreFaderBuffer,
+            m_sendPostFaderBuffer, m_pluginMidi,
             &Track::prepareMidiBlock, this);
         hirari_region_store_install(this, m_id);
     }
@@ -35,19 +35,19 @@ public:
         hirari_channel_strip_destroy(m_strip);
         hirari_track_holographic_panner_destroy(m_spatialPanner);
         hirari_track_frozen_store_destroy(m_frozenStore);
+        hirari_audio_buffer_storage_destroy(m_activeBuffer);
+        hirari_audio_buffer_storage_destroy(m_preFaderBuffer);
+        hirari_audio_buffer_storage_destroy(m_sendPreFaderBuffer);
+        hirari_audio_buffer_storage_destroy(m_sendPostFaderBuffer);
+        hirari_audio_buffer_storage_destroy(m_preInsertBuffer);
     }
 
     /**
      * @brief PROCESS: Performs region lookup and signal processing with industrial precision.
      * INDUSTRIAL: Delegating temporal resolution and processing orchestration to the Rust 'TrackOrchestrator'.
      */
-    void process(AudioBuffer& buffer, uint32_t sz, uint64_t playhead) {
+    void process(void* buffer, uint32_t sz, uint64_t playhead) {
         process(buffer, sz, playhead, true);
-    }
-
-    void clearWorkBuffer(uint32_t sz) {
-        if (sz == 0 || m_activeBuffer.getNumChannels() == 0) return;
-        m_activeBuffer.clear(std::min(sz, m_activeBuffer.getNumSamples()));
     }
 
     // The articulation runtime is Rust-owned; the expression-map edit host
@@ -108,23 +108,14 @@ public:
         }
     }
 
-    bool addInput(const AudioBuffer& input, uint32_t sz) {
-        if (sz == 0 || input.getNumChannels() == 0 || input.getNumSamples() < sz ||
-            m_activeBuffer.getNumChannels() == 0 || m_activeBuffer.getNumSamples() < sz) {
-            return false;
-        }
-        m_activeBuffer.addFrom(input, sz);
-        return true;
-    }
-
     enum class OfflineRenderTap : uint8_t { PostFader = 0, PreInsert = 1, PreFader = 2 };
 
     // Process the already accumulated work buffer without clearing it first.
     // The audio graph uses this at a topological boundary after upstream
     // tracks have added their outputs into this track's input buffer.
     virtual bool processAccumulated(uint32_t sz, uint64_t playhead) {
-        if (sz == 0 || m_activeBuffer.getNumChannels() < 2 ||
-            m_activeBuffer.getNumSamples() < sz) {
+        if (sz == 0 || hirari_audio_buffer_storage_channels(m_activeBuffer) < 2 ||
+            hirari_audio_buffer_storage_samples(m_activeBuffer) < sz) {
             return false;
         }
         process(m_activeBuffer, sz, playhead, false);
@@ -169,7 +160,7 @@ private:
         track.renderBuiltInMidiInstrument(left, right, frames);
     }
 
-    void process(AudioBuffer& buffer, uint32_t sz, uint64_t playhead, bool clearInput) {
-        hirari_track_process_block(m_runtime, buffer.storageHandle(), sz, playhead,
+    void process(void* buffer, uint32_t sz, uint64_t playhead, bool clearInput) {
+        hirari_track_process_block(m_runtime, buffer, sz, playhead,
                                    static_cast<uint8_t>(clearInput));
     }

@@ -22,7 +22,7 @@ SANITIZER_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 COMMON_FLAGS="-std=c++20 -Wall -Wextra -I. -Isrc"
 
 "$CXX" $COMMON_FLAGS $SANITIZER_FLAGS \
-    tests/rt_dsp_contract.cpp -o "$OUT_DIR/rt-dsp" "$BRIDGE_LIB"
+    tests/realtime_safety_contract.cpp -o "$OUT_DIR/realtime-safety" "$BRIDGE_LIB"
 
 if [ "$(uname -s)" = "Darwin" ]; then
     DEFAULT_ASAN_OPTIONS='detect_leaks=0:halt_on_error=1'
@@ -34,5 +34,5 @@ UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1:print_stacktrace=1}
 export ASAN_OPTIONS UBSAN_OPTIONS
 
 "$OUT_DIR/effect-chain-watchdog"
-"$OUT_DIR/rt-dsp"
+"$OUT_DIR/realtime-safety"
 echo "C++ ASan/UBSan contract tests passed"

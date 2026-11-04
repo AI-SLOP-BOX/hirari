@@ -32,13 +32,20 @@ int main() {
             registerDelta(engineUndo, &engineTransactionValue, delta), true, true);
     };
 
-    Hirari::Core::AudioBuffer finiteContract(1, 3);
-    finiteContract.getWritePointer(0)[0] = 1.0f;
-    finiteContract.getWritePointer(0)[1] = std::numeric_limits<float>::quiet_NaN();
-    finiteContract.getWritePointer(0)[2] = std::numeric_limits<float>::infinity();
-    if (finiteContract.sanitizeNonFinite() != 2 ||
-        !std::isfinite(finiteContract.getReadPointer(0)[1]) ||
-        !std::isfinite(finiteContract.getReadPointer(0)[2])) return 24;
+    void* finiteContract = hirari_audio_buffer_storage_create();
+    if (hirari_audio_buffer_storage_reserve_buffer(finiteContract, 1, 3) != 0 ||
+        !hirari_audio_buffer_storage_resize(finiteContract, 1, 3)) return 24;
+    hirari_audio_buffer_storage_write_pointer(finiteContract, 0)[0] = 1.0f;
+    hirari_audio_buffer_storage_write_pointer(finiteContract, 0)[1] =
+        std::numeric_limits<float>::quiet_NaN();
+    hirari_audio_buffer_storage_write_pointer(finiteContract, 0)[2] =
+        std::numeric_limits<float>::infinity();
+    const uint32_t sanitized = hirari_audio_buffer_storage_sanitize(finiteContract);
+    const float* finitePlane = hirari_audio_buffer_storage_read_pointer(finiteContract, 0, 0);
+    const bool planesFinite =
+        std::isfinite(finitePlane[1]) && std::isfinite(finitePlane[2]);
+    hirari_audio_buffer_storage_destroy(finiteContract);
+    if (sanitized != 2 || !planesFinite) return 24;
 
     const char* partial = "engine-partial-operation";
     (void)hirari_undo_manager_begin_transaction(

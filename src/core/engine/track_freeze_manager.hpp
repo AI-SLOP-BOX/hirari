@@ -41,11 +41,13 @@ public:
         auto rendered = renderOffline(track, totalSamples);
         if (!rendered) return false;
         const std::string outputPath = path.string();
+        void* storage = rendered.get();
         if (!hirari_track_freeze_write_float32(
                 reinterpret_cast<const uint8_t*>(outputPath.data()), outputPath.size(),
-                sampleRate, rendered->getReadPointer(0), rendered->getReadPointer(1),
+                sampleRate, hirari_audio_buffer_storage_read_pointer(storage, 0, 0),
+                hirari_audio_buffer_storage_read_pointer(storage, 1, 0),
                 totalSamples)) return false;
-        if (!track->publishFrozenAudio(rendered, totalSamples, sampleRate,
+        if (!track->publishFrozenAudio(std::move(rendered), totalSamples, sampleRate,
                                        0, 0, path.string())) {
             std::error_code ec;
             std::filesystem::remove(path, ec);
@@ -63,14 +65,17 @@ public:
                                      uint32_t sampleRate) {
         if (!track || path.empty() || totalSamples == 0 || sampleRate == 0 ||
             totalSamples > kMaxFreezeSamples) return false;
-        auto restored = std::make_shared<AudioBuffer>(2, static_cast<uint32_t>(totalSamples));
+        auto restored = makeSharedAudioStorage(2, static_cast<uint32_t>(totalSamples));
+        if (!restored) return false;
         const std::string pathText = path.string();
         // Decode, rate agreement, and length admission are enforced by the
         // Rust freeze reader; a mono artifact is widened to stereo there.
+        void* storage = restored.get();
         if (!hirari_track_freeze_read_float32(
                 reinterpret_cast<const uint8_t*>(pathText.data()), pathText.size(),
-                sampleRate, totalSamples, restored->getWritePointer(0),
-                restored->getWritePointer(1))) {
+                sampleRate, totalSamples,
+                hirari_audio_buffer_storage_write_pointer(storage, 0),
+                hirari_audio_buffer_storage_write_pointer(storage, 1))) {
             return false;
         }
         return track->publishFrozenAudio(std::move(restored), totalSamples,
@@ -84,7 +89,7 @@ public:
 private:
     struct RenderContext {
         Track* track = nullptr;
-        AudioBuffer* block = nullptr;
+        void* block = nullptr;
     };
 
     static bool resetOfflineRender(void* opaque) noexcept {
@@ -103,13 +108,16 @@ private:
         auto* context = static_cast<RenderContext*>(opaque);
         if (context == nullptr || context->track == nullptr || context->block == nullptr ||
             left == nullptr || right == nullptr || frames == 0 ||
-            context->block->getNumChannels() < 2 ||
-            context->block->getNumSamples() < frames) return false;
+            hirari_audio_buffer_storage_channels(context->block) < 2 ||
+            hirari_audio_buffer_storage_samples(context->block) < frames) return false;
         try {
-            context->block->clear();
-            context->track->process(*context->block, frames, playhead);
-            const float* sourceLeft = context->block->getReadPointer(0);
-            const float* sourceRight = context->block->getReadPointer(1);
+            hirari_audio_buffer_storage_clear(context->block, 0,
+                hirari_audio_buffer_storage_samples(context->block));
+            context->track->process(context->block, frames, playhead);
+            const float* sourceLeft =
+                hirari_audio_buffer_storage_read_pointer(context->block, 0, 0);
+            const float* sourceRight =
+                hirari_audio_buffer_storage_read_pointer(context->block, 1, 0);
             if (sourceLeft == nullptr || sourceRight == nullptr) return false;
             std::memcpy(left, sourceLeft, static_cast<size_t>(frames) * sizeof(float));
             std::memcpy(right, sourceRight, static_cast<size_t>(frames) * sizeof(float));
@@ -119,19 +127,21 @@ private:
         }
     }
 
-    static std::shared_ptr<AudioBuffer> renderOffline(
+    static SharedAudioStorage renderOffline(
         const std::shared_ptr<Track>& track, uint64_t totalSamples) {
         if (!track || totalSamples == 0 || totalSamples > kMaxFreezeSamples ||
             totalSamples > static_cast<uint64_t>(UINT32_MAX)) return nullptr;
         try {
             constexpr uint32_t kRenderBlockSize = 1024;
-            auto rendered = std::make_shared<AudioBuffer>(2, static_cast<uint32_t>(totalSamples));
-            AudioBuffer block(2, kRenderBlockSize);
-            RenderContext context{track.get(), &block};
-            if (!hirari_track_freeze_render(
+            auto rendered = makeSharedAudioStorage(2, static_cast<uint32_t>(totalSamples));
+            auto block = makeSharedAudioStorage(2, kRenderBlockSize);
+            RenderContext context{track.get(), block.get()};
+            void* storage = rendered.get();
+            if (!rendered || !hirari_track_freeze_render(
                     totalSamples, kRenderBlockSize,
-                    rendered->getWritePointer(0), rendered->getWritePointer(1),
-                    rendered->getNumSamples(), &context,
+                    hirari_audio_buffer_storage_write_pointer(storage, 0),
+                    hirari_audio_buffer_storage_write_pointer(storage, 1),
+                    hirari_audio_buffer_storage_samples(storage), &context,
                     &resetOfflineRender, &renderBlock)) return nullptr;
             return rendered;
         } catch (...) {

@@ -147,7 +147,6 @@ HirariUnifiedEngine::HirariUnifiedEngine() {
     m_midiSnapshotStore = hirari_midi_snapshot_store_create();
     m_midiPlaybackClock = hirari_midi_playback_clock_create();
     m_engineRings = hirari_engine_rings_create();
-    m_masterBuffer.setSize(2, 4096);
     // Both published buffers start at generation one, matching the
     // preparation defaults.
     // All PDC graph edits originate from the engine/control owner. Binding
@@ -171,7 +170,7 @@ HirariUnifiedEngine::HirariUnifiedEngine() {
     hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 
-    void HirariUnifiedEngine::processBlock(AudioBuffer& output, uint32_t off, uint32_t sz) {
+    void HirariUnifiedEngine::processBlock(void* output, uint32_t off, uint32_t sz) {
         // Rust owns the whole block around this device buffer: the gates that
         // decide whether it renders at all, the cycle wrap, the command drain,
         // the timeline MIDI staging into each track and the built-in preview
@@ -181,15 +180,15 @@ HirariUnifiedEngine::HirariUnifiedEngine() {
         ScopedDenormalGuard guard;
         uint32_t frames = 0;
         if (hirari_engine_block_begin(
-                m_engineBlock, output.storageHandle(), off, sz,
+                m_engineBlock, output, off, sz,
                 m_sampleRate.load(std::memory_order_relaxed),
                 m_isShutdown.load(std::memory_order_acquire) ? 1u : 0u,
                 &frames) == 0)
             return;
-        hirari_engine_block_route(m_engineBlock, output.storageHandle(), off, frames,
+        hirari_engine_block_route(m_engineBlock, output, off, frames,
                                   m_sampleRate.load(std::memory_order_relaxed));
         hirari_engine_block_finish(
-            m_engineBlock, output.storageHandle(), off, frames,
+            m_engineBlock, output, off, frames,
             m_sampleRate.load(std::memory_order_relaxed),
             m_masterGain.load(std::memory_order_acquire),
             m_autoRecordMode.load(std::memory_order_relaxed) > 0 ? 1u : 0u);

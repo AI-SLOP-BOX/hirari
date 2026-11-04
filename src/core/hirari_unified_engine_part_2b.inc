@@ -53,7 +53,6 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         // proof.
         m_sampleRate.store(sr);
         hirari_engine_block_bump_generation(m_engineBlock);
-        m_masterBuffer.setSize(2, bs);
         hirari_engine_block_clear_midi_events(m_engineBlock);
         m_blockSize.store(bs, std::memory_order_relaxed);
 
@@ -71,10 +70,13 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
             }
             t->prepareToPlay(sr, bs);
             if (t->canProcess(bs)) {
-                auto& work = t->getWorkBuffer(bs);
+                void* work = t->workBufferStorage();
+                const uint32_t channels = hirari_audio_buffer_storage_channels(work);
                 hirari_sidechain_engine_refresh_source(
-                    m_sidechainEngine, t->getId(), work.getReadPointer(0),
-                    work.getNumChannels() > 1 ? work.getReadPointer(1) : work.getReadPointer(0),
+                    m_sidechainEngine, t->getId(),
+                    hirari_audio_buffer_storage_read_pointer(work, 0, 0),
+                    channels > 1 ? hirari_audio_buffer_storage_read_pointer(work, 1, 0)
+                                 : hirari_audio_buffer_storage_read_pointer(work, 0, 0),
                     bs, static_cast<uint32_t>(sr),
                     hirari_engine_block_generation(m_engineBlock));
             }

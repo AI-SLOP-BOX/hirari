@@ -36,16 +36,18 @@
     std::atomic<bool> m_solo{false};
     std::atomic<bool> m_recordArmed{false};
     std::atomic<bool> m_audioPitchAnalysisRunning{false};
-    AudioBuffer m_activeBuffer;
-    AudioBuffer m_preFaderBuffer;
-    AudioBuffer m_sendPreFaderBuffer;
-    AudioBuffer m_sendPostFaderBuffer;
-    AudioBuffer m_preInsertBuffer;
+    // The block pipeline and its taps are Rust-owned storages; the track only
+    // holds their handles and their lifetime.
+    void* m_activeBuffer = hirari_audio_buffer_storage_create();
+    void* m_preFaderBuffer = hirari_audio_buffer_storage_create();
+    void* m_sendPreFaderBuffer = hirari_audio_buffer_storage_create();
+    void* m_sendPostFaderBuffer = hirari_audio_buffer_storage_create();
+    void* m_preInsertBuffer = hirari_audio_buffer_storage_create();
     // Control-thread-owned retention prevents an in-flight audio callback
     // from observing freed freeze memory; the store publishes the read-side
     // pointer through an atomic the callback loads without locking.
     static void destroyFrozenOwner(void* owner) {
-        delete static_cast<std::shared_ptr<AudioBuffer>*>(owner);
+        delete static_cast<SharedAudioStorage*>(owner);
     }
     static constexpr HirariTrackFrozenOps kFrozenOps = {&Track::destroyFrozenOwner};
     void* m_frozenStore = hirari_track_frozen_store_create(&kFrozenOps);
