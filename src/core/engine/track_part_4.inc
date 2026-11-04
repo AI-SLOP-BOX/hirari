@@ -39,12 +39,9 @@
     void* m_preInsertBuffer = hirari_audio_buffer_storage_create();
     // Control-thread-owned retention prevents an in-flight audio callback
     // from observing freed freeze memory; the store publishes the read-side
-    // pointer through an atomic the callback loads without locking.
-    static void destroyFrozenOwner(void* owner) {
-        delete static_cast<SharedAudioStorage*>(owner);
-    }
-    static constexpr HirariTrackFrozenOps kFrozenOps = {&Track::destroyFrozenOwner};
-    void* m_frozenStore = hirari_track_frozen_store_create(&kFrozenOps);
+    // pointer through an atomic the callback loads without locking, and owns
+    // the rendered buffers it holds.
+    void* m_frozenStore = hirari_track_frozen_store_create();
     void* m_automationStore = hirari_track_automation_store_create();
     // The name is Rust state too, so the layout gather and the control edit host
     // read and write it through this handle like every other track storage.

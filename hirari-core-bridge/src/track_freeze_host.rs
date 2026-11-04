@@ -1,37 +1,53 @@
-//! Track freeze admission policy: validation, sample limits, project-end
-//! sizing, path resolution and the order in which the engine is quiesced.
+//! Track freeze rendering: admission, the offline render, the disk artifact
+//! and the snapshot the audio thread reads.
 //!
-//! The engine keeps the track vector and `TrackFreezeManager` keeps the render,
-//! the published snapshot and the file artifact. This module decides whether a
-//! request is admissible, which size it renders at, and which path is written.
+//! The engine supplies only the three things that physically live with it:
+//! draining the audio callback, pinning the track so its stores cannot be freed
+//! mid-render, and its current block size. Walking the track's own Rust runtime
+//! block by block, writing and reading the Float32 WAV artifact, publishing the
+//! immutable snapshot and dropping it are all decided here.
 //!
-//! Every entry point runs on the control thread.
+//! Every entry point runs on the control thread. The render never holds the
+//! engine's tracks lock: the handles it works through belong to a track the pin
+//! keeps alive, and that lock is taken only for one `TrackSession` at a time.
 
 use std::ffi::{c_void, OsStr};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-/// Mirrors `TrackFreezeManager::kMaxFreezeSamples` (two float channels).
+use crate::audio_buffer_ops::{
+    hirari_audio_buffer_storage_channels, hirari_audio_buffer_storage_clear,
+    hirari_audio_buffer_storage_create, hirari_audio_buffer_storage_destroy,
+    hirari_audio_buffer_storage_read_pointer, hirari_audio_buffer_storage_reserve_buffer,
+    hirari_audio_buffer_storage_resize, hirari_audio_buffer_storage_samples,
+    hirari_audio_buffer_storage_write_pointer,
+};
+use crate::region_store::hirari_region_store_project_end;
+use crate::track_frozen_store::{
+    hirari_track_frozen_store_clear, hirari_track_frozen_store_is_frozen,
+    hirari_track_frozen_store_publish, hirari_track_frozen_store_set_path,
+};
+use crate::track_process::{hirari_track_freeze_render, hirari_track_freeze_write_float32};
+use crate::track_runtime::{
+    hirari_track_process_block, hirari_track_runtime_reset_for_offline_render,
+};
+use crate::track_session::TrackSession;
+use crate::wav_decoder_compat::hirari_track_freeze_read_float32;
+
+/// Maximum freeze length the control plane will allocate. Two float channels at
+/// this limit are about 512 MiB.
 pub const MAX_FREEZE_SAMPLES: u64 = 64 * 1024 * 1024;
+
+/// Frames per offline render block, so one freeze needs no more scratch than a
+/// single block at a time.
+const RENDER_BLOCK_FRAMES: u32 = 1024;
 
 /// Pins a track for the duration of one freeze operation. `wait` drains the
 /// audio callback before the track is looked up.
 pub type AcquireTrackFn = unsafe extern "C" fn(*mut c_void, u32, bool) -> *mut c_void;
 /// Releases the pin returned by `acquire`.
 pub type ReleaseTrackFn = unsafe extern "C" fn(*mut c_void);
-/// Renders and publishes an in-memory freeze snapshot.
-pub type FreezeFn = unsafe extern "C" fn(*mut c_void, u64, u32) -> bool;
-/// Renders a disk-backed artifact at an absolute path, or restores one when
-/// `persist` is false.
-pub type RunFromFileFn = unsafe extern "C" fn(*mut c_void, *const u8, usize, u64, u32, bool) -> bool;
-/// Sets the cache path recorded on a track.
-pub type SetCachePathFn = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> bool;
-/// Drops the frozen snapshot.
-pub type UnfreezeFn = unsafe extern "C" fn(*mut c_void);
-pub type IsFrozenFn = unsafe extern "C" fn(*mut c_void) -> bool;
-/// Computes a pinned track's last region end; false when a region is malformed.
-pub type ProjectEndFn = unsafe extern "C" fn(*mut c_void, *mut u64) -> bool;
 /// Current engine block size, used as the minimum freeze length.
 pub type BlockSizeFn = unsafe extern "C" fn(*mut c_void) -> u32;
 
@@ -40,12 +56,6 @@ pub type BlockSizeFn = unsafe extern "C" fn(*mut c_void) -> u32;
 pub struct HirariTrackFreezeHostOps {
     pub acquire: Option<AcquireTrackFn>,
     pub release: Option<ReleaseTrackFn>,
-    pub freeze: Option<FreezeFn>,
-    pub run_from_file: Option<RunFromFileFn>,
-    pub set_cache_path: Option<SetCachePathFn>,
-    pub unfreeze: Option<UnfreezeFn>,
-    pub is_frozen: Option<IsFrozenFn>,
-    pub project_end: Option<ProjectEndFn>,
     pub block_size: Option<BlockSizeFn>,
 }
 
@@ -100,26 +110,230 @@ fn acquire(
     Some(TrackPin { raw, release })
 }
 
+/// A stereo render buffer with the engine's growth policy applied. It is freed
+/// on any failure; a successful publication takes it through `into_handle`.
+struct RenderStorage {
+    handle: *mut c_void,
+}
+
+impl RenderStorage {
+    fn new(channels: u32, samples: u32) -> Option<Self> {
+        let handle = hirari_audio_buffer_storage_create();
+        if unsafe { hirari_audio_buffer_storage_reserve_buffer(handle, channels, samples) } != 0
+            || !unsafe { hirari_audio_buffer_storage_resize(handle, channels, samples) }
+        {
+            unsafe { hirari_audio_buffer_storage_destroy(handle) };
+            return None;
+        }
+        Some(Self { handle })
+    }
+
+    fn frames(&self) -> u32 {
+        unsafe { hirari_audio_buffer_storage_samples(self.handle) }
+    }
+
+    fn channel_count(&self) -> u32 {
+        unsafe { hirari_audio_buffer_storage_channels(self.handle) }
+    }
+
+    fn write_plane(&self, channel: u32) -> *mut f32 {
+        unsafe { hirari_audio_buffer_storage_write_pointer(self.handle, channel) }
+    }
+
+    fn read_plane(&self, channel: u32) -> *const f32 {
+        unsafe { hirari_audio_buffer_storage_read_pointer(self.handle, channel, 0) }
+    }
+
+    fn into_handle(self) -> *mut c_void {
+        let handle = self.handle;
+        std::mem::forget(self);
+        handle
+    }
+}
+
+impl Drop for RenderStorage {
+    fn drop(&mut self) {
+        unsafe { hirari_audio_buffer_storage_destroy(self.handle) };
+    }
+}
+
+/// The two handles the offline loop drives: the track's runtime and the scratch
+/// block it renders through.
+struct OfflineRender {
+    runtime: *mut c_void,
+    block: *mut c_void,
+}
+
+unsafe extern "C" fn reset_offline(context: *mut c_void) -> bool {
+    let context = unsafe { &*(context as *const OfflineRender) };
+    if context.runtime.is_null() {
+        return false;
+    }
+    unsafe { hirari_track_runtime_reset_for_offline_render(context.runtime) };
+    true
+}
+
+unsafe extern "C" fn render_block(
+    context: *mut c_void,
+    left: *mut f32,
+    right: *mut f32,
+    frames: u32,
+    playhead: u64,
+) -> bool {
+    let context = unsafe { &*(context as *const OfflineRender) };
+    let block = context.block;
+    if context.runtime.is_null()
+        || block.is_null()
+        || left.is_null()
+        || right.is_null()
+        || frames == 0
+        || unsafe { hirari_audio_buffer_storage_channels(block) } < 2
+        || unsafe { hirari_audio_buffer_storage_samples(block) } < frames
+    {
+        return false;
+    }
+    unsafe {
+        hirari_audio_buffer_storage_clear(block, 0, hirari_audio_buffer_storage_samples(block));
+        // A false return means the runtime fully handled the block (mute, an
+        // existing freeze or a bad size) and left its own result in `block`; the
+        // rendered planes are still what the track produced for this block.
+        hirari_track_process_block(context.runtime, block, frames, playhead, 1);
+        let source_left = hirari_audio_buffer_storage_read_pointer(block, 0, 0);
+        let source_right = hirari_audio_buffer_storage_read_pointer(block, 1, 0);
+        if source_left.is_null() || source_right.is_null() {
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(source_left, left, frames as usize);
+        std::ptr::copy_nonoverlapping(source_right, right, frames as usize);
+    }
+    true
+}
+
+/// Drives the track's graph offline into a fresh immutable snapshot. The plugin
+/// state it walks is mutated here, which is why the caller must have drained the
+/// audio callback first.
+fn render_offline(runtime: *mut c_void, total_samples: u64) -> Option<RenderStorage> {
+    if runtime.is_null() || total_samples == 0 || total_samples > MAX_FREEZE_SAMPLES {
+        return None;
+    }
+    let rendered = RenderStorage::new(2, total_samples as u32)?;
+    let block = RenderStorage::new(2, RENDER_BLOCK_FRAMES)?;
+    let context = OfflineRender {
+        runtime,
+        block: block.handle,
+    };
+    let complete = unsafe {
+        hirari_track_freeze_render(
+            total_samples,
+            RENDER_BLOCK_FRAMES,
+            rendered.write_plane(0),
+            rendered.write_plane(1),
+            rendered.frames() as usize,
+            &context as *const OfflineRender as *mut c_void,
+            Some(reset_offline),
+            Some(render_block),
+        )
+    };
+    complete.then_some(rendered)
+}
+
+/// Publishes a rendered snapshot and bumps the layout revision. The storage is
+/// only handed to the store once the publication is accepted, so a track that
+/// disappeared mid-render cannot leak its render.
+fn publish(
+    host: *mut c_void,
+    track_id: u32,
+    rendered: RenderStorage,
+    total_samples: u64,
+    sample_rate: u32,
+    cache_path: &[u8],
+) -> bool {
+    let Some(session) = TrackSession::open(host, track_id) else {
+        return false;
+    };
+    let frames = rendered.frames() as u64;
+    let channels = rendered.channel_count();
+    let audio = rendered.into_handle();
+    let accepted = unsafe {
+        hirari_track_frozen_store_publish(
+            session.frozen(),
+            audio,
+            channels,
+            frames,
+            total_samples,
+            sample_rate,
+            0,
+            0,
+            cache_path.as_ptr(),
+            cache_path.len(),
+        )
+    };
+    if accepted {
+        session.mark_layout();
+        return true;
+    }
+    unsafe { hirari_audio_buffer_storage_destroy(audio) };
+    false
+}
+
+/// Renders the freeze, streams it to `artifact` when one is given, and publishes
+/// the snapshot under that path. A rejected publication leaves neither an orphan
+/// file nor a half-published freeze behind.
 fn freeze_impl(
     ops: &HirariTrackFreezeHostOps,
     host: *mut c_void,
     track_id: u32,
     total_samples: u64,
     sample_rate: u32,
+    artifact: Option<&[u8]>,
 ) -> bool {
     if total_samples == 0 || sample_rate == 0 || total_samples > MAX_FREEZE_SAMPLES {
         return false;
     }
-    let Some(freeze) = ops.freeze else {
-        return false;
+    let artifact = match artifact {
+        Some(path) => match absolute_path(path) {
+            Some(absolute) => Some(absolute),
+            None => return false,
+        },
+        None => None,
     };
     // A freeze render mutates processor state while producing its immutable
     // snapshot, so it must never overlap the live callback or another graph
     // hydration.
-    let Some(pin) = acquire(ops, host, track_id, true) else {
+    let Some(_pin) = acquire(ops, host, track_id, true) else {
         return false;
     };
-    unsafe { freeze(pin.raw, total_samples, sample_rate) }
+    let Some(session) = TrackSession::open(host, track_id) else {
+        return false;
+    };
+    let runtime = session.runtime();
+    drop(session);
+    let Some(rendered) = render_offline(runtime, total_samples) else {
+        return false;
+    };
+    if let Some(path) = &artifact {
+        let streamed = unsafe {
+            hirari_track_freeze_write_float32(
+                path.as_ptr(),
+                path.len(),
+                sample_rate,
+                rendered.read_plane(0),
+                rendered.read_plane(1),
+                total_samples,
+            )
+        };
+        if !streamed {
+            return false;
+        }
+    }
+    let cache_path: &[u8] = artifact.as_deref().unwrap_or(&[]);
+    if publish(host, track_id, rendered, total_samples, sample_rate, cache_path) {
+        return true;
+    }
+    if let Some(path) = &artifact {
+        let _ = std::fs::remove_file(Path::new(OsStr::from_bytes(path)));
+    }
+    false
 }
 
 /// Resolves a caller-supplied path the way `std::filesystem::absolute` did:
@@ -141,15 +355,19 @@ fn freeze_to_project_end_impl(
     if sample_rate == 0 {
         return false;
     }
-    let (Some(project_end), Some(block_size)) = (ops.project_end, ops.block_size) else {
+    let Some(block_size) = ops.block_size else {
         return false;
     };
-    let Some(pin) = acquire(ops, host, track_id, false) else {
+    let Some(_pin) = acquire(ops, host, track_id, false) else {
         return false;
     };
+    let Some(session) = TrackSession::open(host, track_id) else {
+        return false;
+    };
+    let track = session.track();
+    drop(session);
     let mut project_end_samples = 0_u64;
-    let readable = unsafe { project_end(pin.raw, &mut project_end_samples) };
-    drop(pin);
+    let readable = unsafe { hirari_region_store_project_end(track, &mut project_end_samples) };
     if !readable {
         return false;
     }
@@ -162,10 +380,31 @@ fn freeze_to_project_end_impl(
     }
     // Re-enter the regular freeze path so validation and the callback drain
     // happen exactly once, right before the render.
-    freeze_impl(ops, host, track_id, total_samples, sample_rate)
+    freeze_impl(ops, host, track_id, total_samples, sample_rate, None)
 }
 
 fn freeze_to_file_impl(
+    ops: &HirariTrackFreezeHostOps,
+    host: *mut c_void,
+    track_id: u32,
+    path: &[u8],
+    total_samples: u64,
+    sample_rate: u32,
+) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    freeze_impl(
+        ops,
+        host,
+        track_id,
+        total_samples,
+        sample_rate,
+        Some(path),
+    )
+}
+
+fn restore_from_file_impl(
     ops: &HirariTrackFreezeHostOps,
     host: *mut c_void,
     track_id: u32,
@@ -180,36 +419,27 @@ fn freeze_to_file_impl(
     {
         return false;
     }
-    let Some(run) = ops.run_from_file else {
+    let Some(_pin) = acquire(ops, host, track_id, true) else {
         return false;
     };
-    let Some(pin) = acquire(ops, host, track_id, true) else {
+    // Restoring reads the exact published artifact rather than re-rendering the
+    // live graph: a plugin may be nondeterministic or have changed version since
+    // the cache was produced. Rate agreement and length admission are enforced by
+    // the Rust freeze reader, which widens a mono artifact to stereo.
+    let Some(rendered) = RenderStorage::new(2, total_samples as u32) else {
         return false;
     };
-    let Some(absolute) = absolute_path(path) else {
-        return false;
+    let decoded = unsafe {
+        hirari_track_freeze_read_float32(
+            path.as_ptr(),
+            path.len(),
+            sample_rate,
+            total_samples,
+            rendered.write_plane(0),
+            rendered.write_plane(1),
+        )
     };
-    unsafe { run(pin.raw, absolute.as_ptr(), absolute.len(), total_samples, sample_rate, true) }
-}
-
-fn restore_from_file_impl(
-    ops: &HirariTrackFreezeHostOps,
-    host: *mut c_void,
-    track_id: u32,
-    path: &[u8],
-    total_samples: u64,
-    sample_rate: u32,
-) -> bool {
-    if path.is_empty() || total_samples == 0 || sample_rate == 0 {
-        return false;
-    }
-    let Some(run) = ops.run_from_file else {
-        return false;
-    };
-    let Some(pin) = acquire(ops, host, track_id, true) else {
-        return false;
-    };
-    unsafe { run(pin.raw, path.as_ptr(), path.len(), total_samples, sample_rate, false) }
+    decoded && publish(host, track_id, rendered, total_samples, sample_rate, path)
 }
 
 fn set_cache_path_impl(
@@ -221,34 +451,38 @@ fn set_cache_path_impl(
     if path.is_empty() {
         return false;
     }
-    let Some(set) = ops.set_cache_path else {
+    let Some(_pin) = acquire(ops, host, track_id, false) else {
         return false;
     };
-    let Some(pin) = acquire(ops, host, track_id, false) else {
+    let Some(session) = TrackSession::open(host, track_id) else {
         return false;
     };
-    unsafe { set(pin.raw, path.as_ptr(), path.len()) }
+    let recorded =
+        unsafe { hirari_track_frozen_store_set_path(session.frozen(), path.as_ptr(), path.len()) };
+    if recorded {
+        session.mark_layout();
+    }
+    recorded
 }
 
 fn unfreeze_impl(ops: &HirariTrackFreezeHostOps, host: *mut c_void, track_id: u32) -> bool {
-    let Some(unfreeze) = ops.unfreeze else {
+    let Some(_pin) = acquire(ops, host, track_id, true) else {
         return false;
     };
-    let Some(pin) = acquire(ops, host, track_id, true) else {
+    let Some(session) = TrackSession::open(host, track_id) else {
         return false;
     };
-    unsafe { unfreeze(pin.raw) };
+    unsafe { hirari_track_frozen_store_clear(session.frozen()) };
+    session.mark_layout();
     true
 }
 
 fn is_frozen_impl(ops: &HirariTrackFreezeHostOps, host: *mut c_void, track_id: u32) -> bool {
-    let Some(is_frozen) = ops.is_frozen else {
+    let Some(_pin) = acquire(ops, host, track_id, false) else {
         return false;
     };
-    let Some(pin) = acquire(ops, host, track_id, false) else {
-        return false;
-    };
-    unsafe { is_frozen(pin.raw) }
+    TrackSession::open(host, track_id)
+        .is_some_and(|session| unsafe { hirari_track_frozen_store_is_frozen(session.frozen()) })
 }
 
 fn path_slice<'a>(path: *const u8, length: usize) -> &'a [u8] {
@@ -267,7 +501,7 @@ pub unsafe extern "C" fn hirari_track_freeze(
     sample_rate: u32,
 ) -> bool {
     match host_ops() {
-        Some(ops) => freeze_impl(&ops, host, track_id, total_samples, sample_rate),
+        Some(ops) => freeze_impl(&ops, host, track_id, total_samples, sample_rate, None),
         None => false,
     }
 }
@@ -336,9 +570,7 @@ pub unsafe extern "C" fn hirari_track_set_freeze_cache_path(
     path_length: usize,
 ) -> bool {
     match host_ops() {
-        Some(ops) => {
-            set_cache_path_impl(&ops, host, track_id, path_slice(path, path_length))
-        }
+        Some(ops) => set_cache_path_impl(&ops, host, track_id, path_slice(path, path_length)),
         None => false,
     }
 }
@@ -356,345 +588,5 @@ pub unsafe extern "C" fn hirari_track_is_frozen(host: *mut c_void, track_id: u32
     match host_ops() {
         Some(ops) => is_frozen_impl(&ops, host, track_id),
         None => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::cell::RefCell;
-
-    thread_local! {
-        static LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-    }
-
-    fn log(entry: impl Into<String>) {
-        LOG.with(|log| log.borrow_mut().push(entry.into()));
-    }
-
-    fn take_log() -> Vec<String> {
-        LOG.with(|log| std::mem::take(&mut *log.borrow_mut()))
-    }
-
-    unsafe extern "C" fn fake_acquire(host: *mut c_void, track_id: u32, wait: bool) -> *mut c_void {
-        log(format!("acquire {} wait={wait}", host as usize));
-        if track_id == 99 {
-            return std::ptr::null_mut();
-        }
-        track_id as usize as *mut c_void
-    }
-
-    unsafe extern "C" fn fake_release(handle: *mut c_void) {
-        log(format!("release {}", handle as usize));
-    }
-
-    unsafe extern "C" fn fake_freeze(handle: *mut c_void, total: u64, rate: u32) -> bool {
-        log(format!("freeze {} {total} {rate}", handle as usize));
-        true
-    }
-
-    unsafe extern "C" fn fake_run_from_file(
-        handle: *mut c_void,
-        path: *const u8,
-        length: usize,
-        total: u64,
-        rate: u32,
-        persist: bool,
-    ) -> bool {
-        let path = std::str::from_utf8(std::slice::from_raw_parts(path, length)).unwrap();
-        let action = if persist { "file" } else { "restore" };
-        log(format!("{action} {} {path} {total} {rate}", handle as usize));
-        true
-    }
-
-    unsafe extern "C" fn empty_project_end(_handle: *mut c_void, out: *mut u64) -> bool {
-        unsafe { *out = 0 };
-        true
-    }
-
-    unsafe extern "C" fn huge_project_end(_handle: *mut c_void, out: *mut u64) -> bool {
-        unsafe { *out = MAX_FREEZE_SAMPLES + 1 };
-        true
-    }
-
-    unsafe extern "C" fn fake_set_cache(handle: *mut c_void, path: *const u8, length: usize) -> bool {
-        let path = std::str::from_utf8(std::slice::from_raw_parts(path, length)).unwrap();
-        log(format!("cache {} {path}", handle as usize));
-        path != "reject"
-    }
-
-    unsafe extern "C" fn fake_unfreeze(handle: *mut c_void) {
-        log(format!("unfreeze {}", handle as usize));
-    }
-
-    unsafe extern "C" fn fake_is_frozen(handle: *mut c_void) -> bool {
-        log(format!("is_frozen {}", handle as usize));
-        handle as usize == 5
-    }
-
-    unsafe extern "C" fn fake_project_end(handle: *mut c_void, out: *mut u64) -> bool {
-        log(format!("project_end {}", handle as usize));
-        unsafe { *out = 1_000 };
-        true
-    }
-
-    unsafe extern "C" fn unreadable_project_end(handle: *mut c_void, _out: *mut u64) -> bool {
-        log(format!("project_end {}", handle as usize));
-        false
-    }
-
-    unsafe extern "C" fn fake_block_size(_host: *mut c_void) -> u32 {
-        256
-    }
-
-    fn fake_ops() -> HirariTrackFreezeHostOps {
-        HirariTrackFreezeHostOps {
-            acquire: Some(fake_acquire),
-            release: Some(fake_release),
-            freeze: Some(fake_freeze),
-            run_from_file: Some(fake_run_from_file),
-            set_cache_path: Some(fake_set_cache),
-            unfreeze: Some(fake_unfreeze),
-            is_frozen: Some(fake_is_frozen),
-            project_end: Some(fake_project_end),
-            block_size: Some(fake_block_size),
-        }
-    }
-
-    #[test]
-    fn freeze_rejects_empty_and_oversized_requests_before_touching_the_engine() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(!freeze_impl(&ops, host, 1, 0, 48_000));
-        assert!(!freeze_impl(&ops, host, 1, 16, 0));
-        assert!(!freeze_impl(&ops, host, 1, MAX_FREEZE_SAMPLES + 1, 48_000));
-        assert!(take_log().is_empty());
-    }
-
-    #[test]
-    fn freeze_drains_callbacks_renders_and_releases_the_pin() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(freeze_impl(&ops, host, 5, 480, 44_100));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=true".to_string(),
-                "freeze 5 480 44100".to_string(),
-                "release 5".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn freeze_reports_a_missing_track() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(!freeze_impl(&ops, host, 99, 480, 44_100));
-        assert_eq!(take_log(), vec!["acquire 8 wait=true".to_string()]);
-    }
-
-    #[test]
-    fn project_end_uses_the_larger_of_last_region_and_two_blocks() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(freeze_to_project_end_impl(&ops, host, 5, 48_000));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=false".to_string(),
-                "project_end 5".to_string(),
-                "release 5".to_string(),
-                "acquire 8 wait=true".to_string(),
-                "freeze 5 1000 48000".to_string(),
-                "release 5".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn project_end_falls_back_to_two_blocks_for_an_empty_track() {
-        let mut ops = fake_ops();
-        ops.project_end = Some(empty_project_end);
-        let host = 8_usize as *mut c_void;
-        assert!(freeze_to_project_end_impl(&ops, host, 5, 48_000));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=false".to_string(),
-                "release 5".to_string(),
-                "acquire 8 wait=true".to_string(),
-                "freeze 5 512 48000".to_string(),
-                "release 5".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn project_end_rejects_missing_track_and_zero_rate() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(!freeze_to_project_end_impl(&ops, host, 5, 0));
-        assert!(take_log().is_empty());
-        assert!(!freeze_to_project_end_impl(&ops, host, 99, 48_000));
-        assert_eq!(take_log(), vec!["acquire 8 wait=false".to_string()]);
-    }
-
-    #[test]
-    fn project_end_rejects_an_unreadable_region_table() {
-        let mut ops = fake_ops();
-        ops.project_end = Some(unreadable_project_end);
-        assert!(!freeze_to_project_end_impl(&ops, 8_usize as *mut c_void, 5, 48_000));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=false".to_string(),
-                "project_end 5".to_string(),
-                "release 5".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn project_end_rejects_oversized_total_before_the_render() {
-        let mut ops = fake_ops();
-        ops.project_end = Some(huge_project_end);
-        assert!(!freeze_to_project_end_impl(&ops, 8_usize as *mut c_void, 5, 48_000));
-        assert_eq!(
-            take_log(),
-            vec!["acquire 8 wait=false".to_string(), "release 5".to_string()]
-        );
-    }
-
-    #[test]
-    fn to_file_resolves_an_absolute_path_after_quiescing() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(freeze_to_file_impl(&ops, host, 5, b"cache/take.wav", 480, 48_000));
-        let expected = std::path::absolute("cache/take.wav").unwrap();
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=true".to_string(),
-                format!("file 5 {} 480 48000", expected.display()),
-                "release 5".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn to_file_rejects_empty_path_and_oversized_total() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(!freeze_to_file_impl(&ops, host, 5, b"", 480, 48_000));
-        assert!(!freeze_to_file_impl(
-            &ops,
-            host,
-            5,
-            b"take.wav",
-            MAX_FREEZE_SAMPLES + 1,
-            48_000
-        ));
-        assert!(take_log().is_empty());
-    }
-
-    #[test]
-    fn restore_uses_the_given_path_and_drains_first() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(restore_from_file_impl(&ops, host, 5, b"cache/take.wav", 480, 48_000));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=true".to_string(),
-                "restore 5 cache/take.wav 480 48000".to_string(),
-                "release 5".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn restore_rejects_incomplete_requests_without_quiescing() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(!restore_from_file_impl(&ops, host, 5, b"", 480, 48_000));
-        assert!(!restore_from_file_impl(&ops, host, 5, b"take.wav", 0, 48_000));
-        assert!(!restore_from_file_impl(&ops, host, 5, b"take.wav", 480, 0));
-        assert!(take_log().is_empty());
-    }
-
-    #[test]
-    fn cache_path_does_not_drain_callbacks() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(set_cache_path_impl(&ops, host, 5, b"cache/take.wav"));
-        assert!(!set_cache_path_impl(&ops, host, 5, b""));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=false".to_string(),
-                "cache 5 cache/take.wav".to_string(),
-                "release 5".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn cache_path_reports_a_missing_track() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(!set_cache_path_impl(&ops, host, 99, b"cache/take.wav"));
-        assert_eq!(take_log(), vec!["acquire 8 wait=false".to_string()]);
-    }
-
-    #[test]
-    fn unfreeze_drains_and_reports_missing_tracks() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(unfreeze_impl(&ops, host, 5));
-        assert!(!unfreeze_impl(&ops, host, 99));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=true".to_string(),
-                "unfreeze 5".to_string(),
-                "release 5".to_string(),
-                "acquire 8 wait=true".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn is_frozen_reads_without_draining() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(is_frozen_impl(&ops, host, 5));
-        assert!(!is_frozen_impl(&ops, host, 6));
-        assert!(!is_frozen_impl(&ops, host, 99));
-        assert_eq!(
-            take_log(),
-            vec![
-                "acquire 8 wait=false".to_string(),
-                "is_frozen 5".to_string(),
-                "release 5".to_string(),
-                "acquire 8 wait=false".to_string(),
-                "is_frozen 6".to_string(),
-                "release 6".to_string(),
-                "acquire 8 wait=false".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn missing_ops_fail_closed() {
-        let ops = HirariTrackFreezeHostOps::default();
-        let host = 8_usize as *mut c_void;
-        assert!(!freeze_impl(&ops, host, 5, 480, 48_000));
-        assert!(!freeze_to_project_end_impl(&ops, host, 5, 48_000));
-        assert!(!freeze_to_file_impl(&ops, host, 5, b"take.wav", 480, 48_000));
-        assert!(!restore_from_file_impl(&ops, host, 5, b"take.wav", 480, 48_000));
-        assert!(!set_cache_path_impl(&ops, host, 5, b"take.wav"));
-        assert!(!unfreeze_impl(&ops, host, 5));
-        assert!(!is_frozen_impl(&ops, host, 5));
     }
 }

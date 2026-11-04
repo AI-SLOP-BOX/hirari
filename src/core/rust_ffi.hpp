@@ -1044,20 +1044,14 @@ extern "C" bool hirari_track_clone_state(void* sourceStrip, void* sourceRuntime,
 extern "C" void hirari_ids_reset_project(void* host);
 extern "C" void hirari_ids_seed_from_project(void* host);
 
-// Track freeze admission policy (limits, project-end sizing, paths, ordering).
+// Track freeze (track_freeze_host.rs). The Rust side walks the track's own
+// runtime block by block, writes and reads the Float32 artifact and publishes
+// the snapshot; the engine only supplies what cannot leave C++.
 struct HirariTrackFreezeHostOps {
     // Pins a track; `wait` drains the audio callback before lookup. The
     // returned handle must be released.
     void* (*acquire)(void*, uint32_t, bool) = nullptr;
     void (*release)(void*) = nullptr;
-    bool (*freeze)(void*, uint64_t, uint32_t) = nullptr;
-    // Renders to the path, or restores from it when `persist` is false.
-    bool (*runFromFile)(void*, const uint8_t*, size_t, uint64_t, uint32_t, bool) = nullptr;
-    bool (*setCachePath)(void*, const uint8_t*, size_t) = nullptr;
-    void (*unfreeze)(void*) = nullptr;
-    bool (*isFrozen)(void*) = nullptr;
-    // Writes the last region end; false when a region length overflows.
-    bool (*projectEnd)(void*, uint64_t*) = nullptr;
     uint32_t (*blockSize)(void*) = nullptr;
 };
 
@@ -1392,39 +1386,14 @@ extern "C" uint32_t hirari_engine_telemetry_active_index(const void* state);
 extern "C" bool hirari_engine_telemetry_snapshot(
     const void* state, uint32_t index, HirariEngineTelemetry* out);
 
-using HirariTrackFreezeResetCallback = bool (*)(void* context);
-using HirariTrackFreezeProcessCallback = bool (*)(void* context, float* left, float* right,
-                                                   uint32_t frames, uint64_t playhead);
-extern "C" bool hirari_track_freeze_render(
-    uint64_t total_samples, uint32_t block_size,
-    float* output_left, float* output_right, size_t output_capacity,
-    void* context, HirariTrackFreezeResetCallback reset,
-    HirariTrackFreezeProcessCallback process);
-extern "C" bool hirari_track_freeze_write_float32(
-    const uint8_t* path, size_t path_size, uint32_t sample_rate,
-    const float* left, const float* right, uint64_t total_samples);
-extern "C" bool hirari_track_freeze_read_float32(
-    const uint8_t* path, size_t path_size, uint32_t sample_rate,
-    uint64_t total_samples, float* left, float* right);
-// Publication state of the frozen render. The store retains the C++ owner
-// handles and publishes the buffer's Rust storage handle for the callback.
-struct HirariTrackFrozenOps {
-    void (*destroy_owner)(void*);
-};
-extern "C" void* hirari_track_frozen_store_create(const HirariTrackFrozenOps* ops);
+// Publication state of the frozen render. The store owns the Rust audio
+// buffers it holds and publishes the read-side handle for the callback.
+extern "C" void* hirari_track_frozen_store_create();
 extern "C" void hirari_track_frozen_store_destroy(void* state);
-extern "C" bool hirari_track_frozen_store_publish(
-    const void* state, void* owner, void* audio, uint32_t channels, uint64_t frames,
-    uint64_t total_samples, uint32_t sample_rate, uint64_t project_generation,
-    uint64_t audio_generation, const uint8_t* path, size_t path_len);
 extern "C" void hirari_track_frozen_store_clear(const void* state);
 extern "C" void hirari_track_frozen_store_retire(const void* state);
 extern "C" bool hirari_track_frozen_store_is_frozen(const void* state);
 extern "C" uint32_t hirari_track_frozen_store_sample_rate(const void* state);
-extern "C" uint64_t hirari_track_frozen_store_project_generation(const void* state);
-extern "C" uint64_t hirari_track_frozen_store_audio_generation(const void* state);
-extern "C" bool hirari_track_frozen_store_set_path(
-    const void* state, const uint8_t* path, size_t path_len);
 extern "C" bool hirari_status_queue_push_default(
     uint32_t severity, const uint8_t* text, size_t text_size);
 extern "C" bool hirari_status_queue_pop_default(void* output_message);

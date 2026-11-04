@@ -1071,7 +1071,7 @@ mod tests {
     };
     use crate::track_frozen_store::{
         hirari_track_frozen_store_create, hirari_track_frozen_store_destroy,
-        hirari_track_frozen_store_publish, TrackFrozenOps,
+        hirari_track_frozen_store_publish,
     };
     use crate::track_midi_articulation::{
         hirari_track_midi_articulation_create, hirari_track_midi_articulation_destroy,
@@ -1203,8 +1203,6 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn release_frozen_owner(_: *mut c_void) {}
-
     fn fixture() -> Box<MockHost> {
         let routes = crate::sidechain_route_store::hirari_sidechain_routes_create();
         let routing = crate::routing_engine_core::hirari_routing_engine_create();
@@ -1216,10 +1214,7 @@ mod tests {
         let name = unsafe { crate::track_name_store::hirari_track_name_store_create() };
         let chain = hirari_effect_chain_create();
         let automation = hirari_track_automation_store_create();
-        let frozen_ops = TrackFrozenOps {
-            destroy_owner: release_frozen_owner,
-        };
-        let frozen = unsafe { hirari_track_frozen_store_create(&frozen_ops) };
+        let frozen = unsafe { hirari_track_frozen_store_create() };
         let articulation = hirari_track_midi_articulation_create();
         let null = std::ptr::null_mut();
         let runtime = unsafe {
@@ -1252,6 +1247,9 @@ mod tests {
             point_count: lane_points.len(),
         }];
         let frozen_path = b"/tmp/hirari-frozen.wav";
+        // The store owns a published render, so the fixture hands it a real
+        // audio storage rather than an invented handle.
+        let frozen_audio = crate::audio_buffer_ops::hirari_audio_buffer_storage_create();
         unsafe {
             hirari_channel_strip_set_gain(strip, 0.5);
             assert!(crate::track_name_store::hirari_track_name_store_set(
@@ -1278,8 +1276,7 @@ mod tests {
             assert!(hirari_effect_chain_set_bypass(chain, 0, true));
             assert!(hirari_track_frozen_store_publish(
                 frozen,
-                1 as *mut c_void,
-                2 as *mut c_void,
+                frozen_audio,
                 2,
                 4,
                 4,

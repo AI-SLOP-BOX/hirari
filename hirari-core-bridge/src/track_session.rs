@@ -130,6 +130,18 @@ impl TrackSession {
         self.storage(STORAGE_NAME)
     }
 
+    /// The track's Rust realtime runtime — the entry an offline freeze render
+    /// drives block by block.
+    pub fn runtime(&self) -> *mut c_void {
+        self.storage(STORAGE_RUNTIME)
+    }
+
+    /// The engine's address of this track. The Rust region store keys on it, so
+    /// a caller that has pinned the track can read its region table with it.
+    pub fn track(&self) -> *mut c_void {
+        self.track
+    }
+
     /// The track's current name, read from its own store.
     pub fn read_name(&self) -> Vec<u8> {
         crate::track_name_store::read(self.name_store() as *const c_void)

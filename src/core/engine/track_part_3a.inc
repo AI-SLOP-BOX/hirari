@@ -23,35 +23,10 @@
         hirari_track_runtime_reset_for_offline_render(m_runtime);
     }
 
-    // Publishes a fully rendered, immutable track snapshot.  Loading and
-    // decoding are control-thread responsibilities; the audio thread only
-    // observes the raw pointer and copies bounded samples from it.  Published
-    // buffers are retained for the lifetime of the Track so replacing a
-    // freeze cannot invalidate a callback already in flight.
-    // The freeze store retains the owner handles, so a replaced buffer stays
-    // alive until the control side explicitly retires it after quiescing.
-    bool publishFrozenAudio(SharedAudioStorage rendered,
-                            uint64_t totalSamples,
-                            uint32_t sampleRate,
-                            uint64_t projectGeneration = 0,
-                            uint64_t audioGeneration = 0,
-                            std::string_view cachePath = {}) {
-        if (!rendered) return false;
-        auto* owner = new SharedAudioStorage(std::move(rendered));
-        void* storage = owner->get();
-        if (!hirari_track_frozen_store_publish(
-                m_frozenStore, owner, storage,
-                hirari_audio_buffer_storage_channels(storage),
-                hirari_audio_buffer_storage_samples(storage), totalSamples, sampleRate,
-                projectGeneration, audioGeneration,
-                reinterpret_cast<const uint8_t*>(cachePath.data()), cachePath.size())) {
-            delete owner;
-            return false;
-        }
-        markProjectLayoutChanged();
-        return true;
-    }
-
+    // The audio thread only observes the raw pointer the Rust freeze host
+    // published and copies bounded samples from it. Replacing a freeze cannot
+    // invalidate a callback already in flight because the store keeps the
+    // replaced render alive until the control side retires it after quiescing.
     void clearFrozenAudio() noexcept {
         hirari_track_frozen_store_clear(m_frozenStore);
         markProjectLayoutChanged();
@@ -68,20 +43,6 @@
     }
     uint32_t frozenSampleRate() const noexcept {
         return hirari_track_frozen_store_sample_rate(m_frozenStore);
-    }
-    uint64_t frozenProjectGeneration() const noexcept {
-        return hirari_track_frozen_store_project_generation(m_frozenStore);
-    }
-    uint64_t frozenAudioGeneration() const noexcept {
-        return hirari_track_frozen_store_audio_generation(m_frozenStore);
-    }
-    bool setFrozenCachePath(std::string_view path) {
-        if (!hirari_track_frozen_store_set_path(
-                m_frozenStore, reinterpret_cast<const uint8_t*>(path.data()), path.size())) {
-            return false;
-        }
-        markProjectLayoutChanged();
-        return true;
     }
 
     // Offline render taps are prepared on the control thread and only copied

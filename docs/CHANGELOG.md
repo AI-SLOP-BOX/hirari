@@ -78,6 +78,19 @@ production support.
 
 ### Changed
 
+- Freezing a track is rendered and published in Rust now. The freeze host walks
+  the track's own realtime runtime block by block through `hirari_track_freeze_render`,
+  streams the finished stereo buffer to the Float32 artifact, reads one back on
+  restore, and publishes or drops the immutable snapshot through the track's
+  frozen store, taking the layout revision with it. The store owns the renders
+  it holds, so the C++ owner handle and its `destroy_owner` callback are gone and
+  `hirari_track_frozen_store_retained_count` reports what is still being kept
+  alive. The engine is left with only the three things that physically live with
+  it — draining the audio callback, pinning the track and its block size — so
+  `TrackFreezeManager`, `Track::publishFrozenAudio`, `Track::setFrozenCachePath`,
+  the generation getters and the freeze FFI declarations C++ no longer calls are
+  deleted, and the C++ freeze contract case is now an engine-backed Rust test
+  suite. C++ 6549 -> 6237 (-312).
 - Rebuilding a saved project's inserts and curves is Rust's job now. The loader
   hands `project_plugin_hydration.rs` each provisional track's own chain and
   automation-store handles, and Rust walks the document's positional insert list

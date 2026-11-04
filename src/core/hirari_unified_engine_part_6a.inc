@@ -131,36 +131,6 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
             return newTrackHandle(engine->findTrackSharedLocked(tid));
         },
         [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
-        [](void* handle, uint64_t totalSamples, uint32_t sampleRate) {
-            return handle && TrackFreezeManager::freezeTrack(
-                *static_cast<std::shared_ptr<Track>*>(handle), totalSamples, sampleRate);
-        },
-        [](void* handle, const uint8_t* path, size_t length, uint64_t totalSamples,
-           uint32_t sampleRate, bool persist) {
-            if (!handle) return false;
-            auto track = *static_cast<std::shared_ptr<Track>*>(handle);
-            const std::filesystem::path file(
-                std::string(reinterpret_cast<const char*>(path), length));
-            return persist
-                ? TrackFreezeManager::freezeTrackToFile(track, file, totalSamples, sampleRate)
-                : TrackFreezeManager::restoreTrackFromFile(track, file, totalSamples, sampleRate);
-        },
-        [](void* handle, const uint8_t* path, size_t length) {
-            return handle && (*static_cast<std::shared_ptr<Track>*>(handle))->setFrozenCachePath(
-                std::string_view(reinterpret_cast<const char*>(path), length));
-        },
-        [](void* handle) {
-            if (handle) TrackFreezeManager::unfreezeTrack(
-                *static_cast<std::shared_ptr<Track>*>(handle));
-        },
-        [](void* handle) {
-            return handle && (*static_cast<std::shared_ptr<Track>*>(handle))->isFrozen();
-        },
-        [](void* handle, uint64_t* out) -> bool {
-            if (!handle || !out) return false;
-            const auto track = *static_cast<std::shared_ptr<Track>*>(handle);
-            return track && hirari_region_store_project_end(track.get(), out);
-        },
         [](void* host) -> uint32_t {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             return engine ? engine->get_block_size() : 0;
