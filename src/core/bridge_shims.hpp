@@ -10,7 +10,6 @@
 namespace Hirari::Core::Bridge {
 
     struct BridgeEvent;
-    struct BridgeLoudness;
     enum class HirariCommand : uint32_t;
 
     // --- LIFECYCLE ---
@@ -19,21 +18,8 @@ namespace Hirari::Core::Bridge {
 
     const Engine::HirariUnifiedEngine& get_unified_engine(const BridgeFFI::AudioEngine& bridge);
 
-    rust::Vec<float> get_runtime_telemetry(const BridgeFFI::AudioEngine& bridge);
-
-    rust::Vec<float> get_track_peaks_l_owned(const Engine::HirariUnifiedEngine& engine);
-    rust::Vec<float> get_track_peaks_r_owned(const Engine::HirariUnifiedEngine& engine);
     bool pop_event(const Engine::HirariUnifiedEngine& engine, BridgeEvent& ev);
 
-    // Engine-side analysis accessors. Declared here (not on the engine class)
-    // so the Rust `ffi` module can call them as free functions; implemented in
-    // hirari-core-bridge/src/analysis_bridge_accessors.cpp.
-    uint32_t get_active_telemetry_idx(const Engine::HirariUnifiedEngine& engine);
-    rust::Vec<float> get_spectrum(const Engine::HirariUnifiedEngine& engine, uint32_t idx);
-    BridgeLoudness get_master_meter_data(const Engine::HirariUnifiedEngine& engine);
-    rust::String get_intelligence_dashboard_json(const Engine::HirariUnifiedEngine& engine);
-    rust::String get_song_structure_json(const Engine::HirariUnifiedEngine& engine);
-    
     bool push_command(const BridgeFFI::AudioEngine& engine, HirariCommand cmd, uint32_t tid,
                       float val, uint64_t ts, uint64_t expected_project_generation,
                       uint64_t expected_audio_generation);

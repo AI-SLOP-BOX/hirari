@@ -1794,6 +1794,16 @@ pub unsafe extern "C" fn hirari_engine_block_device_block_frames(state: *const c
     block(state).map_or(0, |state| state.device_block_frames.load(Ordering::Acquire))
 }
 
+/// The engine track table the block was created with. Rust analysis reads walk
+/// its published snapshot directly instead of asking C++ for the graph.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_track_table(state: *const c_void) -> *mut c_void {
+    block(state).map_or(ptr::null_mut(), |state| state.track_table)
+}
+
 /// Prepares every live track for a new device format. A freeze the new rate
 /// cannot replay is dropped and retired, taking the layout revision with it, the
 /// track's blocks and DSP retune, and a work block that reached the new length

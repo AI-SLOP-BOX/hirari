@@ -308,7 +308,12 @@ impl HirariCore {
         let raw: Vec<f32> = self
             .engine
             .as_ref()
-            .map(|engine| crate::ffi::get_runtime_telemetry(engine))
+            .map(|engine| {
+                crate::engine_analysis_reads::runtime_telemetry(
+                    engine,
+                    crate::ffi::get_unified_engine(engine),
+                )
+            })
             .unwrap_or_default();
         let value = |index: usize| raw.get(index).copied().unwrap_or(0.0);
         let (bounce_state, bounce_progress) = self.get_bounce_status().unwrap_or((0, 0.0));

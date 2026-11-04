@@ -57,8 +57,7 @@ HEAD split: headers 31,146 LOC, includes 19,070 LOC, implementations 2,529 LOC.
 ## 2. Compiled production vs dead/test/vendor
 
 Liveness = transitive `#include` reachability from the real bridge translation units
-(`hirari-core-bridge/src/hirari_core_ref.cpp`, `analysis_bridge_accessors.cpp`,
-`hirari_core_audio_bridge.cpp`), not guessed.
+(`hirari-core-bridge/src/hirari_core_ref.cpp`), not guessed.
 
 | bucket | files | LOC | headers | impl |
 |--------|------:|----:|--------:|-----:|

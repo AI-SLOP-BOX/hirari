@@ -29,8 +29,7 @@ impl HirariCore {
     // Telemetry
     pub fn get_all_peaks_l(&self, out: &mut Vec<f32>) {
         if let Some(e) = self.engine.as_ref() {
-            let core = ffi::get_unified_engine(e);
-            let pks = ffi::get_track_peaks_l_owned(core);
+            let pks = crate::engine_analysis_reads::track_peaks_l(ffi::get_unified_engine(e));
             out.clear();
             out.extend(pks);
         }
@@ -38,17 +37,16 @@ impl HirariCore {
 
     pub fn get_all_peaks_r(&self, out: &mut Vec<f32>) {
         if let Some(e) = self.engine.as_ref() {
-            let core = ffi::get_unified_engine(e);
-            let pks = ffi::get_track_peaks_r_owned(core);
+            let pks = crate::engine_analysis_reads::track_peaks_r(ffi::get_unified_engine(e));
             out.clear();
             out.extend(pks);
         }
     }
 
     pub fn get_cpu_total(&self) -> f32 {
-        self.engine
-            .as_ref()
-            .map_or(0.0, |e| ffi::get_runtime_telemetry(e)[0] * 100.0)
+        self.engine.as_ref().map_or(0.0, |e| {
+            crate::engine_analysis_reads::runtime_telemetry(e, ffi::get_unified_engine(e))[0] * 100.0
+        })
     }
     pub fn get_buffer_size(&self) -> u32 {
         self.engine.as_ref().map_or(0, |e| e.get_block_size())
@@ -349,29 +347,22 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        let core = ffi::get_unified_engine(engine);
-        let idx = ffi::get_active_telemetry_idx(core);
-        crate::analysis_synesthesia_colors(&ffi::get_spectrum(core, idx))
-            .into_iter()
-            .collect()
+        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        crate::analysis_synesthesia_colors(&spectrum).into_iter().collect()
     }
     pub fn get_motion_energy(&self) -> f32 {
         let Some(engine) = self.engine.as_ref() else {
             return 0.0;
         };
-        let core = ffi::get_unified_engine(engine);
-        let idx = ffi::get_active_telemetry_idx(core);
-        crate::analysis_motion_energy(&ffi::get_spectrum(core, idx))
+        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        crate::analysis_motion_energy(&spectrum)
     }
     pub fn get_spectral_partials_v(&self) -> Vec<f32> {
         let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        let core = ffi::get_unified_engine(engine);
-        let idx = ffi::get_active_telemetry_idx(core);
-        crate::analysis_partials(&ffi::get_spectrum(core, idx))
-            .into_iter()
-            .collect()
+        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        crate::analysis_partials(&spectrum).into_iter().collect()
     }
     pub fn get_video_frame(&self) -> Vec<u8> {
         crate::video_system::video_service().frame_packet()
@@ -393,7 +384,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return String::new();
         };
-        ffi::get_song_structure_json(ffi::get_unified_engine(engine))
+        crate::engine_analysis_reads::song_structure_json(engine, ffi::get_unified_engine(engine))
     }
 
     pub fn get_ai_advice(&self) -> Vec<String> {
@@ -401,8 +392,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return results;
         };
-        let core = ffi::get_unified_engine(engine);
-        let meter = ffi::get_master_meter_data(core);
+        let meter = crate::engine_analysis_reads::master_meter_data(ffi::get_unified_engine(engine));
         results.push(crate::analysis_creative_advice(
             meter.true_peak_l,
             meter.true_peak_r,
@@ -418,8 +408,8 @@ impl HirariCore {
             return Vec::new();
         };
         let core = ffi::get_unified_engine(engine);
-        let l = ffi::get_track_peaks_l_owned(core);
-        let r = ffi::get_track_peaks_r_owned(core);
+        let l = crate::engine_analysis_reads::track_peaks_l(core);
+        let r = crate::engine_analysis_reads::track_peaks_r(core);
         let count = l.len().min(r.len());
         let mut result = Vec::with_capacity(count * 2);
         for i in 0..count {
@@ -432,9 +422,8 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        let core = ffi::get_unified_engine(engine);
-        let idx = ffi::get_active_telemetry_idx(core);
-        crate::analysis_spectral_display(&ffi::get_spectrum(core, idx), engine.get_sample_rate())
+        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        crate::analysis_spectral_display(&spectrum, engine.get_sample_rate())
             .into_iter()
             .collect()
     }
@@ -442,7 +431,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return LoudnessData::default();
         };
-        let v = ffi::get_master_meter_data(ffi::get_unified_engine(engine));
+        let v = crate::engine_analysis_reads::master_meter_data(ffi::get_unified_engine(engine));
         LoudnessData {
             integrated: v.integrated,
             short_term: v.short_term,
@@ -455,13 +444,13 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return String::new();
         };
-        ffi::get_intelligence_dashboard_json(ffi::get_unified_engine(engine))
+        crate::engine_analysis_reads::intelligence_dashboard_json(ffi::get_unified_engine(engine))
     }
     pub fn get_clashing_frequencies(&self) -> Vec<ClashData> {
         let Some(engine) = self.engine.as_ref() else {
             return Vec::new();
         };
-        let meter = ffi::get_master_meter_data(ffi::get_unified_engine(engine));
+        let meter = crate::engine_analysis_reads::master_meter_data(ffi::get_unified_engine(engine));
         let encoded = crate::analysis_spectral_clashes(
             meter.true_peak_l,
             meter.true_peak_r,

@@ -4,8 +4,6 @@ fn main() {
     let mut build = cxx_build::bridge("src/lib.rs");
 
     build.file("src/hirari_core_ref.cpp");
-    build.file("src/analysis_bridge_accessors.cpp");
-    println!("cargo:rerun-if-changed=src/analysis_bridge_accessors.cpp");
     if std::env::var_os("CARGO_FEATURE_DSP_DIFFERENTIAL_REFERENCE").is_some() {
         build.file("../tests/dsp_reference/region_time_stretch_reference.cpp");
         println!("cargo:rerun-if-changed=../tests/dsp_reference/region_time_stretch_reference.cpp");

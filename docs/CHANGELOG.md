@@ -78,6 +78,20 @@ production support.
 
 ### Changed
 
+- The engine's analysis reads now run entirely from Rust.
+  `engine_analysis_reads.rs` samples every store the C++ analysis accessors used
+  to reach through the engine: the telemetry double buffer (spectrum, track peak
+  scans over the full 256-entry arrays with the same retry budgets), the master
+  meter core (keeping the never-assigned correlation the UI advice depends on),
+  the published track table plus per-track region stores for song structure
+  (including the empty-region fallback to thirty seconds at the current sample
+  rate), the harmonic context and the driver host for the ten-value runtime
+  telemetry vector. `HirariUnifiedEngine` sheds `getMasterMeterData`, the
+  `MeterData` struct and both telemetry wrappers, keeping only two store-handle
+  getters; `analysis_bridge_accessors.cpp`, the C++ `HirariEngineTelemetry`
+  mirror and the peaks-owned forwarders are deleted, and
+  `lib_tests_analysis_reads.rs` covers the reads and the song-structure fallback
+  against a real engine. C++ 5384 -> 5145 (-239).
 - Sidechain link registration now runs entirely from Rust.
   `routing_edit_host.rs` derives the registration inputs itself: the engine block
   state records the device format inside `hirari_engine_block_prepare_tracks`

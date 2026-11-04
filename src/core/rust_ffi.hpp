@@ -1207,17 +1207,6 @@ extern "C" uint8_t hirari_track_runtime_prepare(void* state, void* region_key,
 /// Rust owns the engine's whole block (engine_block_host.rs): the admission
 /// head, the graph walk and the post-graph tail. The engine binds its handles
 /// once, then calls begin, route and finish around the device buffer.
-struct HirariEngineTelemetry {
-    float peaks_left[256];
-    float peaks_right[256];
-    uint32_t count;
-    float spectrum[512];
-    float correlation;
-    float dsp_load;
-    uint32_t active_voices;
-    uint64_t forensic_audit_hash;
-    uint64_t version;
-};
 /// The track storages the engine block reaches by kind (engine_block_host.rs).
 enum HirariEngineTrackStorageKind {
     kHirariTrackStorageRuntime = 0,
@@ -1293,9 +1282,6 @@ extern "C" void hirari_engine_block_set_config_transition(
     void* state, uint8_t transition);
 extern "C" uint8_t hirari_engine_block_range_overflowed(const void* state);
 extern "C" void hirari_engine_block_clear_midi_events(void* state);
-extern "C" uint32_t hirari_engine_telemetry_active_index(const void* state);
-extern "C" bool hirari_engine_telemetry_snapshot(
-    const void* state, uint32_t index, HirariEngineTelemetry* out);
 
 // Publication state of the frozen render. The store owns the Rust audio
 // buffers it holds and publishes the read-side handle for the callback.

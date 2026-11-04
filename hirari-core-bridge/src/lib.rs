@@ -301,13 +301,15 @@ pub mod ffi {
         // The Rust layout gather (layout_gather.rs) walks the live tracks
         // through this table; C++ no longer runs a snapshot session.
         fn layout_ops_handle(self: &HirariUnifiedEngine) -> usize;
+        // Rust analysis reads (engine_analysis_reads.rs) sample telemetry and
+        // meter straight from these Rust-owned stores.
+        fn engine_block_state(self: &HirariUnifiedEngine) -> usize;
+        fn meter_state(self: &HirariUnifiedEngine) -> usize;
         fn get_project_generation(self: &HirariUnifiedEngine) -> u64;
         fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
         fn get_project_state_revision(self: &HirariUnifiedEngine) -> u64;
         fn mark_project_layout_changed(self: &HirariUnifiedEngine);
         fn audio_range_overflowed(self: &HirariUnifiedEngine) -> bool;
-
-        fn get_runtime_telemetry(bridge: &AudioEngine) -> Vec<f32>;
 
         fn get_block_size(self: &AudioEngine) -> u32;
         fn get_latency_ms(self: &HirariUnifiedEngine) -> f32;
@@ -332,15 +334,7 @@ pub mod ffi {
         fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
         fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
-        fn get_track_peaks_l_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;
-        fn get_track_peaks_r_owned(engine: &HirariUnifiedEngine) -> Vec<f32>;
         fn pop_event(engine: &HirariUnifiedEngine, event: &mut BridgeEvent) -> bool;
-        // Engine-side analysis accessors (replace the deleted AnalysisHub shim).
-        fn get_active_telemetry_idx(engine: &HirariUnifiedEngine) -> u32;
-        fn get_spectrum(engine: &HirariUnifiedEngine, idx: u32) -> Vec<f32>;
-        fn get_master_meter_data(engine: &HirariUnifiedEngine) -> BridgeLoudness;
-        fn get_intelligence_dashboard_json(engine: &HirariUnifiedEngine) -> String;
-        fn get_song_structure_json(engine: &HirariUnifiedEngine) -> String;
     }
 
     // ---------------------------------------------------------------------

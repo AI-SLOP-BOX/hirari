@@ -1,17 +1,14 @@
     // Analysis
-    struct MeterData {
-        float peakL = 0.0f;
-        float peakR = 0.0f;
-        float truePeakL = 0.0f;
-        float truePeakR = 0.0f;
-        float rmsL = 0.0f;
-        float rmsR = 0.0f;
-        float lufsShortTerm = 0.0f;
-        float lufsIntegrated = 0.0f;
-        float correlation = 0.0f;
-        float balance = 0.0f;
-    };
-    MeterData getMasterMeterData() const;
+    // The engine-block state and the master meter core are Rust-owned stores
+    // (engine_block_host.rs, master_meter.rs); the Rust analysis reads
+    // (engine_analysis_reads.rs) sample telemetry, meter and the published
+    // graph straight from these handles, so no MeterData copy crosses here.
+    uintptr_t engine_block_state() const noexcept {
+        return reinterpret_cast<uintptr_t>(m_engineBlock);
+    }
+    uintptr_t meter_state() const noexcept {
+        return reinterpret_cast<uintptr_t>(m_meterCore);
+    }
     bool execute_auto_arrangement();
     // The Rust layout gather (layout_gather.rs) owns the snapshot, its JSON and
     // the background save session; this hands it the host table it reads.
@@ -46,14 +43,5 @@
     // Diagnostics & Health
 
     void shutdown();
-
-    // Telemetry access (RT-Safe). The double buffer and its publication live in
-    // Rust (engine_block_host.rs); these are the control-side reads.
-    uint32_t get_active_telemetry_idx() const {
-        return hirari_engine_telemetry_active_index(m_engineBlock);
-    }
-    bool copy_telemetry(uint32_t idx, HirariEngineTelemetry& destination) const {
-        return hirari_engine_telemetry_snapshot(m_engineBlock, idx, &destination);
-    }
 
     bool pop_event(::Hirari::Core::EngineEvent& e) const;

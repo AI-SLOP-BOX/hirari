@@ -140,20 +140,4 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
     hirari_track_freeze_host_install(&ops);
 }
 
-HirariUnifiedEngine::MeterData HirariUnifiedEngine::getMasterMeterData() const {
-    if (!m_meterCore) return {};
-    float stats[4] = {-70.0f, -70.0f, -70.0f, -100.0f};
-    hirari_master_meter_analysis_stats(m_meterCore, stats);
-    MeterData out{};
-    out.peakL = hirari_master_meter_get(m_meterCore, 0);
-    out.peakR = hirari_master_meter_get(m_meterCore, 1);
-    out.truePeakL = hirari_master_meter_get(m_meterCore, 2);
-    out.truePeakR = hirari_master_meter_get(m_meterCore, 3);
-    out.rmsL = hirari_master_meter_get(m_meterCore, 4);
-    out.rmsR = hirari_master_meter_get(m_meterCore, 5);
-    out.lufsShortTerm = stats[0];
-    out.lufsIntegrated = stats[2];
-    return out;
-}
-
 
