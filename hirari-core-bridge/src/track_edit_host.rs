@@ -441,6 +441,154 @@ pub unsafe extern "C" fn hirari_track_remove(host: *mut c_void, track_id: u32) -
     }
 }
 
+/// Reads one processor state out of a chain, which the caller owns once copied.
+fn chain_state(chain: *mut c_void, index: u32) -> Vec<u8> {
+    let mut length = 0usize;
+    let data = unsafe { crate::effect_chain_host::hirari_effect_chain_processor_state(chain, index, &mut length) };
+    if data.is_null() || length == 0 {
+        return Vec::new();
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, length).to_vec() };
+    unsafe { crate::effect_chain_host::hirari_effect_chain_buffer_free(data, length) };
+    bytes
+}
+
+/// Reads one sandbox slot's path out of a chain.
+fn chain_sandbox_path(chain: *mut c_void, slot: usize) -> Vec<u8> {
+    let length =
+        unsafe { crate::effect_chain_host::hirari_effect_chain_sandbox_slot_path(chain, slot, std::ptr::null_mut(), 0) };
+    if length == 0 {
+        return Vec::new();
+    }
+    let mut path = vec![0u8; length];
+    let written = unsafe {
+        crate::effect_chain_host::hirari_effect_chain_sandbox_slot_path(
+            chain,
+            slot,
+            path.as_mut_ptr(),
+            length,
+        )
+    };
+    path.truncate(written.min(length));
+    path
+}
+
+/// Copies the store state a duplicated track inherits.
+///
+/// The engine builds the new track and hands over its storages; the fader, the
+/// mute and phase flags, the three automation lists, the plugin lanes and the
+/// chain in order are then read and written store-to-store here. A sandbox path
+/// the destination chain refuses is skipped like the engine's own walk did, so
+/// one rejected worker never aborts the duplicate.
+///
+/// # Safety
+/// Every handle must be a live storage of its kind, and the two handle sets must
+/// belong to tracks of the same kind so the chain rebuild selects the same DSP
+/// variants.
+#[allow(clippy::too_many_arguments)]
+#[no_mangle]
+pub unsafe extern "C" fn hirari_track_clone_state(
+    source_strip: *mut c_void,
+    source_runtime: *mut c_void,
+    source_automation: *mut c_void,
+    source_chain: *mut c_void,
+    dest_strip: *mut c_void,
+    dest_runtime: *mut c_void,
+    dest_automation: *mut c_void,
+    dest_chain: *mut c_void,
+    dest_is_bus: bool,
+) -> bool {
+    if source_strip.is_null()
+        || source_automation.is_null()
+        || source_chain.is_null()
+        || dest_strip.is_null()
+        || dest_automation.is_null()
+        || dest_chain.is_null()
+    {
+        return false;
+    }
+    unsafe {
+        crate::channel_strip::hirari_channel_strip_set_gain(
+            dest_strip,
+            crate::channel_strip::hirari_channel_strip_gain(source_strip),
+        );
+        crate::channel_strip::hirari_channel_strip_set_pan(
+            dest_strip,
+            crate::channel_strip::hirari_channel_strip_pan(source_strip),
+        );
+        crate::track_runtime::hirari_track_runtime_set_muted(
+            dest_runtime,
+            crate::track_runtime::hirari_track_runtime_is_muted(source_runtime) as u8,
+        );
+        crate::track_runtime::hirari_track_runtime_set_phase_invert(
+            dest_runtime,
+            crate::track_runtime::hirari_track_runtime_is_phase_inverted(source_runtime) as u8,
+        );
+        for kind in 0..3u32 {
+            let mut count = 0usize;
+            let points =
+                crate::track_automation_store::hirari_track_automation_store_points(
+                    source_automation, kind, &mut count,
+                );
+            crate::track_automation_store::hirari_track_automation_store_set_points(
+                dest_automation, kind, points, count,
+            );
+        }
+        let mut lane_count = 0usize;
+        let lanes = crate::track_automation_store::hirari_track_automation_store_plugin_lane_views(
+            source_automation,
+            &mut lane_count,
+        );
+        if lane_count != 0 {
+            crate::track_automation_store::hirari_track_automation_store_set_plugin_lanes(
+                dest_automation, lanes, lane_count,
+            );
+        }
+        let slot_count = crate::effect_chain_host::hirari_effect_chain_sandbox_slot_count(source_chain);
+        let mut sandbox_slot = 0usize;
+        for index in 0..crate::effect_chain_host::hirari_effect_chain_count(source_chain) {
+            let kind = crate::effect_chain_host::hirari_effect_chain_node_kind(source_chain, index);
+            let state = chain_state(source_chain, index);
+            let bypassed = crate::effect_chain_host::hirari_effect_chain_bypass(source_chain, index);
+            let added = if kind == crate::effect_chain_nodes::SANDBOX_KIND {
+                let path_index = sandbox_slot;
+                sandbox_slot += 1;
+                if path_index >= slot_count {
+                    false
+                } else {
+                    let path = chain_sandbox_path(source_chain, path_index);
+                    !path.is_empty()
+                        && crate::effect_chain_host::hirari_effect_chain_add_sandbox(
+                            dest_chain,
+                            path.as_ptr(),
+                            path.len(),
+                        )
+                }
+            } else {
+                crate::effect_chain_host::hirari_effect_chain_add_builtin(
+                    dest_chain, kind, dest_is_bus, false,
+                )
+            };
+            if added && !state.is_empty() {
+                let dest_index =
+                    crate::effect_chain_host::hirari_effect_chain_count(dest_chain) - 1;
+                crate::effect_chain_host::hirari_effect_chain_processor_state_restore(
+                    dest_chain,
+                    dest_index,
+                    state.as_ptr(),
+                    state.len(),
+                );
+                crate::effect_chain_host::hirari_effect_chain_set_bypass(
+                    dest_chain,
+                    dest_index,
+                    bypassed,
+                );
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -746,8 +894,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_track_records_nothing() {
-        let _guard = SERIAL.lock().unwrap();
+    fn a_missing_track_records_nothing() {        let _guard = SERIAL.lock().unwrap();
         reset();
         let ops = HirariTrackEditHostOps {
             take: Some(fake_take_missing),
@@ -801,5 +948,181 @@ mod tests {
         unsafe { crate::undo_transaction::hirari_undo_manager_destroy(state) };
         assert_eq!(drain(), vec!["release 0xc0de"]);
         FAKE_UNDO.store(std::ptr::null_mut(), std::sync::atomic::Ordering::SeqCst);
+    }
+
+    use crate::channel_strip::{
+        hirari_channel_strip_create, hirari_channel_strip_destroy, hirari_channel_strip_gain,
+        hirari_channel_strip_pan, hirari_channel_strip_set_gain, hirari_channel_strip_set_pan,
+    };
+    use crate::effect_chain_host::{
+        hirari_effect_chain_add_builtin, hirari_effect_chain_bypass, hirari_effect_chain_count,
+        hirari_effect_chain_create, hirari_effect_chain_destroy, hirari_effect_chain_node_kind,
+        hirari_effect_chain_set_bypass,
+    };
+    use crate::track_automation_store::{
+        hirari_track_automation_store_create, hirari_track_automation_store_destroy,
+        hirari_track_automation_store_points, hirari_track_automation_store_plugin_lane_views,
+        hirari_track_automation_store_set_plugin_lanes, hirari_track_automation_store_set_points,
+        AutomationPoint,
+    };
+    use crate::track_runtime::{
+        hirari_track_runtime_create, hirari_track_runtime_destroy,
+        hirari_track_runtime_is_muted, hirari_track_runtime_is_phase_inverted,
+        hirari_track_runtime_set_muted, hirari_track_runtime_set_phase_invert,
+    };
+
+    /// One track's Rust storages, destroyed in the order the runtime releases
+    /// the handles it borrows.
+    struct Stores {
+        strip: *mut c_void,
+        chain: *mut c_void,
+        automation: *mut c_void,
+        runtime: *mut c_void,
+    }
+
+    impl Stores {
+        fn new(id: u32) -> Self {
+            let strip = unsafe { hirari_channel_strip_create() };
+            let chain = unsafe { hirari_effect_chain_create() };
+            let automation = unsafe { hirari_track_automation_store_create() };
+            let runtime = unsafe {
+                hirari_track_runtime_create(
+                    id, chain, strip, automation, std::ptr::null_mut(), std::ptr::null_mut(),
+                    std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
+                    std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(),
+                    std::ptr::null_mut(), None, std::ptr::null_mut(),
+                )
+            };
+            Self { strip, chain, automation, runtime }
+        }
+    }
+
+    impl Drop for Stores {
+        fn drop(&mut self) {
+            unsafe {
+                hirari_track_runtime_destroy(self.runtime);
+                hirari_track_automation_store_destroy(self.automation);
+                hirari_effect_chain_destroy(self.chain);
+                hirari_channel_strip_destroy(self.strip);
+            }
+        }
+    }
+
+    fn points(store: *mut c_void, kind: u32) -> Vec<AutomationPoint> {
+        let mut count = 0usize;
+        let raw = unsafe { hirari_track_automation_store_points(store, kind, &mut count) };
+        if raw.is_null() {
+            return Vec::new();
+        }
+        unsafe { std::slice::from_raw_parts(raw, count) }.to_vec()
+    }
+
+    #[test]
+    fn cloning_state_copies_stores_onto_a_fresh_track() {
+        let source = Stores::new(1);
+        let dest = Stores::new(2);
+        unsafe {
+            hirari_channel_strip_set_gain(source.strip, 0.5);
+            hirari_channel_strip_set_pan(source.strip, -0.25);
+            hirari_channel_strip_set_gain(dest.strip, 1.0);
+            hirari_track_runtime_set_muted(source.runtime, 1);
+            hirari_track_runtime_set_phase_invert(source.runtime, 1);
+            let volume = [
+                AutomationPoint { time: 4.0, value: 0.2, curve: 0.0 },
+                AutomationPoint { time: 1.0, value: 0.8, curve: 0.5 },
+            ];
+            hirari_track_automation_store_set_points(source.automation, 0, volume.as_ptr(), 2);
+            let delay = [AutomationPoint { time: 2.0, value: 0.5, curve: 0.0 }];
+            hirari_track_automation_store_set_points(
+                source.automation,
+                2,
+                delay.as_ptr(),
+                delay.len(),
+            );
+            let lane = [AutomationPoint { time: 3.0, value: 0.75, curve: 0.25 }];
+            let lanes = [crate::track_automation_store::PluginLaneView {
+                processor_index: 1,
+                parameter_id: 7,
+                points: lane.as_ptr(),
+                point_count: 1,
+            }];
+            hirari_track_automation_store_set_plugin_lanes(
+                source.automation,
+                lanes.as_ptr(),
+                lanes.len(),
+            );
+            assert!(hirari_effect_chain_add_builtin(source.chain, 1, false, false));
+            assert!(hirari_effect_chain_add_builtin(source.chain, 4, false, false));
+            assert!(hirari_effect_chain_set_bypass(source.chain, 1, true));
+        }
+        // The chain bypass and processor state follow the source node, so the
+        // duplicate reports the same insert list and the same parameter values.
+        unsafe {
+            assert!(hirari_track_clone_state(
+                source.strip,
+                source.runtime,
+                source.automation,
+                source.chain,
+                dest.strip,
+                dest.runtime,
+                dest.automation,
+                dest.chain,
+                false,
+            ));
+        }
+        assert_eq!(unsafe { hirari_channel_strip_gain(dest.strip) }, 0.5);
+        assert_eq!(unsafe { hirari_channel_strip_pan(dest.strip) }, -0.25);
+        assert!(unsafe { hirari_track_runtime_is_muted(dest.runtime) });
+        assert!(unsafe { hirari_track_runtime_is_phase_inverted(dest.runtime) });
+        // The automation store sorts by time as it publishes.
+        assert_eq!(
+            points(dest.automation, 0),
+            vec![
+                AutomationPoint { time: 1.0, value: 0.8, curve: 0.5 },
+                AutomationPoint { time: 4.0, value: 0.2, curve: 0.0 },
+            ]
+        );
+        assert_eq!(points(dest.automation, 1), Vec::new());
+        assert_eq!(
+            points(dest.automation, 2),
+            vec![AutomationPoint { time: 2.0, value: 0.5, curve: 0.0 }]
+        );
+        let mut lane_count = 0usize;
+        let views =
+            unsafe { hirari_track_automation_store_plugin_lane_views(dest.automation, &mut lane_count) };
+        assert_eq!(lane_count, 1);
+        let lane = unsafe { &*views };
+        assert_eq!((lane.processor_index, lane.parameter_id, lane.point_count), (1, 7, 1));
+        assert_eq!(unsafe { hirari_effect_chain_count(dest.chain) }, 2);
+        assert_eq!(
+            unsafe {
+                (
+                    hirari_effect_chain_node_kind(dest.chain, 0),
+                    hirari_effect_chain_node_kind(dest.chain, 1),
+                )
+            },
+            (1, 4)
+        );
+        assert_eq!(chain_state(dest.chain, 1), chain_state(source.chain, 1));
+        assert!(!unsafe { hirari_effect_chain_bypass(dest.chain, 0) });
+        assert!(unsafe { hirari_effect_chain_bypass(dest.chain, 1) });
+    }
+
+    #[test]
+    fn cloning_state_without_a_source_chain_copies_nothing() {
+        let dest = Stores::new(2);
+        assert!(!unsafe {
+            hirari_track_clone_state(
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                dest.strip,
+                dest.runtime,
+                dest.automation,
+                dest.chain,
+                false,
+            )
+        });
     }
 }

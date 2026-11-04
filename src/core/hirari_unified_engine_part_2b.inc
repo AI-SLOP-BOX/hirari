@@ -222,62 +222,22 @@ void HirariUnifiedEngine::installTrackEditHost() {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             std::shared_ptr<Track> copy;
             size_t insertIndex = 0;
-            std::vector<uint32_t> pluginTypes;
-            std::vector<std::vector<uint8_t>> pluginStates;
-            std::vector<bool> pluginBypasses;
-            std::vector<std::string> sandboxPaths;
-            std::vector<ProjectAutomationPoint> volumeAutomation;
-            std::vector<ProjectAutomationPoint> panAutomation;
-            std::vector<ProjectAutomationPoint> delayAutomation;
-            std::vector<ProjectPluginAutomationLane> pluginAutomation;
             {
                 std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
                 Track* original = engine->findTrackLocked(tid);
                 if (!original) return nullptr;
                 if (hirari_region_store_count(original) != regionIdCount) return nullptr;
-                pluginTypes = original->getPluginTypes();
-                pluginStates = original->getPluginStates();
-                volumeAutomation = original->getVolumeAutomationPoints();
-                panAutomation = original->getPanAutomationPoints();
-                delayAutomation = original->getTrackDelayAutomationPoints();
-                pluginAutomation = original->getPluginAutomation();
-                pluginBypasses.reserve(pluginTypes.size());
-                for (size_t index = 0; index < pluginTypes.size(); ++index) {
-                    pluginBypasses.push_back(original->getPluginBypass(static_cast<uint32_t>(index)));
-                }
-                sandboxPaths = original->getSandboxedPluginPaths();
                 copy = engine->makeTrack(newId, original->getName() + " Copy",
                                          original->getType());
-                copy->setVolume(original->getVolume());
-                copy->setPan(original->getPan());
-                copy->setMuted(original->isMuted());
-                copy->setPhaseInverted(original->isPhaseInverted());
-                copy->setVolumeAutomation(volumeAutomation);
-                copy->setPanAutomation(panAutomation);
-                copy->setTrackDelayAutomation(delayAutomation);
-                size_t sandboxPathIndex = 0;
-                for (size_t pluginIndex = 0; pluginIndex < pluginTypes.size(); ++pluginIndex) {
-                    const uint32_t pluginType = pluginTypes[pluginIndex];
-                    bool inserted = false;
-                    if (pluginType == 0xFFFFFFFFu) {
-                        if (sandboxPathIndex < sandboxPaths.size()) {
-                            inserted = copy->addSandboxedPlugin(sandboxPaths[sandboxPathIndex]);
-                        }
-                        ++sandboxPathIndex;
-                    } else {
-                        inserted = copy->addPlugin(pluginType);
-                    }
-                    if (inserted && pluginIndex < pluginStates.size() &&
-                        !pluginStates[pluginIndex].empty()) {
-                        const uint32_t destinationIndex =
-                            static_cast<uint32_t>(copy->getPluginCount() - 1);
-                        copy->setPluginState(destinationIndex, pluginStates[pluginIndex]);
-                        if (pluginIndex < pluginBypasses.size()) {
-                            copy->setPluginBypass(destinationIndex, pluginBypasses[pluginIndex]);
-                        }
-                    }
-                }
-                if (!pluginAutomation.empty()) copy->setPluginAutomation(pluginAutomation);
+                // The copy's own storages are the destination: Rust reads the
+                // source stores and writes these, so no value crosses a C++ list.
+                if (!hirari_track_clone_state(
+                        original->channelStripHandle(), original->realtimeRuntime(),
+                        original->automationStoreHandle(), original->effectChainHandle(),
+                        copy->channelStripHandle(), copy->realtimeRuntime(),
+                        copy->automationStoreHandle(), copy->effectChainHandle(),
+                        copy->getType() == Track::Type::Bus))
+                    return nullptr;
                 if (!hirari_region_store_copy_regions(original, copy.get(), regionIds, regionIdCount))
                     return nullptr;
                 insertIndex = engine->lockedTracks().size();

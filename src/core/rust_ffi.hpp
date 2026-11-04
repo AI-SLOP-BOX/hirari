@@ -1060,6 +1060,15 @@ struct HirariTrackEditHostOps {
 
 extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops);
 
+// Duplicating a track copies the store state of one track onto another. The
+// engine only supplies the two handle sets; the reads, the chain rebuild and
+// the per-node tolerance for a refused sandbox path all live in Rust.
+extern "C" bool hirari_track_clone_state(void* sourceStrip, void* sourceRuntime,
+                                        void* sourceAutomation, void* sourceChain,
+                                        void* destStrip, void* destRuntime,
+                                        void* destAutomation, void* destChain,
+                                        bool destIsBus);
+
 // Track and region id allocation lives in Rust (id_host.rs). An emptied
 // project restarts the counters; an installed document resumes them past the
 // highest ids it carries. Both are store-only and safe under the track lock.

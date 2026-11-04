@@ -146,13 +146,6 @@
     uint32_t sandboxSlotChainIndex(size_t slot) const noexcept {
         return hirari_effect_chain_sandbox_slot_index(m_chain, slot);
     }
-    std::vector<std::string> getSandboxedPluginPaths() const {
-        std::vector<std::string> paths;
-        paths.reserve(sandboxSlotCount());
-        for (size_t slot = 0; slot < sandboxSlotCount(); ++slot)
-            paths.push_back(sandboxSlotPath(slot));
-        return paths;
-    }
     uint8_t sandboxedPluginStateError(size_t sandboxIndex) const noexcept {
         return hirari_effect_chain_sandbox_state_error(m_chain, sandboxIndex);
     }

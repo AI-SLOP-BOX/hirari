@@ -74,6 +74,18 @@ production support.
 
 ### Changed
 
+- Duplicating a track now copies its state store-to-store. The engine's
+  duplicate handler builds the new track and hands both tracks' channel-strip,
+  runtime, automation and effect-chain storage handles to one Rust entry point,
+  which reads the source and writes the copy: fader and pan, mute and phase
+  inversion, the volume/pan/delay automation lists and the plugin lanes, and the
+  insert chain rebuilt in order with each node's saved state and bypass. The
+  previous handler marshalled every one of those through temporary C++ vectors
+  — plugin types, states, bypass flags, sandbox paths and four automation lists —
+  and replayed them setter by setter; `Track::getSandboxedPluginPaths` was the
+  only consumer of that plumbing and is gone. A sandbox path the copy refuses is
+  skipped rather than aborting the duplicate, as before. C++ 7113 -> 7075 (-38).
+
 - The project-layout gather now reads the track's own Rust storages. The host
   table shrank from 26 accessors to 11 (`begin`/`end`/count/handle/id/type/
   storage-kind/name plus the route stores and sample rate): automation lists and
