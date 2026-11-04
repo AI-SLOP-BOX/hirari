@@ -8,59 +8,19 @@ uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
 }
 
 // Routing edit host callbacks. Rust owns the routing graph, the sidechain route
-// table and every track sub-state a routing edit reads or writes — all of them
-// are Rust stores the engine only holds — so it reads and mutates them through
-// the shared track session. These handlers remain only where C++ state is
-// involved: the sidechain gate's live registration and the locks around it.
+// table, the sidechain gate's registration inputs and every track sub-state a
+// routing edit reads or writes — all of them are Rust stores the engine only
+// holds — so it reads and mutates them through the shared track session and the
+// engine block state. These handlers hand over those store addresses plus the
+// two engine operations that must stay here: the layout mark and the graph
+// resync.
 void HirariUnifiedEngine::installRoutingEditHost() {
     static const HirariRoutingHostOps ops = {
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainEngine; },
-        [](void* host, uint32_t sourceId, uint32_t destId,
-           HirariRoutingSidechainContext* out) {
-            if (!out) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            // Rust's sidechain storage is 4096 frames and rejects longer links,
-            // so the request is clamped before the source buffer is read.
-            out->blockSize = std::min(engine->m_blockSize.load(std::memory_order_relaxed), 4096u);
-            out->sampleRate = static_cast<uint32_t>(std::max(
-                1.0, engine->m_sampleRate.load(std::memory_order_acquire)));
-            out->generation = std::max<uint64_t>(
-                1, hirari_engine_block_generation(engine->m_engineBlock));
-            Track* source = engine->findTrackLocked(sourceId);
-            Track* destination = engine->findTrackLocked(destId);
-            out->sourceFound = source != nullptr;
-            out->destinationFound = destination != nullptr;
-            out->sourcePrepared = source && destination && source->canProcess(out->blockSize);
-            return true;
-        },
-        [](void* host, uint32_t destId, uint32_t pluginIndex, uint32_t sourceId,
-           const HirariRoutingSidechainContext* context, uint32_t tapPoint, bool silent) {
-            if (!context) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            if (silent) {
-                return hirari_sidechain_engine_register_silent_link(
-                    engine->m_sidechainEngine, destId, pluginIndex, sourceId,
-                    context->blockSize, context->sampleRate, context->generation, 1.0f,
-                    static_cast<uint8_t>(tapPoint));
-            }
-            Track* source = engine->findTrackLocked(sourceId);
-            if (!source) return false;
-            void* sourceBuffer = source->workBufferStorage();
-            const uint32_t channels = hirari_audio_buffer_storage_channels(sourceBuffer);
-            const float* left = hirari_audio_buffer_storage_read_pointer(sourceBuffer, 0, 0);
-            const float* right = channels > 1
-                ? hirari_audio_buffer_storage_read_pointer(sourceBuffer, 1, 0) : left;
-            // Registration copies one prepared block into Rust-owned storage;
-            // supplying the frame count is part of that contract.
-            return hirari_sidechain_engine_register_link(
-                engine->m_sidechainEngine, destId, pluginIndex, sourceId, left, right,
-                context->blockSize, context->sampleRate, context->generation, 1.0f,
-                static_cast<uint8_t>(tapPoint));
-        },
+        nullptr,  // sidechain context and registration live in the Rust routing edit host.
+        nullptr,
         [](void* host) {
             static_cast<HirariUnifiedEngine*>(host)->mark_project_layout_changed();
         },
@@ -72,6 +32,9 @@ void HirariUnifiedEngine::installRoutingEditHost() {
         nullptr,  // undo capture lives in the Rust routing edit host.
         [](void* host) -> void* {
             return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
+        },
+        [](void* host) -> void* {
+            return host ? static_cast<HirariUnifiedEngine*>(host)->m_engineBlock : nullptr;
         },
     };
     hirari_routing_edit_host_install(&ops);

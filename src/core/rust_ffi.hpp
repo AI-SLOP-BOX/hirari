@@ -753,14 +753,6 @@ struct HirariRegionStorageHostOps {
     bool (*pitchRunning)(void* track) = nullptr;
 };
 extern "C" void hirari_region_storage_host_install(const HirariRegionStorageHostOps* ops);
-// A region under construction; its edit tables are the Rust stores the finished
-// region will own.
-struct HirariRegionDraft;
-extern "C" HirariRegionDraft* hirari_region_store_draft_new(
-    uint32_t id, const uint8_t* path, size_t pathLength, const uint8_t* name,
-    size_t nameLength, const HirariRegionState* state);
-extern "C" bool hirari_region_store_draft_add(
-    HirariRegionDraft* draft, void* track, void* audio);
 // The region table is keyed by the live Track, not by the track id: ids are
 // allocated per engine, so two engines can own the same id at the same time.
 // Entry points that only have an engine and an id resolve the track through
@@ -775,7 +767,6 @@ extern "C" void* hirari_region_store_note_snapshot(void* track, uint32_t regionI
 extern "C" bool hirari_region_store_copy_regions(void* sourceTrack,
                                                  void* destinationTrack,
                                                  const uint32_t* regionIds, size_t count);
-extern "C" bool hirari_region_store_project_end(void* track, uint64_t* out);
 extern "C" bool hirari_region_store_span_at(void* track, size_t index, uint64_t* start,
                                             uint64_t* length, uint32_t* loopCount);
 extern "C" void hirari_region_store_forget_waveforms(void* host, void* track);
@@ -818,14 +809,9 @@ extern "C" bool hirari_tempo_edit_set_tempo(void* tempo, void* undo, const void*
 // undo snapshot; C++ keeps only the pointer and calls these entry points.
 extern "C" void* hirari_sidechain_engine_create();
 extern "C" void hirari_sidechain_engine_destroy(void* state);
-extern "C" bool hirari_sidechain_engine_register_link(
-    void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track,
-    const float* source_left, const float* source_right, uint32_t frames, uint32_t sample_rate,
-    uint64_t source_generation, float level, uint8_t tap_point);
-extern "C" bool hirari_sidechain_engine_register_silent_link(
-    void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track,
-    uint32_t frames, uint32_t sample_rate, uint64_t source_generation, float level,
-    uint8_t tap_point);
+// Link registration is a control-thread edit owned by Rust (routing_edit_host.rs
+// taps the source's work buffer through the track session); C++ no longer calls
+// either entry point.
 extern "C" bool hirari_sidechain_engine_has_link(
     const void* state, uint32_t destination_track, uint32_t plugin_index, uint32_t source_track);
 extern "C" void hirari_sidechain_engine_remove_track(void* state, uint32_t track);
@@ -900,6 +886,9 @@ struct HirariRoutingHostOps {
     void* (*routingStore)(void*) = nullptr;
     void* (*sidechainRoutesStore)(void*) = nullptr;
     void* (*sidechainEngineStore)(void*) = nullptr;
+    // The engine installs neither of these; Rust derives the registration
+    // inputs from the engine block state and taps the source's work buffer
+    // through the track session. A host without that state may supply them.
     bool (*sidechainContext)(void*, uint32_t, uint32_t,
                              HirariRoutingSidechainContext*) = nullptr;
     bool (*registerSidechain)(void*, uint32_t, uint32_t, uint32_t,
@@ -910,6 +899,9 @@ struct HirariRoutingHostOps {
     void (*recordUndo)(void*, const char*, const HirariRoutingEditPayload*, size_t,
                        const HirariRoutingEditPayload*, size_t, bool, bool) = nullptr;
     void* (*undoState)(void*) = nullptr;
+    // The engine block state records the device format the graph was last
+    // prepared for; the sidechain registration inputs read it from there.
+    void* (*engineBlockStore)(void*) = nullptr;
 };
 
 extern "C" void hirari_routing_edit_host_install(const HirariRoutingHostOps* ops);

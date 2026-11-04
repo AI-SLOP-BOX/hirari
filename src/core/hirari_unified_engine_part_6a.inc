@@ -24,6 +24,7 @@ void* HirariUnifiedEngine::trackStorageHandle(void* track, uint32_t kind) noexce
         case 3: return typed->frozenStoreHandle();
         case 4: return typed->realtimeRuntime();
         case 6: return typed->nameStoreHandle();
+        case 7: return typed->workBufferStorage();
         default: return typed->articulationStateHandle();
     }
 }

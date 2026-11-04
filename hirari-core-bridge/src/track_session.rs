@@ -27,6 +27,7 @@ pub const STORAGE_FROZEN: u32 = 3;
 pub const STORAGE_RUNTIME: u32 = 4;
 pub const STORAGE_ARTICULATION: u32 = 5;
 pub const STORAGE_NAME: u32 = 6;
+pub const STORAGE_WORK_BUFFER: u32 = 7;
 
 /// `Track::Type::Bus`.
 pub const TRACK_TYPE_BUS: u32 = 3;
@@ -139,6 +140,12 @@ impl TrackSession {
     /// drives block by block.
     pub fn runtime(&self) -> *mut c_void {
         self.storage(STORAGE_RUNTIME)
+    }
+
+    /// The track's active work buffer — the Rust audio storage the block
+    /// pipeline renders into, which a sidechain source taps.
+    pub fn work_buffer(&self) -> *mut c_void {
+        self.storage(STORAGE_WORK_BUFFER)
     }
 
     /// The engine's address of this track. The Rust region store keys on it, so

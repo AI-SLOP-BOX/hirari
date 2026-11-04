@@ -309,6 +309,12 @@ pub struct EngineBlockState {
     cycle_end: AtomicU64,
     test_tone: AtomicBool,
     generation: AtomicU64,
+    /// The device format the graph was last prepared for, recorded by
+    /// [`hirari_engine_block_prepare_tracks`] — the one funnel every
+    /// preparation passes through. Control-side edit hosts read it back as the
+    /// registration inputs for live audio routing instead of asking C++.
+    device_sample_rate: AtomicU64,
+    device_block_frames: AtomicU32,
     config_transition: AtomicBool,
     range_overflow: AtomicBool,
     preview_voices_need_reset: AtomicBool,
@@ -1769,6 +1775,25 @@ pub unsafe extern "C" fn hirari_engine_block_bump_generation(state: *mut c_void)
     })
 }
 
+/// The sample rate the graph was last prepared for.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_device_sample_rate(state: *const c_void) -> f64 {
+    block(state)
+        .map_or(0.0, |state| f64::from_bits(state.device_sample_rate.load(Ordering::Acquire)))
+}
+
+/// The block size the graph was last prepared for.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_device_block_frames(state: *const c_void) -> u32 {
+    block(state).map_or(0, |state| state.device_block_frames.load(Ordering::Acquire))
+}
+
 /// Prepares every live track for a new device format. A freeze the new rate
 /// cannot replay is dropped and retired, taking the layout revision with it, the
 /// track's blocks and DSP retune, and a work block that reached the new length
@@ -1790,6 +1815,12 @@ pub unsafe extern "C" fn hirari_engine_block_prepare_tracks(
     let Some(state) = block(state) else {
         return 0;
     };
+    state
+        .device_sample_rate
+        .store(sample_rate.to_bits(), Ordering::Release);
+    state
+        .device_block_frames
+        .store(block_frames, Ordering::Release);
     let rate = sample_rate as u32;
     let generation = state.generation.load(Ordering::Acquire);
     let count = unsafe { hirari_engine_track_count(state.track_table) };
@@ -1967,6 +1998,8 @@ pub unsafe extern "C" fn hirari_engine_block_create(
         cycle_end: AtomicU64::new(0),
         test_tone: AtomicBool::new(false),
         generation: AtomicU64::new(1),
+        device_sample_rate: AtomicU64::new(44100f64.to_bits()),
+        device_block_frames: AtomicU32::new(512),
         config_transition: AtomicBool::new(false),
         range_overflow: AtomicBool::new(false),
         preview_voices_need_reset: AtomicBool::new(false),

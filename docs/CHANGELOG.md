@@ -78,6 +78,19 @@ production support.
 
 ### Changed
 
+- Sidechain link registration now runs entirely from Rust.
+  `routing_edit_host.rs` derives the registration inputs itself: the engine block
+  state records the device format inside `hirari_engine_block_prepare_tracks`
+  — the single funnel every preparation already passes through — the source
+  track's "prepared at this block size" check taps its own work buffer through
+  a new `TrackSession` storage kind, and the silent-versus-audio registration
+  choice calls the sidechain manager's Rust entry points directly. The engine's
+  `installRoutingEditHost()` replaces its context and registration lambdas with
+  nulls plus one `engineBlockStore` getter, `rust_ffi.hpp` drops the two
+  register-link declarations and the never-referenced region-draft and
+  project-end externs, and an engine-backed test in
+  `lib_tests_routing.rs` walks connect, undo and redo through the fallback.
+  C++ 5428 -> 5384 (-44).
 - The routing edit host now reads and writes track state from Rust.
   `routing_edit_host.rs` opens the shared `TrackSession` for every
   arm/phase/mute/solo/volume/pan/delay edit and a send-route validation, so the

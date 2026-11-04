@@ -118,6 +118,19 @@ impl RoutingEngine {
             )
         }
     }
+
+    fn set_sidechain(&self, source: u32, dest: u32, plugin: u32, tap: u32, enabled: bool) -> bool {
+        unsafe {
+            crate::routing_edit_host::hirari_routing_edit_set_sidechain_link(
+                self.host(),
+                source,
+                dest,
+                plugin,
+                tap,
+                enabled,
+            )
+        }
+    }
 }
 
 #[test]
@@ -234,4 +247,28 @@ fn delay_edits_bound_to_the_shared_delay_line_and_undo() {
     assert_eq!(fixture.engine().get_undo_count(), 1);
     fixture.engine().undo();
     assert_eq!(fixture.state(track).delay_samples, 0);
+}
+
+#[test]
+fn sidechain_links_register_and_remove_through_the_rust_fallback() {
+    let fixture = RoutingEngine::new();
+    // The engine installs no sidechain context or registration callback, so
+    // every path below takes the Rust fallback: the device format from the
+    // engine block state and the source's work buffer through the session.
+    assert!(!fixture.set_sidechain(fixture.missing_track, fixture.second_audio, 0, 0, true));
+    assert!(!fixture.set_sidechain(fixture.audio_track, fixture.missing_track, 0, 0, true));
+    assert!(!fixture.set_sidechain(fixture.audio_track, fixture.audio_track, 0, 0, true));
+    assert!(!fixture.set_sidechain(fixture.audio_track, fixture.second_audio, 0, 3, true));
+    assert_eq!(fixture.engine().get_undo_count(), 0);
+    assert!(fixture.set_sidechain(fixture.audio_track, fixture.second_audio, 0, 0, true));
+    assert_eq!(fixture.engine().get_undo_count(), 1);
+    // Undo replays the disable payload; the link is gone from both stores,
+    // so a second removal has nothing left to delete.
+    fixture.engine().undo();
+    assert_eq!(fixture.engine().get_undo_count(), 0);
+    assert!(!fixture.set_sidechain(fixture.audio_track, fixture.second_audio, 0, 0, false));
+    assert_eq!(fixture.engine().get_undo_count(), 0);
+    // Redo re-registers through the same fallback, and now removal succeeds.
+    fixture.engine().redo();
+    assert!(fixture.set_sidechain(fixture.audio_track, fixture.second_audio, 0, 0, false));
 }
