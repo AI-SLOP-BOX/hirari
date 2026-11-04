@@ -5,7 +5,7 @@ use hirari_core_bridge::audio_buffer_ops::{
 };
 use hirari_core_bridge::track_frozen_store::{
     hirari_track_frozen_store_create, hirari_track_frozen_store_destroy,
-    hirari_track_frozen_store_publish, TrackFrozenOps,
+    hirari_track_frozen_store_publish,
 };
 use hirari_core_bridge::track_runtime::{
     hirari_track_process_block, hirari_track_runtime_create, hirari_track_runtime_destroy,
@@ -19,12 +19,6 @@ use std::ffi::c_void;
 
 const FRAMES: usize = 4;
 const MAX_DELAY_SAMPLES: u32 = 8192;
-
-/// The freeze store keeps the C++-side owner alive; here the owner is a box the
-/// store is expected to reclaim.
-unsafe extern "C" fn destroy_owner(owner: *mut c_void) {
-    drop(unsafe { Box::from_raw(owner.cast::<u8>()) });
-}
 
 struct MidiStage {
     calls: usize,
@@ -217,12 +211,12 @@ fn a_published_freeze_is_read_through_its_storage_handle() {
             *source_right.add(index) = -value;
         }
     }
-    let store = unsafe { hirari_track_frozen_store_create(&TrackFrozenOps { destroy_owner }) };
-    let owner = Box::into_raw(Box::new(0_u8)).cast::<c_void>();
+    let store = hirari_track_frozen_store_create();
+    // The publication takes the render storage, so the store's teardown is what
+    // releases `source` here.
     assert!(unsafe {
         hirari_track_frozen_store_publish(
             store,
-            owner,
             source,
             2,
             FRAMES as u64,
