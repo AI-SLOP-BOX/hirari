@@ -78,6 +78,19 @@ production support.
 
 ### Changed
 
+- The plugin sandbox query surface now reads the graph from Rust.
+  `plugin_sandbox_maintenance.rs` reaches each track's plug-in chain through the
+  layout host operations (kind `CHAIN`) and calls the chain's own sandbox FFI,
+  so slot enumeration, the isolated stereo and MIDI block boundary, the last
+  add-failure and a slot's stored-state error all resolve without a C++
+  forwarder; the maintenance host shrinks to the three callbacks only the engine
+  can supply — statuses, restart and the event ring stamped with its playhead —
+  and every unresolved track or slot keeps the fallback the C++ returned.
+  `Track::sandboxSlotPath`, `sandboxSlotChainIndex`, `sandboxedPluginStateError`,
+  `sandboxedPluginStateErrorText`, `lastSandboxFailure`,
+  `lastSandboxFailureText`, `processSandboxedPluginBlock` and
+  `processSandboxedPluginMidiBlock` plus their declarations are gone.
+  C++ 5871 -> 5721 (-150).
 - A device-format change now prepares the whole graph from one Rust walk.
   `hirari_engine_block_prepare_tracks` walks the engine's own track table,
   drops and retires a freeze the new rate cannot replay while marking the

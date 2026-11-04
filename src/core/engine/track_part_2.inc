@@ -60,27 +60,6 @@
         return commitEditChange(hirari_effect_chain_move(m_chain, from, to));
     }
 
-    // Control/test boundary for validating an isolated worker with a
-    // caller-owned block. The normal transport still uses Track::process; these
-    // exist so integration tests can prove that shared-memory plugin output is
-    // not merely a readiness signal.
-    bool processSandboxedPluginBlock(size_t sandboxIndex, float* left, float* right,
-                                     uint32_t frames) {
-        return hirari_effect_chain_process_sandbox_block(m_chain, sandboxIndex, left, right,
-                                                        frames);
-    }
-    std::vector<uint8_t> processSandboxedPluginMidiBlock(size_t sandboxIndex, uint32_t frames,
-                                                         const uint8_t* midiData,
-                                                         uint32_t midiSize) {
-        size_t length = 0;
-        uint8_t* data = hirari_effect_chain_process_sandbox_midi_block(
-            m_chain, sandboxIndex, frames, midiData, midiSize, &length);
-        if (!data) return {};
-        std::vector<uint8_t> payload(data, data + length);
-        hirari_effect_chain_buffer_free(data, length);
-        return payload;
-    }
-
     void reclaimEffectChainRetiredMemory() { hirari_effect_chain_reclaim(m_chain); }
     uint32_t takeWatchdogTrips() {
         return static_cast<uint32_t>(hirari_effect_chain_metric(m_chain, 0));
@@ -94,26 +73,8 @@
         return m_lastNonFiniteSamples.load(std::memory_order_relaxed);
     }
     size_t getPluginCount() const { return hirari_effect_chain_count(m_chain); }
-    std::string sandboxSlotPath(size_t slot) const {
-        const size_t length = hirari_effect_chain_sandbox_slot_path(m_chain, slot, nullptr, 0);
-        std::string path(length, '\0');
-        if (length != 0 &&
-            hirari_effect_chain_sandbox_slot_path(
-                m_chain, slot, reinterpret_cast<uint8_t*>(path.data()), length) != length)
-            return {};
-        return path;
-    }
     size_t sandboxSlotCount() const noexcept {
         return hirari_effect_chain_sandbox_slot_count(m_chain);
-    }
-    uint32_t sandboxSlotChainIndex(size_t slot) const noexcept {
-        return hirari_effect_chain_sandbox_slot_index(m_chain, slot);
-    }
-    uint8_t sandboxedPluginStateError(size_t sandboxIndex) const noexcept {
-        return hirari_effect_chain_sandbox_state_error(m_chain, sandboxIndex);
-    }
-    const char* sandboxedPluginStateErrorText(size_t sandboxIndex) const noexcept {
-        return hirari_effect_chain_sandbox_state_error_text(m_chain, sandboxIndex);
     }
     // An explicit user restart may recover a quarantined worker and resets the
     // bounded automatic-restart budget; it does not clear the scan-cache fault.
@@ -129,12 +90,6 @@
         const uint32_t recovered = hirari_effect_chain_sandbox_maintain(m_chain, autoRestart);
         if (recovered != 0) markProjectLayoutChanged();
         return recovered;
-    }
-    uint8_t lastSandboxFailure() const noexcept {
-        return hirari_effect_chain_last_sandbox_failure(m_chain);
-    }
-    const char* lastSandboxFailureText() const noexcept {
-        return hirari_effect_chain_last_sandbox_failure_text(m_chain);
     }
     struct SandboxStatus {
         uint32_t pluginIndex = 0;

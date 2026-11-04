@@ -1079,10 +1079,6 @@ extern "C" bool hirari_plugin_edit_set_bypass(
 // Status pointers refer to Track::SandboxStatus, mirrored field for field in
 // plugin_sandbox_maintenance.rs.
 using HirariPluginSandboxVisitorFn = bool (*)(void* context, uint32_t trackId, const void* status);
-// Visits one sandbox slot with its plugin index and bundle path.
-using HirariPluginSandboxSlotVisitorFn = bool (*)(void* context, uint32_t trackId,
-                                                  uint32_t slot, uint32_t pluginIndex,
-                                                  const uint8_t* path, size_t pathLength);
 struct HirariPluginSandboxHostOps {
     // Reports every track's statuses in engine order.
     bool (*statuses)(void* host, void* context, HirariPluginSandboxVisitorFn visit) = nullptr;
@@ -1092,24 +1088,6 @@ struct HirariPluginSandboxHostOps {
                          HirariPluginSandboxVisitorFn visit) = nullptr;
     void (*publishEvent)(void* host, uint32_t type, uint32_t trackId, float value,
                          const uint8_t* label, size_t labelLength) = nullptr;
-    // Reports every track's sandbox slots in engine order.
-    bool (*visitSlots)(void* host, void* context,
-                       HirariPluginSandboxSlotVisitorFn visit) = nullptr;
-    // Renders one sandbox slot over a caller-owned stereo block.
-    bool (*processBlock)(void* host, uint32_t trackId, uint32_t slot, float* left, float* right,
-                         uint32_t frames) = nullptr;
-    // Feeds one MIDI event through a sandbox slot and copies the event it
-    // produced; returns the byte count, or SIZE_MAX when the query failed.
-    size_t (*processMidiBlock)(void* host, uint32_t trackId, uint32_t slot, uint32_t frames,
-                               const uint8_t* midiData, size_t midiLength, uint8_t* out,
-                               size_t capacity) = nullptr;
-    // Copies a diagnostic code plus its text into the caller's buffer and
-    // returns the text length, or SIZE_MAX when the track (or slot) is
-    // missing. Naming an unresolved id is the query surface's decision.
-    size_t (*lastFailure)(void* host, uint32_t trackId, uint8_t* code, uint8_t* text,
-                          size_t capacity) = nullptr;
-    size_t (*stateError)(void* host, uint32_t trackId, uint32_t slot, uint8_t* code,
-                         uint8_t* text, size_t capacity) = nullptr;
 };
 extern "C" void hirari_plugin_sandbox_maintenance_host_install(
     const HirariPluginSandboxHostOps* ops);
@@ -1185,15 +1163,12 @@ extern "C" bool hirari_effect_chain_restore(
     void* state, uint32_t index, uint32_t token, bool bypassed, bool parallel);
 extern "C" bool hirari_effect_chain_move(void* state, uint32_t from, uint32_t to);
 extern "C" uint32_t hirari_effect_chain_count(const void* state);
-extern "C" uint8_t hirari_effect_chain_last_sandbox_failure(const void* state);
-extern "C" const char* hirari_effect_chain_last_sandbox_failure_text(const void* state);
 extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
 extern "C" bool hirari_effect_chain_set_parameter(
     void* state, uint32_t index, uint32_t parameter_id, float value);
 extern "C" float hirari_effect_chain_parameter(
     const void* state, uint32_t index, uint32_t parameter_id);
 extern "C" uint32_t hirari_effect_chain_parameter_count(const void* state, uint32_t index);
-extern "C" void hirari_effect_chain_buffer_free(uint8_t* pointer, size_t length);
 extern "C" uint32_t hirari_effect_chain_total_latency_samples(const void* state);
 extern "C" uint64_t hirari_effect_chain_metric(const void* state, uint32_t metric);
 extern "C" bool hirari_effect_chain_metric_try(
@@ -1214,24 +1189,11 @@ struct HirariEffectChainSandboxStatus {
 static_assert(sizeof(HirariEffectChainSandboxStatus) == 20,
     "sandbox status must match Rust's repr(C) layout");
 extern "C" size_t hirari_effect_chain_sandbox_slot_count(const void* state);
-extern "C" uint32_t hirari_effect_chain_sandbox_slot_index(const void* state, size_t slot);
-/// Copies one slot's plugin path; returns the bytes written, or 0 when it does
-/// not fit in `capacity`.
-extern "C" size_t hirari_effect_chain_sandbox_slot_path(
-    const void* state, size_t slot, uint8_t* out, size_t capacity);
 extern "C" bool hirari_effect_chain_sandbox_status(
     const void* state, size_t slot, HirariEffectChainSandboxStatus* out);
 extern "C" bool hirari_effect_chain_sandbox_restart(
     void* state, size_t slot, bool force, bool record_success);
 extern "C" uint32_t hirari_effect_chain_sandbox_maintain(void* state, bool auto_restart);
-extern "C" uint8_t hirari_effect_chain_sandbox_state_error(const void* state, size_t slot);
-extern "C" const char* hirari_effect_chain_sandbox_state_error_text(
-    const void* state, size_t slot);
-extern "C" bool hirari_effect_chain_process_sandbox_block(
-    void* state, size_t slot, float* left, float* right, uint32_t frames);
-extern "C" uint8_t* hirari_effect_chain_process_sandbox_midi_block(
-    void* state, size_t slot, uint32_t frames, const uint8_t* midi_data,
-    size_t midi_size, size_t* out_len);
 // Per-track name storage. Rust validates and holds the bytes; the engine keeps
 // only the handle, created with the track and destroyed with it.
 extern "C" void* hirari_track_name_store_create();

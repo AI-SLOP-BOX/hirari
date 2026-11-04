@@ -1,20 +1,9 @@
 
 
-// Shared answer for a query whose track or slot could not be resolved; the
-// Rust query surface names the fallback.
-namespace {
-constexpr size_t kSandboxQueryFailed = std::numeric_limits<size_t>::max();
-
-size_t copySandboxText(const char* value, uint8_t* out, size_t capacity) {
-    const std::string text(value ? value : "");
-    if (out && capacity >= text.size()) std::memcpy(out, text.data(), text.size());
-    return text.size();
-}
-} // namespace
-
-// The maintenance pass itself lives in Rust; these handlers only resolve a
-// track, report its sandbox slots and statuses, run one isolated block, and
-// post the resulting event with the engine's playhead.
+// The maintenance pass itself lives in Rust; these handlers only report the
+// per-track sandbox statuses, run one restart and post the resulting event with
+// the engine's playhead. The slot queries and isolated block processing read the
+// effect chain through the Rust layout gather.
 static_assert(sizeof(Track::SandboxStatus) == 24,
               "plugin_sandbox_maintenance.rs mirrors this layout");
 void HirariUnifiedEngine::installSandboxMaintenanceHost() {
@@ -48,62 +37,6 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
                 engine->m_engineRings,
                 hirari_engine_block_playhead(engine->m_engineBlock), type, trackId, value,
                 label, labelLength);
-        },
-        [](void* host, void* context, HirariPluginSandboxSlotVisitorFn visit) -> bool {
-            if (!host) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            const std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            for (Track* track : engine->lockedTracks())
-                for (size_t slot = 0; slot < track->sandboxSlotCount(); ++slot) {
-                    const auto path = track->sandboxSlotPath(slot);
-                    if (!visit(context, track->getId(), static_cast<uint32_t>(slot),
-                               track->sandboxSlotChainIndex(slot),
-                               reinterpret_cast<const uint8_t*>(path.data()), path.size()))
-                        return false;
-                }
-            return true;
-        },
-        [](void* host, uint32_t trackId, uint32_t slot, float* left, float* right,
-           uint32_t frames) -> bool {
-            if (!host) return false;
-            return static_cast<HirariUnifiedEngine*>(host)->mutateLockedTrack(
-                trackId, [&](Track& track) {
-                    return track.processSandboxedPluginBlock(slot, left, right, frames);
-                });
-        },
-        [](void* host, uint32_t trackId, uint32_t slot, uint32_t frames,
-           const uint8_t* midiData, size_t midiLength, uint8_t* out,
-           size_t capacity) -> size_t {
-            if (!host) return kSandboxQueryFailed;
-            std::vector<uint8_t> result;
-            (void)static_cast<HirariUnifiedEngine*>(host)->mutateLockedTrack(
-                trackId, [&](Track& track) {
-                    result = track.processSandboxedPluginMidiBlock(
-                        slot, frames, midiData, static_cast<uint32_t>(midiLength));
-                    return true;
-                });
-            if (result.size() > capacity) return kSandboxQueryFailed;
-            if (!result.empty()) std::memcpy(out, result.data(), result.size());
-            return result.size();
-        },
-        [](void* host, uint32_t trackId, uint8_t* code, uint8_t* text,
-           size_t capacity) -> size_t {
-            if (!host) return kSandboxQueryFailed;
-            return static_cast<HirariUnifiedEngine*>(host)->queryLockedTrack(
-                trackId, kSandboxQueryFailed, [&](const Track& track) -> size_t {
-                    if (code) *code = track.lastSandboxFailure();
-                    return copySandboxText(track.lastSandboxFailureText(), text, capacity);
-                });
-        },
-        [](void* host, uint32_t trackId, uint32_t slot, uint8_t* code, uint8_t* text,
-           size_t capacity) -> size_t {
-            if (!host) return kSandboxQueryFailed;
-            return static_cast<HirariUnifiedEngine*>(host)->queryLockedTrack(
-                trackId, kSandboxQueryFailed, [&](const Track& track) -> size_t {
-                    if (code) *code = track.sandboxedPluginStateError(slot);
-                    return copySandboxText(track.sandboxedPluginStateErrorText(slot),
-                                           text, capacity);
-                });
         },
     };
     hirari_plugin_sandbox_maintenance_host_install(&ops);

@@ -7,14 +7,24 @@
 //! engine to restart what can be restarted. It also answers the query surface
 //! the engine used to forward by hand — slot paths, slot plugin state, the
 //! stored-state and last-add failures, and the isolated block-render test
-//! boundary — so the engine only resolves a track and touches the graph.
+//! boundary — by walking the graph through the layout host operations and
+//! reading each track's plug-in chain storage directly, so the engine only
+//! supplies the tracks lock and the event ring its callback owns.
 //!
 //! Every entry point runs on the control thread. The observed-state map is
 //! keyed by engine address, and the engine forgets its entry when it is
 //! destroyed so a later engine that reuses the address starts clean.
 
+use crate::effect_chain_host::{
+    hirari_effect_chain_buffer_free, hirari_effect_chain_last_sandbox_failure,
+    hirari_effect_chain_last_sandbox_failure_text, hirari_effect_chain_process_sandbox_block,
+    hirari_effect_chain_process_sandbox_midi_block, hirari_effect_chain_sandbox_slot_count,
+    hirari_effect_chain_sandbox_slot_index, hirari_effect_chain_sandbox_slot_path,
+    hirari_effect_chain_sandbox_state_error, hirari_effect_chain_sandbox_state_error_text,
+};
 use std::collections::HashMap;
-use std::ffi::c_void;
+use std::ffi::{c_void, CStr};
+use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 /// Mirror of `Track::SandboxStatus`, filled by the native status callback.
@@ -46,33 +56,6 @@ pub type MaintainFn =
 /// playhead and copies the pre-formatted label.
 pub type PublishEventFn =
     unsafe extern "C" fn(*mut c_void, u32, u32, f32, *const u8, usize);
-/// Visits one sandbox slot with the plugin index bound to it and its bundle
-/// path; returning false stops the enumeration.
-pub type SlotVisitorFn =
-    unsafe extern "C" fn(*mut c_void, u32, u32, u32, *const u8, usize) -> bool;
-pub type VisitSlotsFn =
-    unsafe extern "C" fn(*mut c_void, *mut c_void, Option<SlotVisitorFn>) -> bool;
-/// Renders one sandbox slot over a caller-owned stereo block.
-pub type ProcessBlockFn =
-    unsafe extern "C" fn(*mut c_void, u32, u32, *mut f32, *mut f32, u32) -> bool;
-/// Feeds one MIDI event through a sandbox slot and copies the event produced.
-/// Returns the byte count, or `usize::MAX` when the query failed.
-pub type ProcessMidiBlockFn = unsafe extern "C" fn(
-    *mut c_void,
-    u32,
-    u32,
-    u32,
-    *const u8,
-    usize,
-    *mut u8,
-    usize,
-) -> usize;
-/// Copies a diagnostic code and its text, returning the text length, or
-/// `usize::MAX` when the track (or slot) could not be resolved.
-pub type LastFailureFn =
-    unsafe extern "C" fn(*mut c_void, u32, *mut u8, *mut u8, usize) -> usize;
-pub type StateErrorFn =
-    unsafe extern "C" fn(*mut c_void, u32, u32, *mut u8, *mut u8, usize) -> usize;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -80,11 +63,6 @@ pub struct HirariPluginSandboxHostOps {
     pub statuses: Option<StatusesFn>,
     pub maintain: Option<MaintainFn>,
     pub publish_event: Option<PublishEventFn>,
-    pub visit_slots: Option<VisitSlotsFn>,
-    pub process_block: Option<ProcessBlockFn>,
-    pub process_midi_block: Option<ProcessMidiBlockFn>,
-    pub last_failure: Option<LastFailureFn>,
-    pub state_error: Option<StateErrorFn>,
 }
 
 // The table only holds function pointers supplied by the native engine.
@@ -103,6 +81,85 @@ static OBSERVED: OnceLock<Mutex<Option<HashMap<usize, HashMap<u64, Observed>>>>>
 
 fn host_ops() -> Option<HirariPluginSandboxHostOps> {
     HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
+}
+
+/// The engine's live graph, reached through the layout host operations the
+/// engine installs: `begin`/`end` are its tracks lock, and kind `CHAIN` hands
+/// out the Rust plug-in chain that owns every sandboxed processor of a track.
+fn layout_ops(host: *mut c_void) -> Option<&'static crate::layout_gather::HirariLayoutHostOps> {
+    let ops = unsafe { crate::layout_gather::ops_for(host.cast_const().cast()) };
+    if ops.is_null() {
+        return None;
+    }
+    Some(unsafe { &*ops })
+}
+
+/// Reads one track's plug-in chain while the graph is locked, or `None` when
+/// the engine has no such track.
+fn with_track_chain<T>(
+    host: *mut c_void,
+    track_id: u32,
+    read: impl FnOnce(*mut c_void) -> T,
+) -> Option<T> {
+    let ops = layout_ops(host)?;
+    let mut chain = ptr::null_mut();
+    unsafe { (ops.begin)(host) };
+    for index in 0..unsafe { (ops.track_count)(host) } {
+        let track = unsafe { (ops.track_handle)(host, index) };
+        if !track.is_null() && unsafe { (ops.track_id)(track) } == track_id {
+            chain = unsafe { (ops.track_storage)(track, crate::layout_gather::CHAIN) };
+            break;
+        }
+    }
+    unsafe { (ops.end)(host) };
+    if chain.is_null() {
+        return None;
+    }
+    Some(read(chain))
+}
+
+/// Visits every track's plug-in chain in engine order, with the graph locked
+/// for the whole walk so the slots stay where the callback left them.
+fn each_track_chain(host: *mut c_void, mut visit: impl FnMut(u32, *mut c_void)) {
+    let Some(ops) = layout_ops(host) else {
+        return;
+    };
+    unsafe { (ops.begin)(host) };
+    for index in 0..unsafe { (ops.track_count)(host) } {
+        let track = unsafe { (ops.track_handle)(host, index) };
+        if track.is_null() {
+            continue;
+        }
+        let chain = unsafe { (ops.track_storage)(track, crate::layout_gather::CHAIN) };
+        if !chain.is_null() {
+            visit(unsafe { (ops.track_id)(track) }, chain);
+        }
+    }
+    unsafe { (ops.end)(host) };
+}
+
+/// The bundle path one sandbox slot is loading, as the chain stores it.
+fn slot_path(chain: *const c_void, slot: usize) -> String {
+    let length = unsafe { hirari_effect_chain_sandbox_slot_path(chain, slot, ptr::null_mut(), 0) };
+    if length == 0 {
+        return String::new();
+    }
+    let mut path = vec![0u8; length];
+    if unsafe {
+        hirari_effect_chain_sandbox_slot_path(chain, slot, path.as_mut_ptr(), length)
+    } != length
+    {
+        return String::new();
+    }
+    String::from_utf8_lossy(&path).into_owned()
+}
+
+/// Text a chain FFI entry returns as a C string; a missing answer is empty.
+fn c_text(value: *const std::os::raw::c_char) -> String {
+    if value.is_null() {
+        return String::new();
+    }
+    unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned()
 }
 
 /// Every sandbox status in engine order, or `None` when the host callbacks are
@@ -147,46 +204,22 @@ pub struct SandboxSlot {
     pub path: String,
 }
 
-/// Every sandbox slot in engine order; empty when the callbacks are missing.
+/// Every sandbox slot in engine order; empty when the graph is unreachable.
 pub fn sandbox_slots(host: *mut c_void) -> Vec<SandboxSlot> {
-    let Some(visit_slots) = host_ops().and_then(|ops| ops.visit_slots) else {
-        return Vec::new();
-    };
-    unsafe extern "C" fn visit(
-        context: *mut c_void,
-        track_id: u32,
-        slot: u32,
-        plugin_index: u32,
-        path: *const u8,
-        path_length: usize,
-    ) -> bool {
-        if context.is_null() {
-            return false;
-        }
-        if path_length != 0 && path.is_null() {
-            return false;
-        }
-        let bytes = if path_length == 0 {
-            Vec::new()
-        } else {
-            unsafe { std::slice::from_raw_parts(path, path_length).to_vec() }
-        };
-        unsafe { &mut *context.cast::<Vec<SandboxSlot>>() }.push(SandboxSlot {
-            track_id,
-            slot,
-            plugin_index,
-            path: String::from_utf8_lossy(&bytes).into_owned(),
-        });
-        true
-    }
     let mut slots = Vec::new();
-    unsafe {
-        visit_slots(
-            host,
-            (&mut slots as *mut Vec<SandboxSlot>).cast(),
-            Some(visit),
-        )
-    };
+    each_track_chain(host, |track_id, chain| {
+        let count = unsafe { hirari_effect_chain_sandbox_slot_count(chain.cast_const()) };
+        for slot in 0..count {
+            slots.push(SandboxSlot {
+                track_id,
+                slot: slot as u32,
+                plugin_index: unsafe {
+                    hirari_effect_chain_sandbox_slot_index(chain.cast_const(), slot)
+                },
+                path: slot_path(chain.cast_const(), slot),
+            });
+        }
+    });
     slots
 }
 
@@ -271,22 +304,20 @@ pub fn process_sandbox_block(
     left: &mut [f32],
     right: &mut [f32],
 ) -> bool {
-    let Some(process) = host_ops().and_then(|ops| ops.process_block) else {
-        return false;
-    };
     if left.is_empty() || left.len() != right.len() {
         return false;
     }
-    unsafe {
-        process(
-            host,
-            track_id,
-            slot,
+    let frames = left.len() as u32;
+    with_track_chain(host, track_id, |chain| unsafe {
+        hirari_effect_chain_process_sandbox_block(
+            chain,
+            slot as usize,
             left.as_mut_ptr(),
             right.as_mut_ptr(),
-            left.len() as u32,
+            frames,
         )
-    }
+    })
+    .unwrap_or(false)
 }
 
 /// Feeds one MIDI event through a sandbox slot and returns the event it
@@ -298,78 +329,63 @@ pub fn process_sandbox_midi_block(
     frames: u32,
     midi_data: &[u8],
 ) -> Vec<u8> {
-    let Some(process) = host_ops().and_then(|ops| ops.process_midi_block) else {
-        return Vec::new();
-    };
     if midi_data.is_empty() {
         return Vec::new();
     }
-    let mut output = vec![0u8; MAX_SANDBOX_MIDI_BYTES];
-    let length = unsafe {
-        process(
-            host,
-            track_id,
-            slot,
-            frames,
-            midi_data.as_ptr(),
-            midi_data.len(),
-            output.as_mut_ptr(),
-            output.len(),
-        )
-    };
-    if length == usize::MAX || length > MAX_SANDBOX_MIDI_BYTES {
-        return Vec::new();
-    }
-    output.truncate(length);
-    output
+    with_track_chain(host, track_id, |chain| {
+        let mut length = 0_usize;
+        let data = unsafe {
+            hirari_effect_chain_process_sandbox_midi_block(
+                chain,
+                slot as usize,
+                frames,
+                midi_data.as_ptr(),
+                midi_data.len(),
+                &mut length,
+            )
+        };
+        if data.is_null() {
+            return Vec::new();
+        }
+        // The worker owns the payload until it is copied, and an event the
+        // protocol cannot carry is reported as no event at all.
+        let payload = if length > MAX_SANDBOX_MIDI_BYTES {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(data, length).to_vec() }
+        };
+        unsafe { hirari_effect_chain_buffer_free(data, length) };
+        payload
+    })
+    .unwrap_or_default()
 }
 
 /// The last sandbox-add failure of one track. An unresolved track answers with
 /// no failure and no text, which is what the previous native surface returned.
 pub fn last_sandbox_failure(host: *mut c_void, track_id: u32) -> (u8, String) {
-    let Some(read) = host_ops().and_then(|ops| ops.last_failure) else {
-        return (0, String::new());
-    };
-    let mut code = 0_u8;
-    let text = {
-        let mut call = |out: *mut u8, capacity: usize| unsafe {
-            read(host, track_id, &mut code, out, capacity)
-        };
-        let length = call(std::ptr::null_mut(), 0);
-        if length == usize::MAX {
-            return (0, String::new());
-        }
-        let mut bytes = vec![0u8; length];
-        if call(bytes.as_mut_ptr(), length) != length {
-            return (0, String::new());
-        }
-        String::from_utf8_lossy(&bytes).into_owned()
-    };
-    (code, text)
+    with_track_chain(host, track_id, |chain| {
+        (
+            unsafe { hirari_effect_chain_last_sandbox_failure(chain.cast_const()) },
+            c_text(unsafe {
+                hirari_effect_chain_last_sandbox_failure_text(chain.cast_const())
+            }),
+        )
+    })
+    .unwrap_or((0, String::new()))
 }
 
 /// One sandbox slot's stored-state error. The engine's own fallback code is
 /// reported when the track or slot is missing.
 pub fn sandbox_state_error(host: *mut c_void, track_id: u32, slot: u32) -> (u8, String) {
-    let Some(read) = host_ops().and_then(|ops| ops.state_error) else {
-        return (STATE_ERROR_UNAVAILABLE, String::new());
-    };
-    let mut code = STATE_ERROR_UNAVAILABLE;
-    let text = {
-        let mut call = |out: *mut u8, capacity: usize| unsafe {
-            read(host, track_id, slot, &mut code, out, capacity)
-        };
-        let length = call(std::ptr::null_mut(), 0);
-        if length == usize::MAX {
-            return (STATE_ERROR_UNAVAILABLE, String::new());
-        }
-        let mut bytes = vec![0u8; length];
-        if call(bytes.as_mut_ptr(), length) != length {
-            return (STATE_ERROR_UNAVAILABLE, String::new());
-        }
-        String::from_utf8_lossy(&bytes).into_owned()
-    };
-    (code, text)
+    with_track_chain(host, track_id, |chain| {
+        (
+            unsafe { hirari_effect_chain_sandbox_state_error(chain.cast_const(), slot as usize) },
+            c_text(unsafe {
+                hirari_effect_chain_sandbox_state_error_text(chain.cast_const(), slot as usize)
+            }),
+        )
+    })
+    .unwrap_or((STATE_ERROR_UNAVAILABLE, String::new()))
 }
 
 /// Mirrors `SandboxProtocol::kStateErrorUnavailable`.

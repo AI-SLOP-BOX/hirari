@@ -44,7 +44,9 @@ pub struct HirariLayoutTrackScalars {
 
 /// The track's own Rust storages, read here through the `track_storage` op.
 const STRIP: u32 = 0;
-const CHAIN: u32 = 1;
+/// The plug-in chain storage kind, so another host walk can read a track's
+/// sandboxed processors through the same table.
+pub const CHAIN: u32 = 1;
 const AUTOMATION: u32 = 2;
 const FROZEN: u32 = 3;
 const RUNTIME: u32 = 4;
@@ -903,7 +905,7 @@ pub unsafe extern "C" fn hirari_layout_snapshot_owner_release_host(host: *mut c_
     }
 }
 
-fn ops_for(
+pub fn ops_for(
     engine: *const crate::ffi::HirariUnifiedEngine,
 ) -> *const HirariLayoutHostOps {
     if engine.is_null() {
