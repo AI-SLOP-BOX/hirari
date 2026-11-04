@@ -1373,20 +1373,6 @@ extern "C" float hirari_track_eq_gain(float boost_db, float cut_db);
 extern "C" void* hirari_track_pdc_delay_create();
 extern "C" void hirari_track_pdc_delay_destroy(void* state);
 extern "C" void hirari_track_pdc_delay_reset(void* state, uint32_t requested);
-extern "C" void hirari_track_finalize_output(
-    uint32_t track_id, uint32_t frames, double start_time,
-    const void* volume_points, size_t volume_count, size_t* volume_hint,
-    const void* pan_points, size_t pan_count, size_t* pan_hint,
-    const void* channel_strip,
-    float* const* active_channels, uint32_t active_channel_count,
-    float* const* pre_insert_channels, uint32_t pre_insert_channel_count,
-    float* const* send_pre_channels, uint32_t send_pre_channel_count,
-    float* const* send_post_channels, uint32_t send_post_channel_count,
-    const void* panner, uint32_t spatial_mode, float spatial_x, float spatial_y,
-    float spatial_z, float low_gain, float high_gain,
-    float* low_state_l, float* low_state_r, void* pdc_delay,
-    uint32_t requested_pdc, uint32_t manual_delay,
-    float* const* pre_fader_channels, uint32_t pre_fader_channel_count);
 extern "C" void* hirari_track_holographic_panner_create();
 extern "C" void hirari_track_holographic_panner_destroy(void* state);
 extern "C" void hirari_track_holographic_panner_set_sample_rate(const void* state, double sample_rate);
@@ -1520,44 +1506,33 @@ extern "C" size_t hirari_track_automation_store_plugin_lane_count(const void* st
 extern "C" const void* hirari_track_automation_store_plugin_lane(
     const void* store, size_t index, uint32_t* plugin_index,
     uint32_t* parameter_id, size_t* count);
-using HirariTrackMidiPrepare = void (*)(void*, uint64_t, uint32_t);
-struct HirariTrackProcessRequest {
-    float* const* channels;
-    uint32_t channel_count;
-    uint32_t buffer_capacity;
-    uint32_t frames;
-    uint64_t playhead;
-    uint8_t clear_input;
-    uint8_t muted;
-    uint8_t frozen;
-    const float* const* frozen_channels;
-    uint32_t frozen_channel_count;
-    uint32_t frozen_capacity;
-    uint64_t frozen_total_samples;
-    const HirariTrackRegionRenderInput* region_inputs;
-    size_t region_count;
-    uint8_t region_snapshot_available;
-    uint8_t phase_invert;
-    const void* track_delay_points;
-    size_t track_delay_count;
-    size_t* track_delay_hint;
-    uint32_t* track_delay_output;
-    uint32_t max_track_delay_samples;
-    const HirariPluginAutomationLaneView* plugin_lanes;
-    size_t plugin_lane_count;
-    uint8_t transport_playing;
-    void* plugin_events;
-    size_t plugin_event_capacity;
-    size_t* plugin_event_count_out;
-    float* const* pre_insert_channels;
-    uint32_t pre_insert_channel_count;
-    uint32_t pre_insert_capacity;
-    HirariTrackMidiPrepare midi_prepare;
-    void* midi_context;
-};
-static_assert(sizeof(HirariTrackProcessRequest) == 208,
-    "track block process request must match Rust's repr(C) layout");
-extern "C" bool hirari_track_process_prepare(const HirariTrackProcessRequest* request);
+/// The Rust runtime holds a track's realtime state and renders whole blocks.
+/// C++ binds the DSP handles once and keeps only the returned handle.
+using HirariTrackMidiPrepare = void (*)(void*, uint64_t, uint32_t, float*, float*);
+extern "C" void* hirari_track_runtime_create(
+    uint32_t track_id, void* chain, void* channel_strip, void* automation_store,
+    void* frozen_store, void* panner, void* pdc_delay, void* work, void* pre_insert,
+    void* pre_fader, void* send_pre, void* send_post, void* midi,
+    HirariTrackMidiPrepare midi_prepare, void* midi_context);
+extern "C" void hirari_track_runtime_destroy(void* state);
+extern "C" bool hirari_track_process_block(void* state, void* audio, uint32_t frames,
+                                           uint64_t playhead, uint8_t clear_input);
+extern "C" void hirari_track_runtime_set_muted(void* state, uint8_t value);
+extern "C" void hirari_track_runtime_set_phase_invert(void* state, uint8_t value);
+extern "C" bool hirari_track_runtime_is_muted(void* state);
+extern "C" bool hirari_track_runtime_is_phase_inverted(void* state);
+extern "C" double hirari_track_runtime_transport_bpm(void* state);
+extern "C" void hirari_track_runtime_set_transport(void* state, double bpm, uint8_t playing);
+extern "C" void hirari_track_runtime_set_delays(void* state, uint32_t pdc, uint32_t manual);
+extern "C" uint32_t hirari_track_runtime_pdc_requested(void* state);
+extern "C" uint32_t hirari_track_runtime_track_delay_samples(void* state);
+extern "C" void hirari_track_runtime_set_spatial(void* state, float x, float y, float z);
+extern "C" float hirari_track_runtime_spatial(void* state, uint32_t axis);
+extern "C" void hirari_track_runtime_set_eq(void* state, float low, float high);
+extern "C" float hirari_track_runtime_eq(void* state, uint32_t side);
+extern "C" void hirari_track_runtime_publish_regions(
+    void* state, const uint8_t* inputs, size_t count, uint8_t published);
+extern "C" void hirari_track_runtime_reset_for_offline_render(void* state);
 
 using HirariTrackFreezeResetCallback = bool (*)(void* context);
 using HirariTrackFreezeProcessCallback = bool (*)(void* context, float* left, float* right,
@@ -1574,7 +1549,7 @@ extern "C" bool hirari_track_freeze_read_float32(
     const uint8_t* path, size_t path_size, uint32_t sample_rate,
     uint64_t total_samples, float* left, float* right);
 // Publication state of the frozen render. The store retains the C++ owner
-// handles and publishes the read-side pointer/counters for the callback.
+// handles and publishes the buffer's Rust storage handle for the callback.
 struct HirariTrackFrozenOps {
     void (*destroy_owner)(void*);
 };

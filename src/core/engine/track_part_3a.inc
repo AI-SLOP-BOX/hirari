@@ -1,6 +1,7 @@
     void setEq(float lowBoostDb, float lowCutDb, float highBoostDb, float highCutDb) {
-        m_lowGain = hirari_track_eq_gain(lowBoostDb, lowCutDb);
-        m_highGain = hirari_track_eq_gain(highBoostDb, highCutDb);
+        hirari_track_runtime_set_eq(
+            m_runtime, hirari_track_eq_gain(lowBoostDb, lowCutDb),
+            hirari_track_eq_gain(highBoostDb, highCutDb));
     }
     virtual void prepareToPlay(double sr, uint32_t blockSize) {
         if (!std::isfinite(sr) || sr <= 0.0 || blockSize == 0) return;
@@ -20,14 +21,7 @@
         (void)hirari_effect_chain_set_sample_rate(m_chain, sr, blockSize);
     }
     void resetForOfflineRender() noexcept {
-        hirari_channel_strip_reset(m_strip);
-        hirari_effect_chain_reset(m_chain);
-        hirari_track_automation_store_reset_hints(m_automationStore);
-        const uint32_t pdc = m_pdcRequested.load(std::memory_order_acquire);
-        const uint32_t manual = m_trackDelaySamples.load(std::memory_order_acquire);
-        const uint32_t requested = std::min(kMaxPdcDelaySamples,
-            pdc > kMaxPdcDelaySamples - manual ? kMaxPdcDelaySamples : pdc + manual);
-        hirari_track_pdc_delay_reset(m_pdcDelayState, requested);
+        hirari_track_runtime_reset_for_offline_render(m_runtime);
     }
 
     // Publishes a fully rendered, immutable track snapshot.  Loading and
@@ -46,7 +40,7 @@
         if (!rendered) return false;
         auto* owner = new std::shared_ptr<AudioBuffer>(std::move(rendered));
         if (!hirari_track_frozen_store_publish(
-                m_frozenStore, owner, owner->get(), (*owner)->getNumChannels(),
+                m_frozenStore, owner, (*owner)->storageHandle(), (*owner)->getNumChannels(),
                 (*owner)->getNumSamples(), totalSamples, sampleRate,
                 projectGeneration, audioGeneration,
                 reinterpret_cast<const uint8_t*>(cachePath.data()), cachePath.size())) {
@@ -107,47 +101,6 @@
     const AudioBuffer& offlinePreInsertBuffer() const noexcept { return m_preInsertBuffer; }
     const AudioBuffer& preFxSidechainBuffer() const noexcept { return m_preInsertBuffer; }
     const AudioBuffer& postFxSidechainBuffer() const noexcept { return m_preFaderBuffer; }
-    // Complete the channel signal after all insert chains. Rust executes this
-    // realtime stage, including the pre-fader taps and linked output DSP.
-    void finalizeTrackOutput(uint32_t frames, uint64_t playhead) noexcept {
-        auto& buffer = getWorkBuffer(frames);
-        size_t volumeCount = 0;
-        size_t panCount = 0;
-        const auto* volumeAutomation = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
-            hirari_track_automation_store_points(m_automationStore, 0, &volumeCount));
-        const auto* panAutomation = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
-            hirari_track_automation_store_points(m_automationStore, 1, &panCount));
-        const bool validPreInsert = m_preInsertBuffer.getNumChannels() >= buffer.getNumChannels() &&
-            m_preInsertBuffer.getNumSamples() >= frames;
-        const bool validPreFader = m_preFaderBuffer.getNumChannels() >= 2 &&
-            m_preFaderBuffer.getNumSamples() >= frames;
-        const bool validSendPre = m_sendPreFaderBuffer.getNumChannels() >= 2 &&
-            m_sendPreFaderBuffer.getNumSamples() >= frames;
-        const bool validSendPost = m_sendPostFaderBuffer.getNumChannels() >= 2 &&
-            m_sendPostFaderBuffer.getNumSamples() >= frames;
-        hirari_track_finalize_output(
-            m_id, frames, static_cast<double>(playhead),
-            volumeAutomation && volumeCount != 0 ? volumeAutomation : nullptr,
-            volumeCount, hirari_track_automation_store_hint(m_automationStore, 0),
-            panAutomation && panCount != 0 ? panAutomation : nullptr,
-            panCount, hirari_track_automation_store_hint(m_automationStore, 1),
-            m_strip, buffer.getArrayOfWritePointers(), buffer.getNumChannels(),
-            validPreInsert ? m_preInsertBuffer.getArrayOfWritePointers() : nullptr,
-            validPreInsert ? m_preInsertBuffer.getNumChannels() : 0,
-            validSendPre ? m_sendPreFaderBuffer.getArrayOfWritePointers() : nullptr,
-            validSendPre ? m_sendPreFaderBuffer.getNumChannels() : 0,
-            validSendPost ? m_sendPostFaderBuffer.getArrayOfWritePointers() : nullptr,
-            validSendPost ? m_sendPostFaderBuffer.getNumChannels() : 0,
-            m_spatialPanner, 0,
-            m_spatialX.load(std::memory_order_relaxed),
-            m_spatialY.load(std::memory_order_relaxed),
-            m_spatialZ.load(std::memory_order_relaxed), m_lowGain, m_highGain,
-            &m_lowStateL, &m_lowStateR, m_pdcDelayState,
-            m_pdcRequested.load(std::memory_order_acquire),
-            m_trackDelaySamples.load(std::memory_order_acquire),
-            validPreFader ? m_preFaderBuffer.getArrayOfWritePointers() : nullptr,
-            validPreFader ? m_preFaderBuffer.getNumChannels() : 0);
-    }
     void setSpatialPosition(float x, float y, float z) {
         // Spatial coordinates are control-thread input. Never publish a
         // non-finite value to the real-time panner.
@@ -155,14 +108,12 @@
             return std::isfinite(value) ? std::clamp(value, -100.0f, 100.0f) : 0.0f;
         };
         editControl([&] {
-            m_spatialX.store(sanitize(x), std::memory_order_relaxed);
-            m_spatialY.store(sanitize(y), std::memory_order_relaxed);
-            m_spatialZ.store(sanitize(z), std::memory_order_relaxed);
+            hirari_track_runtime_set_spatial(m_runtime, sanitize(x), sanitize(y), sanitize(z));
         });
     }
-    float getSpatialX() const { return m_spatialX.load(std::memory_order_relaxed); }
-    float getSpatialY() const { return m_spatialY.load(std::memory_order_relaxed); }
-    float getSpatialZ() const { return m_spatialZ.load(std::memory_order_relaxed); }
+    float getSpatialX() const { return hirari_track_runtime_spatial(m_runtime, 0); }
+    float getSpatialY() const { return hirari_track_runtime_spatial(m_runtime, 1); }
+    float getSpatialZ() const { return hirari_track_runtime_spatial(m_runtime, 2); }
     bool setHrtfKernel(const float* left, const float* right, uint32_t taps) {
         if (!left || !right || taps == 0 || taps > kMaxHrtfTaps) return false;
         invalidateFrozenForEdit();
@@ -175,25 +126,26 @@
         editControl(
             [&] { hirari_track_holographic_panner_clear_kernel(m_spatialPanner); });
     }
-    bool isMuted() const { return m_muted.load(std::memory_order_relaxed); }
+    bool isMuted() const { return hirari_track_runtime_is_muted(m_runtime); }
     void setMuted(bool muted) {
-        editControl([&] { m_muted.store(muted, std::memory_order_relaxed); });
+        editControl([&] { hirari_track_runtime_set_muted(m_runtime, static_cast<uint8_t>(muted)); });
     }
-    bool isPhaseInverted() const { return m_phaseInvert.load(std::memory_order_relaxed); }
+    bool isPhaseInverted() const { return hirari_track_runtime_is_phase_inverted(m_runtime); }
     void setPhaseInverted(bool inverted) {
-        editControl([&] { m_phaseInvert.store(inverted, std::memory_order_relaxed); });
+        editControl([&] {
+            hirari_track_runtime_set_phase_invert(m_runtime, static_cast<uint8_t>(inverted));
+        });
     }
     void setSolo(bool solo) {
         editControl([&] { m_solo.store(solo, std::memory_order_relaxed); });
     }
     bool isSolo() const { return m_solo.load(std::memory_order_relaxed); }
-    // The Rust region store owns the table and publishes its render inputs;
-    // these three atomics are the only region state the audio callback reads.
+    // The Rust region store owns the table; the runtime publishes its render
+    // inputs to the audio callback.
     void installRegionInputs(const HirariTrackRegionRenderInput* inputs,
                              size_t length, uint8_t published) noexcept {
-        m_regionInputs.store(inputs, std::memory_order_release);
-        m_regionInputCount.store(length, std::memory_order_release);
-        m_regionPublished.store(published, std::memory_order_release);
+        hirari_track_runtime_publish_regions(
+            m_runtime, reinterpret_cast<const uint8_t*>(inputs), length, published);
     }
     static uint32_t regionHostAudioView(void* handle, const float** out,
                                         size_t capacity, uint64_t* samples) {

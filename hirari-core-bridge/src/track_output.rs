@@ -1,48 +1,83 @@
 use std::ffi::c_void;
 use std::ptr;
 
-/// Runs the final per-track stereo output stage on the Rust side.
+/// One track's final output stage, addressed by the Rust track runtime.
 ///
-/// # Safety
-/// Every non-null channel array must contain the declared number of pointers,
-/// each pointing to `frames` writable floats. Per-track DSP handles must stay
-/// alive for the duration of this call, and audio calls for each handle must
-/// remain serialized by the host callback.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_finalize_output(
-    track_id: u32,
-    frames: u32,
-    start_time: f64,
-    volume_points: *const c_void,
-    volume_count: usize,
-    volume_hint: *mut usize,
-    pan_points: *const c_void,
-    pan_count: usize,
-    pan_hint: *mut usize,
-    channel_strip: *const c_void,
-    active_channels: *const *mut f32,
-    active_channel_count: u32,
-    pre_insert_channels: *const *mut f32,
-    pre_insert_channel_count: u32,
-    send_pre_channels: *const *mut f32,
-    send_pre_channel_count: u32,
-    send_post_channels: *const *mut f32,
-    send_post_channel_count: u32,
-    panner: *const c_void,
-    spatial_mode: u32,
-    spatial_x: f32,
-    spatial_y: f32,
-    spatial_z: f32,
-    low_gain: f32,
-    high_gain: f32,
-    low_state_l: *mut f32,
-    low_state_r: *mut f32,
-    pdc_delay: *mut c_void,
-    requested_pdc: u32,
-    manual_delay: u32,
-    pre_fader_channels: *const *mut f32,
-    pre_fader_channel_count: u32,
-) {
+/// Every channel array must contain the declared number of pointers, each
+/// pointing to `frames` writable floats. The DSP handles stay alive for the
+/// duration of the block and calls for one track stay serialized by the host
+/// audio callback.
+pub(crate) struct TrackFinalizeInput {
+    pub track_id: u32,
+    pub frames: u32,
+    pub start_time: f64,
+    pub volume_points: *const c_void,
+    pub volume_count: usize,
+    pub volume_hint: *mut usize,
+    pub pan_points: *const c_void,
+    pub pan_count: usize,
+    pub pan_hint: *mut usize,
+    pub channel_strip: *const c_void,
+    pub active_channels: *const *mut f32,
+    pub active_channel_count: u32,
+    pub pre_insert_channels: *const *mut f32,
+    pub pre_insert_channel_count: u32,
+    pub send_pre_channels: *const *mut f32,
+    pub send_pre_channel_count: u32,
+    pub send_post_channels: *const *mut f32,
+    pub send_post_channel_count: u32,
+    pub panner: *const c_void,
+    pub spatial_mode: u32,
+    pub spatial_x: f32,
+    pub spatial_y: f32,
+    pub spatial_z: f32,
+    pub low_gain: f32,
+    pub high_gain: f32,
+    pub low_state_l: *mut f32,
+    pub low_state_r: *mut f32,
+    pub pdc_delay: *mut c_void,
+    pub requested_pdc: u32,
+    pub manual_delay: u32,
+    pub pre_fader_channels: *const *mut f32,
+    pub pre_fader_channel_count: u32,
+}
+
+/// Runs the final per-track stereo output stage on the Rust side.
+pub(crate) unsafe fn finalize_track_output(input: &TrackFinalizeInput) {
+    let &TrackFinalizeInput {
+        track_id,
+        frames,
+        start_time,
+        volume_points,
+        volume_count,
+        volume_hint,
+        pan_points,
+        pan_count,
+        pan_hint,
+        channel_strip,
+        active_channels,
+        active_channel_count,
+        pre_insert_channels,
+        pre_insert_channel_count,
+        send_pre_channels,
+        send_pre_channel_count,
+        send_post_channels,
+        send_post_channel_count,
+        panner,
+        spatial_mode,
+        spatial_x,
+        spatial_y,
+        spatial_z,
+        low_gain,
+        high_gain,
+        low_state_l,
+        low_state_r,
+        pdc_delay,
+        requested_pdc,
+        manual_delay,
+        pre_fader_channels,
+        pre_fader_channel_count,
+    } = input;
     if frames == 0
         || channel_strip.is_null()
         || panner.is_null()
@@ -202,7 +237,7 @@ pub unsafe extern "C" fn hirari_track_finalize_output(
 
 #[cfg(test)]
 mod tests {
-    use super::hirari_track_finalize_output;
+    use super::{finalize_track_output, TrackFinalizeInput};
 
     #[test]
     fn final_track_stage_matches_ordered_rust_dsp_calls() {
@@ -258,40 +293,40 @@ mod tests {
             let mut expected_low_l = 0.0;
             let mut expected_low_r = 0.0;
 
-            hirari_track_finalize_output(
-                2047,
+            finalize_track_output(&TrackFinalizeInput {
+                track_id: 2047,
                 frames,
-                0.0,
-                std::ptr::null(),
-                0,
-                std::ptr::null_mut(),
-                std::ptr::null(),
-                0,
-                std::ptr::null_mut(),
-                actual_strip,
-                actual_channels.as_ptr(),
-                2,
-                actual_dry.as_ptr(),
-                2,
-                actual_send_pre.as_ptr(),
-                2,
-                actual_send_post.as_ptr(),
-                2,
-                actual_panner,
-                0,
-                0.0,
-                0.0,
-                0.0,
-                0.8,
-                1.2,
-                &mut actual_low_l,
-                &mut actual_low_r,
-                actual_pdc,
-                4,
-                2,
-                actual_pre_fader.as_ptr(),
-                2,
-            );
+                start_time: 0.0,
+                volume_points: std::ptr::null(),
+                volume_count: 0,
+                volume_hint: std::ptr::null_mut(),
+                pan_points: std::ptr::null(),
+                pan_count: 0,
+                pan_hint: std::ptr::null_mut(),
+                channel_strip: actual_strip,
+                active_channels: actual_channels.as_ptr(),
+                active_channel_count: 2,
+                pre_insert_channels: actual_dry.as_ptr(),
+                pre_insert_channel_count: 2,
+                send_pre_channels: actual_send_pre.as_ptr(),
+                send_pre_channel_count: 2,
+                send_post_channels: actual_send_post.as_ptr(),
+                send_post_channel_count: 2,
+                panner: actual_panner,
+                spatial_mode: 0,
+                spatial_x: 0.0,
+                spatial_y: 0.0,
+                spatial_z: 0.0,
+                low_gain: 0.8,
+                high_gain: 1.2,
+                low_state_l: &mut actual_low_l,
+                low_state_r: &mut actual_low_r,
+                pdc_delay: actual_pdc,
+                requested_pdc: 4,
+                manual_delay: 2,
+                pre_fader_channels: actual_pre_fader.as_ptr(),
+                pre_fader_channel_count: 2,
+            });
 
             crate::track_channel_eq::hirari_track_eq_process(
                 expected_left.as_mut_ptr(),

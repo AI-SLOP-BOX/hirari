@@ -12,10 +12,19 @@ public:
         }
         m_articulationState = hirari_track_midi_articulation_create();
         m_pdcDelayState = hirari_track_pdc_delay_create();
+        // The Rust runtime renders whole blocks, so it is bound to every DSP
+        // handle and tap buffer the track owns. It is destroyed first.
+        m_runtime = hirari_track_runtime_create(
+            id, m_chain, m_strip, m_automationStore, m_frozenStore, m_spatialPanner,
+            m_pdcDelayState, m_activeBuffer.storageHandle(), m_preInsertBuffer.storageHandle(),
+            m_preFaderBuffer.storageHandle(), m_sendPreFaderBuffer.storageHandle(),
+            m_sendPostFaderBuffer.storageHandle(), m_pluginMidi.stateHandle(),
+            &Track::prepareMidiBlock, this);
         hirari_region_store_install(this, m_id);
     }
 
     virtual ~Track() {
+        hirari_track_runtime_destroy(m_runtime);
         hirari_region_store_forget(this);
         hirari_builtin_midi_instrument_destroy(m_builtInMidiState);
         hirari_track_midi_articulation_destroy(m_articulationState);
@@ -136,17 +145,15 @@ public:
     }
 
     // Render a small built-in voice for MIDI tracks without an instrument
-    // plug-in. It is generated into the track's input buffer so the normal
-    // channel strip, inserts, fader, pan, sends, and routing all process it.
-    // This runs on the audio thread with fixed voice storage and no allocation.
-    void renderBuiltInMidiInstrument(AudioBuffer& buffer, uint32_t frames) noexcept {
+    // plug-in. It is generated into the block the runtime is rendering so the
+    // normal channel strip, inserts, fader, pan, sends, and routing all process
+    // it. This runs on the audio thread with fixed voice storage and no
+    // allocation.
+    void renderBuiltInMidiInstrument(float* left, float* right, uint32_t frames) noexcept {
         if ((m_type != Type::Midi && m_type != Type::Instrument) ||
-            hirari_effect_chain_midi_instrument_count(m_chain) != 0 ||
-            buffer.getNumChannels() < 2 || buffer.getNumSamples() < frames || frames == 0) {
+            hirari_effect_chain_midi_instrument_count(m_chain) != 0 || frames == 0) {
             return;
         }
-        float* left = buffer.getWritePointer(0);
-        float* right = buffer.getWritePointer(1);
         if (left && right) {
             hirari_builtin_midi_instrument_process(
                 m_builtInMidiState, m_pluginMidi.getEvents(), m_pluginMidi.size(),
@@ -182,17 +189,15 @@ public:
     // playback while the transport is stopped.
     void setTransportState(double bpm, bool playing) noexcept {
         if (std::isfinite(bpm) && bpm > 0.0) {
-            m_transportBpm.store(std::clamp(bpm, 1.0, 999.0), std::memory_order_relaxed);
+            bpm = std::clamp(bpm, 1.0, 999.0);
+        } else {
+            bpm = hirari_track_runtime_transport_bpm(m_runtime);
         }
-        m_transportPlaying.store(playing, std::memory_order_relaxed);
+        hirari_track_runtime_set_transport(m_runtime, bpm, static_cast<uint8_t>(playing));
     }
 
     double getTransportBpm() const noexcept {
-        return m_transportBpm.load(std::memory_order_relaxed);
-    }
-
-    bool isTransportPlaying() const noexcept {
-        return m_transportPlaying.load(std::memory_order_relaxed);
+        return hirari_track_runtime_transport_bpm(m_runtime);
     }
 
 private:
@@ -205,77 +210,19 @@ private:
         return result;
     }
 
+    // One block's MIDI input is fully prepared before the chain runs: expired
+    // expression note-offs are queued, the generated events are put in
+    // chronological order, and a track without an instrument gets its built-in
+    // voice. The runtime hands over the block channels it already resolved.
+    static void prepareMidiBlock(void* context, uint64_t playhead, uint32_t frames,
+                                 float* left, float* right) noexcept {
+        auto& track = *static_cast<Track*>(context);
+        track.flushExpressionNoteOffs(playhead, frames);
+        track.m_pluginMidi.sort();
+        track.renderBuiltInMidiInstrument(left, right, frames);
+    }
+
     void process(AudioBuffer& buffer, uint32_t sz, uint64_t playhead, bool clearInput) {
-        // Per-block plugin automation capacity. The Rust track-process request
-        // fills at most this many events and the chain applies them in order.
-        constexpr size_t kMaxPluginAutomationEventsPerBlock = 4096;
-        static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) == 16);
-        std::array<HirariTimedParameterEvent, kMaxPluginAutomationEventsPerBlock>
-            pluginAutomationEvents{};
-        size_t pluginAutomationEventCount = 0;
-        const auto* regionInputs = m_regionInputs.load(std::memory_order_acquire);
-        const size_t regionInputCount = m_regionInputCount.load(std::memory_order_acquire);
-        const uint8_t regionPublished = m_regionPublished.load(std::memory_order_acquire);
-        size_t trackDelayCount = 0;
-        const auto* trackDelayAutomation = static_cast<const Hirari::Core::ProjectAutomationPoint*>(
-            hirari_track_automation_store_points(m_automationStore, 2, &trackDelayCount));
-        size_t pluginLaneCount = 0;
-        const auto* pluginLanes = hirari_track_automation_store_plugin_lane_views(
-            m_automationStore, &pluginLaneCount);
-        const auto* frozen = static_cast<const AudioBuffer*>(
-            hirari_track_frozen_store_current(m_frozenStore));
-        uint32_t trackDelaySamples = m_trackDelaySamples.load(std::memory_order_relaxed);
-        struct MidiPreparationContext {
-            Track* track;
-            AudioBuffer* buffer;
-        } midiContext{this, &buffer};
-        const HirariTrackProcessRequest request{
-            buffer.getArrayOfWritePointers(), buffer.getNumChannels(), buffer.getNumSamples(),
-            sz, playhead, static_cast<uint8_t>(clearInput),
-            static_cast<uint8_t>(m_muted.load(std::memory_order_relaxed)),
-            static_cast<uint8_t>(hirari_track_frozen_store_is_frozen(m_frozenStore)),
-            frozen ? frozen->getArrayOfReadPointers() : nullptr,
-            frozen ? frozen->getNumChannels() : 0,
-            frozen ? frozen->getNumSamples() : 0,
-            hirari_track_frozen_store_total_samples(m_frozenStore),
-            regionInputs, regionInputCount, regionPublished,
-            static_cast<uint8_t>(m_phaseInvert.load(std::memory_order_relaxed)),
-            trackDelayAutomation && trackDelayCount != 0 ? trackDelayAutomation : nullptr,
-            trackDelayCount, hirari_track_automation_store_hint(m_automationStore, 2),
-            &trackDelaySamples, kMaxPdcDelaySamples,
-            pluginLanes, pluginLaneCount,
-            static_cast<uint8_t>(m_transportPlaying.load(std::memory_order_relaxed)),
-            pluginAutomationEvents.data(), pluginAutomationEvents.size(),
-            &pluginAutomationEventCount,
-            m_preInsertBuffer.getArrayOfWritePointers(),
-            m_preInsertBuffer.getNumChannels(), m_preInsertBuffer.getNumSamples(),
-            +[](void* context, uint64_t blockPlayhead, uint32_t frames) {
-                auto* midi = static_cast<MidiPreparationContext*>(context);
-                midi->track->flushExpressionNoteOffs(blockPlayhead, frames);
-                midi->track->m_pluginMidi.sort();
-                midi->track->renderBuiltInMidiInstrument(*midi->buffer, frames);
-            },
-            &midiContext};
-        if (!hirari_track_process_prepare(&request)) return;
-        m_trackDelaySamples.store(trackDelaySamples, std::memory_order_relaxed);
-
-        // Queue chronological offsets for isolated plugin workers. Preserve
-        // the existing native sort policy for equal-key event ordering.
-        static_assert(sizeof(HirariTimedParameterEvent) == 16);
-        static_assert(offsetof(HirariTimedParameterEvent, sample_offset) == 8);
-        hirari_effect_chain_parameter_automation(
-            m_chain, pluginAutomationEvents.data(), pluginAutomationEventCount);
-        if (buffer.getNumChannels() >= 2 && sz > 0) {
-            // The Rust traversal reads its own channel table from the buffer's
-            // storage and takes only the transport tempo the nodes consume.
-            hirari_effect_chain_process(m_chain, buffer.storageHandle(),
-                                        m_pluginMidi.stateHandle(),
-                                        m_transportBpm.load(std::memory_order_relaxed));
-            // Processors share the mutable MIDI buffer for this one block.
-            // Drop it before returning so alternate render paths cannot replay
-            // events that were already consumed by the track chain.
-            m_pluginMidi.clear();
-        }
-
-        finalizeTrackOutput(sz, playhead);
+        hirari_track_process_block(m_runtime, buffer.storageHandle(), sz, playhead,
+                                   static_cast<uint8_t>(clearInput));
     }

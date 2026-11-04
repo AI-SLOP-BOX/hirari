@@ -20,6 +20,7 @@
         return drained;
     }
     void setAutomationPoints(uint32_t kind, const AutomationList& points) {
+        static_assert(sizeof(Hirari::Core::ProjectAutomationPoint) == 16);
         invalidateFrozenForEdit();
         hirari_track_automation_store_set_points(
             m_automationStore, kind, points.data(), points.size());

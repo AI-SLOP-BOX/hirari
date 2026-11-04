@@ -74,6 +74,18 @@ production support.
 
 ### Changed
 
+- Rust owns a track's whole realtime block. `TrackRuntime`
+  (`hirari-core-bridge/src/track_runtime.rs`) binds the DSP handles and every tap
+  buffer once at construction and holds the atomics the audio thread reads, so
+  `Track::process` is now the single call `hirari_track_process_block` and the
+  35-field `HirariTrackProcessRequest` (208 bytes, layout-asserted on both sides)
+  plus the 33-argument `hirari_track_finalize_output` ABI were deleted. Per-block
+  cost fell with them: the 64KB C++ stack event array is a runtime-owned buffer,
+  the region/transport/mute/phase state no longer travels as pointer-to-member
+  addresses, and the frozen view is read through the buffer's Rust storage handle
+  instead of a C++ `AudioBuffer*`. The runtime's tap guard also closes a latent
+  overrun in the offline-freeze path, which rendered a 1024-frame block into a
+  work buffer sized to the live device block. C++ 8389 -> 8249 (-140).
 - Rust owns the plugin chain nodes and the realtime traversal. `ChainNode`
   (`hirari-core-bridge/src/effect_chain_nodes.rs`) replaced the C++ `DSP::IProcessor`
   vtable and its 16-slot `HirariEffectNodeOps` dispatch table: a node is either a

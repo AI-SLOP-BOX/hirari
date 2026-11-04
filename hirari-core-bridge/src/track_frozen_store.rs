@@ -1,10 +1,10 @@
 //! Publication store for a track's frozen render.
 //!
-//! C++ owns the decoded `AudioBuffer` instances but no longer tracks which one
-//! is currently published. This store keeps the owner handles alive, publishes
-//! the read-side pointer and counters through lock-free atomics for the audio
-//! callback, and reclaims superseded owners only when the control thread says
-//! the callback has been quiesced.
+//! C++ owns the decoded buffers but no longer tracks which one is currently
+//! published. This store keeps those owners alive and publishes the buffer's
+//! Rust audio-storage handle, so the realtime track runtime reads the frozen
+//! block natively instead of through a C++ view type. Replaced owners stay
+//! alive until the control thread says the callback has been quiesced.
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering};

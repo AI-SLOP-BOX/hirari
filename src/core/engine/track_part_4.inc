@@ -29,19 +29,10 @@
     void* m_articulationState = nullptr;
     void* m_builtInMidiState = nullptr;
     double m_sampleRate = 44100.0;
-    std::atomic<double> m_transportBpm{120.0};
-    std::atomic<bool> m_transportPlaying{false};
     std::atomic<float> m_volume{1.0f};
     std::atomic<float> m_pan{0.0f};
-    std::atomic<bool> m_muted{false};
-    std::atomic<bool> m_phaseInvert{false};
     std::atomic<bool> m_solo{false};
     std::atomic<bool> m_recordArmed{false};
-    // The Rust region store owns the table and publishes immutable render
-    // inputs; the audio callback reads only these three atomics.
-    std::atomic<const HirariTrackRegionRenderInput*> m_regionInputs{nullptr};
-    std::atomic<size_t> m_regionInputCount{0};
-    std::atomic<uint8_t> m_regionPublished{0};
     std::atomic<bool> m_audioPitchAnalysisRunning{false};
     AudioBuffer m_activeBuffer;
     AudioBuffer m_preFaderBuffer;
@@ -56,17 +47,12 @@
     }
     static constexpr HirariTrackFrozenOps kFrozenOps = {&Track::destroyFrozenOwner};
     void* m_frozenStore = hirari_track_frozen_store_create(&kFrozenOps);
-    float m_lowGain = 1.0f;
-    float m_highGain = 1.0f;
-    float m_lowStateL = 0.0f;
-    float m_lowStateR = 0.0f;
     void* m_automationStore = hirari_track_automation_store_create();
-    std::atomic<float> m_spatialX{0.0f}, m_spatialY{0.0f}, m_spatialZ{0.0f};
     // The spatial processor is Rust-owned; the track keeps only its handle.
     void* m_spatialPanner = hirari_track_holographic_panner_create();
     static constexpr uint32_t kMaxHrtfTaps = 128;
-    static constexpr uint32_t kMaxPdcDelaySamples = 8192;
-    std::atomic<uint32_t> m_pdcRequested{0};
-    std::atomic<uint32_t> m_trackDelaySamples{0};
     void* m_pdcDelayState = nullptr;
+    // Every value the audio callback reads, plus the block pipeline itself, is
+    // bound into this runtime; it is created last and destroyed first.
+    void* m_runtime = nullptr;
 };

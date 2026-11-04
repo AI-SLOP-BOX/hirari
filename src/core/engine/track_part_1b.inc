@@ -24,22 +24,21 @@ public:
         return hirari_effect_chain_total_latency_samples(m_chain);
     }
     uint32_t getPdcCompensationSamples() const noexcept {
-        return m_pdcRequested.load(std::memory_order_acquire);
+        return hirari_track_runtime_pdc_requested(m_runtime);
     }
 
     // User timing offset is intentionally separate from plugin PDC.  Both
     // values use the same preallocated transition line, but a graph rebuild
-    // must never erase the musician's manual delay.
+    // must never erase the musician's manual delay. The runtime bounds both to
+    // that line.
     uint32_t getTrackDelaySamples() const noexcept {
-        return m_trackDelaySamples.load(std::memory_order_acquire);
+        return hirari_track_runtime_track_delay_samples(m_runtime);
     }
     void setTrackDelaySamples(uint32_t samples) noexcept {
-        const uint32_t next = std::min(samples, kMaxPdcDelaySamples);
-        if (m_trackDelaySamples.exchange(next, std::memory_order_acq_rel) != next) {
-            markProjectLayoutChanged();
-        }
+        const uint32_t previous = getTrackDelaySamples();
+        hirari_track_runtime_set_delays(m_runtime, getPdcCompensationSamples(), samples);
+        if (getTrackDelaySamples() != previous) markProjectLayoutChanged();
     }
     void setPdcCompensationSamples(uint32_t samples) noexcept {
-        m_pdcRequested.store(std::min(samples, kMaxPdcDelaySamples),
-                             std::memory_order_release);
+        hirari_track_runtime_set_delays(m_runtime, samples, getTrackDelaySamples());
     }
