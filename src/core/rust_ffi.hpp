@@ -713,17 +713,8 @@ struct HirariTrackFreezeHostOps {
 
 extern "C" void hirari_track_freeze_host_install(const HirariTrackFreezeHostOps* ops);
 
-// Control-command admission (target and generations). The command ring and the
-// forensic journal are Rust objects the engine only holds, so they travel as
-// handles and the queue-full diagnostic is posted to the Rust log directly.
-struct HirariCommandHostOps {
-    bool (*trackExists)(void*, uint32_t) = nullptr;
-    // Writes the current project and audio-configuration generations.
-    bool (*generations)(void*, uint64_t*, uint64_t*) = nullptr;
-    void* (*commandRings)(void*) = nullptr;
-    void* (*journaler)(void*) = nullptr;
-};
-extern "C" void hirari_command_host_install(const HirariCommandHostOps* ops);
+// Control-command admission is Rust's; the queue itself is a Rust ring the
+// engine's session bag holds, so the engine only forwards the push.
 extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t trackId,
                                            float value, uint64_t timestamp,
                                            uint64_t expectedProjectGeneration,
@@ -1023,7 +1014,6 @@ extern "C" uint64_t hirari_waveform_snapshot_request(
 // its backing blocks, and serializes or saves it in one call. The engine
 // contributes its address and the tracks lock the gather brackets with it, so
 // no per-field host table crosses here any more.
-extern "C" uint64_t hirari_project_generation(void* host);
 extern "C" bool hirari_project_save_from_host(
     void* host, const uint8_t* path, size_t path_length);
 

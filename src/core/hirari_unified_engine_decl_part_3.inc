@@ -23,7 +23,6 @@
     static void installRoutingEditHost();
     static void installTrackEditHost();
     static void installTrackFreezeHost();
-    static void installCommandHost();
     static void syncNative(void* host);
     void publishTrackSnapshotLocked(bool stampAudioGeneration);
     // Installs the sandbox maintenance callbacks Rust drives; see part_3a.

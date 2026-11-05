@@ -218,7 +218,6 @@ pub mod ffi {
         // meter straight from these Rust-owned stores.
         fn engine_block_state(self: &HirariUnifiedEngine) -> usize;
         fn meter_state(self: &HirariUnifiedEngine) -> usize;
-        fn get_project_generation(self: &HirariUnifiedEngine) -> u64;
         fn mark_project_layout_changed(self: &HirariUnifiedEngine);
 
         fn pdc_state(self: &HirariUnifiedEngine) -> usize;

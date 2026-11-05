@@ -269,6 +269,18 @@ production support.
   `HirariPluginEditHostOps`, its install entry point and
   `installPluginEditHost()` are gone, with the table's slot in the engine's
   one-time install block. C++ 3061 -> 3034 (-27).
+- Command admission no longer borrows a table from the engine. The target lookup
+  is the Rust tracks lock over the Rust track table, the project token is Rust's
+  own layout fingerprint, and the audio token, the command ring and the forensic
+  journal are slots of the session bag the engine's address resolves to, so
+  `push_impl` reads all four from the host it was given. `HirariCommandHostOps`,
+  its install entry point, `installCommandHost()` and the
+  `get_project_generation()` forwarder are gone; the Rust callers that needed
+  that token, the layout fingerprint and the engine-backed admission test, reach
+  `hirari_project_generation` through the engine address instead. The unit tests
+  now run against a real session bag with a live track, and the queue-full,
+  stale-generation and per-engine error reports are pinned there.
+  C++ 3034 -> 2989 (-45).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

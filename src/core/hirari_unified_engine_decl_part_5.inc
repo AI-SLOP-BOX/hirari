@@ -16,9 +16,6 @@
         return reinterpret_cast<uintptr_t>(handle(kHirariHandleBounceSession));
     }
     bool execute_auto_arrangement();
-    // Stable generation token for UI/CLI snapshots. Commands must echo this
-    // value back through push_command; a changed layout makes the token stale.
-    uint64_t get_project_generation() const;
     void mark_project_state_changed() { hirari_engine_block_mark_control(handle(kHirariHandleEngineBlock)); }
     void mark_project_layout_changed() const {
         hirari_layout_revision_mark(hirari_engine_block_layout_revision(handle(kHirariHandleEngineBlock)));

@@ -129,12 +129,19 @@ impl HirariCore {
     }
 
     /// Hashes the native track/region layout without copying its potentially
-    /// large JSON representation across the CXX boundary. Rust-owned Aux and
-    /// other control-plane data must still be fingerprinted separately.
+    /// large JSON representation across the CXX boundary. The gather runs on the
+    /// engine's own address, which is the key its session bag is filed under.
+    /// Rust-owned Aux and other control-plane data must still be fingerprinted
+    /// separately.
     pub fn native_project_layout_fingerprint(&self) -> u64 {
-        self.engine
-            .as_ref()
-            .map_or(0, |engine| engine.get_core().get_project_generation())
+        self.engine.as_ref().map_or(0, |engine| {
+            let host = std::ptr::from_ref(engine.get_core())
+                .cast_mut()
+                .cast::<std::ffi::c_void>();
+            // SAFETY: the engine lives as long as this AudioEngine handle, and
+            // the gather only reads the bag filed under its address.
+            unsafe { crate::layout_gather::hirari_project_generation(host) }
+        })
     }
 
     /// Cheap change token for integration polling. It advances when native

@@ -52,13 +52,12 @@ namespace {
     HirariUnifiedEngine::installRoutingEditHost();
     HirariUnifiedEngine::installExpressionMapEditHost();
     HirariUnifiedEngine::installTrackFreezeHost();
-    HirariUnifiedEngine::installCommandHost();
     // The tracks and their storages are Rust objects, so the spatial-edit host
-    // needs no native table, and neither do the automation and control edits:
-    // they read the undo history and the stores straight out of the session bag
-    // the engine's address resolves to. The region storage host must install
-    // before the region edit host, which routes its data callbacks only once it
-    // answers.
+    // needs no native table, and neither do the automation and control edits or
+    // command admission: they read the undo history, the generations and the
+    // stores straight out of the session bag the engine's address resolves to.
+    // The region storage host must install before the region edit host, which
+    // routes its data callbacks only once it answers.
     hirari_track_region_host_install();
     hirari_region_host_install(&kRegionEditHostOps);
     return true;

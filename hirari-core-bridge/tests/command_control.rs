@@ -18,6 +18,14 @@ fn last_command_error(engine: &ffi::AudioEngine) -> u8 {
         as usize)
 }
 
+/// The layout fingerprint the Rust admission stamps a command with: the gather
+/// runs on the engine's own address, the key its session bag is filed under.
+fn project_generation(engine: &ffi::AudioEngine) -> u64 {
+    let host = engine.get_core() as *const ffi::HirariUnifiedEngine as *mut std::ffi::c_void;
+    // SAFETY: the engine outlives the call and only its own bag is read.
+    unsafe { hirari_core_bridge::layout_gather::hirari_project_generation(host) }
+}
+
 #[test]
 fn command_admission_reports_target_and_generation_failures_in_order() {
     let _guard = native_engine_test_guard();
@@ -25,7 +33,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
     let engine = engine.as_ref().expect("offline engine must be created");
     let track = engine.add_track(0);
     assert_ne!(track, 0);
-    let project = engine.get_core().get_project_generation();
+    let project = project_generation(engine);
     let audio = engine.get_audio_config_generation();
 
     assert!(ffi::push_command(
@@ -79,7 +87,7 @@ fn a_full_command_queue_is_reported_as_a_failure() {
     let engine = ffi::new_audio_engine_offline();
     let engine = engine.as_ref().expect("offline engine must be created");
     let track = engine.add_track(0);
-    let project = engine.get_core().get_project_generation();
+    let project = project_generation(engine);
     let audio = engine.get_audio_config_generation();
 
     let mut accepted = 0u32;
