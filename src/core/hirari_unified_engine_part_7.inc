@@ -2,7 +2,7 @@ bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
     // Rust owns wire-mode normalization, the fail-closed unknown-value rule
     // and the recorder-mode translation; the block store keeps the audio
     // callback's copy of the normalized wire value.
-    hirari_engine_block_set_auto_record_mode(m_engineBlock,
+    hirari_engine_block_set_auto_record_mode(handle(kHirariHandleEngineBlock),
                                              hirari_automation_record_mode_apply(mode));
     return true;
 }
@@ -30,7 +30,7 @@ float HirariUnifiedEngine::get_track_correlation(uint32_t tid) const {
 }
 
 bool HirariUnifiedEngine::pop_event(::Hirari::Core::EngineEvent& e) const {
-    return hirari_engine_event_ring_pop(m_engineRings, &e.timestamp, &e.type, &e.trackId, &e.value,
+    return hirari_engine_event_ring_pop(handle(kHirariHandleEngineRings), &e.timestamp, &e.type, &e.trackId, &e.value,
                                         reinterpret_cast<uint8_t*>(e.label), sizeof(e.label));
 }
 

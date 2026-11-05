@@ -3,44 +3,12 @@ public:
     static constexpr uint32_t kMaxTrackMap = 2048;
 
 private:
-    // The document graph, its deferred-destruction list and the double-buffered
-    // snapshot the realtime callback traverses are Rust's (engine_track_table.rs).
-    void* m_trackTable = hirari_engine_track_table_create();
-
     static constexpr uint32_t kNoInputMonitorTrack = std::numeric_limits<uint32_t>::max();
-    // The monitored input pair, the talkback source and their publication
-    // ordering live in Rust (engine_input_block.rs). The per-chunk read offset,
-    // the playhead, the cycle, the loop flag and the sticky range-overflow
-    // diagnostic are engine-block state (engine_block_host.rs).
-    void* m_inputBlocks = hirari_input_blocks_create(kMaxAudioBlockSize);
-    void* m_metronome = hirari_metronome_create(44100.0);
-    // Generation zero is reserved for an unavailable/uninitialized engine.
-    // The constructor publishes the valid default 44.1 kHz configuration as
-    // generation one before any callback or command can observe it.
-    // The device configuration generation and the admission flag that closes
-    // callbacks around a buffer replacement are transport state the Rust
-    // engine block owns (engine_block_host.rs).
 
-    // The command and event queues are Rust-owned SPSC rings (engine_rings.rs);
-    // neither the records nor the storage for them live on the engine. The
-    // handle is per engine so offline engines and tests never share a queue.
-    void* m_engineRings = nullptr;
-
-    // Internal components (using PIMPL principles where possible)
-    // Callback-owned transport continuity (block end, snapshot revision,
-    // playback pass, panic request) is Rust-owned; it reconciles held MIDI
-    // notes after a seek, loop wrap, or transport restart without retriggering
-    // notes on ordinary adjacent blocks. The block binds the handle, and so
-    // owns the preview voices, the fallback note table and the block's own
-    // event collection that used to live here.
-    void* m_midiPlaybackClock = nullptr;
-    // The native MIDI policy layer runs after timeline scheduling and before
-    // preview/plugin dispatch, so articulation and MPE transformations affect
-    // every downstream instrument consistently.
-    HirariMpeState* m_mpeState = hirari_mpe_state_create();
-    void* m_previewSynthState = hirari_preview_synth_create();
-
-    // Preview-sample storage, trigger/playing flags and the playback cursor
-    // live in Rust (preview_sampler.rs); the callback only renders the handle.
-    void* m_previewSampler = hirari_preview_sampler_create();
-    
+    // Every store the graph, the realtime callback and the control surface read
+    // is a slot in one Rust bag (engine_session.rs), which owns their creation
+    // and teardown order. The engine holds the bag and asks it for a handle.
+    void* m_session = hirari_engine_session_create();
+    void* handle(uint32_t kind) const noexcept {
+        return hirari_engine_session_handle(m_session, kind);
+    }

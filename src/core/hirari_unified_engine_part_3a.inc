@@ -30,8 +30,8 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
             if (!host) return;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             (void)hirari_engine_event_ring_push(
-                engine->m_engineRings,
-                hirari_engine_block_playhead(engine->m_engineBlock), type, trackId, value,
+                engine->handle(kHirariHandleEngineRings),
+                hirari_engine_block_playhead(engine->handle(kHirariHandleEngineBlock)), type, trackId, value,
                 label, labelLength);
         },
     };

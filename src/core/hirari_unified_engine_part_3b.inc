@@ -7,9 +7,9 @@
 // resync.
 void HirariUnifiedEngine::installRoutingEditHost() {
     static const HirariRoutingHostOps ops = {
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainEngine; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleRouting); },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleSidechainRoutes); },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleSidechainEngine); },
         nullptr,  // sidechain context and registration live in the Rust routing edit host.
         nullptr,
         [](void* host) {
@@ -25,7 +25,7 @@ void HirariUnifiedEngine::installRoutingEditHost() {
             return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
         },
         [](void* host) -> void* {
-            return host ? static_cast<HirariUnifiedEngine*>(host)->m_engineBlock : nullptr;
+            return host ? static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleEngineBlock) : nullptr;
         },
     };
     hirari_routing_edit_host_install(&ops);
@@ -41,7 +41,7 @@ void HirariUnifiedEngine::installControlEditHost() {
             if (!host) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!enabled) {
-                hirari_input_blocks_clear_focus(engine->m_inputBlocks, trackId);
+                hirari_input_blocks_clear_focus(engine->handle(kHirariHandleInputBlocks), trackId);
                 return true;
             }
             {
@@ -50,11 +50,11 @@ void HirariUnifiedEngine::installControlEditHost() {
             }
             // One physical input is monitored at a time, so enabling another
             // track moves the focus without touching record-arm state.
-            return hirari_input_blocks_set_focus(engine->m_inputBlocks, trackId, leftChannel,
+            return hirari_input_blocks_set_focus(engine->handle(kHirariHandleInputBlocks), trackId, leftChannel,
                                                 rightChannel);
         },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_macroControl; },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_midiLearnState; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleMacroControl); },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleMidiLearn); },
         [](void* host) -> void* {
             return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
         },
@@ -92,7 +92,7 @@ void HirariUnifiedEngine::installTrackSessionHost() {
         [](void* host, void* track) {
             if (!host || !track) return;
             (void)hirari_engine_block_prepare_track(
-                static_cast<HirariUnifiedEngine*>(host)->m_engineBlock, track);
+                static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleEngineBlock), track);
         },
     };
     hirari_track_session_install(&ops);
@@ -102,5 +102,5 @@ void HirariUnifiedEngine::installTrackSessionHost() {
 bool HirariUnifiedEngine::has_sidechain_link(uint32_t sourceId, uint32_t destId,
                                            uint32_t pluginIndex) const {
     return hirari_sidechain_engine_has_link(
-        m_sidechainEngine, destId, pluginIndex, sourceId);
+        handle(kHirariHandleSidechainEngine), destId, pluginIndex, sourceId);
 }

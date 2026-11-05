@@ -37,35 +37,35 @@
         // the old project remained published.  The ordered teardown of the
         // outgoing graph and of every project-scoped manager is Rust's decision
         // (engine_track_table.rs); only the replacement graph is inserted here.
-        hirari_engine_reset_project(m_trackTable, m_engineRings, m_pdcState,
-                                    m_sidechainEngine, m_routingEngine, m_busSystem,
-                                    m_controlRoomState, m_sidechainRoutes);
+        hirari_engine_reset_project(handle(kHirariHandleTrackTable), handle(kHirariHandleEngineRings), handle(kHirariHandlePdc),
+                                    handle(kHirariHandleSidechainEngine), handle(kHirariHandleRouting), handle(kHirariHandleBusSystem),
+                                    handle(kHirariHandleControlRoom), handle(kHirariHandleSidechainRoutes));
         for (auto& entry : loadedTracks) {
-            (void)hirari_engine_track_insert(m_trackTable, std::numeric_limits<size_t>::max(),
+            (void)hirari_engine_track_insert(handle(kHirariHandleTrackTable), std::numeric_limits<size_t>::max(),
                                              entry.commit());
         }
         loadedTracks.clear();
         mark_project_layout_changed();
         for (const auto& route : state.routes) {
             hirari_routing_engine_add_connection(
-                m_routingEngine, route.sourceId, route.destinationId, route.gain,
+                handle(kHirariHandleRouting), route.sourceId, route.destinationId, route.gain,
                 route.send, route.preFader);
         }
         for (void* track : lockedTracks()) {
             if (hirari_track_type(track) != kHirariTrackKindBus) continue;
             const uint32_t busId = hirari_track_id(track);
-            hirari_track_resolve_bus(track, hirari_bus_system_register(m_busSystem, busId)
-                ? hirari_bus_system_bus(m_busSystem, busId) : nullptr, true);
+            hirari_track_resolve_bus(track, hirari_bus_system_register(handle(kHirariHandleBusSystem), busId)
+                ? hirari_bus_system_bus(handle(kHirariHandleBusSystem), busId) : nullptr, true);
         }
         lock.unlock();
         hirari_ids_seed_from_project(this);
-        hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(state.bpm));
-        hirari_engine_block_set_project_scale(m_engineBlock, state.rootNote, state.scaleType);
+        hirari_tempo_map_set_current_bpm(handle(kHirariHandleTempo), static_cast<float>(state.bpm));
+        hirari_engine_block_set_project_scale(handle(kHirariHandleEngineBlock), state.rootNote, state.scaleType);
         // Restore timeline markers as part of the document, not as transient UI state.
-        hirari_arrangement_document_reset_markers(m_arrangementDocument);
+        hirari_arrangement_document_reset_markers(handle(kHirariHandleArrangementDocument));
         for (const auto& marker : state.markers) {
             (void)hirari_arrangement_document_upsert_marker(
-                m_arrangementDocument, marker.sample,
+                handle(kHirariHandleArrangementDocument), marker.sample,
                 reinterpret_cast<const uint8_t*>(marker.name.data()), marker.name.size(),
                 marker.color);
         }
@@ -77,10 +77,10 @@
                 part.repeats});
         }
         (void)hirari_arrangement_document_set_parts(
-            m_arrangementDocument, arrangerParts.data(), arrangerParts.size());
-        hirari_tempo_map_clear(m_tempoState, projectSampleRate, state.bpm);
+            handle(kHirariHandleArrangementDocument), arrangerParts.data(), arrangerParts.size());
+        hirari_tempo_map_clear(handle(kHirariHandleTempo), projectSampleRate, state.bpm);
         for (const auto& event : state.tempoEvents)
-            hirari_tempo_map_add_tempo(m_tempoState, event.sample, event.bpm, projectSampleRate, event.ramp != 0);
+            hirari_tempo_map_add_tempo(handle(kHirariHandleTempo), event.sample, event.bpm, projectSampleRate, event.ramp != 0);
         // A project carries its own timeline rate. Re-prepare every track and
         // DSP component so opening a 48/96 kHz project does not leave the
         // engine running at the previous device rate.
@@ -94,7 +94,7 @@
         }
         // A loaded project starts a fresh editing history. Keeping commands
         // from the previous document would let Undo mutate the wrong graph.
-        hirari_undo_manager_clear(m_undoState);
+        hirari_undo_manager_clear(handle(kHirariHandleUndo));
         return true;
     }
     return false;
@@ -106,7 +106,7 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
     // hirari-core-bridge/src/project_save_layout.rs.
     return hirari_project_save_from_host(
         this, layoutHostOps(), reinterpret_cast<const uint8_t*>(path.data()), path.size(),
-        m_tempoState, m_routingEngine, reinterpret_cast<size_t>(m_arrangementDocument),
-        hirari_tempo_map_get_current_bpm(m_tempoState), m_engineBlock);
+        handle(kHirariHandleTempo), handle(kHirariHandleRouting), reinterpret_cast<size_t>(handle(kHirariHandleArrangementDocument)),
+        hirari_tempo_map_get_current_bpm(handle(kHirariHandleTempo)), handle(kHirariHandleEngineBlock));
 }
 

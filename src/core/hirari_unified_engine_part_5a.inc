@@ -34,7 +34,7 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
         // Clear stateful processor history so a bounce is reproducible.
         [](void* host) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            if (engine->m_masterLimiter) hirari_master_limiter_reset(engine->m_masterLimiter);
+            if (engine->handle(kHirariHandleMasterLimiter)) hirari_master_limiter_reset(engine->handle(kHirariHandleMasterLimiter));
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
             for (void* track : engine->lockedTracks()) {
                 if (track) hirari_track_reset_for_offline_render(track);
@@ -47,10 +47,10 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
             if (!host) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             switch (kind) {
-                case kHirariBounceStoreTrackTable: return engine->m_trackTable;
-                case kHirariBounceStoreEngineBlock: return engine->m_engineBlock;
-                case kHirariBounceStoreMidiSnapshot: return engine->m_midiSnapshotStore;
-                default: return engine->m_masterLimiter;
+                case kHirariBounceStoreTrackTable: return engine->handle(kHirariHandleTrackTable);
+                case kHirariBounceStoreEngineBlock: return engine->handle(kHirariHandleEngineBlock);
+                case kHirariBounceStoreMidiSnapshot: return engine->handle(kHirariHandleMidiSnapshotStore);
+                default: return engine->handle(kHirariHandleMasterLimiter);
             }
         },
         // The driver's channel pairs are wrapped, not copied, so the offline
@@ -66,18 +66,18 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
         // skip larger blocks; never render past the prepared block.
         [](void* host) -> uint32_t {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            const uint32_t block = hirari_engine_block_device_block_frames(engine->m_engineBlock);
+            const uint32_t block = hirari_engine_block_device_block_frames(engine->handle(kHirariHandleEngineBlock));
             return block > 0 ? std::min(1024u, block) : 1024u;
         },
         [](void* host, uint64_t* playhead, uint8_t* playing) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            *playhead = hirari_engine_block_playhead(engine->m_engineBlock);
-            *playing = hirari_engine_block_is_playing(engine->m_engineBlock);
+            *playhead = hirari_engine_block_playhead(engine->handle(kHirariHandleEngineBlock));
+            *playing = hirari_engine_block_is_playing(engine->handle(kHirariHandleEngineBlock));
         },
         [](void* host, uint64_t playhead, uint8_t playing) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            hirari_engine_block_set_playhead(engine->m_engineBlock, playhead);
-            hirari_engine_block_set_playing(engine->m_engineBlock, playing);
+            hirari_engine_block_set_playhead(engine->handle(kHirariHandleEngineBlock), playhead);
+            hirari_engine_block_set_playing(engine->handle(kHirariHandleEngineBlock), playing);
         },
     };
     return &ops;
@@ -88,7 +88,7 @@ bool HirariUnifiedEngine::bounce_project(std::string_view path, uint32_t format)
     // control-side container first. Rebuild the immutable callback snapshot so
     // a bounce can never observe an empty/stale track graph (silent WAV).
     syncStructuralChanges();
-    return hirari_bounce_render_driver(this, m_bounceSession, bounceOps(),
+    return hirari_bounce_render_driver(this, handle(kHirariHandleBounceSession), bounceOps(),
                                        reinterpret_cast<const uint8_t*>(path.data()), path.size(),
                                        format);
 }

@@ -1,32 +1,32 @@
 bool HirariUnifiedEngine::bounce_project_async(std::string_view path, uint32_t format) {
-    return hirari_bounce_start_async(m_bounceSession, this, bounceOps(),
+    return hirari_bounce_start_async(handle(kHirariHandleBounceSession), this, bounceOps(),
                                      reinterpret_cast<const uint8_t*>(path.data()), path.size(),
                                      format);
 }
 
 float HirariUnifiedEngine::get_bounce_progress() const noexcept {
-    return hirari_bounce_progress(m_bounceSession);
+    return hirari_bounce_progress(handle(kHirariHandleBounceSession));
 }
 
 uint32_t HirariUnifiedEngine::get_bounce_state() const noexcept {
-    return hirari_bounce_state(m_bounceSession);
+    return hirari_bounce_state(handle(kHirariHandleBounceSession));
 }
 
 bool HirariUnifiedEngine::cancel_bounce() noexcept {
-    return hirari_bounce_cancel(m_bounceSession);
+    return hirari_bounce_cancel(handle(kHirariHandleBounceSession));
 }
 
 bool HirariUnifiedEngine::pause_bounce() noexcept {
-    return hirari_bounce_pause(m_bounceSession);
+    return hirari_bounce_pause(handle(kHirariHandleBounceSession));
 }
 
 bool HirariUnifiedEngine::resume_bounce() noexcept {
-    return hirari_bounce_resume(m_bounceSession);
+    return hirari_bounce_resume(handle(kHirariHandleBounceSession));
 }
 
 bool HirariUnifiedEngine::set_project_scale(int32_t root, int32_t type) {
     // The bridge validates the ranges before this is reached.
-    hirari_engine_block_set_project_scale(m_engineBlock, root, type);
+    hirari_engine_block_set_project_scale(handle(kHirariHandleEngineBlock), root, type);
     return true;
 }
 

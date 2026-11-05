@@ -35,11 +35,11 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         &hirari_track_id,
         &hirari_track_type,
         &hirari_track_storage,
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleSidechainRoutes); },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleRouting); },
         [](void* host) {
             return hirari_engine_block_device_sample_rate(
-                static_cast<HirariUnifiedEngine*>(host)->m_engineBlock);
+                static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleEngineBlock));
         },
     };
     return &ops;
@@ -63,13 +63,13 @@ uint64_t HirariUnifiedEngine::get_project_generation() const {
 }
 
 uint64_t HirariUnifiedEngine::get_project_layout_revision() const noexcept {
-    return hirari_layout_revision_current(hirari_engine_block_layout_revision(m_engineBlock));
+    return hirari_layout_revision_current(hirari_engine_block_layout_revision(handle(kHirariHandleEngineBlock)));
 }
 
 uint64_t HirariUnifiedEngine::get_project_state_revision() const noexcept {
     const uint64_t layout = get_project_layout_revision();
-    const uint64_t midi = hirari_midi_snapshot_store_revision(m_midiSnapshotStore);
-    const uint64_t control = hirari_engine_block_control_revision(m_engineBlock);
+    const uint64_t midi = hirari_midi_snapshot_store_revision(handle(kHirariHandleMidiSnapshotStore));
+    const uint64_t control = hirari_engine_block_control_revision(handle(kHirariHandleEngineBlock));
     return hirari_project_state_revision_mix(layout, midi, control);
 }
 
@@ -85,11 +85,11 @@ void HirariUnifiedEngine::installCommandHost() {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!engine) return false;
             *project = engine->get_project_generation();
-            *audio = hirari_engine_block_generation(engine->m_engineBlock);
+            *audio = hirari_engine_block_generation(engine->handle(kHirariHandleEngineBlock));
             return true;
         },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_engineRings; },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_forensicJournal; },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleEngineRings); },
+        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleForensicJournal); },
     };
     hirari_command_host_install(&ops);
 }
@@ -101,13 +101,13 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
         [](void* host, uint32_t tid, bool wait) -> void* {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!engine) return nullptr;
-            if (wait) hirari_engine_block_join_callbacks(engine->m_engineBlock);
+            if (wait) hirari_engine_block_join_callbacks(engine->handle(kHirariHandleEngineBlock));
             return engine->takeTrackOwner(tid);
         },
         [](void* handle) { hirari_track_owner_release(handle); },
         [](void* host) -> uint32_t {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            return engine ? hirari_engine_block_device_block_frames(engine->m_engineBlock) : 0;
+            return engine ? hirari_engine_block_device_block_frames(engine->handle(kHirariHandleEngineBlock)) : 0;
         },
     };
     hirari_track_freeze_host_install(&ops);

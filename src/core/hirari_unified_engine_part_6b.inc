@@ -4,21 +4,21 @@ bool HirariUnifiedEngine::set_tempo(float bpm) const {
     // the engine singleton. Every other tempo edit reaches Rust without
     // entering C++ at all.
     return hirari_tempo_edit_set_tempo(
-        m_tempoState, m_undoState,
+        handle(kHirariHandleTempo), handle(kHirariHandleUndo),
         hirari_log_state(),
-        hirari_engine_block_playhead(m_engineBlock),
-        hirari_engine_block_device_sample_rate(m_engineBlock), bpm);
+        hirari_engine_block_playhead(handle(kHirariHandleEngineBlock)),
+        hirari_engine_block_device_sample_rate(handle(kHirariHandleEngineBlock)), bpm);
 }
 
 bool HirariUnifiedEngine::set_master_gain(float value) {
     // Storage only: the bridge owns the range check and the undo entry. The
     // audio callback reads the block store's copy once per block.
-    hirari_engine_block_set_master_gain(m_engineBlock, value);
+    hirari_engine_block_set_master_gain(handle(kHirariHandleEngineBlock), value);
     return true;
 }
 
 float HirariUnifiedEngine::get_master_gain() const noexcept {
-    return hirari_engine_block_master_gain(m_engineBlock);
+    return hirari_engine_block_master_gain(handle(kHirariHandleEngineBlock));
 }
 
 namespace {
@@ -41,13 +41,13 @@ bool HirariUnifiedEngine::execute_auto_arrangement() {
     float harmonyValence = 0.5f;
     hirari_harmonic_context_get(&harmonyTension, &harmonyValence, nullptr);
     return hirari_engine_auto_arrange(
-        this, hirari_tempo_map_get_current_bpm(m_tempoState),
-        hirari_engine_block_device_sample_rate(m_engineBlock),
+        this, hirari_tempo_map_get_current_bpm(handle(kHirariHandleTempo)),
+        hirari_engine_block_device_sample_rate(handle(kHirariHandleEngineBlock)),
         harmonyTension, harmonyValence,
         [](void* context, uint64_t start, uint64_t length) {
             auto* engine = static_cast<HirariUnifiedEngine*>(context);
             // EVENT_TYPE_STRUCTURE_MARKER carries the section length as its value.
-            (void)hirari_engine_event_ring_push(engine->m_engineRings, start, 0x50, 0,
+            (void)hirari_engine_event_ring_push(engine->handle(kHirariHandleEngineRings), start, 0x50, 0,
                                                 static_cast<float>(length), nullptr, 0);
             hirari_log_post(0, 0, "AI | ARRANGEMENT | SECTION_DETECTED");
         });

@@ -4,16 +4,16 @@
     // (engine_analysis_reads.rs) sample telemetry, meter and the published
     // graph straight from these handles, so no MeterData copy crosses here.
     uintptr_t engine_block_state() const noexcept {
-        return reinterpret_cast<uintptr_t>(m_engineBlock);
+        return reinterpret_cast<uintptr_t>(handle(kHirariHandleEngineBlock));
     }
     uintptr_t meter_state() const noexcept {
-        return reinterpret_cast<uintptr_t>(m_meterCore);
+        return reinterpret_cast<uintptr_t>(handle(kHirariHandleMeter));
     }
     // The bounce session and the live track table are Rust-owned stores too;
     // the Rust offline-target and volume reads use the layout host ops
     // (layout_gather.rs) plus this session handle, so no C++ forwarder is left.
     uintptr_t bounce_session_state() const noexcept {
-        return reinterpret_cast<uintptr_t>(m_bounceSession);
+        return reinterpret_cast<uintptr_t>(handle(kHirariHandleBounceSession));
     }
     bool execute_auto_arrangement();
     // The Rust layout gather (layout_gather.rs) owns the snapshot, its JSON and
@@ -28,9 +28,9 @@
     // continues to use get_project_generation().
     uint64_t get_project_layout_revision() const noexcept;
     uint64_t get_project_state_revision() const noexcept;
-    void mark_project_state_changed() { hirari_engine_block_mark_control(m_engineBlock); }
+    void mark_project_state_changed() { hirari_engine_block_mark_control(handle(kHirariHandleEngineBlock)); }
     void mark_project_layout_changed() const {
-        hirari_layout_revision_mark(hirari_engine_block_layout_revision(m_engineBlock));
+        hirari_layout_revision_mark(hirari_engine_block_layout_revision(handle(kHirariHandleEngineBlock)));
     }
     bool set_articulation_map(uint32_t trackId, uint32_t mapHash);
     static void installExpressionMapEditHost();

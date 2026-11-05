@@ -24,18 +24,18 @@ size_t HirariUnifiedEngine::regionHostListTracks(void* host, uint32_t* out,
 }
 
 void* HirariUnifiedEngine::regionHostTempoState(void* host) {
-    return host ? static_cast<HirariUnifiedEngine*>(host)->m_tempoState : nullptr;
+    return host ? static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleTempo) : nullptr;
 }
 
 void* HirariUnifiedEngine::regionHostUndoState(void* host) {
     if (!host) return nullptr;
-    return static_cast<HirariUnifiedEngine*>(host)->m_undoState;
+    return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleUndo);
 }
 
 double HirariUnifiedEngine::regionHostSampleRate(void* host) {
     if (!host) return 0.0;
     return hirari_engine_block_device_sample_rate(
-        static_cast<HirariUnifiedEngine*>(host)->m_engineBlock);
+        static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleEngineBlock));
 }
 
 size_t HirariUnifiedEngine::regionHostTrackIdentity(void* host, uint32_t trackId) {

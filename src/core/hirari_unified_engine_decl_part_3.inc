@@ -7,7 +7,7 @@
     // such as the analysis bridge. The realtime callback traverses the same one.
     HirariTrackSnapshot published_tracks() const noexcept {
         HirariTrackSnapshot published{};
-        hirari_engine_track_snapshot(m_trackTable, &published);
+        hirari_engine_track_snapshot(handle(kHirariHandleTrackTable), &published);
         return published;
     }
 

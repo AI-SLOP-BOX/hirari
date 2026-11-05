@@ -185,6 +185,25 @@ production support.
   `hirari_engine_block_join_callbacks`. `prepareToPlay` still raises the same
   two C++ exceptions, off the status the Rust preparation walk returns.
   C++ 3673 -> 3613 (-60).
+- The engine's stores live in one Rust bag. `engine_session.rs` creates the
+  track table, the hardware input store, the rings, the MIDI clock and snapshot
+  store, the MPE state and manager, the preview synth and sampler, the meter,
+  the limiter, the telemetry hub, the bounce session, the sidechain routes and
+  engine, the routing and bus systems, the macro and learn maps, the journal,
+  the Control Room, the external sync, the arrangement document, the undo
+  history, the tempo map, the PDC manager, the layout revision and the block
+  that binds twenty of them, and it tears them down in the order the callbacks
+  and the writer threads require. `HirariUnifiedEngine` keeps the bag and asks
+  it for a handle by kind, so its twenty-nine members, the `HirariEngineBlockHandles`
+  aggregate and the hand-written construction and destruction lists are gone —
+  along with two leaks the lists carried: the limiter the constructor built a
+  second time and the layout revision nothing ever released. 144 FFI
+  declarations whose last C++ caller was one of those lists went with them. A
+  new `engine_session_contract` test pins what the bag is now responsible for:
+  every slot bound before the engine's own constructor body runs, the graph
+  slots retired alone and read back null afterwards, an unknown kind answered as
+  null, and no two engines sharing a queue, a journal or an undo history.
+  C++ 3613 -> 3266 (-347).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its
