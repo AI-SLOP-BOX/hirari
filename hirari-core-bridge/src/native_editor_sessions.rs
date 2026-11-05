@@ -1,14 +1,14 @@
 //! Session registry for open native plug-in editor windows.
 //!
-//! The platform callbacks stay in C++ because they own the window toolkit, but
-//! the (track, plug-in) -> session mapping and its key packing live here so the
-//! engine keeps a single owner for editor bookkeeping.
+//! The table is reached through [`HirariCore`](crate::HirariCore), which owns
+//! one registry per project session, so the (track, plug-in) -> session mapping
+//! lives in exactly one place regardless of which surface opens or closes an
+//! editor.
 
 use std::collections::HashMap;
-use std::ffi::c_void;
 use std::sync::Mutex;
 
-struct SessionRegistry {
+pub(crate) struct SessionRegistry {
     sessions: Mutex<HashMap<u64, u64>>,
 }
 
@@ -17,13 +17,13 @@ fn key(track: u32, plugin: u32) -> u64 {
 }
 
 impl SessionRegistry {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
         }
     }
 
-    fn adopt(&self, track: u32, plugin: u32, session: u64) {
+    pub(crate) fn adopt(&self, track: u32, plugin: u32, session: u64) {
         if session == 0 {
             return;
         }
@@ -32,19 +32,19 @@ impl SessionRegistry {
         }
     }
 
-    fn forget(&self, track: u32, plugin: u32) -> bool {
+    pub(crate) fn forget(&self, track: u32, plugin: u32) -> bool {
         self.sessions
             .lock()
             .is_ok_and(|mut sessions| sessions.remove(&key(track, plugin)).is_some())
     }
 
-    fn clear(&self) {
+    pub(crate) fn clear(&self) {
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.clear();
         }
     }
 
-    fn session(&self, track: u32, plugin: u32) -> u64 {
+    pub(crate) fn session(&self, track: u32, plugin: u32) -> u64 {
         self.sessions
             .lock()
             .ok()
@@ -52,74 +52,11 @@ impl SessionRegistry {
             .unwrap_or(0)
     }
 
-    fn embedded(&self, track: u32, plugin: u32) -> bool {
+    pub(crate) fn embedded(&self, track: u32, plugin: u32) -> bool {
         self.sessions
             .lock()
             .is_ok_and(|sessions| sessions.contains_key(&key(track, plugin)))
     }
-}
-
-fn state<'a>(handle: *const c_void) -> Option<&'a SessionRegistry> {
-    unsafe { handle.cast::<SessionRegistry>().as_ref() }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_native_editor_sessions_create() -> *mut c_void {
-    Box::into_raw(Box::new(SessionRegistry::new())).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_editor_sessions_destroy(handle: *mut c_void) {
-    if !handle.is_null() {
-        // SAFETY: handle comes from the matching create function and is dropped once.
-        unsafe { drop(Box::from_raw(handle.cast::<SessionRegistry>())) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_editor_sessions_clear(handle: *mut c_void) {
-    if let Some(state) = state(handle) {
-        state.clear();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_editor_sessions_adopt(
-    handle: *mut c_void,
-    track: u32,
-    plugin: u32,
-    session: u64,
-) {
-    if let Some(state) = state(handle) {
-        state.adopt(track, plugin, session);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_editor_sessions_forget(
-    handle: *mut c_void,
-    track: u32,
-    plugin: u32,
-) -> bool {
-    state(handle).is_some_and(|state| state.forget(track, plugin))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_editor_sessions_embedded(
-    handle: *const c_void,
-    track: u32,
-    plugin: u32,
-) -> bool {
-    state(handle).is_some_and(|state| state.embedded(track, plugin))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_editor_sessions_session(
-    handle: *const c_void,
-    track: u32,
-    plugin: u32,
-) -> u64 {
-    state(handle).map_or(0, |state| state.session(track, plugin))
 }
 
 #[cfg(test)]

@@ -443,6 +443,11 @@ impl HirariCore {
         if let Ok(mut tonal) = self.tonal.lock() {
             *tonal = crate::tonal_sync::TonalOrchestrator::new();
         }
+        // Editor windows belong to the project that opened them, so the session
+        // table resets with the rest of the project-scoped mirrors here.
+        if let Ok(mut sessions) = self.native_editor_sessions.lock() {
+            sessions.clear();
+        }
         if let Ok(mut ids) = self.aux_track_ids.lock() {
             if !ids.is_empty() {
                 ids.clear();

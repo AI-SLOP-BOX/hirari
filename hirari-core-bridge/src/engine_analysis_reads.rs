@@ -388,6 +388,37 @@ pub fn plugin_bypass(core: &HirariUnifiedEngine, tid: u32, plugin_index: u32) ->
     })
 }
 
+/// Display name for one plug-in parameter, read from the built-in effect table
+/// the chain node's kind selects. An insert outside the chain has no kind to
+/// name and a sandboxed worker keeps its labels inside the worker, so both stay
+/// empty — which is what the deleted C++ stub answered for every insert.
+pub fn plugin_parameter_name(
+    core: &HirariUnifiedEngine,
+    tid: u32,
+    plugin_index: u32,
+    parameter_id: u32,
+) -> String {
+    let Some(session) = session(core, tid) else {
+        return String::new();
+    };
+    let chain = session.chain() as *const c_void;
+    let count = unsafe { effect_chain_host::hirari_effect_chain_count(chain) };
+    if plugin_index >= count {
+        return String::new();
+    }
+    let kind = unsafe { effect_chain_host::hirari_effect_chain_node_kind(chain, plugin_index) };
+    if kind == crate::effect_chain_nodes::SANDBOX_KIND {
+        return String::new();
+    }
+    let name = crate::builtin_effect_names::hirari_builtin_effect_parameter_name(kind, parameter_id);
+    if name.is_null() {
+        return String::new();
+    }
+    unsafe { std::ffi::CStr::from_ptr(name) }
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// Drains every track's watchdog counter, summing the edges the audio callback
 /// reported. The wrap is the deleted C++ accumulator's own.
 pub fn watchdog_trips(core: &HirariUnifiedEngine) -> u32 {

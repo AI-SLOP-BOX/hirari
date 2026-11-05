@@ -195,12 +195,6 @@ pub mod ffi {
             -> bool;
 
         fn set_automation_record_mode(self: Pin<&mut HirariUnifiedEngine>, mode: u32) -> bool;
-        fn get_plugin_parameter_name(
-            self: &AudioEngine,
-            tid: u32,
-            plugin_index: u32,
-            parameter_id: u32,
-        ) -> String;
         fn set_plugin_bypass(
             self: Pin<&mut HirariUnifiedEngine>,
             tid: u32,
@@ -222,24 +216,6 @@ pub mod ffi {
         fn cancel_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
         fn pause_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
         fn resume_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
-        fn has_plugin_native_editor(
-            self: &HirariUnifiedEngine,
-            track_id: u32,
-            plugin_index: u32,
-        ) -> bool;
-        fn plugin_native_editor_embedded(
-            self: &AudioEngine,
-            track_id: u32,
-            plugin_index: u32,
-        ) -> bool;
-        fn open_plugin_native_editor(
-            self: &AudioEngine,
-            track_id: u32,
-            plugin_index: u32,
-            parent: u64,
-        ) -> u64;
-        fn close_plugin_native_editor(self: &AudioEngine, track_id: u32, plugin_index: u32)
-            -> bool;
         fn midi_clock_tick(self: &HirariUnifiedEngine, timestamp: u64);
         fn midi_clock_ticks(self: &HirariUnifiedEngine) -> u64;
         fn midi_clock_last_tick(self: &HirariUnifiedEngine) -> u64;

@@ -113,6 +113,9 @@ impl HirariCore {
             stem_batch: std::sync::Mutex::new(None),
             ara2_protocol: std::sync::Mutex::new(crate::ara2_protocol::Ara2ProtocolEndpoint::default()),
             tonal: std::sync::Mutex::new(crate::tonal_sync::TonalOrchestrator::new()),
+            native_editor_sessions: std::sync::Mutex::new(
+                crate::native_editor_sessions::SessionRegistry::new(),
+            ),
         })
     }
 

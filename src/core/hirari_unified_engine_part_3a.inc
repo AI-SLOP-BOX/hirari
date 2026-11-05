@@ -45,19 +45,9 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
 // The plug-in chain reads, the sandbox restarts and the channel EQ went to
 // Rust (engine_analysis_reads.rs): a session resolves the live track and the
 // chain or runtime storage answers, so these engine methods no longer exist.
-// Native plugin editors require a processor that publishes a vendor UI. The
-// chain's built-in and sandbox nodes never did, so these answers are constant
-// and the whole API is a candidate for removal.
-bool HirariUnifiedEngine::has_plugin_native_editor(uint32_t, uint32_t) const { return false; }
-uint64_t HirariUnifiedEngine::open_plugin_native_editor(uint32_t, uint32_t, uintptr_t) const {
-    return 0;
-}
-bool HirariUnifiedEngine::close_plugin_native_editor(uint32_t, uint32_t, uint64_t) const {
-    return false;
-}
-std::string HirariUnifiedEngine::get_plugin_parameter_name(uint32_t, uint32_t, uint32_t) const {
-    return {};
-}
+// Parameter names and native editor sessions are Rust-side too: the chain host
+// answers the name from its own effect tables and HirariCore holds the session
+// registry, so this facade no longer forwards either.
 bool HirariUnifiedEngine::set_plugin_bypass(uint32_t tid, uint32_t pluginIndex, bool bypassed) {
     if (!hirari_plugin_edit_set_bypass(this, tid, pluginIndex, bypassed)) return false;
     // Bypass changes alter the active latency path. Rebuild the published

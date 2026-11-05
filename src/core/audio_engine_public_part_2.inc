@@ -3,42 +3,14 @@
     }
     // The sandbox query surface lives in Rust (plugin_sandbox_maintenance.rs);
     // it reaches the graph through the sandbox host ops, not this bridge.
+    // Parameter names and native editor sessions are Rust-side too: the chain
+    // host answers the name from its own effect tables and HirariCore holds the
+    // session registry, so this facade no longer forwards either.
 
-    rust::String get_plugin_parameter_name(uint32_t tid, uint32_t pluginIndex,
-                                           uint32_t parameterId) const {
-        return rust::String(m_engine ? m_engine->get_plugin_parameter_name(tid, pluginIndex, parameterId) : "");
-    }
     bool save_project(rust::Str path) const { return m_engine && m_engine->saveProject(std::string_view(path.data(), path.size())); }
     bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }
     bool bounce_project(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project(std::string_view(path.data(), path.size()), format); }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
-
-
-    uint64_t open_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex,
-                                       uint64_t parent) const {
-        if (!m_engine || !m_engine->has_plugin_native_editor(trackId, pluginIndex)) return 0;
-        uint64_t session = m_engine->open_plugin_native_editor(
-            trackId, pluginIndex, static_cast<uintptr_t>(parent));
-        if (session != 0)
-            hirari_native_editor_sessions_adopt(m_nativeEditorSessions, trackId, pluginIndex,
-                                               session);
-        return session;
-    }
-    bool close_plugin_native_editor(uint32_t trackId, uint32_t pluginIndex) const {
-        const uint64_t session =
-            hirari_native_editor_sessions_session(m_nativeEditorSessions, trackId, pluginIndex);
-        const bool processorClosed = session != 0 && m_engine &&
-            m_engine->close_plugin_native_editor(trackId, pluginIndex, session);
-        const bool wrapperClosed = session != 0 &&
-            hirari_native_editor_sessions_forget(m_nativeEditorSessions, trackId, pluginIndex);
-        if (processorClosed && !wrapperClosed)
-            hirari_native_editor_sessions_forget(m_nativeEditorSessions, trackId, pluginIndex);
-        return wrapperClosed || processorClosed;
-    }
-    bool plugin_native_editor_embedded(uint32_t trackId, uint32_t pluginIndex) const {
-        return hirari_native_editor_sessions_embedded(m_nativeEditorSessions, trackId, pluginIndex);
-    }
-
 
 
     bool append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, rust::Str operation, float parameter, bool enabled) const {

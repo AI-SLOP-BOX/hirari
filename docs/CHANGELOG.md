@@ -93,6 +93,19 @@ production support.
   the cached read and asserts it agrees with the blocking one, on top of the
   engine-backed plug-in workflow the integration suite already covers.
   C++ 4810 -> 4711 (-99).
+- Native editor sessions are now owned by the Rust project state.
+  `HirariCore` holds the `SessionRegistry` directly, so the table resets with
+  the rest of the project mirrors in `new_project` instead of riding on a C++
+  `AudioEngine` handle that created and destroyed it. The Rust-side close keeps
+  the same "forget only an adopted session" answer, the embedded query reads the
+  registry, and the parameter name no longer returns the C++ constant empty
+  string: `engine_analysis_reads.rs` resolves the chain node's kind and asks the
+  built-in effect tables for the real name, guarding missing tracks, out-of-range
+  inserts, sandbox nodes and unknown parameters with the same empty answer. Four
+  engine stubs, the `AudioEngine` inline editor methods, the session handle and
+  the six `rust_ffi.hpp` registry declarations are deleted; a new integration
+  test asserts the chain-backed names ("Threshold", "Ratio") and every empty
+  guard. C++ 4711 -> 4658 (-53).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

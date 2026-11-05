@@ -142,40 +142,39 @@ impl HirariCore {
         serde_json::json!({"ok":true,"completed":completed}).to_string()
     }
 
-    pub fn open_plugin_native_editor_json(&self, track: u32, plugin: u32, parent: u64) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+    /// Native editors need a processor that publishes a vendor UI. No node in the
+    /// Rust plug-in chain does, so the open path declines and the parameter
+    /// fallback stays the only editor surface — the same answers the deleted C++
+    /// stubs gave, now decided where the chain itself lives.
+    pub fn open_plugin_native_editor_json(&self, _track: u32, _plugin: u32, _parent: u64) -> String {
+        if self.engine.as_ref().is_none() {
             return r#"{"ok":false,"code":"engine_unavailable","retryable":true}"#.into();
-        };
-        if !engine.has_plugin_native_editor(track, plugin) {
-            return r#"{"ok":false,"code":"native_editor_unavailable","retryable":false}"#.into();
         }
-        let session = engine.open_plugin_native_editor(track, plugin, parent);
-        if session == 0 {
-            return r#"{"ok":false,"code":"native_editor_open_failed","retryable":true}"#.into();
-        }
-        serde_json::json!({"ok":true,"track":track,"plugin":plugin,"session":session,"embedded":true}).to_string()
+        r#"{"ok":false,"code":"native_editor_unavailable","retryable":false}"#.into()
     }
 
     pub fn close_plugin_native_editor_json(&self, track: u32, plugin: u32) -> String {
-        let ok = self
-            .engine
-            .as_ref()
-            .is_some_and(|engine| engine.close_plugin_native_editor(track, plugin));
-        serde_json::json!({"ok":ok,"track":track,"plugin":plugin}).to_string()
+        let wrapper_closed = self
+            .native_editor_sessions
+            .lock()
+            .is_ok_and(|sessions| sessions.session(track, plugin) != 0 && sessions.forget(track, plugin));
+        serde_json::json!({"ok":wrapper_closed,"track":track,"plugin":plugin}).to_string()
+    }
+
+    /// Whether a host still holds an editor window for this insert. The registry
+    /// is the whole answer now that no processor publishes a vendor UI to close.
+    pub fn plugin_native_editor_embedded(&self, track: u32, plugin: u32) -> bool {
+        self.native_editor_sessions
+            .lock()
+            .is_ok_and(|sessions| sessions.embedded(track, plugin))
     }
 
     pub fn reset_sandboxed_plugin(&self, track_id: u32, index: u32) -> bool {
         self.restart_sandboxed_plugin(track_id, index)
     }
     pub fn plugin_editor_capability_diagnostic_json(&self, track: u32, index: u32) -> String {
-        let native_editor = self
-            .engine
-            .as_ref()
-            .is_some_and(|engine| engine.has_plugin_native_editor(track, index));
-        let embedded = self
-            .engine
-            .as_ref()
-            .is_some_and(|engine| engine.plugin_native_editor_embedded(track, index));
+        let native_editor = false;
+        let embedded = self.plugin_native_editor_embedded(track, index);
         // Detecting a vendor editor is not the same thing as embedding its
         // HWND/NSView.  Keep that distinction explicit so clients cannot
         // accidentally present the parameter fallback as a native editor.
@@ -191,14 +190,8 @@ impl HirariCore {
     pub fn plugin_parameter_snapshot_json(&self, track: u32, plugin: u32) -> String {
         let count = self.get_plugin_parameter_count(track, plugin).min(2048);
         let parameters = (0..count).map(|id| serde_json::json!({"id":id,"name":self.get_plugin_parameter_name(track,plugin,id),"normalized":self.get_plugin_parameter(track,plugin,id)})).collect::<Vec<_>>();
-        let native_editor = self
-            .engine
-            .as_ref()
-            .is_some_and(|engine| engine.has_plugin_native_editor(track, plugin));
-        let embedded = self
-            .engine
-            .as_ref()
-            .is_some_and(|engine| engine.plugin_native_editor_embedded(track, plugin));
+        let native_editor = false;
+        let embedded = self.plugin_native_editor_embedded(track, plugin);
         serde_json::json!({
             "ok": true,
             "parameters": parameters,

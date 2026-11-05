@@ -204,6 +204,13 @@ pub struct HirariCore {
     /// owning it here is what let that class be deleted without losing the
     /// answer to "is this note in the project's scale".
     pub(crate) tonal: std::sync::Mutex<crate::tonal_sync::TonalOrchestrator>,
+    /// (track, plug-in) -> open native editor session. The table itself was
+    /// always Rust's; what used to live here in C++ was only the handle the
+    /// session-scoped facade created with it and destroyed alongside it.
+    /// Holding the registry per Core keeps that lifetime and lets the facade's
+    /// editor methods go away.
+    pub(crate) native_editor_sessions:
+        std::sync::Mutex<crate::native_editor_sessions::SessionRegistry>,
 }
 
 #[derive(Clone)]

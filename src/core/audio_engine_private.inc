@@ -34,6 +34,4 @@ private:
     // The Rust device host this session constructed.
     void* m_driver = nullptr;
     mutable std::mutex m_configMutex;
-    // (track, plug-in) native editor sessions; the table lives in Rust.
-    void* m_nativeEditorSessions = hirari_native_editor_sessions_create();
 };

@@ -203,6 +203,20 @@ fn rust_project_v2_round_trips_built_in_plugin_state() {
 }
 
 #[test]
+fn built_in_plugin_parameter_names_answer_from_the_chain() {
+    let _guard = native_engine_test_guard();
+    let core = HirariCore::new().expect("core must initialize");
+    let track_id = core.add_track(0);
+    assert_eq!(core.get_plugin_parameter_name(track_id, 0, 0), "");
+    assert!(core.add_plugin(track_id, 0));
+    assert_eq!(core.get_plugin_parameter_name(track_id, 0, 0), "Threshold");
+    assert_eq!(core.get_plugin_parameter_name(track_id, 0, 1), "Ratio");
+    assert_eq!(core.get_plugin_parameter_name(track_id, 0, 7), "");
+    assert_eq!(core.get_plugin_parameter_name(track_id, 1, 0), "");
+    assert_eq!(core.get_plugin_parameter_name(track_id + 9999, 0, 0), "");
+}
+
+#[test]
 fn serial_plugin_chain_state_and_order_survive_project_reload() {
     let _guard = native_engine_test_guard();
     let core = HirariCore::new().expect("core must initialize");

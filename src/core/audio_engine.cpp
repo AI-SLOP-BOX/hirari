@@ -43,7 +43,6 @@ AudioEngine::AudioEngine(bool startDevice)
         }
         hirari_audio_driver_host_destroy(m_driver);
         m_driver = nullptr;
-        hirari_native_editor_sessions_destroy(m_nativeEditorSessions);
     }
 
     void AudioEngine::shutdown() const {

@@ -881,9 +881,18 @@ impl ffi::AudioEngine {
     pub fn set_plugin_bypass(&self, tid: u32, plugin_index: u32, bypassed: bool) -> bool {
         pinned(self).set_plugin_bypass(tid, plugin_index, bypassed)
     }
-    pub fn has_plugin_native_editor(&self, track_id: u32, plugin_index: u32) -> bool {
-        self.get_core()
-            .has_plugin_native_editor(track_id, plugin_index)
+    pub fn get_plugin_parameter_name(
+        &self,
+        track_id: u32,
+        plugin_index: u32,
+        parameter_id: u32,
+    ) -> String {
+        crate::engine_analysis_reads::plugin_parameter_name(
+            self.get_core(),
+            track_id,
+            plugin_index,
+            parameter_id,
+        )
     }
     pub fn cancel_bounce(&self) -> bool {
         pinned(self).cancel_bounce()
