@@ -23,8 +23,8 @@
     // Rust owns every insert: node instances, order, sandbox identity and the
     // built-in-instrument count. The track keeps only the chain handle.
     void* m_chain = hirari_effect_chain_create();
-    // Last sampled non-finite count, so a polled diagnostic never blocks.
-    mutable std::atomic<uint64_t> m_lastNonFiniteSamples{0};
+    // The non-finite poll cache moved into the Rust chain host, which keeps the
+    // last measurement outside its control mutex.
     // Rust owns the block's event table; the head stages into it and the chain
     // reads it in place, so the track keeps only the handle.
     void* m_pluginMidi = hirari_midi_buffer_create();

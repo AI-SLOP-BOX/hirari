@@ -1,8 +1,5 @@
-    void setEq(float lowBoostDb, float lowCutDb, float highBoostDb, float highCutDb) {
-        hirari_track_runtime_set_eq(
-            m_runtime, hirari_track_eq_gain(lowBoostDb, lowCutDb),
-            hirari_track_eq_gain(highBoostDb, highCutDb));
-    }
+    // The channel EQ write moved to Rust (engine_analysis_reads.rs), which maps
+    // the dB pairs through the shared gain policy and writes the runtime.
     // The Rust runtime retunes the region store, the strip and the panner,
     // grows every block the track renders through and prepares the plug-in
     // chain. Only the allocation policy stays here because it is a C++

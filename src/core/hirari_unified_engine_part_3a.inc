@@ -42,40 +42,9 @@ void HirariUnifiedEngine::installSandboxMaintenanceHost() {
     hirari_plugin_sandbox_maintenance_host_install(&ops);
 }
 
-bool HirariUnifiedEngine::retry_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
-    return mutateLockedTrack(trackId,
-                             [&](Track& track) { return track.retrySandboxedPlugin(sandboxIndex); });
-}
-
-bool HirariUnifiedEngine::restart_sandboxed_plugin(uint32_t trackId, uint32_t sandboxIndex) {
-    return mutateLockedTrack(trackId,
-                             [&](Track& track) { return track.restartSandboxedPlugin(sandboxIndex); });
-}
-
-uint32_t HirariUnifiedEngine::take_watchdog_trips() {
-    uint32_t trips = 0;
-    const std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (Track* track : lockedTracks()) trips += track->takeWatchdogTrips();
-    return trips;
-}
-
-uint64_t HirariUnifiedEngine::non_finite_plugin_samples() const {
-    uint64_t count = 0;
-    const std::lock_guard<std::mutex> lock(m_tracksMutex);
-    for (Track* track : lockedTracks()) count += track->nonFiniteSampleCount();
-    return count;
-}
-
-float HirariUnifiedEngine::get_plugin_parameter(uint32_t tid, uint32_t pluginIndex,
-                                              uint32_t parameterId) const {
-    return queryLockedTrack(tid, 0.0f, [&](const Track& track) {
-        return track.getPluginParameter(pluginIndex, parameterId);
-    });
-}
-uint32_t HirariUnifiedEngine::get_plugin_parameter_count(uint32_t tid, uint32_t pluginIndex) const {
-    return queryLockedTrack(tid, 0u,
-                            [&](const Track& track) { return track.getPluginParameterCount(pluginIndex); });
-}
+// The plug-in chain reads, the sandbox restarts and the channel EQ went to
+// Rust (engine_analysis_reads.rs): a session resolves the live track and the
+// chain or runtime storage answers, so these engine methods no longer exist.
 // Native plugin editors require a processor that publishes a vendor UI. The
 // chain's built-in and sandbox nodes never did, so these answers are constant
 // and the whole API is a candidate for removal.

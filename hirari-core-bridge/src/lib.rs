@@ -180,18 +180,6 @@ pub mod ffi {
             group_id: u32,
         ) -> bool;
         fn new_project(self: Pin<&mut HirariUnifiedEngine>);
-        fn take_watchdog_trips(self: Pin<&mut HirariUnifiedEngine>) -> u32;
-        fn non_finite_plugin_samples(self: &HirariUnifiedEngine) -> u64;
-        fn retry_sandboxed_plugin(
-            self: Pin<&mut HirariUnifiedEngine>,
-            track_id: u32,
-            sandbox_index: u32,
-        ) -> bool;
-        fn restart_sandboxed_plugin(
-            self: Pin<&mut HirariUnifiedEngine>,
-            track_id: u32,
-            sandbox_index: u32,
-        ) -> bool;
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
         fn append_region_processing(
@@ -207,17 +195,6 @@ pub mod ffi {
             -> bool;
 
         fn set_automation_record_mode(self: Pin<&mut HirariUnifiedEngine>, mode: u32) -> bool;
-        fn get_plugin_parameter(
-            self: &HirariUnifiedEngine,
-            tid: u32,
-            plugin_index: u32,
-            parameter_id: u32,
-        ) -> f32;
-        fn get_plugin_parameter_count(
-            self: &HirariUnifiedEngine,
-            tid: u32,
-            plugin_index: u32,
-        ) -> u32;
         fn get_plugin_parameter_name(
             self: &AudioEngine,
             tid: u32,
@@ -230,7 +207,6 @@ pub mod ffi {
             plugin_index: u32,
             bypassed: bool,
         ) -> bool;
-        fn get_plugin_bypass(self: &HirariUnifiedEngine, tid: u32, plugin_index: u32) -> bool;
         fn has_sidechain_link(
             self: &HirariUnifiedEngine,
             source_id: u32,
@@ -280,14 +256,6 @@ pub mod ffi {
             self: Pin<&mut HirariUnifiedEngine>,
             tid: u32,
             map_hash: u32,
-        ) -> bool;
-        fn set_track_eq(
-            self: Pin<&mut HirariUnifiedEngine>,
-            tid: u32,
-            low_boost_db: f32,
-            low_cut_db: f32,
-            high_boost_db: f32,
-            high_cut_db: f32,
         ) -> bool;
         fn get_track_correlation(self: &HirariUnifiedEngine, tid: u32) -> f32;
         // The Rust layout gather (layout_gather.rs) walks the live tracks

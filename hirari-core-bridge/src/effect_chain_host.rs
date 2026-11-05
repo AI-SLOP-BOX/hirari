@@ -7,7 +7,7 @@
 //! publication and the realtime reader rules live in `effect_chain.rs`.
 
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -109,6 +109,9 @@ pub struct EffectChainHost {
     midi_instrument_count: AtomicU32,
     last_sandbox_failure: AtomicU8,
     last_sandbox_text: AtomicPtr<c_char>,
+    /// Last value of the polled non-finite diagnostic, kept outside the control
+    /// mutex so a contended poll still reports a measurement.
+    last_non_finite: AtomicU64,
 }
 
 /// One worker's diagnostic snapshot, laid out to match the engine's struct.
@@ -260,6 +263,7 @@ pub extern "C" fn hirari_effect_chain_create() -> *mut c_void {
         midi_instrument_count: AtomicU32::new(0),
         last_sandbox_failure: AtomicU8::new(0),
         last_sandbox_text: AtomicPtr::new(text_pointer(TEXT_NONE)),
+        last_non_finite: AtomicU64::new(0),
     }))
     .cast()
 }
@@ -928,6 +932,21 @@ pub unsafe extern "C" fn hirari_effect_chain_metric_try(
     true
 }
 
+/// The polled non-finite sample count. A contended read keeps the last
+/// measurement, so a UI poll never waits behind a control-thread edit.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_effect_chain_non_finite_samples(state: *const c_void) -> u64 {
+    let Some(host) = (unsafe { host(state.cast_mut()) }) else {
+        return 0;
+    };
+    let Ok(guard) = host.inner.try_lock() else {
+        return host.last_non_finite.load(Ordering::Relaxed);
+    };
+    let value = node_metric(&guard, 1);
+    host.last_non_finite.store(value, Ordering::Relaxed);
+    value
+}
+
 /// Folds node diagnostics and effect tails over the current chain order. Metric
 /// 2 is the serial tail plus the longest parallel branch; the rest sum.
 fn node_metric(inner: &HostInner, metric: u32) -> u64 {
@@ -1559,6 +1578,7 @@ mod tests {
             unsafe {
                 let _ = hirari_effect_chain_metric_try(state as *const _, 2, &mut value);
                 let _ = hirari_effect_chain_metric_try(state as *const _, 1, &mut value);
+                let _ = hirari_effect_chain_non_finite_samples(state as *const _);
             }
             worst = worst.max(started.elapsed());
             std::thread::yield_now();
@@ -1568,6 +1588,11 @@ mod tests {
         assert!(
             worst < Duration::from_millis(5),
             "diagnostic reader blocked on the control thread: {worst:?}"
+        );
+        assert_eq!(
+            unsafe { hirari_effect_chain_non_finite_samples(state as *const _) },
+            unsafe { hirari_effect_chain_metric(state as *const _, 1) },
+            "the cached non-finite poll must report the same count as the blocking read"
         );
         unsafe { hirari_effect_chain_destroy(state) };
     }

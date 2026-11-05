@@ -36,8 +36,6 @@
     }
     bool set_articulation_map(uint32_t trackId, uint32_t mapHash);
     static void installExpressionMapEditHost();
-    bool set_track_eq(uint32_t trackId, float lowBoostDb, float lowCutDb,
-                      float highBoostDb, float highCutDb);
     bool set_project_scale(int32_t root, int32_t type);
     
     // Phase 11: Neural Telemetry

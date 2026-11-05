@@ -61,30 +61,9 @@
     }
 
     void reclaimEffectChainRetiredMemory() { hirari_effect_chain_reclaim(m_chain); }
-    uint32_t takeWatchdogTrips() {
-        return static_cast<uint32_t>(hirari_effect_chain_metric(m_chain, 0));
-    }
-    uint64_t nonFiniteSampleCount() const noexcept {
-        uint64_t value = 0;
-        // A polled diagnostic must not wait behind a control-thread edit, so a
-        // contended read keeps the last measurement.
-        if (hirari_effect_chain_metric_try(m_chain, 1, &value))
-            m_lastNonFiniteSamples.store(value, std::memory_order_relaxed);
-        return m_lastNonFiniteSamples.load(std::memory_order_relaxed);
-    }
     size_t getPluginCount() const { return hirari_effect_chain_count(m_chain); }
     size_t sandboxSlotCount() const noexcept {
         return hirari_effect_chain_sandbox_slot_count(m_chain);
-    }
-    // An explicit user restart may recover a quarantined worker and resets the
-    // bounded automatic-restart budget; it does not clear the scan-cache fault.
-    bool restartSandboxedPlugin(size_t sandboxIndex) {
-        return commitLayoutChange(
-            hirari_effect_chain_sandbox_restart(m_chain, sandboxIndex, true, false));
-    }
-    bool retrySandboxedPlugin(size_t sandboxIndex) {
-        return commitLayoutChange(
-            hirari_effect_chain_sandbox_restart(m_chain, sandboxIndex, true, true));
     }
     uint32_t maintainSandboxedPlugins(bool autoRestart) {
         const uint32_t recovered = hirari_effect_chain_sandbox_maintain(m_chain, autoRestart);
@@ -119,14 +98,7 @@
         return commitEditChange(
             hirari_effect_chain_set_parameter(m_chain, pluginIndex, parameterId, value));
     }
-    virtual float getPluginParameter(uint32_t pluginIndex, uint32_t parameterId) const noexcept {
-        return hirari_effect_chain_parameter(m_chain, pluginIndex, parameterId);
-    }
-    virtual uint32_t getPluginParameterCount(uint32_t pluginIndex) const noexcept {
-        return hirari_effect_chain_parameter_count(m_chain, pluginIndex);
-    }
-    bool getPluginBypass(uint32_t pluginIndex) const {
-        return hirari_effect_chain_bypass(m_chain, pluginIndex);
-    }
+    // The chain's parameter, bypass and sandbox-repair reads are Rust-side now
+    // (engine_analysis_reads.rs resolves the track's chain storage directly).
 
 public:

@@ -1054,7 +1054,6 @@ extern "C" bool hirari_track_midi_expression_map_set(
     const void* state, uint8_t map_kind, const uint8_t* data, size_t length);
 extern "C" void* hirari_automation_recorder_instance();
 extern "C" uint32_t hirari_automation_record_mode_apply(uint32_t mode);
-extern "C" float hirari_track_eq_gain(float boost_db, float cut_db);
 extern "C" void* hirari_track_pdc_delay_create();
 extern "C" void hirari_track_pdc_delay_destroy(void* state);
 extern "C" void* hirari_track_holographic_panner_create();
@@ -1082,16 +1081,9 @@ extern "C" bool hirari_effect_chain_restore(
     void* state, uint32_t index, uint32_t token, bool bypassed, bool parallel);
 extern "C" bool hirari_effect_chain_move(void* state, uint32_t from, uint32_t to);
 extern "C" uint32_t hirari_effect_chain_count(const void* state);
-extern "C" bool hirari_effect_chain_bypass(const void* state, uint32_t index);
 extern "C" bool hirari_effect_chain_set_parameter(
     void* state, uint32_t index, uint32_t parameter_id, float value);
-extern "C" float hirari_effect_chain_parameter(
-    const void* state, uint32_t index, uint32_t parameter_id);
-extern "C" uint32_t hirari_effect_chain_parameter_count(const void* state, uint32_t index);
 extern "C" uint32_t hirari_effect_chain_total_latency_samples(const void* state);
-extern "C" uint64_t hirari_effect_chain_metric(const void* state, uint32_t metric);
-extern "C" bool hirari_effect_chain_metric_try(
-    const void* state, uint32_t metric, uint64_t* out_value);
 extern "C" void hirari_effect_chain_reclaim(void* state);
 /// Runs the published node list over one block. The channel table and frame
 /// count come from the caller's own audio-buffer storage handle.
@@ -1110,8 +1102,6 @@ static_assert(sizeof(HirariEffectChainSandboxStatus) == 20,
 extern "C" size_t hirari_effect_chain_sandbox_slot_count(const void* state);
 extern "C" bool hirari_effect_chain_sandbox_status(
     const void* state, size_t slot, HirariEffectChainSandboxStatus* out);
-extern "C" bool hirari_effect_chain_sandbox_restart(
-    void* state, size_t slot, bool force, bool record_success);
 extern "C" uint32_t hirari_effect_chain_sandbox_maintain(void* state, bool auto_restart);
 // Per-track name storage. Rust validates and holds the bytes; the engine keeps
 // only the handle, created with the track and destroyed with it.
@@ -1148,7 +1138,6 @@ extern "C" void hirari_track_runtime_set_delays(void* state, uint32_t pdc, uint3
 extern "C" uint32_t hirari_track_runtime_pdc_requested(void* state);
 extern "C" uint32_t hirari_track_runtime_track_delay_samples(void* state);
 extern "C" void hirari_track_runtime_set_spatial(void* state, float x, float y, float z);
-extern "C" void hirari_track_runtime_set_eq(void* state, float low, float high);
 extern "C" void hirari_track_runtime_publish_regions(
     void* state, const uint8_t* inputs, size_t count, uint8_t published);
 extern "C" void hirari_track_runtime_reset_for_offline_render(void* state);

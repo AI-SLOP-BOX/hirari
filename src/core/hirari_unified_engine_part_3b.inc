@@ -1,7 +1,3 @@
-bool HirariUnifiedEngine::get_plugin_bypass(uint32_t tid, uint32_t pluginIndex) const {
-    return queryLockedTrack(tid, false,
-                           [&](const Track& track) { return track.getPluginBypass(pluginIndex); });
-}
 uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
     return queryLockedTrack(tid, uint32_t{0},
                             [&](const Track& track) { return track.getTrackDelaySamples(); });

@@ -1,12 +1,3 @@
-bool HirariUnifiedEngine::set_track_eq(uint32_t trackId, float lowBoostDb, float lowCutDb,
-                                     float highBoostDb, float highCutDb) {
-    std::lock_guard<std::mutex> lock(m_tracksMutex);
-    Track* track = findTrackLocked(trackId);
-    if (!track) return false;
-    track->setEq(lowBoostDb, lowCutDb, highBoostDb, highCutDb);
-    return true;
-}
-
 // History control (undo, redo, transactions, counts) is Rust-owned; the C++
 // facade calls the Rust entry points directly. The one thing that must stay
 // here is the graph resync that follows a replayed structural edit.

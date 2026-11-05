@@ -9,6 +9,7 @@ use crate::analysis_views;
 use crate::audio_driver_host;
 use crate::bounce_driver;
 use crate::channel_strip;
+use crate::effect_chain_host;
 use crate::engine_block_host::{
     HirariEngineTelemetry, hirari_engine_block_track_table, hirari_engine_telemetry_active_index,
     hirari_engine_telemetry_snapshot,
@@ -20,6 +21,9 @@ use crate::layout_gather;
 use crate::master_meter;
 use crate::region_store;
 use crate::tempo;
+use crate::track_channel_eq;
+use crate::track_runtime;
+use crate::track_session::{self, HirariTrackSessionOps, TrackSession};
 use std::ffi::c_void;
 
 fn block_handle(core: &HirariUnifiedEngine) -> *const c_void {
@@ -295,4 +299,160 @@ fn with_track_storage<R>(
     let result = read(found);
     unsafe { (ops.end)(host) };
     result
+}
+
+/// The engine address a track session pins its lock against.
+fn host(core: &HirariUnifiedEngine) -> *mut c_void {
+    core as *const HirariUnifiedEngine as *mut c_void
+}
+
+/// A live track with the engine's tracks lock held, as the deleted
+/// `queryLockedTrack` and `mutateLockedTrack` prologues resolved it.
+fn session(core: &HirariUnifiedEngine, tid: u32) -> Option<TrackSession> {
+    TrackSession::open(host(core), tid)
+}
+
+/// Releases the tracks lock when the walk leaves, including on a panic.
+struct TracksLock<'a> {
+    ops: &'a HirariTrackSessionOps,
+    host: *mut c_void,
+}
+
+impl Drop for TracksLock<'_> {
+    fn drop(&mut self) {
+        self.ops.unlock_tracks(self.host);
+    }
+}
+
+/// Visits every live track's effect chain with the tracks lock held, in graph
+/// order — the walk the deleted C++ diagnostic polls performed over
+/// `lockedTracks()`.
+fn for_each_chain(core: &HirariUnifiedEngine, mut visit: impl FnMut(*mut c_void)) {
+    let Some(ops) = track_session::engine_ops() else {
+        return;
+    };
+    let table = unsafe { hirari_engine_block_track_table(block_handle(core)) };
+    if table.is_null() {
+        return;
+    }
+    let address = host(core);
+    ops.lock_tracks(address);
+    let _guard = TracksLock {
+        ops: &ops,
+        host: address,
+    };
+    let count = unsafe { engine_track_table::hirari_engine_track_count(table) };
+    let pointers = unsafe { engine_track_table::hirari_engine_track_ptrs(table) };
+    if pointers.is_null() {
+        return;
+    }
+    // SAFETY: the table's buffer holds `count` entries while its lock is held.
+    for &track in unsafe { std::slice::from_raw_parts(pointers, count) } {
+        if track.is_null() {
+            continue;
+        }
+        visit(ops.storage(track, track_session::STORAGE_CHAIN));
+    }
+}
+
+/// One plug-in parameter, or 0.0 when the track is not in the graph.
+pub fn plugin_parameter(
+    core: &HirariUnifiedEngine,
+    tid: u32,
+    plugin_index: u32,
+    parameter_id: u32,
+) -> f32 {
+    session(core, tid).map_or(0.0, |session| unsafe {
+        effect_chain_host::hirari_effect_chain_parameter(
+            session.chain() as *const c_void,
+            plugin_index,
+            parameter_id,
+        )
+    })
+}
+
+/// How many parameters one plug-in publishes, or 0 for a missing track.
+pub fn plugin_parameter_count(core: &HirariUnifiedEngine, tid: u32, plugin_index: u32) -> u32 {
+    session(core, tid).map_or(0, |session| unsafe {
+        effect_chain_host::hirari_effect_chain_parameter_count(
+            session.chain() as *const c_void,
+            plugin_index,
+        )
+    })
+}
+
+/// Whether one insert is bypassed, or false for a missing track.
+pub fn plugin_bypass(core: &HirariUnifiedEngine, tid: u32, plugin_index: u32) -> bool {
+    session(core, tid).is_some_and(|session| unsafe {
+        effect_chain_host::hirari_effect_chain_bypass(session.chain() as *const c_void, plugin_index)
+    })
+}
+
+/// Drains every track's watchdog counter, summing the edges the audio callback
+/// reported. The wrap is the deleted C++ accumulator's own.
+pub fn watchdog_trips(core: &HirariUnifiedEngine) -> u32 {
+    let mut trips = 0_u32;
+    for_each_chain(core, |chain| {
+        trips = trips.wrapping_add(unsafe {
+            effect_chain_host::hirari_effect_chain_metric(chain as *const c_void, 0) as u32
+        });
+    });
+    trips
+}
+
+/// Every track's non-finite sample count, keeping each chain's last measurement
+/// while a control edit holds it.
+pub fn non_finite_plugin_samples(core: &HirariUnifiedEngine) -> u64 {
+    let mut samples = 0_u64;
+    for_each_chain(core, |chain| {
+        samples = samples.wrapping_add(unsafe {
+            effect_chain_host::hirari_effect_chain_non_finite_samples(chain as *const c_void)
+        });
+    });
+    samples
+}
+
+/// Restarts one quarantined worker. `clears_scan_fault` separates the explicit
+/// user restart from the retry, which also clears the path's scan-cache fault.
+/// A change only bumps the layout revision, leaving the frozen render valid.
+fn sandbox_restart(core: &HirariUnifiedEngine, tid: u32, slot: u32, clears_scan_fault: bool) -> bool {
+    session(core, tid).is_some_and(|session| {
+        let changed = unsafe {
+            effect_chain_host::hirari_effect_chain_sandbox_restart(
+                session.chain(),
+                usize::try_from(slot).unwrap_or(usize::MAX),
+                true,
+                clears_scan_fault,
+            )
+        };
+        session.commit_layout(changed)
+    })
+}
+
+pub fn restart_sandboxed_plugin(core: &HirariUnifiedEngine, tid: u32, slot: u32) -> bool {
+    sandbox_restart(core, tid, slot, false)
+}
+
+pub fn retry_sandboxed_plugin(core: &HirariUnifiedEngine, tid: u32, slot: u32) -> bool {
+    sandbox_restart(core, tid, slot, true)
+}
+
+/// Bands a track's channel EQ. The dB pairs fold into the runtime's gain
+/// coefficients, and a missing track is reported as a rejection.
+pub fn set_track_eq(
+    core: &HirariUnifiedEngine,
+    tid: u32,
+    low_boost_db: f32,
+    low_cut_db: f32,
+    high_boost_db: f32,
+    high_cut_db: f32,
+) -> bool {
+    let (low, high) = (
+        track_channel_eq::hirari_track_eq_gain(low_boost_db, low_cut_db),
+        track_channel_eq::hirari_track_eq_gain(high_boost_db, high_cut_db),
+    );
+    session(core, tid).is_some_and(|session| {
+        unsafe { track_runtime::hirari_track_runtime_set_eq(session.runtime(), low, high) };
+        true
+    })
 }

@@ -815,7 +815,7 @@ impl ffi::AudioEngine {
         unsafe { crate::preview_sampler::hirari_preview_sampler_trigger(preview_sampler(self)) }
     }
     pub fn non_finite_plugin_samples(&self) -> u64 {
-        self.get_core().non_finite_plugin_samples()
+        crate::engine_analysis_reads::non_finite_plugin_samples(self.get_core())
     }
     pub fn get_sandbox_plugin_state_error(&self, track_id: u32, sandbox_index: u32) -> u8 {
         crate::plugin_sandbox_maintenance::sandbox_state_error(
@@ -826,14 +826,13 @@ impl ffi::AudioEngine {
         .0
     }
     pub fn get_plugin_parameter(&self, tid: u32, plugin_index: u32, parameter_id: u32) -> f32 {
-        self.get_core()
-            .get_plugin_parameter(tid, plugin_index, parameter_id)
+        crate::engine_analysis_reads::plugin_parameter(self.get_core(), tid, plugin_index, parameter_id)
     }
     pub fn get_plugin_parameter_count(&self, tid: u32, plugin_index: u32) -> u32 {
-        self.get_core().get_plugin_parameter_count(tid, plugin_index)
+        crate::engine_analysis_reads::plugin_parameter_count(self.get_core(), tid, plugin_index)
     }
     pub fn get_plugin_bypass(&self, tid: u32, plugin_index: u32) -> bool {
-        self.get_core().get_plugin_bypass(tid, plugin_index)
+        crate::engine_analysis_reads::plugin_bypass(self.get_core(), tid, plugin_index)
     }
     pub fn get_track_latency_ms(&self, tid: u32) -> f32 {
         self.get_core().get_track_latency_ms(tid)
@@ -867,13 +866,17 @@ impl ffi::AudioEngine {
         pinned(self).new_project()
     }
     pub fn take_watchdog_trips(&self) -> u32 {
-        pinned(self).take_watchdog_trips()
+        crate::engine_analysis_reads::watchdog_trips(self.get_core())
     }
     pub fn retry_sandboxed_plugin(&self, track_id: u32, sandbox_index: u32) -> bool {
-        pinned(self).retry_sandboxed_plugin(track_id, sandbox_index)
+        crate::engine_analysis_reads::retry_sandboxed_plugin(self.get_core(), track_id, sandbox_index)
     }
     pub fn restart_sandboxed_plugin(&self, track_id: u32, sandbox_index: u32) -> bool {
-        pinned(self).restart_sandboxed_plugin(track_id, sandbox_index)
+        crate::engine_analysis_reads::restart_sandboxed_plugin(
+            self.get_core(),
+            track_id,
+            sandbox_index,
+        )
     }
     pub fn set_plugin_bypass(&self, tid: u32, plugin_index: u32, bypassed: bool) -> bool {
         pinned(self).set_plugin_bypass(tid, plugin_index, bypassed)
@@ -905,7 +908,8 @@ impl ffi::AudioEngine {
         high_boost_db: f32,
         high_cut_db: f32,
     ) -> bool {
-        pinned(self).set_track_eq(
+        crate::engine_analysis_reads::set_track_eq(
+            self.get_core(),
             tid,
             low_boost_db,
             low_cut_db,

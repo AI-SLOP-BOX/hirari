@@ -78,6 +78,21 @@ production support.
 
 ### Changed
 
+- The plug-in chain's read and repair surface now answers from Rust.
+  `engine_analysis_reads.rs` opens the shared track session for a per-track
+  read, so a parameter, its count and its bypass come straight from the chain
+  storage a live track publishes, and the engine-wide polls walk the Rust track
+  table under its own lock instead of the deleted `lockedTracks()` loop. The
+  non-finite diagnostic keeps its last measurement inside `EffectChainHost`,
+  where the C++ `Track` member used to hold it, so a UI poll still never waits
+  behind a control-thread edit; a sandbox restart and retry keep the
+  layout-revision-only commit, and the channel EQ folds its dB pairs through the
+  shared gain policy into the Rust runtime. Eight `HirariUnifiedEngine` methods,
+  seven `Track` methods, `m_lastNonFiniteSamples` and the eight `rust_ffi.hpp`
+  declarations C++ no longer referenced are gone. The contention test now polls
+  the cached read and asserts it agrees with the blocking one, on top of the
+  engine-backed plug-in workflow the integration suite already covers.
+  C++ 4810 -> 4711 (-99).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its
