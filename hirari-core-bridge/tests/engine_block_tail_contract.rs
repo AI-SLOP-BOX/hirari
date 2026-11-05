@@ -21,9 +21,9 @@ use hirari_core_bridge::control_room_runtime::{
 use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_create, hirari_engine_block_destroy, hirari_engine_block_finish,
     hirari_engine_block_playhead, hirari_engine_block_range_overflowed,
-    hirari_engine_block_set_playhead, hirari_engine_block_set_playing,
-    hirari_engine_telemetry_active_index, hirari_engine_telemetry_snapshot,
-    HirariEngineBlockHandles, HirariEngineTelemetry,
+    hirari_engine_block_set_auto_record_mode, hirari_engine_block_set_playhead,
+    hirari_engine_block_set_playing, hirari_engine_telemetry_active_index,
+    hirari_engine_telemetry_snapshot, HirariEngineBlockHandles, HirariEngineTelemetry,
 };
 use hirari_core_bridge::engine_input_block::{
     hirari_input_blocks_create, hirari_input_blocks_destroy,
@@ -209,15 +209,8 @@ impl Engine {
         unsafe {
             hirari_engine_block_set_playhead(self.state, playhead);
             hirari_engine_block_set_playing(self.state, u8::from(playing));
-            hirari_engine_block_finish(
-                self.state,
-                self.output,
-                0,
-                FRAMES,
-                RATE,
-                1.0,
-                u8::from(auto_record),
-            );
+            hirari_engine_block_set_auto_record_mode(self.state, u32::from(auto_record));
+            hirari_engine_block_finish(self.state, self.output, 0, FRAMES);
             let stepped = hirari_engine_block_playhead(self.state);
             (
                 stepped.saturating_sub(playhead) as u32,
@@ -337,7 +330,7 @@ fn a_block_larger_than_the_engine_cap_writes_nothing() {
     engine.track(4, FRAMES);
     unsafe {
         hirari_engine_block_set_playing(engine.state, 1);
-        hirari_engine_block_finish(engine.state, engine.output, 0, 16_385, RATE, 1.0, 0);
+        hirari_engine_block_finish(engine.state, engine.output, 0, 16_385);
     };
     assert_eq!(
         unsafe { hirari_engine_block_playhead(engine.state) },

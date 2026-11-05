@@ -798,10 +798,10 @@ impl ffi::AudioEngine {
         self.get_core().bus_track_exists(bus_track_id)
     }
     pub fn get_track_delay_samples(&self, tid: u32) -> u32 {
-        self.get_core().get_track_delay_samples(tid)
+        crate::engine_analysis_reads::track_delay_samples(self.get_core(), tid)
     }
     pub fn get_latency_ms(&self) -> f32 {
-        self.get_core().get_latency_ms()
+        crate::engine_analysis_reads::latency_ms(self.get_core())
     }
     pub fn low_latency_mode(&self) -> bool {
         unsafe { crate::native_pdc::hirari_native_pdc_low_latency_mode(pdc_state(self)) }
@@ -839,10 +839,10 @@ impl ffi::AudioEngine {
         crate::engine_analysis_reads::plugin_bypass(self.get_core(), tid, plugin_index)
     }
     pub fn get_track_latency_ms(&self, tid: u32) -> f32 {
-        self.get_core().get_track_latency_ms(tid)
+        crate::engine_analysis_reads::track_latency_ms(self.get_core(), tid)
     }
     pub fn get_track_pdc_compensation_ms(&self, tid: u32) -> f32 {
-        self.get_core().get_track_pdc_compensation_ms(tid)
+        crate::engine_analysis_reads::track_pdc_compensation_ms(self.get_core(), tid)
     }
     pub fn has_sidechain_link(&self, source_id: u32, dest_id: u32, plugin_index: u32) -> bool {
         self.get_core()

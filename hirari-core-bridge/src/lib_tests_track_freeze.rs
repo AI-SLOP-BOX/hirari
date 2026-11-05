@@ -44,7 +44,7 @@ impl TrackFreezeEngine {
     }
 
     fn block_size(&self) -> u32 {
-        self.engine().get_block_size()
+        crate::engine_config::block_frames(self.engine())
     }
 
     fn session(&self) -> crate::track_session::TrackSession {

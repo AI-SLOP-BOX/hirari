@@ -28,11 +28,9 @@
     // continues to use get_project_generation().
     uint64_t get_project_layout_revision() const noexcept;
     uint64_t get_project_state_revision() const noexcept;
-    void mark_project_state_changed() {
-        m_projectControlRevision.fetch_add(1, std::memory_order_acq_rel);
-    }
+    void mark_project_state_changed() { hirari_engine_block_mark_control(m_engineBlock); }
     void mark_project_layout_changed() const {
-        hirari_layout_revision_mark(m_layoutRevision);
+        hirari_layout_revision_mark(hirari_engine_block_layout_revision(m_engineBlock));
     }
     bool set_articulation_map(uint32_t trackId, uint32_t mapHash);
     static void installExpressionMapEditHost();

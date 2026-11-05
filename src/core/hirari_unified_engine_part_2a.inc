@@ -1,16 +1,10 @@
-void HirariUnifiedEngine::waitForAudioCallbacks() const noexcept {
-    // This is a control/shutdown path, never the real-time callback. Yielding
-    // avoids destroying Track objects while a callback still owns raw state
-    // pointers, without introducing a mutex into the audio path.
-    while (m_audioCallbacksInFlight.load(std::memory_order_acquire) != 0) {
-        std::this_thread::yield();
-    }
-}
-
 // The preview-sampler swap and its quiescence protocol are Rust-side now
 // (engine_transport.rs): the delegate asks the block store whether the
 // callback is running, joins it on the control thread and drives the sampler
 // clear/reclaim/set externs directly, so no engine method forwards either.
+// The block-size, latency and callback-join answers come straight from that
+// store too: the device format, the master fader and the in-flight count are
+// its state, so this facade keeps no reader for any of them.
 void HirariUnifiedEngine::set_playing(bool p) {
     // The voice release and the playback panic are part of stopping; Rust's
     // set_playing asks the callback to perform them on its next block.
@@ -18,48 +12,17 @@ void HirariUnifiedEngine::set_playing(bool p) {
     if (!p) {
         // The callback is quiescent once transport is stopped. Reclaim old
         // immutable region generations on the control thread only.
-        waitForAudioCallbacks();
+        hirari_engine_block_join_callbacks(m_engineBlock);
         std::lock_guard<std::mutex> lock(m_tracksMutex);
         for (void* track : lockedTracks()) {
             hirari_region_store_trim_retired(track);
         }
     }
 }
-uint32_t HirariUnifiedEngine::get_block_size() const noexcept {
-    return m_blockSize.load(std::memory_order_relaxed);
-}
-float HirariUnifiedEngine::get_latency_ms() const noexcept {
-    uint32_t masterLatency = get_block_size();
-    if (m_masterLimiter) {
-        masterLatency += hirari_master_limiter_latency(m_masterLimiter);
-    }
-    return hirari_samples_to_milliseconds(
-        masterLatency, m_sampleRate.load(std::memory_order_relaxed));
-}
-
-float HirariUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return queryLockedTrack(tid, 0.0f, [&](void* track) {
-        return hirari_samples_to_milliseconds(hirari_track_latency_samples(track), sampleRate);
-    });
-}
-
-float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noexcept {
-    const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return queryLockedTrack(tid, 0.0f, [&](void* track) {
-        return hirari_samples_to_milliseconds(hirari_track_pdc_requested(track), sampleRate);
-    });
-}
-
-// The playhead, loop, cycle, test tone and VCA assignment relays are gone:
-// engine_transport.rs reads and writes the engine-block store and the global
-// VCA manager directly, and the delegate calls it. Only the device-loss and
-// new-project paths in this facade still touch the block store, through the
-// hirari_engine_block_* externs.
 
 void HirariUnifiedEngine::new_project() {
     set_playing(false);
-    waitForAudioCallbacks();
+    hirari_engine_block_join_callbacks(m_engineBlock);
     // Input monitoring is a live device assignment, not project data. Clear
     // it before reusing any track IDs in the new project.
     hirari_input_blocks_reset(m_inputBlocks);
@@ -76,7 +39,7 @@ void HirariUnifiedEngine::new_project() {
     hirari_bus_system_reset(m_busSystem);
     hirari_control_room_reset(m_controlRoomState);
     hirari_tempo_map_set_current_bpm(m_tempoState, 120.0f);
-    m_masterGain.store(1.0f, std::memory_order_release);
+    hirari_engine_block_set_master_gain(m_engineBlock, 1.0f);
     // Project tonality (root + scale) is no longer reset here: that state
     // moved into Core, and HirariCore::new_project() resets the same
     // (root 0, Major) defaults alongside the other project-scoped mirrors.
@@ -94,10 +57,9 @@ void HirariUnifiedEngine::new_project() {
     void* bootstrap = nullptr;
     void* bootstrapOwner = hirari_track_new(
         1, reinterpret_cast<const uint8_t*>("Audio 1"), 7, kHirariTrackKindAudio,
-        m_layoutRevision, &bootstrap);
+        hirari_engine_block_layout_revision(m_engineBlock), &bootstrap);
     if (bootstrapOwner) {
-        (void)hirari_track_prepare(bootstrap, m_sampleRate.load(std::memory_order_relaxed),
-                                   m_blockSize.load(std::memory_order_relaxed));
+        (void)hirari_engine_block_prepare_track(m_engineBlock, bootstrap);
         (void)hirari_engine_track_insert(m_trackTable, 0, bootstrapOwner);
         mark_project_layout_changed();
     }

@@ -26,8 +26,7 @@ bool HirariUnifiedEngine::resume_bounce() noexcept {
 
 bool HirariUnifiedEngine::set_project_scale(int32_t root, int32_t type) {
     // The bridge validates the ranges before this is reached.
-    m_rootNote.store(root, std::memory_order_relaxed);
-    m_scaleType.store(type, std::memory_order_relaxed);
+    hirari_engine_block_set_project_scale(m_engineBlock, root, type);
     return true;
 }
 

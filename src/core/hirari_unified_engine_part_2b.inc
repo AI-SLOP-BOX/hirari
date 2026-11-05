@@ -12,7 +12,7 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         void* state;
         ~ConfigTransitionGuard() { hirari_engine_block_set_config_transition(state, 0); }
     } transitionGuard{m_engineBlock};
-    waitForAudioCallbacks();
+    hirari_engine_block_join_callbacks(m_engineBlock);
     {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
 
@@ -20,10 +20,9 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         // prepareToPlay may race with a device callback that still has the
         // previous published snapshot, so transport state is not a reclamation
         // proof.
-        m_sampleRate.store(sr);
+        hirari_engine_block_set_device_format(m_engineBlock, sr, bs);
         hirari_engine_block_bump_generation(m_engineBlock);
         hirari_engine_block_clear_midi_events(m_engineBlock);
-        m_blockSize.store(bs, std::memory_order_relaxed);
 
         hirari_master_limiter_prepare(m_masterLimiter, sr);
         hirari_master_meter_prepare(m_meterCore, sr);
@@ -33,7 +32,7 @@ void HirariUnifiedEngine::prepareToPlay(double sr, uint32_t bs) {
         // blocks and DSP retune, and a work block that reached the new length
         // re-offers its taps to the sidechain graph at this generation. Only
         // the allocation policy stays here because it is a C++ exception.
-        const uint8_t status = hirari_engine_block_prepare_tracks(m_engineBlock, sr, bs);
+        const uint8_t status = hirari_engine_block_prepare_tracks(m_engineBlock);
         if (status == 2) throw std::bad_array_new_length();
         if (status == 3) throw std::bad_alloc();
     }
@@ -95,7 +94,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
                 case kHirariTrackEditStoreEngineBlock: return engine->m_engineBlock;
                 case kHirariTrackEditStoreSidechain: return engine->m_sidechainEngine;
                 case kHirariTrackEditStoreSidechainRoutes: return engine->m_sidechainRoutes;
-                case kHirariTrackEditStoreLayoutRevision: return engine->m_layoutRevision;
+                case kHirariTrackEditStoreLayoutRevision:
+                    return hirari_engine_block_layout_revision(engine->m_engineBlock);
                 case kHirariTrackEditStoreBusSystem: return engine->m_busSystem;
                 default: return engine->m_routingEngine;
             }

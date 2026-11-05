@@ -207,8 +207,8 @@ impl HirariCore {
         // the native graph accepts but cannot render through — every bounce
         // of a just-loaded project came out full-length and silent.
         // This mirrors the validated set in `apply_audio_config`.
-        let block_size = match engine.get_block_size() {
-            32 | 64 | 128 | 256 | 512 | 1024 | 2048 => engine.get_block_size(),
+        let block_size = match crate::engine_config::block_frames(engine) {
+            size @ (32 | 64 | 128 | 256 | 512 | 1024 | 2048) => size,
             _ => 1024,
         };
 

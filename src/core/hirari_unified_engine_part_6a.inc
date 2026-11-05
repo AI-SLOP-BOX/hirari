@@ -38,8 +38,8 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
         [](void* host) {
-            return static_cast<HirariUnifiedEngine*>(host)
-                ->m_sampleRate.load(std::memory_order_relaxed);
+            return hirari_engine_block_device_sample_rate(
+                static_cast<HirariUnifiedEngine*>(host)->m_engineBlock);
         },
     };
     return &ops;
@@ -63,13 +63,13 @@ uint64_t HirariUnifiedEngine::get_project_generation() const {
 }
 
 uint64_t HirariUnifiedEngine::get_project_layout_revision() const noexcept {
-    return hirari_layout_revision_current(m_layoutRevision);
+    return hirari_layout_revision_current(hirari_engine_block_layout_revision(m_engineBlock));
 }
 
 uint64_t HirariUnifiedEngine::get_project_state_revision() const noexcept {
     const uint64_t layout = get_project_layout_revision();
     const uint64_t midi = hirari_midi_snapshot_store_revision(m_midiSnapshotStore);
-    const uint64_t control = m_projectControlRevision.load(std::memory_order_acquire);
+    const uint64_t control = hirari_engine_block_control_revision(m_engineBlock);
     return hirari_project_state_revision_mix(layout, midi, control);
 }
 
@@ -101,13 +101,13 @@ void HirariUnifiedEngine::installTrackFreezeHost() {
         [](void* host, uint32_t tid, bool wait) -> void* {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!engine) return nullptr;
-            if (wait) engine->waitForAudioCallbacks();
+            if (wait) hirari_engine_block_join_callbacks(engine->m_engineBlock);
             return engine->takeTrackOwner(tid);
         },
         [](void* handle) { hirari_track_owner_release(handle); },
         [](void* host) -> uint32_t {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            return engine ? engine->get_block_size() : 0;
+            return engine ? hirari_engine_block_device_block_frames(engine->m_engineBlock) : 0;
         },
     };
     hirari_track_freeze_host_install(&ops);

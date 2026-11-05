@@ -1,14 +1,10 @@
     // Transport
     // The playhead, loop, cycle and test-tone transport answers come straight
-    // from the Rust engine-block store (engine_transport.rs); only the
-    // device-callback join and the stop-time path stay here. Transport start
-    // and stop reach the block store from Rust too, so this facade keeps no
-    // play-state relay at all.
-    void join_audio_callbacks() const noexcept { waitForAudioCallbacks(); }
-    uint32_t get_block_size() const noexcept;
-    float get_latency_ms() const noexcept;
-    float get_track_latency_ms(uint32_t tid) const noexcept;
-    float get_track_pdc_compensation_ms(uint32_t tid) const noexcept;
+    // from the Rust engine-block store (engine_transport.rs). The device
+    // format, the master fader, the record-arm gate and the in-flight callback
+    // count are its state as well, so latency and block-size reads are Rust's
+    // (engine_analysis_reads.rs) and only the stop-time path stays here.
+    void join_audio_callbacks() const noexcept { hirari_engine_block_join_callbacks(m_engineBlock); }
     void set_playing(bool playing);
     // Tempo editing moved to Rust; this write survives for the native contract
     // test that drives the engine singleton directly.
@@ -47,8 +43,7 @@
         return track && hirari_track_type(track) == kHirariTrackKindBus;
     }
     float get_master_gain() const noexcept;
-    uint32_t get_track_delay_samples(uint32_t tid) const;
-    double get_sample_rate() const { return m_sampleRate.load(std::memory_order_relaxed); }
+    double get_sample_rate() const { return hirari_engine_block_device_sample_rate(m_engineBlock); }
     // Rust owns the playhead, loop, cycle and test tone in the engine-block
     // store (engine_transport.rs); the deleted accessors were one-line
     // forwarders onto hirari_engine_block_* that Rust now calls directly.

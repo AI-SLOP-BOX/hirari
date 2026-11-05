@@ -26,7 +26,8 @@ use hirari_core_bridge::control_room_runtime::{
 use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_create, hirari_engine_block_destroy, hirari_engine_block_finish,
     hirari_engine_block_prepare_tracks, hirari_engine_block_route,
-    hirari_engine_block_set_playhead, hirari_engine_block_set_playing, HirariEngineBlockHandles,
+    hirari_engine_block_set_device_format, hirari_engine_block_set_playhead,
+    hirari_engine_block_set_playing, HirariEngineBlockHandles,
 };
 use hirari_core_bridge::engine_input_block::{
     hirari_input_blocks_create, hirari_input_blocks_destroy,
@@ -377,7 +378,7 @@ impl Engine {
         unsafe {
             hirari_engine_block_set_playhead(self.state, playhead);
             hirari_engine_block_set_playing(self.state, 1);
-            hirari_engine_block_route(self.state, self.output, 0, FRAMES, RATE);
+            hirari_engine_block_route(self.state, self.output, 0, FRAMES);
         };
     }
 
@@ -386,7 +387,7 @@ impl Engine {
         unsafe {
             hirari_engine_block_set_playhead(self.state, playhead);
             hirari_engine_block_set_playing(self.state, 1);
-            hirari_engine_block_finish(self.state, self.output, 0, FRAMES, RATE, 1.0, 0);
+            hirari_engine_block_finish(self.state, self.output, 0, FRAMES);
         };
     }
 
@@ -612,12 +613,15 @@ fn preparing_the_graph_drops_a_freeze_the_new_rate_cannot_replay() {
     let usable = engine.track(12, FRAMES, -1.0);
     engine.publish_freeze(stale, 44_100);
     engine.publish_freeze(usable, 48_000);
+    // The engine block owns the device format, so the change is published there
+    // and the walk reads it back.
+    unsafe { hirari_engine_block_set_device_format(engine.state, 48_000.0, 8) };
     // Publishing a freeze is the store's own write, so the revision only counts
     // what the preparation walk changes.
     let before = engine.marks();
 
     assert_eq!(
-        unsafe { hirari_engine_block_prepare_tracks(engine.state, 48_000.0, 8) },
+        unsafe { hirari_engine_block_prepare_tracks(engine.state) },
         0,
         "every track prepared"
     );

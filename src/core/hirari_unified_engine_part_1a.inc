@@ -43,9 +43,9 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
 }
 
 void HirariUnifiedEngine::shutdown() {
-    const bool wasShutdown = m_isShutdown.exchange(true, std::memory_order_acq_rel);
+    const bool wasShutdown = hirari_engine_block_take_shutdown(m_engineBlock) != 0;
     hirari_engine_block_set_playing(m_engineBlock, 0);
-    waitForAudioCallbacks();
+    hirari_engine_block_join_callbacks(m_engineBlock);
     // Shutdown must cancel offline work before joining it.  Joining a render
     // that is still publishing blocks can otherwise keep app teardown alive
     // indefinitely and leave its temporary output/worker state behind.
@@ -76,36 +76,25 @@ HirariUnifiedEngine::HirariUnifiedEngine() {
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_masterLimiter = hirari_master_limiter_create(44'100.0);
     const HirariEngineBlockHandles blockHandles{
-        m_routingEngine, m_trackTable, m_bounceSession, m_inputBlocks,
-        m_controlRoomState, m_mixerTelemetry, m_metronome, m_masterLimiter,
-        m_meterCore, m_tempoState, m_busSystem, m_sidechainEngine,
-        m_engineRings, m_midiPlaybackClock, m_midiSnapshotStore,
-        m_previewSynthState, m_previewSampler, m_mpeState, m_macroControl};
+        m_routingEngine,   m_trackTable,    m_bounceSession, m_inputBlocks,
+        m_controlRoomState, m_mixerTelemetry, m_metronome,   m_masterLimiter,
+        m_meterCore,       m_tempoState,    m_busSystem,     m_sidechainEngine,
+        m_engineRings,     m_midiPlaybackClock, m_midiSnapshotStore,
+        m_previewSynthState, m_previewSampler, m_mpeState,    m_macroControl,
+        hirari_layout_revision_create()};
     m_engineBlock = hirari_engine_block_create(blockHandles);
     hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 
-    void HirariUnifiedEngine::processBlock(void* output, uint32_t off, uint32_t sz) {
-        // Rust owns the whole block around this device buffer: the gates that
-        // decide whether it renders at all, the cycle wrap, the command drain,
-        // the timeline MIDI staging into each track and the built-in preview
-        // voices; then the graph walk and the post-graph tail that advances the
-        // playhead it holds. Only the FPU denormal mode and the two scalars that
-        // stay control-side are the engine's own.
-        ScopedDenormalGuard guard;
-        uint32_t frames = 0;
-        if (hirari_engine_block_begin(
-                m_engineBlock, output, off, sz,
-                m_sampleRate.load(std::memory_order_relaxed),
-                m_isShutdown.load(std::memory_order_acquire) ? 1u : 0u,
-                &frames) == 0)
-            return;
-        hirari_engine_block_route(m_engineBlock, output, off, frames,
-                                  m_sampleRate.load(std::memory_order_relaxed));
-        hirari_engine_block_finish(
-            m_engineBlock, output, off, frames,
-            m_sampleRate.load(std::memory_order_relaxed),
-            m_masterGain.load(std::memory_order_acquire),
-            m_autoRecordMode.load(std::memory_order_relaxed) > 0 ? 1u : 0u);
-    }
+void HirariUnifiedEngine::processBlock(void* output, uint32_t off, uint32_t sz) {
+    // Rust owns the whole block around this device buffer, including the
+    // device format, the master fader, the record-arm gate and its own
+    // shutdown flag: the block reads them from the state the engine prepared.
+    // Only the FPU denormal mode stays here.
+    ScopedDenormalGuard guard;
+    uint32_t frames = 0;
+    if (hirari_engine_block_begin(m_engineBlock, output, off, sz, &frames) == 0) return;
+    hirari_engine_block_route(m_engineBlock, output, off, frames);
+    hirari_engine_block_finish(m_engineBlock, output, off, frames);
+}
 

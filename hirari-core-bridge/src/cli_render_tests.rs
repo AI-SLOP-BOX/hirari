@@ -85,13 +85,13 @@ mod cli_render_probe_tests {
         );
         let generation_before = engine.get_audio_config_generation();
 
-        let applied = engine.try_apply_config(120.0, 48_000, engine.get_block_size());
+        let applied = engine.try_apply_config(120.0, 48_000, crate::engine_config::block_frames(&engine));
         assert!(
             applied,
             "an offline engine with no audio device must accept a 48 kHz \
              reconfiguration, got rate {} block {}",
             engine.get_sample_rate(),
-            engine.get_block_size()
+            crate::engine_config::block_frames(&engine)
         );
         assert!(
             engine.get_audio_config_generation() != generation_before,

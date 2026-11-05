@@ -189,17 +189,8 @@ impl Engine {
     /// block length the rest of the callback would have to use.
     fn begin(&self, frames: u32) -> (u8, u32) {
         let mut handled = 0;
-        let admitted = unsafe {
-            hirari_engine_block_begin(
-                self.state,
-                self.output,
-                0,
-                frames,
-                SAMPLE_RATE,
-                0,
-                &mut handled,
-            )
-        };
+        let admitted =
+            unsafe { hirari_engine_block_begin(self.state, self.output, 0, frames, &mut handled) };
         (admitted, handled)
     }
 

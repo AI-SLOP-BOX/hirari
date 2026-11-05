@@ -49,21 +49,28 @@ impl HirariCore {
         })
     }
     pub fn get_buffer_size(&self) -> u32 {
-        self.engine.as_ref().map_or(0, |e| e.get_block_size())
-    }
-    pub fn get_latency_ms(&self) -> f32 {
-        self.engine.as_ref().map_or(0.0, |e| e.get_latency_ms())
-    }
-    pub fn get_track_latency_ms(&self, track_id: u32) -> f32 {
         self.engine
             .as_ref()
-            .map_or(0.0, |engine| engine.get_track_latency_ms(track_id))
+            .map_or(0, |e| crate::engine_config::block_frames(e))
+    }
+    pub fn get_latency_ms(&self) -> f32 {
+        self.engine.as_ref().map_or(0.0, |e| {
+            crate::engine_analysis_reads::latency_ms(ffi::get_unified_engine(e))
+        })
+    }
+    pub fn get_track_latency_ms(&self, track_id: u32) -> f32 {
+        self.engine.as_ref().map_or(0.0, |e| {
+            crate::engine_analysis_reads::track_latency_ms(ffi::get_unified_engine(e), track_id)
+        })
     }
 
     pub fn get_track_pdc_compensation_ms(&self, track_id: u32) -> f32 {
-        self.engine
-            .as_ref()
-            .map_or(0.0, |engine| engine.get_track_pdc_compensation_ms(track_id))
+        self.engine.as_ref().map_or(0.0, |e| {
+            crate::engine_analysis_reads::track_pdc_compensation_ms(
+                ffi::get_unified_engine(e),
+                track_id,
+            )
+        })
     }
 
     pub fn set_low_latency_mode(&self, active: bool) -> bool {

@@ -169,6 +169,22 @@ production support.
   a test may author, a track's own preparation marks the layout once, and a
   kernel the panner rejects still retires the frozen render.
   C++ 4485 -> 3673 (-812).
+- The engine keeps no session scalars of its own. `EngineBlockState` now holds
+  the device sample rate and block size, the master fader, the record-arm mode,
+  the shutdown flag, the callback-in-flight counter, the control and layout
+  revisions and the project tonality, so `HirariUnifiedEngine` is left with a
+  single handle and a tracks lock. Every block argument the callback used to
+  stage is read back from that store instead: `begin`, `route`, `finish` and
+  `prepare_tracks` lost their sample-rate, shutdown, master-gain and record-arm
+  parameters, and the 20th handle is the layout revision the engine used to own.
+  The nine members and the accessor layer in front of them went with them —
+  `get_track_delay_samples`, `get_block_size`, `get_latency_ms`,
+  `get_track_latency_ms` and `get_track_pdc_compensation_ms` are now Rust reads
+  over the block, limiter and track stores, the project save takes the block
+  handle instead of the tonality, and `waitForAudioCallbacks` is
+  `hirari_engine_block_join_callbacks`. `prepareToPlay` still raises the same
+  two C++ exceptions, off the status the Rust preparation walk returns.
+  C++ 3673 -> 3613 (-60).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

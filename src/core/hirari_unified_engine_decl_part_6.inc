@@ -7,10 +7,6 @@ private:
     // snapshot the realtime callback traverses are Rust's (engine_track_table.rs).
     void* m_trackTable = hirari_engine_track_table_create();
 
-    // Incremented around the complete direct callback. Control-side object
-    // reclamation must not rely on transport state alone: a CoreAudio
-    // callback can still be in flight while stop/reconnect is being handled.
-    std::atomic<uint32_t> m_audioCallbacksInFlight{0};
     static constexpr uint32_t kNoInputMonitorTrack = std::numeric_limits<uint32_t>::max();
     // The monitored input pair, the talkback source and their publication
     // ordering live in Rust (engine_input_block.rs). The per-chunk read offset,
@@ -18,8 +14,6 @@ private:
     // diagnostic are engine-block state (engine_block_host.rs).
     void* m_inputBlocks = hirari_input_blocks_create(kMaxAudioBlockSize);
     void* m_metronome = hirari_metronome_create(44100.0);
-    std::atomic<float> m_masterGain{1.0f};
-    std::atomic<double> m_sampleRate{44100.0};
     // Generation zero is reserved for an unavailable/uninitialized engine.
     // The constructor publishes the valid default 44.1 kHz configuration as
     // generation one before any callback or command can observe it.

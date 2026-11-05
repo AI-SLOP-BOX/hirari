@@ -1008,7 +1008,9 @@ pub fn cancel_layout_snapshot(
 }
 
 /// The saver path: gathers with the save-only fields and encodes the project
-/// container directly, without a C++ snapshot in between.
+/// container directly, without a C++ snapshot in between. The project tonality
+/// comes from the engine's block store, so the caller hands over that handle
+/// instead of two scalars it keeps a copy of.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_project_save_from_host(
     host: *mut c_void,
@@ -1019,12 +1021,13 @@ pub unsafe extern "C" fn hirari_project_save_from_host(
     routing_state: *const c_void,
     arrangement_document: usize,
     bpm: f64,
-    root_note: i32,
-    scale_type: i32,
+    block: *const c_void,
 ) -> bool {
     if host.is_null() || ops.is_null() {
         return false;
     }
+    let root_note = unsafe { crate::engine_block_host::hirari_engine_block_root_note(block) };
+    let scale_type = unsafe { crate::engine_block_host::hirari_engine_block_scale_type(block) };
     let Some(owned) = (unsafe { gather(host, &*ops, true, None) }) else {
         return false;
     };

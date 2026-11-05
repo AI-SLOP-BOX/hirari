@@ -1,6 +1,3 @@
-    // Atomic so a control-thread device change can never be seen half-applied
-    // by Track preparation.
-    std::atomic<uint32_t> m_blockSize{512};
     // Both DSP objects are Rust-owned; the engine keeps only their handles.
     void* m_meterCore = hirari_master_meter_create(44'100.0);
     void* m_masterLimiter = hirari_master_limiter_create(44'100.0);
@@ -13,7 +10,6 @@
     // by the audio callback; it must not lazily initialize on first process.
     void* m_mixerTelemetry = hirari_mixer_telemetry_create();
 
-    std::atomic<bool> m_isShutdown{false};
     // Project hydration mutates tracks, routing and several process-wide
     // managers as one control-plane transaction.  Reject a concurrent load
     // instead of allowing two documents to interleave partial state.
@@ -24,10 +20,6 @@
     // The engine keeps only this handle, which the realtime callback and the
     // control surface both read through narrow FFI entry points.
     void* m_bounceSession = hirari_bounce_session_create();
-    // The layout revision is a Rust counter (engine_track.rs); a track marks it
-    // when it changes and the control side polls it.
-    void* m_layoutRevision = hirari_layout_revision_create();
-    std::atomic<uint64_t> m_projectControlRevision{0};
     mutable std::mutex m_tracksMutex;
 
     // The document graph lives in the Rust track table (engine_track_table.rs)
@@ -99,6 +91,3 @@
     const HirariLayoutHostOps* layoutHostOps() const;
 
     void* m_midiSnapshotStore = nullptr;
-
-    std::atomic<uint32_t> m_autoRecordMode{0};
-    std::atomic<int32_t> m_rootNote{0}, m_scaleType{0};

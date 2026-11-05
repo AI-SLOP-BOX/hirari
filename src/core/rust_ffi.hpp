@@ -1129,7 +1129,10 @@ extern "C" uint8_t hirari_track_runtime_prepare(void* state, void* region_key,
 
 /// Rust owns the engine's whole block (engine_block_host.rs): the admission
 /// head, the graph walk and the post-graph tail. The engine binds its handles
-/// once, then calls begin, route and finish around the device buffer.
+/// once, then calls begin, route and finish around the device buffer. The block
+/// also holds the session scalars — device format, master fader, record-arm
+/// gate, shutdown flag, in-flight count, control token, project tonality — so
+/// the engine keeps no atomics of its own.
 /// Every handle the block borrows; the engine owns each for the state's lifetime.
 struct HirariEngineBlockHandles {
     void* routing;
@@ -1151,20 +1154,19 @@ struct HirariEngineBlockHandles {
     void* preview_sampler;
     void* mpe;
     void* macro_control;
+    void* layout_revision;
 };
 extern "C" void* hirari_engine_block_create(HirariEngineBlockHandles handles);
 extern "C" void hirari_engine_block_destroy(void* state);
 /// Zero when the head already silenced the window. `frames_out` receives the
 /// block length the rest of the callback must use.
 extern "C" uint8_t hirari_engine_block_begin(
-    void* state, void* output, uint32_t off, uint32_t frames, double sample_rate,
-    uint8_t shutdown, uint32_t* frames_out);
+    void* state, void* output, uint32_t off, uint32_t frames, uint32_t* frames_out);
 extern "C" uint64_t hirari_engine_block_chunk_plan(void* state, uint32_t remaining);
 extern "C" void hirari_engine_block_route(
-    void* state, void* output, uint32_t off, uint32_t frames, double sample_rate);
+    void* state, void* output, uint32_t off, uint32_t frames);
 extern "C" void hirari_engine_block_finish(
-    void* state, void* output, uint32_t off, uint32_t frames, double sample_rate,
-    float master_gain, uint8_t auto_record);
+    void* state, void* output, uint32_t off, uint32_t frames);
 extern "C" uint64_t hirari_engine_block_playhead(const void* state);
 extern "C" void hirari_engine_block_set_playhead(void* state, uint64_t playhead);
 extern "C" uint8_t hirari_engine_block_is_playing(const void* state);
@@ -1172,13 +1174,33 @@ extern "C" void hirari_engine_block_set_playing(void* state, uint8_t playing);
 extern "C" void hirari_engine_block_set_test_tone(void* state, uint8_t enabled);
 extern "C" uint64_t hirari_engine_block_generation(const void* state);
 extern "C" uint64_t hirari_engine_block_bump_generation(void* state);
-/// Prepare every track in the engine's table for a new device format: drop a
-/// freeze the rate cannot replay, retune and grow the track's blocks, then
-/// re-offer its work taps to the sidechain graph. The caller holds the tracks
-/// lock. Returns the first allocation status the walk cannot swallow: 2 an
-/// impossible size, 3 an exhausted allocation, 0 otherwise.
-extern "C" uint8_t hirari_engine_block_prepare_tracks(
+extern "C" double hirari_engine_block_device_sample_rate(const void* state);
+extern "C" uint32_t hirari_engine_block_device_block_frames(const void* state);
+extern "C" void hirari_engine_block_set_device_format(
     void* state, double sample_rate, uint32_t block_frames);
+extern "C" void* hirari_engine_block_layout_revision(const void* state);
+extern "C" float hirari_engine_block_master_gain(const void* state);
+extern "C" void hirari_engine_block_set_master_gain(void* state, float gain);
+extern "C" void hirari_engine_block_set_auto_record_mode(void* state, uint32_t mode);
+extern "C" uint8_t hirari_engine_block_is_shutdown(const void* state);
+/// Sets the shutdown flag and reports whether it was already set.
+extern "C" uint8_t hirari_engine_block_take_shutdown(void* state);
+extern "C" void hirari_engine_block_callback_enter(void* state);
+extern "C" void hirari_engine_block_callback_leave(void* state);
+/// Waits for every callback in flight; a control path, never the realtime one.
+extern "C" void hirari_engine_block_join_callbacks(const void* state);
+extern "C" uint64_t hirari_engine_block_control_revision(const void* state);
+extern "C" uint64_t hirari_engine_block_mark_control(void* state);
+extern "C" void hirari_engine_block_set_project_scale(
+    void* state, int32_t root, int32_t scale);
+/// Prepare every track in the engine's table for the format the block holds:
+/// drop a freeze the rate cannot replay, retune and grow the track's blocks,
+/// then re-offer its work taps to the sidechain graph. The caller holds the
+/// tracks lock. Returns the first allocation status the walk cannot swallow: 2
+/// an impossible size, 3 an exhausted allocation, 0 otherwise.
+extern "C" uint8_t hirari_engine_block_prepare_tracks(void* state);
+/// Prepares one track for the format the block already holds.
+extern "C" uint8_t hirari_engine_block_prepare_track(void* state, void* track);
 extern "C" void hirari_engine_block_set_config_transition(
     void* state, uint8_t transition);
 extern "C" void hirari_engine_block_clear_midi_events(void* state);
@@ -1289,7 +1311,7 @@ extern "C" bool hirari_project_save_from_host(
     void* host, const HirariLayoutHostOps* ops,
     const uint8_t* path, size_t path_length,
     const void* tempo_state, const void* routing_state, size_t arrangement_document,
-    double bpm, int32_t root_note, int32_t scale_type);
+    double bpm, const void* engine_block);
 
 // Rust-owned harmonic context shared by structure analysis and auto-arrangement.
 extern "C" void hirari_harmonic_context_get(

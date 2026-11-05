@@ -60,8 +60,7 @@
         lock.unlock();
         hirari_ids_seed_from_project(this);
         hirari_tempo_map_set_current_bpm(m_tempoState, static_cast<float>(state.bpm));
-        m_rootNote.store(state.rootNote, std::memory_order_relaxed);
-        m_scaleType.store(state.scaleType, std::memory_order_relaxed);
+        hirari_engine_block_set_project_scale(m_engineBlock, state.rootNote, state.scaleType);
         // Restore timeline markers as part of the document, not as transient UI state.
         hirari_arrangement_document_reset_markers(m_arrangementDocument);
         for (const auto& marker : state.markers) {
@@ -108,8 +107,6 @@ bool HirariUnifiedEngine::saveProject(std::string_view path) {
     return hirari_project_save_from_host(
         this, layoutHostOps(), reinterpret_cast<const uint8_t*>(path.data()), path.size(),
         m_tempoState, m_routingEngine, reinterpret_cast<size_t>(m_arrangementDocument),
-        hirari_tempo_map_get_current_bpm(m_tempoState),
-        m_rootNote.load(std::memory_order_relaxed),
-        m_scaleType.load(std::memory_order_relaxed));
+        hirari_tempo_map_get_current_bpm(m_tempoState), m_engineBlock);
 }
 

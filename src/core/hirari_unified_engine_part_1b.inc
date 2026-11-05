@@ -1,9 +1,9 @@
 void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChannels, uint32_t numSamples) {
-    m_audioCallbacksInFlight.fetch_add(1, std::memory_order_acquire);
+    hirari_engine_block_callback_enter(m_engineBlock);
     struct CallbackGuard {
-        std::atomic<uint32_t>& count;
-        ~CallbackGuard() { count.fetch_sub(1, std::memory_order_release); }
-    } callbackGuard{m_audioCallbacksInFlight};
+        void* state;
+        ~CallbackGuard() { hirari_engine_block_callback_leave(state); }
+    } callbackGuard{m_engineBlock};
 
     const bool validInput = buffers != nullptr && numChannels >= 2 && numChannels <= 32 &&
         numSamples > 0 && numSamples <= HirariUnifiedEngine::kMaxAudioBlockSize &&
@@ -19,7 +19,7 @@ void HirariUnifiedEngine::processBlockDirect(float** buffers, uint32_t numChanne
     for (uint32_t channel = 0; channel < numChannels; ++channel) {
         if (buffers[channel] == nullptr) return;
     }
-    if (m_isShutdown.load(std::memory_order_acquire)) {
+    if (hirari_engine_block_is_shutdown(m_engineBlock) != 0) {
         void* silence = hirari_audio_buffer_storage_create();
         (void)hirari_audio_buffer_storage_wrap_channels(
             silence, buffers, numChannels, numSamples);

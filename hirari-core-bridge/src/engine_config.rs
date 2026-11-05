@@ -18,7 +18,10 @@ use crate::audio_driver_host::{
     hirari_audio_driver_host_reconfigure, hirari_audio_driver_host_sample_rate,
     hirari_audio_driver_host_select_device,
 };
-use crate::engine_block_host::{hirari_engine_block_generation, hirari_engine_block_is_playing};
+use crate::engine_block_host::{
+    hirari_engine_block_device_block_frames, hirari_engine_block_generation,
+    hirari_engine_block_is_playing,
+};
 use crate::ffi;
 use crate::tempo::hirari_tempo_map_set_current_bpm;
 
@@ -50,6 +53,16 @@ fn driver_host(engine: &ffi::AudioEngine) -> *mut c_void {
 /// is the guard the deleted C++ `!m_engine` checks made.
 fn block_state(engine: &ffi::AudioEngine) -> *const c_void {
     engine.engine_block_state() as *const c_void
+}
+
+/// The device block length the graph is prepared for, read from the store the
+/// engine itself prepares: the deleted C++ accessor only relayed this value.
+pub fn block_frames(engine: &ffi::AudioEngine) -> u32 {
+    let block = block_state(engine);
+    if block.is_null() {
+        return 0;
+    }
+    unsafe { hirari_engine_block_device_block_frames(block) }
 }
 
 fn generation(engine: &ffi::AudioEngine) -> u64 {
@@ -143,7 +156,7 @@ pub fn try_apply_config(engine: &ffi::AudioEngine, tempo: f32, sr: u32, bs: u32)
     }
     generation(engine) != before
         && (core.get_sample_rate() - f64::from(sr)).abs() < 0.5
-        && engine.get_block_size() == bs
+        && block_frames(engine) == bs
 }
 
 /// Selects a device and applies the format it negotiated as one answer, then checks
@@ -166,7 +179,7 @@ pub fn select_audio_device(
     apply_negotiated_driver_config(engine);
     let core = engine.get_core();
     (core.get_sample_rate() - sample_rate).abs() < 0.5
-        && engine.get_block_size() == hirari_audio_driver_host_buffer_size(host)
+        && block_frames(engine) == hirari_audio_driver_host_buffer_size(host)
 }
 
 impl ffi::AudioEngine {
@@ -200,7 +213,7 @@ mod tests {
         // detached branch prepares it and the transaction reports the landing.
         assert!(try_apply_config(&engine, 120.0, 48_000, 128));
         assert_ne!(generation(&engine), before);
-        assert_eq!(engine.get_block_size(), 128);
+        assert_eq!(block_frames(&engine), 128);
         assert!((engine.get_core().get_sample_rate() - 48_000.0).abs() < 0.5);
     }
 }

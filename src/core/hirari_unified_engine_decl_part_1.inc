@@ -13,7 +13,7 @@ public:
     // The hardware input publish and the config transaction are Rust-side now
     // (engine_config.rs): the driver callback stages its buffers through the
     // input-block externs and prepareToPlay is called directly, so no relay
-    // method forwards either.
-    void waitForAudioCallbacks() const noexcept;
+    // method forwards either. The callback-join wait is engine-block state, so
+    // the facade holds no in-flight counter of its own.
     void prepareToPlay(double sr, uint32_t sz);
     void syncStructuralChanges();

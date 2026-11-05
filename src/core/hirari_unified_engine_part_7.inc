@@ -1,9 +1,9 @@
 bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
     // Rust owns wire-mode normalization, the fail-closed unknown-value rule
-    // and the recorder-mode translation; the atomic keeps the audio
+    // and the recorder-mode translation; the block store keeps the audio
     // callback's copy of the normalized wire value.
-    m_autoRecordMode.store(hirari_automation_record_mode_apply(mode),
-                           std::memory_order_release);
+    hirari_engine_block_set_auto_record_mode(m_engineBlock,
+                                             hirari_automation_record_mode_apply(mode));
     return true;
 }
 

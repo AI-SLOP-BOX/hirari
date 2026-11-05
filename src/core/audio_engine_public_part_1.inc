@@ -67,7 +67,6 @@ public:
                              reinterpret_cast<const void*>(m_engine->engine_block_state()))
                         : 0;
     }
-    uint32_t get_block_size() const { return m_engine ? m_engine->get_block_size() : 0; }
 
     /// Processes one bounded stereo block through the C++ graph. Rust must
     /// not maintain a second production audio graph.

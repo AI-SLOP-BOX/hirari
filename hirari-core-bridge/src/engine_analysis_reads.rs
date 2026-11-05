@@ -9,9 +9,12 @@ use crate::analysis_views;
 use crate::audio_driver_host;
 use crate::bounce_driver;
 use crate::channel_strip;
+use crate::dsp_utils::hirari_samples_to_milliseconds;
 use crate::effect_chain_host;
 use crate::engine_block_host::{
-    HirariEngineTelemetry, hirari_engine_block_track_table, hirari_engine_telemetry_active_index,
+    HirariEngineTelemetry, hirari_engine_block_device_block_frames,
+    hirari_engine_block_device_sample_rate, hirari_engine_block_master_limiter,
+    hirari_engine_block_track_table, hirari_engine_telemetry_active_index,
     hirari_engine_telemetry_snapshot,
 };
 use crate::engine_track_table::{self, HirariTrackSnapshot};
@@ -485,5 +488,47 @@ pub fn set_track_eq(
     session(core, tid).is_some_and(|session| {
         unsafe { track_runtime::hirari_track_runtime_set_eq(session.runtime(), low, high) };
         true
+    })
+}
+
+/// The engine's end-to-end latency: the device block plus the master limiter's
+/// lookahead, in milliseconds at the rate the graph is prepared for.
+pub fn latency_ms(core: &HirariUnifiedEngine) -> f32 {
+    let state = block_handle(core);
+    let limiter = unsafe { hirari_engine_block_master_limiter(state) };
+    let samples = u64::from(unsafe { hirari_engine_block_device_block_frames(state) })
+        + u64::from(unsafe { crate::master_limiter::hirari_master_limiter_latency(limiter) });
+    unsafe {
+        hirari_samples_to_milliseconds(samples, hirari_engine_block_device_sample_rate(state))
+    }
+}
+
+/// A track's reported latency in milliseconds; zero when the graph has no such
+/// track — the answer the deleted locked-query gave for a miss.
+pub fn track_latency_ms(core: &HirariUnifiedEngine, tid: u32) -> f32 {
+    let rate = unsafe { hirari_engine_block_device_sample_rate(block_handle(core)) };
+    session(core, tid).map_or(0.0, |session| unsafe {
+        hirari_samples_to_milliseconds(
+            u64::from(crate::engine_track::hirari_track_latency_samples(session.track())),
+            rate,
+        )
+    })
+}
+
+/// A track's plug-in delay compensation request in milliseconds.
+pub fn track_pdc_compensation_ms(core: &HirariUnifiedEngine, tid: u32) -> f32 {
+    let rate = unsafe { hirari_engine_block_device_sample_rate(block_handle(core)) };
+    session(core, tid).map_or(0.0, |session| unsafe {
+        hirari_samples_to_milliseconds(
+            u64::from(crate::engine_track::hirari_track_pdc_requested(session.track())),
+            rate,
+        )
+    })
+}
+
+/// A track's own manual delay in samples.
+pub fn track_delay_samples(core: &HirariUnifiedEngine, tid: u32) -> u32 {
+    session(core, tid).map_or(0, |session| unsafe {
+        crate::engine_track::hirari_track_delay_samples(session.track())
     })
 }

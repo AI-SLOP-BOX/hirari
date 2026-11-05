@@ -54,9 +54,9 @@ use crate::engine_input_block::{hirari_input_blocks_take_monitor, hirari_input_b
 use crate::engine_rings::{hirari_engine_command_ring_pop, CommandRecord, EngineRings};
 use crate::engine_clock::{hirari_engine_chunk_plan, CHUNK_RESTART_PLAYHEAD};
 use crate::engine_track::{
-    hirari_track_begin_edit, hirari_track_end_edit, hirari_track_record_state,
-    hirari_track_storage, hirari_track_type_byte, STORAGE_ARTICULATION, STORAGE_BUS_STATE,
-    STORAGE_PLUGIN_MIDI, STORAGE_RUNTIME, STORAGE_STRIP,
+    hirari_track_begin_edit, hirari_track_end_edit, hirari_track_prepare,
+    hirari_track_record_state, hirari_track_storage, hirari_track_type_byte,
+    STORAGE_ARTICULATION, STORAGE_BUS_STATE, STORAGE_PLUGIN_MIDI, STORAGE_RUNTIME, STORAGE_STRIP,
 };
 use crate::engine_track_table::{
     hirari_engine_track_count, hirari_engine_track_ptrs, hirari_engine_track_snapshot,
@@ -110,7 +110,7 @@ use crate::track_runtime::{self, hirari_track_runtime_set_muted, TrackRuntime};
 use std::ffi::c_void;
 use std::ptr;
 use std::slice;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 /// `HirariUnifiedEngine::kMaxTracks`, and the width of one metering payload.
 const MAX_TRACKS: usize = 256;
@@ -194,6 +194,9 @@ pub struct HirariEngineBlockHandles {
     pub preview_sampler: *mut c_void,
     pub mpe: *mut c_void,
     pub macro_control: *mut c_void,
+    /// The layout revision the tracks mark and the control side polls, so a
+    /// revision read needs no engine accessor.
+    pub layout_revision: *mut c_void,
 }
 
 /// The graph eligibility the whole block shares: an offline target isolates one
@@ -276,6 +279,20 @@ pub struct EngineBlockState {
     preview_sampler: *mut c_void,
     mpe: *mut c_void,
     macro_control: *mut c_void,
+    layout_revision: *mut c_void,
+    /// The master fader the tail mixes with, the normalized record-arm wire mode,
+    /// the shutdown flag that closes block admission, the count of callbacks in
+    /// flight the control thread joins before it replaces a buffer, the
+    /// control-plane edit token and the project tonality a save writes back out.
+    /// The engine facade held each of these as its own atomic and handed it to
+    /// the block one argument per call; they are the block's state now.
+    master_gain: AtomicU32,
+    auto_record_mode: AtomicU32,
+    shutdown: AtomicBool,
+    callbacks_in_flight: AtomicU32,
+    control_revision: AtomicU64,
+    root_note: AtomicI32,
+    scale_type: AtomicI32,
     playhead: AtomicU64,
     playing: AtomicBool,
     loop_enabled: AtomicBool,
@@ -323,6 +340,12 @@ fn block(state: *const c_void) -> Option<&'static EngineBlockState> {
 }
 
 impl EngineBlockState {
+    /// The device format the graph was last prepared for. The engine used to hold
+    /// its own copy and pass it in as an argument on every block.
+    fn sample_rate(&self) -> f64 {
+        f64::from_bits(self.device_sample_rate.load(Ordering::Relaxed))
+    }
+
     fn storage(&self, track: *mut c_void, kind: u32) -> *mut c_void {
         unsafe { hirari_track_storage(track, kind) }
     }
@@ -1308,22 +1331,19 @@ impl EngineBlockState {
 ///
 /// # Safety
 /// `state` comes from [`hirari_engine_block_create`], `output` is that engine's
-/// block storage, `sample_rate` is the device's, `shutdown` is the engine's
-/// shutdown flag, and `frames_out` is writable when non-null.
+/// block storage and `frames_out` is writable when non-null.
 #[no_mangle]
-#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn hirari_engine_block_begin(
     state: *mut c_void,
     output: *mut c_void,
     off: u32,
     frames: u32,
-    sample_rate: f64,
-    shutdown: u8,
     frames_out: *mut u32,
 ) -> u8 {
     let Some(state) = block(state) else {
         return 0;
     };
+    let sample_rate = state.sample_rate();
     let (planes, channel_count, capacity) = track_runtime::channels_of(output);
     let capacity = capacity as usize;
     let off = off as usize;
@@ -1352,7 +1372,7 @@ pub unsafe extern "C" fn hirari_engine_block_begin(
         EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
         return 0;
     }
-    if shutdown != 0 {
+    if state.shutdown.load(Ordering::Acquire) {
         EngineBlockState::clear_window(planes, channel_count, off, frames as usize);
         return 0;
     }
@@ -1477,9 +1497,6 @@ pub unsafe extern "C" fn hirari_engine_block_finish(
     output: *mut c_void,
     off: u32,
     frames: u32,
-    sample_rate: f64,
-    master_gain: f32,
-    auto_record: u8,
 ) {
     // The click scratch holds one kMaxAudioBlockSize block; the engine's head
     // gate clamps the block length before it reaches the tail.
@@ -1489,6 +1506,9 @@ pub unsafe extern "C" fn hirari_engine_block_finish(
     let Some((left, right, planes, channel_count)) = state.window(output, off, frames) else {
         return;
     };
+    let sample_rate = state.sample_rate();
+    let master_gain = f32::from_bits(state.master_gain.load(Ordering::Acquire));
+    let auto_record = state.auto_record_mode.load(Ordering::Relaxed);
     let view = state.view();
     let playhead = state.playhead.load(Ordering::Relaxed);
     let playing = state.playing.load(Ordering::Acquire);
@@ -1547,7 +1567,6 @@ pub unsafe extern "C" fn hirari_engine_block_route(
     output: *mut c_void,
     off: u32,
     frames: u32,
-    sample_rate: f64,
 ) {
     let Some(state) = block(state).filter(|_| frames as usize <= MAX_BLOCK_FRAMES) else {
         return;
@@ -1555,6 +1574,7 @@ pub unsafe extern "C" fn hirari_engine_block_route(
     let Some((master_left, master_right, _, _)) = state.window(output, off, frames) else {
         return;
     };
+    let sample_rate = state.sample_rate();
     let monitor_offset = state.monitor_offset.load(Ordering::Relaxed);
     let generation = state.generation.load(Ordering::Acquire);
     let playing = state.playing.load(Ordering::Acquire);
@@ -1755,6 +1775,179 @@ pub unsafe extern "C" fn hirari_engine_block_device_block_frames(state: *const c
     block(state).map_or(0, |state| state.device_block_frames.load(Ordering::Acquire))
 }
 
+/// Records the device format the graph is being prepared for, before any track
+/// re-preparation reads it back.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_device_format(
+    state: *mut c_void,
+    sample_rate: f64,
+    block_frames: u32,
+) {
+    if let Some(state) = block(state) {
+        state
+            .device_sample_rate
+            .store(sample_rate.to_bits(), Ordering::Release);
+        state.device_block_frames.store(block_frames, Ordering::Release);
+    }
+}
+
+/// The layout revision the engine's tracks mark.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_layout_revision(state: *const c_void) -> *mut c_void {
+    block(state).map_or(ptr::null_mut(), |state| state.layout_revision)
+}
+
+/// The master fader the block tail mixes with.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_master_gain(state: *const c_void) -> f32 {
+    block(state).map_or(1.0, |state| f32::from_bits(state.master_gain.load(Ordering::Acquire)))
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_master_gain(state: *mut c_void, gain: f32) {
+    if let Some(state) = block(state) {
+        state.master_gain.store(gain.to_bits(), Ordering::Release);
+    }
+}
+
+/// The normalized record-arm wire mode the block tail gates on.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_auto_record_mode(state: *const c_void) -> u32 {
+    block(state).map_or(0, |state| state.auto_record_mode.load(Ordering::Relaxed))
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_auto_record_mode(state: *mut c_void, mode: u32) {
+    if let Some(state) = block(state) {
+        state.auto_record_mode.store(mode, Ordering::Release);
+    }
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_is_shutdown(state: *const c_void) -> u8 {
+    block(state).map_or(0, |state| {
+        u8::from(state.shutdown.load(Ordering::Acquire))
+    })
+}
+
+/// Sets the shutdown flag and reports whether it was already set, so a second
+/// shutdown can skip the once-only work.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_take_shutdown(state: *mut c_void) -> u8 {
+    block(state).map_or(0, |state| {
+        u8::from(state.shutdown.swap(true, Ordering::AcqRel))
+    })
+}
+
+/// Counts a device callback as it enters and leaves the graph.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_callback_enter(state: *mut c_void) {
+    if let Some(state) = block(state) {
+        state.callbacks_in_flight.fetch_add(1, Ordering::Acquire);
+    }
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`] and a
+/// matching [`hirari_engine_block_callback_enter`] must have run.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_callback_leave(state: *mut c_void) {
+    if let Some(state) = block(state) {
+        state.callbacks_in_flight.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// Waits for every callback in flight to finish. A control/shutdown path, never
+/// the realtime callback: yielding keeps it from spinning a whole core while it
+/// avoids putting a mutex in the audio path.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_join_callbacks(state: *const c_void) {
+    let Some(state) = block(state) else {
+        return;
+    };
+    while state.callbacks_in_flight.load(Ordering::Acquire) != 0 {
+        std::thread::yield_now();
+    }
+}
+
+/// The control-plane edit token, mixed with the layout revision and the MIDI
+/// snapshot revision into a project state revision.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_control_revision(state: *const c_void) -> u64 {
+    block(state).map_or(0, |state| state.control_revision.load(Ordering::Acquire))
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_mark_control(state: *mut c_void) -> u64 {
+    block(state).map_or(0, |state| {
+        state.control_revision.fetch_add(1, Ordering::AcqRel)
+    })
+}
+
+/// The project root note a save writes back into its document.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_root_note(state: *const c_void) -> i32 {
+    block(state).map_or(0, |state| state.root_note.load(Ordering::Relaxed))
+}
+
+/// The project scale type a save writes back into its document.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_scale_type(state: *const c_void) -> i32 {
+    block(state).map_or(0, |state| state.scale_type.load(Ordering::Relaxed))
+}
+
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_set_project_scale(
+    state: *mut c_void,
+    root: i32,
+    scale: i32,
+) {
+    if let Some(state) = block(state) {
+        state.root_note.store(root, Ordering::Relaxed);
+        state.scale_type.store(scale, Ordering::Relaxed);
+    }
+}
+
 /// The engine track table the block was created with. Rust analysis reads walk
 /// its published snapshot directly instead of asking C++ for the graph.
 ///
@@ -1763,6 +1956,43 @@ pub unsafe extern "C" fn hirari_engine_block_device_block_frames(state: *const c
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_block_track_table(state: *const c_void) -> *mut c_void {
     block(state).map_or(ptr::null_mut(), |state| state.track_table)
+}
+
+/// The master limiter the block tail guards. Latency is the device block plus its
+/// lookahead, so a read of the engine's delay needs no accessor of its own.
+///
+/// # Safety
+/// `state` must be null or a pointer from [`hirari_engine_block_create`].
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_master_limiter(state: *const c_void) -> *mut c_void {
+    block(state).map_or(ptr::null_mut(), |state| state.master_limiter)
+}
+
+/// Prepares one track for the device format this block already holds — the step
+/// a new bootstrap track and every session re-prepare needs, so neither reads a
+/// rate and length off the engine.
+///
+/// Returns the runtime's allocation status: 0 ready, 1 a growth the realtime
+/// guard declined, 2 an impossible size, 3 an exhausted allocation.
+///
+/// # Safety
+/// `state` must be a pointer from [`hirari_engine_block_create`] and `track` a
+/// live track object the caller keeps alive across the call.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_engine_block_prepare_track(
+    state: *mut c_void,
+    track: *mut c_void,
+) -> u8 {
+    let Some(state) = block(state) else {
+        return 0;
+    };
+    unsafe {
+        hirari_track_prepare(
+            track,
+            state.sample_rate(),
+            state.device_block_frames.load(Ordering::Relaxed),
+        )
+    }
 }
 
 /// Prepares every live track for a new device format. A freeze the new rate
@@ -1778,20 +2008,12 @@ pub unsafe extern "C" fn hirari_engine_block_track_table(state: *const c_void) -
 /// `state` must be a pointer from [`hirari_engine_block_create`] and the caller
 /// must hold the engine's tracks lock, so the table is one graph for the walk.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_engine_block_prepare_tracks(
-    state: *mut c_void,
-    sample_rate: f64,
-    block_frames: u32,
-) -> u8 {
+pub unsafe extern "C" fn hirari_engine_block_prepare_tracks(state: *mut c_void) -> u8 {
     let Some(state) = block(state) else {
         return 0;
     };
-    state
-        .device_sample_rate
-        .store(sample_rate.to_bits(), Ordering::Release);
-    state
-        .device_block_frames
-        .store(block_frames, Ordering::Release);
+    let sample_rate = state.sample_rate();
+    let block_frames = state.device_block_frames.load(Ordering::Relaxed);
     let rate = sample_rate as u32;
     let generation = state.generation.load(Ordering::Acquire);
     let count = unsafe { hirari_engine_track_count(state.track_table) };
@@ -1954,6 +2176,14 @@ pub unsafe extern "C" fn hirari_engine_block_create(
         preview_sampler: handles.preview_sampler,
         mpe: handles.mpe,
         macro_control: handles.macro_control,
+        layout_revision: handles.layout_revision,
+        master_gain: AtomicU32::new(1.0f32.to_bits()),
+        auto_record_mode: AtomicU32::new(0),
+        shutdown: AtomicBool::new(false),
+        callbacks_in_flight: AtomicU32::new(0),
+        control_revision: AtomicU64::new(0),
+        root_note: AtomicI32::new(0),
+        scale_type: AtomicI32::new(0),
         playhead: AtomicU64::new(0),
         playing: AtomicBool::new(false),
         loop_enabled: AtomicBool::new(false),

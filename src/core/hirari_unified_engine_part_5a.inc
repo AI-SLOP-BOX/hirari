@@ -65,7 +65,8 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
         // Tracks size their buffers to the engine block size and silently
         // skip larger blocks; never render past the prepared block.
         [](void* host) -> uint32_t {
-            const uint32_t block = static_cast<HirariUnifiedEngine*>(host)->get_block_size();
+            auto* engine = static_cast<HirariUnifiedEngine*>(host);
+            const uint32_t block = hirari_engine_block_device_block_frames(engine->m_engineBlock);
             return block > 0 ? std::min(1024u, block) : 1024u;
         },
         [](void* host, uint64_t* playhead, uint8_t* playing) {

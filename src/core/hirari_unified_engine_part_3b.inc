@@ -1,8 +1,3 @@
-uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
-    return queryLockedTrack(tid, uint32_t{0},
-                            [&](void* track) { return hirari_track_delay_samples(track); });
-}
-
 // Routing edit host callbacks. Rust owns the routing graph, the sidechain route
 // table, the sidechain gate's registration inputs and every track sub-state a
 // routing edit reads or writes — all of them are Rust stores the engine only
@@ -81,9 +76,9 @@ void HirariUnifiedEngine::installPluginEditHost() {
 }
 
 // The one track-edit session every control-side host shares (track_session.rs).
-// The track and every storage it holds are Rust objects now, so the session only
-// needs what physically cannot leave C++: the engine's tracks lock, the live
-// track resolution and the device format a re-prepare must read.
+// The track and every storage it holds are Rust objects now, and so is the
+// device format a re-prepare needs, so the session only carries what physically
+// cannot leave C++: the engine's tracks lock and the live track resolution.
 void HirariUnifiedEngine::installTrackSessionHost() {
     static const HirariTrackSessionOps ops = {
         [](void* host) { static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.lock(); },
@@ -96,10 +91,8 @@ void HirariUnifiedEngine::installTrackSessionHost() {
         &hirari_track_mark_layout,
         [](void* host, void* track) {
             if (!host || !track) return;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            (void)hirari_track_prepare(
-                track, engine->m_sampleRate.load(std::memory_order_relaxed),
-                engine->m_blockSize.load(std::memory_order_relaxed));
+            (void)hirari_engine_block_prepare_track(
+                static_cast<HirariUnifiedEngine*>(host)->m_engineBlock, track);
         },
     };
     hirari_track_session_install(&ops);

@@ -38,13 +38,13 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
         rust::Str(path.data(), path.size()));
     if (state.valid) {
         const double projectSampleRate = static_cast<double>(state.sampleRate);
-        const uint32_t currentBlockSize = m_blockSize.load(std::memory_order_relaxed);
+        const uint32_t currentBlockSize = hirari_engine_block_device_block_frames(m_engineBlock);
         // Every document-level invariant (track/region ids, references,
         // routing graph, sidechain cycles, plugin-array shape) is enforced by
         // native_project_load, which only returns a valid state when the file
         // is safe to hydrate.
         set_playing(false);
-        waitForAudioCallbacks();
+        hirari_engine_block_join_callbacks(m_engineBlock);
         // Build and validate the replacement document before mutating the
         // currently published project.  Hydration can fail on a malformed
         // sidechain, plugin index, missing allocation, or unsupported audio
@@ -85,7 +85,7 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
             void* track = nullptr;
             void* owner = hirari_track_new(
                 ts.id, reinterpret_cast<const uint8_t*>(named.data()), named.size(),
-                ts.trackType, m_layoutRevision, &track);
+                ts.trackType, hirari_engine_block_layout_revision(m_engineBlock), &track);
             if (!owner) return false;
             // A bus keeps its slot only once the bus system resolves it after the
             // commit point; while provisional it must not touch the summing system.

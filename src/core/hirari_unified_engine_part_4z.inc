@@ -34,7 +34,8 @@ void* HirariUnifiedEngine::regionHostUndoState(void* host) {
 
 double HirariUnifiedEngine::regionHostSampleRate(void* host) {
     if (!host) return 0.0;
-    return static_cast<HirariUnifiedEngine*>(host)->m_sampleRate.load(std::memory_order_relaxed);
+    return hirari_engine_block_device_sample_rate(
+        static_cast<HirariUnifiedEngine*>(host)->m_engineBlock);
 }
 
 size_t HirariUnifiedEngine::regionHostTrackIdentity(void* host, uint32_t trackId) {
